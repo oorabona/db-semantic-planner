@@ -4,8 +4,12 @@
  * Focus: Branch coverage for INSERT, UPDATE, DELETE, UPSERT compilation with all variants
  */
 
+import { schema } from '@dbsp/core';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { CamelCaseNamingPlugin } from '../naming-plugin.js';
+import { relationBinding } from '../binding-registry.js';
+import { createDeclaredNameResolver } from '../declared-name-resolver.js';
+import { createPgPhysicalModel } from '../physical-model/index.js';
+import { queryLocal } from '../sql-identifier.js';
 import {
 	buildReturningExprs,
 	compileDelete,
@@ -18,8 +22,32 @@ import {
 } from './mutation-compiler.js';
 
 describe('mutation-compiler - coverage', () => {
-	const naming = new CamelCaseNamingPlugin();
-	const ctx = { naming, rootTable: 'users', schema: undefined };
+	const mutationModel = schema({
+		users: {
+			id: 'integer',
+			name: 'text',
+			email: 'text',
+			role: 'text',
+			last_login: 'timestamp',
+			active: 'boolean',
+			plan: 'text',
+		},
+		sessions: { expired: 'boolean', created_at: 'timestamp' },
+		old_records: { year: 'integer' },
+		temp_cache: { valid: 'boolean' },
+	}).model;
+	const ctx = {
+		rootTable: 'users',
+		schema: undefined,
+		declaredNames: createDeclaredNameResolver(
+			createPgPhysicalModel({
+				mode: 'logical',
+				model: mutationModel,
+				schema: 'public',
+				dbCasing: 'preserve',
+			}),
+		),
+	};
 	const state = { parameters: [], paramIndex: 0 };
 
 	beforeEach(() => {
@@ -45,21 +73,29 @@ describe('mutation-compiler - coverage', () => {
 
 	describe('buildReturningExprs', () => {
 		it('returns undefined for empty columns', () => {
-			expect(buildReturningExprs([], 'users', ctx)).toBeUndefined();
+			expect(
+				buildReturningExprs([], queryLocal('users'), undefined),
+			).toBeUndefined();
 		});
 
 		it('returns undefined for undefined columns', () => {
-			expect(buildReturningExprs(undefined, 'users', ctx)).toBeUndefined();
+			expect(
+				buildReturningExprs(undefined, queryLocal('users'), undefined),
+			).toBeUndefined();
 		});
 
 		it('builds returning list for single column', () => {
-			const result = buildReturningExprs(['id'], 'users', ctx);
+			const result = buildReturningExprs(
+				['id'],
+				queryLocal('users'),
+				['id'].map(queryLocal),
+			);
 			expect(result).toHaveLength(1);
 			expect(result[0].ResTarget).toBeDefined();
 		});
 
 		it('builds RETURNING * as a bare star target', () => {
-			const result = buildReturningExprs(['*'], 'users', ctx);
+			const result = buildReturningExprs(['*'], queryLocal('users'), undefined);
 			expect(result).toHaveLength(1);
 			const target = result![0]!.ResTarget;
 			expect(target.name).toBeUndefined();
@@ -67,22 +103,29 @@ describe('mutation-compiler - coverage', () => {
 		});
 
 		it('builds returning list for multiple columns', () => {
-			const result = buildReturningExprs(['id', 'name', 'email'], 'users', ctx);
+			const result = buildReturningExprs(
+				['id', 'name', 'email'],
+				queryLocal('users'),
+				['id', 'name', 'email'].map(queryLocal),
+			);
 			expect(result).toHaveLength(3);
 		});
 
 		it('rejects star RETURNING carrying alias-aware returning items', () => {
 			expect(() =>
-				buildReturningExprs(['*'], 'users', ctx, [
+				buildReturningExprs(['*'], queryLocal('users'), undefined, [
 					{ source: 'id', output: '*' },
 				]),
 			).toThrow(/star RETURNING cannot carry alias-aware returningItems/);
 		});
 
 		it('uses source for alias-aware returning items and output for aliases', () => {
-			const result = buildReturningExprs(['contact'], 'users', ctx, [
-				{ source: 'email', output: 'contact' },
-			]);
+			const result = buildReturningExprs(
+				['contact'],
+				queryLocal('users'),
+				['email'].map(queryLocal),
+				[{ source: 'email', output: 'contact' }],
+			);
 			expect(result).toHaveLength(1);
 			const target = result![0]!.ResTarget;
 			expect(target.name).toBe('contact');
@@ -94,26 +137,39 @@ describe('mutation-compiler - coverage', () => {
 
 		it('rejects desynced returningItems length', () => {
 			expect(() =>
-				buildReturningExprs(['contact'], 'users', ctx, [
-					{ source: 'email', output: 'contact' },
-					{ source: 'name', output: 'display' },
-				]),
+				buildReturningExprs(
+					['contact'],
+					queryLocal('users'),
+					['email'].map(queryLocal),
+					[
+						{ source: 'email', output: 'contact' },
+						{ source: 'name', output: 'display' },
+					],
+				),
 			).toThrow(/returningItems length/);
 		});
 
 		it('rejects desynced returningItems output order', () => {
 			expect(() =>
-				buildReturningExprs(['contact'], 'users', ctx, [
-					{ source: 'email', output: 'who' },
-				]),
+				buildReturningExprs(
+					['contact'],
+					queryLocal('users'),
+					['email'].map(queryLocal),
+					[{ source: 'email', output: 'who' }],
+				),
 			).toThrow(/returningItems\[0\]\.output/);
 		});
 
 		it('keeps distinct local RETURNING output aliases distinct', () => {
-			const result = buildReturningExprs(['userId', 'user_id'], 'users', ctx, [
-				{ source: 'id', output: 'userId' },
-				{ source: 'email', output: 'user_id' },
-			]);
+			const result = buildReturningExprs(
+				['userId', 'user_id'],
+				queryLocal('users'),
+				['id', 'email'].map(queryLocal),
+				[
+					{ source: 'id', output: 'userId' },
+					{ source: 'email', output: 'user_id' },
+				],
+			);
 			expect(result).toHaveLength(2);
 		});
 	});
@@ -121,8 +177,8 @@ describe('mutation-compiler - coverage', () => {
 	describe('compileInsert', () => {
 		it('compiles INSERT with single row', () => {
 			const config = {
-				table: 'users',
-				columns: ['name', 'email'],
+				table: queryLocal('users'),
+				columns: ['name', 'email'].map(queryLocal),
 				values: [['John', 'john@example.com']],
 			};
 			const node = compileInsert(config, ctx, state);
@@ -133,8 +189,8 @@ describe('mutation-compiler - coverage', () => {
 
 		it('compiles INSERT with multiple rows', () => {
 			const config = {
-				table: 'users',
-				columns: ['name'],
+				table: queryLocal('users'),
+				columns: ['name'].map(queryLocal),
 				values: [['Alice'], ['Bob'], ['Charlie']],
 			};
 			const node = compileInsert(config, ctx, state);
@@ -145,8 +201,8 @@ describe('mutation-compiler - coverage', () => {
 		it('compiles INSERT with schema', () => {
 			const ctxWithSchema = { ...ctx, schema: 'public' };
 			const config = {
-				table: 'users',
-				columns: ['name'],
+				table: queryLocal('users'),
+				columns: ['name'].map(queryLocal),
 				values: [['John']],
 			};
 			const node = compileInsert(config, ctxWithSchema, state);
@@ -155,10 +211,11 @@ describe('mutation-compiler - coverage', () => {
 
 		it('compiles INSERT with RETURNING clause', () => {
 			const config = {
-				table: 'users',
-				columns: ['name'],
+				table: queryLocal('users'),
+				columns: ['name'].map(queryLocal),
 				values: [['John']],
 				returning: ['id', 'name'],
+				returningSources: ['id', 'name'].map(queryLocal),
 			};
 			const node = compileInsert(config, ctx, state);
 			expect(node.InsertStmt.returningClause?.exprs).toBeDefined();
@@ -167,8 +224,8 @@ describe('mutation-compiler - coverage', () => {
 
 		it('compiles INSERT with NULL values', () => {
 			const config = {
-				table: 'users',
-				columns: ['name', 'email'],
+				table: queryLocal('users'),
+				columns: ['name', 'email'].map(queryLocal),
 				values: [['John', null]],
 			};
 			const node = compileInsert(config, ctx, state);
@@ -178,8 +235,8 @@ describe('mutation-compiler - coverage', () => {
 
 		it('compiles INSERT with range type column', () => {
 			const config = {
-				table: 'events',
-				columns: ['name', 'period'],
+				table: queryLocal('events'),
+				columns: ['name', 'period'].map(queryLocal),
 				values: [['Meeting', '[2024-01-01,2024-01-02)']],
 				columnTypes: { period: 'daterange' },
 			};
@@ -190,8 +247,8 @@ describe('mutation-compiler - coverage', () => {
 
 		it('compiles INSERT with non-range type column', () => {
 			const config = {
-				table: 'products',
-				columns: ['name', 'price'],
+				table: queryLocal('products'),
+				columns: ['name', 'price'].map(queryLocal),
 				values: [['Widget', 19.99]],
 				columnTypes: { price: 'numeric' },
 			};
@@ -203,8 +260,8 @@ describe('mutation-compiler - coverage', () => {
 	describe('compileUpdate', () => {
 		it('compiles UPDATE with SET clause', () => {
 			const config = {
-				table: 'users',
-				set: [{ column: 'name', value: 'Jane' }],
+				table: queryLocal('users'),
+				set: [{ column: queryLocal('name'), value: 'Jane' }],
 			};
 			const node = compileUpdate(config, ctx, state);
 			expect(node.UpdateStmt).toBeDefined();
@@ -215,11 +272,11 @@ describe('mutation-compiler - coverage', () => {
 
 		it('compiles UPDATE with multiple SET clauses', () => {
 			const config = {
-				table: 'users',
+				table: queryLocal('users'),
 				set: [
-					{ column: 'name', value: 'Jane' },
-					{ column: 'email', value: 'jane@example.com' },
-					{ column: 'age', value: 30 },
+					{ column: queryLocal('name'), value: 'Jane' },
+					{ column: queryLocal('email'), value: 'jane@example.com' },
+					{ column: queryLocal('age'), value: 30 },
 				],
 			};
 			const node = compileUpdate(config, ctx, state);
@@ -229,15 +286,15 @@ describe('mutation-compiler - coverage', () => {
 
 		it('compiles UPDATE with single WHERE condition', () => {
 			const config = {
-				table: 'users',
-				set: [{ column: 'name', value: 'Jane' }],
+				table: queryLocal('users'),
+				set: [{ column: queryLocal('name'), value: 'Jane' }],
 				where: [
 					{
 						type: 'where',
 						column: 'id',
 						operator: 'eq',
 						value: 1,
-						table: 'users',
+						table: queryLocal('users'),
 					},
 				],
 			};
@@ -247,22 +304,22 @@ describe('mutation-compiler - coverage', () => {
 
 		it('compiles UPDATE with multiple WHERE conditions (AND)', () => {
 			const config = {
-				table: 'users',
-				set: [{ column: 'active', value: false }],
+				table: queryLocal('users'),
+				set: [{ column: queryLocal('active'), value: false }],
 				where: [
 					{
 						type: 'where',
 						column: 'role',
 						operator: 'eq',
 						value: 'guest',
-						table: 'users',
+						table: queryLocal('users'),
 					},
 					{
 						type: 'where',
 						column: 'last_login',
 						operator: 'lt',
 						value: '2020-01-01',
-						table: 'users',
+						table: queryLocal('users'),
 					},
 				],
 			};
@@ -273,9 +330,10 @@ describe('mutation-compiler - coverage', () => {
 
 		it('compiles UPDATE with RETURNING clause', () => {
 			const config = {
-				table: 'users',
-				set: [{ column: 'name', value: 'Jane' }],
+				table: queryLocal('users'),
+				set: [{ column: queryLocal('name'), value: 'Jane' }],
 				returning: ['id', 'name', 'updated_at'],
+				returningSources: ['id', 'name', 'updated_at'].map(queryLocal),
 			};
 			const node = compileUpdate(config, ctx, state);
 			expect(node.UpdateStmt.returningClause?.exprs).toBeDefined();
@@ -285,8 +343,8 @@ describe('mutation-compiler - coverage', () => {
 		it('compiles UPDATE with schema', () => {
 			const ctxWithSchema = { ...ctx, schema: 'public' };
 			const config = {
-				table: 'users',
-				set: [{ column: 'name', value: 'Jane' }],
+				table: queryLocal('users'),
+				set: [{ column: queryLocal('name'), value: 'Jane' }],
 			};
 			const node = compileUpdate(config, ctxWithSchema, state);
 			expect(node.UpdateStmt.relation.schemaname).toBe('public');
@@ -294,8 +352,8 @@ describe('mutation-compiler - coverage', () => {
 
 		it('compiles UPDATE with NULL value', () => {
 			const config = {
-				table: 'users',
-				set: [{ column: 'deleted_at', value: null }],
+				table: queryLocal('users'),
+				set: [{ column: queryLocal('deleted_at'), value: null }],
 			};
 			const node = compileUpdate(config, ctx, state);
 			expect(state.parameters).toHaveLength(0); // NULL doesn't add parameter
@@ -303,8 +361,10 @@ describe('mutation-compiler - coverage', () => {
 
 		it('compiles UPDATE with range type value', () => {
 			const config = {
-				table: 'events',
-				set: [{ column: 'period', value: '[2024-06-01,2024-06-30)' }],
+				table: queryLocal('events'),
+				set: [
+					{ column: queryLocal('period'), value: '[2024-06-01,2024-06-30)' },
+				],
 				columnTypes: { period: 'tsrange' },
 			};
 			const node = compileUpdate(config, ctx, state);
@@ -313,8 +373,8 @@ describe('mutation-compiler - coverage', () => {
 
 		it('compiles UPDATE without WHERE (affects all rows)', () => {
 			const config = {
-				table: 'settings',
-				set: [{ column: 'maintenance_mode', value: true }],
+				table: queryLocal('settings'),
+				set: [{ column: queryLocal('maintenance_mode'), value: true }],
 			};
 			const node = compileUpdate(config, ctx, state);
 			expect(node.UpdateStmt.whereClause).toBeUndefined();
@@ -323,7 +383,7 @@ describe('mutation-compiler - coverage', () => {
 
 	describe('compileDelete', () => {
 		it('compiles DELETE without WHERE', () => {
-			const config = { table: 'temp_logs' };
+			const config = { table: queryLocal('temp_logs') };
 			const node = compileDelete(config, ctx, state);
 			expect(node.DeleteStmt).toBeDefined();
 			expect(node.DeleteStmt.relation.relname).toBe('temp_logs');
@@ -332,14 +392,14 @@ describe('mutation-compiler - coverage', () => {
 
 		it('compiles DELETE with single WHERE condition', () => {
 			const config = {
-				table: 'users',
+				table: queryLocal('users'),
 				where: [
 					{
 						type: 'where',
 						column: 'id',
 						operator: 'eq',
 						value: 42,
-						table: 'users',
+						table: queryLocal('users'),
 					},
 				],
 			};
@@ -350,21 +410,21 @@ describe('mutation-compiler - coverage', () => {
 
 		it('compiles DELETE with multiple WHERE conditions (AND)', () => {
 			const config = {
-				table: 'sessions',
+				table: queryLocal('sessions'),
 				where: [
 					{
 						type: 'where',
 						column: 'expired',
 						operator: 'eq',
 						value: true,
-						table: 'sessions',
+						table: queryLocal('sessions'),
 					},
 					{
 						type: 'where',
 						column: 'created_at',
 						operator: 'lt',
 						value: '2020-01-01',
-						table: 'sessions',
+						table: queryLocal('sessions'),
 					},
 				],
 			};
@@ -374,17 +434,18 @@ describe('mutation-compiler - coverage', () => {
 
 		it('compiles DELETE with RETURNING clause', () => {
 			const config = {
-				table: 'users',
+				table: queryLocal('users'),
 				where: [
 					{
 						type: 'where',
 						column: 'id',
 						operator: 'eq',
 						value: 1,
-						table: 'users',
+						table: queryLocal('users'),
 					},
 				],
 				returning: ['id', 'name'],
+				returningSources: ['id', 'name'].map(queryLocal),
 			};
 			const node = compileDelete(config, ctx, state);
 			expect(node.DeleteStmt.returningClause?.exprs).toBeDefined();
@@ -394,14 +455,14 @@ describe('mutation-compiler - coverage', () => {
 		it('compiles DELETE with schema', () => {
 			const ctxWithSchema = { ...ctx, schema: 'archive' };
 			const config = {
-				table: 'old_records',
+				table: queryLocal('old_records'),
 				where: [
 					{
 						type: 'where',
 						column: 'year',
 						operator: 'lt',
 						value: 2010,
-						table: 'old_records',
+						table: queryLocal('old_records'),
 					},
 				],
 			};
@@ -413,9 +474,15 @@ describe('mutation-compiler - coverage', () => {
 	describe('compileInsertFrom', () => {
 		it('compiles INSERT FROM with all columns', () => {
 			const config = {
-				targetTable: 'users_backup',
-				sourceTable: 'users',
-				columns: ['id', 'name', 'email'],
+				targetTable: queryLocal('users_backup'),
+				source: relationBinding({
+					qualifier: queryLocal('users'),
+					kind: 'cte-bind',
+				}),
+				columns: ['id', 'name', 'email'].map((column) => ({
+					target: queryLocal(column),
+					source: queryLocal(column),
+				})),
 			};
 			const node = compileInsertFrom(config, ctx, state);
 			expect(node.InsertStmt.relation.relname).toBe('users_backup');
@@ -424,8 +491,11 @@ describe('mutation-compiler - coverage', () => {
 
 		it('compiles INSERT FROM with SELECT *', () => {
 			const config = {
-				targetTable: 'users_backup',
-				sourceTable: 'users',
+				targetTable: queryLocal('users_backup'),
+				source: relationBinding({
+					qualifier: queryLocal('users'),
+					kind: 'cte-bind',
+				}),
 			};
 			const node = compileInsertFrom(config, ctx, state);
 			expect(node.InsertStmt.selectStmt.SelectStmt.targetList).toHaveLength(1);
@@ -437,16 +507,22 @@ describe('mutation-compiler - coverage', () => {
 
 		it('compiles INSERT FROM with WHERE clause', () => {
 			const config = {
-				targetTable: 'active_users',
-				sourceTable: 'users',
-				columns: ['id', 'name'],
+				targetTable: queryLocal('active_users'),
+				source: relationBinding({
+					qualifier: queryLocal('users'),
+					kind: 'cte-bind',
+				}),
+				columns: ['id', 'name'].map((column) => ({
+					target: queryLocal(column),
+					source: queryLocal(column),
+				})),
 				where: [
 					{
 						type: 'where',
 						column: 'active',
 						operator: 'eq',
 						value: true,
-						table: 'users',
+						table: queryLocal('users'),
 					},
 				],
 			};
@@ -456,22 +532,25 @@ describe('mutation-compiler - coverage', () => {
 
 		it('compiles INSERT FROM with multiple WHERE conditions', () => {
 			const config = {
-				targetTable: 'premium_users',
-				sourceTable: 'users',
+				targetTable: queryLocal('premium_users'),
+				source: relationBinding({
+					qualifier: queryLocal('users'),
+					kind: 'cte-bind',
+				}),
 				where: [
 					{
 						type: 'where',
 						column: 'plan',
 						operator: 'eq',
 						value: 'premium',
-						table: 'users',
+						table: queryLocal('users'),
 					},
 					{
 						type: 'where',
 						column: 'active',
 						operator: 'eq',
 						value: true,
-						table: 'users',
+						table: queryLocal('users'),
 					},
 				],
 			};
@@ -483,8 +562,11 @@ describe('mutation-compiler - coverage', () => {
 
 		it('compiles INSERT FROM with LIMIT', () => {
 			const config = {
-				targetTable: 'sample_users',
-				sourceTable: 'users',
+				targetTable: queryLocal('sample_users'),
+				source: relationBinding({
+					qualifier: queryLocal('users'),
+					kind: 'cte-bind',
+				}),
 				limit: 100,
 			};
 			const node = compileInsertFrom(config, ctx, state);
@@ -493,9 +575,13 @@ describe('mutation-compiler - coverage', () => {
 
 		it('compiles INSERT FROM with RETURNING', () => {
 			const config = {
-				targetTable: 'users_backup',
-				sourceTable: 'users',
+				targetTable: queryLocal('users_backup'),
+				source: relationBinding({
+					qualifier: queryLocal('users'),
+					kind: 'cte-bind',
+				}),
 				returning: ['id'],
+				returningSources: ['id'].map(queryLocal),
 			};
 			const node = compileInsertFrom(config, ctx, state);
 			expect(node.InsertStmt.returningClause?.exprs).toBeDefined();
@@ -504,8 +590,11 @@ describe('mutation-compiler - coverage', () => {
 		it('compiles INSERT FROM with schema', () => {
 			const ctxWithSchema = { ...ctx, schema: 'archive' };
 			const config = {
-				targetTable: 'old_users',
-				sourceTable: 'users',
+				targetTable: queryLocal('old_users'),
+				source: relationBinding({
+					qualifier: queryLocal('users'),
+					kind: 'cte-bind',
+				}),
 			};
 			const node = compileInsertFrom(config, ctxWithSchema, state);
 			expect(node.InsertStmt.relation.schemaname).toBe('archive');
@@ -515,10 +604,16 @@ describe('mutation-compiler - coverage', () => {
 	describe('compileUpsertFrom', () => {
 		it('compiles UPSERT FROM with conflict columns', () => {
 			const config = {
-				targetTable: 'users',
-				sourceTable: 'temp_users',
-				conflictColumns: ['email'],
-				columns: ['email', 'name', 'role'],
+				targetTable: queryLocal('users'),
+				source: relationBinding({
+					qualifier: queryLocal('temp_users'),
+					kind: 'cte-bind',
+				}),
+				conflictColumns: ['email'].map(queryLocal),
+				columns: ['email', 'name', 'role'].map((column) => ({
+					target: queryLocal(column),
+					source: queryLocal(column),
+				})),
 			};
 			const node = compileUpsertFrom(config, ctx, state);
 			expect(node.InsertStmt.onConflictClause).toBeDefined();
@@ -527,10 +622,16 @@ describe('mutation-compiler - coverage', () => {
 
 		it('compiles UPSERT FROM with multiple conflict columns', () => {
 			const config = {
-				targetTable: 'products',
-				sourceTable: 'import_products',
-				conflictColumns: ['sku', 'vendor_id'],
-				columns: ['sku', 'vendor_id', 'name', 'price'],
+				targetTable: queryLocal('products'),
+				source: relationBinding({
+					qualifier: queryLocal('import_products'),
+					kind: 'cte-bind',
+				}),
+				conflictColumns: ['sku', 'vendor_id'].map(queryLocal),
+				columns: ['sku', 'vendor_id', 'name', 'price'].map((column) => ({
+					target: queryLocal(column),
+					source: queryLocal(column),
+				})),
 			};
 			const node = compileUpsertFrom(config, ctx, state);
 			expect(node.InsertStmt.onConflictClause.infer.indexElems).toHaveLength(2);
@@ -538,10 +639,16 @@ describe('mutation-compiler - coverage', () => {
 
 		it('compiles UPSERT FROM excludes conflict columns from UPDATE', () => {
 			const config = {
-				targetTable: 'users',
-				sourceTable: 'new_users',
-				conflictColumns: ['id'],
-				columns: ['id', 'name', 'email'],
+				targetTable: queryLocal('users'),
+				source: relationBinding({
+					qualifier: queryLocal('new_users'),
+					kind: 'cte-bind',
+				}),
+				conflictColumns: ['id'].map(queryLocal),
+				columns: ['id', 'name', 'email'].map((column) => ({
+					target: queryLocal(column),
+					source: queryLocal(column),
+				})),
 			};
 			const node = compileUpsertFrom(config, ctx, state);
 			// UPDATE should only include name and email, not id
@@ -550,17 +657,23 @@ describe('mutation-compiler - coverage', () => {
 
 		it('compiles UPSERT FROM with WHERE clause', () => {
 			const config = {
-				targetTable: 'cache',
-				sourceTable: 'temp_cache',
-				conflictColumns: ['key'],
-				columns: ['key', 'value'],
+				targetTable: queryLocal('cache'),
+				source: relationBinding({
+					qualifier: queryLocal('temp_cache'),
+					kind: 'cte-bind',
+				}),
+				conflictColumns: ['key'].map(queryLocal),
+				columns: ['key', 'value'].map((column) => ({
+					target: queryLocal(column),
+					source: queryLocal(column),
+				})),
 				where: [
 					{
 						type: 'where',
 						column: 'valid',
 						operator: 'eq',
 						value: true,
-						table: 'temp_cache',
+						table: queryLocal('temp_cache'),
 					},
 				],
 			};
@@ -570,10 +683,16 @@ describe('mutation-compiler - coverage', () => {
 
 		it('compiles UPSERT FROM with LIMIT', () => {
 			const config = {
-				targetTable: 'sync_data',
-				sourceTable: 'staging',
-				conflictColumns: ['external_id'],
-				columns: ['external_id', 'data'],
+				targetTable: queryLocal('sync_data'),
+				source: relationBinding({
+					qualifier: queryLocal('staging'),
+					kind: 'cte-bind',
+				}),
+				conflictColumns: ['external_id'].map(queryLocal),
+				columns: ['external_id', 'data'].map((column) => ({
+					target: queryLocal(column),
+					source: queryLocal(column),
+				})),
 				limit: 1000,
 			};
 			const node = compileUpsertFrom(config, ctx, state);
@@ -582,11 +701,18 @@ describe('mutation-compiler - coverage', () => {
 
 		it('compiles UPSERT FROM with RETURNING', () => {
 			const config = {
-				targetTable: 'users',
-				sourceTable: 'import_users',
-				conflictColumns: ['email'],
-				columns: ['email', 'name'],
+				targetTable: queryLocal('users'),
+				source: relationBinding({
+					qualifier: queryLocal('import_users'),
+					kind: 'cte-bind',
+				}),
+				conflictColumns: ['email'].map(queryLocal),
+				columns: ['email', 'name'].map((column) => ({
+					target: queryLocal(column),
+					source: queryLocal(column),
+				})),
 				returning: ['id', 'email'],
+				returningSources: ['id', 'email'].map(queryLocal),
 			};
 			const node = compileUpsertFrom(config, ctx, state);
 			expect(node.InsertStmt.returningClause?.exprs).toBeDefined();
@@ -595,10 +721,16 @@ describe('mutation-compiler - coverage', () => {
 		it('compiles UPSERT FROM with schema', () => {
 			const ctxWithSchema = { ...ctx, schema: 'staging' };
 			const config = {
-				targetTable: 'products',
-				sourceTable: 'import_products',
-				conflictColumns: ['sku'],
-				columns: ['sku', 'name'],
+				targetTable: queryLocal('products'),
+				source: relationBinding({
+					qualifier: queryLocal('import_products'),
+					kind: 'cte-bind',
+				}),
+				conflictColumns: ['sku'].map(queryLocal),
+				columns: ['sku', 'name'].map((column) => ({
+					target: queryLocal(column),
+					source: queryLocal(column),
+				})),
 			};
 			const node = compileUpsertFrom(config, ctxWithSchema, state);
 			expect(node.InsertStmt.relation.schemaname).toBe('staging');
@@ -609,8 +741,8 @@ describe('mutation-compiler - coverage', () => {
 		it('compiles INSERT mutation decision', () => {
 			const decision = {
 				type: 'insert',
-				table: 'users',
-				columns: ['name'],
+				table: queryLocal('users'),
+				columns: ['name'].map(queryLocal),
 				values: ['John'],
 			};
 			const node = compileMutation(decision, ctx, state);
@@ -620,8 +752,8 @@ describe('mutation-compiler - coverage', () => {
 		it('compiles UPDATE mutation decision', () => {
 			const decision = {
 				type: 'update',
-				table: 'users',
-				set: [{ column: 'name', value: 'Jane' }],
+				table: queryLocal('users'),
+				set: [{ column: queryLocal('name'), value: 'Jane' }],
 			};
 			const node = compileMutation(decision, ctx, state);
 			expect(node.UpdateStmt).toBeDefined();
@@ -630,7 +762,7 @@ describe('mutation-compiler - coverage', () => {
 		it('compiles DELETE mutation decision', () => {
 			const decision = {
 				type: 'delete',
-				table: 'users',
+				table: queryLocal('users'),
 			};
 			const node = compileMutation(decision, ctx, state);
 			expect(node.DeleteStmt).toBeDefined();
@@ -639,7 +771,7 @@ describe('mutation-compiler - coverage', () => {
 		it('throws error for unknown mutation type', () => {
 			const decision = {
 				type: 'merge',
-				table: 'users',
+				table: queryLocal('users'),
 			};
 			expect(() => compileMutation(decision, ctx, state)).toThrow(
 				'Unknown mutation type: merge',
@@ -649,7 +781,7 @@ describe('mutation-compiler - coverage', () => {
 		it('uses rootTable from context if decision.table undefined', () => {
 			const decision = {
 				type: 'delete',
-				columns: ['id'],
+				columns: ['id'].map(queryLocal),
 			};
 			const node = compileMutation(decision, ctx, state);
 			expect(node.DeleteStmt.relation.relname).toBe('users');

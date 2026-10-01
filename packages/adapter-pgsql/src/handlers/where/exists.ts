@@ -163,9 +163,8 @@ function buildExistsSubquery(
 		throw new Error('EXISTS handler requires targetTable or relation');
 	}
 	requireRelationTargetColumns(
-		resolveRelationTarget(targetTable, ctx),
-		toColumnList(targetColumn),
-		ctx,
+		resolveRelationTarget(queryLocal(targetTable), ctx),
+		toColumnList(targetColumn).map(queryLocal),
 		'join key',
 		relation,
 	);
@@ -213,12 +212,11 @@ function buildExistsSubquery(
 	state.aliases.set(targetAlias, targetAlias);
 
 	const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
-	const targetAuthority = resolveRelationTarget(targetTable, ctx);
+	const targetAuthority = resolveRelationTarget(queryLocal(targetTable), ctx);
 	const aliasColumnAuthorities = bindAliasAuthority(
 		ctx.aliasColumnAuthorities,
-		targetAlias,
+		queryLocal(targetAlias),
 		targetAuthority,
-		ctx,
 	);
 	const scopedCtx: CompilerContext = { ...ctx, aliasColumnAuthorities };
 	const targetBinding = relationBinding({
@@ -410,7 +408,10 @@ function buildExistsSubquery(
 			}
 
 			const joinAlias = joinRelation; // e.g. 'callerFile'
-			const joinTarget = resolveRelationTarget(joinTargetTable, joinCtx);
+			const joinTarget = resolveRelationTarget(
+				queryLocal(joinTargetTable),
+				joinCtx,
+			);
 			const joinBinding = relationBinding({
 				qualifier: queryLocal(joinAlias),
 				kind: 'declared-table',
@@ -427,22 +428,20 @@ function buildExistsSubquery(
 				}),
 				aliasColumnAuthorities: bindAliasAuthority(
 					joinCtx.aliasColumnAuthorities,
-					joinAlias,
+					queryLocal(joinAlias),
 					joinTarget,
-					joinCtx,
 				),
 			};
 			const joinQuals = buildKeyCorrelation(
 				sourceAliasForJoin, // resolved source alias (root or intermediate)
 				joinSourceCols,
 				joinAlias,
-				joinTargetCols ?? [],
+				(joinTargetCols ?? []).map(queryLocal),
 				joinCtx,
 			);
 			requireRelationTargetColumns(
 				joinTarget,
-				joinTargetCols ?? [],
-				joinCtx,
+				(joinTargetCols ?? []).map(queryLocal),
 				'join key',
 				joinRelation,
 			);

@@ -295,7 +295,7 @@ describe('PATH D: nested IN inside logical group (mapInSubqueryCondition → inS
 
 describe('PATH E: mutation path (normalizeToDecision → inSubqueryHandler)', () => {
 	it('GROUP BY in mutation WHERE IN-subquery throws via normalizeToDecision', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
 		expect(() =>
 			adapter.compileDelete({
 				type: 'delete',

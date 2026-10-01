@@ -6,11 +6,7 @@
  * ranges are local SQL vocabulary and must retain their spelling verbatim.
  */
 import type { OutputDescriptor } from '@dbsp/types';
-import {
-	identifierText,
-	queryLocal,
-	type SqlIdentifier,
-} from './sql-identifier.js';
+import { identifierText, type SqlIdentifier } from './sql-identifier.js';
 
 export type RelationBindingKind =
 	| 'declared-table'
@@ -145,42 +141,30 @@ export function declaredRelationBindingFor(
 
 export function hasBindingName(
 	scope: QueryScope | BindingNameRegistry | undefined,
-	name: SqlIdentifier | string,
-	..._legacy: readonly unknown[]
+	name: string,
 ): boolean {
 	if (scope !== undefined && 'has' in scope) return scope.has(name);
-	const binding = relationBindingFor(
-		scope as QueryScope | undefined,
-		typeof name === 'string' ? queryLocal(name) : name,
-	);
+	const binding = (scope as QueryScope | undefined)?.bindings.get(name);
 	return binding?.kind === 'cte-bind';
 }
 
 export function schemaForFromName(
-	schemaName: SqlIdentifier | string | undefined,
-	fromName: SqlIdentifier | string,
+	schemaName: SqlIdentifier | undefined,
+	fromName: string,
 	scope: QueryScope | BindingNameRegistry | undefined,
-	..._legacy: readonly unknown[]
-): SqlIdentifier | string | undefined {
+): SqlIdentifier | undefined {
 	return hasBindingName(scope, fromName) ? undefined : schemaName;
 }
 
 /** Boundary spelling for a CTE name; it remains verbatim. */
-export function emittedBindName(
-	name: SqlIdentifier | string,
-	..._legacy: readonly unknown[]
-): SqlIdentifier {
-	return typeof name === 'string' ? queryLocal(name) : name;
+export function emittedBindName(name: SqlIdentifier): SqlIdentifier {
+	return name;
 }
 
 /** Compatibility constructor for later lots which still carry a name registry. */
 export function withBindingName(
 	bindingNames: BindingNameRegistry | undefined,
-	name: SqlIdentifier | string,
-	..._legacy: readonly unknown[]
+	name: SqlIdentifier,
 ): BindingNameRegistry {
-	return new Set([
-		...(bindingNames ?? []),
-		identifierText(emittedBindName(name)),
-	]);
+	return new Set([...(bindingNames ?? []), identifierText(name)]);
 }

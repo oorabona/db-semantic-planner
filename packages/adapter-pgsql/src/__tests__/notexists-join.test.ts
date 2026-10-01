@@ -170,8 +170,8 @@ describe('notExists() with include — DELETE mutation path', () => {
 		expect(sql).toContain('caller_file_id');
 	});
 
-	it('without ModelIR falls back to FK derivation and still produces a JOIN', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+	it('uses the complete model to produce a JOIN', () => {
+		const adapter = buildAdapter();
 
 		const { sql } = adapter.compileDelete({
 			type: 'delete' as const,

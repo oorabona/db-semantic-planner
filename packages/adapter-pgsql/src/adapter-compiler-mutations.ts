@@ -179,7 +179,7 @@ function prependSourceCte(
 		return finalizeEnvelope(query);
 	}
 	const cteParamCount = sourceCte.parameters.length;
-	const sourceCteName = emittedBindName(sourceName);
+	const sourceCteName = emittedBindName(queryLocal(sourceName));
 	return finalizeEnvelope(
 		preserveOneToOne(query, {
 			sql: `WITH ${quoteIdent(sourceCteName, 'alias')} as (${sourceCte.sql}) ${renumberSqlParams(query.sql, cteParamCount)}`,
@@ -192,9 +192,12 @@ function declaredMutationTable(
 	deps: AdapterCompilerDeps,
 	table: string,
 ): SqlIdentifier {
-	return deps.declaredNames
-		? declaredTable(deps.declaredNames, table)
-		: queryLocal(table);
+	if (!deps.declaredNames) {
+		throw new Error(
+			`No declared-name resolver is available for table '${table}'.`,
+		);
+	}
+	return declaredTable(deps.declaredNames, table);
 }
 
 function declaredMutationColumn(
@@ -202,9 +205,12 @@ function declaredMutationColumn(
 	table: string,
 	column: string,
 ): SqlIdentifier {
-	return deps.declaredNames
-		? declaredColumn(deps.declaredNames, table, column)
-		: queryLocal(column);
+	if (!deps.declaredNames) {
+		throw new Error(
+			`No declared-name resolver is available for column '${table}.${column}'.`,
+		);
+	}
+	return declaredColumn(deps.declaredNames, table, column);
 }
 
 function mutationBinding(deps: AdapterCompilerDeps, table: string) {
@@ -229,12 +235,6 @@ function mutationSourceColumn(
 	column: string,
 ): SqlIdentifier {
 	if (binding.kind !== 'declared-table') return queryLocal(column);
-	if (
-		deps.declaredNames !== undefined &&
-		deps.declaredNames.column(logicalTable, column) === undefined
-	) {
-		return queryLocal(column);
-	}
 	return declaredMutationColumn(deps, logicalTable, column);
 }
 
@@ -580,7 +580,7 @@ export function compileInsertFrom(
 			: undefined;
 	const bindingNames =
 		intent.sourceQuery !== undefined
-			? withBindingName(deps.bindingNames, intent.source)
+			? withBindingName(deps.bindingNames, queryLocal(intent.source))
 			: deps.bindingNames;
 
 	const ctx = mutationContext(
@@ -1050,7 +1050,7 @@ export function compileUpsertFrom(
 			: undefined;
 	const bindingNames =
 		intent.sourceQuery !== undefined
-			? withBindingName(deps.bindingNames, intent.source)
+			? withBindingName(deps.bindingNames, queryLocal(intent.source))
 			: deps.bindingNames;
 
 	const ctx = mutationContext(

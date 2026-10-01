@@ -1699,15 +1699,8 @@ function removeShadowedNqlBindingNames(
 	if (bindingNames.length === 0 || localCteNames.length === 0) {
 		return [...bindingNames];
 	}
-	const localLogicalNames = new Set(localCteNames);
-	const localEmittedNames = new Set(
-		localCteNames.map((name) => emittedBindName(name)),
-	);
-	return bindingNames.filter(
-		(name) =>
-			!localLogicalNames.has(name) &&
-			!localEmittedNames.has(emittedBindName(name)),
-	);
+	const localNames = new Set(localCteNames);
+	return bindingNames.filter((name) => !localNames.has(name));
 }
 
 function runtimeBindingSourceTable(
@@ -2147,7 +2140,7 @@ function compileNqlRuntimeBindingCte(
 			`NQL runtime binding '${name}' cannot be materialized without projected columns.`,
 		);
 	}
-	const cteName = quoteIdent(emittedBindName(name), 'alias');
+	const cteName = quoteIdent(emittedBindName(queryLocal(name)), 'alias');
 	// A binding CTE's header is its query-local output schema, not a projection
 	// of the source table. Keep aliases and aggregate labels verbatim even when
 	// their source happens to be a declared model column.
@@ -2457,7 +2450,7 @@ function getNqlBindingProjection(
 	registry: NqlBindingProjectionRegistry | undefined,
 	name: string,
 ): ProjectionEnvelope | undefined {
-	return registry?.get(emittedBindName(name));
+	return registry?.get(name);
 }
 // ============================================================================
 // Options
@@ -3226,9 +3219,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			shadowingLocalCteNames(bundle),
 		);
 		const bindingNames =
-			bindingNamesInOrder.length > 0
-				? new Set(bindingNamesInOrder.map((name) => emittedBindName(name)))
-				: undefined;
+			bindingNamesInOrder.length > 0 ? new Set(bindingNamesInOrder) : undefined;
 		const bindingProjections = new Map<string, ProjectionEnvelope>();
 
 		for (const name of bindingNamesInOrder) {
@@ -3273,7 +3264,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				ctes.push(compiledRuntimeBinding.cte);
 				parameters.push(...compiledRuntimeBinding.parameters);
 				bindingProjections.set(
-					emittedBindName(name),
+					name,
 					fromOutputDescriptors({
 						sql: '',
 						parameters: [],
@@ -3291,7 +3282,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					`NQL binding '${name}' has no query intent or runtime rows to materialize.`,
 				);
 			}
-			const cteName = quoteIdent(emittedBindName(name), 'alias');
+			const cteName = quoteIdent(emittedBindName(queryLocal(name)), 'alias');
 			const bindingBundle: CompiledNqlQuery = bundle.mutationBindings?.has(name)
 				? { mutation: bundle.mutationBindings.get(name)! }
 				: { query: queryIntent };
@@ -3339,7 +3330,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				`${cteName} as (${renumberSqlParams(compiled.sql, parameters.length)})`,
 			);
 			parameters.push(...compiled.parameters);
-			bindingProjections.set(emittedBindName(name), bindingProjection);
+			bindingProjections.set(name, bindingProjection);
 		}
 
 		const leafBundle: CompiledNqlQuery = {

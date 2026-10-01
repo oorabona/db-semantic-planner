@@ -206,19 +206,17 @@ export const cteIncludeHandler: IncludeHandler = {
 		if (!relation) {
 			throw new Error('CTE include requires relation name');
 		}
-		const target = resolveRelationTarget(targetTable, ctx);
+		const target = resolveRelationTarget(queryLocal(targetTable), ctx);
 		requireRelationTargetColumns(
 			target,
-			toColumnList(targetColumn),
-			ctx,
+			toColumnList(targetColumn).map(queryLocal),
 			'join key',
 			relation,
 		);
 		if (columns) {
 			requireRelationTargetColumns(
 				target,
-				columns.filter((column) => column !== '*'),
-				ctx,
+				columns.filter((column) => column !== '*').map(queryLocal),
 				'selected column',
 				relation,
 			);
@@ -231,10 +229,13 @@ export const cteIncludeHandler: IncludeHandler = {
 		const cteAlias = `${relation}_ref_${existingAliases}`;
 		state.aliases.set(`cte_${targetTable}`, cteName);
 		const aliasColumnAuthorities = bindAliasAuthority(
-			bindAliasAuthority(ctx.aliasColumnAuthorities, innerAlias, target, ctx),
-			cteAlias,
+			bindAliasAuthority(
+				ctx.aliasColumnAuthorities,
+				queryLocal(innerAlias),
+				target,
+			),
+			queryLocal(cteAlias),
 			target,
-			ctx,
 		);
 		const scopedCtx: CompilerContext = {
 			...ctx,

@@ -147,9 +147,8 @@ export function buildRecursiveScalarSubquery(config: RecursiveCteConfig): Node {
 		ctx,
 	} = config;
 	requireRelationTargetColumns(
-		resolveRelationTarget(table, ctx),
-		[pkColumn, fkColumn, selectColumn],
-		ctx,
+		resolveRelationTarget(queryLocal(table), ctx),
+		[pkColumn, fkColumn, selectColumn].map(queryLocal),
 		'traversal column',
 	);
 	const dbTable = addressedTable(ctx, table);
@@ -161,7 +160,11 @@ export function buildRecursiveScalarSubquery(config: RecursiveCteConfig): Node {
 		outerAlias,
 		outerSeedColumn ?? (isAncestors ? fkColumn : pkColumn),
 	);
-	const schemaName = schemaForFromName(ctx.schema, table, ctx.scope);
+	const schemaName = schemaForFromName(
+		ctx.schema === undefined ? undefined : queryLocal(ctx.schema),
+		table,
+		ctx.scope,
+	);
 
 	// Inner alias for CTE iterations
 	const innerAlias = '__n';
@@ -589,14 +592,17 @@ export const singleHopPseudoHandler: ExpressionHandler = {
 		const fkColumn = decision.fkColumn ?? 'parent_id';
 		const traversal = decision.traversal ?? 'parent';
 		requireRelationTargetColumns(
-			resolveRelationTarget(table, ctx),
-			[pkColumn, fkColumn, targetColumn],
-			ctx,
+			resolveRelationTarget(queryLocal(table), ctx),
+			[pkColumn, fkColumn, targetColumn].map(queryLocal),
 			'traversal column',
 		);
 		const dbTable = addressedTable(ctx, table);
 		const dbPk = addressedColumn(ctx, table, pkColumn);
-		const schemaName = schemaForFromName(ctx.schema, table, ctx.scope);
+		const schemaName = schemaForFromName(
+			ctx.schema === undefined ? undefined : queryLocal(ctx.schema),
+			table,
+			ctx.scope,
+		);
 		const dbCol = addressedColumn(ctx, table, targetColumn);
 		const outerAlias = emittedQualifier(ctx, ctx.currentAlias ?? ctx.rootTable);
 		const outerParentFk = emittedQualifierColumn(
@@ -727,7 +733,11 @@ export const chainedPseudoHandler: ExpressionHandler = {
 		const dbTable = addressedTable(ctx, table);
 		const dbPk = addressedColumn(ctx, table, pkColumn);
 		const dbFk = addressedColumn(ctx, table, fkColumn);
-		const schemaName = schemaForFromName(ctx.schema, table, ctx.scope);
+		const schemaName = schemaForFromName(
+			ctx.schema === undefined ? undefined : queryLocal(ctx.schema),
+			table,
+			ctx.scope,
+		);
 
 		// Build from innermost to outermost
 		// Start with the final column selection
@@ -738,9 +748,8 @@ export const chainedPseudoHandler: ExpressionHandler = {
 			'chained pseudo',
 		);
 		requireRelationTargetColumns(
-			resolveRelationTarget(table, ctx),
-			[pkColumn, fkColumn, targetColumn],
-			ctx,
+			resolveRelationTarget(queryLocal(table), ctx),
+			[pkColumn, fkColumn, targetColumn].map(queryLocal),
 			'traversal column',
 		);
 		const targetCol = addressedColumn(ctx, table, targetColumn);

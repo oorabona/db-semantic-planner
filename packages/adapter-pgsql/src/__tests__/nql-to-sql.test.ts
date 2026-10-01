@@ -2107,6 +2107,9 @@ const mutationSchema = schema({
 	},
 	posts: {
 		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		email: 'string',
+		active: 'boolean',
 		title: 'string',
 		published: 'boolean',
 		featured: 'boolean',

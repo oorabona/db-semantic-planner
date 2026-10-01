@@ -62,13 +62,13 @@ function buildJoin(
 	const joinExpr: JoinExpr = {
 		jointype: joinType === 'inner' ? 'JOIN_INNER' : 'JOIN_LEFT',
 		rarg: sqlRangeVar(
-			resolveRelationTarget(targetTable, ctx).cteName ??
+			resolveRelationTarget(queryLocal(targetTable), ctx).cteName ??
 				(ctx.declaredNames === undefined
 					? queryLocal(targetTable)
 					: declaredTable(ctx.declaredNames, targetTable)),
 			queryLocal(targetAlias),
-			resolveRelationTarget(targetTable, ctx).cteName === undefined &&
-				ctx.schema !== undefined
+			resolveRelationTarget(queryLocal(targetTable), ctx).cteName ===
+				undefined && ctx.schema !== undefined
 				? queryLocal(ctx.schema)
 				: undefined,
 		),
@@ -116,19 +116,17 @@ export const joinIncludeHandler: IncludeHandler = {
 				ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
 			),
 		];
-		const target = resolveRelationTarget(targetTable, ctx);
+		const target = resolveRelationTarget(queryLocal(targetTable), ctx);
 		requireRelationTargetColumns(
 			target,
-			toColumnList(targetColumn),
-			ctx,
+			toColumnList(targetColumn).map(queryLocal),
 			'join key',
 			relation,
 		);
 		if (columns) {
 			requireRelationTargetColumns(
 				target,
-				columns.filter((column) => column !== '*'),
-				ctx,
+				columns.filter((column) => column !== '*').map(queryLocal),
 				'selected column',
 				relation,
 			);

@@ -85,9 +85,7 @@ function getRegisteredProjection(
 	name: string,
 ): ProjectionEnvelope | undefined {
 	if (registry.size === 0) return undefined;
-	const exact = registry.get(name);
-	if (exact !== undefined) return exact;
-	return registry.get(emittedBindName(name));
+	return registry.get(name);
 }
 
 function createPlanReportForQuery(query: QueryIntent): PlanReport {
@@ -126,10 +124,9 @@ function createPlanReportForCteQuery(
 	});
 }
 
-function dbOutputKey(name: string, deps: AdapterCompilerDeps): string {
+function dbOutputKey(name: string): string {
 	// CTE projection labels are query-local, including labels that happen to
 	// have the same spelling as a declared model column.
-	void deps;
 	return name;
 }
 
@@ -160,25 +157,18 @@ function addStarSelections(
 	}
 }
 
-function aliasOutputKey(
-	value: unknown,
-	deps: AdapterCompilerDeps,
-): string | undefined {
-	return typeof value === 'string' ? dbOutputKey(value, deps) : undefined;
+function aliasOutputKey(value: unknown): string | undefined {
+	return typeof value === 'string' ? dbOutputKey(value) : undefined;
 }
 
-function expressionOutputKey(
-	expr: ExpressionIntent,
-	deps: AdapterCompilerDeps,
-): string | undefined {
+function expressionOutputKey(expr: ExpressionIntent): string | undefined {
 	const record = expr as unknown as Record<string, unknown>;
-	return aliasOutputKey(record.as ?? record.alias, deps);
+	return aliasOutputKey(record.as ?? record.alias);
 }
 
 function buildCteProjectionShape(
 	source: ProjectionEnvelope,
 	select: SelectIntent | undefined,
-	deps: AdapterCompilerDeps,
 ): {
 	selections: ProjectNamedFieldsSelection[];
 	expressions: ProjectNamedFieldsExpression[];
@@ -202,7 +192,7 @@ function buildCteProjectionShape(
 				addStarSelections(source, selections);
 				continue;
 			}
-			const outputKey = dbOutputKey(field, deps);
+			const outputKey = dbOutputKey(field);
 			addSelection(selections, outputKey, outputKey);
 		}
 		return { selections, expressions, preserveOneToOne: false };
@@ -210,13 +200,13 @@ function buildCteProjectionShape(
 
 	if (select.type === 'aggregate') {
 		for (const field of select.fields ?? []) {
-			const outputKey = dbOutputKey(field, deps);
+			const outputKey = dbOutputKey(field);
 			addSelection(selections, outputKey, outputKey);
 		}
 		for (const aggregate of select.aggregates) {
 			addExpression(
 				expressions,
-				aliasOutputKey(aggregate.as, deps),
+				aliasOutputKey(aggregate.as),
 				'aggregate projection has no raw column provenance',
 			);
 		}
@@ -235,15 +225,15 @@ function buildCteProjectionShape(
 				if (typeof column !== 'string') {
 					addExpression(
 						expressions,
-						expressionOutputKey(expr, deps),
+						expressionOutputKey(expr),
 						'column projection could not be resolved',
 					);
 					break;
 				}
 				addSelection(
 					selections,
-					dbOutputKey(column, deps),
-					aliasOutputKey(record.as, deps) ?? dbOutputKey(column, deps),
+					dbOutputKey(column),
+					aliasOutputKey(record.as) ?? dbOutputKey(column),
 				);
 				break;
 			}
@@ -253,22 +243,18 @@ function buildCteProjectionShape(
 				if (typeof column !== 'string' || typeof alias !== 'string') {
 					addExpression(
 						expressions,
-						expressionOutputKey(expr, deps),
+						expressionOutputKey(expr),
 						'column alias projection could not be resolved',
 					);
 					break;
 				}
-				addSelection(
-					selections,
-					dbOutputKey(column, deps),
-					dbOutputKey(alias, deps),
-				);
+				addSelection(selections, dbOutputKey(column), dbOutputKey(alias));
 				break;
 			}
 			default:
 				addExpression(
 					expressions,
-					expressionOutputKey(expr, deps),
+					expressionOutputKey(expr),
 					'expression projection has no raw column provenance',
 				);
 				break;
@@ -336,10 +322,9 @@ function projectCteQueryEnvelope<T = unknown>(
 	query: QueryIntent,
 	sql: string,
 	parameters: readonly unknown[],
-	deps: AdapterCompilerDeps,
 	hydrationPlan: PlanReport | undefined,
 ): ProjectionEnvelope<T> {
-	const shape = buildCteProjectionShape(source, query.select, deps);
+	const shape = buildCteProjectionShape(source, query.select);
 	const projectedHydrationPlan =
 		hydrationPlan ?? sourceHydrationPlanForCteProjection(source, shape);
 	if (shape.preserveOneToOne) {
@@ -382,7 +367,6 @@ function compileQueryEnvelope(
 			query,
 			compiled.sql,
 			compiled.parameters,
-			deps,
 			compiled.hydrationPlan,
 		);
 	}
@@ -395,14 +379,12 @@ function rehomeQueryEnvelope(
 	compiled: ProjectionEnvelope,
 	sql: string,
 	parameters: readonly unknown[],
-	deps: AdapterCompilerDeps,
 ): ProjectionEnvelope {
 	return projectCteQueryEnvelope(
 		source,
 		query,
 		sql,
 		parameters,
-		deps,
 		compiled.hydrationPlan,
 	);
 }
@@ -450,7 +432,9 @@ export function compileRecursive<T = unknown>(
 			intent.start.nodeIdExpr.kind === 'column'
 				? intent.start.nodeIdExpr.name
 				: pkColumn;
-		const selectColumns = Array.from(new Set([nodeIdColumn, ...startSelect]));
+		const selectColumns = Array.from(
+			new Set([nodeIdColumn, ...startSelect]),
+		).map((column) => declaredColumn(deps.declaredNames!, table, column));
 
 		// Edge-table traversal: join through a junction table
 		const edgeFrom =
@@ -465,28 +449,21 @@ export function compileRecursive<T = unknown>(
 
 		const base: RecursiveCteConfig = {
 			cteAlias: queryLocal(intent.cteName),
-			table: deps.declaredNames
-				? declaredTable(deps.declaredNames, table)
-				: queryLocal(table),
-			pkColumn: deps.declaredNames
-				? declaredColumn(deps.declaredNames, table, pkColumn)
-				: queryLocal(pkColumn),
-			fkColumn: '', // unused in edge-table mode
+			table: declaredTable(deps.declaredNames!, table),
+			pkColumn: declaredColumn(deps.declaredNames!, table, pkColumn),
 			outerAlias: queryLocal('t0'),
 			isAncestors: false,
 			maxDepth: intent.maxDepth,
 			selectColumns,
 			trackPath,
 			usePg14Cycle: false,
-			edgeTable: deps.declaredNames
-				? declaredTable(deps.declaredNames, traversal.edgeTable)
-				: queryLocal(traversal.edgeTable),
-			edgeFrom: deps.declaredNames
-				? declaredColumn(deps.declaredNames, traversal.edgeTable, edgeFrom)
-				: queryLocal(edgeFrom),
-			edgeTo: deps.declaredNames
-				? declaredColumn(deps.declaredNames, traversal.edgeTable, edgeTo)
-				: queryLocal(edgeTo),
+			edgeTable: declaredTable(deps.declaredNames!, traversal.edgeTable),
+			edgeFrom: declaredColumn(
+				deps.declaredNames!,
+				traversal.edgeTable,
+				edgeFrom,
+			),
+			edgeTo: declaredColumn(deps.declaredNames!, traversal.edgeTable, edgeTo),
 			ctx,
 		};
 
@@ -516,20 +493,16 @@ export function compileRecursive<T = unknown>(
 			intent.start.nodeIdExpr.kind === 'column'
 				? intent.start.nodeIdExpr.name
 				: pkColumn;
-		const selectColumns = Array.from(new Set([nodeIdColumn, ...startSelect]));
+		const selectColumns = Array.from(
+			new Set([nodeIdColumn, ...startSelect]),
+		).map((column) => declaredColumn(deps.declaredNames!, table, column));
 
 		// Adjacency-list traversal: self-referencing FK
 		config = {
 			cteAlias: queryLocal(intent.cteName),
-			table: deps.declaredNames
-				? declaredTable(deps.declaredNames, table)
-				: queryLocal(table),
-			pkColumn: deps.declaredNames
-				? declaredColumn(deps.declaredNames, table, pkColumn)
-				: queryLocal(pkColumn),
-			fkColumn: deps.declaredNames
-				? declaredColumn(deps.declaredNames, table, traversal.parentId)
-				: queryLocal(traversal.parentId),
+			table: declaredTable(deps.declaredNames!, table),
+			pkColumn: declaredColumn(deps.declaredNames!, table, pkColumn),
+			fkColumn: declaredColumn(deps.declaredNames!, table, traversal.parentId),
 			outerAlias: queryLocal('t0'),
 			isAncestors: traversal.direction === 'ancestors',
 			maxDepth: intent.maxDepth,
@@ -695,7 +668,7 @@ export function compileCteQuery<T = unknown>(
 
 	for (const cte of intent.ctes) {
 		validateIdentifier(cte.name, 'table');
-		const emittedCteName = emittedBindName(cte.name);
+		const emittedCteName = emittedBindName(queryLocal(cte.name));
 		if (cte.kind === 'unnestCte') {
 			// Unnest-backed CTE: builds an AST node, deparses it
 			const beforeUnnestParamCount = state.parameters.length;
@@ -722,7 +695,7 @@ export function compileCteQuery<T = unknown>(
 			const currentParamOffset = allCteParams.length;
 			const rawCteStepDeps = withBindingProjectionScope(
 				visibleCteDeps,
-				withBindingName(visibleCteDeps.bindingNames, cte.name),
+				withBindingName(visibleCteDeps.bindingNames, queryLocal(cte.name)),
 				cteProjectionByName,
 			);
 			const rawCte = buildRawCte(
@@ -790,7 +763,7 @@ export function compileCteQuery<T = unknown>(
 
 		visibleCteDeps = withBindingProjectionScope(
 			visibleCteDeps,
-			withBindingName(visibleCteDeps.bindingNames, cte.name),
+			withBindingName(visibleCteDeps.bindingNames, queryLocal(cte.name)),
 			cteProjectionByName,
 		);
 	}
@@ -840,7 +813,6 @@ export function compileCteQuery<T = unknown>(
 				intent.query,
 				sql,
 				parameters,
-				deps,
 				outerCompiled.hydrationPlan,
 			)
 		: preserveOneToOne<T>(outerCompiled, { sql, parameters });
@@ -919,7 +891,7 @@ function buildUnnestCte(
 
 	return {
 		CommonTableExpr: {
-			ctename: emittedBindName(cte.name),
+			ctename: emittedBindName(queryLocal(cte.name)),
 			ctequery: { SelectStmt: cteSelectStmt },
 		},
 	};
@@ -959,7 +931,10 @@ function buildRawCte(
 	// The recursive name enters the step query with the anchor's projected
 	// labels. A name-only binding cannot safely resolve `chain.name`.
 	const stepProjectionRegistry = new Map(registry);
-	stepProjectionRegistry.set(emittedBindName(cte.name), baseCompiled);
+	stepProjectionRegistry.set(
+		emittedBindName(queryLocal(cte.name)),
+		baseCompiled,
+	);
 	const scopedStepDeps = withBindingProjectionScope(
 		stepDeps,
 		stepDeps.bindingNames,
@@ -1020,7 +995,6 @@ function buildRawCte(
 				rawStepCompiled,
 				finalStepSql,
 				allParams,
-				scopedStepDeps,
 			)
 		: preserveOneToOne(rawStepCompiled, {
 				sql: finalStepSql,
@@ -1028,7 +1002,7 @@ function buildRawCte(
 			});
 
 	const setOp = cte.unionAll ? 'UNION ALL' : 'UNION';
-	const cteName = `"${emittedBindName(cte.name)}"`;
+	const cteName = `"${emittedBindName(queryLocal(cte.name))}"`;
 	const cteSql = `${cteName} AS (${baseCompiled.sql} ${setOp} ${finalStepSql})`;
 
 	return {
@@ -1075,9 +1049,12 @@ function buildRecursiveAnchorWhere(
 			const operator = w.operator as string;
 			const op = mapComparisonOperator(operator);
 			const field = w.field as string;
-			const dbCol = deps.declaredNames
-				? declaredColumn(deps.declaredNames, table, field)
-				: queryLocal(field);
+			if (deps.declaredNames === undefined) {
+				throw new Error(
+					`Recursive anchor column '${table}.${field}' requires a declared-name resolver.`,
+				);
+			}
+			const dbCol = declaredColumn(deps.declaredNames, table, field);
 			const left: Node = {
 				ColumnRef: {
 					fields: [

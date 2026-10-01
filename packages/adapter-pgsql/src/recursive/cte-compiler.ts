@@ -36,21 +36,21 @@ export const MAX_DEPTH_LIMIT = 100;
  */
 export interface RecursiveCteConfig {
 	/** Unique CTE name (e.g., '__rc_0') */
-	cteAlias: SqlIdentifier | string;
+	cteAlias: SqlIdentifier;
 	/** Table to traverse */
-	table: SqlIdentifier | string;
+	table: SqlIdentifier;
 	/** Primary key column */
-	pkColumn: SqlIdentifier | string;
+	pkColumn: SqlIdentifier;
 	/** Foreign key column for self-reference (adjacency mode only) */
-	fkColumn: SqlIdentifier | string;
+	fkColumn?: SqlIdentifier;
 	/** Outer query alias to correlate with */
-	outerAlias: SqlIdentifier | string;
+	outerAlias: SqlIdentifier;
 	/** true = traverse up (ancestors), false = traverse down (descendants) */
 	isAncestors: boolean;
 	/** Maximum recursion depth (default: {@link MAX_DEPTH_LIMIT}) */
 	maxDepth: number;
 	/** Column(s) to select from each row */
-	selectColumns: (SqlIdentifier | string)[];
+	selectColumns: SqlIdentifier[];
 	/** Whether to track traversal path */
 	trackPath?: boolean;
 	/** Whether to use PG14+ CYCLE clause (vs __visited array) */
@@ -60,11 +60,11 @@ export interface RecursiveCteConfig {
 
 	// Edge-table mode (optional — when set, uses edge-table traversal)
 	/** Edge table name (e.g., "role_edges") */
-	edgeTable?: SqlIdentifier | string;
+	edgeTable?: SqlIdentifier;
 	/** Source column in edge table (e.g., "parent_role_id") */
-	edgeFrom?: SqlIdentifier | string;
+	edgeFrom?: SqlIdentifier;
 	/** Target column in edge table (e.g., "child_role_id") */
-	edgeTo?: SqlIdentifier | string;
+	edgeTo?: SqlIdentifier;
 	/** Bidirectional strategy: 'union' (safe, dedup) or 'union-all' (no dedup) */
 	bidirectionalStrategy?: 'union' | 'union-all';
 
@@ -110,6 +110,9 @@ export function buildRecursiveCte(config: RecursiveCteConfig): {
 	if (config.edgeTable) {
 		return buildEdgeTableRecursiveCte(config);
 	}
+	if (config.fkColumn === undefined) {
+		throw new Error('fkColumn is required for adjacency-list traversal.');
+	}
 
 	const {
 		cteAlias,
@@ -125,11 +128,11 @@ export function buildRecursiveCte(config: RecursiveCteConfig): {
 		ctx,
 	} = config;
 
-	const dbTable = queryLocal(table);
-	const dbPk = queryLocal(pkColumn);
-	const dbFk = queryLocal(fkColumn);
-	const dbOuter = queryLocal(outerAlias);
-	const innerAlias = '__n';
+	const dbTable = table;
+	const dbPk = pkColumn;
+	const dbFk = fkColumn;
+	const dbOuter = outerAlias;
+	const innerAlias = queryLocal('__n');
 
 	// Build anchor target list
 	const anchorTargets: Node[] = buildTargetList(selectColumns, innerAlias, {
@@ -249,13 +252,13 @@ export function buildRecursiveCte(config: RecursiveCteConfig): {
  * Build the target list for anchor or recursive SELECT
  */
 function buildTargetList(
-	columns: string[],
-	alias: string,
+	columns: SqlIdentifier[],
+	alias: SqlIdentifier,
 	options: {
 		isAnchor: boolean;
 		trackPath: boolean;
-		pkColumn: string;
-		cteAlias?: string;
+		pkColumn: SqlIdentifier;
+		cteAlias?: SqlIdentifier;
 		usePg14Cycle?: boolean;
 	},
 ): Node[] {
@@ -263,7 +266,7 @@ function buildTargetList(
 
 	// Add requested columns
 	for (const col of columns) {
-		const dbCol = queryLocal(col);
+		const dbCol = col;
 		targets.push({
 			ResTarget: {
 				val: {
@@ -336,10 +339,10 @@ function buildTargetList(
  * Build anchor WHERE clause
  */
 function buildAnchorWhere(
-	innerAlias: string,
-	outerAlias: string,
-	pkColumn: string,
-	fkColumn: string,
+	innerAlias: SqlIdentifier,
+	outerAlias: SqlIdentifier,
+	pkColumn: SqlIdentifier,
+	fkColumn: SqlIdentifier,
 	isAncestors: boolean,
 ): Node {
 	if (isAncestors) {
@@ -389,9 +392,9 @@ function buildAnchorWhere(
  * Build recursive WHERE clause with depth limit and cycle check
  */
 function buildRecursiveWhere(
-	cteAlias: string,
-	innerAlias: string,
-	pkColumn: string,
+	cteAlias: SqlIdentifier,
+	innerAlias: SqlIdentifier,
+	pkColumn: SqlIdentifier,
 	maxDepth: number,
 	usePg14Cycle: boolean,
 ): Node {
@@ -453,11 +456,11 @@ function buildRecursiveWhere(
  * Build the JOIN for recursive step
  */
 function buildRecursiveJoin(
-	cteAlias: string,
-	innerAlias: string,
-	dbTable: string,
-	pkColumn: string,
-	fkColumn: string,
+	cteAlias: SqlIdentifier,
+	innerAlias: SqlIdentifier,
+	dbTable: SqlIdentifier,
+	pkColumn: SqlIdentifier,
+	fkColumn: SqlIdentifier,
 	isAncestors: boolean,
 	ctx: CompilerContext,
 ): Node {
@@ -584,13 +587,13 @@ function buildEdgeTableRecursiveCte(config: RecursiveCteConfig): {
 		);
 	}
 
-	const dbTable = queryLocal(table);
-	const dbPk = queryLocal(pkColumn);
-	const dbEdgeTable = queryLocal(edgeTable);
-	const dbEdgeFrom = queryLocal(edgeFrom);
-	const dbEdgeTo = queryLocal(edgeTo);
-	const innerAlias = '__n';
-	const edgeAlias = '__e';
+	const dbTable = table;
+	const dbPk = pkColumn;
+	const dbEdgeTable = edgeTable;
+	const dbEdgeFrom = edgeFrom;
+	const dbEdgeTo = edgeTo;
+	const innerAlias = queryLocal('__n');
+	const edgeAlias = queryLocal('__e');
 	const isBidirectional = bidirectionalStrategy !== undefined;
 	const bidirCteAlias = '__edges_bidir';
 
@@ -644,9 +647,11 @@ function buildEdgeTableRecursiveCte(config: RecursiveCteConfig): {
 	);
 
 	// FROM cte JOIN edge ON edge.from = cte.pk JOIN node ON node.pk = edge.to
-	const edgeJoinSource = isBidirectional ? bidirCteAlias : dbEdgeTable;
-	const edgeJoinFromCol = isBidirectional ? 'from_id' : dbEdgeFrom;
-	const edgeJoinToCol = isBidirectional ? 'to_id' : dbEdgeTo;
+	const edgeJoinSource = isBidirectional
+		? queryLocal(bidirCteAlias)
+		: dbEdgeTable;
+	const edgeJoinFromCol = isBidirectional ? queryLocal('from_id') : dbEdgeFrom;
+	const edgeJoinToCol = isBidirectional ? queryLocal('to_id') : dbEdgeTo;
 
 	// Build: cte JOIN edgeTable e ON e.edgeFrom = cte.pk
 	const cteToEdgeJoin: Node = {

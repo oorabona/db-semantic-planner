@@ -102,15 +102,14 @@ function resolveJsonAggProjection(
 		requested &&
 		requested.length > 0 &&
 		!(requested.length === 1 && requested[0] === '*');
-	const target = resolveRelationTarget(targetTable, ctx);
+	const target = resolveRelationTarget(queryLocal(targetTable), ctx);
 	if (hasExplicitProjection) {
 		return requested.map((column) =>
 			column === '*'
 				? queryLocal(column)
 				: (requireRelationTargetColumn(
 						target,
-						column,
-						ctx,
+						queryLocal(column),
 						'selected column',
 						decision.relation,
 					)?.outputKey ??
@@ -172,14 +171,16 @@ function buildJsonAggColumnValueOverrides(
 		(columns.length === 1 && identifierText(columns[0]!) === '*')
 	)
 		return undefined;
-	const target = resolveRelationTarget(targetTable, ctx);
+	const target = resolveRelationTarget(queryLocal(targetTable), ctx);
 	if (target.outputs !== undefined) {
 		const overrides = new Map<string, Node>();
 		for (const columnName of columns) {
 			if (identifierText(columnName) === '*') continue;
 			// `columns` comes from the target projection here, so its keys are
 			// already emitted SQL identifiers rather than logical input names.
-			const emittedColumn = emittedColumnReference(identifierText(columnName));
+			const emittedColumn = emittedColumnReference(
+				queryLocal(identifierText(columnName)),
+			);
 			const descriptor = requireEmittedRelationTargetColumn(
 				target,
 				emittedColumn,
@@ -269,15 +270,14 @@ function compileJsonAggRecursive(
 			: toColumnList(declaredRelation?.foreignKey).length > 0
 				? declaredRelation!.foreignKey
 				: targetColumn;
-	const sourceTarget = resolveRelationTarget(targetTable, ctx);
+	const sourceTarget = resolveRelationTarget(queryLocal(targetTable), ctx);
 	// Preserve the container-conversion refusal before validating correlation
 	// keys: its diagnostic is more specific for a projected JSON output.
 	for (const column of decision.columns ?? []) {
 		if (column === '*') continue;
 		const descriptor = requireRelationTargetColumn(
 			sourceTarget,
-			column,
-			ctx,
+			queryLocal(column),
 			'selected column',
 			relation,
 		);
@@ -288,8 +288,7 @@ function compileJsonAggRecursive(
 	// before an inner alias can obscure the relation and its available outputs.
 	requireRelationTargetColumns(
 		sourceTarget,
-		toColumnList(resolvedTargetColumn),
-		ctx,
+		toColumnList(resolvedTargetColumn).map(queryLocal),
 		'column reference',
 		relation,
 	);
@@ -300,9 +299,8 @@ function compileJsonAggRecursive(
 		outerAlias: parentAlias,
 		aliasColumnAuthorities: bindAliasAuthority(
 			ctx.aliasColumnAuthorities,
-			innerAlias,
-			resolveRelationTarget(targetTable, ctx),
-			ctx,
+			queryLocal(innerAlias),
+			resolveRelationTarget(queryLocal(targetTable), ctx),
 		),
 		scope: queryScope([
 			...((
@@ -362,13 +360,15 @@ function compileJsonAggRecursive(
 
 	const limit = typeof decision.limit === 'number' ? decision.limit : undefined;
 	const orderBy = resolveJsonAggOrderBy(decision, targetTable, innerCtx);
-	const resolvedTarget = resolveRelationTarget(targetTable, innerCtx);
+	const resolvedTarget = resolveRelationTarget(
+		queryLocal(targetTable),
+		innerCtx,
+	);
 	const orderByIdentifiers = orderBy?.columns.map(
 		(column) =>
 			requireRelationTargetColumn(
 				resolvedTarget,
-				column,
-				innerCtx,
+				queryLocal(column),
 				'order key',
 				relation,
 			)?.outputKey ??

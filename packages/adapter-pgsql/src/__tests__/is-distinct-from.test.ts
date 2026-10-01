@@ -817,7 +817,8 @@ describe('#462 isDistinctFrom', () => {
 				undefined,
 				{
 					schemaName: undefined,
-					model: undefined,
+					model: testSchema.model,
+					declaredNames: resolverFor(testSchema.model),
 					defaultPk: 'id',
 					deriveFk: (relation: string) => `${relation}_id`,
 				},

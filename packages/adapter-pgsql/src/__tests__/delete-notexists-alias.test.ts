@@ -97,13 +97,14 @@ describe('DELETE-NOTEXISTS-ALIAS: relation resolved to real table via ModelIR', 
 		expect(sql).not.toMatch(/NOT.*EXISTS/i);
 	});
 
-	it('falls back to relation name when no ModelIR available', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+	it('resolves caller-supplied relation names through the declared model', () => {
+		const model = buildModel('embeddings', 'symbol', 'symbols');
+		const adapter = createPgsqlCompileOnlyAdapter({ model });
 
 		const { sql } = adapter.compileDelete({
 			type: 'delete' as const,
 			table: 'embeddings',
-			where: notExists('symbols'),
+			where: notExists('symbol'),
 		});
 
 		expect(sql).toMatch(/NOT.*EXISTS/i);

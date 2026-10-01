@@ -26,12 +26,12 @@ export type AliasColumnAuthority = ReadonlyMap<string, ResolvedRelationTarget>;
 
 /** A column name after deciding whether it is logical input or emitted output. */
 export type ResolvedColumnReference = {
-	readonly requestedName: string;
-	readonly emittedName: string;
+	readonly requestedName: SqlIdentifier;
+	readonly emittedName: SqlIdentifier;
 };
 
 export type ResolvedRelationTarget = {
-	readonly target: string;
+	readonly target: SqlIdentifier;
 	readonly cteName?: SqlIdentifier;
 	readonly logicalTable?: string;
 	readonly outputs?: ReadonlyMap<string, RelationBindingOutput>;
@@ -104,22 +104,21 @@ export function queryScopeForBindingProjections(
 
 /** Projection keys have already crossed the query-local identifier boundary. */
 export function requestedColumnReference(
-	requestedName: SqlIdentifier | string,
+	requestedName: SqlIdentifier,
 ): ResolvedColumnReference {
 	return { requestedName, emittedName: requestedName };
 }
 
 export function emittedColumnReference(
-	emittedName: SqlIdentifier | string,
+	emittedName: SqlIdentifier,
 ): ResolvedColumnReference {
 	return { requestedName: emittedName, emittedName };
 }
 
 export function bindAliasAuthority(
 	authorities: AliasColumnAuthority | undefined,
-	alias: SqlIdentifier | string,
+	alias: SqlIdentifier,
 	target: ResolvedRelationTarget,
-	..._legacy: readonly unknown[]
 ): AliasColumnAuthority {
 	const next = new Map(authorities);
 	next.set(alias, target);
@@ -128,14 +127,13 @@ export function bindAliasAuthority(
 
 /** The sole resolver for relation-target column authority. */
 export function resolveRelationTarget(
-	target: SqlIdentifier | string,
+	target: SqlIdentifier,
 	ctx: RelationTargetProjectionContext,
 ): ResolvedRelationTarget {
-	const identifier = typeof target === 'string' ? queryLocal(target) : target;
-	const binding = relationBindingFor(legacyScope(ctx), identifier);
-	if (binding === undefined) return { target: identifierText(identifier) };
+	const binding = relationBindingFor(legacyScope(ctx), target);
+	if (binding === undefined) return { target };
 	return {
-		target: identifierText(identifier),
+		target,
 		...(binding.kind === 'cte-bind' && { cteName: binding.qualifier }),
 		...(binding.logicalTable !== undefined && {
 			logicalTable: binding.logicalTable,
@@ -156,7 +154,7 @@ export function resolveRelationTarget(
 
 export function requireRelationTargetColumn(
 	target: ResolvedRelationTarget,
-	column: SqlIdentifier | string,
+	column: SqlIdentifier,
 	purposeOrContext: string | RelationTargetProjectionContext,
 	purposeOrRelation?: string,
 	relationName?: string,
@@ -167,7 +165,7 @@ export function requireRelationTargetColumn(
 			: purposeOrRelation!;
 	const relation =
 		typeof purposeOrContext === 'string' ? purposeOrRelation : relationName;
-	const identifier = typeof column === 'string' ? queryLocal(column) : column;
+	const identifier = column;
 	if (target.outputs === undefined) return undefined;
 	const descriptor =
 		target.outputs.get(identifierText(identifier)) ??
@@ -175,20 +173,20 @@ export function requireRelationTargetColumn(
 	if (descriptor !== undefined) {
 		if (descriptor.source.kind === 'ambiguous') {
 			throw new Error(
-				`${relation ? `Relation '${relation}' ` : ''}target '${identifierText(queryLocal(target.target))}' resolves to the CTE '${identifierText(target.cteName ?? queryLocal(target.target))}', whose projected column '${identifierText(identifier)}' is ambiguous and cannot be referenced (${purpose}).`,
+				`${relation ? `Relation '${relation}' ` : ''}target '${identifierText(target.target)}' resolves to the CTE '${identifierText(target.cteName ?? target.target)}', whose projected column '${identifierText(identifier)}' is ambiguous and cannot be referenced (${purpose}).`,
 			);
 		}
 		return descriptor;
 	}
 	const relationPrefix = relation ? `Relation '${relation}' ` : '';
 	throw new Error(
-		`${relationPrefix}target '${identifierText(queryLocal(target.target))}' resolves to the CTE '${identifierText(target.cteName ?? queryLocal(target.target))}', which does not project '${identifierText(identifier)}' (${purpose}). Available: ${[...target.outputs.keys()].join(', ')}`,
+		`${relationPrefix}target '${identifierText(target.target)}' resolves to the CTE '${identifierText(target.cteName ?? target.target)}', which does not project '${identifierText(identifier)}' (${purpose}). Available: ${[...target.outputs.keys()].join(', ')}`,
 	);
 }
 
 export function requireRelationTargetColumns(
 	target: ResolvedRelationTarget,
-	columns: readonly (SqlIdentifier | string)[],
+	columns: readonly SqlIdentifier[],
 	purposeOrContext: string | RelationTargetProjectionContext,
 	purposeOrRelation?: string,
 	relationName?: string,
@@ -230,7 +228,7 @@ export function assertProjectedJsonContainerCanBeAggregated(
 		(descriptor.shape.kind === 'array' || descriptor.shape.kind === 'object')
 	) {
 		throw new Error(
-			`Nested JSON conversion cannot be carried through a projected CTE: target '${identifierText(queryLocal(target.target))}', output '${descriptor.outputKey}'.`,
+			`Nested JSON conversion cannot be carried through a projected CTE: target '${identifierText(target.target)}', output '${descriptor.outputKey}'.`,
 		);
 	}
 }

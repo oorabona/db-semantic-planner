@@ -34,6 +34,14 @@ function createMockPool(): Pool {
 	} as unknown as Pool;
 }
 
+const mutationTestModel = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'text',
+		email: 'text',
+	},
+}).model;
+
 function testQuery<T = unknown>(
 	sql: string,
 	parameters: readonly unknown[] = [],
@@ -508,7 +516,7 @@ describe('PgsqlAdapter', () => {
 	describe('mutations', () => {
 		it('should compile insert intent', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgsqlAdapter(pool, { model: mutationTestModel });
 
 			const intent = {
 				table: 'users',
@@ -523,11 +531,11 @@ describe('PgsqlAdapter', () => {
 
 		it('should compile update intent', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgsqlAdapter(pool, { model: mutationTestModel });
 
 			const intent = {
 				table: 'users',
-				set: [{ column: 'name', value: 'Bob' }],
+				set: { name: 'Bob' },
 			} as any;
 
 			const compiled = adapter.compileUpdate(intent);
@@ -538,7 +546,7 @@ describe('PgsqlAdapter', () => {
 
 		it('should compile delete intent', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgsqlAdapter(pool, { model: mutationTestModel });
 
 			const intent = {
 				table: 'users',
@@ -552,7 +560,7 @@ describe('PgsqlAdapter', () => {
 
 		it('should compile upsert intent', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgsqlAdapter(pool, { model: mutationTestModel });
 
 			const intent = {
 				type: 'upsert' as const,
@@ -2868,7 +2876,11 @@ describe('PgsqlAdapter', () => {
 
 		it('compileInsertFrom generates INSERT ... SELECT', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool);
+			const model = schema({
+				users: { id: 'integer', name: 'text' },
+				archivedUsers: { id: 'integer', name: 'text' },
+			}).model;
+			const adapter = createPgsqlAdapter(pool, { model });
 
 			const intent = {
 				type: 'insert_from' as const,

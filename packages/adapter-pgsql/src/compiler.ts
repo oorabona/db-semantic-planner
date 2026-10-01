@@ -952,15 +952,14 @@ export class PlanCompiler {
 
 	/** Register an emitted alias before any column-reference path can use it. */
 	private registerAliasAuthority(
-		alias: string,
-		target: string | ResolvedRelationTarget,
+		alias: SqlIdentifier,
+		target: SqlIdentifier | ResolvedRelationTarget,
 	): void {
 		const ctx = this.relationTargetContext();
 		this.aliasColumnAuthorities = bindAliasAuthority(
 			this.aliasColumnAuthorities,
 			alias,
 			typeof target === 'string' ? resolveRelationTarget(target, ctx) : target,
-			ctx,
 		);
 	}
 
@@ -1299,9 +1298,8 @@ export class PlanCompiler {
 			const aliasColumnAuthorities = targetTable
 				? bindAliasAuthority(
 						filterCtx.aliasColumnAuthorities,
-						innerAlias,
-						resolveRelationTarget(targetTable, filterCtx),
-						filterCtx,
+						queryLocal(innerAlias),
+						resolveRelationTarget(queryLocal(targetTable), filterCtx),
 					)
 				: filterCtx.aliasColumnAuthorities;
 			const condNodes = (decision.conditions as PlanDecision[]).map((c) => {
@@ -1390,7 +1388,10 @@ export class PlanCompiler {
 			}
 		}
 		if (decision.choice === 'join' && finalJoinAlias && decision.targetTable) {
-			this.registerAliasAuthority(finalJoinAlias, decision.targetTable);
+			this.registerAliasAuthority(
+				queryLocal(finalJoinAlias),
+				queryLocal(decision.targetTable),
+			);
 		}
 
 		const ctx = {
@@ -1652,17 +1653,16 @@ export class PlanCompiler {
 	} {
 		const relatedAlias = this.allocateBindingRelationAlias();
 		const target = resolveRelationTarget(
-			fields.targetTable,
+			queryLocal(fields.targetTable),
 			this.createHandlerContext(plan),
 		);
 		requireRelationTargetColumns(
 			target,
-			fields.targetColumn,
-			this.createHandlerContext(plan),
+			fields.targetColumn.map(queryLocal),
 			'correlation key',
 			this.bindingRelationName(fields),
 		);
-		this.registerAliasAuthority(relatedAlias, target);
+		this.registerAliasAuthority(queryLocal(relatedAlias), target);
 		const relatedTable = sqlRangeVar(
 			this.tableIdentifier(fields.targetTable),
 			queryLocal(relatedAlias),
@@ -1814,23 +1814,21 @@ export class PlanCompiler {
 					const hopAlias = `${relatedAlias}_h${i + 1}`;
 					requireRelationTargetColumns(
 						previousTarget,
-						hop.fkColumn,
-						this.createHandlerContext(plan),
+						hop.fkColumn.map(queryLocal),
 						'join key',
 						this.bindingRelationName(fields),
 					);
 					const hopTarget = resolveRelationTarget(
-						hop.target,
+						queryLocal(hop.target),
 						this.createHandlerContext(plan),
 					);
 					requireRelationTargetColumns(
 						hopTarget,
-						hop.joinColumn,
-						this.createHandlerContext(plan),
+						hop.joinColumn.map(queryLocal),
 						'join key',
 						this.bindingRelationName(fields),
 					);
-					this.registerAliasAuthority(hopAlias, hopTarget);
+					this.registerAliasAuthority(queryLocal(hopAlias), hopTarget);
 					const hopTable = sqlRangeVar(
 						this.tableIdentifier(hop.target),
 						queryLocal(hopAlias),
@@ -1852,8 +1850,7 @@ export class PlanCompiler {
 				}
 				requireRelationTargetColumns(
 					previousTarget,
-					[fields.selectedColumn!],
-					this.createHandlerContext(plan),
+					[queryLocal(fields.selectedColumn!)],
 					'selected column',
 					this.bindingRelationName(fields),
 				);
@@ -1884,8 +1881,7 @@ export class PlanCompiler {
 			}
 			requireRelationTargetColumns(
 				relatedTarget,
-				[fields.selectedColumn!],
-				this.createHandlerContext(plan),
+				[queryLocal(fields.selectedColumn!)],
 				'selected column',
 				this.bindingRelationName(fields),
 			);
@@ -1942,8 +1938,7 @@ export class PlanCompiler {
 				this.buildCorrelatedRelationRefs(fields, plan);
 			requireRelationTargetColumns(
 				relatedTarget,
-				[fields.selectedColumn!],
-				this.createHandlerContext(plan),
+				[queryLocal(fields.selectedColumn!)],
 				'selected column',
 				this.bindingRelationName(fields),
 			);
@@ -1960,17 +1955,19 @@ export class PlanCompiler {
 				: undefined;
 			if (hasCompleteManyToManyProof) {
 				const throughTarget = resolveRelationTarget(
-					fields.through!,
+					queryLocal(fields.through!),
 					this.createHandlerContext(plan),
 				);
 				requireRelationTargetColumns(
 					throughTarget,
-					[fields.throughTargetColumn!, fields.throughSourceColumn!],
-					this.createHandlerContext(plan),
+					[
+						queryLocal(fields.throughTargetColumn!),
+						queryLocal(fields.throughSourceColumn!),
+					],
 					'junction key',
 					this.bindingRelationName(fields),
 				);
-				this.registerAliasAuthority(junctionAlias!, throughTarget);
+				this.registerAliasAuthority(queryLocal(junctionAlias!), throughTarget);
 			}
 			const handlerContext = this.createHandlerContext(plan);
 			const manyToManyHandlerContext: HandlerCompilerContext =
@@ -2703,7 +2700,10 @@ export class PlanCompiler {
 					// Manual JOIN aliases are visible to SELECT expressions and ORDER BY
 					// before the JOIN node itself is emitted. Register their target now
 					// so all those references keep the alias spelling verbatim.
-					this.registerAliasAuthority(alias, decision.targetTable);
+					this.registerAliasAuthority(
+						queryLocal(alias),
+						queryLocal(decision.targetTable),
+					);
 				}
 				continue;
 			}
@@ -2904,11 +2904,14 @@ export class PlanCompiler {
 			this.state.paramIndex = this.state.parameters.length;
 		}
 		if (this.isNqlBindingRoot(plan)) {
-			this.registerAliasAuthority(plan.rootTable, plan.rootTable);
+			this.registerAliasAuthority(
+				queryLocal(plan.rootTable),
+				queryLocal(plan.rootTable),
+			);
 		}
 		if (plan.batchValuesFromAlias !== undefined) {
-			this.registerAliasAuthority(plan.batchValuesFromAlias, {
-				target: plan.batchValuesFromAlias,
+			this.registerAliasAuthority(queryLocal(plan.batchValuesFromAlias), {
+				target: queryLocal(plan.batchValuesFromAlias),
 			});
 		}
 		return [
@@ -3745,17 +3748,16 @@ export class PlanCompiler {
 		];
 		const targetKey = decision.parentKey ?? [this.defaultPk];
 		const target = resolveRelationTarget(
-			targetTable,
+			queryLocal(targetTable),
 			this.createHandlerContext({ rootTable: sourceTable, decisions: [] }),
 		);
 		requireRelationTargetColumns(
 			target,
-			toColumnList(targetKey),
-			this.createHandlerContext({ rootTable: sourceTable, decisions: [] }),
+			toColumnList(targetKey).map(queryLocal),
 			'join key',
 			decision.relationName,
 		);
-		this.registerAliasAuthority(targetAlias, target);
+		this.registerAliasAuthority(queryLocal(targetAlias), target);
 		const onCondition = buildKeyCorrelation(
 			targetAlias,
 			targetKey,
@@ -3805,17 +3807,19 @@ export class PlanCompiler {
 		}
 		const targetName = decision.targetTable ?? '';
 		const target = resolveRelationTarget(
-			targetName,
+			queryLocal(targetName),
 			this.createHandlerContext(plan),
 		);
 		requireRelationTargetColumns(
 			target,
-			targetColumn,
-			this.createHandlerContext(plan),
+			targetColumn.map(queryLocal),
 			'join key',
 			decision.relationName,
 		);
-		this.registerAliasAuthority(decision.alias ?? targetName, target);
+		this.registerAliasAuthority(
+			queryLocal(decision.alias ?? targetName),
+			target,
+		);
 		const sourceAlias = plan.rootTable;
 		const onCondition = buildKeyCorrelation(
 			sourceAlias,

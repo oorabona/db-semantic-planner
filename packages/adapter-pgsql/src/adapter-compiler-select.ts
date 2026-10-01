@@ -737,7 +737,7 @@ function jsonAggProjectedColumns(
 		!(requested.length === 1 && requested[0] === '*');
 	if (hasExplicitProjection) return requested;
 	const projected = deps
-		? resolveRelationTarget(targetTable, deps).outputs
+		? resolveRelationTarget(queryLocal(targetTable), deps).outputs
 		: undefined;
 	if (projected !== undefined) return [...projected.keys()];
 
@@ -754,7 +754,7 @@ function buildJsonAggColumnKeyMap(
 	const columns = jsonAggProjectedColumns(decision, targetTable, model, deps);
 	if (!columns || columns.length === 0) return undefined;
 	const projected = deps
-		? resolveRelationTarget(targetTable, deps).outputs
+		? resolveRelationTarget(queryLocal(targetTable), deps).outputs
 		: undefined;
 	if (projected !== undefined) {
 		const map: Record<string, string> = {};
@@ -795,7 +795,7 @@ function buildJsonAggNestedReadTransforms(
 	const columns = jsonAggProjectedColumns(decision, targetTable, model, deps);
 	if (!columns || columns.length === 0) return undefined;
 	const projected = deps
-		? resolveRelationTarget(targetTable, deps).outputs
+		? resolveRelationTarget(queryLocal(targetTable), deps).outputs
 		: undefined;
 	if (projected !== undefined) {
 		const shape = jsonAggContainerShape(decision.relationType);
@@ -804,7 +804,7 @@ function buildJsonAggNestedReadTransforms(
 			const descriptor = projected.get(columnName);
 			if (!descriptor) continue;
 			assertProjectedJsonContainerCanBeAggregated(
-				resolveRelationTarget(targetTable, deps!),
+				resolveRelationTarget(queryLocal(targetTable), deps!),
 				descriptor,
 			);
 			const handling = resolveOutputReadHandling({ ...descriptor, shape });
@@ -861,14 +861,14 @@ function buildJsonAggOutputDescriptor(
 	const columns = jsonAggProjectedColumns(decision, targetTable, model, deps);
 	if (!columns || columns.length === 0) return undefined;
 	const projected = deps
-		? resolveRelationTarget(targetTable, deps).outputs
+		? resolveRelationTarget(queryLocal(targetTable), deps).outputs
 		: undefined;
 	if (projected !== undefined) {
 		for (const columnName of columns) {
 			const descriptor = projected.get(columnName);
 			if (!descriptor) continue;
 			assertProjectedJsonContainerCanBeAggregated(
-				resolveRelationTarget(targetTable, deps!),
+				resolveRelationTarget(queryLocal(targetTable), deps!),
 				descriptor,
 			);
 			if (resolveOutputReadHandling({ ...descriptor, shape }).kind !== 'none') {
@@ -1027,7 +1027,7 @@ function buildPhysicalRelationColumnOutputDescriptor(
 		model,
 	);
 	if (targetTable) {
-		const target = resolveRelationTarget(targetTable, deps);
+		const target = resolveRelationTarget(queryLocal(targetTable), deps);
 		const descriptor =
 			target.outputs?.get(decision.column) ??
 			target.outputsByLogicalKey?.get(decision.column);

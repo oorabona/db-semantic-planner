@@ -13,7 +13,10 @@ import {
 } from '@dbsp/core';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
+import { emittedBindName } from '../binding-registry.js';
+import type { InsertConfig } from '../mutations/mutation-compiler.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { queryLocal } from '../sql-identifier.js';
 
 const sourceRoot = fileURLToPath(new URL('..', import.meta.url));
 /** Naming is restricted to physical-model construction and DDL/code generation. */
@@ -101,7 +104,116 @@ function namingViolations(relative: string, text: string): string[] {
 	return violations;
 }
 
+function identifierStringUnionViolations(
+	relative: string,
+	text: string,
+): string[] {
+	const source = ts.createSourceFile(
+		relative,
+		text,
+		ts.ScriptTarget.Latest,
+		true,
+	);
+	const violations: string[] = [];
+	const visit = (node: ts.Node): void => {
+		if (ts.isUnionTypeNode(node)) {
+			const hasIdentifier = node.types.some(
+				(type) =>
+					ts.isTypeReferenceNode(type) &&
+					ts.isIdentifier(type.typeName) &&
+					type.typeName.text === 'SqlIdentifier',
+			);
+			const hasString = node.types.some(
+				(type) => type.kind === ts.SyntaxKind.StringKeyword,
+			);
+			if (hasIdentifier && hasString) {
+				violations.push(
+					`${relative}: SqlIdentifier must not be unioned with string`,
+				);
+			}
+		}
+		ts.forEachChild(node, visit);
+	};
+	visit(source);
+	return violations;
+}
+
+function identifierStringUnionSites(relative: string, text: string): string[] {
+	const source = ts.createSourceFile(
+		relative,
+		text,
+		ts.ScriptTarget.Latest,
+		true,
+	);
+	const sites: string[] = [];
+	const visit = (node: ts.Node): void => {
+		if (ts.isUnionTypeNode(node)) {
+			const hasIdentifier = node.types.some(
+				(type) =>
+					ts.isTypeReferenceNode(type) &&
+					ts.isIdentifier(type.typeName) &&
+					type.typeName.text === 'SqlIdentifier',
+			);
+			const hasString = node.types.some(
+				(type) => type.kind === ts.SyntaxKind.StringKeyword,
+			);
+			if (hasIdentifier && hasString) {
+				const owners: string[] = [];
+				let owner = node.parent;
+				while (owner !== undefined && !ts.isSourceFile(owner)) {
+					const ownerName = (owner as ts.NamedDeclaration).name;
+					if (ownerName !== undefined) owners.push(ownerName.getText(source));
+					owner = owner.parent;
+				}
+				sites.push(
+					`${relative}:${owners.slice(0, 3).reverse().join('.')}:${node.getText(source)}`,
+				);
+			}
+		}
+		ts.forEachChild(node, visit);
+	};
+	visit(source);
+	return sites;
+}
+
+function architectureViolations(): string[] {
+	return sourceFiles(sourceRoot).flatMap(([relative, text]) =>
+		identifierStringUnionSites(relative, text).map(
+			(site) => `${site}: SqlIdentifier | string boundary`,
+		),
+	);
+}
+
 describe('query naming boundary', () => {
+	const typecheckMutationRawStringRefusal = (table: string): InsertConfig => ({
+		// @ts-expect-error mutation compiler configs require an addressed identifier
+		table,
+		columns: [],
+		values: [],
+	});
+	void typecheckMutationRawStringRefusal;
+
+	const typecheckRawStringRefusal = (): void => {
+		// @ts-expect-error raw strings cannot cross an emitted-name boundary
+		emittedBindName('cte');
+	};
+	void typecheckRawStringRefusal;
+
+	it('rejects SqlIdentifier | string in adapter source', () => {
+		expect(emittedBindName(queryLocal('cte'))).toBe('cte');
+		// This fixture is a reintroduced site: the architecture rule must flag it.
+		const reintroducedUnion = 'type Name = SqlIdentifier | string;';
+		expect(
+			identifierStringUnionViolations('reintroduced.ts', reintroducedUnion),
+		).toEqual([
+			'reintroduced.ts: SqlIdentifier must not be unioned with string',
+		]);
+		expect(
+			identifierStringUnionSites('reintroduced.ts', reintroducedUnion),
+		).toHaveLength(1);
+		expect(architectureViolations()).toEqual([]);
+	});
+
 	it('uses the physical root range variable for every root-table reference', () => {
 		const model = schema({
 			users: { id: { type: 'integer', primaryKey: true } },

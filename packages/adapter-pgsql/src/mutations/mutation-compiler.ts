@@ -29,7 +29,7 @@ import {
 	sqlResTarget,
 	sqlUpdateStmt,
 } from '../ast-helpers.js';
-import { type RelationBinding, relationBinding } from '../binding-registry.js';
+import type { RelationBinding } from '../binding-registry.js';
 import {
 	inferPgArrayType,
 	parseRawExpression,
@@ -46,7 +46,12 @@ import type {
 } from '../handlers/types.js';
 import { unwrapParamIntent } from '../param-intent.js';
 import { createTypeCastParamRef } from '../param-ref.js';
-import { queryLocal, type SqlIdentifier } from '../sql-identifier.js';
+import {
+	declaredColumn,
+	declaredTable,
+	queryLocal,
+	type SqlIdentifier,
+} from '../sql-identifier.js';
 
 // ============================================================================
 // Shared Helpers
@@ -58,17 +63,11 @@ import { queryLocal, type SqlIdentifier } from '../sql-identifier.js';
  */
 export function buildReturningExprs(
 	columns: readonly string[] | undefined,
-	tableRef: SqlIdentifier | string,
-	sourceInput:
-		| readonly (SqlIdentifier | string)[]
-		| CompilerContext
-		| undefined,
+	table: SqlIdentifier,
+	sourceInput: readonly SqlIdentifier[] | undefined,
 	returningItems?: readonly MutationReturningItem[],
 ): Node[] | undefined {
-	const table = established(tableRef);
-	const addressedSources = Array.isArray(sourceInput)
-		? sourceInput.map(established)
-		: undefined;
+	const addressedSources = sourceInput;
 	if (returningItems !== undefined) {
 		const returning = columns ?? [];
 		if (returningItems.length !== returning.length) {
@@ -102,7 +101,7 @@ export function buildReturningExprs(
 				);
 			}
 			emittedOutputs.set(emittedOutput, item.output);
-			const source = addressedSources?.[index] ?? queryLocal(item.source);
+			const source = addressedSources?.[index];
 			if (source === undefined) {
 				throw new Error(
 					`Mutation RETURNING source '${item.source}' has no addressed identifier.`,
@@ -119,43 +118,34 @@ export function buildReturningExprs(
 		col === '*'
 			? sqlResTarget(sqlColumnRefStar())
 			: sqlResTarget(
-					sqlColumnRef(addressedSources?.[index] ?? queryLocal(col), table),
+					sqlColumnRef(
+						requireAddressedReturningSource(addressedSources, index, col),
+						table,
+					),
 					queryLocal(col),
 				),
 	);
 }
 
-function established(value: SqlIdentifier | string): SqlIdentifier {
-	return queryLocal(value);
+function requireAddressedReturningSource(
+	sources: readonly SqlIdentifier[] | undefined,
+	index: number,
+	label: string,
+): SqlIdentifier {
+	const source = sources?.[index];
+	if (source === undefined) {
+		throw new Error(
+			`Mutation RETURNING source '${label}' has no addressed identifier.`,
+		);
+	}
+	return source;
 }
 
-function configuredSource(config: {
-	source?: RelationBinding;
-	sourceTable?: string;
-}): RelationBinding {
-	if (config.source !== undefined) return config.source;
-	if (config.sourceTable !== undefined) {
-		return relationBinding({
-			qualifier: queryLocal(config.sourceTable),
-			kind: 'cte-bind',
-		});
-	}
-	throw new Error('INSERT FROM requires an addressed source relation.');
-}
-
-function sourceColumnPair(
-	column:
-		| string
-		| { target: SqlIdentifier | string; source: SqlIdentifier | string },
-): { target: SqlIdentifier; source: SqlIdentifier } {
-	if (typeof column === 'string') {
-		const identifier = established(column);
-		return { target: identifier, source: identifier };
-	}
-	return {
-		target: established(column.target),
-		source: established(column.source),
-	};
+function sourceColumnPair(column: {
+	target: SqlIdentifier;
+	source: SqlIdentifier;
+}): { target: SqlIdentifier; source: SqlIdentifier } {
+	return column;
 }
 
 // ============================================================================
@@ -167,15 +157,15 @@ function sourceColumnPair(
  */
 export interface InsertConfig {
 	/** Table to insert into */
-	table: SqlIdentifier | string;
+	table: SqlIdentifier;
 	/** Columns to insert */
-	columns: (SqlIdentifier | string)[];
+	columns: SqlIdentifier[];
 	/** Values for each column (array of rows) */
 	values: unknown[][];
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
 	/** Addressed declared sources for RETURNING labels. */
-	returningSources?: (SqlIdentifier | string)[];
+	returningSources?: SqlIdentifier[];
 	/** Alias-aware RETURNING projection items */
 	returningItems?: readonly MutationReturningItem[];
 	/** Subquery for INSERT ... SELECT */
@@ -189,14 +179,14 @@ export interface InsertConfig {
  */
 export interface UpdateConfig {
 	/** Table to update */
-	table: SqlIdentifier | string;
+	table: SqlIdentifier;
 	/** Column-value pairs to set */
-	set: { column: SqlIdentifier | string; value: unknown }[];
+	set: { column: SqlIdentifier; value: unknown }[];
 	/** WHERE conditions */
 	where?: Decision[];
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
-	returningSources?: (SqlIdentifier | string)[];
+	returningSources?: SqlIdentifier[];
 	/** Alias-aware RETURNING projection items */
 	returningItems?: readonly MutationReturningItem[];
 	/** Column database types for type-cast emission (e.g. range types) */
@@ -208,12 +198,12 @@ export interface UpdateConfig {
  */
 export interface DeleteConfig {
 	/** Table to delete from */
-	table: SqlIdentifier | string;
+	table: SqlIdentifier;
 	/** WHERE conditions */
 	where?: Decision[];
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
-	returningSources?: (SqlIdentifier | string)[];
+	returningSources?: SqlIdentifier[];
 	/** Alias-aware RETURNING projection items */
 	returningItems?: readonly MutationReturningItem[];
 }
@@ -223,46 +213,38 @@ export interface DeleteConfig {
  */
 export interface InsertFromConfig {
 	/** Target table to insert into */
-	targetTable: SqlIdentifier | string;
+	targetTable: SqlIdentifier;
 	/** Source table to select from */
-	source?: RelationBinding;
-	sourceTable?: string;
+	source: RelationBinding;
 	/** Addressed target and source columns. */
-	columns?: (
-		| string
-		| { target: SqlIdentifier | string; source: SqlIdentifier | string }
-	)[];
+	columns?: { target: SqlIdentifier; source: SqlIdentifier }[];
 	/** WHERE conditions for source query */
 	where?: Decision[];
 	/** LIMIT for source query */
 	limit?: number | ParamIntent;
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
-	returningSources?: (SqlIdentifier | string)[];
+	returningSources?: SqlIdentifier[];
 	/** Alias-aware RETURNING projection items */
 	returningItems?: readonly MutationReturningItem[];
 }
 
 export interface UpsertFromConfig {
 	/** Target table to upsert into */
-	targetTable: SqlIdentifier | string;
+	targetTable: SqlIdentifier;
 	/** Source table to select from */
-	source?: RelationBinding;
-	sourceTable?: string;
+	source: RelationBinding;
 	/** Conflict target columns for ON CONFLICT */
-	conflictColumns: (SqlIdentifier | string)[];
+	conflictColumns: SqlIdentifier[];
 	/** Addressed target and source columns. */
-	columns?: (
-		| string
-		| { target: SqlIdentifier | string; source: SqlIdentifier | string }
-	)[];
+	columns?: { target: SqlIdentifier; source: SqlIdentifier }[];
 	/** WHERE conditions for source query */
 	where?: Decision[];
 	/** LIMIT for source query */
 	limit?: number | ParamIntent;
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
-	returningSources?: (SqlIdentifier | string)[];
+	returningSources?: SqlIdentifier[];
 	/** Alias-aware RETURNING projection items */
 	returningItems?: readonly MutationReturningItem[];
 }
@@ -279,12 +261,12 @@ export function compileInsert(
 	ctx: CompilerContext,
 	state: CompilerState,
 ): Node {
-	const dbTable = established(config.table);
-	const dbColumns = config.columns.map(established);
+	const dbTable = config.table;
+	const dbColumns = config.columns;
 
 	// Build VALUES as Node[][] (each row is Node[])
 	const columnTypes = config.columnTypes;
-	const columns = config.columns.map(established);
+	const columns = config.columns;
 	const valuesRows: Node[][] = config.values.map((row) =>
 		row.map((val, i) => {
 			const colName = columns[i];
@@ -297,7 +279,7 @@ export function compileInsert(
 	const returningExprs = buildReturningExprs(
 		config.returning,
 		dbTable,
-		config.returningSources?.map(established),
+		config.returningSources,
 		config.returningItems,
 	);
 
@@ -341,9 +323,9 @@ export function compileUnnestInsert(
 	ctx: CompilerContext,
 	state: CompilerState,
 ): Node {
-	const dbTable = established(config.table);
+	const dbTable = config.table;
 	const { values, columnTypes } = config;
-	const columns = config.columns.map(established);
+	const columns = config.columns;
 
 	// Validate cardinality before any SQL generation (INV-02)
 	validateBatchCardinality(columns, values);
@@ -388,7 +370,7 @@ export function compileUnnestInsert(
 	const returningExprs = buildReturningExprs(
 		config.returning,
 		dbTable,
-		config.returningSources?.map(established),
+		config.returningSources,
 		config.returningItems,
 	);
 
@@ -412,7 +394,7 @@ export function compileUpdate(
 	ctx: CompilerContext,
 	state: CompilerState,
 ): Node {
-	const tableAlias = established(config.table);
+	const tableAlias = config.table;
 
 	// Build SET clause - convert unknown values to Node.
 	// Raw SQL expressions (SqlRawExpression) are parsed directly into AST nodes;
@@ -420,7 +402,7 @@ export function compileUpdate(
 	const columnTypes = config.columnTypes;
 	const setClause: Array<{ column: SqlIdentifier; value: Node }> =
 		config.set.map(({ column, value }) => ({
-			column: established(column),
+			column,
 			value: isSqlRaw(value)
 				? parseRawExpression(value.sql)
 				: valueToNode(value, state, columnTypes?.[column]),
@@ -451,7 +433,7 @@ export function compileUpdate(
 	const returningExprs = buildReturningExprs(
 		config.returning,
 		tableAlias,
-		config.returningSources?.map(established),
+		config.returningSources,
 		config.returningItems,
 	);
 
@@ -476,18 +458,18 @@ export function compileUpdate(
  */
 export interface BatchUpdateConfig {
 	/** Target table name */
-	table: SqlIdentifier | string;
+	table: SqlIdentifier;
 	/** Column(s) used to join for WHERE clause */
-	matchColumns: (SqlIdentifier | string)[];
+	matchColumns: SqlIdentifier[];
 	/** All columns (match + update), extracted from updates[0] */
-	allColumns: (SqlIdentifier | string)[];
+	allColumns: SqlIdentifier[];
 	/** Column-major arrays: [[match_vals...], [update_vals...], ...] */
 	columnArrays: unknown[][];
 	/** Optional scalar SET assignments applied to all rows */
-	scalarSet?: { column: SqlIdentifier | string; value: unknown }[];
+	scalarSet?: { column: SqlIdentifier; value: unknown }[];
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
-	returningSources?: (SqlIdentifier | string)[];
+	returningSources?: SqlIdentifier[];
 	/** Alias-aware RETURNING projection items */
 	returningItems?: readonly MutationReturningItem[];
 	/** Column database types for type-cast emission */
@@ -511,9 +493,9 @@ export function compileUnnestUpdate(
 	state: CompilerState,
 ): Node {
 	const { table, matchColumns, allColumns, columnArrays, columnTypes } = config;
-	const dbTable = established(table);
-	const dbMatchColumns = matchColumns.map(established);
-	const dbAllColumns = allColumns.map(established);
+	const dbTable = table;
+	const dbMatchColumns = matchColumns;
+	const dbAllColumns = allColumns;
 	const updateColumns = dbAllColumns.filter((c) => !dbMatchColumns.includes(c));
 
 	// Build unnest arguments: CAST($N AS type[]) for each column
@@ -554,7 +536,7 @@ export function compileUnnestUpdate(
 		})),
 		// Scalar SET from scalarSet (e.g. .set({ confidence: 0.85 }))
 		...(config.scalarSet ?? []).map(({ column, value }) => ({
-			column: established(column),
+			column,
 			value: valueToNode(value, state, columnTypes?.[column]),
 		})),
 	];
@@ -593,7 +575,7 @@ export function compileUnnestUpdate(
 	const returningExprs = buildReturningExprs(
 		config.returning,
 		dbTable,
-		config.returningSources?.map(established),
+		config.returningSources,
 		config.returningItems,
 	);
 
@@ -615,7 +597,7 @@ export function compileDelete(
 	ctx: CompilerContext,
 	state: CompilerState,
 ): Node {
-	const tableAlias = established(config.table);
+	const tableAlias = config.table;
 
 	// Build WHERE clause if present
 	let whereClause: Node | undefined;
@@ -642,7 +624,7 @@ export function compileDelete(
 	const returningExprs = buildReturningExprs(
 		config.returning,
 		tableAlias,
-		config.returningSources?.map(established),
+		config.returningSources,
 		config.returningItems,
 	);
 
@@ -666,7 +648,7 @@ export function compileInsertFrom(
 	ctx: CompilerContext,
 	state: CompilerState,
 ): Node {
-	const source = configuredSource(config);
+	const source = config.source;
 	const sourceAlias = source.qualifier;
 	const sourceSchema =
 		source.kind === 'declared-table' && ctx.schema
@@ -747,8 +729,8 @@ export function compileInsertFrom(
 	// Build RETURNING clause for INSERT if specified
 	const returningExprs = buildReturningExprs(
 		config.returning,
-		established(config.targetTable),
-		config.returningSources?.map(established),
+		config.targetTable,
+		config.returningSources,
 		config.returningItems,
 	);
 
@@ -756,7 +738,7 @@ export function compileInsertFrom(
 	// Note: dbTargetTable is computed but table in options uses logical name
 	// The addressed target is passed directly to the typed AST facade.
 	const options: SqlInsertOptions = {
-		table: established(config.targetTable),
+		table: config.targetTable,
 		selectQuery,
 	};
 	if (dbColumns) options.columns = dbColumns;
@@ -776,7 +758,7 @@ export function compileUpsertFrom(
 	ctx: CompilerContext,
 	state: CompilerState,
 ): Node {
-	const source = configuredSource(config);
+	const source = config.source;
 	const sourceAlias = source.qualifier;
 	const sourceSchema =
 		source.kind === 'declared-table' && ctx.schema
@@ -857,8 +839,8 @@ export function compileUpsertFrom(
 	// Build RETURNING clause
 	const returningExprs = buildReturningExprs(
 		config.returning,
-		established(config.targetTable),
-		config.returningSources?.map(established),
+		config.targetTable,
+		config.returningSources,
 		config.returningItems,
 	);
 
@@ -866,13 +848,13 @@ export function compileUpsertFrom(
 	const conflictInfer = {
 		indexElems: config.conflictColumns.map((col) => ({
 			IndexElem: {
-				name: established(col),
+				name: col,
 			},
 		})),
 	};
 
 	// Determine update columns: all source columns minus conflict columns
-	const conflictColumns = config.conflictColumns.map(established);
+	const conflictColumns = config.conflictColumns;
 	const updateColumns = config.columns
 		? config.columns
 				.map(sourceColumnPair)
@@ -899,7 +881,7 @@ export function compileUpsertFrom(
 
 	// Build INSERT statement with SELECT query + ON CONFLICT
 	const options: SqlInsertOptions = {
-		table: established(config.targetTable),
+		table: config.targetTable,
 		selectQuery,
 	};
 	if (dbColumns) options.columns = dbColumns;
@@ -1000,35 +982,66 @@ export function compileMutation(
 	state: CompilerState,
 ): Node {
 	const type = decision.type;
+	if (type !== 'insert' && type !== 'update' && type !== 'delete') {
+		throw new Error(`Unknown mutation type: ${type}`);
+	}
 	const table = decision.table ?? ctx.rootTable;
+	if (!ctx.declaredNames) {
+		throw new Error(
+			`No declared-name resolver is available for table '${table}'.`,
+		);
+	}
+	const addressedTable = declaredTable(ctx.declaredNames, table);
 
 	switch (type) {
 		case 'insert': {
+			const columns = decision.columns?.map((column) =>
+				declaredColumn(ctx.declaredNames!, table, column),
+			);
 			const insertConfig: InsertConfig = {
-				table,
-				columns: decision.columns ? [...decision.columns] : [],
+				table: addressedTable,
+				columns: columns ?? [],
 				values: decision.values ? [[...decision.values] as unknown[]] : [],
 			};
-			if (decision.columns) insertConfig.returning = [...decision.columns];
+			if (decision.columns) {
+				insertConfig.returning = [...decision.columns];
+				insertConfig.returningSources = decision.columns.map((column) =>
+					declaredColumn(ctx.declaredNames!, table, column),
+				);
+			}
 			return compileInsert(insertConfig, ctx, state);
 		}
 
 		case 'update': {
+			const set = decision.set?.map(({ column, value }) => ({
+				column: declaredColumn(ctx.declaredNames!, table, column),
+				value,
+			}));
 			const updateConfig: UpdateConfig = {
-				table,
-				set: decision.set ? [...decision.set] : [],
+				table: addressedTable,
+				set: set ?? [],
 			};
 			if (decision.conditions) updateConfig.where = [...decision.conditions];
-			if (decision.columns) updateConfig.returning = [...decision.columns];
+			if (decision.columns) {
+				updateConfig.returning = [...decision.columns];
+				updateConfig.returningSources = decision.columns.map((column) =>
+					declaredColumn(ctx.declaredNames!, table, column),
+				);
+			}
 			return compileUpdate(updateConfig, ctx, state);
 		}
 
 		case 'delete': {
 			const deleteConfig: DeleteConfig = {
-				table,
+				table: addressedTable,
 			};
 			if (decision.conditions) deleteConfig.where = [...decision.conditions];
-			if (decision.columns) deleteConfig.returning = [...decision.columns];
+			if (decision.columns) {
+				deleteConfig.returning = [...decision.columns];
+				deleteConfig.returningSources = decision.columns.map((column) =>
+					declaredColumn(ctx.declaredNames!, table, column),
+				);
+			}
 			return compileDelete(deleteConfig, ctx, state);
 		}
 

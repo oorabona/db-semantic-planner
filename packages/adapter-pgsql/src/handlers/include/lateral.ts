@@ -155,19 +155,17 @@ function compileLateralCascade(
 	if (!targetTable) {
 		throw new Error('LATERAL include requires targetTable');
 	}
-	const target = resolveRelationTarget(targetTable, ctx);
+	const target = resolveRelationTarget(queryLocal(targetTable), ctx);
 	requireRelationTargetColumns(
 		target,
-		toColumnList(targetColumn),
-		ctx,
+		toColumnList(targetColumn).map(queryLocal),
 		'join key',
 		decision.relation,
 	);
 	if (columns) {
 		requireRelationTargetColumns(
 			target,
-			columns.filter((column) => column !== '*'),
-			ctx,
+			columns.filter((column) => column !== '*').map(queryLocal),
 			'selected column',
 			decision.relation,
 		);
@@ -179,10 +177,13 @@ function compileLateralCascade(
 	const lateralAlias = `${targetTable}_lat_${existingAliases}`;
 	state.aliases.set(`lateral_${targetTable}_${existingAliases}`, lateralAlias);
 	const aliasColumnAuthorities = bindAliasAuthority(
-		bindAliasAuthority(ctx.aliasColumnAuthorities, innerAlias, target, ctx),
-		lateralAlias,
+		bindAliasAuthority(
+			ctx.aliasColumnAuthorities,
+			queryLocal(innerAlias),
+			target,
+		),
+		queryLocal(lateralAlias),
 		target,
-		ctx,
 	);
 	const scopedCtx: CompilerContext = {
 		...ctx,

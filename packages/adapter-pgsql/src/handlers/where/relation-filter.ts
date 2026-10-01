@@ -83,9 +83,8 @@ function buildJoinFilter(
 		throw new Error('Relation filter requires targetTable');
 	}
 	requireRelationTargetColumns(
-		resolveRelationTarget(targetTable, ctx),
-		toColumnList(targetColumn),
-		ctx,
+		resolveRelationTarget(queryLocal(targetTable), ctx),
+		toColumnList(targetColumn).map(queryLocal),
 		'join key',
 		relation,
 	);
@@ -96,7 +95,7 @@ function buildJoinFilter(
 	state.aliases.set(`rel_${targetTable}`, targetAlias);
 
 	const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
-	const resolvedTarget = resolveRelationTarget(targetTable, ctx);
+	const resolvedTarget = resolveRelationTarget(queryLocal(targetTable), ctx);
 	const targetBinding = relationBinding({
 		qualifier: queryLocal(targetAlias),
 		...(resolvedTarget.cteName === undefined
@@ -138,7 +137,7 @@ function buildJoinFilter(
 					: queryLocal(targetTable)),
 			queryLocal(targetAlias),
 			schemaForFromName(
-				ctx.schema,
+				ctx.schema === undefined ? undefined : queryLocal(ctx.schema),
 				targetTable,
 				ctx.scope ?? ctx.bindingNames,
 			) === undefined
@@ -159,9 +158,8 @@ function buildJoinFilter(
 			currentAlias: targetAlias,
 			aliasColumnAuthorities: bindAliasAuthority(
 				ctx.aliasColumnAuthorities,
-				targetAlias,
-				resolveRelationTarget(targetTable, ctx),
-				ctx,
+				queryLocal(targetAlias),
+				resolveRelationTarget(queryLocal(targetTable), ctx),
 			),
 		};
 

@@ -36,10 +36,20 @@
  * - Assert that IN-with-values (no subquery) still compiles.
  */
 
+import { schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
-const adapter = createPgsqlCompileOnlyAdapter();
+const mutationGuardModel = schema({
+	users: { id: 'integer', name: 'text' },
+	sessions: {
+		user_id: 'integer',
+		id: 'integer',
+		region: 'text',
+		token: 'text',
+	},
+}).model;
+const adapter = createPgsqlCompileOnlyAdapter({ model: mutationGuardModel });
 
 // ---------------------------------------------------------------------------
 // Helpers — build raw WhereIntent objects (bypassing the fluent builder to
