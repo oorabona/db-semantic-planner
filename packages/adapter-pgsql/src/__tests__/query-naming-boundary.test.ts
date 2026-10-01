@@ -397,7 +397,31 @@ describe('query naming boundary', () => {
 				} as never,
 				{ model },
 			),
-		).toThrow("Declared column 'userProfiles.missingColumn'");
+		).toThrow(
+			"Declared column 'userProfiles.missingColumn' is missing from the physical inventory.",
+		);
+		expect(() =>
+			adapter.compileInsert(
+				{ type: 'insert', table: 'missingTable', values: [{ id: 1 }] } as never,
+				{ model },
+			),
+		).toThrow(
+			"Declared table 'missingTable' is missing from the physical inventory.",
+		);
+		expect(() =>
+			adapter.compileUpsert(
+				{
+					type: 'upsert',
+					table: 'userProfiles',
+					values: [{ id: 1 }],
+					onConflict: { columns: ['missingColumn'] },
+					action: { type: 'doNothing' },
+				} as never,
+				{ model },
+			),
+		).toThrow(
+			"Declared column 'userProfiles.missingColumn' is missing from the physical inventory.",
+		);
 		expect(() =>
 			adapter.compile(
 				plan(
@@ -410,7 +434,48 @@ describe('query naming boundary', () => {
 				),
 				{ model },
 			),
-		).toThrow("Declared column 'userProfiles.missingColumn'");
+		).toThrow(
+			"Declared column 'userProfiles.missingColumn' is missing from the physical inventory.",
+		);
+	});
+
+	it('resolves declared conflict constraints and rejects catalog-only constraints', () => {
+		const model = schema({
+			userProfiles: {
+				id: { type: 'integer', primaryKey: true },
+				email: 'string',
+			},
+		}).model;
+		const adapter = createPgsqlCompileOnlyAdapter({
+			model,
+			dbCasing: 'snake_case',
+		});
+		const base = {
+			type: 'upsert' as const,
+			table: 'userProfiles',
+			values: [{ id: 1, email: 'a@example.test' }],
+			action: { type: 'doNothing' as const },
+		};
+
+		expect(
+			adapter.compileUpsert(
+				{ ...base, onConflict: { constraint: 'pk_userProfiles' } },
+				{ model },
+			).sql,
+		).toBe(
+			'INSERT INTO user_profiles (id, email) VALUES ($1, $2) ON CONFLICT ON CONSTRAINT pk_user_profiles DO NOTHING',
+		);
+		expect(() =>
+			adapter.compileUpsert(
+				{
+					...base,
+					onConflict: { constraint: 'runtime_user_profiles_email_uq' },
+				},
+				{ model },
+			),
+		).toThrow(
+			"Declared constraint 'userProfiles.runtime_user_profiles_email_uq' is absent from the physical model.",
+		);
 	});
 
 	it('enforces the TypeScript-AST naming boundary', () => {

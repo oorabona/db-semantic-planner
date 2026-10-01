@@ -772,6 +772,21 @@ describe('Alias-aware mutation RETURNING intent emission (#217)', () => {
 
 		expect(sql).toContain('AS "bad""; DROP TABLE users; --"');
 	});
+
+	it('rejects post-naming duplicate mutation RETURNING outputs', () => {
+		expect(() =>
+			adapter.compileInsert({
+				type: 'insert',
+				table: 'users',
+				values: [{ email: 'a@example.com' }],
+				returning: ['x', 'x'],
+				returningItems: [
+					{ source: 'email', output: 'x' },
+					{ source: 'email', output: 'x' },
+				],
+			}),
+		).toThrow("Duplicate mutation RETURNING output: 'x' from 'x' and 'x'.");
+	});
 });
 
 // ============================================================================

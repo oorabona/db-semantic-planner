@@ -1672,23 +1672,6 @@ function guardCompileResultWithIncludes<T>(
 	};
 }
 
-function findDuplicateEmittedNqlBindingName(
-	bindingNames: Iterable<string>,
-):
-	| { originalName: string; duplicateName: string; emittedName: string }
-	| undefined {
-	const seen = new Map<string, string>();
-	for (const bindingName of bindingNames) {
-		const emittedName = emittedBindName(bindingName);
-		const originalName = seen.get(emittedName);
-		if (originalName !== undefined && originalName !== bindingName) {
-			return { originalName, duplicateName: bindingName, emittedName };
-		}
-		seen.set(emittedName, bindingName);
-	}
-	return undefined;
-}
-
 function orderedNqlBindingNames(bundle: CompiledNqlQuery): string[] {
 	const names: string[] = [];
 	const seen = new Set<string>();
@@ -3117,44 +3100,35 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		if (mutation === undefined) {
 			throw new Error('NQL bundle did not contain a mutation intent.');
 		}
+		const deps = this.buildCompileDeps(
+			options,
+			bindingNames,
+			bindingProjections,
+		);
+		if (mutation.type === 'insert_from' || mutation.type === 'upsert_from') {
+			const emittedTable = identifierText(
+				declaredTable(requireDeclaredNames(deps), mutation.table),
+			);
+			if (bindingNames?.has(emittedTable)) {
+				throw new Error(
+					`Declared table '${mutation.table}' emits as '${emittedTable}', which is shadowed by bind or CTE '${emittedTable}' in scope.`,
+				);
+			}
+		}
 
 		switch (mutation.type) {
 			case 'insert':
-				return compileInsertImpl(
-					mutation,
-					options,
-					this.buildCompileDeps(options, bindingNames, bindingProjections),
-				);
+				return compileInsertImpl(mutation, options, deps);
 			case 'insert_from':
-				return compileInsertFromImpl(
-					mutation,
-					options,
-					this.buildCompileDeps(options, bindingNames, bindingProjections),
-				);
+				return compileInsertFromImpl(mutation, options, deps);
 			case 'update':
-				return compileUpdateImpl(
-					mutation,
-					options,
-					this.buildCompileDeps(options, bindingNames, bindingProjections),
-				);
+				return compileUpdateImpl(mutation, options, deps);
 			case 'delete':
-				return compileDeleteImpl(
-					mutation,
-					options,
-					this.buildCompileDeps(options, bindingNames, bindingProjections),
-				);
+				return compileDeleteImpl(mutation, options, deps);
 			case 'upsert':
-				return compileUpsertImpl(
-					mutation,
-					options,
-					this.buildCompileDeps(options, bindingNames, bindingProjections),
-				);
+				return compileUpsertImpl(mutation, options, deps);
 			case 'upsert_from':
-				return compileUpsertFromImpl(
-					mutation,
-					options,
-					this.buildCompileDeps(options, bindingNames, bindingProjections),
-				);
+				return compileUpsertFromImpl(mutation, options, deps);
 		}
 		throw new Error(
 			`Unsupported NQL mutation type: ${(mutation as { type: string }).type}`,
@@ -3251,16 +3225,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			orderedNqlBindingNames(bundle),
 			shadowingLocalCteNames(bundle),
 		);
-		const duplicateEmittedBinding =
-			bindingNamesInOrder.length > 0
-				? findDuplicateEmittedNqlBindingName(bindingNamesInOrder)
-				: undefined;
-		if (duplicateEmittedBinding !== undefined) {
-			throw new Error(
-				`NQL bindings '${duplicateEmittedBinding.originalName}' and '${duplicateEmittedBinding.duplicateName}' emit to duplicate CTE name '${duplicateEmittedBinding.emittedName}'. ` +
-					'NQL binding names must be unique after identifier emission.',
-			);
-		}
 		const bindingNames =
 			bindingNamesInOrder.length > 0
 				? new Set(bindingNamesInOrder.map((name) => emittedBindName(name)))

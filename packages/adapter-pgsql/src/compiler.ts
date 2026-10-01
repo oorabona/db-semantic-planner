@@ -1614,9 +1614,22 @@ export class PlanCompiler {
 		if (hasBindingName(this.bindingNames, queryLocal(table))) {
 			return queryLocal(table);
 		}
-		return this.declaredNames === undefined
-			? queryLocal(table)
-			: declaredTable(this.declaredNames, table);
+		const identifier =
+			this.declaredNames === undefined
+				? queryLocal(table)
+				: declaredTable(this.declaredNames, table);
+		const emittedName = identifierText(identifier);
+		const shadowingLocal = [...(this.scope?.bindings.values() ?? [])].find(
+			(binding) =>
+				binding.kind === 'cte-bind' &&
+				identifierText(binding.qualifier) === emittedName,
+		);
+		if (shadowingLocal !== undefined || this.bindingNames?.has(emittedName)) {
+			throw new Error(
+				`Declared table '${table}' emits as '${emittedName}', which is shadowed by bind or CTE '${emittedName}' in scope.`,
+			);
+		}
+		return identifier;
 	}
 
 	private schemaIdentifier(

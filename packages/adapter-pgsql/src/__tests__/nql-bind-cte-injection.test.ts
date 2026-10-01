@@ -194,6 +194,48 @@ function aggregateOutput(outputKey: string): OutputDescriptor {
 }
 
 describe('NQL bind CTE identifier injection defense', () => {
+	it('refuses a declared table shadowed by a bind after physical naming', () => {
+		const bundle = compileNqlBundle(
+			'items | select id | bind archived_items\narchivedItems | select id',
+		);
+		const { error, sql } = tryCompileNqlBundle(bundle, {
+			dbCasing: 'snake_case',
+		});
+
+		expect(sql).toBeUndefined();
+		expect((error as Error).message).toBe(
+			"Declared table 'archivedItems' emits as 'archived_items', which is shadowed by bind or CTE 'archived_items' in scope.",
+		);
+	});
+
+	it('refuses insert-from when its declared target is shadowed by a bind', () => {
+		const bundle = compileNqlBundle(
+			'items | select id, name | bind archived_items\ninsert into archivedItems from archived_items',
+		);
+		const { error, sql } = tryCompileNqlBundle(bundle, {
+			dbCasing: 'snake_case',
+		});
+
+		expect(sql).toBeUndefined();
+		expect((error as Error).message).toBe(
+			"Declared table 'archivedItems' emits as 'archived_items', which is shadowed by bind or CTE 'archived_items' in scope.",
+		);
+	});
+
+	it('refuses upsert-from when its declared target is shadowed by a bind', () => {
+		const bundle = compileNqlBundle(
+			'items | select id, name | bind archived_items\nupsert into archivedItems on id from archived_items',
+		);
+		const { error, sql } = tryCompileNqlBundle(bundle, {
+			dbCasing: 'snake_case',
+		});
+
+		expect(sql).toBeUndefined();
+		expect((error as Error).message).toBe(
+			"Declared table 'archivedItems' emits as 'archived_items', which is shadowed by bind or CTE 'archived_items' in scope.",
+		);
+	});
+
 	it('keeps bind output aliases query-local when they match a declared column', () => {
 		const bundle = compileNqlBundle(
 			'posts | select title as displayName | bind b\nb | select displayName',
@@ -206,6 +248,32 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect(sql).toContain('AS "displayName"');
 		expect(sql).toContain('b."displayName"');
 		expect(sql).not.toContain('b.display_name');
+	});
+
+	it.each([
+		{ property: 'identical labels', columns: ['x', 'x'] },
+		{
+			property: 'labels equal after PostgreSQL truncation',
+			columns: [`${'a'.repeat(63)}1`, `${'a'.repeat(63)}2`],
+		},
+	])('rejects runtime binding columns with $property', ({ columns }) => {
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'colliding',
+				select: { type: 'fields', fields: [columns[0]!] },
+			},
+			runtimeBindings: new Map([['colliding', { columns, rows: [] }]]),
+		};
+
+		const { error, sql } = tryCompileNqlBundle(bundle, {
+			dbCasing: 'snake_case',
+		});
+
+		expect(sql).toBeUndefined();
+		expect((error as Error).message).toBe(
+			"NQL runtime binding 'colliding' emits duplicate column names after PostgreSQL returned-label truncation.",
+		);
 	});
 
 	it('keeps aggregate bind aliases query-local when they match a declared column', () => {

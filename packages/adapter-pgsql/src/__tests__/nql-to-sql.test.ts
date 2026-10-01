@@ -951,7 +951,7 @@ users | select id`.dump(),
 		);
 	});
 
-	it('#762: keeps CTE output aliases verbatim under snake_case', () => {
+	it('emits NQL CTE declarations and references with their exact casing', () => {
 		const orm = createOrm({
 			model: blogSchema.model,
 			adapter: createPgsqlCompileOnlyAdapter({
@@ -960,11 +960,12 @@ users | select id`.dump(),
 			}),
 		});
 
-		const result = orm.nql`with t as (posts | select title as postTitle)
-t | select postTitle`.dump();
+		const result =
+			orm.nql`with activeUsers as (posts | select title as postTitle)
+activeUsers | select postTitle`.dump();
 
 		expect(result.sql).toBe(
-			'WITH "t" AS (SELECT posts.title AS "postTitle" FROM posts) SELECT t."postTitle" FROM t',
+			'WITH "activeUsers" AS (SELECT posts.title AS "postTitle" FROM posts) SELECT "activeUsers"."postTitle" FROM "activeUsers"',
 		);
 	});
 
