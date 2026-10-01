@@ -3107,6 +3107,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 						model,
 						schemaName ?? 'public',
 						this._dbCasing,
+						naming,
 					);
 		const declaredNames =
 			physicalModel === undefined
@@ -3150,6 +3151,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		bundle: CompiledNqlQuery,
 		options?: CompileOptions,
 		bindingNames?: BindingNameRegistry,
+		bindingProjections?: NqlBindingProjectionRegistry,
 	): CompiledQuery {
 		const mutation = bundle.mutation;
 		if (mutation === undefined) {
@@ -3161,37 +3163,37 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				return compileInsertImpl(
 					mutation,
 					options,
-					this.buildCompileDeps(options, bindingNames),
+					this.buildCompileDeps(options, bindingNames, bindingProjections),
 				);
 			case 'insert_from':
 				return compileInsertFromImpl(
 					mutation,
 					options,
-					this.buildCompileDeps(options, bindingNames),
+					this.buildCompileDeps(options, bindingNames, bindingProjections),
 				);
 			case 'update':
 				return compileUpdateImpl(
 					mutation,
 					options,
-					this.buildCompileDeps(options, bindingNames),
+					this.buildCompileDeps(options, bindingNames, bindingProjections),
 				);
 			case 'delete':
 				return compileDeleteImpl(
 					mutation,
 					options,
-					this.buildCompileDeps(options, bindingNames),
+					this.buildCompileDeps(options, bindingNames, bindingProjections),
 				);
 			case 'upsert':
 				return compileUpsertImpl(
 					mutation,
 					options,
-					this.buildCompileDeps(options, bindingNames),
+					this.buildCompileDeps(options, bindingNames, bindingProjections),
 				);
 			case 'upsert_from':
 				return compileUpsertFromImpl(
 					mutation,
 					options,
-					this.buildCompileDeps(options, bindingNames),
+					this.buildCompileDeps(options, bindingNames, bindingProjections),
 				);
 		}
 		throw new Error(
@@ -3270,7 +3272,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		if (bundle.mutation !== undefined) {
 			return fromCompiledQuery<T>(
 				guardCompiledQuery(
-					this.compileNqlMutation(bundle, options, bindingNames),
+					this.compileNqlMutation(
+						bundle,
+						options,
+						bindingNames,
+						bindingProjections,
+					),
 					'NQL mutation',
 				),
 			);
@@ -3903,7 +3910,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				...options,
 				model,
 			};
-			const deps = this.buildCompileDeps(leafOptions, bindingNames);
+			const deps = this.buildCompileDeps(
+				leafOptions,
+				bindingNames,
+				bindingProjections,
+			);
 			const queryFromBinding = hasBindingName(
 				bindingNames,
 				query.from,

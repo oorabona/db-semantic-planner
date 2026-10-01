@@ -58,7 +58,6 @@ import {
 import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
 import { createCompilerState } from '../handlers/types.js';
 import { convertWhereCondition } from '../intent-to-decisions.js';
-import { identityNaming } from '../naming-plugin.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ============================================================================
@@ -102,9 +101,8 @@ function makeDirectCtx(): WhereCompilerCtx {
 		rootTable: 'orders',
 		aliases: new Map(),
 		paramState,
-		naming: identityNaming,
 		compileSubquery: (sqIntent, paramOffset) =>
-			buildSubqueryFromIntent(sqIntent, paramOffset, identityNaming),
+			buildSubqueryFromIntent(sqIntent, paramOffset),
 	};
 }
 
@@ -611,7 +609,6 @@ describe('DEFECT 1 regression: scalar subquery in JOIN ON condition is rejected'
 			rootTable: 'orders',
 			aliases: new Map(),
 			paramState,
-			naming: identityNaming,
 			// Exact override used in adapter-compiler-select.ts ~387
 			compileSubquery: () => {
 				throw new Error('Subquery in JOIN ON condition is not supported.');
@@ -642,7 +639,6 @@ describe('DEFECT 1 regression: scalar subquery in JOIN ON condition is rejected'
 			rootTable: 'orders',
 			aliases: new Map(),
 			paramState,
-			naming: identityNaming,
 			// Exact override used in adapter-compiler-select.ts ~331
 			compileSubquery: () => {
 				throw new Error(
@@ -676,7 +672,6 @@ describe('DEFECT 1 regression: scalar subquery in JOIN ON condition is rejected'
 			rootTable: 'orders',
 			aliases: new Map(),
 			paramState,
-			naming: identityNaming,
 			compileSubquery: () => {
 				throw new Error(
 					'SENTINEL: compileSubquery reached — guard did NOT fire first',
@@ -710,7 +705,6 @@ describe('DEFECT 1 regression: scalar subquery in JOIN ON condition is rejected'
 			rootTable: 'orders',
 			aliases: new Map(),
 			paramState,
-			naming: identityNaming,
 			compileSubquery: () => {
 				throw new Error('SENTINEL: should not be called for plain comparisons');
 			},

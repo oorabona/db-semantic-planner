@@ -49,6 +49,7 @@ import {
 	rangeVar,
 	selectStmt,
 	sortBy,
+	sqlRangeVar,
 	starTarget,
 	typeCast,
 	updateStmt,
@@ -60,6 +61,7 @@ import {
 	type QueryScope,
 	queryScope,
 	relationBinding,
+	relationBindingFor,
 	schemaForFromName,
 } from './binding-registry.js';
 import { deparseQuoted } from './deparse.js';
@@ -105,7 +107,11 @@ import type {
 	JoinExprNode,
 	SelectStmtNode,
 } from './handlers/types.js';
-import { expressionColumnRef, isSelectWithFields } from './handlers/types.js';
+import {
+	expressionColumnRef,
+	expressionQualifiedColumnRef,
+	isSelectWithFields,
+} from './handlers/types.js';
 import { buildColumnRef, compileValue } from './handlers/where/utils.js';
 import {
 	assertNoUnsupportedSubqueryModifiers,
@@ -866,6 +872,24 @@ export class PlanCompiler {
 
 	/** Build immutable context for handler-based WHERE compilation */
 	private handlerCtx(): HandlerCompilerContext {
+		const bindings = [...(this.scope?.bindings.values() ?? [])];
+		if (
+			this.currentRootTable.length > 0 &&
+			this.declaredNames !== undefined &&
+			relationBindingFor(this.scope, queryLocal(this.currentRootTable)) ===
+				undefined &&
+			declaredRelationBindingFor(this.scope, this.currentRootTable) ===
+				undefined
+		) {
+			bindings.push(
+				relationBinding({
+					qualifier: declaredTable(this.declaredNames, this.currentRootTable),
+					kind: 'declared-table',
+					logicalTable: this.currentRootTable,
+				}),
+			);
+		}
+		const scope = bindings.length > 0 ? queryScope(bindings) : undefined;
 		return {
 			naming: this.naming,
 			...(this.declaredNames !== undefined && {
@@ -884,7 +908,7 @@ export class PlanCompiler {
 				dialectCapabilities: this.dialectCapabilities,
 			}),
 			...(this.bindingNames != null && { bindingNames: this.bindingNames }),
-			...(this.scope != null && { scope: this.scope }),
+			...(scope !== undefined && { scope }),
 			...(this.relationTargetProjections != null && {
 				relationTargetProjections: this.relationTargetProjections,
 			}),
@@ -1495,6 +1519,9 @@ export class PlanCompiler {
 		const scope = bindings.length > 0 ? queryScope(bindings) : undefined;
 		return {
 			naming: this.naming,
+			...(this.declaredNames !== undefined && {
+				declaredNames: this.declaredNames,
+			}),
 			rootTable: plan.rootTable,
 			currentAlias: alias,
 			aliases: this.visibleSqlQualifiers,
@@ -1873,15 +1900,16 @@ export class PlanCompiler {
 				'selected column',
 				this.bindingRelationName(fields),
 			);
-			const relatedColumn = columnRef(
-				fields.selectedColumn!,
-				relatedAlias,
-				undefined,
-				this.naming,
-				this.aliasColumnAuthorities,
-			);
 			const junctionAlias = hasCompleteManyToManyProof
 				? this.allocateBindingRelationAlias()
+				: undefined;
+			const junctionTable = hasCompleteManyToManyProof
+				? this.declaredNames === undefined
+					? queryLocal(fields.through!)
+					: declaredTable(this.declaredNames, fields.through!)
+				: undefined;
+			const junctionSchema = hasCompleteManyToManyProof
+				? this.schemaForRangeVar(plan, fields.through!)
 				: undefined;
 			if (hasCompleteManyToManyProof) {
 				const throughTarget = resolveRelationTarget(
@@ -1898,21 +1926,54 @@ export class PlanCompiler {
 				this.registerAliasAuthority(junctionAlias!, throughTarget);
 			}
 			const handlerContext = this.createHandlerContext(plan);
+			const manyToManyHandlerContext: HandlerCompilerContext =
+				hasCompleteManyToManyProof
+					? {
+							...handlerContext,
+							scope: queryScope([
+								...(handlerContext.scope?.bindings.values() ?? []),
+								relationBinding({
+									qualifier: queryLocal(relatedAlias),
+									kind: 'declared-table',
+									logicalTable: fields.targetTable,
+								}),
+								relationBinding({
+									qualifier: queryLocal(junctionAlias!),
+									kind: 'declared-table',
+									logicalTable: fields.through!,
+								}),
+							]),
+						}
+					: handlerContext;
+			const relatedColumn = hasCompleteManyToManyProof
+				? expressionQualifiedColumnRef(
+						fields.selectedColumn!,
+						relatedAlias,
+						manyToManyHandlerContext,
+					)
+				: columnRef(
+						fields.selectedColumn!,
+						relatedAlias,
+						undefined,
+						this.naming,
+						this.aliasColumnAuthorities,
+					);
 			const fromNode = hasCompleteManyToManyProof
 				? innerJoin(
 						relatedTable,
-						rangeVar(
-							fields.through!,
-							junctionAlias!,
-							this.schemaForRangeVar(plan, fields.through!),
-							this.naming,
+						sqlRangeVar(
+							junctionTable!,
+							queryLocal(junctionAlias!),
+							junctionSchema === undefined
+								? undefined
+								: queryLocal(junctionSchema),
 						),
 						buildKeyCorrelation(
 							relatedAlias,
 							fields.targetColumn,
 							junctionAlias!,
 							[fields.throughTargetColumn!],
-							handlerContext,
+							manyToManyHandlerContext,
 						),
 					)
 				: relatedTable;
@@ -1922,7 +1983,7 @@ export class PlanCompiler {
 						[fields.throughSourceColumn!],
 						plan.rootTable,
 						fields.sourceColumn,
-						handlerContext,
+						manyToManyHandlerContext,
 					)
 				: buildKeyCorrelation(
 						relatedAlias,

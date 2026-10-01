@@ -367,13 +367,18 @@ function compileUpsertActionWhere(
 	schemaName: string | undefined,
 ): import('@pgsql/types').Node {
 	const whereCtx: WhereCompilerCtx = {
-		naming: deps.naming,
 		rootTable: table,
 		aliases: new Map<string, string>(),
 		paramState: state,
 		...(schemaName !== undefined && { schemaName }),
 		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
 		...(deps.scope !== undefined && { scope: deps.scope }),
+		...(deps.relationTargetProjections !== undefined && {
+			relationTargetProjections: deps.relationTargetProjections,
+		}),
+		...(deps.declaredNames !== undefined && {
+			declaredNames: deps.declaredNames,
+		}),
 		...(deps.model !== undefined && { model: deps.model }),
 		...(deps.dialectCapabilities !== undefined && {
 			dialectCapabilities: deps.dialectCapabilities,
@@ -382,10 +387,10 @@ function compileUpsertActionWhere(
 			buildSubqueryFromIntent(
 				sqIntent,
 				paramOffset,
-				deps.naming,
+				deps.declaredNames,
 				schemaName,
 				'rawExists',
-				deps.bindingNames,
+				deps.scope,
 				deps.dialectCapabilities,
 			),
 	};
@@ -681,7 +686,6 @@ export function compileBatchUpdate(
 	if (intent.where) {
 		const resolvedWhere = resolveExistsIntent(intent.where, intent.table, deps);
 		const whereCtx: WhereCompilerCtx = {
-			naming: deps.naming,
 			rootTable: intent.table,
 			aliases: new Map<string, string>(),
 			paramState: state,
@@ -690,6 +694,9 @@ export function compileBatchUpdate(
 				bindingNames: deps.bindingNames,
 			}),
 			...(deps.scope !== undefined && { scope: deps.scope }),
+			...(deps.declaredNames !== undefined && {
+				declaredNames: deps.declaredNames,
+			}),
 			...(deps.model !== undefined && { model: deps.model }),
 			...(deps.dialectCapabilities !== undefined && {
 				dialectCapabilities: deps.dialectCapabilities,
@@ -698,10 +705,10 @@ export function compileBatchUpdate(
 				buildSubqueryFromIntent(
 					sqIntent,
 					paramOffset,
-					deps.naming,
+					deps.declaredNames,
 					schemaName,
 					'rawExists',
-					deps.bindingNames,
+					deps.scope,
 					deps.dialectCapabilities,
 				),
 		};
@@ -750,6 +757,9 @@ export function compileDelete(
 		...(schemaName !== undefined && { schema: schemaName }),
 		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
 		...(deps.scope !== undefined && { scope: deps.scope }),
+		...(deps.relationTargetProjections !== undefined && {
+			relationTargetProjections: deps.relationTargetProjections,
+		}),
 		...(deps.dialectCapabilities !== undefined && {
 			dialectCapabilities: deps.dialectCapabilities,
 		}),

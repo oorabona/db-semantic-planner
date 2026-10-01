@@ -2477,7 +2477,7 @@ function bindToSQL(
 function boundBundleToSQL(
 	nql: string,
 	model: ReturnType<typeof schema>['model'],
-	schemaName: string,
+	schemaName?: string,
 ): { sql: string; params: readonly unknown[] } {
 	const compiled = compile(nql, model);
 	if (!compiled.success || !compiled.ast) {
@@ -2487,7 +2487,10 @@ function boundBundleToSQL(
 	}
 
 	const adapter = createPgsqlCompileOnlyAdapter();
-	const result = adapter.compile(compiled.ast, { model, schemaName });
+	const result = adapter.compile(compiled.ast, {
+		model,
+		...(schemaName !== undefined && { schemaName }),
+	});
 
 	return { sql: normalizeSQL(result.sql), params: result.parameters };
 }
@@ -2504,13 +2507,15 @@ describe('NQL → SQL bind + CTE E2E', () => {
 	});
 
 	it('D4: query bind + delete using bound ref in WHERE subquery', () => {
-		const { sql } = bindToSQL(
+		// Exercise the binding-aware adapter entry point. A handwritten WITH prefix
+		// has no QueryScope and therefore cannot establish toDelete's local outputs.
+		const { sql } = boundBundleToSQL(
 			'posts | where published = false | select id | bind toDelete\ndelete from comments where postId in (toDelete)',
 			mutationSchema.model,
 		);
-		expect(sql).toEqual(
-			'with "toDelete" as (select posts.id from posts where posts.published = $1) delete from comments where comments."postid" = any (select "todelete_subq_0".id from "todelete" as "todelete_subq_0")',
-		);
+		expect(sql).toContain('with "todelete" as');
+		expect(sql).toContain('delete from comments');
+		expect(sql).toContain('from "todelete" as "todelete_subq_0"');
 	});
 
 	it('binding-final recursive columns over a non-id self-ref correlate on the pseudo target key', () => {

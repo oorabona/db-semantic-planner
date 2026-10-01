@@ -27,7 +27,10 @@ const batchSchema = schema({
 		callee_id: 'integer',
 		kind: 'text',
 	},
-	symbols: { id: { type: 'integer', primaryKey: true } },
+	symbols: {
+		id: { type: 'integer', primaryKey: true },
+		active: { type: 'boolean' },
+	},
 } as const);
 
 function makeOrm() {

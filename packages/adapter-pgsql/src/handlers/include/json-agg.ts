@@ -12,6 +12,7 @@ import {
 	type JsonAggOrderByEntry,
 	resolveJsonAggOrderKey,
 	resolveOutputReadHandling,
+	toColumnList,
 } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
@@ -247,6 +248,44 @@ function compileJsonAggRecursive(
 		ctx.defaultPkColumnName,
 		ctx.deriveFkColumnName,
 	);
+	// Planner include decisions created before the typed boundary can carry an
+	// already-rendered FK spelling. The ModelIR relation remains the declared
+	// address, so use it for the correlation when present.
+	const declaredRelation = ctx.model?.getRelation(
+		`${(decision as { sourceTable?: string }).sourceTable ?? ctx.rootTable}.${relation}`,
+	);
+	const resolvedTargetColumn =
+		declaredRelation?.type === 'belongsTo'
+			? toColumnList(declaredRelation.targetKey).length > 0
+				? declaredRelation.targetKey
+				: targetColumn
+			: toColumnList(declaredRelation?.foreignKey).length > 0
+				? declaredRelation!.foreignKey
+				: targetColumn;
+	const sourceTarget = resolveRelationTarget(targetTable, ctx);
+	// Preserve the container-conversion refusal before validating correlation
+	// keys: its diagnostic is more specific for a projected JSON output.
+	for (const column of decision.columns ?? []) {
+		if (column === '*') continue;
+		const descriptor = requireRelationTargetColumn(
+			sourceTarget,
+			column,
+			ctx,
+			'selected column',
+			relation,
+		);
+		if (descriptor)
+			assertProjectedJsonContainerCanBeAggregated(sourceTarget, descriptor);
+	}
+	// A CTE target owns only its declared projection. Reject a missing join key
+	// before an inner alias can obscure the relation and its available outputs.
+	requireRelationTargetColumns(
+		sourceTarget,
+		toColumnList(resolvedTargetColumn),
+		ctx,
+		'column reference',
+		relation,
+	);
 	const innerCtx: CompilerContext = {
 		...ctx,
 		rootTable: targetTable,
@@ -261,7 +300,7 @@ function compileJsonAggRecursive(
 	};
 	let whereExpr: Node = buildKeyCorrelation(
 		innerAlias,
-		targetColumn,
+		resolvedTargetColumn,
 		parentAlias,
 		sourceColumn,
 		innerCtx,

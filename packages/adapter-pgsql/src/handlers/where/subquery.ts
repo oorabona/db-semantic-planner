@@ -11,7 +11,7 @@
  */
 
 import type { A_Expr, A_Expr_Kind, Node, SubLink } from '@pgsql/types';
-import { columnRef, distinctExpr } from '../../ast-helpers.js';
+import { distinctExpr } from '../../ast-helpers.js';
 import { buildPredicateSubquerySelect } from '../../subquery-emission.js';
 import type {
 	CompilerContext,
@@ -21,6 +21,7 @@ import type {
 	WhereHandler,
 } from '../types.js';
 import { resolveWhereOperator } from './operator-resolver.js';
+import { buildColumnRef } from './utils.js';
 
 // ============================================================================
 // Map comparison operators to their PostgreSQL equivalents
@@ -225,14 +226,7 @@ export const scalarSubqueryHandler: WhereHandler = {
 			throw new Error('Scalar subquery requires column');
 		}
 
-		const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
-		const leftOperand = columnRef(
-			column,
-			sourceAlias,
-			undefined,
-			ctx.naming,
-			ctx.aliasColumnAuthorities,
-		);
+		const leftOperand = buildColumnRef(column, ctx);
 		const subquery = buildScalarSubquery(
 			decision,
 			'scalar',
@@ -265,14 +259,7 @@ export const inSubqueryHandler: WhereHandler = {
 			throw new Error('IN subquery requires column');
 		}
 
-		const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
-		const leftOperand = columnRef(
-			column,
-			sourceAlias,
-			undefined,
-			ctx.naming,
-			ctx.aliasColumnAuthorities,
-		);
+		const leftOperand = buildColumnRef(column, ctx);
 		const subquery = buildScalarSubquery(decision, 'IN', ctx, state, dispatch);
 
 		const subLink: SubLink = {
@@ -306,14 +293,7 @@ export const notInSubqueryHandler: WhereHandler = {
 			throw new Error('NOT IN subquery requires column');
 		}
 
-		const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
-		const leftOperand = columnRef(
-			column,
-			sourceAlias,
-			undefined,
-			ctx.naming,
-			ctx.aliasColumnAuthorities,
-		);
+		const leftOperand = buildColumnRef(column, ctx);
 		const subquery = buildScalarSubquery(decision, 'IN', ctx, state, dispatch);
 
 		const subLink: SubLink = {

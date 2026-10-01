@@ -16,7 +16,6 @@ import {
 	type WhereCompilerCtx,
 } from '../compile-where.js';
 import { createCompilerState } from '../handlers/types.js';
-import { identityNaming } from '../naming-plugin.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -28,7 +27,6 @@ function makeCtx(overrides?: Partial<WhereCompilerCtx>): WhereCompilerCtx {
 		rootTable: 'users',
 		aliases: new Map(),
 		paramState,
-		naming: identityNaming,
 		compileSubquery: () => {
 			throw new Error('compileSubquery not needed');
 		},

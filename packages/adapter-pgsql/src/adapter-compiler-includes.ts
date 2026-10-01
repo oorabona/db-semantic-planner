@@ -14,11 +14,17 @@ import type {
 import { toColumnList } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
-import { columnRef, innerJoin, rangeVar } from './ast-helpers.js';
+import {
+	columnRef,
+	innerJoin,
+	sqlColumnRef,
+	sqlRangeVar,
+} from './ast-helpers.js';
 import { quoteIdent } from './ddl/phases/utils.js';
 import { deparseQuoted } from './deparse.js';
 import { createCompilerState } from './handlers/index.js';
 import { finalizeEnvelope, fromAstProjection } from './projection-envelope.js';
+import { declaredColumn, declaredTable, queryLocal } from './sql-identifier.js';
 
 function compileIncludeSelectEnvelope(
 	selectAst: Node,
@@ -231,6 +237,18 @@ function compileSubqueryIncludeManyToMany(
 	const throughTable = info.through!;
 	const throughSourceKey = info.throughSourceKey!;
 	const throughTargetKey = info.throughTargetKey!;
+	const targetTable = deps.declaredNames
+		? declaredTable(deps.declaredNames, info.targetTable)
+		: queryLocal(info.targetTable);
+	const junctionTable = deps.declaredNames
+		? declaredTable(deps.declaredNames, throughTable)
+		: queryLocal(throughTable);
+	const junctionSourceColumn = deps.declaredNames
+		? declaredColumn(deps.declaredNames, throughTable, throughSourceKey)
+		: queryLocal(throughSourceKey);
+	const junctionTargetColumn = deps.declaredNames
+		? declaredColumn(deps.declaredNames, throughTable, throughTargetKey)
+		: queryLocal(throughTargetKey);
 
 	// Determine target PK (usually 'id', but could be from sourceKey)
 	const targetPkColumns = toColumnList(info.sourceKey);
@@ -240,6 +258,9 @@ function compileSubqueryIncludeManyToMany(
 		);
 	}
 	const targetPk = targetPkColumns[0]!;
+	const targetPkColumn = deps.declaredNames
+		? declaredColumn(deps.declaredNames, info.targetTable, targetPk)
+		: queryLocal(targetPk);
 
 	// Build param refs for parent IDs
 	const paramRefs = parentIds.map((id) => {
@@ -253,7 +274,7 @@ function compileSubqueryIncludeManyToMany(
 		A_Expr: {
 			kind: 'AEXPR_IN',
 			name: [{ String: { sval: '=' } }],
-			lexpr: columnRef(throughSourceKey, junctionAlias, undefined, deps.naming),
+			lexpr: sqlColumnRef(junctionSourceColumn, queryLocal(junctionAlias)),
 			rexpr: { List: { items: paramRefs } },
 		},
 	};
@@ -263,24 +284,22 @@ function compileSubqueryIncludeManyToMany(
 		A_Expr: {
 			kind: 'AEXPR_OP',
 			name: [{ String: { sval: '=' } }],
-			lexpr: columnRef(targetPk, targetAlias, undefined, deps.naming),
-			rexpr: columnRef(throughTargetKey, junctionAlias, undefined, deps.naming),
+			lexpr: sqlColumnRef(targetPkColumn, queryLocal(targetAlias)),
+			rexpr: sqlColumnRef(junctionTargetColumn, queryLocal(junctionAlias)),
 		},
 	};
 
 	// Build FROM clause with JOIN using helper functions
-	const targetRangeVar = rangeVar(
-		info.targetTable,
-		targetAlias,
-		schemaName,
-		deps.naming,
+	const targetRangeVar = sqlRangeVar(
+		targetTable,
+		queryLocal(targetAlias),
+		schemaName === undefined ? undefined : queryLocal(schemaName),
 	);
 
-	const junctionRangeVar = rangeVar(
-		throughTable,
-		junctionAlias,
-		schemaName,
-		deps.naming,
+	const junctionRangeVar = sqlRangeVar(
+		junctionTable,
+		queryLocal(junctionAlias),
+		schemaName === undefined ? undefined : queryLocal(schemaName),
 	);
 
 	// Use innerJoin helper for proper typing

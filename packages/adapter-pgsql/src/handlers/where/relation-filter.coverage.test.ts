@@ -9,7 +9,9 @@
 import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../../ast-helpers.js';
+import { queryScope, relationBinding } from '../../binding-registry.js';
 import { identityNaming } from '../../naming-plugin.js';
+import { queryLocal } from '../../sql-identifier.js';
 import type { CompilerContext, Decision, WhereDispatcher } from '../types.js';
 import { createCompilerState } from '../types.js';
 import {
@@ -422,6 +424,23 @@ describe('relationFilterHandler visible CTE target', () => {
 		const ctx = makeCtx({
 			schema: 'tenant_42',
 			bindingNames: new Set(['authors']),
+			scope: queryScope([
+				relationBinding({
+					qualifier: queryLocal('authors'),
+					kind: 'cte-bind',
+					outputs: new Map([
+						[
+							queryLocal('id'),
+							{
+								outputKey: queryLocal('id'),
+								logicalKey: 'id',
+								source: { kind: 'expression', reason: 'test CTE' },
+								shape: { kind: 'scalar', cardinality: 'one' },
+							},
+						],
+					]),
+				}),
+			]),
 		});
 		const decision = {
 			type: 'where',

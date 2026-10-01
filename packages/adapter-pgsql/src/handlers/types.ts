@@ -154,14 +154,7 @@ export function currentExpressionBinding(
 	ctx: ExpressionCompilerContext,
 ): RelationBinding {
 	if (ctx.currentBinding !== undefined) return ctx.currentBinding;
-	const qualifier = queryLocal(ctx.currentAlias ?? ctx.rootTable);
-	const bound = relationBindingFor(ctx.scope, qualifier);
-	if (bound !== undefined) return bound;
-	return relationBinding({
-		qualifier,
-		kind: 'declared-table',
-		logicalTable: ctx.currentAlias ?? ctx.rootTable,
-	});
+	return expressionRelationBinding(ctx.currentAlias ?? ctx.rootTable, ctx);
 }
 
 /** Resolve one logical expression column through an authoritative binding. */
@@ -179,9 +172,15 @@ export function expressionColumnIdentifier(
 		// Model-less direct compiler construction is a compatibility boundary.
 		// Normal adapter compilation always supplies the resolver and therefore
 		// takes the fail-closed addressed path below.
-		return resolver === undefined
-			? queryLocal(column)
-			: declaredColumn(resolver, binding.logicalTable, column);
+		if (resolver === undefined) return queryLocal(column);
+		// Include handlers not yet converted to addressed columns can carry the
+		// resolver's already-emitted spelling (e.g. parent_id). Recover its
+		// declared address from the physical inventory, never by casing guesswork.
+		const logicalColumn =
+			resolver.column(binding.logicalTable, column) !== undefined
+				? column
+				: (resolver.logicalColumn(binding.logicalTable, column) ?? column);
+		return declaredColumn(resolver, binding.logicalTable, logicalColumn);
 	}
 	const output =
 		binding.outputs?.get(queryLocal(column)) ??
@@ -237,13 +236,14 @@ export function expressionRelationBinding(
 	if (declaredBound !== undefined) return declaredBound;
 	const aliasAuthority = ctx.aliasColumnAuthorities?.get(qualifier);
 	if (
-		aliasAuthority?.logicalTable !== undefined &&
+		(aliasAuthority?.logicalTable !== undefined ||
+			aliasAuthority?.target !== undefined) &&
 		aliasAuthority.outputs === undefined
 	) {
 		return relationBinding({
 			qualifier: identifier,
 			kind: 'declared-table',
-			logicalTable: aliasAuthority.logicalTable,
+			logicalTable: aliasAuthority.logicalTable ?? aliasAuthority.target,
 		});
 	}
 	if (aliasAuthority?.outputs !== undefined) {

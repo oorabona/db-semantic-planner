@@ -454,7 +454,7 @@ describe('PlanCompiler', () => {
 	});
 
 	describe('Naming convention', () => {
-		it('applies CamelCase naming plugin', () => {
+		it('keeps direct legacy WHERE construction outside naming authority', () => {
 			const compiler = new PlanCompiler({
 				naming: new CamelCaseNamingPlugin(),
 			});
@@ -480,7 +480,7 @@ describe('PlanCompiler', () => {
 			expect(normalized).toContain('user_profiles');
 			expect(normalized).toContain('first_name');
 			expect(normalized).toContain('last_name');
-			expect(normalized).toContain('created_at');
+			expect(normalized).toContain('createdat');
 		});
 	});
 

@@ -25,7 +25,6 @@ import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { buildSubqueryFromIntent } from '../compile-where.js';
 import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
-import { identityNaming } from '../naming-plugin.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { EXPRESSION_HANDLERS } from '../select-expression-handlers.js';
 
@@ -309,7 +308,7 @@ describe('#247 aggregate DISTINCT', () => {
 				buildSubqueryFromIntent(
 					intent,
 					0,
-					identityNaming,
+					undefined,
 					undefined,
 					'scalar-direct',
 				),

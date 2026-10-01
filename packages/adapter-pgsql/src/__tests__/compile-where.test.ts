@@ -17,7 +17,6 @@ import {
 	type WhereCompilerCtx,
 } from '../compile-where.js';
 import { createCompilerState } from '../handlers/types.js';
-import { identityNaming } from '../naming-plugin.js';
 
 // ---------------------------------------------------------------------------
 // Test helper
@@ -36,7 +35,6 @@ function compile(
 		rootTable: 'users',
 		aliases: new Map(),
 		paramState,
-		naming: identityNaming,
 		compileSubquery: () => {
 			throw new Error('compileSubquery not needed for this test');
 		},
@@ -699,9 +697,8 @@ describe('rawExists / rawNotExists', () => {
 			rootTable: 'symbols',
 			aliases: new Map(),
 			paramState,
-			naming: identityNaming,
 			compileSubquery: (subIntent: QueryIntent, paramOffset: number) =>
-				buildSubqueryFromIntent(subIntent, paramOffset, identityNaming),
+				buildSubqueryFromIntent(subIntent, paramOffset),
 		};
 		const node = compileWhereIntent(intent, ctx);
 		const sql = deparseSync([{ SelectStmt: { whereClause: node } }])

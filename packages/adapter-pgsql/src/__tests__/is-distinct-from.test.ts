@@ -63,9 +63,8 @@ function whereCtx(): WhereCompilerCtx {
 		rootTable: 't',
 		aliases: new Map(),
 		paramState: createCompilerState(),
-		naming: identityNaming,
 		compileSubquery: (intent: QueryIntent, paramOffset: number) =>
-			buildSubqueryFromIntent(intent, paramOffset, identityNaming),
+			buildSubqueryFromIntent(intent, paramOffset),
 	};
 }
 

@@ -24,8 +24,13 @@ import { getTrustedNqlRelationFilterFields } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { defaultFkDerivation } from './assert-field.js';
-import { funcCall, rangeVar } from './ast-helpers.js';
-import { hasBindingName, schemaForFromName } from './binding-registry.js';
+import { funcCall, sqlRangeVar } from './ast-helpers.js';
+import {
+	declaredRelationBindingFor,
+	queryScope,
+	relationBinding,
+	relationBindingFor,
+} from './binding-registry.js';
 import { compileWhereIntent, type WhereCompilerCtx } from './compile-where.js';
 import {
 	type CompilerOptions,
@@ -44,7 +49,6 @@ import {
 	jsonAggContainerShape,
 	resolveJsonAggColumnReadHandling,
 } from './json-agg-read-handling.js';
-import { identityNaming } from './naming-plugin.js';
 import { createTypeCastParamRef } from './param-ref.js';
 import {
 	convertDottedFieldsToExists,
@@ -63,6 +67,57 @@ import {
 	assertProjectedJsonContainerCanBeAggregated,
 	resolveRelationTarget,
 } from './relation-target-projection.js';
+import { declaredTable, queryLocal } from './sql-identifier.js';
+
+/** Establish the output authority of an unnest() range at the point it enters. */
+function batchValuesBinding(
+	alias: string,
+	columns: readonly string[],
+): ReturnType<typeof relationBinding> {
+	return relationBinding({
+		qualifier: queryLocal(alias),
+		kind: 'batch-values',
+		outputs: new Map(
+			columns.map((column) => [
+				queryLocal(column),
+				{
+					outputKey: queryLocal(column),
+					logicalKey: column,
+					source: { kind: 'expression', reason: 'BatchValues output' },
+					shape: { kind: 'scalar', cardinality: 'one' },
+				},
+			]),
+		),
+	});
+}
+
+/** Root relations enter every SELECT scope before any JOIN/WHERE reference. */
+function sourceBinding(
+	rootTable: string,
+	deps: AdapterCompilerDeps,
+): ReturnType<typeof relationBinding> {
+	const existing =
+		relationBindingFor(deps.scope, queryLocal(rootTable)) ??
+		declaredRelationBindingFor(deps.scope, rootTable);
+	if (existing !== undefined) return existing;
+	return relationBinding({
+		qualifier: deps.declaredNames
+			? declaredTable(deps.declaredNames, rootTable)
+			: queryLocal(rootTable),
+		kind: 'declared-table',
+		logicalTable: rootTable,
+	});
+}
+
+function hasSourceBinding(
+	rootTable: string,
+	deps: AdapterCompilerDeps,
+): boolean {
+	return (
+		relationBindingFor(deps.scope, queryLocal(rootTable)) !== undefined ||
+		declaredRelationBindingFor(deps.scope, rootTable) !== undefined
+	);
+}
 
 // ============================================================================
 // Compile-time type-name safety guard (covers forged BatchValuesRef vector)
@@ -185,7 +240,6 @@ function compileJoinIntents(
 	if (joins.length === 0) return [];
 
 	const model = deps.model;
-	const naming = deps.naming;
 	const deriveFk = deps.deriveFk ?? defaultFkDerivation;
 	const defaultPk = deps.defaultPk;
 	const results: PlanDecision[] = [];
@@ -271,16 +325,21 @@ function compileJoinIntents(
 				rootTable,
 				aliases: new Map<string, string>(),
 				paramState: bvOnParamState,
-				naming,
 				outerTable: alias,
-				// A BatchValues range variable is query-local even when its spelling
-				// collides with a declared table. Its columns are supplied by unnest().
-				aliasColumnAuthorities: new Map([[alias, { target: alias }]]),
 				...(schemaName !== undefined && { schemaName }),
-				...(deps.bindingNames !== undefined && {
-					bindingNames: deps.bindingNames,
+				scope: queryScope([
+					...(deps.scope?.bindings.values() ?? []),
+					...(!hasSourceBinding(rootTable, deps)
+						? [sourceBinding(rootTable, deps)]
+						: []),
+					batchValuesBinding(alias, [
+						...bv.columns,
+						...(bv.ordinality ? ['ord'] : []),
+					]),
+				]),
+				...(deps.declaredNames !== undefined && {
+					declaredNames: deps.declaredNames,
 				}),
-				...(deps.scope !== undefined && { scope: deps.scope }),
 				...(deps.relationTargetProjections !== undefined && {
 					relationTargetProjections: deps.relationTargetProjections,
 				}),
@@ -335,23 +394,52 @@ function compileJoinIntents(
 				// rangeVar() emits the same spelling rather than a physical table name.
 				tableAliasMap.set(tableAlias, tableAlias);
 			}
+			const joinedSource = relationBindingFor(
+				deps.scope,
+				queryLocal(intent.table),
+			);
+			const joinedBinding =
+				joinedSource?.kind === 'declared-table'
+					? relationBinding({
+							qualifier: queryLocal(tableAlias),
+							kind: 'declared-table',
+							logicalTable: joinedSource.logicalTable ?? intent.table,
+						})
+					: joinedSource !== undefined
+						? relationBinding({
+								qualifier: queryLocal(tableAlias),
+								kind: 'join-alias',
+								...(joinedSource.outputs !== undefined && {
+									outputs: joinedSource.outputs,
+								}),
+							})
+						: relationBinding({
+								qualifier: queryLocal(tableAlias),
+								kind: 'declared-table',
+								logicalTable: intent.table,
+							});
+			const scopeBindings = [
+				...(deps.scope?.bindings.values() ?? []),
+				...(!hasSourceBinding(rootTable, deps)
+					? [sourceBinding(rootTable, deps)]
+					: []),
+				...(relationBindingFor(deps.scope, joinedBinding.qualifier) ===
+					undefined && tableAlias !== rootTable
+					? [joinedBinding]
+					: []),
+			];
 			const ctx: WhereCompilerCtx = {
 				rootTable,
 				aliases: tableAliasMap,
 				paramState,
-				naming,
 				// outerTable = tableAlias so FieldRef(scope:'outer') resolves to the
 				// joined alias (e.g. 'e2' in self-join ON conditions).
 				outerTable: tableAlias,
-				// A join alias is query-local. Mark it as an authority at the AST
-				// boundary instead of altering the naming plugin used by the WHERE
-				// compiler for declared table and column references.
-				aliasColumnAuthorities: new Map([[tableAlias, { target: tableAlias }]]),
 				...(schemaName !== undefined && { schemaName }),
-				...(deps.bindingNames !== undefined && {
-					bindingNames: deps.bindingNames,
+				scope: queryScope([...scopeBindings]),
+				...(deps.declaredNames !== undefined && {
+					declaredNames: deps.declaredNames,
 				}),
-				...(deps.scope !== undefined && { scope: deps.scope }),
 				...(deps.relationTargetProjections !== undefined && {
 					relationTargetProjections: deps.relationTargetProjections,
 				}),
@@ -368,13 +456,18 @@ function compileJoinIntents(
 
 			// Store rarg + onNode separately — the 'join' case in compiler.ts wraps
 			// from[0] as larg so multiple .join() calls chain correctly.
-			const joinedRangeVar = rangeVar(
-				intent.table,
-				tableAlias,
-				schemaForFromName(schemaName, intent.table, deps.bindingNames, naming),
-				hasBindingName(deps.bindingNames, intent.table, naming)
-					? identityNaming
-					: naming,
+			const joinedRangeVar = sqlRangeVar(
+				joinedSource?.qualifier ??
+					(deps.declaredNames
+						? declaredTable(deps.declaredNames, intent.table)
+						: queryLocal(intent.table)),
+				queryLocal(tableAlias),
+				joinedSource?.kind === 'cte-bind' ||
+					joinedSource?.kind === 'batch-values'
+					? undefined
+					: schemaName === undefined
+						? undefined
+						: queryLocal(schemaName),
 			);
 
 			const joinDecision: PrecompiledJoinDecision = {

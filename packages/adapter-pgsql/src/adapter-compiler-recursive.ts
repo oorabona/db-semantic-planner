@@ -49,8 +49,8 @@ import { mapComparisonOperator } from './plan-decision-extractor.js';
 import {
 	dropPositionalUnion,
 	finalizeEnvelope,
-	fromAstProjection,
 	fromModelColumns,
+	fromOutputDescriptors,
 	type ProjectionEnvelope,
 	type ProjectNamedFieldsExpression,
 	type ProjectNamedFieldsSelection,
@@ -699,16 +699,15 @@ export function compileCteQuery<T = unknown>(
 			allCteParams.push(...cteParams);
 			const cteSql = deparseQuoted(node);
 			cteSqlFragments.push(cteSql);
-			const cteQueryAst = (node as { CommonTableExpr?: { ctequery?: Node } })
-				.CommonTableExpr?.ctequery;
 			cteProjectionByName.set(
 				emittedCteName,
-				fromAstProjection({
+				fromOutputDescriptors({
 					sql: cteSql,
 					parameters: cteParams,
-					ast: cteQueryAst ?? node,
-					rootTable: emittedCteName,
-					model: undefined,
+					columns: [
+						...Object.keys(cte.columns),
+						...(cte.indexColumn !== undefined ? [cte.indexColumn] : []),
+					],
 				}),
 			);
 		} else if (cte.kind === 'rawCte') {
@@ -731,6 +730,9 @@ export function compileCteQuery<T = unknown>(
 				options,
 				cteProjectionByName,
 			);
+			// Keep positional-UNION result metadata fail-closed even though the
+			// separate binding projection below retains local output labels.
+			finalizeEnvelope(rawCte.projection);
 			const renumberedRawCteSql =
 				currentParamOffset > 0
 					? rawCte.sql.replace(
@@ -743,7 +745,7 @@ export function compileCteQuery<T = unknown>(
 			cteSqlFragments.push(renumberedRawCteSql);
 			cteProjectionByName.set(
 				emittedCteName,
-				preserveOneToOne(rawCte.projection, {
+				preserveOneToOne(rawCte.bindingProjection, {
 					sql: renumberedRawCteSql,
 					parameters: rawCte.params,
 					preserveHydrationPlan: false,
@@ -948,6 +950,7 @@ function buildRawCte(
 	sql: string;
 	params: readonly unknown[];
 	projection: ProjectionEnvelope;
+	bindingProjection: ProjectionEnvelope;
 } {
 	// Compile base (anchor) query
 	const baseQuery = cte.base as QueryIntent;
@@ -957,17 +960,33 @@ function buildRawCte(
 		anchorDeps,
 		registry,
 	);
+	// The recursive name enters the step query with the anchor's projected
+	// labels. A name-only binding cannot safely resolve `chain.name`.
+	const stepProjectionRegistry = new Map(registry);
+	stepProjectionRegistry.set(
+		emittedBindName(cte.name, anchorDeps.naming),
+		baseCompiled,
+	);
+	const scopedStepDeps = withBindingProjectionScope(
+		stepDeps,
+		stepDeps.bindingNames,
+		stepProjectionRegistry,
+	);
 
 	// Compile step (recursive) query
 	const stepQuery = cte.step as QueryIntent;
 	const rawStepCompiled = compileSelectEnvelope(
 		createPlanReportForCteQuery(
 			stepQuery,
-			stepDeps,
-			getRegisteredProjection(registry, stepQuery.from, stepDeps) !== undefined,
+			scopedStepDeps,
+			getRegisteredProjection(
+				stepProjectionRegistry,
+				stepQuery.from,
+				scopedStepDeps,
+			) !== undefined,
 		),
 		options,
-		stepDeps,
+		scopedStepDeps,
 	);
 
 	// Renumber step params to follow base params.
@@ -1003,7 +1022,11 @@ function buildRawCte(
 	const stepRegisteredSource =
 		stepQuery.from === cte.name
 			? baseCompiled
-			: getRegisteredProjection(registry, stepQuery.from, stepDeps);
+			: getRegisteredProjection(
+					stepProjectionRegistry,
+					stepQuery.from,
+					scopedStepDeps,
+				);
 	const stepCompiled = stepRegisteredSource
 		? rehomeQueryEnvelope(
 				stepRegisteredSource,
@@ -1011,7 +1034,7 @@ function buildRawCte(
 				rawStepCompiled,
 				finalStepSql,
 				allParams,
-				stepDeps,
+				scopedStepDeps,
 			)
 		: preserveOneToOne(rawStepCompiled, {
 				sql: finalStepSql,
@@ -1029,6 +1052,13 @@ function buildRawCte(
 			sql: cteSql,
 			parameters: allParams,
 			reason: 'raw-recursive-cte-positional-merge',
+		}),
+		// Recursive UNION output labels come from the anchor SELECT. Preserve them
+		// for the CTE relation binding while keeping result metadata conservative.
+		bindingProjection: preserveOneToOne(baseCompiled, {
+			sql: cteSql,
+			parameters: allParams,
+			preserveHydrationPlan: false,
 		}),
 	};
 }

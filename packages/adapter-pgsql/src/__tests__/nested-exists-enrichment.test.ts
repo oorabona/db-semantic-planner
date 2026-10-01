@@ -36,7 +36,6 @@ import {
 	type WhereCompilerCtx,
 } from '../compile-where.js';
 import { createCompilerState } from '../handlers/types.js';
-import { identityNaming } from '../naming-plugin.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
@@ -222,9 +221,8 @@ describe('rawExists + outerRef on direct compileWhereIntent path', () => {
 			rootTable: 'users',
 			aliases: new Map(),
 			paramState,
-			naming: identityNaming,
 			compileSubquery: (subIntent, paramOffset) =>
-				buildSubqueryFromIntent(subIntent, paramOffset, identityNaming),
+				buildSubqueryFromIntent(subIntent, paramOffset),
 		};
 	}
 
@@ -489,9 +487,8 @@ describe('scalar subquery modifier guard on direct compileWhereIntent path', () 
 			rootTable: 'users',
 			aliases: new Map(),
 			paramState,
-			naming: identityNaming,
 			compileSubquery: (subIntent, paramOffset) =>
-				buildSubqueryFromIntent(subIntent, paramOffset, identityNaming),
+				buildSubqueryFromIntent(subIntent, paramOffset),
 		};
 	}
 
@@ -592,9 +589,8 @@ describe('scalar-direct guard: limit and orderBy rejected on direct path', () =>
 			rootTable: 'users',
 			aliases: new Map(),
 			paramState,
-			naming: identityNaming,
 			compileSubquery: (subIntent, paramOffset) =>
-				buildSubqueryFromIntent(subIntent, paramOffset, identityNaming),
+				buildSubqueryFromIntent(subIntent, paramOffset),
 		};
 	}
 
@@ -788,9 +784,8 @@ describe('scalar-direct projection validation on direct compileWhereIntent path'
 			rootTable: 'users',
 			aliases: new Map(),
 			paramState,
-			naming: identityNaming,
 			compileSubquery: (subIntent: any, paramOffset: number) =>
-				buildSubqueryFromIntent(subIntent, paramOffset, identityNaming),
+				buildSubqueryFromIntent(subIntent, paramOffset),
 		};
 	}
 

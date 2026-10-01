@@ -34,7 +34,6 @@ import {
 } from '../compile-where.js';
 import { createCompilerState } from '../handlers/types.js';
 import { convertWhereCondition, isOuterRef } from '../intent-to-decisions.js';
-import { identityNaming } from '../naming-plugin.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { convertWhereToDecisions } from '../plan-decision-extractor.js';
 
@@ -71,6 +70,7 @@ const testSchema = schema({
 	comments: {
 		id: { type: 'integer', primaryKey: true },
 		body: { type: 'text' },
+		flagged: { type: 'boolean' },
 		post_id: ref('posts', { as: 'post', inverse: 'comments' }),
 	},
 } as const);
@@ -90,10 +90,9 @@ function makeCtx(
 		rootTable,
 		aliases: new Map(),
 		paramState,
-		naming: identityNaming,
 		...(!withoutModel ? { model: testSchema.model as any } : {}),
 		compileSubquery: (subIntent, paramOffset) =>
-			buildSubqueryFromIntent(subIntent, paramOffset, identityNaming),
+			buildSubqueryFromIntent(subIntent, paramOffset),
 		...rest,
 	};
 }

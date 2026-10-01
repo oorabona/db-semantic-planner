@@ -14,13 +14,18 @@
 import { toColumnList } from '@dbsp/types';
 import type { JoinExpr, Node } from '@pgsql/types';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
-import { rangeVar } from '../../ast-helpers.js';
-import { schemaForFromName } from '../../binding-registry.js';
+import { sqlRangeVar } from '../../ast-helpers.js';
+import {
+	queryScope,
+	relationBinding,
+	schemaForFromName,
+} from '../../binding-registry.js';
 import {
 	bindAliasAuthority,
 	requireRelationTargetColumns,
 	resolveRelationTarget,
 } from '../../relation-target-projection.js';
+import { declaredTable, queryLocal } from '../../sql-identifier.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -91,6 +96,27 @@ function buildJoinFilter(
 	state.aliases.set(`rel_${targetTable}`, targetAlias);
 
 	const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
+	const resolvedTarget = resolveRelationTarget(targetTable, ctx);
+	const targetBinding = relationBinding({
+		qualifier: queryLocal(targetAlias),
+		...(resolvedTarget.cteName === undefined
+			? { kind: 'declared-table' as const, logicalTable: targetTable }
+			: {
+					kind: 'join-alias' as const,
+					...(resolvedTarget.outputs !== undefined && {
+						outputs: new Map(
+							[...resolvedTarget.outputs].map(([column, output]) => [
+								queryLocal(column),
+								output,
+							]),
+						),
+					}),
+				}),
+	});
+	const scopedCtx: CompilerContext = {
+		...ctx,
+		scope: queryScope([...(ctx.scope?.bindings.values() ?? []), targetBinding]),
+	};
 
 	// Build join condition: source.column = target.column
 	const joinCondition = buildKeyCorrelation(
@@ -98,18 +124,26 @@ function buildJoinFilter(
 		sourceColumn,
 		targetAlias,
 		targetColumn,
-		ctx,
+		scopedCtx,
 	);
 
 	// Build a proper JoinExpr node
 	// Note: The left arg (larg) will be set by the compiler when constructing the full FROM clause
 	const joinExpr: JoinExpr = {
 		jointype: 'JOIN_INNER',
-		rarg: rangeVar(
-			targetTable,
-			targetAlias,
-			schemaForFromName(ctx.schema, targetTable, ctx.bindingNames, ctx.naming),
-			ctx.naming,
+		rarg: sqlRangeVar(
+			resolvedTarget.cteName ??
+				(ctx.declaredNames
+					? declaredTable(ctx.declaredNames, targetTable)
+					: queryLocal(targetTable)),
+			queryLocal(targetAlias),
+			schemaForFromName(
+				ctx.schema,
+				targetTable,
+				ctx.scope ?? ctx.bindingNames,
+			) === undefined
+				? undefined
+				: queryLocal(ctx.schema!),
 		),
 		quals: joinCondition,
 	};
@@ -120,7 +154,7 @@ function buildJoinFilter(
 	// If there are additional conditions on the relation, compile them
 	if (decision.conditions && decision.conditions.length > 0) {
 		const subCtx: CompilerContext = {
-			...ctx,
+			...scopedCtx,
 			rootTable: targetTable,
 			currentAlias: targetAlias,
 			aliasColumnAuthorities: bindAliasAuthority(

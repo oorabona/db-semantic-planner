@@ -43,7 +43,6 @@ function makeCtx(overrides?: Partial<WhereCompilerCtx>): WhereCompilerCtx {
 		rootTable: 'items',
 		aliases: new Map(),
 		paramState,
-		naming: identityNaming,
 		compileSubquery: () => {
 			throw new Error('compileSubquery not expected in this test');
 		},

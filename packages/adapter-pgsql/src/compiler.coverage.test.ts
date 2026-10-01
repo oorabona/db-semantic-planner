@@ -19,12 +19,18 @@
  * - Returning clauses
  */
 
-import { POSTGRESQL_CAPABILITIES } from '@dbsp/core';
+import { POSTGRESQL_CAPABILITIES, ref, schema } from '@dbsp/core';
 import { markNqlTrustedRelationFilter } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from './ast-helpers.js';
+import { queryScope, relationBinding } from './binding-registry.js';
 import { PlanCompiler, type SimplifiedPlanReport } from './compiler.js';
-import { identityNaming } from './naming-plugin.js';
+import {
+	createDeclaredNameResolver,
+	getCachedPgPhysicalModel,
+} from './declared-name-resolver.js';
+import { camelCaseNaming, identityNaming } from './naming-plugin.js';
+import { queryLocal } from './sql-identifier.js';
 
 describe('PlanCompiler - Coverage Tests', () => {
 	describe('existsWrap', () => {
@@ -819,6 +825,85 @@ describe('PlanCompiler - Coverage Tests', () => {
 				/\(select coalesce\(json_agg\(rc_0\.name order by cast\(rc_0\.name as text\) nulls last\), '\[\]'::json\) from tags as rc_0 join post_tags as rc_1 on rc_0\.id = rc_1\.tag_id where rc_1\.post_id = projected_users\.id\) as "tags\.name"/i,
 			);
 			expect(sql).not.toMatch(/where rc_0\.id = projected_users\.id/i);
+		});
+
+		it('resolves binding-final many-to-many junction keys by declared address', () => {
+			const model = schema({
+				posts: { id: { type: 'integer', primaryKey: true } },
+				tags: {
+					id: { type: 'integer', primaryKey: true },
+					name: 'string',
+				},
+				postTags: {
+					postId: ref('posts'),
+					tagId: ref('tags'),
+				},
+			}).model;
+			expect(
+				model.getTable('postTags')?.columns.map((column) => column.name),
+			).toEqual(['postId', 'tagId']);
+			const declaredNames = createDeclaredNameResolver(
+				getCachedPgPhysicalModel(
+					model,
+					'public',
+					'snake_case',
+					camelCaseNaming,
+				),
+			);
+			expect(declaredNames.column('postTags', 'postId')).toBe('post_id');
+			expect(declaredNames.column('postTags', 'tagId')).toBe('tag_id');
+			const compiler = new PlanCompiler({
+				model,
+				declaredNames,
+				bindingNames: new Set(['projected_posts']),
+				scope: queryScope([
+					relationBinding({
+						qualifier: queryLocal('projected_posts'),
+						kind: 'cte-bind',
+						outputs: new Map([
+							[
+								queryLocal('id'),
+								{
+									outputKey: queryLocal('id'),
+									logicalKey: 'id',
+								},
+							],
+						]),
+					}),
+				]),
+			});
+			const result = compiler.compile({
+				rootTable: 'projected_posts',
+				decisions: [
+					markNqlTrustedRelationFilter(
+						{
+							type: 'selectRelationColumn',
+							relation: 'tags',
+							column: 'name',
+							alias: 'tags.name',
+						},
+						{
+							relation: 'tags',
+							targetTable: 'tags',
+							sourceColumn: ['id'],
+							targetColumn: ['id'],
+							hops: [],
+							through: 'postTags',
+							throughSourceColumn: 'postId',
+							throughTargetColumn: 'tagId',
+							selectedColumn: 'name',
+							cardinality: 'many',
+							relationType: 'belongsToMany',
+						},
+					),
+				],
+			});
+			const sql = normalizeSQL(result.sql);
+
+			expect(sql).toMatch(
+				/from tags as rc_\d+ join post_tags as rc_\d+ on rc_\d+\.id = rc_\d+\.tag_id where rc_\d+\.post_id = projected_posts\.id/i,
+			);
+			expect(sql).not.toMatch(/rc_\d+\."tagId"|rc_\d+\."postId"/);
 		});
 
 		it('rejects trusted manyToMany binding relation columns forged as cardinality one', () => {

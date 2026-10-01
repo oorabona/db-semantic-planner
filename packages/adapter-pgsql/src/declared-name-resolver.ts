@@ -7,6 +7,7 @@
  * deliberately left to the caller: they are query-local SQL identifiers.
  */
 import type { ModelIR } from '@dbsp/types';
+import type { NamingPlugin } from './naming-plugin.js';
 import {
 	createPgPhysicalModel,
 	type PgPhysicalModel,
@@ -74,31 +75,43 @@ export function declaredLogicalColumnName(
 type PerModelPhysicalCache = Map<string, PgPhysicalModel>;
 const physicalModels = new WeakMap<ModelIR, PerModelPhysicalCache>();
 const declaredResolvers = new WeakMap<PgPhysicalModel, DeclaredNameResolver>();
+const namingPluginCacheKeys = new WeakMap<NamingPlugin, number>();
+let nextNamingPluginCacheKey = 0;
+
+function namingPluginCacheKey(naming: NamingPlugin | undefined): string {
+	if (naming === undefined) return 'db-casing';
+	let key = namingPluginCacheKeys.get(naming);
+	if (key === undefined) {
+		key = nextNamingPluginCacheKey++;
+		namingPluginCacheKeys.set(naming, key);
+	}
+	return `plugin:${key}`;
+}
 
 /**
  * Cache physical models by logical-model identity, effective schema and
- * db-casing. Module scope is intentional: withSchema() constructs a sibling
- * adapter and must reuse the same cache.
+ * db-casing and naming-plugin identity. Module scope is intentional:
+ * withSchema() constructs a sibling adapter and must reuse the same cache.
  */
 export function getCachedPgPhysicalModel(
 	model: ModelIR,
 	schema: string,
 	dbCasing: import('@dbsp/types').DbCasing,
+	naming?: NamingPlugin,
 ): PgPhysicalModel {
 	let byKey = physicalModels.get(model);
 	if (byKey === undefined) {
 		byKey = new Map();
 		physicalModels.set(model, byKey);
 	}
-	const key = `${schema}\u0000${dbCasing}`;
+	const key = `${schema}\u0000${dbCasing}\u0000${namingPluginCacheKey(naming)}`;
 	const cached = byKey.get(key);
 	if (cached !== undefined) return cached;
-	const physical = createPgPhysicalModel({
-		mode: 'logical',
-		model,
-		schema,
-		dbCasing,
-	});
+	const physical = createPgPhysicalModel(
+		naming === undefined
+			? { mode: 'logical', model, schema, dbCasing }
+			: { mode: 'logical', model, schema, naming },
+	);
 	byKey.set(key, physical);
 	return physical;
 }
