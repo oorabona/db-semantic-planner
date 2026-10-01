@@ -1210,7 +1210,7 @@ function compareIndexes(
 	// the emitter and fails loudly.
 	const declaredUnemittableFkIndexCols = new Set(
 		schema.indexes.flatMap((idx) =>
-			idx.columns.length === 1 && !isManagedIndex(schema.name, idx)
+			idx.columns.length === 1 && isUnemittableFkIndex(schema.name, idx)
 				? idx.columns
 				: [],
 		),
@@ -1251,25 +1251,25 @@ function compareIndexes(
 	);
 
 	// Index identity: structural definition (name is cosmetic)
-	const schemaIdxMap = new Map(
-		schema.indexes.map((idx) => [indexComparisonKey(idx), idx]),
-	);
-	const dbIdxMap = new Map(
-		db.indexes
-			.filter((idx) => isManagedIndex(schema.name, idx))
-			.map((idx) => [indexComparisonKey(idx), idx]),
-	);
+	const unmatchedDbIndexes = [...db.indexes];
 	const pendingCreates: PendingIndexCreate[] = [];
 
-	// Explicit indexes in schema but not in DB → create
-	for (const [key, idx] of schemaIdxMap) {
-		if (!dbIdxMap.has(key)) {
+	// Index identity is structural and each occurrence consumes one matching
+	// counterpart. Names are cosmetic, but duplicate structural indexes are not.
+	for (const idx of schema.indexes) {
+		const key = indexComparisonKey(idx);
+		const dbIndex = unmatchedDbIndexes.findIndex(
+			(candidate) => indexComparisonKey(candidate) === key,
+		);
+		if (dbIndex === -1) {
 			pendingCreates.push({
 				index: idx,
 				replacementKey: indexReplacementKey(schema.name, idx),
 				details: `Create ${idx.unique ? 'unique ' : ''}index on (${idx.columns.join(', ')})`,
 				destructive: false,
 			});
+		} else {
+			unmatchedDbIndexes.splice(dbIndex, 1);
 		}
 	}
 
@@ -1292,9 +1292,9 @@ function compareIndexes(
 
 	// Indexes in DB but not in schema → drop (skip auto-FK and auto-unique indexes — they are auto-managed)
 	const pendingDrops: PendingIndexDrop[] = [];
-	for (const [key, idx] of dbIdxMap) {
+	for (const idx of unmatchedDbIndexes) {
+		const key = indexComparisonKey(idx);
 		if (
-			!schemaIdxMap.has(key) &&
 			!autoFkIndexKeys.has(key) &&
 			!declaredUnemittableFkAutoIndexKeys.has(key) &&
 			!isAutoUniqueIndex(schema.name, idx, autoUniqueIndexColumns)
@@ -1302,7 +1302,7 @@ function compareIndexes(
 			pendingDrops.push({
 				index: idx,
 				replacementKey: indexReplacementKey(schema.name, idx),
-				destructive: idx.unique === true,
+				destructive: idx.unique === true || !isManagedIndex(schema.name, idx),
 				details: `Drop index ${idx.name ?? `on (${formatIndexTargets(idx)})`}`,
 			});
 		}
@@ -1376,6 +1376,14 @@ function isManagedIndex(tableName: string, idx: IndexIR): boolean {
 		(idx.expressions === undefined || idx.expressions.length === 0) &&
 		canGenerateCreateIndex(tableName, idx) &&
 		canValidateSchemaIndex(tableName, idx)
+	);
+}
+
+function isUnemittableFkIndex(tableName: string, idx: IndexIR): boolean {
+	return (
+		(idx.expressions?.length ?? 0) > 0 ||
+		!canGenerateCreateIndex(tableName, idx) ||
+		!canValidateSchemaIndex(tableName, idx)
 	);
 }
 

@@ -519,10 +519,9 @@ describe('generateDropIndexSQL', () => {
 		).toEqual('DROP INDEX IF EXISTS "tenant_42"."idx_name"');
 	});
 
-	it('rejects index names with embedded double-quotes (security: validateIdentifier)', () => {
-		// S-2: validateIdentifier now rejects double-quotes in identifiers to prevent injection.
-		expect(() => generateDropIndexSQL('my"index', 'public')).toThrow(
-			/Invalid.*identifier/i,
+	it('quote-doubles a catalog index name with embedded double-quotes', () => {
+		expect(generateDropIndexSQL('my"index', 'public')).toEqual(
+			'DROP INDEX "public"."my""index"',
 		);
 	});
 

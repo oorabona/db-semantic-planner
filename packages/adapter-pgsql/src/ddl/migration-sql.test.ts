@@ -791,6 +791,30 @@ describe('generateMigrationSQL', () => {
 			expect(sql[0]).toBe('DROP INDEX IF EXISTS "tenant_1"."idx_old";');
 		});
 
+		it('quotes a catalog index name outside the dbsp identifier grammar', () => {
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'drop_index',
+						table: 'embeddings',
+						destructive: true,
+						details: '',
+						meta: {
+							index: {
+								name: 'idx-embeddings-manual',
+								columns: ['chunk_index'],
+							},
+						},
+					},
+				]),
+				{ includeDestructive: true, schemaName: 'public' },
+			);
+
+			expect(sql).toEqual([
+				'DROP INDEX IF EXISTS "public"."idx-embeddings-manual";',
+			]);
+		});
+
 		describe('Index enhancements', () => {
 			it('should generate CREATE INDEX USING gin', () => {
 				const idx: IndexIR = {
@@ -1294,7 +1318,7 @@ describe('generateMigrationSQL', () => {
 			expect(sql.some((s) => s.includes('DROP'))).toBe(false);
 		});
 
-		it('leaves expression-index drops unmanaged and emits no SQL', () => {
+		it('reports an expression-index drop as destructive drift', () => {
 			const schemaTable = makeTable('users', [
 				makeCol({ name: 'email', type: 'string' }),
 			]);
@@ -1313,15 +1337,26 @@ describe('generateMigrationSQL', () => {
 				new ModelIRImpl(new Map([['users', dbTable]]), new Map()),
 			);
 
-			expect(diff.changes).toEqual([]);
+			expect(diff.changes).toEqual([
+				expect.objectContaining({
+					kind: 'drop_index',
+					destructive: true,
+					meta: {
+						index: {
+							name: 'idx_users_lower_email',
+							columns: [],
+							expressions: ['lower(email)'],
+						},
+					},
+				}),
+			]);
 			expect(generateMigrationSQL(diff, { includeDestructive: false })).toEqual(
 				[],
 			);
-			expect(generateMigrationSQL(diff, { includeDestructive: true })).toEqual(
-				[],
-			);
+			expect(generateMigrationSQL(diff, { includeDestructive: true })).toEqual([
+				'DROP INDEX IF EXISTS "idx_users_lower_email";',
+			]);
 			expect(generateDownSQL(diff, { includeDestructive: false })).toEqual([]);
-			expect(generateDownSQL(diff, { includeDestructive: true })).toEqual([]);
 		});
 
 		it('filters both halves of a unique NULLS NOT DISTINCT index replacement with the same name', () => {

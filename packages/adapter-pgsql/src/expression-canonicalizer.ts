@@ -2,7 +2,7 @@
  * PostgreSQL CHECK constraint and column-default canonicalisation.
  */
 import { randomUUID } from 'node:crypto';
-import { ModelIRImpl } from '@dbsp/core';
+import { emitWarning, ModelIRImpl } from '@dbsp/core';
 import { assertDeclaredEnumMapIdentity } from '@dbsp/core/internal';
 import type {
 	CheckConstraintIR,
@@ -240,6 +240,17 @@ class TaggedExpressionRejection extends Error {
 	) {
 		super(`PostgreSQL rejected expression while executing ${statement}`);
 		this.name = 'TaggedExpressionRejection';
+	}
+}
+
+/** Preserve statement context for a staging failure without misreporting it as an expression rejection. */
+class StagedExpressionError extends Error {
+	constructor(
+		readonly statement: ExpressionStatement,
+		override readonly cause: unknown,
+	) {
+		super(errorMessage(cause), { cause });
+		this.name = 'StagedExpressionError';
 	}
 }
 
@@ -935,23 +946,11 @@ function collectUnavailableColumnDefaultOutcomes(
 	for (const table of desired.tables.values()) {
 		const dbTableName = table.name;
 		const dbTable = dbModel.tables.get(dbTableName);
+		if (dbTable === undefined) continue;
 		for (const column of table.columns) {
 			if (column.default === undefined || column.default === null) continue;
 			const columnName = column.name;
-			if (dbTable === undefined) {
-				outcomes.push(
-					fallbackColumnDefaultOutcome(
-						'desired',
-						dbTableName,
-						columnName,
-						'unavailable',
-						'unpaired',
-						'the table is absent from the database',
-					),
-				);
-			} else if (
-				!dbTable.columns.some((candidate) => candidate.name === columnName)
-			) {
+			if (!dbTable.columns.some((candidate) => candidate.name === columnName)) {
 				outcomes.push(
 					fallbackColumnDefaultOutcome(
 						'desired',
@@ -976,6 +975,11 @@ function collectUnavailableColumnDefaultOutcomes(
 				desiredColumn?.default === undefined ||
 				desiredColumn.default === null
 			) {
+				if (
+					desiredColumn?.autoIncrement === true &&
+					dbColumn.autoIncrement === true
+				)
+					continue;
 				outcomes.push(
 					fallbackColumnDefaultOutcome(
 						'database',
@@ -1402,7 +1406,10 @@ export async function canonicalizeIndexPredicate(
 				`((1)) WHERE ${requestedPredicate}`,
 		);
 	} catch (error) {
-		throw markExpressionRejection(error, 'create_partial_index');
+		throw (
+			markExpressionRejection(error, 'create_partial_index') ??
+			new StagedExpressionError('create_partial_index', error)
+		);
 	}
 	const rows = await deparseWithCatalogSearchPath(adapter, (tx) =>
 		tx.executeRaw<{ predicate: string }>(
@@ -1483,8 +1490,7 @@ async function renderOwnedTableChecks(
 			tempNamesByPhysicalName.set(check.physicalName, tempName);
 		} catch (error) {
 			const rejection = markExpressionRejection(error, 'add_check_constraint');
-			if (!isSemanticExpressionRejection(rejection, 'add_check_constraint'))
-				throw rejection;
+			if (rejection === undefined) throw error;
 		}
 	}
 
@@ -1728,7 +1734,7 @@ async function canonicalizeColumnDefault(
 	} catch (error) {
 		// An authored default that PostgreSQL rejects cannot run in the migration.
 		// Unlike scratch infrastructure, this is never safe to compare as raw text.
-		throw markExpressionRejection(error, 'alter_column_set_default');
+		throw markExpressionRejection(error, 'alter_column_set_default') ?? error;
 	}
 
 	const defaults = await deparseWithCatalogSearchPath(adapter, (tx) =>
@@ -1940,7 +1946,7 @@ async function canonicalizeTableChecks(
 					),
 				);
 			} catch (error) {
-				throw markExpressionRejection(error, 'add_check_constraint');
+				throw markExpressionRejection(error, 'add_check_constraint') ?? error;
 			}
 			tempConstraintNamesByIndex.set(i, tempConstraintName);
 		} catch (error) {
@@ -2432,7 +2438,7 @@ function reportConstraintCanonicalizationFailure(
 	if (onWarning) {
 		onWarning(warning);
 	} else {
-		console.warn(`Warning: ${message}`);
+		emitWarning(`Warning: ${message}`, 'runtime');
 	}
 }
 
@@ -2460,7 +2466,7 @@ function reportColumnDefaultCanonicalizationFailure(
 	if (options?.onWarning) {
 		options.onWarning(warning);
 	} else {
-		console.warn(`Warning: ${message}`);
+		emitWarning(`Warning: ${message}`, 'runtime');
 	}
 }
 
@@ -2496,7 +2502,7 @@ function reportUnavailableColumnDefault(
 	if (options?.onWarning) {
 		options.onWarning(warning);
 	} else {
-		console.warn(`Warning: ${message}`);
+		emitWarning(`Warning: ${message}`, 'runtime');
 	}
 }
 
@@ -2530,12 +2536,15 @@ function reportIndexPredicateCanonicalizationFailure(
 	if (options?.onWarning) {
 		options.onWarning(warning);
 	} else {
-		console.warn(`Warning: ${message}`);
+		emitWarning(`Warning: ${message}`, 'runtime');
 	}
 }
 
 function errorMessage(error: unknown): string {
 	if (error instanceof TaggedExpressionRejection) {
+		return errorMessage(error.cause);
+	}
+	if (error instanceof StagedExpressionError) {
 		return errorMessage(error.cause);
 	}
 	if (error instanceof IndexPredicateCanonicalizationUnavailableError) {
@@ -2600,7 +2609,8 @@ function isTransactionIntegrityOrCleanupFailureItem(error: unknown): boolean {
 function markExpressionRejection(
 	error: unknown,
 	statement: ExpressionStatement,
-): TaggedExpressionRejection {
+): TaggedExpressionRejection | undefined {
+	if (!hasOnlyExpressionSqlStateErrors(error)) return undefined;
 	return new TaggedExpressionRejection(statement, error);
 }
 
@@ -2613,15 +2623,12 @@ function isSemanticExpressionRejection(
 	error: unknown,
 	statement: ExpressionStatement,
 ): boolean {
-	if (
-		!errorChain(error).some(
-			(item) =>
-				item instanceof TaggedExpressionRejection &&
-				item.statement === statement,
-		)
-	) {
-		return false;
-	}
+	if (!(error instanceof TaggedExpressionRejection)) return false;
+	if (error.statement !== statement) return false;
+	return true;
+}
+
+function hasOnlyExpressionSqlStateErrors(error: unknown): boolean {
 	const chain = errorChain(error);
 	if (chain.some(isTransactionIntegrityOrCleanupFailureItem)) return false;
 	const leaves = chain.filter((item) => nestedErrors(item).length === 0);
@@ -2629,32 +2636,8 @@ function isSemanticExpressionRejection(
 		leaves.length > 0 &&
 		leaves.every((item) => {
 			const code = pgErrorCode(item);
-			return (
-				code !== undefined &&
-				!isOperationalSqlState(code) &&
-				(code.startsWith('22') ||
-					code.startsWith('23') ||
-					(code.startsWith('42') &&
-						(code !== '42501' || statement === 'create_partial_index')) ||
-					code === '0A000')
-			);
+			return code?.startsWith('22') === true || code?.startsWith('42') === true;
 		})
-	);
-}
-
-function isOperationalSqlState(code: string): boolean {
-	return (
-		code.startsWith('08') ||
-		code.startsWith('25') ||
-		code.startsWith('3B') ||
-		code.startsWith('40') ||
-		code.startsWith('53') ||
-		code.startsWith('54') ||
-		code === '55P03' ||
-		code === '55P04' ||
-		code.startsWith('57') ||
-		code.startsWith('58') ||
-		code.startsWith('XX')
 	);
 }
 

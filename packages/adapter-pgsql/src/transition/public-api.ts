@@ -1,9 +1,11 @@
 import type { Pool } from 'pg';
 import type { PgPhysicalModel } from '../physical-model/index.js';
+import { validateIdentifier } from '../validate.js';
 import {
 	convergePgPhysical,
 	type ConvergePgOptions as InternalConvergePgOptions,
 	type PgConvergeCheckResult,
+	PgConvergeRefusalError,
 	type PgConvergeResult,
 	physicalConvergeOptions,
 } from './converge.js';
@@ -36,6 +38,15 @@ export function convergePg(
 	physical: PgPhysicalModel,
 	options: ConvergePgOptions | ConvergePgCheckOptions = {},
 ): Promise<PgConvergeResult | PgConvergeCheckResult> {
+	try {
+		validateIdentifier(physical.schema, 'schema');
+	} catch (error) {
+		throw new PgConvergeRefusalError(
+			'invalid-options',
+			[],
+			`converge refuses physical schema ${physical.schema}: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
 	return convergePgPhysical(
 		pool,
 		physical,

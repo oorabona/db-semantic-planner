@@ -46,6 +46,7 @@ import {
 	normalizeOptionalBoolean,
 	normalizeSequenceInteger,
 } from './generated-source-normalizers.js';
+import { quoteCatalogIdentifier } from './index-operations.js';
 import {
 	AutoIncrementTransitionUnsupportedError,
 	assertCreateIndexesSupported,
@@ -962,9 +963,8 @@ function upDropIndex(
 ): string | undefined {
 	const idx = change.meta?.index as IndexIR;
 	if (!idx) return undefined;
-	const indexName = quoteIdent(
+	const indexName = quoteCatalogIdentifier(
 		requiredPhysicalIndexName(idx, change.table, schemaName),
-		'alias',
 	);
 	const schemaPrefix = schemaName ? `${quoteIdent(schemaName, 'alias')}.` : '';
 	return `DROP INDEX IF EXISTS ${schemaPrefix}${indexName};`;

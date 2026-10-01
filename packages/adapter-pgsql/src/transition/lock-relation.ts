@@ -1,3 +1,4 @@
+import { emitWarning } from '@dbsp/core';
 import type { LedgerAddress } from '@dbsp/types';
 import { escapeDiagnosticText } from '../validate.js';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
@@ -71,8 +72,9 @@ export function pgLockRelationForAddress(
 			address.parent.schema !== undefined &&
 			address.parent.schema !== address.schema
 		)
-			console.warn(
+			emitWarning(
 				`${escapeDiagnosticText(label)} lock ignores mismatched parent schema ${escapeDiagnosticText(address.parent.schema)} for ${escapeDiagnosticText(address.kind)} ${escapeDiagnosticText(address.name)}; catalogue identity resolves ${escapeDiagnosticText(address.schema)}`,
+				'runtime',
 			);
 		return { schema: address.schema, table: address.parent.name };
 	}

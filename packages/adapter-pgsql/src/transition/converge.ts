@@ -118,10 +118,10 @@ export interface PgConvergeInitializationFailure {
 export class PgConvergeRefusalError extends Error {
 	constructor(
 		readonly refusal: PgConvergeRefusal,
-		readonly changes: readonly Pick<
+		readonly changes: readonly (Pick<
 			SchemaChange,
 			'kind' | 'table' | 'column' | 'details'
-		>[],
+		> & { readonly index?: string })[],
 		readonly detail?: string,
 		readonly runIds?: readonly string[],
 		readonly executionIds?: readonly string[],
@@ -388,6 +388,13 @@ function refusal(
 			kind: change.kind,
 			table: change.table,
 			...(change.column === undefined ? {} : { column: change.column }),
+			...((change.kind === 'create_index' || change.kind === 'drop_index') &&
+			change.meta?.index !== undefined &&
+			typeof change.meta.index === 'object' &&
+			!Array.isArray(change.meta.index) &&
+			typeof (change.meta.index as IndexIR).name === 'string'
+				? { index: (change.meta.index as IndexIR).name }
+				: {}),
 			details: change.details,
 		})),
 		detail,
@@ -397,6 +404,42 @@ function refusal(
 		undefined,
 		options,
 	);
+}
+
+function applicationStepFailure(error: PgApplicationStepError): {
+	readonly detail: string;
+	readonly cause: unknown;
+} {
+	const cause = originalApplicationStepCause(error.cause ?? error);
+	const code = pgErrorCode(cause);
+	const message = cause instanceof Error ? cause.message : String(cause);
+	return {
+		detail: `application step ${error.stepId}: ${code === undefined ? message : `${code} ${message}`}`,
+		cause,
+	};
+}
+
+function originalApplicationStepCause(error: unknown): unknown {
+	const seen = new Set<unknown>();
+	let current = error;
+	while (
+		typeof current === 'object' &&
+		current !== null &&
+		!seen.has(current)
+	) {
+		seen.add(current);
+		if (pgErrorCode(current) !== undefined) return current;
+		const cause = (current as { readonly cause?: unknown }).cause;
+		if (cause === undefined) break;
+		current = cause;
+	}
+	return current;
+}
+
+function pgErrorCode(error: unknown): string | undefined {
+	if (typeof error !== 'object' || error === null) return undefined;
+	const code = (error as { readonly code?: unknown }).code;
+	return typeof code === 'string' ? code : undefined;
 }
 
 function invalidOptions(detail: string): PgConvergeRefusalError {
@@ -2181,13 +2224,12 @@ export async function convergePgPhysical(
 				},
 			});
 		} catch (error) {
-			if (error instanceof PgApplicationStepError)
-				throw refusal(
-					error.refusal,
-					[],
-					`application step ${error.stepId}: ${error.message}`,
-					{ cause: error.cause ?? error },
-				);
+			if (error instanceof PgApplicationStepError) {
+				const failure = applicationStepFailure(error);
+				throw refusal(error.refusal, [], failure.detail, {
+					cause: failure.cause,
+				});
+			}
 			throw error;
 		}
 		if (
@@ -2404,13 +2446,12 @@ export async function convergePgPhysical(
 				destroyReason = 'converge received a transport-ambiguous outcome';
 				return { kind: 'transport-ambiguous', detail: error.message };
 			}
-			if (error instanceof PgApplicationStepError)
-				throw refusal(
-					error.refusal,
-					[],
-					`application step ${error.stepId}: ${error.message}`,
-					{ cause: error.cause ?? error },
-				);
+			if (error instanceof PgApplicationStepError) {
+				const failure = applicationStepFailure(error);
+				throw refusal(error.refusal, [], failure.detail, {
+					cause: failure.cause,
+				});
+			}
 			throw error;
 		}
 		const run: TransitionRunMetadata = {
@@ -2486,13 +2527,12 @@ export async function convergePgPhysical(
 					destroyReason = 'converge received a transport-ambiguous outcome';
 					return { kind: 'transport-ambiguous', detail: error.message };
 				}
-				if (error instanceof PgApplicationStepError)
-					throw refusal(
-						error.refusal,
-						[],
-						`application step ${error.stepId}: ${error.message}`,
-						{ cause: error.cause ?? error },
-					);
+				if (error instanceof PgApplicationStepError) {
+					const failure = applicationStepFailure(error);
+					throw refusal(error.refusal, [], failure.detail, {
+						cause: failure.cause,
+					});
+				}
 				throw error;
 			}
 		if (outcome.outcome === 'completed')

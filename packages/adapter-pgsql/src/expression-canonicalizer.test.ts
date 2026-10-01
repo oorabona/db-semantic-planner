@@ -1,4 +1,9 @@
-import { ModelIRImpl, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
+import {
+	ModelIRImpl,
+	POSTGRESQL_CAPABILITIES,
+	resetLogger,
+	setLogger,
+} from '@dbsp/core';
 import { EnumNameMapKeyMismatchError } from '@dbsp/core/internal';
 import type {
 	ColumnIR,
@@ -1232,6 +1237,68 @@ describe('canonicalizeCheckConstraints', () => {
 				return `${change.kind}:${checkName}`;
 			});
 		expect(checkChanges).toEqual(['add_check_constraint:jobs_status_check']);
+	});
+
+	it('only tags staged CHECK errors in the data and syntax SQLSTATE classes', async () => {
+		const timeout = Object.assign(
+			new Error('canceling statement due to statement timeout'),
+			{ code: '57014' },
+		);
+		const client = new FakePgClient();
+		client.failOnSql = /^ALTER TABLE .*CHECK \(score > 0\)$/u;
+		client.failOnSqlError = timeout;
+		const desired = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [makeCol('id'), makeCol('score')],
+				checkConstraints: [
+					{ name: 'jobs_score_check', expression: 'score > 0' },
+				],
+			}),
+		]);
+		const database = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [makeCol('id'), makeCol('score')],
+			}),
+		]);
+
+		const caught = await canonicalizeWithScratch(
+			adapterForPool(new FakePgPool(client)),
+			desired,
+			database,
+		).catch((error: unknown) => error);
+
+		expect(caught).toBeInstanceOf(CheckConstraintCanonicalizationError);
+		expect(caught).not.toMatchObject({ name: 'TaggedExpressionRejection' });
+		expect((caught as Error).cause).toBe(timeout);
+		expect((caught as Error).cause).toMatchObject({
+			code: '57014',
+			message: 'canceling statement due to statement timeout',
+		});
+
+		const syntaxError = Object.assign(
+			new Error('column "missing" does not exist'),
+			{ code: '42703' },
+		);
+		client.failOnSqlError = syntaxError;
+		const warnings: unknown[] = [];
+		await expect(
+			canonicalizeWithScratch(
+				adapterForPool(new FakePgPool(client)),
+				desired,
+				database,
+				{ onWarning: (warning) => warnings.push(warning) },
+			),
+		).resolves.toBeDefined();
+		expect(warnings).toEqual([
+			expect.objectContaining({
+				cause: expect.objectContaining({
+					name: 'TaggedExpressionRejection',
+					cause: syntaxError,
+				}),
+			}),
+		]);
 	});
 
 	it('throws in strict mode when a CHECK references an enum value added by the same diff', async () => {
@@ -3961,7 +4028,7 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 		);
 	});
 
-	it('reports strict refusal instead of announcing raw fallback for shape-unavailable defaults', async () => {
+	it('does not compare defaults for a desired table absent from the database', async () => {
 		const desired = makeModel([
 			makeTable({
 				name: 'new_jobs',
@@ -3974,27 +4041,76 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 			new FakePgPool(new FakePgClient()),
 		).withScratchScope((scratch) =>
 			canonicalizeExpressionSurfaces(scratch, desired, makeModel([]), {
-				requireCanonicalization: true,
 				onWarning: (warning) => warnings.push(warning),
 			}),
 		);
 
-		expect(canonical.defaultOutcomes).toContainEqual(
-			expect.objectContaining({
-				table: 'new_jobs',
-				column: 'state',
-				status: 'unavailable',
-				comparison: 'unpaired',
-			}),
-		);
-		expect(warnings).toEqual([
-			expect.objectContaining({
-				outcome: 'refused',
-				message: expect.stringContaining(
-					'strict canonicalization cannot compare this column',
-				),
+		expect(canonical.defaultOutcomes).toEqual([]);
+		expect(warnings).toEqual([]);
+	});
+
+	it('pairs an owned generated sequence default with auto-increment without warning', async () => {
+		const desired = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [makeCol('id', { autoIncrement: true })],
 			}),
 		]);
+		const database = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [
+					makeCol('id', {
+						autoIncrement: true,
+						default: { sql: "nextval('jobs_id_seq'::regclass)" },
+					}),
+				],
+			}),
+		]);
+		const warning = vi.fn();
+		setLogger({ warn: warning });
+
+		try {
+			const canonical = await adapterForPool(
+				new FakePgPool(new FakePgClient()),
+			).withScratchScope((scratch) =>
+				canonicalizeExpressionSurfaces(scratch, desired, database),
+			);
+			expect(canonical.defaultOutcomes).toEqual([]);
+			expect(warning).not.toHaveBeenCalled();
+		} finally {
+			resetLogger();
+		}
+	});
+
+	it('routes unavailable-default warnings through the core runtime logger', async () => {
+		const desired = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [makeCol('id'), makeCol('state', { default: 'pending' })],
+			}),
+		]);
+		const database = makeModel([
+			makeTable({ name: 'jobs', columns: [makeCol('id')] }),
+		]);
+		const warning = vi.fn();
+		const consoleWarning = vi
+			.spyOn(console, 'warn')
+			.mockImplementation(() => {});
+		setLogger({ warn: warning });
+
+		try {
+			await adapterForPool(new FakePgPool(new FakePgClient())).withScratchScope(
+				(scratch) => canonicalizeExpressionSurfaces(scratch, desired, database),
+			);
+			expect(warning).toHaveBeenCalledWith(
+				expect.stringContaining('Could not canonicalize one column default'),
+			);
+			expect(consoleWarning).not.toHaveBeenCalled();
+		} finally {
+			resetLogger();
+			consoleWarning.mockRestore();
+		}
 	});
 
 	it('reports strict refusal instead of announcing raw fallback when a catalog default disappears', async () => {

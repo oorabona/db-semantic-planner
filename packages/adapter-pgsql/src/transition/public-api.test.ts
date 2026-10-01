@@ -2,7 +2,10 @@ import { ModelIRImpl } from '@dbsp/core';
 import type { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import * as physicalModel from '../physical-model/index.js';
-import { createPgPhysicalModel } from '../physical-model/index.js';
+import {
+	createPgPhysicalModel,
+	type PgPhysicalModel,
+} from '../physical-model/index.js';
 import { PgConvergeRefusalError } from './converge.js';
 import { convergePg } from './public-api.js';
 
@@ -40,7 +43,7 @@ function poolThatMustNotConnect(): Pool {
 
 function expectInvalidOptionsBeforeConnection(
 	pool: Pool,
-	physical: ReturnType<typeof physicalWithUsers>,
+	physical: PgPhysicalModel,
 	options: unknown,
 ): void {
 	let caught: unknown;
@@ -102,6 +105,30 @@ describe('public convergePg', () => {
 		} finally {
 			factory.mockRestore();
 		}
+	});
+
+	it('refuses an unrenderable physical snapshot schema before connecting', () => {
+		const physical = createPgPhysicalModel({
+			mode: 'physical',
+			schema: '$user',
+			model: new ModelIRImpl(
+				new Map([
+					[
+						'users',
+						{
+							name: 'users',
+							columns: [],
+							foreignKeys: [],
+							indexes: [],
+						},
+					],
+				]),
+				new Map(),
+			),
+		});
+		const pool = poolThatMustNotConnect();
+
+		expectInvalidOptionsBeforeConnection(pool, physical, {});
 	});
 
 	it('refuses an undeclared external-index table before inventory resolution', () => {

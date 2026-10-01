@@ -1272,7 +1272,34 @@ describe('compareSchemata', () => {
 			expect(diff.changes[0]!.kind).toBe('drop_index');
 		});
 
-		it('treats database expression and unrepresentable indexes as unmanaged, while unique drops stay destructive', () => {
+		it('drops one of two live indexes with identical structure', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'email', type: 'string' })],
+					indexes: [{ name: 'idx_users_email', columns: ['email'] }],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'email', type: 'string' })],
+					indexes: [
+						{ name: 'idx_users_email_a', columns: ['email'] },
+						{ name: 'idx_users_email_b', columns: ['email'] },
+					],
+				}),
+			]);
+
+			expect(compareSchemata(schema, db).changes).toEqual([
+				expect.objectContaining({
+					kind: 'drop_index',
+					meta: { index: { name: 'idx_users_email_b', columns: ['email'] } },
+				}),
+			]);
+		});
+
+		it('reports database expression and unrepresentable indexes as destructive drift', () => {
 			const plainIdx: IndexIR = {
 				name: 'idx_users_email',
 				columns: ['email'],
@@ -1283,6 +1310,7 @@ describe('compareSchemata', () => {
 				unique: true,
 			};
 			const expressionIdx: IndexIR = {
+				name: 'idx_users_lower_email',
 				columns: [],
 				expressions: ['lower(email)'],
 			};
@@ -1324,21 +1352,18 @@ describe('compareSchemata', () => {
 				]);
 			const diffForDroppedIndex = (idx: IndexIR) =>
 				compareSchemata(modelWithoutIndex(), modelWithIndex(idx));
-			const expectNoDbIndexChangesOrSql = (idx: IndexIR) => {
+			const expectDestructiveDbIndexDrift = (idx: IndexIR) => {
 				const diff = compareSchemata(modelWithoutIndex(), modelWithIndex(idx));
-				expect(diff.changes).toEqual([]);
-				for (const includeDestructive of [false, true]) {
-					expect(() =>
-						generateMigrationSQL(diff, { includeDestructive }),
-					).not.toThrow();
-					expect(generateMigrationSQL(diff, { includeDestructive })).toEqual(
-						[],
-					);
-					expect(() =>
-						generateDownSQL(diff, { includeDestructive }),
-					).not.toThrow();
-					expect(generateDownSQL(diff, { includeDestructive })).toEqual([]);
-				}
+				expect(diff.changes).toEqual([
+					expect.objectContaining({
+						kind: 'drop_index',
+						destructive: true,
+						meta: { index: idx },
+					}),
+				]);
+				expect(
+					generateMigrationSQL(diff, { includeDestructive: false }),
+				).toEqual([]);
 			};
 
 			const plainDiff = diffForDroppedIndex(plainIdx);
@@ -1369,7 +1394,7 @@ describe('compareSchemata', () => {
 				rejectedOpclassIdx,
 				schemaRejectedIdx,
 			]) {
-				expectNoDbIndexChangesOrSql(idx);
+				expectDestructiveDbIndexDrift(idx);
 			}
 		});
 

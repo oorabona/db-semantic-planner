@@ -65,7 +65,7 @@ How they are recorded and run:
   built-in names win; otherwise a name that exists
   in the target resolves there and a session temporary table cannot shadow it, while a name absent
   from it continues down the path. A target schema literally named `$user` cannot host steps; since ADR 0009
-  it cannot be a converge target at all, because the physical model refuses a schema the renderers cannot write.
+  it cannot be a converge target at all, because `convergePg` refuses a schema the renderers cannot write.
   An owned-CHECK state rendering failure during planning or execution is `application-step-failed`
   naming the step with the original error as `cause`; failed rendering-scope cleanup destroys the
   session, so planning rolls back only that scope without running a step while execution rolls back

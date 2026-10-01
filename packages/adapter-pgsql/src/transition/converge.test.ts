@@ -600,6 +600,9 @@ async function expectRefusal(
 	refusal: string,
 	testClient = client(),
 ) {
+	const indexName = (
+		input.meta as { readonly index?: { readonly name?: unknown } } | undefined
+	)?.index?.name;
 	mocks.compare.mockResolvedValue({ changes: [input] });
 	mocks.createStep.mockImplementation(
 		({ change: value }: { change: Record<string, unknown> }) => stepFor(value),
@@ -609,6 +612,9 @@ async function expectRefusal(
 	).rejects.toMatchObject({
 		name: 'PgConvergeRefusalError',
 		refusal,
+		...(typeof indexName === 'string'
+			? { changes: [expect.objectContaining({ index: indexName })] }
+			: {}),
 	});
 	expect(mocks.execute).not.toHaveBeenCalled();
 }
@@ -870,6 +876,79 @@ describe('convergePg refusal boundary', () => {
 			).catch((caught: unknown) => caught);
 			expect(error).toMatchObject({ refusal: 'application-step-failed' });
 			expect((error as Error).cause).toBe(renderingError);
+		} finally {
+			mocks.adapter.withScratchScope = withScratchScope;
+		}
+	});
+
+	it('reports an owned-CHECK rendering timeout SQLSTATE and keeps its original cause', async () => {
+		const timeout = Object.assign(
+			new Error('canceling statement due to statement timeout'),
+			{ code: '57014' },
+		);
+		const withScratchScope = mocks.adapter.withScratchScope;
+		mocks.adapter.withScratchScope = async (callback) => {
+			type ScratchScope = {
+				readonly executeRaw: (sql: string) => Promise<unknown[]>;
+				readonly transaction: (
+					inner: (value: ScratchScope) => Promise<unknown>,
+				) => Promise<unknown>;
+			};
+			const scope: ScratchScope = {
+				executeRaw: async (sql: string) => {
+					if (sql.includes("current_setting('search_path')"))
+						return [{ search_path: 'public' }];
+					if (sql.includes('SELECT pg_catalog.to_regclass'))
+						return [{ exists: true }];
+					if (sql.includes('FROM pg_catalog.pg_constraint c'))
+						return [
+							{
+								name: 'positive',
+								expression: 'CHECK ((score > 0))',
+								validated: true,
+							},
+						];
+					if (sql.startsWith('ALTER TABLE ')) throw timeout;
+					return [];
+				},
+				transaction: async (inner) => inner(scope),
+			};
+			return callback(scope);
+		};
+		mocks.compare.mockResolvedValue({ changes: [] });
+		mockManagedObjectsWithUnmanagedApplicationSteps();
+		try {
+			const error = await convergePg(
+				poolFor(),
+				modelWithTables([
+					{
+						name: 'projects',
+						columns: [{ name: 'score', type: 'integer', nullable: false }],
+						foreignKeys: [],
+						indexes: [],
+						checkConstraints: [{ name: 'positive', expression: 'score > 0' }],
+					},
+				]),
+				{
+					steps: [
+						{
+							kind: 'assert',
+							id: 'owned-check-timeout',
+							digest: 'v1',
+							phase: 'after-generated-ddl',
+							owns: { checks: [{ table: 'projects', name: 'positive' }] },
+							inspect: async () => 'healthy' as const,
+							apply: async () => undefined,
+						},
+					],
+				},
+			).catch((caught: unknown) => caught);
+			expect(error).toMatchObject({
+				refusal: 'application-step-failed',
+				detail:
+					'application step owned-check-timeout: 57014 canceling statement due to statement timeout',
+				cause: timeout,
+			});
 		} finally {
 			mocks.adapter.withScratchScope = withScratchScope;
 		}

@@ -20,7 +20,9 @@ import {
 } from '@dbsp/adapter-pgsql/internal';
 import {
 	projectLedgerChain,
+	resetLogger,
 	semanticArtifactId,
+	setLogger,
 	transitionPlanDigest,
 } from '@dbsp/core';
 import type {
@@ -35,7 +37,7 @@ import type {
 	TransitionRunMetadata,
 } from '@dbsp/types';
 import pg from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
 	closeTestDb,
 	createSchema,
@@ -2612,6 +2614,151 @@ describe('convergePg', () => {
 		).resolves.toMatchObject({ rows: [{ exists: true }] });
 	});
 
+	it('refuses undeclared quoted and expression indexes unless each is external', async () => {
+		const pool = await getTestPool();
+		const name = 'undeclared_index_refusal_fixture';
+		const manualIndex = 'idx-embeddings-manual';
+		const expressionIndex = 'idx-embeddings-expression-manual';
+		const desired = model([
+			{
+				...table(name, false),
+				columns: [
+					{ name: 'id', type: 'integer', nullable: false },
+					{ name: 'name', type: 'string', nullable: false },
+				],
+			},
+		]);
+		await expect(convergePg(pool, desired, { schema })).resolves.toMatchObject({
+			kind: 'applied',
+		});
+		await pool.query(
+			`CREATE INDEX "${manualIndex}" ON "${schema}"."${name}" ("name")`,
+		);
+
+		await expect(
+			convergePg(pool, desired, { schema, mode: 'check' }),
+		).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+			changes: [
+				expect.objectContaining({
+					kind: 'drop_index',
+					index: manualIndex,
+				}),
+			],
+		});
+		const manualExternal = {
+			schema,
+			mode: 'check' as const,
+			externalIndexes: [{ table: name, name: manualIndex }],
+		};
+		await expect(
+			convergePg(pool, desired, manualExternal),
+		).resolves.toMatchObject({ kind: 'no-drift' });
+
+		await pool.query(
+			`CREATE INDEX "${expressionIndex}" ON "${schema}"."${name}" ((lower("name")))`,
+		);
+		const { changes } = await comparePgsqlDatabaseSchema(
+			createPgsqlAdapter(pool),
+			desired,
+			{ schema },
+		);
+		expect(changes).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					kind: 'drop_index',
+					table: name,
+					destructive: true,
+					meta: expect.objectContaining({
+						index: expect.objectContaining({ name: expressionIndex }),
+					}),
+				}),
+			]),
+		);
+		await expect(
+			convergePg(pool, desired, manualExternal),
+		).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+			changes: [
+				expect.objectContaining({
+					kind: 'drop_index',
+					index: expressionIndex,
+				}),
+			],
+		});
+		await expect(
+			convergePg(pool, desired, {
+				...manualExternal,
+				externalIndexes: [
+					{ table: name, name: manualIndex },
+					{ table: name, name: expressionIndex },
+				],
+			}),
+		).resolves.toMatchObject({ kind: 'no-drift' });
+	});
+
+	it('does not warn for serial defaults or pristine defaulted tables', async () => {
+		const pool = await getTestPool();
+		const serialName = 'serial_default_no_warning_fixture';
+		const pristineSchema = `converge_pristine_default_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const serialTable: TableIR = {
+			name: serialName,
+			columns: [
+				{
+					name: 'id',
+					type: 'integer',
+					nullable: false,
+					autoIncrement: true,
+				},
+			],
+			primaryKey: 'id',
+			foreignKeys: [],
+			indexes: [],
+		};
+		await expect(
+			convergePg(pool, model([serialTable]), { schema }),
+		).resolves.toMatchObject({ kind: 'applied' });
+
+		const warning = vi.fn();
+		setLogger({ warn: warning });
+		try {
+			await expect(
+				convergePg(pool, model([serialTable]), { schema, mode: 'check' }),
+			).resolves.toMatchObject({ kind: 'no-drift' });
+			expect(warning).not.toHaveBeenCalled();
+
+			const defaultedTable: TableIR = {
+				name: 'pristine_default_no_warning_fixture',
+				columns: [
+					{ name: 'id', type: 'integer', nullable: false },
+					{
+						name: 'state',
+						type: 'string',
+						nullable: false,
+						default: 'pending',
+					},
+				],
+				primaryKey: 'id',
+				foreignKeys: [],
+				indexes: [],
+			};
+			await createSchema(pristineSchema);
+			try {
+				await expect(
+					convergePg(pool, model([defaultedTable]), {
+						schema: pristineSchema,
+						initialize: 'pristine',
+					}),
+				).resolves.toMatchObject({ kind: 'applied' });
+				expect(warning).not.toHaveBeenCalled();
+			} finally {
+				await dropSchema(pristineSchema);
+			}
+		} finally {
+			resetLogger();
+		}
+	});
+
 	it('applies a declared nullable column without dropping a caller-named external index', async () => {
 		const pool = await getTestPool();
 		const name = 'external_index_add_column_fixture';
@@ -4573,6 +4720,75 @@ describe('convergePg', () => {
 			expect(renderedSchema).toBe(targetSchema);
 		} finally {
 			await dropSchema(targetSchema);
+		}
+	});
+
+	it('does not misreport an owned-CHECK rendering timeout as an expression rejection', async () => {
+		const freshSchema = `converge_owned_timeout_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const name = 'scores';
+		const checkName = 'scores_positive';
+		const id = 'owned-check-timeout';
+		const pool = await getTestPool();
+		const desired = model([
+			{
+				...table(name, false),
+				columns: [{ name: 'score', type: 'integer', nullable: false }],
+				primaryKey: 'score',
+				checkConstraints: [{ name: checkName, expression: 'score > 0' }],
+			},
+		]);
+		const steps = [
+			{
+				kind: 'assert' as const,
+				id,
+				digest: 'v1',
+				phase: 'after-generated-ddl' as const,
+				statementTimeoutMs: 1,
+				owns: { checks: [{ table: name, name: checkName }] },
+				inspect: async (
+					_tx: PgApplicationStepTx,
+					owned: OwnedCheckInspection = emptyOwnedCheckInspection,
+				) =>
+					owned.checks[0]?.state === 'healthy'
+						? ('healthy' as const)
+						: ('unhealthy' as const),
+				apply: async (tx: PgApplicationStepTx) => {
+					await tx.query(
+						`ALTER TABLE "${name}" ADD CONSTRAINT "${checkName}" CHECK (score > 0)`,
+					);
+				},
+			},
+		];
+		await createSchema(freshSchema);
+		try {
+			const result = await convergePg(pool, desired, {
+				schema: freshSchema,
+				initialize: 'pristine',
+				steps,
+			}).catch((error: unknown) => error);
+			if (result instanceof PgConvergeRefusalError) {
+				const code =
+					result.cause !== null &&
+					typeof result.cause === 'object' &&
+					'code' in result.cause
+						? (result.cause as { readonly code?: unknown }).code
+						: undefined;
+				if (
+					typeof code === 'string' &&
+					!code.startsWith('22') &&
+					!code.startsWith('42')
+				) {
+					expect(result.detail).not.toContain('rejected expression');
+					expect(result.detail).toContain(code);
+					const message =
+						result.cause instanceof Error
+							? result.cause.message
+							: String(result.cause);
+					expect(result.detail).toContain(message);
+				}
+			}
+		} finally {
+			await dropSchema(freshSchema);
 		}
 	});
 

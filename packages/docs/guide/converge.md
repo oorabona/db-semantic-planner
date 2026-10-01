@@ -227,7 +227,7 @@ await convergePg(pool, createPgPhysicalModel({ mode: 'logical', model, schema: '
   Otherwise a name that exists in `options.schema` resolves there and a session temporary table
   cannot shadow it; a name absent from it continues down the path, like any query your application
   runs with that path, so schema-qualify names that live elsewhere. A schema literally named `$user`
-  cannot be a converge target: `createPgPhysicalModel` refuses a schema the DDL renderers cannot write.
+  cannot be a converge target: `convergePg` refuses a schema the DDL renderers cannot write.
 - `lockTimeoutMs` and `statementTimeoutMs` set PostgreSQL's `lock_timeout` and `statement_timeout`
   in the transactions that run the step's `inspect` or `apply`, so they limit each lock wait and
   each statement there, converge's ledger statements included. They do not limit how long the
@@ -311,7 +311,7 @@ database error inside an `initialize` preflight scope (a missing privilege, for 
 becomes `initialization-refused` with the error in `initialization.detail`, and an error in an
 application step's `inspect` or `apply`, or while rendering an owned CHECK's state, which becomes
 `application-step-failed` naming the step. A rendering failure carries the original error as
-`cause`; an error thrown by `inspect` or `apply` is reported by its message in `detail`. A failed cleanup of
+`cause` and, when it has a SQLSTATE, reports that SQLSTATE and PostgreSQL message in `detail`; an error thrown by `inspect` or `apply` is reported by its message in `detail`. A failed cleanup of
 that rendering scope destroys the session: during planning only the rendering scope is rolled back
 and no step ran; during execution the step transaction rolls back as for any `application-step-failed`. A failure
 during execution becomes an `execution-refused`, `adoption-refused` or `application-step-failed`
@@ -432,8 +432,9 @@ await convergePg(pool, createPgPhysicalModel({ mode: 'logical', model, schema: '
 });
 ```
 
-Each entry names a declared table and the exact physical index name. Converge never drops a live
-index named here and does not report it as drift. This is unlike `owns`: an external index is not
+Each entry names a declared table and the exact physical index name. An undeclared index is drift
+whatever its name or form; use `externalIndexes` to keep one. Converge never drops a live index
+named here and does not report it as drift. This is unlike `owns`: an external index is not
 declared in the model and only filters a live-side `drop_index`; an owned index remains declared,
 is removed from both comparison sides, and is maintained by an assert.
 
