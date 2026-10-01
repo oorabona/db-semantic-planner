@@ -454,7 +454,7 @@ describe('PlanCompiler', () => {
 	});
 
 	describe('Naming convention', () => {
-	it('does not apply the legacy naming policy to direct compilation', () => {
+		it('does not apply the legacy naming policy to direct compilation', () => {
 			const compiler = new PlanCompiler({
 				naming: new CamelCaseNamingPlugin(),
 			});
