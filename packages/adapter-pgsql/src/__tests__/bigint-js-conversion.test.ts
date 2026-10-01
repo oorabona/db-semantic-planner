@@ -1107,6 +1107,54 @@ user_post_counts | select postViewCount, postSafeViewCount, postStringViewCount`
 		]);
 	});
 
+	it('keeps logical recursive output keys and bigint metadata under snake casing', async () => {
+		const treeModel = schema({
+			treeNodes: {
+				id: 'uuid',
+				displayName: 'text',
+				totalCount: { type: 'bigint', js: 'bigint' },
+				parentId: ref('treeNodes', {
+					roles: { parent: 'parent', children: 'children' },
+				}),
+			},
+		});
+		const report: RecursivePlanReport = {
+			...recursiveConversionReport(),
+			rootTable: 'treeNodes',
+			intent: {
+				...recursiveConversionReport().intent,
+				start: {
+					from: 'treeNodes',
+					nodeIdExpr: { kind: 'column', name: 'id' },
+					select: ['displayName', 'totalCount'],
+				},
+				traversal: {
+					kind: 'adjacency',
+					nodeTable: 'treeNodes',
+					nodeId: 'id',
+					parentId: 'parentId',
+					direction: 'descendants',
+				},
+			},
+		};
+		const adapter = createPgsqlAdapter(
+			makePool([
+				{ id: 'node-1', display_name: 'Root', total_count: '9007199254740993' },
+			]),
+			{ model: treeModel.model, dbCasing: 'snake_case' },
+		);
+		const compiled = adapter.compileRecursive(report, treeModel.model);
+		expect(compiled.outputKeyMap?.get('display_name')).toBe('displayName');
+		expect(compiled.columnMetadata?.get('total_count')).toEqual({
+			table: 'treeNodes',
+			column: 'totalCount',
+			js: 'bigint',
+		});
+		await expect(adapter.execute(compiled)).resolves.toEqual([
+			{ id: 'node-1', displayName: 'Root', totalCount: 9007199254740993n },
+		]);
+	});
+
 	it('converts fluent withCte outer rows by threading the ORM model', async () => {
 		const adapter = createPgsqlAdapter(
 			makePool([{ sequence: '9007199254740993' }]),

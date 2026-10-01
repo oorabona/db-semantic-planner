@@ -356,7 +356,9 @@ export function buildSubqueryFromIntent(
 			sqlRangeVar(
 				sourceBinding.qualifier,
 				innerBinding.qualifier,
-				schemaName === undefined ? undefined : queryLocal(schemaName),
+				sourceBinding.kind === 'declared-table' && schemaName !== undefined
+					? queryLocal(schemaName)
+					: undefined,
 			),
 		],
 	};

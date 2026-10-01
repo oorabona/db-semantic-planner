@@ -71,6 +71,9 @@ import {
 	type DeleteConfig,
 	type InsertConfig,
 	type InsertFromConfig,
+	type MutationColumnAddress,
+	type MutationColumnMetadata,
+	type MutationTableMetadata,
 	type UpdateConfig,
 	type UpsertConfig,
 	type UpsertFromConfig,
@@ -200,6 +203,16 @@ function declaredMutationTable(
 	);
 }
 
+function declaredMutationTableMetadata(
+	deps: AdapterCompilerDeps,
+	logicalTable: string,
+): MutationTableMetadata {
+	return {
+		logicalTable,
+		physicalName: declaredMutationTable(deps, logicalTable),
+	};
+}
+
 function declaredMutationColumn(
 	deps: AdapterCompilerDeps,
 	table: string,
@@ -214,6 +227,18 @@ function declaredMutationColumn(
 			column,
 		},
 	);
+}
+
+function declaredMutationColumnAddress(
+	deps: AdapterCompilerDeps,
+	logicalTable: string,
+	logicalColumn: string,
+): MutationColumnAddress {
+	return {
+		logicalTable,
+		logicalColumn,
+		physicalName: declaredMutationColumn(deps, logicalTable, logicalColumn),
+	};
 }
 
 function mutationBinding(deps: AdapterCompilerDeps, table: string) {
@@ -401,8 +426,10 @@ function resolveExistsIntent(
 }
 
 /**
- * Build a column-type map for a table, covering all typed columns so that
- * `inferPgArrayType` can produce schema-driven array casts (e.g. int4[], bool[]).
+ * Build addressed column metadata for a table, keyed by emitted physical name.
+ * Logical model lookup happens before that key is built, so the SQL compiler
+ * never asks a logical map for a physical identifier.
+ * `inferPgArrayType` uses the resolved database type for schema-driven casts.
  * Prefers `originalDbType` when set (preserves precision info from introspection).
  * Returns undefined if no columns found (or model unavailable).
  */
@@ -410,11 +437,11 @@ function getColumnTypes(
 	tableName: string,
 	columns: string[],
 	deps: AdapterCompilerDeps,
-): Record<string, string> | undefined {
+): Record<string, MutationColumnMetadata> | undefined {
 	if (!deps.model) return undefined;
 	const table = deps.model.getTable(tableName);
 	if (!table) return undefined;
-	let result: Record<string, string> | undefined;
+	let result: Record<string, MutationColumnMetadata> | undefined;
 	const targetSchema = deps.schemaName;
 	for (const col of columns) {
 		const columnIR = table.columns.find((c) => c.name === col);
@@ -442,7 +469,15 @@ function getColumnTypes(
 					`Batch mutation of array-typed column '${col}' (${castTarget}) is not supported: unnest flattens multi-dimensional arrays. Use single-row mutations for array columns.`,
 				);
 			}
-			result[col] = castTarget;
+			// Mutation compiler columns are physical identifiers. Keep the cast map
+			// in that same SQL namespace after looking up the logical model column.
+			const physicalName = declaredMutationColumn(deps, tableName, col);
+			result[physicalName] = {
+				logicalTable: tableName,
+				logicalColumn: col,
+				physicalName,
+				databaseType: castTarget,
+			};
 		}
 	}
 	return result;
@@ -519,6 +554,7 @@ export function compileInsert(
 
 	const config: InsertConfig = {
 		table: declaredMutationTable(deps, intent.table),
+		tableMetadata: declaredMutationTableMetadata(deps, intent.table),
 		columns: columns.map((column) =>
 			declaredMutationColumn(deps, intent.table, column),
 		),
@@ -604,6 +640,7 @@ export function compileInsertFrom(
 	);
 	const config: InsertFromConfig = {
 		targetTable: declaredMutationTable(deps, intent.table),
+		targetTableMetadata: declaredMutationTableMetadata(deps, intent.table),
 		source: sourceBinding,
 		...(intent.columns && {
 			columns: intent.columns.map((column) => ({
@@ -614,6 +651,18 @@ export function compileInsertFrom(
 					intent.source,
 					column,
 				),
+				targetAddress: declaredMutationColumnAddress(
+					deps,
+					intent.table,
+					column,
+				),
+				...(sourceBinding.kind === 'declared-table' && {
+					sourceAddress: declaredMutationColumnAddress(
+						deps,
+						intent.source,
+						column,
+					),
+				}),
 			})),
 		}),
 		...(resolvedWhere && { where: [whereIntentAsDecision(resolvedWhere)] }),
@@ -664,6 +713,7 @@ export function compileUpdate(
 
 	const config: UpdateConfig = {
 		table: declaredMutationTable(deps, intent.table),
+		tableMetadata: declaredMutationTableMetadata(deps, intent.table),
 		set: Object.entries(intent.set ?? {}).map(([column, value]) => ({
 			column: declaredMutationColumn(deps, intent.table, column),
 			value,
@@ -740,7 +790,11 @@ export function compileBatchUpdate(
 	const columnArrays = transposeToColumnArrays(allColumns, values);
 
 	// Get column types for type inference
-	const columnTypes = getColumnTypes(intent.table, allColumns, deps);
+	const columnTypes = getColumnTypes(
+		intent.table,
+		[...allColumns, ...Object.keys(intent.scalarSet ?? {})],
+		deps,
+	);
 
 	// Build scalar SET entries from scalarSet
 	const scalarSet = intent.scalarSet
@@ -789,6 +843,7 @@ export function compileBatchUpdate(
 
 	const config: BatchUpdateConfig = {
 		table: declaredMutationTable(deps, intent.table),
+		tableMetadata: declaredMutationTableMetadata(deps, intent.table),
 		matchColumns: matchColumns.map((column) =>
 			declaredMutationColumn(deps, intent.table, column),
 		),
@@ -845,6 +900,7 @@ export function compileDelete(
 
 	const config: DeleteConfig = {
 		table: declaredMutationTable(deps, intent.table),
+		tableMetadata: declaredMutationTableMetadata(deps, intent.table),
 		...(resolvedWhere && { where: [whereIntentAsDecision(resolvedWhere)] }),
 		...(intent.returning && { returning: [...intent.returning] }),
 		...(intent.returning && {
@@ -914,15 +970,24 @@ export function compileUpsert(
 	// Build conflict target
 	const conflictTarget: {
 		columns?: SqlIdentifier[];
+		columnAddresses?: MutationColumnAddress[];
 		constraint?: SqlIdentifier;
+		constraintAddress?: {
+			logicalTable: string;
+			logicalConstraint: string;
+			physicalName: SqlIdentifier;
+		};
 	} = {};
 
 	if ('columns' in intent.onConflict) {
 		conflictTarget.columns = intent.onConflict.columns.map((column) =>
 			declaredMutationColumn(deps, intent.table, column),
 		);
+		conflictTarget.columnAddresses = intent.onConflict.columns.map((column) =>
+			declaredMutationColumnAddress(deps, intent.table, column),
+		);
 	} else if ('constraint' in intent.onConflict) {
-		conflictTarget.constraint = resolveDeclaredIdentifier(
+		const physicalName = resolveDeclaredIdentifier(
 			deps.declaredNames,
 			deps.dbCasing ?? 'preserve',
 			{
@@ -931,6 +996,12 @@ export function compileUpsert(
 				constraint: intent.onConflict.constraint,
 			},
 		);
+		conflictTarget.constraint = physicalName;
+		conflictTarget.constraintAddress = {
+			logicalTable: intent.table,
+			logicalConstraint: intent.onConflict.constraint,
+			physicalName,
+		};
 	}
 
 	// Build conflict action
@@ -941,19 +1012,24 @@ export function compileUpsert(
 	// All columns in intent.action.set are update columns (both scalar and raw).
 	// Scalar ones use EXCLUDED.column, raw ones use the parsed SQL expression.
 	let updateColumns: SqlIdentifier[] | undefined;
+	let logicalUpdateColumns: string[] | undefined;
 	if (intent.action.type === 'doUpdate') {
 		if (intent.action.set) {
 			// All keys in set become update columns (raw + scalar combined)
-			updateColumns = Object.keys(intent.action.set).map((column) =>
+			logicalUpdateColumns = Object.keys(intent.action.set);
+			updateColumns = logicalUpdateColumns.map((column) =>
 				declaredMutationColumn(deps, intent.table, column),
 			);
 		} else {
 			// Default: update all non-conflict columns
 			const conflictCols =
 				'columns' in intent.onConflict ? intent.onConflict.columns : [];
-			updateColumns = columns
-				.filter((col) => !conflictCols.includes(col))
-				.map((column) => declaredMutationColumn(deps, intent.table, column));
+			logicalUpdateColumns = columns.filter(
+				(col) => !conflictCols.includes(col),
+			);
+			updateColumns = logicalUpdateColumns.map((column) =>
+				declaredMutationColumn(deps, intent.table, column),
+			);
 		}
 	}
 
@@ -969,6 +1045,7 @@ export function compileUpsert(
 
 	const config: UpsertConfig = {
 		table: declaredMutationTable(deps, intent.table),
+		tableMetadata: declaredMutationTableMetadata(deps, intent.table),
 		columns: columns.map((column) =>
 			declaredMutationColumn(deps, intent.table, column),
 		),
@@ -976,6 +1053,11 @@ export function compileUpsert(
 		conflictTarget,
 		conflictAction,
 		...(updateColumns && { updateColumns }),
+		...(logicalUpdateColumns && {
+			updateColumnAddresses: logicalUpdateColumns.map((column) =>
+				declaredMutationColumnAddress(deps, intent.table, column),
+			),
+		}),
 		...(intent.returning && { returning: [...intent.returning] }),
 		...(intent.returning && {
 			returningSources: mutationReturningSources(
@@ -1087,9 +1169,13 @@ export function compileUpsertFrom(
 	);
 	const config: UpsertFromConfig = {
 		targetTable: declaredMutationTable(deps, intent.table),
+		targetTableMetadata: declaredMutationTableMetadata(deps, intent.table),
 		source: sourceBinding,
 		conflictColumns: intent.conflictColumns.map((column) =>
 			declaredMutationColumn(deps, intent.table, column),
+		),
+		conflictColumnAddresses: intent.conflictColumns.map((column) =>
+			declaredMutationColumnAddress(deps, intent.table, column),
 		),
 		...(columns && {
 			columns: columns.map((column) => ({
@@ -1100,6 +1186,18 @@ export function compileUpsertFrom(
 					intent.source,
 					column,
 				),
+				targetAddress: declaredMutationColumnAddress(
+					deps,
+					intent.table,
+					column,
+				),
+				...(sourceBinding.kind === 'declared-table' && {
+					sourceAddress: declaredMutationColumnAddress(
+						deps,
+						intent.source,
+						column,
+					),
+				}),
 			})),
 		}),
 		...(resolvedWhere && { where: [whereIntentAsDecision(resolvedWhere)] }),

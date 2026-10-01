@@ -25,8 +25,10 @@ import {
 	plan,
 	type QueryIntent,
 	raw,
+	rawExists,
 	ref,
 	schema,
+	subquery,
 } from '@dbsp/core';
 import { compile } from '@dbsp/nql';
 import type {
@@ -1497,6 +1499,33 @@ function blogCteToSQL(nql: string, schemaName?: string): string {
 }
 
 describe('CTE relation planning', () => {
+	it('keeps a schema-scoped binding as a query-local source in rawExists', () => {
+		const adapter = createPgsqlCompileOnlyAdapter({
+			model: testSchema.model,
+			schemaName: 'tenant',
+		});
+		const result = adapter.compile({
+			bindings: new Map([
+				[
+					'activeUsers',
+					{
+						type: 'select',
+						from: 'users',
+						select: { type: 'fields', fields: ['id'] },
+					},
+				],
+			]),
+			query: {
+				type: 'select',
+				from: 'users',
+				select: { type: 'fields', fields: ['id'] },
+				where: rawExists(subquery('activeUsers').select('id')),
+			},
+		} satisfies CompiledNqlQuery);
+		expect(result.sql).toContain('FROM "activeUsers"');
+		expect(result.sql).not.toContain('tenant."activeUsers"');
+	});
+
 	it('plans relation paths in a simple CTE body', () => {
 		expect(
 			blogCteToSQL(

@@ -520,8 +520,6 @@ export function createPgPhysicalModel(
 			);
 	}
 	const sequenceNaming: NamingPlugin = {
-		resolve: (value) => truncateIdentifier(naming.resolve(value)),
-		model: (value) => naming.model(value),
 		toDatabase: (value) => truncateIdentifier(naming.toDatabase(value)),
 		toModel: (value) => naming.toModel(value),
 	};

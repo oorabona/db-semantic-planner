@@ -28,7 +28,12 @@ import type {
 import { unwrapParamIntent } from '../param-intent.js';
 import { createTypeCastParamRef } from '../param-ref.js';
 import { queryLocal, type SqlIdentifier } from '../sql-identifier.js';
-import { buildReturningExprs } from './mutation-compiler.js';
+import {
+	buildReturningExprs,
+	type MutationColumnAddress,
+	type MutationColumnMetadata,
+	type MutationTableMetadata,
+} from './mutation-compiler.js';
 
 // ============================================================================
 // Types
@@ -45,8 +50,14 @@ export type ConflictAction = 'nothing' | 'update';
 export interface ConflictTarget {
 	/** Column names that form the unique constraint */
 	columns?: SqlIdentifier[];
+	columnAddresses?: MutationColumnAddress[];
 	/** Addressed constraint declared by the target table. */
 	constraint?: SqlIdentifier;
+	constraintAddress?: {
+		readonly logicalTable: string;
+		readonly logicalConstraint: string;
+		readonly physicalName: SqlIdentifier;
+	};
 	/** WHERE clause for partial index */
 	where?: Decision[];
 }
@@ -57,6 +68,7 @@ export interface ConflictTarget {
 export interface UpsertConfig {
 	/** Table to upsert into */
 	table: SqlIdentifier;
+	tableMetadata?: MutationTableMetadata;
 	/** Columns to insert */
 	columns: SqlIdentifier[];
 	/** Values for each column (array of rows) */
@@ -67,6 +79,7 @@ export interface UpsertConfig {
 	conflictAction: ConflictAction;
 	/** Columns to update on conflict (for 'update' action) */
 	updateColumns?: SqlIdentifier[];
+	updateColumnAddresses?: MutationColumnAddress[];
 	/** Optional WHERE clause for ON CONFLICT DO UPDATE */
 	actionWhere?: Decision[];
 	/** Optional direct WHERE intent for ON CONFLICT DO UPDATE */
@@ -81,7 +94,7 @@ export interface UpsertConfig {
 	/** Alias-aware RETURNING projection items */
 	returningItems?: readonly MutationReturningItem[];
 	/** Optional column type hints for unnest casting (schema-driven) */
-	columnTypes?: Record<string, string>;
+	columnTypes?: Record<string, string | MutationColumnMetadata>;
 	/**
 	 * Raw SQL expressions for specific update columns.
 	 * These are injected verbatim into the ON CONFLICT DO UPDATE SET clause.
@@ -152,7 +165,11 @@ export function buildOnConflictClause(
 	) {
 		// Conflict on columns
 		infer = {
-			indexElems: config.conflictTarget.columns.map((col) => ({
+			indexElems: (
+				config.conflictTarget.columnAddresses?.map(
+					(address) => address.physicalName,
+				) ?? config.conflictTarget.columns
+			).map((col) => ({
 				IndexElem: {
 					name: col,
 				},
@@ -171,7 +188,9 @@ export function buildOnConflictClause(
 	} else if (config.conflictTarget.constraint) {
 		// Conflict on named constraint
 		infer = {
-			conname: config.conflictTarget.constraint,
+			conname:
+				config.conflictTarget.constraintAddress?.physicalName ??
+				config.conflictTarget.constraint,
 		};
 	}
 
@@ -184,7 +203,10 @@ export function buildOnConflictClause(
 	}
 
 	// DO UPDATE SET case
-	const updateColumns = config.updateColumns ?? config.columns;
+	const updateColumns =
+		config.updateColumnAddresses?.map((address) => address.physicalName) ??
+		config.updateColumns ??
+		config.columns;
 	const useExcluded = config.useExcluded ?? true;
 
 	const targetList: Node[] = updateColumns.map((col) => {
@@ -238,7 +260,7 @@ export function compileUpsert(
 	ctx: CompilerContext,
 	state: CompilerState,
 ): Node {
-	const dbTable = config.table;
+	const dbTable = config.tableMetadata?.physicalName ?? config.table;
 	const dbColumns = config.columns;
 
 	// Build column names
@@ -301,7 +323,7 @@ export function compileUnnestUpsert(
 	ctx: CompilerContext,
 	state: CompilerState,
 ): Node {
-	const dbTable = config.table;
+	const dbTable = config.tableMetadata?.physicalName ?? config.table;
 	const { values, columnTypes } = config;
 	const columns = config.columns;
 

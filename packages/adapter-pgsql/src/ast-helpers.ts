@@ -733,6 +733,7 @@ export function sqlJsonAggSubquery(
 	let row: Node;
 	if (
 		columns !== undefined &&
+		columns.length > 0 &&
 		!(columns.length === 1 && identifierText(columns[0]!) === '*')
 	) {
 		const args: Node[] = [];

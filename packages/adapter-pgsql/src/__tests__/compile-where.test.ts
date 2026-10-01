@@ -11,12 +11,15 @@ import { markNqlTrustedRelationFilter } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it } from 'vitest';
+import { queryScope, relationBinding } from '../binding-registry.js';
 import {
 	buildSubqueryFromIntent,
 	compileWhereIntent,
 	type WhereCompilerCtx,
 } from '../compile-where.js';
+import { deparseQuoted } from '../deparse.js';
 import { createCompilerState } from '../handlers/types.js';
+import { queryLocal } from '../sql-identifier.js';
 
 // ---------------------------------------------------------------------------
 // Test helper
@@ -685,6 +688,28 @@ describe('compileWhereIntent', () => {
 });
 
 describe('rawExists / rawNotExists', () => {
+	it('does not schema-qualify a visible CTE source', () => {
+		const activeUsers = relationBinding({
+			qualifier: queryLocal('activeUsers'),
+			kind: 'cte-bind',
+		});
+		const subquery = buildSubqueryFromIntent(
+			{
+				type: 'select',
+				from: 'activeUsers',
+				select: { type: 'fields', fields: ['id'] },
+			},
+			0,
+			undefined,
+			'tenant',
+			'rawExists',
+			queryScope([activeUsers]),
+		);
+		const sql = deparseQuoted(subquery.sql);
+		expect(sql).toContain('FROM "activeUsers"');
+		expect(sql).not.toContain('tenant.');
+	});
+
 	/**
 	 * Build a compile helper that provides a real compileSubquery callback.
 	 */

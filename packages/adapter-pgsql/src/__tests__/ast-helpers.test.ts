@@ -32,11 +32,13 @@ import {
 	orExpr,
 	selectStmt,
 	sortBy,
+	sqlJsonAggSubquery,
 	stringConstNode,
 	stringNode,
 	typeCast,
 } from '../ast-helpers.js';
 import { createParamRef } from '../param-ref.js';
+import { queryLocal } from '../sql-identifier.js';
 import {
 	columnRef,
 	columnRefStar,
@@ -54,6 +56,19 @@ import {
 } from './typed-ast-test-helpers.js';
 
 describe('Basic Value Nodes', () => {
+	it('uses to_jsonb for an explicitly empty JSON aggregate projection', () => {
+		const aggregate = sqlJsonAggSubquery(
+			queryLocal('users'),
+			{ A_Const: { boolval: { boolval: true } } } as never,
+			queryLocal('user_row'),
+			undefined,
+			{ columns: [] },
+		);
+		const encoded = JSON.stringify(aggregate);
+		expect(encoded).toContain('to_jsonb');
+		expect(encoded).not.toContain('jsonb_build_object');
+	});
+
 	it('creates String node', () => {
 		const node = stringNode('test');
 		expect(node).toEqual({ String: { sval: 'test' } });

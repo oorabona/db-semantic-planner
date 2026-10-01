@@ -834,8 +834,8 @@ FROM ch5_ecommerce.products
 ```
 </details>
 
-| id | sku        | name          | price   | category_id | priceRank |
-|----|------------|---------------|---------|-------------|------------|
+| id | sku        | name          | price   | categoryId | priceRank |
+|----|------------|---------------|---------|------------|------------|
 | 1  | LAPTOP-001 | ProBook 15    | 1299.99 | 11          | 1          |
 | 2  | LAPTOP-002 | UltraLight 13 | 999.99  | 11          | 2          |
 | 13 | DESKTOP-001| PowerStation  | 2499.99 | 12          | 1          |
@@ -860,8 +860,8 @@ FROM ch5_ecommerce.orders
 ```
 </details>
 
-| order_number | total   | runningTotal |
-|--------------|---------|---------------|
+| orderNumber | total   | runningTotal |
+|-------------|---------|---------------|
 | ORD-2024-001 | 1499.98 | 1499.98       |
 | ORD-2024-005 | 179.97  | 1679.95       |
 | ORD-2024-002 | 349.99  | 2029.94       |

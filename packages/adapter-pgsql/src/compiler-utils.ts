@@ -23,12 +23,33 @@ import { parseExpression } from './raw-expression-parser.js';
  */
 export function inferPgArrayType(
 	columnName: string,
-	columnTypes?: Record<string, string>,
+	columnTypes?: Record<
+		string,
+		| string
+		| {
+				readonly databaseType: string;
+				readonly physicalName?: string;
+				readonly logicalTable?: string;
+				readonly logicalColumn?: string;
+		  }
+	>,
 	sampleValue?: unknown,
 ): string {
 	// 1. Schema-driven: use column type from ModelIR (via columnTypes map)
-	if (columnTypes?.[columnName]) {
-		const pgBase = mapToPgBaseType(columnTypes[columnName]);
+	const metadata = columnTypes?.[columnName];
+	if (metadata) {
+		if (
+			typeof metadata === 'object' &&
+			metadata.physicalName !== undefined &&
+			metadata.physicalName !== columnName
+		) {
+			throw new Error(
+				`Mutation column metadata for '${metadata.logicalTable}.${metadata.logicalColumn}' does not match physical '${columnName}'.`,
+			);
+		}
+		const databaseType =
+			typeof metadata === 'string' ? metadata : metadata.databaseType;
+		const pgBase = mapToPgBaseType(databaseType);
 		return `${pgBase}[]`;
 	}
 

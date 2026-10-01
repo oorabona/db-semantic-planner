@@ -498,8 +498,6 @@ describe('createPgPhysicalModel', () => {
 				schema: 'app',
 				dbCasing: 'snake_case',
 				naming: {
-					resolve: (value) => value,
-					model: (value) => value,
 					toDatabase: (value) => value,
 					toModel: (value) => value,
 				},

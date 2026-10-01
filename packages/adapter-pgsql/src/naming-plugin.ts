@@ -11,10 +11,6 @@
  * Interface for naming convention transformation plugins
  */
 export interface NamingPlugin {
-	/** Internal query-path spelling; aliases keep the plugin API stable. */
-	resolve(identifier: string): string;
-	/** Internal query-path result spelling; aliases keep the plugin API stable. */
-	model(identifier: string): string;
 	/**
 	 * Transform a model identifier to database format
 	 * Example: "createdAt" → "created_at"
@@ -33,14 +29,6 @@ export interface NamingPlugin {
  * Use this when model and database naming conventions match
  */
 export class IdentityNamingPlugin implements NamingPlugin {
-	resolve(identifier: string): string {
-		return identifier;
-	}
-
-	model(identifier: string): string {
-		return identifier;
-	}
-
 	toDatabase(identifier: string): string {
 		return identifier;
 	}
@@ -59,14 +47,6 @@ export class IdentityNamingPlugin implements NamingPlugin {
  * - Preserves leading underscores
  */
 export class CamelCaseNamingPlugin implements NamingPlugin {
-	resolve(identifier: string): string {
-		return camelCaseNaming.toDatabase(identifier);
-	}
-
-	model(identifier: string): string {
-		return camelCaseNaming.toModel(identifier);
-	}
-
 	/**
 	 * camelCase → snake_case
 	 */

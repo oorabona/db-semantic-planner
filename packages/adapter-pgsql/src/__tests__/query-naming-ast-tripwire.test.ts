@@ -19,7 +19,7 @@ import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { queryLocal } from '../sql-identifier.js';
 
 const sourceRoot = fileURLToPath(new URL('..', import.meta.url));
-/** Naming is restricted to physical-model construction and DDL/code generation. */
+/** Syntactic checks for direct naming-module imports, property or destructured naming calls, SqlIdentifier assertions, and SqlIdentifier | string unions; not semantic proof. */
 const namingAllowed = new Set([
 	'index.ts',
 	'naming-plugin.ts',
@@ -74,29 +74,48 @@ function namingViolations(relative: string, text: string): string[] {
 		if (
 			!allowed &&
 			ts.isCallExpression(node) &&
-			ts.isPropertyAccessExpression(node.expression)
+			(ts.isPropertyAccessExpression(node.expression) ||
+				ts.isElementAccessExpression(node.expression))
 		) {
-			const name = node.expression.name.text;
+			const method = ts.isPropertyAccessExpression(node.expression)
+				? node.expression.name.text
+				: node.expression.argumentExpression &&
+						ts.isStringLiteral(node.expression.argumentExpression)
+					? node.expression.argumentExpression.text
+					: '';
 			const isPromiseResolve =
-				name === 'resolve' &&
+				method === 'resolve' &&
 				ts.isIdentifier(node.expression.expression) &&
 				node.expression.expression.text === 'Promise';
 			if (
 				!isPromiseResolve &&
-				(name === 'resolve' ||
-					name === 'model' ||
-					name === 'toDatabase' ||
-					name === 'toModel')
+				(method === 'resolve' ||
+					method === 'model' ||
+					method === 'toDatabase' ||
+					method === 'toModel')
 			)
-				violations.push(`${relative}: forbidden naming call .${name}()`);
+				violations.push(
+					`${relative}: property-access naming call .${method}()`,
+				);
 		}
 		if (
+			!allowed &&
+			ts.isCallExpression(node) &&
+			ts.isIdentifier(node.expression) &&
+			['resolve', 'model', 'toDatabase', 'toModel'].includes(
+				node.expression.text,
+			)
+		)
+			violations.push(
+				`${relative}: destructured naming call ${node.expression.text}()`,
+			);
+		if (
 			relative !== 'sql-identifier.ts' &&
-			ts.isAsExpression(node) &&
+			(ts.isAsExpression(node) || ts.isTypeAssertionExpression(node)) &&
 			node.type.getText(source) === 'SqlIdentifier'
 		)
 			violations.push(
-				`${relative}: only sql-identifier.ts may cast as SqlIdentifier`,
+				`${relative}: only sql-identifier.ts may assert SqlIdentifier`,
 			);
 		ts.forEachChild(node, visit);
 	};
@@ -184,7 +203,7 @@ function architectureViolations(): string[] {
 	);
 }
 
-describe('query naming boundary', () => {
+describe('query naming syntax tripwire', () => {
 	const typecheckMutationRawStringRefusal = (table: string): InsertConfig => ({
 		// @ts-expect-error mutation compiler configs require an addressed identifier
 		table,
@@ -590,20 +609,47 @@ describe('query naming boundary', () => {
 		);
 	});
 
-	it('enforces the TypeScript-AST naming boundary', () => {
+	it('catches direct naming imports, property calls, SqlIdentifier assertions, and unions', () => {
 		const violations = sourceFiles(sourceRoot).flatMap(([relative, text]) =>
 			namingViolations(relative, text),
 		);
 		expect(violations).toEqual([]);
 	});
 
-	it('rejects a forbidden import in the AST guard fixture', () => {
+	it('catches a direct naming-module import', () => {
 		const violations = namingViolations(
 			'compiler.ts',
 			"import { identityNaming } from './naming-plugin.js';",
 		);
 		expect(violations).toEqual([
 			'compiler.ts: forbidden import ./naming-plugin.js',
+		]);
+	});
+
+	it('catches a property-access naming call', () => {
+		expect(namingViolations('x.ts', 'plugin.toDatabase(name);')).toEqual([
+			'x.ts: property-access naming call .toDatabase()',
+		]);
+	});
+
+	it('catches destructured naming calls', () => {
+		expect(
+			namingViolations(
+				'x.ts',
+				'const { toDatabase } = plugin; toDatabase(name);',
+			),
+		).toEqual(['x.ts: destructured naming call toDatabase()']);
+	});
+
+	it('catches as and angle-bracket SqlIdentifier assertions', () => {
+		expect(
+			namingViolations(
+				'x.ts',
+				'const a = value as SqlIdentifier; const b = <SqlIdentifier>value;',
+			),
+		).toEqual([
+			'x.ts: only sql-identifier.ts may assert SqlIdentifier',
+			'x.ts: only sql-identifier.ts may assert SqlIdentifier',
 		]);
 	});
 });

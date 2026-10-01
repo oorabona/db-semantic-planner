@@ -51,6 +51,9 @@ export interface RecursiveCteConfig {
 	maxDepth: number;
 	/** Column(s) to select from each row */
 	selectColumns: SqlIdentifier[];
+	/** Logical model addresses retained for result metadata construction. */
+	logicalTable?: string;
+	logicalSelectColumns?: string[];
 	/** Whether to track traversal path */
 	trackPath?: boolean;
 	/** Whether to use PG14+ CYCLE clause (vs __visited array) */

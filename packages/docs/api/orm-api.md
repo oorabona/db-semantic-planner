@@ -1434,9 +1434,9 @@ const adapter = createPgsqlAdapter(pool, {
 | `defaultPkColumnName` | `string` | `'id'` | Convention fallback when schema metadata doesn't provide an explicit PK column |
 | `deriveFkColumnName` | `(table: string, pk: string) => string` | `singularize(table)_pk` | Derives FK column names from the referenced table and its PK |
 
-### NamingPlugin — Column Name Transformation
+### NamingPlugin — Physical Column Names
 
-When your database uses `snake_case` columns but your TypeScript models use `camelCase`, the `NamingPlugin` handles bidirectional transformation automatically:
+`NamingPlugin` converts declared model names to physical database names during compilation. Result keys come from the query projection's logical keys; the adapter does not infer them from returned PostgreSQL labels.
 
 ```typescript
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
@@ -1446,8 +1446,8 @@ const adapter = createPgsqlAdapter(pool, {
   dbCasing: 'snake_case',  // enables CamelCaseNamingPlugin
 });
 
-// Query results: snake_case DB columns → camelCase JS properties
-// Query compilation: camelCase JS properties → snake_case SQL columns
+// Declared model names such as eventId compile to physical names such as event_id.
+// Projecting eventId returns the logical key eventId.
 ```
 
 Two built-in plugins:

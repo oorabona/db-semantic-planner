@@ -445,6 +445,9 @@ export function compileRecursive<T = unknown>(
 				},
 			),
 		);
+		const logicalSelectColumns = Array.from(
+			new Set([nodeIdColumn, ...startSelect]),
+		);
 
 		// Edge-table traversal: join through a junction table
 		const edgeFrom =
@@ -480,6 +483,8 @@ export function compileRecursive<T = unknown>(
 			isAncestors: false,
 			maxDepth: intent.maxDepth,
 			selectColumns,
+			logicalTable: table,
+			logicalSelectColumns,
 			trackPath,
 			usePg14Cycle: false,
 			edgeTable: resolveDeclaredIdentifier(
@@ -550,6 +555,9 @@ export function compileRecursive<T = unknown>(
 				},
 			),
 		);
+		const logicalSelectColumns = Array.from(
+			new Set([nodeIdColumn, ...startSelect]),
+		);
 
 		// Adjacency-list traversal: self-referencing FK
 		config = {
@@ -584,6 +592,8 @@ export function compileRecursive<T = unknown>(
 			isAncestors: traversal.direction === 'ancestors',
 			maxDepth: intent.maxDepth,
 			selectColumns,
+			logicalTable: table,
+			logicalSelectColumns,
 			trackPath,
 			usePg14Cycle: false,
 			ctx,
@@ -686,8 +696,8 @@ export function compileRecursive<T = unknown>(
 	const sourceEnv = fromModelColumns<T>({
 		sql,
 		parameters: state.parameters,
-		table: config.table,
-		columns: config.selectColumns,
+		table: config.logicalTable ?? config.table,
+		columns: config.logicalSelectColumns ?? config.selectColumns,
 		model,
 		...(deps.declaredNames !== undefined && {
 			declaredNames: deps.declaredNames,
