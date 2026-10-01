@@ -16,7 +16,6 @@ import {
 	type ColumnMetadataProjection,
 } from './column-metadata.js';
 import type { DeclaredNameResolver } from './declared-name-resolver.js';
-import type { NamingPlugin } from './naming-plugin.js';
 
 const projectionEnvelopeBrand: unique symbol = Symbol('projectionEnvelope');
 
@@ -64,7 +63,6 @@ export type FromAstProjectionOptions = {
 	readonly ast: Node;
 	readonly rootTable: string;
 	readonly model: ModelIR | undefined;
-	readonly naming: NamingPlugin;
 	readonly declaredNames?: DeclaredNameResolver;
 	readonly hydrationPlan?: PlanReport;
 };
@@ -75,7 +73,6 @@ export type FromModelColumnsOptions = {
 	readonly table: string;
 	readonly columns: readonly string[];
 	readonly model: ModelIR;
-	readonly naming: NamingPlugin;
 	readonly declaredNames?: DeclaredNameResolver;
 };
 
@@ -84,7 +81,6 @@ export type FromOutputDescriptorsOptions = {
 	readonly parameters: readonly unknown[];
 	readonly columns: readonly string[];
 	readonly declaredOutputs?: readonly OutputDescriptor[];
-	readonly naming: NamingPlugin;
 	/** Explicit physical keys for a runtime binding materialized by the adapter. */
 	readonly emittedOutputKeys?: ReadonlyMap<string, string>;
 	readonly hydrationPlan?: PlanReport;
@@ -240,7 +236,8 @@ function outputMapFromColumnProjections(
 	const outputs = new Map<string, OutputProjection>();
 	if (!projections) return outputs;
 	for (const [outputKey, projection] of projections) {
-		outputs.set(
+		setProjectedOutput(
+			outputs,
 			outputKey,
 			descriptorForSource(
 				outputKey,
@@ -373,12 +370,14 @@ export function fromModelColumns<T = unknown>(
 function outputDescriptorWithEmittedKey(
 	output: OutputDescriptor,
 	emittedKey?: string,
+	logicalKey?: string,
 ): OutputProjection {
 	return descriptor(
 		emittedKey ?? output.outputKey,
 		output.source,
 		output.shape,
-		(output as OutputDescriptor & { logicalKey?: string }).logicalKey ??
+		logicalKey ??
+			(output as OutputDescriptor & { logicalKey?: string }).logicalKey ??
 			output.outputKey,
 	);
 }
@@ -400,17 +399,23 @@ export function fromOutputDescriptors<T = unknown>(
 		const outputKey = options.emittedOutputKeys?.get(column) ?? column;
 		const entries = descriptorsByOutput.get(outputKey) ?? [];
 		if (entries.length === 0) {
-			outputs.set(
+			setProjectedOutput(
+				outputs,
 				outputKey,
-				descriptorForSource(outputKey, {
-					kind: 'unresolved',
-					reason: 'binding output descriptor was not provided',
-				}),
+				descriptorForSource(
+					outputKey,
+					{
+						kind: 'unresolved',
+						reason: 'binding output descriptor was not provided',
+					},
+					column,
+				),
 			);
 			continue;
 		}
 		if (entries.length > 1) {
-			outputs.set(
+			setProjectedOutput(
+				outputs,
 				outputKey,
 				descriptor(
 					outputKey,
@@ -421,19 +426,25 @@ export function fromOutputDescriptors<T = unknown>(
 					unknownShape(
 						`binding output '${outputKey}' had multiple declared descriptors`,
 					),
+					column,
 				),
 			);
 			continue;
 		}
 		const [output] = entries;
-		outputs.set(
+		setProjectedOutput(
+			outputs,
 			outputKey,
 			output !== undefined
-				? outputDescriptorWithEmittedKey(output, outputKey)
-				: descriptorForSource(outputKey, {
-						kind: 'unresolved',
-						reason: 'binding output descriptor could not be read',
-					}),
+				? outputDescriptorWithEmittedKey(output, outputKey, column)
+				: descriptorForSource(
+						outputKey,
+						{
+							kind: 'unresolved',
+							reason: 'binding output descriptor could not be read',
+						},
+						column,
+					),
 		);
 	}
 
@@ -457,6 +468,8 @@ export function supplementOutputDescriptors<T = unknown>(
 
 	const outputs = new Map(source.projection.outputs);
 	for (const output of descriptors) {
+		// This enriches an existing emitted output's provenance; it does not add a
+		// second target-list item and therefore cannot create a returned-label collision.
 		outputs.set(
 			output.outputKey,
 			descriptor(

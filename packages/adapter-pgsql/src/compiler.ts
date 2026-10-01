@@ -56,6 +56,7 @@ import {
 import {
 	type BindingNameRegistry,
 	hasBindingName,
+	type QueryScope,
 	schemaForFromName,
 } from './binding-registry.js';
 import { deparseQuoted } from './deparse.js';
@@ -754,6 +755,7 @@ export interface CompilerOptions {
 	readonly model?: import('@dbsp/types').ModelIR;
 	/** Query-local CTE/binding names that must not be schema-qualified. */
 	readonly bindingNames?: BindingNameRegistry;
+	readonly scope?: QueryScope;
 	readonly relationTargetProjections?: RelationTargetProjectionRegistry;
 }
 
@@ -766,6 +768,7 @@ export class PlanCompiler {
 	private readonly model: import('@dbsp/types').ModelIR | undefined;
 	private readonly dialectCapabilities: DialectCapabilities | undefined;
 	private readonly bindingNames: BindingNameRegistry | undefined;
+	private readonly scope: QueryScope | undefined;
 	private readonly relationTargetProjections:
 		| RelationTargetProjectionRegistry
 		| undefined;
@@ -827,6 +830,7 @@ export class PlanCompiler {
 		this.model = options.model ?? undefined;
 		this.dialectCapabilities = options.dialectCapabilities;
 		this.bindingNames = options.bindingNames;
+		this.scope = options.scope;
 		this.relationTargetProjections = options.relationTargetProjections;
 	}
 
@@ -848,6 +852,7 @@ export class PlanCompiler {
 			...(this.bindingNames !== undefined && {
 				bindingNames: this.bindingNames,
 			}),
+			...(this.scope !== undefined && { scope: this.scope }),
 			...(this.relationTargetProjections !== undefined && {
 				relationTargetProjections: this.relationTargetProjections,
 			}),
@@ -875,6 +880,7 @@ export class PlanCompiler {
 				dialectCapabilities: this.dialectCapabilities,
 			}),
 			...(this.bindingNames != null && { bindingNames: this.bindingNames }),
+			...(this.scope != null && { scope: this.scope }),
 			...(this.relationTargetProjections != null && {
 				relationTargetProjections: this.relationTargetProjections,
 			}),
@@ -888,11 +894,12 @@ export class PlanCompiler {
 
 	private relationTargetContext(): Pick<
 		HandlerCompilerContext,
-		'naming' | 'bindingNames' | 'relationTargetProjections' | 'model'
+		'naming' | 'bindingNames' | 'scope' | 'relationTargetProjections' | 'model'
 	> {
 		return {
 			naming: this.naming,
 			...(this.bindingNames != null && { bindingNames: this.bindingNames }),
+			...(this.scope != null && { scope: this.scope }),
 			...(this.relationTargetProjections != null && {
 				relationTargetProjections: this.relationTargetProjections,
 			}),
@@ -1465,6 +1472,7 @@ export class PlanCompiler {
 				dialectCapabilities: this.dialectCapabilities,
 			}),
 			...(this.bindingNames != null && { bindingNames: this.bindingNames }),
+			...(this.scope != null && { scope: this.scope }),
 			...(this.relationTargetProjections != null && {
 				relationTargetProjections: this.relationTargetProjections,
 			}),

@@ -109,7 +109,6 @@ describe('bigint js json_agg SQL projection', () => {
 					shape: { kind: 'array', cardinality: 'many', aggregate: 'json_agg' },
 				},
 			],
-			naming: identityNaming,
 		});
 
 		expect(() =>
@@ -474,7 +473,6 @@ describe('bigint js json_agg SQL projection', () => {
 					shape: { kind: 'array', cardinality: 'many', aggregate: 'json_agg' },
 				},
 			],
-			naming: identityNaming,
 			hydrationPlan,
 		});
 

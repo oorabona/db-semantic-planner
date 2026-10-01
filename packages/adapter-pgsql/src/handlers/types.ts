@@ -14,7 +14,7 @@ import type {
 } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { FkColumnDerivation } from '../assert-field.js';
-import type { BindingNameRegistry } from '../binding-registry.js';
+import type { BindingNameRegistry, QueryScope } from '../binding-registry.js';
 import type { DeclaredNameResolver } from '../declared-name-resolver.js';
 import type { NamingPlugin } from '../naming-plugin.js';
 import type {
@@ -67,6 +67,8 @@ export interface CompilerContext {
 	readonly outerAlias?: string;
 	/** Query-local CTE/binding names that must not be schema-qualified. */
 	readonly bindingNames?: BindingNameRegistry;
+	/** Query-local relation authority; bindings and their outputs never hit the model resolver. */
+	readonly scope?: QueryScope;
 	/** Known projections for visible CTE/binding relation targets. */
 	readonly relationTargetProjections?: RelationTargetProjectionRegistry;
 	/** Lexically visible SQL aliases that expose a known CTE projection. */

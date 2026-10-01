@@ -44,20 +44,6 @@ type AliasContext = {
 	readonly visibleTables: readonly string[];
 };
 
-function declaredNameAuthority(
-	value: unknown,
-): DeclaredNameResolver | undefined {
-	if (
-		value !== null &&
-		typeof value === 'object' &&
-		typeof (value as { table?: unknown }).table === 'function' &&
-		typeof (value as { column?: unknown }).column === 'function'
-	) {
-		return value as DeclaredNameResolver;
-	}
-	return undefined;
-}
-
 function hasTableMap(model: ModelIR): boolean {
 	const tables = (model as { tables?: unknown }).tables;
 	return (
@@ -280,13 +266,8 @@ function findColumnByDbName(
 	declaredNames: DeclaredNameResolver | undefined,
 ): ColumnIR | undefined {
 	if (!table) return undefined;
-	return table.columns.find(
-		(column) =>
-			column.name === dbColumn ||
-			pgReturnedIdentifier(
-				declaredColumnName(declaredNames, table.name, column.name),
-			) === dbColumn,
-	);
+	const logical = declaredNames?.logicalColumn(table.name, dbColumn);
+	return table.columns.find((column) => column.name === (logical ?? dbColumn));
 }
 
 function pgReturnedIdentifier(identifier: string): string {
@@ -508,10 +489,9 @@ export function buildCompiledColumnProjections(
 	ast: Node,
 	rootTable: string,
 	model: ModelIR | undefined,
-	authority?: unknown,
+	declaredNames?: DeclaredNameResolver,
 ): ReadonlyMap<string, ColumnMetadataProjection> | undefined {
 	if (!model || !hasTableMap(model)) return undefined;
-	const declaredNames = declaredNameAuthority(authority);
 	const targets = targetListForAst(ast);
 	if (!targets || targets.length === 0) return undefined;
 	const ctx = buildAliasContext(ast, rootTable, model, declaredNames);
@@ -526,12 +506,11 @@ export function buildModelColumnProjections(
 	tableName: string,
 	columns: readonly string[],
 	model: ModelIR,
-	authority?: unknown,
+	declaredNames?: DeclaredNameResolver,
 ): ReadonlyMap<string, ColumnMetadataProjection> | undefined {
 	if (typeof (model as { getTable?: unknown }).getTable !== 'function') {
 		return undefined;
 	}
-	const declaredNames = declaredNameAuthority(authority);
 	const table = model.getTable(tableName);
 	if (!table) return undefined;
 	const projections = new Map<string, ColumnMetadataProjection>();

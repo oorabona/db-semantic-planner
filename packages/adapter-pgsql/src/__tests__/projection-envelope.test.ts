@@ -3,10 +3,6 @@ import { resolveOutputReadHandling } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import { describe, expect, it } from 'vitest';
 import {
-	getNamingPluginForDbCasing,
-	identityNaming,
-} from '../naming-plugin.js';
-import {
 	dropPositionalUnion,
 	expressionColumn,
 	finalizeEnvelope,
@@ -66,7 +62,6 @@ describe('projection envelope', () => {
 			ast: selectAst([columnTarget('event_id')]),
 			rootTable: 'events',
 			model: snakeSchema.model,
-			naming: getNamingPluginForDbCasing('snake_case'),
 		});
 
 		const compiled = finalizeEnvelope(env);
@@ -82,7 +77,6 @@ describe('projection envelope', () => {
 				table: 'events',
 				columns: ['sequence'],
 				model: testSchema.model,
-				naming: identityNaming,
 			}),
 			[
 				{
@@ -121,7 +115,6 @@ describe('projection envelope', () => {
 			]),
 			rootTable: 'events',
 			model: testSchema.model,
-			naming: identityNaming,
 		});
 
 		const compiled = finalizeEnvelope(env);
@@ -148,7 +141,6 @@ describe('projection envelope', () => {
 			table: 'events',
 			columns: ['id'],
 			model: testSchema.model,
-			naming: identityNaming,
 		});
 		const projected = projectNamedFields(source, {
 			sql: 'SELECT id AS first, id AS second FROM events',
@@ -171,7 +163,6 @@ describe('projection envelope', () => {
 			table: 'events',
 			columns: ['sequence', 'label'],
 			model: testSchema.model,
-			naming: identityNaming,
 		});
 
 		expect(() =>
@@ -195,7 +186,6 @@ describe('projection envelope', () => {
 			table: 'events',
 			columns: ['sequence'],
 			model: testSchema.model,
-			naming: identityNaming,
 		});
 		expect(source.projection.kind).toBe('known');
 		if (source.projection.kind !== 'known') return;
@@ -238,7 +228,6 @@ describe('projection envelope', () => {
 				table: 'events',
 				columns: ['legacySequence'],
 				model: testSchema.model,
-				naming: identityNaming,
 			}),
 			[expressionOutput],
 		);
@@ -260,7 +249,6 @@ describe('projection envelope', () => {
 			table: 'events',
 			columns: ['sequence', 'legacySequence'],
 			model: testSchema.model,
-			naming: identityNaming,
 		});
 
 		const projected = projectNamedFields(source, {
@@ -293,7 +281,6 @@ describe('projection envelope', () => {
 				table: 'events',
 				columns: ['legacySequence'],
 				model: testSchema.model,
-				naming: identityNaming,
 			}),
 			[
 				{
@@ -341,7 +328,6 @@ describe('projection envelope', () => {
 			table: 'events',
 			columns: ['sequence'],
 			model: testSchema.model,
-			naming: identityNaming,
 		});
 		const nonConvertible = fromModelColumns({
 			sql: 'SELECT legacySequence, label FROM events',
@@ -349,7 +335,6 @@ describe('projection envelope', () => {
 			table: 'events',
 			columns: ['legacySequence', 'label'],
 			model: testSchema.model,
-			naming: identityNaming,
 		});
 
 		expect(() =>
@@ -408,7 +393,6 @@ describe('projection envelope', () => {
 			]),
 			rootTable: 'events',
 			model: testSchema.model,
-			naming: identityNaming,
 		});
 
 		expect(finalizeEnvelope(env).columnMetadata?.size).toBe(0);
@@ -421,7 +405,6 @@ describe('projection envelope', () => {
 			table: 'events',
 			columns: ['sequence'],
 			model: testSchema.model,
-			naming: identityNaming,
 		});
 
 		const preserved = preserveOneToOne(source, {
@@ -445,7 +428,6 @@ describe('projection envelope', () => {
 			table: 'events',
 			columns: ['sequence'],
 			model: testSchema.model,
-			naming: identityNaming,
 		});
 
 		const supplemented = supplementOutputDescriptors(source, [

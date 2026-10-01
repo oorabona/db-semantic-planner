@@ -7,7 +7,7 @@
 
 import type { DialectCapabilities, ModelIR } from '@dbsp/types';
 import type { FkColumnDerivation } from './assert-field.js';
-import type { BindingNameRegistry } from './binding-registry.js';
+import type { BindingNameRegistry, QueryScope } from './binding-registry.js';
 import type { DeclaredNameResolver } from './declared-name-resolver.js';
 import type { NamingPlugin } from './naming-plugin.js';
 import type { PgPhysicalModel } from './physical-model/index.js';
@@ -28,6 +28,8 @@ export interface AdapterCompilerDeps {
 	readonly dialectCapabilities?: DialectCapabilities;
 	readonly defaultPk: string;
 	readonly deriveFk: FkColumnDerivation;
+	/** Query-local relation authority established by the adapter boundary. */
+	readonly scope?: QueryScope;
 	readonly bindingNames?: BindingNameRegistry;
 	readonly relationTargetProjections?: RelationTargetProjectionRegistry;
 }

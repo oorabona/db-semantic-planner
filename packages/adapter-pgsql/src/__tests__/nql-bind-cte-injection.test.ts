@@ -253,7 +253,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect(sql).not.toContain('b.display_name');
 	});
 
-	it('materializes long logical bind columns through their physical PostgreSQL name', () => {
+	it('materializes long logical bind columns through their truncated local PostgreSQL label', () => {
 		const longColumn =
 			'extremelyLongCamelCaseColumnNameThatExceedsPostgresqlIdentifierLimitByFar';
 		const model = schema({ records: { [longColumn]: 'string' } }).model;
@@ -278,11 +278,9 @@ describe('NQL bind CTE identifier injection defense', () => {
 		});
 
 		const compiled = adapter.compile(bundle, { model });
-		const physicalColumn = longColumn
-			.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)
-			.slice(0, 63);
+		const returnedLocalColumn = longColumn.slice(0, 63);
 
-		expect(compiled.sql).toContain(`"${physicalColumn}"`);
+		expect(compiled.sql).toContain(`"${returnedLocalColumn}"`);
 		expect(compiled.parameters).toEqual(['value']);
 	});
 	it('rejects NQL multi-statement quoted bind name with embedded double quote before WITH CTE emission', () => {

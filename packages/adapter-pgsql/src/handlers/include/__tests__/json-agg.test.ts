@@ -136,7 +136,6 @@ describe('json-agg handler', () => {
 					shape: { kind: 'scalar', cardinality: 'one' },
 				},
 			],
-			naming: identityNaming,
 		});
 		const ctx = {
 			...makeCtx('users'),
@@ -180,7 +179,6 @@ describe('json-agg handler', () => {
 					shape: { kind: 'scalar', cardinality: 'one' },
 				},
 			],
-			naming: identityNaming,
 		});
 		const ctx = {
 			...makeCtx('users'),
@@ -229,7 +227,6 @@ describe('json-agg handler', () => {
 					shape: { kind: 'scalar', cardinality: 'one' },
 				},
 			],
-			naming: identityNaming,
 		});
 		const ctx = {
 			...makeCtx('users'),

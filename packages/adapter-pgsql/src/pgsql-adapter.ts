@@ -96,6 +96,8 @@ import {
 	type BindingNameRegistry,
 	emittedBindName,
 	hasBindingName,
+	type QueryScope,
+	relationBindingFor,
 } from './binding-registry.js';
 import {
 	buildCustomFnFilter,
@@ -159,10 +161,12 @@ import {
 	projectNamedFields,
 } from './projection-envelope.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
+import { queryScopeForBindingProjections } from './relation-target-projection.js';
 import {
 	compileSetOperationEnvelope as compileSetOperationEnvelopeImpl,
 	type LeafCompileFn,
 } from './set-operation.js';
+import { identifierText, queryLocal } from './sql-identifier.js';
 import { generateCursorName } from './streaming/cursor.js';
 import {
 	type PgsqlTransactionTimeoutParameter,
@@ -1555,6 +1559,19 @@ function renumberSqlParams(sql: string, offset: number): string {
 	});
 }
 
+/** PostgreSQL returns identifiers truncated to its 63-byte identifier limit. */
+function pgReturnedIdentifier(identifier: string): string {
+	let result = '';
+	let byteLength = 0;
+	for (const character of identifier) {
+		const width = Buffer.byteLength(character, 'utf8');
+		if (byteLength + width > 63) break;
+		result += character;
+		byteLength += width;
+	}
+	return result;
+}
+
 function prefixNqlBindingCtes(
 	bindingCtes: readonly string[],
 	sql: string,
@@ -2121,6 +2138,10 @@ function compileNqlRuntimeBindingCte(
 	returningItems?: readonly MutationReturningItem[],
 ): { cte: string; parameters: readonly unknown[] } {
 	const { naming } = deps;
+	const sourceBinding =
+		sourceTable === undefined
+			? undefined
+			: relationBindingFor(deps.scope, queryLocal(sourceTable));
 	// #217: an aliased mutation RETURNING projects OUTPUT names that are not
 	// physical columns of the source table. The CTE header (columnSql) names
 	// the outputs positionally, so the source-table anchor and the type walk
@@ -2137,32 +2158,42 @@ function compileNqlRuntimeBindingCte(
 	}
 	const sourceColumnFor = (output: string): string =>
 		returningItems?.find((item) => item.output === output)?.source ?? output;
+	const localSourceOutputFor = (output: string): string | undefined => {
+		if (sourceBinding === undefined) return undefined;
+		const source = sourceColumnFor(output);
+		const descriptor =
+			sourceBinding.outputs?.get(queryLocal(source)) ??
+			sourceBinding.outputsByLogicalKey?.get(source);
+		return descriptor === undefined
+			? source
+			: identifierText(descriptor.outputKey);
+	};
 	const sourcePhysicalColumnFor = (output: string): string =>
-		sourceTable !== undefined
+		localSourceOutputFor(output) ??
+		(sourceTable !== undefined
 			? declaredColumnName(
 					deps.declaredNames,
 					sourceTable,
 					sourceColumnFor(output),
 				)
-			: sourceColumnFor(output);
-	const physicalColumnFor = (output: string): string =>
-		sourceColumnFor(output) !== output
-			? output
-			: sourcePhysicalColumnFor(output);
+			: sourceColumnFor(output));
 	if (binding.columns.length === 0) {
 		throw new Error(
 			`NQL runtime binding '${name}' cannot be materialized without projected columns.`,
 		);
 	}
 	const cteName = quoteIdent(emittedBindName(name, naming), 'alias');
-	const emittedColumnNames = binding.columns.map(physicalColumnFor);
+	// A binding CTE's header is its query-local output schema, not a projection
+	// of the source table. Keep aliases and aggregate labels verbatim even when
+	// their source happens to be a declared model column.
+	const emittedColumnNames = binding.columns.map(pgReturnedIdentifier);
 	if (new Set(emittedColumnNames).size !== emittedColumnNames.length) {
 		throw new Error(
-			`NQL runtime binding '${name}' emits duplicate column names after database naming.`,
+			`NQL runtime binding '${name}' emits duplicate column names after PostgreSQL returned-label truncation.`,
 		);
 	}
-	const columnSql = binding.columns
-		.map((column) => quoteIdent(physicalColumnFor(column), 'column'))
+	const columnSql = emittedColumnNames
+		.map((column) => quoteIdent(column, 'column'))
 		.join(', ');
 
 	// #213: a binding carrying per-column type info (currently: snapshotted
@@ -2207,7 +2238,16 @@ function compileNqlRuntimeBindingCte(
 	const projectedColumns = binding.columns
 		.map((column) => quoteIdent(sourcePhysicalColumnFor(column), 'column'))
 		.join(', ');
-	const sourceAnchorSql = `SELECT ${projectedColumns} FROM ${schemaName ? `${quoteIdent(schemaName, 'schema')}.` : ''}${quoteIdent(declaredTableName(deps.declaredNames, sourceTable), 'table')} WHERE false`;
+	const sourceAnchorSql = `SELECT ${projectedColumns} FROM ${
+		sourceBinding === undefined && schemaName
+			? `${quoteIdent(schemaName, 'schema')}.`
+			: ''
+	}${quoteIdent(
+		sourceBinding === undefined
+			? declaredTableName(deps.declaredNames, sourceTable)
+			: sourceTable,
+		'table',
+	)} WHERE false`;
 	if (binding.rows.length === 0) {
 		return {
 			cte: `${cteName} (${columnSql}) as (${sourceAnchorSql})`,
@@ -3032,6 +3072,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		options?: CompileOptions,
 		bindingNames?: BindingNameRegistry,
 		relationTargetProjections?: NqlBindingProjectionRegistry,
+		scope?: QueryScope,
 	): AdapterCompilerDeps {
 		// Validate schemaName from CompileOptions before use — prevents SQL injection
 		// via direct callers of adapter.compile().  Empty string is treated as "no
@@ -3071,6 +3112,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			physicalModel === undefined
 				? undefined
 				: createDeclaredNameResolver(physicalModel);
+		const queryScope =
+			scope ??
+			queryScopeForBindingProjections(bindingNames, relationTargetProjections);
 		return {
 			// Naming supplies the legacy no-model path. Model-backed compiler sites
 			// resolve declared objects through declaredNames and a full address.
@@ -3085,6 +3129,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			defaultPk: this.defaultPk,
 			deriveFk: this.deriveFk,
 			...(bindingNames !== undefined && { bindingNames }),
+			...(queryScope !== undefined && { scope: queryScope }),
 			...(relationTargetProjections !== undefined && {
 				relationTargetProjections,
 			}),
@@ -3267,6 +3312,14 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		for (const name of bindingNamesInOrder) {
 			const runtimeBinding = bundle.runtimeBindings?.get(name);
 			if (runtimeBinding !== undefined) {
+				// Every runtime binding is compiled against the CTEs already
+				// materialized in this bundle.  Their qualifiers and outputs are
+				// query-local authority, never declared model addresses.
+				const bindingDeps = this.buildCompileDeps(
+					options,
+					bindingNames,
+					bindingProjections,
+				);
 				const declaredOutputs =
 					runtimeBinding.declaredOutputs ??
 					bundle.bindingOutputSchemas?.get(name)?.declaredOutputs;
@@ -3280,27 +3333,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					bundle.mutationBindings?.get(name)?.returningItems;
 				const physicalOutputKeys = new Map(
 					materializedRuntimeBinding.columns.map((output) => {
-						const source =
-							returningItems?.find((item) => item.output === output)?.source ??
-							output;
-						return [
-							output,
-							source !== output
-								? output
-								: runtimeSourceTable !== undefined
-									? declaredColumnName(
-											deps.declaredNames,
-											runtimeSourceTable,
-											source,
-										)
-									: source,
-						] as const;
+						// CTE column labels are query-local, including a plain
+						// projection of a declared source column.
+						return [output, pgReturnedIdentifier(output)] as const;
 					}),
 				);
 				const compiledRuntimeBinding = compileNqlRuntimeBindingCte(
 					name,
 					materializedRuntimeBinding,
-					deps,
+					bindingDeps,
 					parameters.length,
 					runtimeSourceTable,
 					deps.schemaName,
@@ -3316,7 +3357,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 						parameters: [],
 						columns: runtimeBinding.columns,
 						...(declaredOutputs !== undefined && { declaredOutputs }),
-						naming,
 						emittedOutputKeys: physicalOutputKeys,
 					}),
 				);
@@ -3365,7 +3405,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 							parameters: compiled.parameters,
 							columns: outputSchema.columns,
 							declaredOutputs: outputSchema.declaredOutputs,
-							naming,
 							...(emittedBindingOutputKeys !== undefined && {
 								emittedOutputKeys: emittedBindingOutputKeys,
 							}),

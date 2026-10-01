@@ -144,7 +144,6 @@ function compileMutationEnvelope(
 		ast,
 		rootTable,
 		model: options?.model ?? deps.model,
-		naming: deps.naming,
 		...(deps.declaredNames !== undefined && {
 			declaredNames: deps.declaredNames,
 		}),
@@ -368,12 +367,13 @@ function compileUpsertActionWhere(
 	schemaName: string | undefined,
 ): import('@pgsql/types').Node {
 	const whereCtx: WhereCompilerCtx = {
+		naming: deps.naming,
 		rootTable: table,
 		aliases: new Map<string, string>(),
 		paramState: state,
-		naming: deps.naming,
 		...(schemaName !== undefined && { schemaName }),
 		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
+		...(deps.scope !== undefined && { scope: deps.scope }),
 		...(deps.model !== undefined && { model: deps.model }),
 		...(deps.dialectCapabilities !== undefined && {
 			dialectCapabilities: deps.dialectCapabilities,
@@ -424,6 +424,7 @@ export function compileInsert(
 			dialectCapabilities: deps.dialectCapabilities,
 		}),
 		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
+		...(deps.scope !== undefined && { scope: deps.scope }),
 		maxRecursiveDepth: MAX_DEPTH_LIMIT,
 		compileCustomFnFilter: buildCustomFnFilter,
 	};
@@ -509,6 +510,7 @@ export function compileInsertFrom(
 			dialectCapabilities: deps.dialectCapabilities,
 		}),
 		...(bindingNames !== undefined && { bindingNames }),
+		...(deps.scope !== undefined && { scope: deps.scope }),
 		maxRecursiveDepth: MAX_DEPTH_LIMIT,
 		compileCustomFnFilter: buildCustomFnFilter,
 	};
@@ -562,6 +564,7 @@ export function compileUpdate(
 		rootTable: intent.table,
 		...(schemaName !== undefined && { schema: schemaName }),
 		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
+		...(deps.scope !== undefined && { scope: deps.scope }),
 		...(resolvedModel !== undefined && { model: resolvedModel }),
 		...(deps.dialectCapabilities !== undefined && {
 			dialectCapabilities: deps.dialectCapabilities,
@@ -627,6 +630,7 @@ export function compileBatchUpdate(
 			dialectCapabilities: deps.dialectCapabilities,
 		}),
 		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
+		...(deps.scope !== undefined && { scope: deps.scope }),
 		maxRecursiveDepth: MAX_DEPTH_LIMIT,
 		compileCustomFnFilter: buildCustomFnFilter,
 	};
@@ -677,14 +681,15 @@ export function compileBatchUpdate(
 	if (intent.where) {
 		const resolvedWhere = resolveExistsIntent(intent.where, intent.table, deps);
 		const whereCtx: WhereCompilerCtx = {
+			naming: deps.naming,
 			rootTable: intent.table,
 			aliases: new Map<string, string>(),
 			paramState: state,
-			naming: deps.naming,
 			...(schemaName !== undefined && { schemaName }),
 			...(deps.bindingNames !== undefined && {
 				bindingNames: deps.bindingNames,
 			}),
+			...(deps.scope !== undefined && { scope: deps.scope }),
 			...(deps.model !== undefined && { model: deps.model }),
 			...(deps.dialectCapabilities !== undefined && {
 				dialectCapabilities: deps.dialectCapabilities,
@@ -744,6 +749,7 @@ export function compileDelete(
 		rootTable: intent.table,
 		...(schemaName !== undefined && { schema: schemaName }),
 		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
+		...(deps.scope !== undefined && { scope: deps.scope }),
 		...(deps.dialectCapabilities !== undefined && {
 			dialectCapabilities: deps.dialectCapabilities,
 		}),
@@ -794,6 +800,7 @@ export function compileUpsert(
 		rootTable: intent.table,
 		...(schemaName !== undefined && { schema: schemaName }),
 		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
+		...(deps.scope !== undefined && { scope: deps.scope }),
 		...(deps.model !== undefined && { model: deps.model }),
 		...(deps.dialectCapabilities !== undefined && {
 			dialectCapabilities: deps.dialectCapabilities,
@@ -964,6 +971,7 @@ export function compileUpsertFrom(
 			dialectCapabilities: deps.dialectCapabilities,
 		}),
 		...(bindingNames !== undefined && { bindingNames }),
+		...(deps.scope !== undefined && { scope: deps.scope }),
 		maxRecursiveDepth: MAX_DEPTH_LIMIT,
 		compileCustomFnFilter: buildCustomFnFilter,
 	};

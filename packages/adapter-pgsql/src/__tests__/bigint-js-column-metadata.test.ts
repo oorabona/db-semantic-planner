@@ -10,7 +10,6 @@ import { compile as compileNql } from '@dbsp/nql';
 import type { CompiledNqlQuery } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { buildCompiledColumnProjections } from '../column-metadata.js';
-import { identityNaming } from '../naming-plugin.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const testSchema = schema({
@@ -504,7 +503,6 @@ describe('bigint js column metadata provenance', () => {
 			} as never,
 			'events',
 			testSchema.model,
-			identityNaming,
 		);
 
 		expect(projections?.get('sequence')).toEqual({

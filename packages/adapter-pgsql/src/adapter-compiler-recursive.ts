@@ -61,9 +61,24 @@ import {
 	buildRecursiveCte,
 	type RecursiveCteConfig,
 } from './recursive/index.js';
+import { queryScopeForBindingProjections } from './relation-target-projection.js';
 import { validateIdentifier } from './validate.js';
 
 type CteProjectionRegistry = ReadonlyMap<string, ProjectionEnvelope>;
+
+function withBindingProjectionScope(
+	deps: AdapterCompilerDeps,
+	bindingNames: AdapterCompilerDeps['bindingNames'],
+	projections: CteProjectionRegistry,
+): AdapterCompilerDeps {
+	const scope = queryScopeForBindingProjections(bindingNames, projections);
+	return {
+		...deps,
+		...(bindingNames !== undefined && { bindingNames }),
+		relationTargetProjections: projections,
+		...(scope !== undefined && { scope }),
+	};
+}
 
 function getRegisteredProjection(
 	registry: CteProjectionRegistry,
@@ -618,7 +633,6 @@ export function compileRecursive<T = unknown>(
 		table: config.table,
 		columns: config.selectColumns,
 		model,
-		naming: deps.naming,
 		...(deps.declaredNames !== undefined && {
 			declaredNames: deps.declaredNames,
 		}),
@@ -667,10 +681,11 @@ export function compileCteQuery<T = unknown>(
 	// CTE names share the binding-name registry because both are query-local
 	// relations that must not be schema-qualified. A CTE body may only refer to
 	// earlier declarations; the outer query may refer to every declaration.
-	let visibleCteDeps: AdapterCompilerDeps = {
-		...deps,
-		relationTargetProjections: cteProjectionByName,
-	};
+	let visibleCteDeps = withBindingProjectionScope(
+		deps,
+		deps.bindingNames,
+		cteProjectionByName,
+	);
 
 	for (const cte of intent.ctes) {
 		validateIdentifier(cte.name, 'table');
@@ -694,21 +709,21 @@ export function compileCteQuery<T = unknown>(
 					ast: cteQueryAst ?? node,
 					rootTable: emittedCteName,
 					model: undefined,
-					naming: deps.naming,
 				}),
 			);
 		} else if (cte.kind === 'rawCte') {
 			// Raw WITH RECURSIVE CTE: compile base + step independently
 			isRecursive = true;
 			const currentParamOffset = allCteParams.length;
-			const rawCteStepDeps = {
-				...visibleCteDeps,
-				bindingNames: withBindingName(
+			const rawCteStepDeps = withBindingProjectionScope(
+				visibleCteDeps,
+				withBindingName(
 					visibleCteDeps.bindingNames,
 					cte.name,
 					visibleCteDeps.naming,
 				),
-			};
+				cteProjectionByName,
+			);
 			const rawCte = buildRawCte(
 				cte,
 				visibleCteDeps,
@@ -769,15 +784,15 @@ export function compileCteQuery<T = unknown>(
 			);
 		}
 
-		visibleCteDeps = {
-			...visibleCteDeps,
-			bindingNames: withBindingName(
+		visibleCteDeps = withBindingProjectionScope(
+			visibleCteDeps,
+			withBindingName(
 				visibleCteDeps.bindingNames,
 				cte.name,
 				visibleCteDeps.naming,
 			),
-			relationTargetProjections: cteProjectionByName,
-		};
+			cteProjectionByName,
+		);
 	}
 
 	// 2. Compile outer query independently ($1, $2, ... relative to outer)

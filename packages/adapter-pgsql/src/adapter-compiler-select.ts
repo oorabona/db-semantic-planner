@@ -280,6 +280,7 @@ function compileJoinIntents(
 				...(deps.bindingNames !== undefined && {
 					bindingNames: deps.bindingNames,
 				}),
+				...(deps.scope !== undefined && { scope: deps.scope }),
 				...(deps.relationTargetProjections !== undefined && {
 					relationTargetProjections: deps.relationTargetProjections,
 				}),
@@ -350,6 +351,7 @@ function compileJoinIntents(
 				...(deps.bindingNames !== undefined && {
 					bindingNames: deps.bindingNames,
 				}),
+				...(deps.scope !== undefined && { scope: deps.scope }),
 				...(deps.relationTargetProjections !== undefined && {
 					relationTargetProjections: deps.relationTargetProjections,
 				}),
@@ -1139,6 +1141,7 @@ export function compileSelectEnvelope<T = unknown>(
 		...(deps.bindingNames !== undefined && {
 			bindingNames: deps.bindingNames,
 		}),
+		...(deps.scope !== undefined && { scope: deps.scope }),
 		...(deps.relationTargetProjections !== undefined && {
 			relationTargetProjections: deps.relationTargetProjections,
 		}),
@@ -1357,7 +1360,6 @@ export function compileSelectEnvelope<T = unknown>(
 		ast: result.ast,
 		rootTable: plan.rootTable,
 		model: resolvedModelForCompiler,
-		naming: deps.naming,
 		...(deps.declaredNames !== undefined && {
 			declaredNames: deps.declaredNames,
 		}),
