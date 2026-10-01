@@ -13,13 +13,20 @@
 import { type ColumnListInput, toColumnList } from '@dbsp/types';
 import type { JoinExpr, Node, SelectStmt } from '@pgsql/types';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
-import { columnRef, rangeVar, starTarget } from '../../ast-helpers.js';
-import { schemaForFromName } from '../../binding-registry.js';
+import {
+	sqlColumnRefStar,
+	sqlRangeAlias,
+	sqlRangeVar,
+	sqlResTarget,
+} from '../../ast-helpers.js';
+import { queryScope, relationBinding } from '../../binding-registry.js';
 import {
 	bindAliasAuthority,
+	queryScopeForBindingProjections,
 	requireRelationTargetColumns,
 	resolveRelationTarget,
 } from '../../relation-target-projection.js';
+import { declaredTable, queryLocal } from '../../sql-identifier.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -27,6 +34,7 @@ import type {
 	IncludeHandler,
 	IncludeResult,
 } from '../types.js';
+import { expressionQualifiedColumnRef } from '../types.js';
 import { buildKeyCorrelation } from '../where/exists.js';
 import { deriveFkColumns } from './shared.js';
 
@@ -43,21 +51,13 @@ function buildLateralTargets(
 		columns.length > 0 &&
 		!(columns.length === 1 && columns[0] === '*')
 	) {
-		return columns.map((col) => ({
-			ResTarget: {
-				val: columnRef(
-					col,
-					alias,
-					undefined,
-					ctx.naming,
-					ctx.aliasColumnAuthorities,
-				),
-			},
-		}));
+		return columns.map((col) =>
+			sqlResTarget(expressionQualifiedColumnRef(col, alias, ctx)),
+		);
 	}
 
 	// Select all columns
-	return [starTarget(alias, ctx.naming, ctx.aliasColumnAuthorities)];
+	return [sqlResTarget(sqlColumnRefStar(queryLocal(alias)))];
 }
 
 /**
@@ -89,16 +89,12 @@ function buildLateralSubquery(
 	const stmt: SelectStmt = {
 		targetList,
 		fromClause: [
-			rangeVar(
-				targetTable,
-				innerAlias,
-				schemaForFromName(
-					ctx.schema,
-					targetTable,
-					ctx.bindingNames,
-					ctx.naming,
-				),
-				ctx.naming,
+			sqlRangeVar(
+				ctx.declaredNames === undefined
+					? queryLocal(targetTable)
+					: declaredTable(ctx.declaredNames, targetTable),
+				queryLocal(innerAlias),
+				ctx.schema === undefined ? undefined : queryLocal(ctx.schema),
 			),
 		],
 		whereClause,
@@ -123,7 +119,7 @@ function buildLateralJoin(
 		RangeSubselect: {
 			lateral: true,
 			subquery,
-			alias: { aliasname: lateralAlias },
+			alias: sqlRangeAlias(queryLocal(lateralAlias)),
 		},
 	};
 
@@ -188,7 +184,29 @@ function compileLateralCascade(
 		target,
 		ctx,
 	);
-	const scopedCtx: CompilerContext = { ...ctx, aliasColumnAuthorities };
+	const scopedCtx: CompilerContext = {
+		...ctx,
+		aliasColumnAuthorities,
+		scope: queryScope([
+			...((
+				ctx.scope ??
+				queryScopeForBindingProjections(
+					ctx.bindingNames,
+					ctx.relationTargetProjections,
+				)
+			)?.bindings.values() ?? []),
+			relationBinding({
+				qualifier: queryLocal(innerAlias),
+				kind: 'declared-table',
+				logicalTable: targetTable,
+			}),
+			relationBinding({
+				qualifier: queryLocal(lateralAlias),
+				kind: 'declared-table',
+				logicalTable: targetTable,
+			}),
+		]),
+	};
 
 	// Build the LATERAL subquery
 	const subquery = buildLateralSubquery(

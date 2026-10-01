@@ -12,12 +12,22 @@
 import { type ColumnListInput, toColumnList } from '@dbsp/types';
 import type { JoinExpr, Node } from '@pgsql/types';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
-import { columnTarget, rangeVar, starTarget } from '../../ast-helpers.js';
-import { schemaForFromName } from '../../binding-registry.js';
 import {
+	sqlColumnRefStar,
+	sqlRangeVar,
+	sqlResTarget,
+} from '../../ast-helpers.js';
+import {
+	queryScope,
+	relationBinding,
+	relationBindingFor,
+} from '../../binding-registry.js';
+import {
+	queryScopeForBindingProjections,
 	requireRelationTargetColumns,
 	resolveRelationTarget,
 } from '../../relation-target-projection.js';
+import { declaredTable, queryLocal } from '../../sql-identifier.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -25,6 +35,7 @@ import type {
 	IncludeHandler,
 	IncludeResult,
 } from '../types.js';
+import { expressionQualifiedColumnRef } from '../types.js';
 import { buildKeyCorrelation } from '../where/exists.js';
 
 /**
@@ -50,11 +61,16 @@ function buildJoin(
 
 	const joinExpr: JoinExpr = {
 		jointype: joinType === 'inner' ? 'JOIN_INNER' : 'JOIN_LEFT',
-		rarg: rangeVar(
-			targetTable,
-			targetAlias,
-			schemaForFromName(ctx.schema, targetTable, ctx.bindingNames, ctx.naming),
-			ctx.naming,
+		rarg: sqlRangeVar(
+			resolveRelationTarget(targetTable, ctx).cteName ??
+				(ctx.declaredNames === undefined
+					? queryLocal(targetTable)
+					: declaredTable(ctx.declaredNames, targetTable)),
+			queryLocal(targetAlias),
+			resolveRelationTarget(targetTable, ctx).cteName === undefined &&
+				ctx.schema !== undefined
+				? queryLocal(ctx.schema)
+				: undefined,
 		),
 		quals: joinCondition,
 	};
@@ -119,13 +135,33 @@ export const joinIncludeHandler: IncludeHandler = {
 		}
 
 		// Build the JOIN (LEFT or INNER based on decision.joinType)
+		const targetBinding = relationBinding({
+			qualifier: queryLocal(targetAlias),
+			kind: 'declared-table',
+			logicalTable: targetTable,
+		});
+		const scopedCtx: CompilerContext = {
+			...ctx,
+			scope: queryScope([
+				...((
+					ctx.scope ??
+					queryScopeForBindingProjections(
+						ctx.bindingNames,
+						ctx.relationTargetProjections,
+					)
+				)?.bindings.values() ?? []),
+				...(relationBindingFor(ctx.scope, targetBinding.qualifier) === undefined
+					? [targetBinding]
+					: []),
+			]),
+		};
 		const join = buildJoin(
 			targetTable,
 			targetAlias,
 			sourceAlias,
 			sourceColumn,
 			targetColumn,
-			ctx,
+			scopedCtx,
 			decision.joinType ?? 'left',
 		);
 
@@ -138,20 +174,15 @@ export const joinIncludeHandler: IncludeHandler = {
 		if (columns && columns.length > 0) {
 			if (columns.length === 1 && columns[0] === '*') {
 				// Wildcard: select all columns from the joined relation
-				targets.push(
-					starTarget(targetAlias, ctx.naming, ctx.aliasColumnAuthorities),
-				);
+				targets.push(sqlResTarget(sqlColumnRefStar(queryLocal(targetAlias))));
 			} else {
 				for (const col of columns) {
 					const outputAlias =
 						columnAliases?.[col] ?? `${hydrationPrefix}.${col}`;
 					targets.push(
-						columnTarget(
-							col,
-							outputAlias,
-							targetAlias,
-							ctx.naming,
-							ctx.aliasColumnAuthorities,
+						sqlResTarget(
+							expressionQualifiedColumnRef(col, targetAlias, scopedCtx),
+							queryLocal(outputAlias),
 						),
 					);
 				}

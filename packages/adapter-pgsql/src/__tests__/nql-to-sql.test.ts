@@ -852,20 +852,20 @@ describe('NQL → SQL compile-only pipeline', () => {
 
 	it('keeps structural ORDER BY columns and trusted nqlRaw ORDER BY fragments working', () => {
 		const structural = nqlToSQLWithNamedParams(
-			'users | select id | order by created_at desc',
+			'users | select id | order by createdAt desc',
 			{},
 		);
-		expect(structural.sql).toContain('order by users.created_at desc');
+		expect(structural.sql).toContain('order by users."createdat" desc');
 		expect(structural.params).toEqual([]);
 
 		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
 		const orm = createOrm({ model: testSchema.model, adapter });
 		const rawFragment = orm.nql<{
 			id: number;
-		}>`users | select id | ${nqlRaw('order by created_at desc')}`.dump();
+		}>`users | select id | ${nqlRaw('order by createdAt desc')}`.dump();
 
 		expect(normalizeSQL(rawFragment.sql)).toContain(
-			'order by users.created_at desc',
+			'order by users."createdat" desc',
 		);
 		if (!('params' in rawFragment)) {
 			throw new Error('expected NQL dump to be a query dump');
@@ -1573,7 +1573,7 @@ describe('CTE relation planning', () => {
 				'with authors as (authors | select id) posts | select title, author.id | flat | order by author.name',
 			),
 		).toThrow(
-			"target 'authors' resolves to the CTE 'authors', which does not project 'name' (column reference). Available: id",
+			"Local relation 'author' does not project expression column 'name'.",
 		);
 	});
 
@@ -1583,14 +1583,14 @@ describe('CTE relation planning', () => {
 				'with authors as (authors | select name) authors | select id',
 			),
 		).toThrow(
-			"target 'authors' resolves to the CTE 'authors', which does not project 'id' (column reference). Available: name",
+			"Local relation 'authors' does not project expression column 'id'.",
 		);
 		expect(() =>
 			blogCteToSQL(
 				'with authors as (authors | select name) authors | where id = 1 | select id',
 			),
 		).toThrow(
-			"target 'authors' resolves to the CTE 'authors', which does not project 'id' (column reference). Available: name",
+			"Local relation 'authors' does not project expression column 'id'.",
 		);
 	});
 

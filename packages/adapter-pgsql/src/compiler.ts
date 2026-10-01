@@ -34,25 +34,24 @@ import {
 import {
 	andExpr,
 	coalesceExpr,
-	columnRef,
-	columnTarget,
-	deleteStmt,
 	emptyJsonArrayNode,
 	funcCall,
 	innerJoin,
-	insertStmt,
 	integerNode,
 	leftJoin,
 	mapLockToAst,
 	notExpr,
 	orExpr,
-	rangeVar,
 	selectStmt,
 	sortBy,
+	sqlColumnRef,
+	sqlColumnRefStar,
+	sqlDeleteStmt,
+	sqlInsertStmt,
 	sqlRangeVar,
-	starTarget,
+	sqlResTarget,
+	sqlUpdateStmt,
 	typeCast,
-	updateStmt,
 } from './ast-helpers.js';
 import {
 	type BindingNameRegistry,
@@ -62,7 +61,6 @@ import {
 	queryScope,
 	relationBinding,
 	relationBindingFor,
-	schemaForFromName,
 } from './binding-registry.js';
 import { deparseQuoted } from './deparse.js';
 import { assertDialectCapability } from './dialect-capabilities.js';
@@ -87,7 +85,7 @@ import { buildKeyCorrelation } from './handlers/where/exists.js';
 import {
 	type AliasColumnAuthority,
 	bindAliasAuthority,
-	emittedColumnReference,
+	queryScopeForBindingProjections,
 	type RelationTargetProjectionRegistry,
 	type ResolvedRelationTarget,
 	requireRelationTargetColumns,
@@ -110,6 +108,7 @@ import type {
 import {
 	expressionColumnRef,
 	expressionQualifiedColumnRef,
+	expressionUnqualifiedColumnRef,
 	isSelectWithFields,
 } from './handlers/types.js';
 import { buildColumnRef, compileValue } from './handlers/where/utils.js';
@@ -119,7 +118,6 @@ import {
 	intentToDecisions,
 } from './intent-to-decisions.js';
 import type { NamingPlugin } from './naming-plugin.js';
-import { identityNaming } from './naming-plugin.js';
 import { unwrapParamIntent } from './param-intent.js';
 import { createParamRef } from './param-ref.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
@@ -128,7 +126,13 @@ import {
 	isAmbiguousRelationAlias,
 	resolveVisibleRelationAlias,
 } from './relation-alias.js';
-import { declaredTable, identifierText, queryLocal } from './sql-identifier.js';
+import {
+	declaredColumn,
+	declaredTable,
+	identifierText,
+	queryLocal,
+	type SqlIdentifier,
+} from './sql-identifier.js';
 import { assertNoDroppedDecisionModifiers } from './subquery-emission.js';
 import { validateIdentifier } from './validate.js';
 
@@ -753,6 +757,7 @@ function maxParamRefNumber(value: unknown): number {
 // ============================================================================
 
 export interface CompilerOptions {
+	/** @deprecated Kept only so pre-lot callers remain structurally assignable. */
 	readonly naming?: NamingPlugin;
 	readonly declaredNames?: DeclaredNameResolver;
 	readonly schema?: string;
@@ -770,7 +775,6 @@ export interface CompilerOptions {
 }
 
 export class PlanCompiler {
-	private readonly naming: NamingPlugin;
 	private readonly declaredNames: DeclaredNameResolver | undefined;
 	private readonly schema: string | undefined;
 	private readonly defaultPk: string;
@@ -832,7 +836,6 @@ export class PlanCompiler {
 	private aliasColumnAuthorities: AliasColumnAuthority = new Map();
 
 	constructor(options: CompilerOptions = {}) {
-		this.naming = options.naming ?? identityNaming;
 		this.declaredNames = options.declaredNames;
 		this.schema = options.schema ?? undefined;
 		this.defaultPk = options.defaultPkColumnName ?? DEFAULT_PK_COLUMN;
@@ -848,7 +851,6 @@ export class PlanCompiler {
 		overrides: CompilerOptions = {},
 	): CompilerOptions {
 		return {
-			naming: this.naming,
 			...(this.declaredNames !== undefined && {
 				declaredNames: this.declaredNames,
 			}),
@@ -862,7 +864,9 @@ export class PlanCompiler {
 			...(this.bindingNames !== undefined && {
 				bindingNames: this.bindingNames,
 			}),
-			...(this.scope !== undefined && { scope: this.scope }),
+			...(this.scope !== undefined && {
+				scope: queryScope([...this.scope.bindings.values()]),
+			}),
 			...(this.relationTargetProjections !== undefined && {
 				relationTargetProjections: this.relationTargetProjections,
 			}),
@@ -872,10 +876,17 @@ export class PlanCompiler {
 
 	/** Build immutable context for handler-based WHERE compilation */
 	private handlerCtx(): HandlerCompilerContext {
-		const bindings = [...(this.scope?.bindings.values() ?? [])];
+		const bindings = [
+			...((
+				this.scope ??
+				queryScopeForBindingProjections(
+					this.bindingNames,
+					this.relationTargetProjections,
+				)
+			)?.bindings.values() ?? []),
+		];
 		if (
 			this.currentRootTable.length > 0 &&
-			this.declaredNames !== undefined &&
 			relationBindingFor(this.scope, queryLocal(this.currentRootTable)) ===
 				undefined &&
 			declaredRelationBindingFor(this.scope, this.currentRootTable) ===
@@ -883,7 +894,7 @@ export class PlanCompiler {
 		) {
 			bindings.push(
 				relationBinding({
-					qualifier: declaredTable(this.declaredNames, this.currentRootTable),
+					qualifier: this.tableIdentifier(this.currentRootTable),
 					kind: 'declared-table',
 					logicalTable: this.currentRootTable,
 				}),
@@ -891,7 +902,6 @@ export class PlanCompiler {
 		}
 		const scope = bindings.length > 0 ? queryScope(bindings) : undefined;
 		return {
-			naming: this.naming,
 			...(this.declaredNames !== undefined && {
 				declaredNames: this.declaredNames,
 			}),
@@ -922,10 +932,9 @@ export class PlanCompiler {
 
 	private relationTargetContext(): Pick<
 		HandlerCompilerContext,
-		'naming' | 'bindingNames' | 'scope' | 'relationTargetProjections' | 'model'
+		'bindingNames' | 'scope' | 'relationTargetProjections' | 'model'
 	> {
 		return {
-			naming: this.naming,
 			...(this.bindingNames != null && { bindingNames: this.bindingNames }),
 			...(this.scope != null && { scope: this.scope }),
 			...(this.relationTargetProjections != null && {
@@ -1485,19 +1494,26 @@ export class PlanCompiler {
 		currentAlias?: string,
 	): HandlerCompilerContext {
 		const alias = currentAlias ?? plan.rootTable;
-		const bindings = [...(this.scope?.bindings.values() ?? [])];
+		const bindings = [
+			...((
+				this.scope ??
+				queryScopeForBindingProjections(
+					this.bindingNames,
+					this.relationTargetProjections,
+				)
+			)?.bindings.values() ?? []),
+		];
 		const boundQualifiers = new Set(
 			bindings.map((binding) => identifierText(binding.qualifier)),
 		);
-		const declaredRoot = this.declaredNames?.table(plan.rootTable);
+		const declaredRoot = this.tableIdentifier(plan.rootTable);
 		if (
-			declaredRoot !== undefined &&
 			!boundQualifiers.has(declaredRoot) &&
 			declaredRelationBindingFor(this.scope, plan.rootTable) === undefined
 		) {
 			bindings.push(
 				relationBinding({
-					qualifier: declaredTable(this.declaredNames!, plan.rootTable),
+					qualifier: declaredRoot,
 					kind: 'declared-table',
 					logicalTable: plan.rootTable,
 				}),
@@ -1518,7 +1534,6 @@ export class PlanCompiler {
 		}
 		const scope = bindings.length > 0 ? queryScope(bindings) : undefined;
 		return {
-			naming: this.naming,
 			...(this.declaredNames !== undefined && {
 				declaredNames: this.declaredNames,
 			}),
@@ -1569,16 +1584,36 @@ export class PlanCompiler {
 		plan: SimplifiedPlanReport,
 		table: string,
 	): string | undefined {
-		return schemaForFromName(
-			plan.schema ?? this.schema,
-			table,
-			this.bindingNames,
-			this.naming,
-		);
+		return hasBindingName(this.scope ?? this.bindingNames, queryLocal(table))
+			? undefined
+			: (plan.schema ?? this.schema);
 	}
 
 	private isNqlBindingRoot(plan: SimplifiedPlanReport): boolean {
-		return hasBindingName(this.bindingNames, plan.rootTable, this.naming);
+		return hasBindingName(
+			this.scope ?? this.bindingNames,
+			queryLocal(plan.rootTable),
+		);
+	}
+
+	/** Classify a FROM target before it reaches the typed AST façade. */
+	private tableIdentifier(table: string): SqlIdentifier {
+		const scoped =
+			relationBindingFor(this.scope, queryLocal(table)) ??
+			declaredRelationBindingFor(this.scope, table);
+		if (scoped !== undefined) return scoped.qualifier;
+		if (hasBindingName(this.bindingNames, queryLocal(table))) {
+			return queryLocal(table);
+		}
+		return this.declaredNames === undefined
+			? queryLocal(table)
+			: declaredTable(this.declaredNames, table);
+	}
+
+	private schemaIdentifier(
+		schema: string | undefined,
+	): SqlIdentifier | undefined {
+		return schema === undefined ? undefined : queryLocal(schema);
 	}
 
 	private allocateBindingRelationAlias(): string {
@@ -1606,11 +1641,10 @@ export class PlanCompiler {
 			this.bindingRelationName(fields),
 		);
 		this.registerAliasAuthority(relatedAlias, target);
-		const relatedTable = rangeVar(
-			fields.targetTable,
-			relatedAlias,
-			this.schemaForRangeVar(plan, fields.targetTable),
-			this.naming,
+		const relatedTable = sqlRangeVar(
+			this.tableIdentifier(fields.targetTable),
+			queryLocal(relatedAlias),
+			this.schemaIdentifier(this.schemaForRangeVar(plan, fields.targetTable)),
 		);
 		return {
 			relatedAlias,
@@ -1775,11 +1809,10 @@ export class PlanCompiler {
 						this.bindingRelationName(fields),
 					);
 					this.registerAliasAuthority(hopAlias, hopTarget);
-					const hopTable = rangeVar(
-						hop.target,
-						hopAlias,
-						this.schemaForRangeVar(plan, hop.target),
-						this.naming,
+					const hopTable = sqlRangeVar(
+						this.tableIdentifier(hop.target),
+						queryLocal(hopAlias),
+						this.schemaIdentifier(this.schemaForRangeVar(plan, hop.target)),
 					);
 					fromNode = innerJoin(
 						fromNode,
@@ -1807,17 +1840,13 @@ export class PlanCompiler {
 						subLinkType: 'EXPR_SUBLINK',
 						subselect: selectStmt({
 							targetList: [
-								{
-									ResTarget: {
-										val: columnRef(
-											fields.selectedColumn!,
-											previousAlias,
-											undefined,
-											this.naming,
-											this.aliasColumnAuthorities,
-										),
-									},
-								},
+								sqlResTarget(
+									expressionQualifiedColumnRef(
+										fields.selectedColumn!,
+										previousAlias,
+										this.createHandlerContext(plan),
+									),
+								),
 							],
 							from: [fromNode],
 							where: buildKeyCorrelation(
@@ -1843,17 +1872,13 @@ export class PlanCompiler {
 					subLinkType: 'EXPR_SUBLINK',
 					subselect: selectStmt({
 						targetList: [
-							{
-								ResTarget: {
-									val: columnRef(
-										fields.selectedColumn!,
-										relatedAlias,
-										undefined,
-										this.naming,
-										this.aliasColumnAuthorities,
-									),
-								},
-							},
+							sqlResTarget(
+								expressionQualifiedColumnRef(
+									fields.selectedColumn!,
+									relatedAlias,
+									this.createHandlerContext(plan),
+								),
+							),
 						],
 						from: [relatedTable],
 						where: buildKeyCorrelation(
@@ -1945,19 +1970,11 @@ export class PlanCompiler {
 							]),
 						}
 					: handlerContext;
-			const relatedColumn = hasCompleteManyToManyProof
-				? expressionQualifiedColumnRef(
-						fields.selectedColumn!,
-						relatedAlias,
-						manyToManyHandlerContext,
-					)
-				: columnRef(
-						fields.selectedColumn!,
-						relatedAlias,
-						undefined,
-						this.naming,
-						this.aliasColumnAuthorities,
-					);
+			const relatedColumn = expressionQualifiedColumnRef(
+				fields.selectedColumn!,
+				relatedAlias,
+				manyToManyHandlerContext,
+			);
 			const fromNode = hasCompleteManyToManyProof
 				? innerJoin(
 						relatedTable,
@@ -2111,13 +2128,7 @@ export class PlanCompiler {
 						column,
 						ctx.aliases ?? new Map(),
 					);
-					return columnRef(
-						column,
-						alias,
-						undefined,
-						ctx.naming,
-						ctx.aliasColumnAuthorities,
-					);
+					return expressionQualifiedColumnRef(column, alias, ctx);
 				}
 
 				case 'param':
@@ -2361,39 +2372,28 @@ export class PlanCompiler {
 			case 'select':
 				if (decision.column === '*') {
 					targetList.push(
-						starTarget(
-							decision.table,
-							this.naming,
-							this.createHandlerContext(plan).aliasColumnAuthorities,
+						sqlResTarget(
+							sqlColumnRefStar(
+								decision.table === undefined
+									? undefined
+									: queryLocal(decision.table),
+							),
 						),
 					);
 				} else if (decision.column) {
-					const sourceTable = decision.table ?? plan.rootTable;
-					const authority =
-						this.createHandlerContext(plan).aliasColumnAuthorities?.get(
-							sourceTable,
-						);
-					const declaredColumn =
-						authority === undefined
-							? this.declaredNames?.column(sourceTable, decision.column)
-							: undefined;
-					if (
-						authority === undefined &&
-						this.declaredNames &&
-						!declaredColumn
-					) {
-						throw new Error(
-							`Declared column '${sourceTable}.${decision.column}' is missing from the physical inventory.`,
-						);
-					}
-					const emittedColumn = declaredColumn ?? decision.column;
+					const ctx = this.createHandlerContext(plan);
 					targetList.push(
-						columnTarget(
-							emittedColumn,
-							decision.alias,
-							decision.table,
-							this.naming,
-							this.createHandlerContext(plan).aliasColumnAuthorities,
+						sqlResTarget(
+							decision.table === undefined
+								? expressionUnqualifiedColumnRef(decision.column, ctx)
+								: expressionQualifiedColumnRef(
+										decision.column,
+										decision.table,
+										ctx,
+									),
+							decision.alias === undefined
+								? undefined
+								: queryLocal(decision.alias),
 						),
 					);
 				}
@@ -2827,20 +2827,20 @@ export class PlanCompiler {
 	private flushPendingJoins(from: Node[], plan: SimplifiedPlanReport): void {
 		// Flush pending JOINs into FROM clause
 		for (const pj of this.pendingJoins) {
-			const targetRV = rangeVar(
-				pj.table,
-				pj.alias,
-				this.schemaForRangeVar(plan, pj.table),
-				this.naming,
+			const targetRV = sqlRangeVar(
+				this.tableIdentifier(pj.table),
+				pj.alias === undefined ? undefined : queryLocal(pj.alias),
+				this.schemaIdentifier(this.schemaForRangeVar(plan, pj.table)),
 			);
 			const base =
 				from.length > 0
 					? from[0]!
-					: rangeVar(
-							plan.rootTable,
+					: sqlRangeVar(
+							this.tableIdentifier(plan.rootTable),
 							undefined,
-							this.schemaForRangeVar(plan, plan.rootTable),
-							this.naming,
+							this.schemaIdentifier(
+								this.schemaForRangeVar(plan, plan.rootTable),
+							),
 						);
 			from[0] =
 				pj.type === 'LEFT JOIN'
@@ -2853,11 +2853,12 @@ export class PlanCompiler {
 			const base =
 				from.length > 0
 					? from[0]!
-					: rangeVar(
-							plan.rootTable,
+					: sqlRangeVar(
+							this.tableIdentifier(plan.rootTable),
 							undefined,
-							this.schemaForRangeVar(plan, plan.rootTable),
-							this.naming,
+							this.schemaIdentifier(
+								this.schemaForRangeVar(plan, plan.rootTable),
+							),
 						);
 			// Raw joins are pre-built JoinExpr — inject base table as larg
 			const joinExpr = rawJoin as JoinExprNode;
@@ -2890,11 +2891,12 @@ export class PlanCompiler {
 		return [
 			plan.batchValuesFromNode
 				? (plan.batchValuesFromNode as Node)
-				: rangeVar(
-						plan.rootTable,
+				: sqlRangeVar(
+						this.isNqlBindingRoot(plan)
+							? queryLocal(plan.rootTable)
+							: this.tableIdentifier(plan.rootTable),
 						undefined,
-						this.schemaForRangeVar(plan, plan.rootTable),
-						this.isNqlBindingRoot(plan) ? identityNaming : this.naming,
+						this.schemaIdentifier(this.schemaForRangeVar(plan, plan.rootTable)),
 					),
 		];
 	}
@@ -3031,7 +3033,7 @@ export class PlanCompiler {
 			// must not be passed through db casing.
 			if (this.projectionAliases.has(decision.column)) {
 				return sortBy(
-					columnRef(emittedColumnReference(decision.column)),
+					sqlColumnRef(queryLocal(decision.column)),
 					decision.direction ?? 'ASC',
 					decision.nulls ?? 'DEFAULT',
 				);
@@ -3040,7 +3042,6 @@ export class PlanCompiler {
 				this.compileRelationAwareColumnRef(
 					decision.column as string,
 					decision.table,
-					this.aliasColumnAuthorities,
 				),
 				decision.direction ?? 'ASC',
 				decision.nulls ?? 'DEFAULT',
@@ -3055,33 +3056,30 @@ export class PlanCompiler {
 	private compileRelationAwareColumnRef(
 		column: string,
 		table: string | undefined,
-		authorities: AliasColumnAuthority | undefined,
 	): Node {
 		const dot = column.lastIndexOf('.');
 		if (dot !== -1) {
 			const relation = column.slice(0, dot);
 			if (relation === this.currentRootTable) {
-				return columnRef(
+				return expressionQualifiedColumnRef(
 					column.slice(dot + 1),
 					relation,
-					undefined,
-					this.naming,
-					authorities,
+					this.handlerCtx(),
 				);
 			}
 			const alias = this.resolveVisibleSqlQualifier(
 				relation,
 				column.slice(dot + 1),
 			);
-			return columnRef(
+			return expressionQualifiedColumnRef(
 				column.slice(dot + 1),
 				alias,
-				undefined,
-				this.naming,
-				authorities,
+				this.handlerCtx(),
 			);
 		}
-		return columnRef(column, table, undefined, this.naming, authorities);
+		return table === undefined
+			? expressionColumnRef(column, this.handlerCtx())
+			: expressionQualifiedColumnRef(column, table, this.handlerCtx());
 	}
 
 	/**
@@ -3092,7 +3090,6 @@ export class PlanCompiler {
 		return this.compileRelationAwareColumnRef(
 			decision.column as string,
 			decision.table,
-			this.aliasColumnAuthorities,
 		);
 	}
 
@@ -3102,11 +3099,9 @@ export class PlanCompiler {
 	 * DISTINCT ON columns as unqualified references.
 	 */
 	private compileDistinctOnColumn(column: string): Node {
-		return this.compileRelationAwareColumnRef(
-			column,
-			undefined,
-			this.aliasColumnAuthorities,
-		);
+		return column.includes('.')
+			? this.compileRelationAwareColumnRef(column, undefined)
+			: expressionUnqualifiedColumnRef(column, this.handlerCtx());
 	}
 
 	/**
@@ -3127,7 +3122,7 @@ export class PlanCompiler {
 	): Node {
 		// Default to SELECT * if no columns specified
 		if (targetList.length === 0) {
-			targetList.push(starTarget(undefined, this.naming));
+			targetList.push(sqlResTarget(sqlColumnRefStar()));
 		}
 
 		// Build options object, only including defined properties
@@ -3170,11 +3165,12 @@ export class PlanCompiler {
 				...(hasJoins
 					? {
 							lockedRels: [
-								rangeVar(
-									plan.rootTable,
+								sqlRangeVar(
+									this.tableIdentifier(plan.rootTable),
 									undefined,
-									this.schemaForRangeVar(plan, plan.rootTable),
-									this.naming,
+									this.schemaIdentifier(
+										this.schemaForRangeVar(plan, plan.rootTable),
+									),
 								),
 							],
 						}
@@ -3520,32 +3516,40 @@ export class PlanCompiler {
 				}
 			} else if (decision.type === 'returning') {
 				if (decision.column === '*') {
-					returning.push(starTarget(undefined, this.naming));
+					returning.push(sqlResTarget(sqlColumnRefStar()));
 				} else if (decision.column) {
 					returning.push(
-						columnTarget(
-							decision.column,
-							decision.alias,
-							undefined,
-							this.naming,
+						sqlResTarget(
+							this.declaredNames === undefined
+								? sqlColumnRef(queryLocal(decision.column))
+								: sqlColumnRef(
+										declaredColumn(
+											this.declaredNames,
+											plan.rootTable,
+											decision.column,
+										),
+									),
+							decision.alias === undefined
+								? undefined
+								: queryLocal(decision.alias),
 						),
 					);
 				}
 			}
 		}
 
-		const insertOptions: Parameters<typeof insertStmt>[0] = {
-			table: plan.rootTable,
-			columns,
-			values,
-			naming: this.naming,
-		};
-
 		const schema = plan.schema ?? this.schema;
-		if (schema) insertOptions.schema = schema;
-		if (returning.length > 0) insertOptions.returning = returning;
-
-		return insertStmt(insertOptions);
+		return sqlInsertStmt({
+			table: this.tableIdentifier(plan.rootTable),
+			columns: columns.map((column) =>
+				this.declaredNames === undefined
+					? queryLocal(column)
+					: declaredColumn(this.declaredNames, plan.rootTable, column),
+			),
+			values,
+			...(schema !== undefined && { schema }),
+			...(returning.length > 0 && { returning }),
+		});
 	}
 
 	// --------------------------------------------------------------------------
@@ -3553,7 +3557,7 @@ export class PlanCompiler {
 	// --------------------------------------------------------------------------
 
 	private compileUpdate(plan: SimplifiedPlanReport): Node {
-		const set: Array<{ column: string; value: Node }> = [];
+		const set: Array<{ column: SqlIdentifier; value: Node }> = [];
 		let where: Node | undefined;
 		const returning: Node[] = [];
 
@@ -3562,7 +3566,14 @@ export class PlanCompiler {
 				if (decision.set) {
 					for (const s of decision.set) {
 						set.push({
-							column: s.column,
+							column:
+								this.declaredNames === undefined
+									? queryLocal(s.column)
+									: declaredColumn(
+											this.declaredNames,
+											plan.rootTable,
+											s.column,
+										),
 							value: compileValue(s.value, this.state),
 						});
 					}
@@ -3572,32 +3583,36 @@ export class PlanCompiler {
 				where = where ? andExpr(where, whereExpr) : whereExpr;
 			} else if (decision.type === 'returning') {
 				if (decision.column === '*') {
-					returning.push(starTarget(undefined, this.naming));
+					returning.push(sqlResTarget(sqlColumnRefStar()));
 				} else if (decision.column) {
 					returning.push(
-						columnTarget(
-							decision.column,
-							decision.alias,
-							undefined,
-							this.naming,
+						sqlResTarget(
+							sqlColumnRef(
+								this.declaredNames === undefined
+									? queryLocal(decision.column)
+									: declaredColumn(
+											this.declaredNames,
+											plan.rootTable,
+											decision.column,
+										),
+							),
+							decision.alias === undefined
+								? undefined
+								: queryLocal(decision.alias),
 						),
 					);
 				}
 			}
 		}
 
-		const updateOptions: Parameters<typeof updateStmt>[0] = {
-			table: plan.rootTable,
-			set,
-			naming: this.naming,
-		};
-
 		const updateSchema = plan.schema ?? this.schema;
-		if (updateSchema) updateOptions.schema = updateSchema;
-		if (where) updateOptions.where = where;
-		if (returning.length > 0) updateOptions.returning = returning;
-
-		return updateStmt(updateOptions);
+		return sqlUpdateStmt({
+			table: this.tableIdentifier(plan.rootTable),
+			set,
+			...(updateSchema !== undefined && { schema: updateSchema }),
+			...(where !== undefined && { where }),
+			...(returning.length > 0 && { returning }),
+		});
 	}
 
 	// --------------------------------------------------------------------------
@@ -3614,14 +3629,22 @@ export class PlanCompiler {
 				where = where ? andExpr(where, whereExpr) : whereExpr;
 			} else if (decision.type === 'returning') {
 				if (decision.column === '*') {
-					returning.push(starTarget(undefined, this.naming));
+					returning.push(sqlResTarget(sqlColumnRefStar()));
 				} else if (decision.column) {
 					returning.push(
-						columnTarget(
-							decision.column,
-							decision.alias,
-							undefined,
-							this.naming,
+						sqlResTarget(
+							sqlColumnRef(
+								this.declaredNames === undefined
+									? queryLocal(decision.column)
+									: declaredColumn(
+											this.declaredNames,
+											plan.rootTable,
+											decision.column,
+										),
+							),
+							decision.alias === undefined
+								? undefined
+								: queryLocal(decision.alias),
 						),
 					);
 				}
@@ -3630,17 +3653,13 @@ export class PlanCompiler {
 			}
 		}
 
-		const deleteOptions: Parameters<typeof deleteStmt>[0] = {
-			table: plan.rootTable,
-			naming: this.naming,
-		};
-
 		const deleteSchema = plan.schema ?? this.schema;
-		if (deleteSchema) deleteOptions.schema = deleteSchema;
-		if (where) deleteOptions.where = where;
-		if (returning.length > 0) deleteOptions.returning = returning;
-
-		return deleteStmt(deleteOptions);
+		return sqlDeleteStmt({
+			table: this.tableIdentifier(plan.rootTable),
+			...(deleteSchema !== undefined && { schema: deleteSchema }),
+			...(where !== undefined && { where }),
+			...(returning.length > 0 && { returning }),
+		});
 	}
 
 	// --------------------------------------------------------------------------
@@ -3703,17 +3722,17 @@ export class PlanCompiler {
 	): Node {
 		const baseTable =
 			larg ??
-			rangeVar(
-				plan.rootTable,
+			sqlRangeVar(
+				this.tableIdentifier(plan.rootTable),
 				undefined,
-				this.schemaForRangeVar(plan, plan.rootTable),
-				this.naming,
+				this.schemaIdentifier(this.schemaForRangeVar(plan, plan.rootTable)),
 			);
-		const targetTable = rangeVar(
-			decision.targetTable ?? '',
-			decision.alias,
-			this.schemaForRangeVar(plan, decision.targetTable ?? ''),
-			this.naming,
+		const targetTable = sqlRangeVar(
+			this.tableIdentifier(decision.targetTable ?? ''),
+			decision.alias === undefined ? undefined : queryLocal(decision.alias),
+			this.schemaIdentifier(
+				this.schemaForRangeVar(plan, decision.targetTable ?? ''),
+			),
 		);
 
 		const sourceColumn = toColumnList(decision.sourceColumn);

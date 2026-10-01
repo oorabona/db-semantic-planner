@@ -1223,8 +1223,18 @@ export function compileSelectEnvelope<T = unknown>(
 	const schemaName = deps.schemaName;
 
 	const resolvedModelForCompiler = options?.model ?? deps.model;
+	const batchValuesSource = plan.intent?.batchValuesSource;
+	const compilerScope =
+		batchValuesSource === undefined
+			? deps.scope
+			: queryScope([
+					...(deps.scope?.bindings.values() ?? []),
+					batchValuesBinding(batchValuesSource.alias, [
+						...batchValuesSource.columns,
+						...(batchValuesSource.ordinality ? ['ord'] : []),
+					]),
+				]);
 	const compilerOptions: CompilerOptions = {
-		naming: deps.naming,
 		...(deps.declaredNames !== undefined && {
 			declaredNames: deps.declaredNames,
 		}),
@@ -1234,7 +1244,7 @@ export function compileSelectEnvelope<T = unknown>(
 		...(deps.bindingNames !== undefined && {
 			bindingNames: deps.bindingNames,
 		}),
-		...(deps.scope !== undefined && { scope: deps.scope }),
+		...(compilerScope !== undefined && { scope: compilerScope }),
 		...(deps.relationTargetProjections !== undefined && {
 			relationTargetProjections: deps.relationTargetProjections,
 		}),

@@ -77,7 +77,7 @@ function relationQuery(from = 'employees', column = 'name') {
 // ---------------------------------------------------------------------------
 
 describe('FR-8: orm.recursive() — WITH RECURSIVE CTE', () => {
-	it('keeps an undeclared recursive CTE root on the stub plan', () => {
+	it('resolves a declared recursive CTE root from the physical inventory', () => {
 		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
 		const result = adapter.compileCteQuery({
 			kind: 'cteQuery',
@@ -87,7 +87,7 @@ describe('FR-8: orm.recursive() — WITH RECURSIVE CTE', () => {
 					name: 'employee_rows',
 					base: {
 						type: 'select',
-						from: 'unmodeled_employees',
+						from: 'employees',
 						select: { type: 'all' },
 					},
 					step: {
@@ -102,7 +102,7 @@ describe('FR-8: orm.recursive() — WITH RECURSIVE CTE', () => {
 		});
 
 		expect(ws(result.sql)).toBe(
-			'WITH RECURSIVE "employee_rows" AS (SELECT unmodeled_employees.* FROM unmodeled_employees UNION ALL SELECT employee_rows.* FROM employee_rows) SELECT employee_rows.* FROM employee_rows',
+			'WITH RECURSIVE "employee_rows" AS (SELECT employees.* FROM employees UNION ALL SELECT employee_rows.* FROM employee_rows) SELECT employee_rows.* FROM employee_rows',
 		);
 	});
 

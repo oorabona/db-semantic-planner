@@ -15,16 +15,21 @@ import { toColumnList } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import {
-	columnRef,
 	innerJoin,
 	sqlColumnRef,
+	sqlColumnRefStar,
 	sqlRangeVar,
 } from './ast-helpers.js';
 import { quoteIdent } from './ddl/phases/utils.js';
 import { deparseQuoted } from './deparse.js';
 import { createCompilerState } from './handlers/index.js';
 import { finalizeEnvelope, fromAstProjection } from './projection-envelope.js';
-import { declaredColumn, declaredTable, queryLocal } from './sql-identifier.js';
+import {
+	declaredColumn,
+	declaredTable,
+	identifierText,
+	queryLocal,
+} from './sql-identifier.js';
 
 function compileIncludeSelectEnvelope(
 	selectAst: Node,
@@ -40,9 +45,8 @@ function compileIncludeSelectEnvelope(
 			ast: selectAst,
 			rootTable: targetTable,
 			model: deps.model,
-			naming: deps.naming,
 			...(deps.declaredNames !== undefined && {
-				naming: deps.naming,
+				declaredNames: deps.declaredNames,
 			}),
 		}),
 	);
@@ -69,21 +73,17 @@ export function compileSubqueryInclude(
 
 	// Handle empty parent IDs - return query that returns no results
 	if (parentIds.length === 0) {
-		const dbTargetTable = deps.naming.resolve(info.targetTable);
-		const targetList = [
-			{ ResTarget: { val: { ColumnRef: { fields: [{ A_Star: {} }] } } } },
-		];
+		const dbTargetTable =
+			deps.declaredNames === undefined
+				? queryLocal(info.targetTable)
+				: declaredTable(deps.declaredNames, info.targetTable);
+		const targetList = [{ ResTarget: { val: sqlColumnRefStar() } }];
 		const fromClause = [
-			{
-				RangeVar: {
-					relname: dbTargetTable,
-					inh: true,
-					relpersistence: 'p',
-					...(schemaName && {
-						schemaname: schemaName,
-					}),
-				},
-			},
+			sqlRangeVar(
+				dbTargetTable,
+				undefined,
+				schemaName === undefined ? undefined : queryLocal(schemaName),
+			),
 		];
 		const selectAst: Node = {
 			SelectStmt: {
@@ -92,8 +92,8 @@ export function compileSubqueryInclude(
 			},
 		};
 		const tableName = schemaName
-			? `${quoteIdent(schemaName, 'schema')}.${quoteIdent(dbTargetTable, 'table')}`
-			: quoteIdent(dbTargetTable, 'table');
+			? `${quoteIdent(schemaName, 'schema')}.${quoteIdent(identifierText(dbTargetTable), 'table')}`
+			: quoteIdent(identifierText(dbTargetTable), 'table');
 
 		return compileIncludeSelectEnvelope(
 			selectAst,
@@ -124,22 +124,17 @@ export function compileSubqueryInclude(
 	}
 
 	// Build SELECT target list
-	const targetList = [
-		{ ResTarget: { val: { ColumnRef: { fields: [{ A_Star: {} }] } } } },
-	];
+	const targetList = [{ ResTarget: { val: sqlColumnRefStar() } }];
 
 	// Build FROM clause
 	const fromClause = [
-		{
-			RangeVar: {
-				relname: deps.naming.resolve(info.targetTable),
-				inh: true,
-				relpersistence: 'p',
-				...(schemaName && {
-					schemaname: schemaName,
-				}),
-			},
-		},
+		sqlRangeVar(
+			deps.declaredNames === undefined
+				? queryLocal(info.targetTable)
+				: declaredTable(deps.declaredNames, info.targetTable),
+			undefined,
+			schemaName === undefined ? undefined : queryLocal(schemaName),
+		),
 	];
 
 	// Build WHERE clause: foreignKey IN ($1, $2, ...)
@@ -157,7 +152,15 @@ export function compileSubqueryInclude(
 			A_Expr: {
 				kind: 'AEXPR_IN',
 				name: [{ String: { sval: '=' } }],
-				lexpr: columnRef(fkColumns[0]!, undefined, undefined, deps.naming),
+				lexpr: sqlColumnRef(
+					deps.declaredNames === undefined
+						? queryLocal(fkColumns[0]!)
+						: declaredColumn(
+								deps.declaredNames,
+								info.targetTable,
+								fkColumns[0]!,
+							),
+				),
 				rexpr: { List: { items: paramRefs } },
 			},
 		};
@@ -178,7 +181,11 @@ export function compileSubqueryInclude(
 					A_Expr: {
 						kind: 'AEXPR_OP',
 						name: [{ String: { sval: '=' } }],
-						lexpr: columnRef(col, undefined, undefined, deps.naming),
+						lexpr: sqlColumnRef(
+							deps.declaredNames === undefined
+								? queryLocal(col)
+								: declaredColumn(deps.declaredNames, info.targetTable, col),
+						),
 						rexpr: { ParamRef: { number: state.paramIndex } },
 					},
 				};

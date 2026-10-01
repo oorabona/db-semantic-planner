@@ -185,6 +185,9 @@ export function expressionColumnIdentifier(
 	const output =
 		binding.outputs?.get(queryLocal(column)) ??
 		binding.outputsByLogicalKey?.get(column);
+	// A raw/legacy CTE can enter scope without an output list.  Its columns are
+	// still query-local SQL vocabulary; only a known list authorizes rejection.
+	if (binding.outputs === undefined) return queryLocal(column);
 	if (output === undefined) {
 		throw new Error(
 			`Local relation '${binding.qualifier}' does not project expression column '${column}'.`,
