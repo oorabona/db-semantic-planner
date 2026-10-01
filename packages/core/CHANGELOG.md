@@ -1,5 +1,35 @@
 # Changelog
 
+## [5.0.0](https://github.com/oorabona/db-semantic-planner/compare/core-v4.0.0...core-v5.0.0) (2026-10-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* **adapter-pgsql:** generateDDL, compareSchemata, generateMigrationSQL, generateDownSQL, comparePgsqlDatabaseSchema, convergePg and planPgTransitionRun take a PgPhysicalModel built with createPgPhysicalModel; the per-call schema, dbCasing, naming and fkAutoIndex options move to it. declarationSetFromModel takes no naming. DeclarationNamingStrategy, DDLGeneratingAdapter, supportsDDLGeneration and SetNotNullRuleOptions are removed. convergePg honours fkAutoIndex, default true.
+
+### Features
+
+* **adapter-pgsql:** ConvergePg adopts existing standalone sequences ([#834](https://github.com/oorabona/db-semantic-planner/issues/834)) ([72da9f0](https://github.com/oorabona/db-semantic-planner/commit/72da9f099226a62c480c622fd530863c4684e2ca))
+* **adapter-pgsql:** ConvergePg runs once and assert application steps ([#844](https://github.com/oorabona/db-semantic-planner/issues/844)) ([491698e](https://github.com/oorabona/db-semantic-planner/commit/491698e2879d81815280a9b9567c8eed4006be8a))
+* **adapter-pgsql:** One PostgreSQL physical name authority for schema generation, comparison and converge ([#865](https://github.com/oorabona/db-semantic-planner/issues/865)) ([662d66f](https://github.com/oorabona/db-semantic-planner/commit/662d66f6242ec9092acfd00345fcc7a2185e551d)), closes [#784](https://github.com/oorabona/db-semantic-planner/issues/784)
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** A relation column needs an alias a join emitted ([#794](https://github.com/oorabona/db-semantic-planner/issues/794)) ([19a3ea4](https://github.com/oorabona/db-semantic-planner/commit/19a3ea43e1ff4cdb7c4b9cef22e459734674df6f))
+* **adapter-pgsql:** A relation target resolved to a CTE uses that CTE's projection ([#772](https://github.com/oorabona/db-semantic-planner/issues/772)) ([b93f976](https://github.com/oorabona/db-semantic-planner/commit/b93f9769676cbdd7404d31469db509781379b811))
+* **adapter-pgsql:** Converge reports every live index and its real failure cause ([#868](https://github.com/oorabona/db-semantic-planner/issues/868)) ([0ee2301](https://github.com/oorabona/db-semantic-planner/commit/0ee2301abded8dac106ea73bd7c3f85447a4a6e1)), closes [#863](https://github.com/oorabona/db-semantic-planner/issues/863) [#864](https://github.com/oorabona/db-semantic-planner/issues/864) [#866](https://github.com/oorabona/db-semantic-planner/issues/866) [#867](https://github.com/oorabona/db-semantic-planner/issues/867)
+* **core:** Declared enum names stay physical under every dbCasing ([#827](https://github.com/oorabona/db-semantic-planner/issues/827)) ([b4d5d04](https://github.com/oorabona/db-semantic-planner/commit/b4d5d0416390719e912ceddb0595ce85706aed1b))
+* **core:** Orm.nql runs the CTE and set-operation queries the NQL guide documents ([#756](https://github.com/oorabona/db-semantic-planner/issues/756)) ([2ec48e3](https://github.com/oorabona/db-semantic-planner/commit/2ec48e379acca1989bc9d8594f00897c336c875d))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/nql bumped to 1.10.5
+    * @dbsp/types bumped to 5.0.0
+
 ## [4.0.0](https://github.com/oorabona/db-semantic-planner/compare/core-v3.4.0...core-v4.0.0) (2026-08-25)
 
 
