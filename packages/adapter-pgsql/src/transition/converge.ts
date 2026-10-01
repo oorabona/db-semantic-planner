@@ -110,6 +110,17 @@ export interface PgConvergeInitializationFailure {
 	readonly detail: string;
 }
 
+export type PgConvergeRefusalChange = Pick<
+	SchemaChange,
+	'kind' | 'table' | 'column' | 'details'
+> & {
+	/**
+	 * Present for create_index and drop_index when the index has a name. Models
+	 * built by createPgPhysicalModel always materialize index names.
+	 */
+	readonly index?: string;
+};
+
 /**
  * Unsupported-change, ledger and ownership refusals occur before converge commits
  * managed DDL. An execution refusal may follow a rolled-back transactional DDL
@@ -118,10 +129,7 @@ export interface PgConvergeInitializationFailure {
 export class PgConvergeRefusalError extends Error {
 	constructor(
 		readonly refusal: PgConvergeRefusal,
-		readonly changes: readonly (Pick<
-			SchemaChange,
-			'kind' | 'table' | 'column' | 'details'
-		> & { readonly index?: string })[],
+		readonly changes: readonly PgConvergeRefusalChange[],
 		readonly detail?: string,
 		readonly runIds?: readonly string[],
 		readonly executionIds?: readonly string[],
@@ -414,7 +422,7 @@ function applicationStepFailure(error: PgApplicationStepError): {
 	const code = pgErrorCode(cause);
 	const message = cause instanceof Error ? cause.message : String(cause);
 	return {
-		detail: `application step ${error.stepId}: ${code === undefined ? message : `${code} ${message}`}`,
+		detail: `application step ${escapeDiagnosticText(error.stepId)}: ${code === undefined ? escapeDiagnosticText(message) : `${escapeDiagnosticText(code)} ${escapeDiagnosticText(message)}`}`,
 		cause,
 	};
 }

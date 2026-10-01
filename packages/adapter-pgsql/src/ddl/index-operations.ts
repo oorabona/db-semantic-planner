@@ -23,8 +23,16 @@ import { quoteIdent } from './phases/utils.js';
 // grammar. Catalog names come from PostgreSQL introspection and can be wider
 // than that grammar, so DROP INDEX uses quoteCatalogIdentifier instead.
 
-/** Quote an identifier returned by PostgreSQL's catalog without dbsp validation. */
+/** Quote a valid identifier returned by PostgreSQL's catalog without dbsp grammar validation. */
 export function quoteCatalogIdentifier(name: string): string {
+	if (
+		typeof name !== 'string' ||
+		name.length === 0 ||
+		name.includes('\0') ||
+		Buffer.byteLength(name, 'utf8') > 63
+	) {
+		throw new Error('Invalid PostgreSQL catalog identifier');
+	}
 	return `"${name.replace(/"/g, '""')}"`;
 }
 

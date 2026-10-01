@@ -131,6 +131,24 @@ describe('public convergePg', () => {
 		expectInvalidOptionsBeforeConnection(pool, physical, {});
 	});
 
+	it('escapes an invalid physical schema in the refusal detail', () => {
+		const physical = { ...physicalWithUsers(), schema: 'bad\nschema' };
+		const pool = poolThatMustNotConnect();
+
+		let caught: unknown;
+		try {
+			convergePg(pool, physical);
+		} catch (error) {
+			caught = error;
+		}
+		expect(caught).toMatchObject({
+			refusal: 'invalid-options',
+			detail: expect.stringContaining('bad\\nschema'),
+		});
+		expect((caught as PgConvergeRefusalError).detail).not.toContain('\n');
+		expect(pool.connect).not.toHaveBeenCalled();
+	});
+
 	it('refuses an undeclared external-index table before inventory resolution', () => {
 		const physical = createPgPhysicalModel({
 			mode: 'logical',

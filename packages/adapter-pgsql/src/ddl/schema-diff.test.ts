@@ -1299,6 +1299,104 @@ describe('compareSchemata', () => {
 			]);
 		});
 
+		it('budgets each automatic FK-index exemption and preserves live drop order', () => {
+			const fk: ForeignKeyIR = {
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+			};
+			const desired = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'integer' })],
+					primaryKey: 'id',
+				}),
+				makeTable({
+					name: 'posts',
+					columns: [
+						makeCol({ name: 'id', type: 'integer' }),
+						makeCol({ name: 'user_id', type: 'integer' }),
+					],
+					primaryKey: 'id',
+					foreignKeys: [fk],
+				}),
+			]);
+			const oneLiveIndex = makeModel([
+				...Array.from(desired.tables.values()).filter(
+					(table) => table.name !== 'posts',
+				),
+				makeTable({
+					name: 'posts',
+					columns: [
+						makeCol({ name: 'id', type: 'integer' }),
+						makeCol({ name: 'user_id', type: 'integer' }),
+					],
+					primaryKey: 'id',
+					foreignKeys: [fk],
+					indexes: [{ name: 'idx_posts_user_id', columns: ['user_id'] }],
+				}),
+			]);
+			const twoLiveIndexes = makeModel([
+				...Array.from(oneLiveIndex.tables.values()).filter(
+					(table) => table.name !== 'posts',
+				),
+				{
+					...oneLiveIndex.getTable('posts')!,
+					indexes: [
+						{ name: 'idx_posts_user_id', columns: ['user_id'] },
+						{ name: 'manual_duplicate', columns: ['user_id'] },
+					],
+				},
+			]);
+
+			const compare = (database: ReturnType<typeof makeModel>) =>
+				comparePhysicalSchemata(
+					createPgPhysicalModel({
+						mode: 'logical',
+						model: desired,
+						schema: 'app',
+					}),
+					createPgPhysicalModel({
+						mode: 'physical',
+						model: database,
+						schema: 'app',
+					}),
+				);
+
+			expect(compare(oneLiveIndex).changes).toEqual([]);
+			expect(compare(twoLiveIndexes).changes).toEqual([
+				expect.objectContaining({
+					kind: 'drop_index',
+					table: 'posts',
+					meta: expect.objectContaining({
+						index: expect.objectContaining({ name: 'manual_duplicate' }),
+					}),
+				}),
+			]);
+		});
+
+		it('escapes an unmanaged index name in drop details but keeps metadata raw', () => {
+			const index = { name: 'idx_users\\nmanual', columns: ['email'] };
+			const diff = compareSchemata(
+				makeModel([
+					makeTable({
+						name: 'users',
+						columns: [makeCol({ name: 'email', type: 'string' })],
+					}),
+				]),
+				makeModel([
+					makeTable({
+						name: 'users',
+						columns: [makeCol({ name: 'email', type: 'string' })],
+						indexes: [index],
+					}),
+				]),
+			);
+			const drop = diff.changes[0]!;
+			expect(drop.details).toBe('Drop index idx_users\\\\nmanual');
+			expect(drop.details).not.toContain('\n');
+			expect(drop.meta?.index).toEqual(index);
+		});
+
 		it('reports database expression and unrepresentable indexes as destructive drift', () => {
 			const plainIdx: IndexIR = {
 				name: 'idx_users_email',
@@ -1525,6 +1623,23 @@ describe('compareSchemata', () => {
 			expect(() => generateMigrationSQL(diff)).toThrow(
 				/Invalid index method: "rum"/,
 			);
+
+			const duplicateAutoIndexDb = makeModel(
+				Array.from(db.tables.values()).map((table) =>
+					table.name === 'posts'
+						? {
+								...table,
+								indexes: [
+									...table.indexes,
+									{ name: 'manual_duplicate', columns: ['author_id'] },
+								],
+							}
+						: table,
+				),
+			);
+			expect(
+				changeKinds(compareSchemata(schema, duplicateAutoIndexDb).changes),
+			).toContain('drop_index');
 		});
 
 		it('drops a plain auto-index beside a declared partial FK-column index', () => {

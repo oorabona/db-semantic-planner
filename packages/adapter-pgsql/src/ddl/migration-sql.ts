@@ -30,6 +30,7 @@ import {
 import { getPostgresqlCapabilitiesTargetVersion } from '../postgresql-capabilities.js';
 import {
 	assertString,
+	escapeDiagnosticText,
 	sanitizeCommentText,
 	validateCheckExpression,
 	validateDbTypeName,
@@ -609,15 +610,43 @@ function collectUpCreateIndexSpecs(
 	return specs;
 }
 
-function collectDownCreateIndexSpecs(
+/**
+ * Raised when a forward index drop has metadata that cannot be rendered as its
+ * DOWN CREATE INDEX. No partial DOWN script is returned in this case.
+ */
+export class DownIndexRecreationError extends Error {
+	constructor(
+		readonly table: string,
+		readonly index: string,
+		options?: ErrorOptions,
+	) {
+		super(
+			`Cannot generate DOWN SQL to recreate index ${escapeDiagnosticText(index)} on table ${escapeDiagnosticText(table)}.`,
+			options,
+		);
+		this.name = 'DownIndexRecreationError';
+	}
+}
+
+function assertDownDropIndexesRecreatable(
 	changes: readonly SchemaChange[],
 	schemaName: string | undefined,
-): IndexRenderSpec[] {
-	return changes.flatMap((change) =>
-		change.kind === 'drop_index'
-			? (buildCreateIndexSpec(change, schemaName) ?? [])
-			: [],
-	);
+	indexContext: IndexCapabilityContext | undefined,
+): void {
+	for (const change of changes) {
+		if (change.kind !== 'drop_index') continue;
+		const idx = change.meta?.index as IndexIR | undefined;
+		if (!idx) continue;
+		const index = typeof idx.name === 'string' ? idx.name : '<unnamed index>';
+		try {
+			const spec = buildCreateIndexSpec(change, schemaName);
+			if (spec === undefined) continue;
+			assertCreateIndexesSupported([spec], indexContext);
+			renderCreateIndex(spec, indexContext);
+		} catch (error) {
+			throw new DownIndexRecreationError(change.table, index, { cause: error });
+		}
+	}
 }
 
 // ============================================================================
@@ -1863,7 +1892,9 @@ function changeToDownSQL(
  * Reverses the topological order used in UP migrations:
  * phases run in descending order (18, 17, ..., 0).
  *
- * Irreversible changes (drops that lose data) produce SQL WARNING comments.
+ * Irreversible drops with missing metadata produce SQL WARNING comments. A
+ * dropped index whose metadata cannot be rendered as CREATE INDEX throws
+ * DownIndexRecreationError before any DOWN SQL is returned.
  */
 export function generateDownSQL(
 	diff: SchemaDiff,
@@ -1914,8 +1945,7 @@ export function generateDownMigrationSQL(
 	// destructiveness filter below.
 	const changes = changesAppliedByUp(diff, options);
 	const indexContext = indexContextFromOptions(options);
-	const createIndexSpecs = collectDownCreateIndexSpecs(changes, schemaName);
-	assertCreateIndexesSupported(createIndexSpecs, indexContext);
+	assertDownDropIndexesRecreatable(changes, schemaName, indexContext);
 
 	for (const change of changes) {
 		const phase = getPhase(change.kind);

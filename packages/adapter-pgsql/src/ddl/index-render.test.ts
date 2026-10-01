@@ -14,7 +14,11 @@ import {
 	IndexFeatureUnsupportedError,
 	renderCreateIndex,
 } from './index-render.js';
-import { generateDownSQL, generateMigrationSQL } from './migration-sql.js';
+import {
+	DownIndexRecreationError,
+	generateDownSQL,
+	generateMigrationSQL,
+} from './migration-sql.js';
 import type { SchemaDiff } from './schema-diff.js';
 
 const maximalIndex: IndexIR = {
@@ -791,6 +795,6 @@ describe('PostgreSQL version-derived index capabilities', () => {
 			generateDownSQL(diff, {
 				dialectCapabilities: derivePostgresqlCapabilitiesForVersion('14'),
 			}),
-		).toThrow(IndexFeatureUnsupportedError);
+		).toThrow(DownIndexRecreationError);
 	});
 });

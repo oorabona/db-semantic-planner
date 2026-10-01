@@ -24,6 +24,7 @@ import { describe, expect, it } from 'vitest';
 import { createPgPhysicalModel } from '../physical-model/index.js';
 import { generateDDL } from './ddl-generator.js';
 import {
+	DownIndexRecreationError,
 	generateDownMigrationSQL,
 	generateDownSQL,
 	generateMigrationSQL,
@@ -2204,7 +2205,34 @@ describe('generateDownSQL', () => {
 						},
 					]),
 				),
-			).toThrow(/NULLS NOT DISTINCT is only valid for UNIQUE/);
+			).toThrow(DownIndexRecreationError);
+		});
+
+		it('refuses an unrecreatable dropped catalog index before returning DOWN SQL', () => {
+			const diff = makeDiff([
+				{
+					kind: 'drop_index',
+					table: 'embeddings',
+					destructive: true,
+					details: '',
+					meta: {
+						index: {
+							name: 'idx-embeddings-manual',
+							columns: ['chunk_index'],
+						},
+					},
+				},
+			]);
+
+			expect(() => generateDownSQL(diff)).toThrow(
+				expect.objectContaining({
+					name: 'DownIndexRecreationError',
+					table: 'embeddings',
+					index: 'idx-embeddings-manual',
+					message: expect.stringContaining('idx-embeddings-manual'),
+				}),
+			);
+			expect(() => generateDownSQL(diff)).toThrow(DownIndexRecreationError);
 		});
 
 		it('SC-07: alter_foreign_key with oldFk → DROP + re-add old', () => {

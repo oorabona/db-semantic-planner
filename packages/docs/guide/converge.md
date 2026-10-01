@@ -305,7 +305,9 @@ would without `owns`.
 ## Refusals
 
 A refusal throws `PgConvergeRefusalError`: `refusal` names the case and `detail` explains it;
-`changes` carries planning context and can be empty. An error raised before execution starts — an
+`changes` carries planning context and can be empty. A `create_index` or `drop_index` change includes
+`index` whenever its index has a name; a model built by `createPgPhysicalModel` always materializes one.
+An error raised before execution starts — an
 invalid model, a connection failure, a database error while planning — is thrown as it is, except a
 database error inside an `initialize` preflight scope (a missing privilege, for example), which
 becomes `initialization-refused` with the error in `initialization.detail`, and an error in an

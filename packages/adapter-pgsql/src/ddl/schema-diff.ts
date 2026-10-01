@@ -1215,53 +1215,58 @@ function compareIndexes(
 				: [],
 		),
 	);
-	const autoFkIndexKeys = new Set(
-		schema.foreignKeys
-			.filter((fk) => {
-				const fkCol = fk.columns[0];
-				return (
-					fk.columns.length === 1 &&
-					fkCol !== undefined &&
-					!hasDeclaredSingleColumnFkIndex(schema, fkCol)
-				);
-			})
-			.map((fk) =>
-				indexComparisonKey({
-					columns: fk.columns,
-					unique: false,
-				}),
-			),
+	const indexExemptionBudgets = (foreignKeys: readonly ForeignKeyIR[]) => {
+		const budgets = new Map<string, number>();
+		for (const fk of foreignKeys) {
+			const key = indexComparisonKey({ columns: fk.columns, unique: false });
+			budgets.set(key, (budgets.get(key) ?? 0) + 1);
+		}
+		return budgets;
+	};
+	const autoFkIndexBudgets = indexExemptionBudgets(
+		schema.foreignKeys.filter((fk) => {
+			const fkCol = fk.columns[0];
+			return (
+				fk.columns.length === 1 &&
+				fkCol !== undefined &&
+				!hasDeclaredSingleColumnFkIndex(schema, fkCol)
+			);
+		}),
 	);
-	const declaredUnemittableFkAutoIndexKeys = new Set(
-		schema.foreignKeys
-			.filter((fk) => {
-				const fkCol = fk.columns[0];
-				return (
-					fk.columns.length === 1 &&
-					fkCol !== undefined &&
-					declaredUnemittableFkIndexCols.has(fkCol)
-				);
-			})
-			.map((fk) =>
-				indexComparisonKey({
-					columns: fk.columns,
-					unique: false,
-				}),
-			),
+	const declaredUnemittableFkAutoIndexBudgets = indexExemptionBudgets(
+		schema.foreignKeys.filter((fk) => {
+			const fkCol = fk.columns[0];
+			return (
+				fk.columns.length === 1 &&
+				fkCol !== undefined &&
+				declaredUnemittableFkIndexCols.has(fkCol)
+			);
+		}),
 	);
 
 	// Index identity: structural definition (name is cosmetic)
-	const unmatchedDbIndexes = [...db.indexes];
+	const unmatchedDbIndexes = db.indexes.map((index) => ({
+		index,
+		matched: false,
+	}));
+	const unmatchedDbIndexesByKey = new Map<
+		string,
+		{ readonly index: IndexIR; matched: boolean }[]
+	>();
+	for (const unmatched of unmatchedDbIndexes) {
+		const key = indexComparisonKey(unmatched.index);
+		const bucket = unmatchedDbIndexesByKey.get(key);
+		if (bucket === undefined) unmatchedDbIndexesByKey.set(key, [unmatched]);
+		else bucket.push(unmatched);
+	}
 	const pendingCreates: PendingIndexCreate[] = [];
 
 	// Index identity is structural and each occurrence consumes one matching
 	// counterpart. Names are cosmetic, but duplicate structural indexes are not.
 	for (const idx of schema.indexes) {
 		const key = indexComparisonKey(idx);
-		const dbIndex = unmatchedDbIndexes.findIndex(
-			(candidate) => indexComparisonKey(candidate) === key,
-		);
-		if (dbIndex === -1) {
+		const dbIndex = unmatchedDbIndexesByKey.get(key)?.shift();
+		if (dbIndex === undefined) {
 			pendingCreates.push({
 				index: idx,
 				replacementKey: indexReplacementKey(schema.name, idx),
@@ -1269,7 +1274,7 @@ function compareIndexes(
 				destructive: false,
 			});
 		} else {
-			unmatchedDbIndexes.splice(dbIndex, 1);
+			dbIndex.matched = true;
 		}
 	}
 
@@ -1292,18 +1297,25 @@ function compareIndexes(
 
 	// Indexes in DB but not in schema → drop (skip auto-FK and auto-unique indexes — they are auto-managed)
 	const pendingDrops: PendingIndexDrop[] = [];
-	for (const idx of unmatchedDbIndexes) {
+	for (const { index: idx, matched } of unmatchedDbIndexes) {
+		if (matched) continue;
 		const key = indexComparisonKey(idx);
+		const consumeExemption = (budgets: Map<string, number>): boolean => {
+			const remaining = budgets.get(key) ?? 0;
+			if (remaining === 0) return false;
+			budgets.set(key, remaining - 1);
+			return true;
+		};
 		if (
-			!autoFkIndexKeys.has(key) &&
-			!declaredUnemittableFkAutoIndexKeys.has(key) &&
+			!consumeExemption(autoFkIndexBudgets) &&
+			!consumeExemption(declaredUnemittableFkAutoIndexBudgets) &&
 			!isAutoUniqueIndex(schema.name, idx, autoUniqueIndexColumns)
 		) {
 			pendingDrops.push({
 				index: idx,
 				replacementKey: indexReplacementKey(schema.name, idx),
 				destructive: idx.unique === true || !isManagedIndex(schema.name, idx),
-				details: `Drop index ${idx.name ?? `on (${formatIndexTargets(idx)})`}`,
+				details: `Drop index ${idx.name === undefined ? `on (${formatIndexTargets(idx)})` : escapeDiagnosticText(idx.name)}`,
 			});
 		}
 	}

@@ -525,6 +525,24 @@ describe('generateDropIndexSQL', () => {
 		);
 	});
 
+	it('rejects impossible catalog names while accepting quoted punctuation', () => {
+		expect(() => generateDropIndexSQL(42 as never, 'public')).toThrow(
+			'Invalid PostgreSQL catalog identifier',
+		);
+		expect(() => generateDropIndexSQL('', 'public')).toThrow(
+			'Invalid PostgreSQL catalog identifier',
+		);
+		expect(() => generateDropIndexSQL('idx\0broken', 'public')).toThrow(
+			'Invalid PostgreSQL catalog identifier',
+		);
+		expect(() => generateDropIndexSQL('x'.repeat(64), 'public')).toThrow(
+			'Invalid PostgreSQL catalog identifier',
+		);
+		expect(generateDropIndexSQL('idx-"x"', 'public')).toBe(
+			'DROP INDEX "public"."idx-""x"""',
+		);
+	});
+
 	it('throws before SQL generation when schema is missing or empty', () => {
 		expect(() => generateDropIndexSQL('idx_vec', '')).toThrow(
 			/Invalid.*schema.*identifier/i,

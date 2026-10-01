@@ -1,6 +1,6 @@
 import type { Pool } from 'pg';
 import type { PgPhysicalModel } from '../physical-model/index.js';
-import { validateIdentifier } from '../validate.js';
+import { escapeDiagnosticText, validateIdentifier } from '../validate.js';
 import {
 	convergePgPhysical,
 	type ConvergePgOptions as InternalConvergePgOptions,
@@ -44,7 +44,7 @@ export function convergePg(
 		throw new PgConvergeRefusalError(
 			'invalid-options',
 			[],
-			`converge refuses physical schema ${physical.schema}: ${error instanceof Error ? error.message : String(error)}`,
+			`converge refuses physical schema ${escapeDiagnosticText(physical.schema)}: ${escapeDiagnosticText(error instanceof Error ? error.message : String(error))}`,
 		);
 	}
 	return convergePgPhysical(

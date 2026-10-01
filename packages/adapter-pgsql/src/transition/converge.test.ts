@@ -599,20 +599,26 @@ async function expectRefusal(
 	input: Record<string, unknown>,
 	refusal: string,
 	testClient = client(),
+	options?: ConvergePgOptions | ConvergePgCheckOptions,
 ) {
 	const indexName = (
 		input.meta as { readonly index?: { readonly name?: unknown } } | undefined
 	)?.index?.name;
+	const isIndexChange =
+		input.kind === 'create_index' || input.kind === 'drop_index';
+	if (isIndexChange) expect(indexName).toEqual(expect.any(String));
 	mocks.compare.mockResolvedValue({ changes: [input] });
 	mocks.createStep.mockImplementation(
 		({ change: value }: { change: Record<string, unknown> }) => stepFor(value),
 	);
-	await expect(
-		convergePg(poolFor(testClient), emptyModel()),
-	).rejects.toMatchObject({
+	const convergence =
+		options?.mode === 'check'
+			? convergePg(poolFor(testClient), emptyModel(), options)
+			: convergePg(poolFor(testClient), emptyModel(), options);
+	await expect(convergence).rejects.toMatchObject({
 		name: 'PgConvergeRefusalError',
 		refusal,
-		...(typeof indexName === 'string'
+		...(isIndexChange
 			? { changes: [expect.objectContaining({ index: indexName })] }
 			: {}),
 	});
@@ -883,7 +889,9 @@ describe('convergePg refusal boundary', () => {
 
 	it('reports an owned-CHECK rendering timeout SQLSTATE and keeps its original cause', async () => {
 		const timeout = Object.assign(
-			new Error('canceling statement due to statement timeout'),
+			new Error(
+				'canceling statement due to statement timeout\nfrom PostgreSQL',
+			),
 			{ code: '57014' },
 		);
 		const withScratchScope = mocks.adapter.withScratchScope;
@@ -946,7 +954,7 @@ describe('convergePg refusal boundary', () => {
 			expect(error).toMatchObject({
 				refusal: 'application-step-failed',
 				detail:
-					'application step owned-check-timeout: 57014 canceling statement due to statement timeout',
+					'application step owned-check-timeout: 57014 canceling statement due to statement timeout\\nfrom PostgreSQL',
 				cause: timeout,
 			});
 		} finally {
@@ -3153,6 +3161,40 @@ describe('convergePg refusal boundary', () => {
 			}),
 			'unsupported-change',
 		);
+	});
+
+	it('refuses a named index removal in check mode', async () => {
+		await expectRefusal(
+			change('drop_index', {
+				index: { name: 'idx_users_email', columns: ['email'] },
+			}),
+			'unsupported-change',
+			client(),
+			{ mode: 'check' },
+		);
+	});
+
+	it('keeps a raw index name in refusal metadata while details stay escaped', async () => {
+		const index = 'idx_users\nmanual';
+		mocks.compare.mockResolvedValue({
+			changes: [
+				{
+					...change('drop_index', {
+						index: { name: index, columns: ['email'] },
+					}),
+					details: 'Drop index idx_users\\nmanual',
+				},
+			],
+		});
+		await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+			changes: [
+				expect.objectContaining({
+					index,
+					details: 'Drop index idx_users\\nmanual',
+				}),
+			],
+		});
 	});
 
 	it('leaves an exact external index drop out of converge while refusing it without the option', async () => {
