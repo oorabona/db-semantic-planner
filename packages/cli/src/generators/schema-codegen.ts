@@ -464,7 +464,7 @@ function indexRepresentationWarning(
 	idx: IndexIR,
 ): string | undefined {
 	if (hasExpressions(idx)) {
-		return `Expression index ${warningName(idx.name)} on table ${warningName(tableName)} cannot be represented in the schema and is not managed by dbsp. dbsp will neither drop nor recreate it; maintain it by hand.`;
+		return `Expression index ${warningName(idx.name)} on table ${warningName(tableName)} cannot be represented in the schema. It may be reported as destructive drift; list it in externalIndexes to keep it.`;
 	}
 	const schemaWarning = schemaIndexRepresentationWarning(tableName, idx);
 	const ddlWarning = ddlIndexRepresentationWarning(tableName, idx);
@@ -481,7 +481,7 @@ function ddlIndexRepresentationWarning(
 	try {
 		generateCreateIndex(tableName, idx, undefined);
 	} catch (error) {
-		return `Index ${warningName(idx.name)} on table ${warningName(tableName)} cannot be represented in the schema and is not managed by dbsp because the DDL emitter rejected it: ${errorMessage(error)}. dbsp will neither drop nor recreate it; maintain it by hand.`;
+		return `Index ${warningName(idx.name)} on table ${warningName(tableName)} cannot be represented in the schema because the DDL emitter rejected it: ${errorMessage(error)}. It may be reported as destructive drift; list it in externalIndexes to keep it.`;
 	}
 	return undefined;
 }
@@ -493,7 +493,7 @@ function schemaIndexRepresentationWarning(
 	try {
 		validateSchemaIndexOptions(tableName, idx);
 	} catch (error) {
-		return `Index ${warningName(idx.name)} on table ${warningName(tableName)} cannot be represented in the schema and is not managed by dbsp because schema() rejected it: ${errorMessage(error)}. dbsp will neither drop nor recreate it; maintain it by hand.`;
+		return `Index ${warningName(idx.name)} on table ${warningName(tableName)} cannot be represented in the schema because schema() rejected it: ${errorMessage(error)}. It may be reported as destructive drift; list it in externalIndexes to keep it.`;
 	}
 	return undefined;
 }

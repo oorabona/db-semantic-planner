@@ -46,6 +46,7 @@ import {
 	normalizeOptionalBoolean,
 	normalizeSequenceInteger,
 } from './generated-source-normalizers.js';
+import { quoteCatalogIdentifier } from './index-operations.js';
 import {
 	AutoIncrementTransitionUnsupportedError,
 	assertCreateIndexesSupported,
@@ -64,6 +65,7 @@ import {
 import { escapeCanonicalSqlLiterals } from './rendered-sql.js';
 import {
 	collectReferencedKeyRemovalConflicts,
+	isManagedIndex,
 	ReferencedKeyRemovalError,
 	type SchemaChange,
 	type SchemaDiff,
@@ -608,17 +610,6 @@ function collectUpCreateIndexSpecs(
 	return specs;
 }
 
-function collectDownCreateIndexSpecs(
-	changes: readonly SchemaChange[],
-	schemaName: string | undefined,
-): IndexRenderSpec[] {
-	return changes.flatMap((change) =>
-		change.kind === 'drop_index'
-			? (buildCreateIndexSpec(change, schemaName) ?? [])
-			: [],
-	);
-}
-
 // ============================================================================
 // SQL Generation
 // ============================================================================
@@ -962,9 +953,8 @@ function upDropIndex(
 ): string | undefined {
 	const idx = change.meta?.index as IndexIR;
 	if (!idx) return undefined;
-	const indexName = quoteIdent(
+	const indexName = quoteCatalogIdentifier(
 		requiredPhysicalIndexName(idx, change.table, schemaName),
-		'alias',
 	);
 	const schemaPrefix = schemaName ? `${quoteIdent(schemaName, 'alias')}.` : '';
 	return `DROP INDEX IF EXISTS ${schemaPrefix}${indexName};`;
@@ -1525,6 +1515,14 @@ function changeToDownSQL(
 					destructive: true,
 				};
 			}
+			if (!isManagedIndex(change.table, idx)) {
+				const indexName =
+					typeof idx.name === 'string' ? idx.name : '<unnamed index>';
+				return {
+					sql: `-- WARNING: Cannot reverse drop_index "${sanitizeCommentText(change.table)}"."${sanitizeCommentText(indexName)}" -- index definition cannot be recreated faithfully`,
+					destructive: true,
+				};
+			}
 			return {
 				sql: upCreateIndex(change, schemaName, indexContext),
 				// Allowlisted: re-creates the dropped index from metadata.
@@ -1863,7 +1861,8 @@ function changeToDownSQL(
  * Reverses the topological order used in UP migrations:
  * phases run in descending order (18, 17, ..., 0).
  *
- * Irreversible changes (drops that lose data) produce SQL WARNING comments.
+ * Irreversible drops with missing or unmanaged metadata produce SQL WARNING
+ * comments instead of reconstructing the dropped object.
  */
 export function generateDownSQL(
 	diff: SchemaDiff,
@@ -1914,8 +1913,6 @@ export function generateDownMigrationSQL(
 	// destructiveness filter below.
 	const changes = changesAppliedByUp(diff, options);
 	const indexContext = indexContextFromOptions(options);
-	const createIndexSpecs = collectDownCreateIndexSpecs(changes, schemaName);
-	assertCreateIndexesSupported(createIndexSpecs, indexContext);
 
 	for (const change of changes) {
 		const phase = getPhase(change.kind);

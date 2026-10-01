@@ -1,9 +1,19 @@
 // These execution primitives are deliberately reachable only through the
 // internal subpath (or the admitted-operation façade), never the public API.
-import type { PgsqlCompileOnlyAdapterOptions } from '@dbsp/adapter-pgsql';
+import type {
+	PgConvergeRefusalChange,
+	PgsqlCompileOnlyAdapterOptions,
+} from '@dbsp/adapter-pgsql';
 
 const compileOnlyOptions: PgsqlCompileOnlyAdapterOptions = {};
 void compileOnlyOptions;
+
+const refusalChange: PgConvergeRefusalChange = {
+	kind: 'drop_index',
+	table: 'users',
+	details: 'Drop index users_email_index',
+};
+void refusalChange;
 
 // @ts-expect-error destructive compatibility bridge is not public
 import { executePgDestructiveOutcome } from '@dbsp/adapter-pgsql';

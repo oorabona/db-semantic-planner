@@ -278,6 +278,7 @@ export {
 	type PgConvergeInitializationFailure,
 	type PgConvergePlannedStep,
 	type PgConvergeRefusal,
+	type PgConvergeRefusalChange,
 	PgConvergeRefusalError,
 	type PgConvergeResult,
 } from './transition/converge.js';

@@ -2,7 +2,7 @@
  * Index-level DDL SQL generators for PostgreSQL.
  *
  * Generates SQL for CREATE INDEX and DROP INDEX.
- * All identifiers are quoted via quoteIdentifier().
+ * Declared identifiers are validated and quoted; catalog index names are quoted directly.
  *
  * @module ddl/index-operations
  */
@@ -19,11 +19,21 @@ import { quoteIdent } from './phases/utils.js';
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-// S-2: Use quoteIdent from phases/utils (validates + double-quotes) instead of the former
-// local quoteIdentifier (which had no validation).
+// Declared identifiers use quoteIdent, which validates dbsp's declaration
+// grammar. Catalog names come from PostgreSQL introspection and can be wider
+// than that grammar, so DROP INDEX uses quoteCatalogIdentifier instead.
 
-function quoteIdentifier(name: string): string {
-	return quoteIdent(name, 'alias');
+/** Quote a valid identifier returned by PostgreSQL's catalog without dbsp grammar validation. */
+export function quoteCatalogIdentifier(name: string): string {
+	if (
+		typeof name !== 'string' ||
+		name.length === 0 ||
+		name.includes('\0') ||
+		Buffer.byteLength(name, 'utf8') > 63
+	) {
+		throw new Error('Invalid PostgreSQL catalog identifier');
+	}
+	return `"${name.replace(/"/g, '""')}"`;
 }
 
 function validateSchemaName(schemaName: string): string {
@@ -128,7 +138,9 @@ export function generateDropIndexSQL(
 	if (options?.concurrently) parts.push('CONCURRENTLY');
 	if (options?.ifExists) parts.push('IF EXISTS');
 
-	parts.push(`${quoteIdent(schemaName, 'schema')}.${quoteIdentifier(name)}`);
+	parts.push(
+		`${quoteIdent(schemaName, 'schema')}.${quoteCatalogIdentifier(name)}`,
+	);
 
 	if (options?.cascade) parts.push('CASCADE');
 

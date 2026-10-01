@@ -791,6 +791,30 @@ describe('generateMigrationSQL', () => {
 			expect(sql[0]).toBe('DROP INDEX IF EXISTS "tenant_1"."idx_old";');
 		});
 
+		it('quotes a catalog index name outside the dbsp identifier grammar', () => {
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'drop_index',
+						table: 'embeddings',
+						destructive: true,
+						details: '',
+						meta: {
+							index: {
+								name: 'idx-embeddings-manual',
+								columns: ['chunk_index'],
+							},
+						},
+					},
+				]),
+				{ includeDestructive: true, schemaName: 'public' },
+			);
+
+			expect(sql).toEqual([
+				'DROP INDEX IF EXISTS "public"."idx-embeddings-manual";',
+			]);
+		});
+
 		describe('Index enhancements', () => {
 			it('should generate CREATE INDEX USING gin', () => {
 				const idx: IndexIR = {
@@ -1294,7 +1318,7 @@ describe('generateMigrationSQL', () => {
 			expect(sql.some((s) => s.includes('DROP'))).toBe(false);
 		});
 
-		it('leaves expression-index drops unmanaged and emits no SQL', () => {
+		it('reports an expression-index drop as destructive drift', () => {
 			const schemaTable = makeTable('users', [
 				makeCol({ name: 'email', type: 'string' }),
 			]);
@@ -1313,15 +1337,26 @@ describe('generateMigrationSQL', () => {
 				new ModelIRImpl(new Map([['users', dbTable]]), new Map()),
 			);
 
-			expect(diff.changes).toEqual([]);
+			expect(diff.changes).toEqual([
+				expect.objectContaining({
+					kind: 'drop_index',
+					destructive: true,
+					meta: {
+						index: {
+							name: 'idx_users_lower_email',
+							columns: [],
+							expressions: ['lower(email)'],
+						},
+					},
+				}),
+			]);
 			expect(generateMigrationSQL(diff, { includeDestructive: false })).toEqual(
 				[],
 			);
-			expect(generateMigrationSQL(diff, { includeDestructive: true })).toEqual(
-				[],
-			);
+			expect(generateMigrationSQL(diff, { includeDestructive: true })).toEqual([
+				'DROP INDEX IF EXISTS "idx_users_lower_email";',
+			]);
 			expect(generateDownSQL(diff, { includeDestructive: false })).toEqual([]);
-			expect(generateDownSQL(diff, { includeDestructive: true })).toEqual([]);
 		});
 
 		it('filters both halves of a unique NULLS NOT DISTINCT index replacement with the same name', () => {
@@ -2156,8 +2191,7 @@ describe('generateDownSQL', () => {
 			expect(withoutNullsSql).toEqual([
 				'CREATE UNIQUE INDEX "idx_users_email_unique_plain" ON "users" ("email") WHERE deleted_at IS NULL;',
 			]);
-			// #245: recreating a non-unique index that declares nullsNotDistinct is a fail-loud input error.
-			expect(() =>
+			expect(
 				generateDownSQL(
 					makeDiff([
 						{
@@ -2169,7 +2203,58 @@ describe('generateDownSQL', () => {
 						},
 					]),
 				),
-			).toThrow(/NULLS NOT DISTINCT is only valid for UNIQUE/);
+			).toEqual([
+				'-- WARNING: Cannot reverse drop_index "users"."idx_users_email_plain" -- index definition cannot be recreated faithfully',
+			]);
+		});
+
+		it('writes warnings instead of recreating unmanaged dropped catalog indexes', () => {
+			const diff = makeDiff([
+				{
+					kind: 'drop_index',
+					table: 'users',
+					destructive: true,
+					details: '',
+					meta: {
+						index: {
+							name: 'idx_users_email_lower',
+							columns: ['email'],
+							expressions: ['lower(email)'],
+						},
+					},
+				},
+				{
+					kind: 'drop_index',
+					table: 'embeddings',
+					destructive: true,
+					details: '',
+					meta: {
+						index: {
+							name: 'idx-embeddings-manual',
+							columns: ['chunk_index'],
+						},
+					},
+				},
+				{
+					kind: 'drop_index',
+					table: 'users',
+					destructive: false,
+					details: '',
+					meta: {
+						index: { name: 'idx_users_email', columns: ['email'] },
+					},
+				},
+			]);
+
+			const sql = generateDownSQL(diff);
+			expect(sql).toEqual([
+				'-- WARNING: Cannot reverse drop_index "users"."idx_users_email_lower" -- index definition cannot be recreated faithfully',
+				'-- WARNING: Cannot reverse drop_index "embeddings"."idx-embeddings-manual" -- index definition cannot be recreated faithfully',
+				'CREATE INDEX "idx_users_email" ON "users" ("email");',
+			]);
+			expect(
+				sql.filter((statement) => statement.includes('CREATE INDEX')),
+			).toEqual(['CREATE INDEX "idx_users_email" ON "users" ("email");']);
 		});
 
 		it('SC-07: alter_foreign_key with oldFk → DROP + re-add old', () => {

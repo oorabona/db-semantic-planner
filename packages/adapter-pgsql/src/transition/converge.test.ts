@@ -599,16 +599,28 @@ async function expectRefusal(
 	input: Record<string, unknown>,
 	refusal: string,
 	testClient = client(),
+	options?: ConvergePgOptions | ConvergePgCheckOptions,
 ) {
+	const indexName = (
+		input.meta as { readonly index?: { readonly name?: unknown } } | undefined
+	)?.index?.name;
+	const isIndexChange =
+		input.kind === 'create_index' || input.kind === 'drop_index';
+	if (isIndexChange) expect(indexName).toEqual(expect.any(String));
 	mocks.compare.mockResolvedValue({ changes: [input] });
 	mocks.createStep.mockImplementation(
 		({ change: value }: { change: Record<string, unknown> }) => stepFor(value),
 	);
-	await expect(
-		convergePg(poolFor(testClient), emptyModel()),
-	).rejects.toMatchObject({
+	const convergence =
+		options?.mode === 'check'
+			? convergePg(poolFor(testClient), emptyModel(), options)
+			: convergePg(poolFor(testClient), emptyModel(), options);
+	await expect(convergence).rejects.toMatchObject({
 		name: 'PgConvergeRefusalError',
 		refusal,
+		...(isIndexChange
+			? { changes: [expect.objectContaining({ index: indexName })] }
+			: {}),
 	});
 	expect(mocks.execute).not.toHaveBeenCalled();
 }
@@ -870,6 +882,166 @@ describe('convergePg refusal boundary', () => {
 			).catch((caught: unknown) => caught);
 			expect(error).toMatchObject({ refusal: 'application-step-failed' });
 			expect((error as Error).cause).toBe(renderingError);
+		} finally {
+			mocks.adapter.withScratchScope = withScratchScope;
+		}
+	});
+
+	it('reports an owned-CHECK rendering timeout SQLSTATE and keeps its original cause', async () => {
+		const timeout = Object.assign(
+			new Error(
+				'canceling statement due to statement timeout\nfrom PostgreSQL',
+			),
+			{ code: '57014' },
+		);
+		const withScratchScope = mocks.adapter.withScratchScope;
+		mocks.adapter.withScratchScope = async (callback) => {
+			type ScratchScope = {
+				readonly executeRaw: (sql: string) => Promise<unknown[]>;
+				readonly transaction: (
+					inner: (value: ScratchScope) => Promise<unknown>,
+				) => Promise<unknown>;
+			};
+			const scope: ScratchScope = {
+				executeRaw: async (sql: string) => {
+					if (sql.includes("current_setting('search_path')"))
+						return [{ search_path: 'public' }];
+					if (sql.includes('SELECT pg_catalog.to_regclass'))
+						return [{ exists: true }];
+					if (sql.includes('FROM pg_catalog.pg_constraint c'))
+						return [
+							{
+								name: 'positive',
+								expression: 'CHECK ((score > 0))',
+								validated: true,
+							},
+						];
+					if (sql.startsWith('ALTER TABLE ')) throw timeout;
+					return [];
+				},
+				transaction: async (inner) => inner(scope),
+			};
+			return callback(scope);
+		};
+		mocks.compare.mockResolvedValue({ changes: [] });
+		mockManagedObjectsWithUnmanagedApplicationSteps();
+		try {
+			const error = await convergePg(
+				poolFor(),
+				modelWithTables([
+					{
+						name: 'projects',
+						columns: [{ name: 'score', type: 'integer', nullable: false }],
+						foreignKeys: [],
+						indexes: [],
+						checkConstraints: [{ name: 'positive', expression: 'score > 0' }],
+					},
+				]),
+				{
+					steps: [
+						{
+							kind: 'assert',
+							id: 'owned-check-timeout',
+							digest: 'v1',
+							phase: 'after-generated-ddl',
+							owns: { checks: [{ table: 'projects', name: 'positive' }] },
+							inspect: async () => 'healthy' as const,
+							apply: async () => undefined,
+						},
+					],
+				},
+			).catch((caught: unknown) => caught);
+			expect(error).toMatchObject({
+				refusal: 'application-step-failed',
+				detail:
+					'application step owned-check-timeout: 57014 canceling statement due to statement timeout\\nfrom PostgreSQL',
+				cause: timeout,
+			});
+		} finally {
+			mocks.adapter.withScratchScope = withScratchScope;
+		}
+	});
+
+	it('keeps a scratch-cleanup failure as the cause while reporting the SQLSTATE leaf', async () => {
+		const timeout = Object.assign(new Error('statement timed out'), {
+			code: '57014',
+		});
+		const cleanupError = new Error('rollback to savepoint failed');
+		const withScratchScope = mocks.adapter.withScratchScope;
+		mocks.adapter.withScratchScope = async (callback) => {
+			type ScratchScope = {
+				readonly executeRaw: (sql: string) => Promise<unknown[]>;
+				readonly transaction: (
+					inner: (value: ScratchScope) => Promise<unknown>,
+				) => Promise<unknown>;
+			};
+			const scope: ScratchScope = {
+				executeRaw: async (sql: string) => {
+					if (sql.includes("current_setting('search_path')"))
+						return [{ search_path: 'public' }];
+					if (sql.includes('SELECT pg_catalog.to_regclass'))
+						return [{ exists: true }];
+					if (sql.includes('FROM pg_catalog.pg_constraint c'))
+						return [
+							{
+								name: 'positive',
+								expression: 'CHECK ((score > 0))',
+								validated: true,
+							},
+						];
+					if (sql.startsWith('ALTER TABLE ')) throw timeout;
+					return [];
+				},
+				transaction: async (inner) => inner(scope),
+			};
+			try {
+				return await callback(scope);
+			} catch (originalError) {
+				throw Object.assign(
+					new AggregateError(
+						[originalError, cleanupError],
+						'owned-CHECK rendering and cleanup failed',
+						{ cause: originalError },
+					),
+					{ cleanupError, originalError },
+				);
+			}
+		};
+		mocks.compare.mockResolvedValue({ changes: [] });
+		mockManagedObjectsWithUnmanagedApplicationSteps();
+		try {
+			const error = await convergePg(
+				poolFor(),
+				modelWithTables([
+					{
+						name: 'projects',
+						columns: [{ name: 'score', type: 'integer', nullable: false }],
+						foreignKeys: [],
+						indexes: [],
+						checkConstraints: [{ name: 'positive', expression: 'score > 0' }],
+					},
+				]),
+				{
+					steps: [
+						{
+							kind: 'assert',
+							id: 'owned-check-cleanup-timeout',
+							digest: 'v1',
+							phase: 'after-generated-ddl',
+							owns: { checks: [{ table: 'projects', name: 'positive' }] },
+							inspect: async () => 'healthy' as const,
+							apply: async () => undefined,
+						},
+					],
+				},
+			).catch((caught: unknown) => caught);
+			expect(error).toMatchObject({
+				refusal: 'application-step-failed',
+				detail:
+					'application step owned-check-cleanup-timeout: 57014 statement timed out',
+			});
+			expect((error as Error).cause).toBeInstanceOf(AggregateError);
+			expect((error as Error).cause).toMatchObject({ cleanupError });
 		} finally {
 			mocks.adapter.withScratchScope = withScratchScope;
 		}
@@ -3074,6 +3246,40 @@ describe('convergePg refusal boundary', () => {
 			}),
 			'unsupported-change',
 		);
+	});
+
+	it('refuses a named index removal in check mode', async () => {
+		await expectRefusal(
+			change('drop_index', {
+				index: { name: 'idx_users_email', columns: ['email'] },
+			}),
+			'unsupported-change',
+			client(),
+			{ mode: 'check' },
+		);
+	});
+
+	it('keeps a raw index name in refusal metadata while details stay escaped', async () => {
+		const index = 'idx_users\nmanual';
+		mocks.compare.mockResolvedValue({
+			changes: [
+				{
+					...change('drop_index', {
+						index: { name: index, columns: ['email'] },
+					}),
+					details: 'Drop index idx_users\\nmanual',
+				},
+			],
+		});
+		await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+			changes: [
+				expect.objectContaining({
+					index,
+					details: 'Drop index idx_users\\nmanual',
+				}),
+			],
+		});
 	});
 
 	it('leaves an exact external index drop out of converge while refusing it without the option', async () => {

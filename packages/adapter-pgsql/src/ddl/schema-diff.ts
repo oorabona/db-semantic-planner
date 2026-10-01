@@ -1210,66 +1210,89 @@ function compareIndexes(
 	// the emitter and fails loudly.
 	const declaredUnemittableFkIndexCols = new Set(
 		schema.indexes.flatMap((idx) =>
-			idx.columns.length === 1 && !isManagedIndex(schema.name, idx)
+			idx.columns.length === 1 && isUnemittableFkIndex(schema.name, idx)
 				? idx.columns
 				: [],
 		),
 	);
-	const autoFkIndexKeys = new Set(
-		schema.foreignKeys
-			.filter((fk) => {
-				const fkCol = fk.columns[0];
-				return (
-					fk.columns.length === 1 &&
-					fkCol !== undefined &&
-					!hasDeclaredSingleColumnFkIndex(schema, fkCol)
-				);
-			})
-			.map((fk) =>
-				indexComparisonKey({
-					columns: fk.columns,
-					unique: false,
-				}),
-			),
+	const indexExemptionBudgets = (foreignKeys: readonly ForeignKeyIR[]) => {
+		const budgets = new Map<string, number>();
+		for (const fk of foreignKeys) {
+			const key = indexComparisonKey({ columns: fk.columns, unique: false });
+			budgets.set(key, (budgets.get(key) ?? 0) + 1);
+		}
+		return budgets;
+	};
+	const autoFkIndexBudgets = indexExemptionBudgets(
+		schema.foreignKeys.filter((fk) => {
+			const fkCol = fk.columns[0];
+			return (
+				fk.columns.length === 1 &&
+				fkCol !== undefined &&
+				!hasDeclaredSingleColumnFkIndex(schema, fkCol)
+			);
+		}),
 	);
-	const declaredUnemittableFkAutoIndexKeys = new Set(
-		schema.foreignKeys
-			.filter((fk) => {
-				const fkCol = fk.columns[0];
-				return (
-					fk.columns.length === 1 &&
-					fkCol !== undefined &&
-					declaredUnemittableFkIndexCols.has(fkCol)
-				);
-			})
-			.map((fk) =>
-				indexComparisonKey({
-					columns: fk.columns,
-					unique: false,
-				}),
-			),
+	const declaredUnemittableFkAutoIndexBudgets = indexExemptionBudgets(
+		schema.foreignKeys.filter((fk) => {
+			const fkCol = fk.columns[0];
+			return (
+				fk.columns.length === 1 &&
+				fkCol !== undefined &&
+				declaredUnemittableFkIndexCols.has(fkCol)
+			);
+		}),
 	);
 
 	// Index identity: structural definition (name is cosmetic)
-	const schemaIdxMap = new Map(
-		schema.indexes.map((idx) => [indexComparisonKey(idx), idx]),
-	);
-	const dbIdxMap = new Map(
-		db.indexes
-			.filter((idx) => isManagedIndex(schema.name, idx))
-			.map((idx) => [indexComparisonKey(idx), idx]),
-	);
+	const unmatchedDbIndexes = db.indexes.map((index) => ({
+		index,
+		matched: false,
+		exempted: false,
+	}));
+	const unmatchedDbIndexesByKey = new Map<
+		string,
+		{
+			readonly items: {
+				readonly index: IndexIR;
+				matched: boolean;
+				exempted: boolean;
+			}[];
+			next: number;
+		}
+	>();
+	for (const unmatched of unmatchedDbIndexes) {
+		const key = indexComparisonKey(unmatched.index);
+		const bucket = unmatchedDbIndexesByKey.get(key);
+		if (bucket === undefined) {
+			unmatchedDbIndexesByKey.set(key, { items: [unmatched], next: 0 });
+		} else {
+			bucket.items.push(unmatched);
+		}
+	}
+	for (const bucket of unmatchedDbIndexesByKey.values())
+		bucket.items.sort(
+			(left, right) =>
+				Number(isManagedIndex(schema.name, left.index)) -
+				Number(isManagedIndex(schema.name, right.index)),
+		);
 	const pendingCreates: PendingIndexCreate[] = [];
 
-	// Explicit indexes in schema but not in DB → create
-	for (const [key, idx] of schemaIdxMap) {
-		if (!dbIdxMap.has(key)) {
+	// Index identity is structural and each occurrence consumes one matching
+	// counterpart. Names are cosmetic, but duplicate structural indexes are not.
+	for (const idx of schema.indexes) {
+		const key = indexComparisonKey(idx);
+		const bucket = unmatchedDbIndexesByKey.get(key);
+		const dbIndex = bucket?.items[bucket.next++];
+		if (dbIndex === undefined) {
 			pendingCreates.push({
 				index: idx,
 				replacementKey: indexReplacementKey(schema.name, idx),
 				details: `Create ${idx.unique ? 'unique ' : ''}index on (${idx.columns.join(', ')})`,
 				destructive: false,
 			});
+		} else {
+			dbIndex.matched = true;
 		}
 	}
 
@@ -1290,22 +1313,37 @@ function compareIndexes(
 			.map((col) => col.name),
 	);
 
+	const consumeExemptions = (budgets: Map<string, number>) => {
+		for (const [key, bucket] of unmatchedDbIndexesByKey) {
+			let remaining = budgets.get(key) ?? 0;
+			for (const unmatched of bucket.items) {
+				if (remaining === 0) break;
+				if (!unmatched.matched && !unmatched.exempted) {
+					unmatched.exempted = true;
+					remaining -= 1;
+				}
+			}
+			budgets.set(key, remaining);
+		}
+	};
+	consumeExemptions(autoFkIndexBudgets);
+	consumeExemptions(declaredUnemittableFkAutoIndexBudgets);
+
 	// Indexes in DB but not in schema → drop (skip auto-FK and auto-unique indexes — they are auto-managed)
 	const pendingDrops: PendingIndexDrop[] = [];
-	for (const [key, idx] of dbIdxMap) {
+	for (const { index: idx, matched, exempted } of unmatchedDbIndexes) {
 		if (
-			!schemaIdxMap.has(key) &&
-			!autoFkIndexKeys.has(key) &&
-			!declaredUnemittableFkAutoIndexKeys.has(key) &&
-			!isAutoUniqueIndex(schema.name, idx, autoUniqueIndexColumns)
-		) {
-			pendingDrops.push({
-				index: idx,
-				replacementKey: indexReplacementKey(schema.name, idx),
-				destructive: idx.unique === true,
-				details: `Drop index ${idx.name ?? `on (${formatIndexTargets(idx)})`}`,
-			});
-		}
+			matched ||
+			exempted ||
+			isAutoUniqueIndex(schema.name, idx, autoUniqueIndexColumns)
+		)
+			continue;
+		pendingDrops.push({
+			index: idx,
+			replacementKey: indexReplacementKey(schema.name, idx),
+			destructive: idx.unique === true || !isManagedIndex(schema.name, idx),
+			details: `Drop index ${idx.name === undefined ? `on (${formatIndexTargets(idx)})` : escapeDiagnosticText(idx.name)}`,
+		});
 	}
 
 	// Same-name replacements must be all-or-nothing: with destructive changes
@@ -1371,11 +1409,25 @@ function markDestructiveReplacementCreates(
 	}
 }
 
-function isManagedIndex(tableName: string, idx: IndexIR): boolean {
+/**
+ * Whether dbsp can faithfully manage an index from its captured IndexIR.
+ *
+ * This predicate governs both destructive-drop classification and DOWN index
+ * recreation, so the two paths cannot disagree about representability.
+ */
+export function isManagedIndex(tableName: string, idx: IndexIR): boolean {
 	return (
 		(idx.expressions === undefined || idx.expressions.length === 0) &&
 		canGenerateCreateIndex(tableName, idx) &&
 		canValidateSchemaIndex(tableName, idx)
+	);
+}
+
+function isUnemittableFkIndex(tableName: string, idx: IndexIR): boolean {
+	return (
+		(idx.expressions?.length ?? 0) > 0 ||
+		!canGenerateCreateIndex(tableName, idx) ||
+		!canValidateSchemaIndex(tableName, idx)
 	);
 }
 

@@ -826,7 +826,10 @@ describe('generateSchemaFileWithDiagnostics', () => {
 			const loaded = await loadEmittedSchemaCode(result.code);
 			expect(() => generateDDL(loaded.model)).not.toThrow();
 			const diff = compareSchemata(loaded.model, model);
-			expect(diff.changes).toEqual([]);
+			expect(diff.changes).toEqual([
+				expect.objectContaining({ kind: 'drop_index', destructive: true }),
+				expect.objectContaining({ kind: 'drop_index', destructive: true }),
+			]);
 			expect(generateMigrationSQL(diff, { includeDestructive: false })).toEqual(
 				[],
 			);
@@ -979,10 +982,7 @@ describe('generateSchemaFileWithDiagnostics', () => {
 			expect(error).not.toHaveBeenCalled();
 			expect(log).not.toHaveBeenCalled();
 			expect(warningText).toContain(
-				'Expression index "idx_users_lower_email" on table "users" cannot be represented in the schema and is not managed by dbsp.',
-			);
-			expect(warningText).toContain(
-				'dbsp will neither drop nor recreate it; maintain it by hand.',
+				'Expression index "idx_users_lower_email" on table "users" cannot be represented in the schema. It may be reported as destructive drift; list it in externalIndexes to keep it.',
 			);
 			expect(result).not.toContain('Warnings:');
 			expect(result).not.toContain('idx_users_lower_email');
@@ -1143,7 +1143,7 @@ describe('generateSchemaFileWithDiagnostics', () => {
 			expect(result.warnings[0]).toBe(model.warnings[0]);
 			expect(result.warnings).toContainEqual(
 				expect.stringContaining(
-					'Expression index "idx_notes_lower_email" on table "notes" cannot be represented in the schema and is not managed by dbsp.',
+					'Expression index "idx_notes_lower_email" on table "notes" cannot be represented in the schema. It may be reported as destructive drift; list it in externalIndexes to keep it.',
 				),
 			);
 			expect(result.warnings).not.toContainEqual(
@@ -1218,14 +1218,16 @@ describe('generateSchemaFileWithDiagnostics', () => {
 			expect(result.code).not.toContain('nullsNotDistinct: true');
 			expect(result.warnings).toContainEqual(
 				expect.stringContaining(
-					'Index "idx_users_email_nulls_not_distinct" on table "users" cannot be represented in the schema and is not managed by dbsp because schema() rejected it',
+					'Index "idx_users_email_nulls_not_distinct" on table "users" cannot be represented in the schema because schema() rejected it',
 				),
 			);
 
 			const loaded = await loadEmittedSchemaCode(result.code);
 			expect(() => generateDDL(loaded.model)).not.toThrow();
 			const diff = compareSchemata(loaded.model, model);
-			expect(diff.changes).toEqual([]);
+			expect(diff.changes).toEqual([
+				expect.objectContaining({ kind: 'drop_index', destructive: true }),
+			]);
 		});
 
 		it('emits ordinary partial indexes and the loaded schema has no drift', async () => {
@@ -1328,7 +1330,7 @@ describe('generateSchemaFileWithDiagnostics', () => {
 			expect(result.code).toContain('idx_notes_active');
 			expect(result.warnings).toContainEqual(
 				expect.stringContaining(
-					'Index "idx_notes_email_nonunique_nulls" on table "notes" cannot be represented in the schema and is not managed by dbsp because schema() rejected it',
+					'Index "idx_notes_email_nonunique_nulls" on table "notes" cannot be represented in the schema because schema() rejected it',
 				),
 			);
 
@@ -1341,7 +1343,12 @@ describe('generateSchemaFileWithDiagnostics', () => {
 				}
 			}
 			expect(() => generateDDL(loaded.model)).not.toThrow();
-			expect(compareSchemata(loaded.model, model).changes).toEqual([]);
+			expect(compareSchemata(loaded.model, model).changes).toEqual([
+				expect.objectContaining({ kind: 'drop_index', destructive: true }),
+				expect.objectContaining({ kind: 'drop_index', destructive: true }),
+				expect.objectContaining({ kind: 'drop_index', destructive: true }),
+				expect.objectContaining({ kind: 'drop_index', destructive: true }),
+			]);
 		});
 
 		it('emits opclass and with __proto__ keys as own computed properties', async () => {

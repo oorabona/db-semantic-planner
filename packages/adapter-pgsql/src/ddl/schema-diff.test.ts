@@ -1272,7 +1272,220 @@ describe('compareSchemata', () => {
 			expect(diff.changes[0]!.kind).toBe('drop_index');
 		});
 
-		it('treats database expression and unrepresentable indexes as unmanaged, while unique drops stay destructive', () => {
+		it('drops one of two live indexes with identical structure', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'email', type: 'string' })],
+					indexes: [{ name: 'idx_users_email', columns: ['email'] }],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'email', type: 'string' })],
+					indexes: [
+						{ name: 'idx_users_email_a', columns: ['email'] },
+						{ name: 'idx_users_email_b', columns: ['email'] },
+					],
+				}),
+			]);
+
+			expect(compareSchemata(schema, db).changes).toEqual([
+				expect.objectContaining({
+					kind: 'drop_index',
+					meta: { index: { name: 'idx_users_email_b', columns: ['email'] } },
+				}),
+			]);
+		});
+
+		it('matches an unrecreatable duplicate before a recreatable duplicate', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'email', type: 'string' })],
+					indexes: [{ name: 'users_email', columns: ['email'] }],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'email', type: 'string' })],
+					indexes: [
+						{ name: 'a_valid', columns: ['email'] },
+						{ name: 'z-invalid', columns: ['email'] },
+					],
+				}),
+			]);
+
+			expect(compareSchemata(schema, db).changes).toEqual([
+				expect.objectContaining({
+					kind: 'drop_index',
+					destructive: false,
+					meta: { index: { name: 'a_valid', columns: ['email'] } },
+				}),
+			]);
+		});
+
+		it('budgets each automatic FK-index exemption and preserves live drop order', () => {
+			const fk: ForeignKeyIR = {
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+			};
+			const desired = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'integer' })],
+					primaryKey: 'id',
+				}),
+				makeTable({
+					name: 'posts',
+					columns: [
+						makeCol({ name: 'id', type: 'integer' }),
+						makeCol({ name: 'user_id', type: 'integer' }),
+					],
+					primaryKey: 'id',
+					foreignKeys: [fk],
+				}),
+			]);
+			const oneLiveIndex = makeModel([
+				...Array.from(desired.tables.values()).filter(
+					(table) => table.name !== 'posts',
+				),
+				makeTable({
+					name: 'posts',
+					columns: [
+						makeCol({ name: 'id', type: 'integer' }),
+						makeCol({ name: 'user_id', type: 'integer' }),
+					],
+					primaryKey: 'id',
+					foreignKeys: [fk],
+					indexes: [{ name: 'idx_posts_user_id', columns: ['user_id'] }],
+				}),
+			]);
+			const twoLiveIndexes = makeModel([
+				...Array.from(oneLiveIndex.tables.values()).filter(
+					(table) => table.name !== 'posts',
+				),
+				{
+					...oneLiveIndex.getTable('posts')!,
+					indexes: [
+						{ name: 'idx_posts_user_id', columns: ['user_id'] },
+						{ name: 'manual_duplicate', columns: ['user_id'] },
+					],
+				},
+			]);
+
+			const compare = (database: ReturnType<typeof makeModel>) =>
+				comparePhysicalSchemata(
+					createPgPhysicalModel({
+						mode: 'logical',
+						model: desired,
+						schema: 'app',
+					}),
+					createPgPhysicalModel({
+						mode: 'physical',
+						model: database,
+						schema: 'app',
+					}),
+				);
+
+			expect(compare(oneLiveIndex).changes).toEqual([]);
+			expect(compare(twoLiveIndexes).changes).toEqual([
+				expect.objectContaining({
+					kind: 'drop_index',
+					table: 'posts',
+					meta: expect.objectContaining({
+						index: expect.objectContaining({ name: 'manual_duplicate' }),
+					}),
+				}),
+			]);
+		});
+
+		it('spends an automatic FK-index exemption on an unrecreatable duplicate', () => {
+			const fk: ForeignKeyIR = {
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+			};
+			const desired = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'integer' })],
+					primaryKey: 'id',
+				}),
+				makeTable({
+					name: 'posts',
+					columns: [
+						makeCol({ name: 'id', type: 'integer' }),
+						makeCol({ name: 'user_id', type: 'integer' }),
+					],
+					primaryKey: 'id',
+					foreignKeys: [fk],
+				}),
+			]);
+			const live = makeModel([
+				...Array.from(desired.tables.values()).filter(
+					(table) => table.name !== 'posts',
+				),
+				makeTable({
+					name: 'posts',
+					columns: [
+						makeCol({ name: 'id', type: 'integer' }),
+						makeCol({ name: 'user_id', type: 'integer' }),
+					],
+					primaryKey: 'id',
+					foreignKeys: [fk],
+					indexes: [
+						{ name: 'a_valid', columns: ['user_id'] },
+						{ name: 'z-invalid', columns: ['user_id'] },
+					],
+				}),
+			]);
+
+			const diff = comparePhysicalSchemata(
+				createPgPhysicalModel({
+					mode: 'logical',
+					model: desired,
+					schema: 'app',
+				}),
+				createPgPhysicalModel({ mode: 'physical', model: live, schema: 'app' }),
+			);
+			expect(diff.changes).toEqual([
+				expect.objectContaining({
+					kind: 'drop_index',
+					table: 'posts',
+					destructive: false,
+					meta: expect.objectContaining({
+						index: expect.objectContaining({ name: 'a_valid' }),
+					}),
+				}),
+			]);
+		});
+
+		it('escapes an unmanaged index name in drop details but keeps metadata raw', () => {
+			const index = { name: 'idx_users\\nmanual', columns: ['email'] };
+			const diff = compareSchemata(
+				makeModel([
+					makeTable({
+						name: 'users',
+						columns: [makeCol({ name: 'email', type: 'string' })],
+					}),
+				]),
+				makeModel([
+					makeTable({
+						name: 'users',
+						columns: [makeCol({ name: 'email', type: 'string' })],
+						indexes: [index],
+					}),
+				]),
+			);
+			const drop = diff.changes[0]!;
+			expect(drop.details).toBe('Drop index idx_users\\\\nmanual');
+			expect(drop.details).not.toContain('\n');
+			expect(drop.meta?.index).toEqual(index);
+		});
+
+		it('reports database expression and unrepresentable indexes as destructive drift', () => {
 			const plainIdx: IndexIR = {
 				name: 'idx_users_email',
 				columns: ['email'],
@@ -1283,6 +1496,7 @@ describe('compareSchemata', () => {
 				unique: true,
 			};
 			const expressionIdx: IndexIR = {
+				name: 'idx_users_lower_email',
 				columns: [],
 				expressions: ['lower(email)'],
 			};
@@ -1324,21 +1538,18 @@ describe('compareSchemata', () => {
 				]);
 			const diffForDroppedIndex = (idx: IndexIR) =>
 				compareSchemata(modelWithoutIndex(), modelWithIndex(idx));
-			const expectNoDbIndexChangesOrSql = (idx: IndexIR) => {
+			const expectDestructiveDbIndexDrift = (idx: IndexIR) => {
 				const diff = compareSchemata(modelWithoutIndex(), modelWithIndex(idx));
-				expect(diff.changes).toEqual([]);
-				for (const includeDestructive of [false, true]) {
-					expect(() =>
-						generateMigrationSQL(diff, { includeDestructive }),
-					).not.toThrow();
-					expect(generateMigrationSQL(diff, { includeDestructive })).toEqual(
-						[],
-					);
-					expect(() =>
-						generateDownSQL(diff, { includeDestructive }),
-					).not.toThrow();
-					expect(generateDownSQL(diff, { includeDestructive })).toEqual([]);
-				}
+				expect(diff.changes).toEqual([
+					expect.objectContaining({
+						kind: 'drop_index',
+						destructive: true,
+						meta: { index: idx },
+					}),
+				]);
+				expect(
+					generateMigrationSQL(diff, { includeDestructive: false }),
+				).toEqual([]);
 			};
 
 			const plainDiff = diffForDroppedIndex(plainIdx);
@@ -1369,7 +1580,7 @@ describe('compareSchemata', () => {
 				rejectedOpclassIdx,
 				schemaRejectedIdx,
 			]) {
-				expectNoDbIndexChangesOrSql(idx);
+				expectDestructiveDbIndexDrift(idx);
 			}
 		});
 
@@ -1500,6 +1711,23 @@ describe('compareSchemata', () => {
 			expect(() => generateMigrationSQL(diff)).toThrow(
 				/Invalid index method: "rum"/,
 			);
+
+			const duplicateAutoIndexDb = makeModel(
+				Array.from(db.tables.values()).map((table) =>
+					table.name === 'posts'
+						? {
+								...table,
+								indexes: [
+									...table.indexes,
+									{ name: 'manual_duplicate', columns: ['author_id'] },
+								],
+							}
+						: table,
+				),
+			);
+			expect(
+				changeKinds(compareSchemata(schema, duplicateAutoIndexDb).changes),
+			).toContain('drop_index');
 		});
 
 		it('drops a plain auto-index beside a declared partial FK-column index', () => {

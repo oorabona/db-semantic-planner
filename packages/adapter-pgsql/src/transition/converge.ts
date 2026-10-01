@@ -110,6 +110,18 @@ export interface PgConvergeInitializationFailure {
 	readonly detail: string;
 }
 
+export type PgConvergeRefusalChange = Pick<
+	SchemaChange,
+	'kind' | 'table' | 'column' | 'details'
+> & {
+	/**
+	 * Present for create_index and drop_index when the index has a name: always
+	 * for a live index and for a logical-mode physical model, which names every
+	 * index; a physical-mode snapshot passes its own names through as given.
+	 */
+	readonly index?: string;
+};
+
 /**
  * Unsupported-change, ledger and ownership refusals occur before converge commits
  * managed DDL. An execution refusal may follow a rolled-back transactional DDL
@@ -118,10 +130,7 @@ export interface PgConvergeInitializationFailure {
 export class PgConvergeRefusalError extends Error {
 	constructor(
 		readonly refusal: PgConvergeRefusal,
-		readonly changes: readonly Pick<
-			SchemaChange,
-			'kind' | 'table' | 'column' | 'details'
-		>[],
+		readonly changes: readonly PgConvergeRefusalChange[],
 		readonly detail?: string,
 		readonly runIds?: readonly string[],
 		readonly executionIds?: readonly string[],
@@ -388,6 +397,13 @@ function refusal(
 			kind: change.kind,
 			table: change.table,
 			...(change.column === undefined ? {} : { column: change.column }),
+			...((change.kind === 'create_index' || change.kind === 'drop_index') &&
+			change.meta?.index !== undefined &&
+			typeof change.meta.index === 'object' &&
+			!Array.isArray(change.meta.index) &&
+			typeof (change.meta.index as IndexIR).name === 'string'
+				? { index: (change.meta.index as IndexIR).name }
+				: {}),
 			details: change.details,
 		})),
 		detail,
@@ -397,6 +413,62 @@ function refusal(
 		undefined,
 		options,
 	);
+}
+
+function applicationStepFailure(error: PgApplicationStepError): {
+	readonly detail: string;
+	readonly cause: unknown;
+} {
+	const originalCause = error.cause ?? error;
+	const leafCause = originalApplicationStepCause(originalCause);
+	const compositeCause = applicationStepCleanupCause(originalCause);
+	const code = pgErrorCode(leafCause);
+	const message =
+		leafCause instanceof Error ? leafCause.message : String(leafCause);
+	return {
+		detail: `application step ${escapeDiagnosticText(error.stepId)}: ${code === undefined ? escapeDiagnosticText(message) : `${escapeDiagnosticText(code)} ${escapeDiagnosticText(message)}`}`,
+		cause: compositeCause ?? leafCause,
+	};
+}
+
+function applicationStepCleanupCause(error: unknown): unknown | undefined {
+	const seen = new Set<unknown>();
+	let current = error;
+	while (
+		typeof current === 'object' &&
+		current !== null &&
+		!seen.has(current)
+	) {
+		seen.add(current);
+		if (Object.hasOwn(current, 'cleanupError')) return current;
+		const cause = (current as { readonly cause?: unknown }).cause;
+		if (cause === undefined) break;
+		current = cause;
+	}
+	return undefined;
+}
+
+function originalApplicationStepCause(error: unknown): unknown {
+	const seen = new Set<unknown>();
+	let current = error;
+	while (
+		typeof current === 'object' &&
+		current !== null &&
+		!seen.has(current)
+	) {
+		seen.add(current);
+		if (pgErrorCode(current) !== undefined) return current;
+		const cause = (current as { readonly cause?: unknown }).cause;
+		if (cause === undefined) break;
+		current = cause;
+	}
+	return current;
+}
+
+function pgErrorCode(error: unknown): string | undefined {
+	if (typeof error !== 'object' || error === null) return undefined;
+	const code = (error as { readonly code?: unknown }).code;
+	return typeof code === 'string' ? code : undefined;
 }
 
 function invalidOptions(detail: string): PgConvergeRefusalError {
@@ -2181,13 +2253,12 @@ export async function convergePgPhysical(
 				},
 			});
 		} catch (error) {
-			if (error instanceof PgApplicationStepError)
-				throw refusal(
-					error.refusal,
-					[],
-					`application step ${error.stepId}: ${error.message}`,
-					{ cause: error.cause ?? error },
-				);
+			if (error instanceof PgApplicationStepError) {
+				const failure = applicationStepFailure(error);
+				throw refusal(error.refusal, [], failure.detail, {
+					cause: failure.cause,
+				});
+			}
 			throw error;
 		}
 		if (
@@ -2404,13 +2475,12 @@ export async function convergePgPhysical(
 				destroyReason = 'converge received a transport-ambiguous outcome';
 				return { kind: 'transport-ambiguous', detail: error.message };
 			}
-			if (error instanceof PgApplicationStepError)
-				throw refusal(
-					error.refusal,
-					[],
-					`application step ${error.stepId}: ${error.message}`,
-					{ cause: error.cause ?? error },
-				);
+			if (error instanceof PgApplicationStepError) {
+				const failure = applicationStepFailure(error);
+				throw refusal(error.refusal, [], failure.detail, {
+					cause: failure.cause,
+				});
+			}
 			throw error;
 		}
 		const run: TransitionRunMetadata = {
@@ -2486,13 +2556,12 @@ export async function convergePgPhysical(
 					destroyReason = 'converge received a transport-ambiguous outcome';
 					return { kind: 'transport-ambiguous', detail: error.message };
 				}
-				if (error instanceof PgApplicationStepError)
-					throw refusal(
-						error.refusal,
-						[],
-						`application step ${error.stepId}: ${error.message}`,
-						{ cause: error.cause ?? error },
-					);
+				if (error instanceof PgApplicationStepError) {
+					const failure = applicationStepFailure(error);
+					throw refusal(error.refusal, [], failure.detail, {
+						cause: failure.cause,
+					});
+				}
 				throw error;
 			}
 		if (outcome.outcome === 'completed')

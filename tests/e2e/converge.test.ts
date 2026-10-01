@@ -20,7 +20,9 @@ import {
 } from '@dbsp/adapter-pgsql/internal';
 import {
 	projectLedgerChain,
+	resetLogger,
 	semanticArtifactId,
+	setLogger,
 	transitionPlanDigest,
 } from '@dbsp/core';
 import type {
@@ -35,7 +37,7 @@ import type {
 	TransitionRunMetadata,
 } from '@dbsp/types';
 import pg from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
 	closeTestDb,
 	createSchema,
@@ -2610,6 +2612,151 @@ describe('convergePg', () => {
 				[schema, name, index],
 			),
 		).resolves.toMatchObject({ rows: [{ exists: true }] });
+	});
+
+	it('refuses undeclared quoted and expression indexes unless each is external', async () => {
+		const pool = await getTestPool();
+		const name = 'undeclared_index_refusal_fixture';
+		const manualIndex = 'idx-embeddings-manual';
+		const expressionIndex = 'idx-embeddings-expression-manual';
+		const desired = model([
+			{
+				...table(name, false),
+				columns: [
+					{ name: 'id', type: 'integer', nullable: false },
+					{ name: 'name', type: 'string', nullable: false },
+				],
+			},
+		]);
+		await expect(convergePg(pool, desired, { schema })).resolves.toMatchObject({
+			kind: 'applied',
+		});
+		await pool.query(
+			`CREATE INDEX "${manualIndex}" ON "${schema}"."${name}" ("name")`,
+		);
+
+		await expect(
+			convergePg(pool, desired, { schema, mode: 'check' }),
+		).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+			changes: [
+				expect.objectContaining({
+					kind: 'drop_index',
+					index: manualIndex,
+				}),
+			],
+		});
+		const manualExternal = {
+			schema,
+			mode: 'check' as const,
+			externalIndexes: [{ table: name, name: manualIndex }],
+		};
+		await expect(
+			convergePg(pool, desired, manualExternal),
+		).resolves.toMatchObject({ kind: 'no-drift' });
+
+		await pool.query(
+			`CREATE INDEX "${expressionIndex}" ON "${schema}"."${name}" ((lower("name")))`,
+		);
+		const { changes } = await comparePgsqlDatabaseSchema(
+			createPgsqlAdapter(pool),
+			desired,
+			{ schema },
+		);
+		expect(changes).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					kind: 'drop_index',
+					table: name,
+					destructive: true,
+					meta: expect.objectContaining({
+						index: expect.objectContaining({ name: expressionIndex }),
+					}),
+				}),
+			]),
+		);
+		await expect(
+			convergePg(pool, desired, manualExternal),
+		).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+			changes: [
+				expect.objectContaining({
+					kind: 'drop_index',
+					index: expressionIndex,
+				}),
+			],
+		});
+		await expect(
+			convergePg(pool, desired, {
+				...manualExternal,
+				externalIndexes: [
+					{ table: name, name: manualIndex },
+					{ table: name, name: expressionIndex },
+				],
+			}),
+		).resolves.toMatchObject({ kind: 'no-drift' });
+	});
+
+	it('does not warn for serial defaults or pristine defaulted tables', async () => {
+		const pool = await getTestPool();
+		const serialName = 'serial_default_no_warning_fixture';
+		const pristineSchema = `converge_pristine_default_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const serialTable: TableIR = {
+			name: serialName,
+			columns: [
+				{
+					name: 'id',
+					type: 'integer',
+					nullable: false,
+					autoIncrement: true,
+				},
+			],
+			primaryKey: 'id',
+			foreignKeys: [],
+			indexes: [],
+		};
+		await expect(
+			convergePg(pool, model([serialTable]), { schema }),
+		).resolves.toMatchObject({ kind: 'applied' });
+
+		const warning = vi.fn();
+		setLogger({ warn: warning });
+		try {
+			await expect(
+				convergePg(pool, model([serialTable]), { schema, mode: 'check' }),
+			).resolves.toMatchObject({ kind: 'no-drift' });
+			expect(warning).not.toHaveBeenCalled();
+
+			const defaultedTable: TableIR = {
+				name: 'pristine_default_no_warning_fixture',
+				columns: [
+					{ name: 'id', type: 'integer', nullable: false },
+					{
+						name: 'state',
+						type: 'string',
+						nullable: false,
+						default: 'pending',
+					},
+				],
+				primaryKey: 'id',
+				foreignKeys: [],
+				indexes: [],
+			};
+			await createSchema(pristineSchema);
+			try {
+				await expect(
+					convergePg(pool, model([defaultedTable]), {
+						schema: pristineSchema,
+						initialize: 'pristine',
+					}),
+				).resolves.toMatchObject({ kind: 'applied' });
+				expect(warning).not.toHaveBeenCalled();
+			} finally {
+				await dropSchema(pristineSchema);
+			}
+		} finally {
+			resetLogger();
+		}
 	});
 
 	it('applies a declared nullable column without dropping a caller-named external index', async () => {

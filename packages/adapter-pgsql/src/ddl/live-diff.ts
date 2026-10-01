@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { defaultIndexName } from '@dbsp/core';
+import { defaultIndexName, emitWarning } from '@dbsp/core';
 import { assertDeclaredEnumMapIdentity } from '@dbsp/core/internal';
 import type {
 	CheckConstraintIR,
@@ -61,7 +61,7 @@ export interface ComparePgsqlDatabaseSchemaOptions
 	 */
 	readonly canonicalizeExpressions?: boolean;
 	/**
-	 * Receives live expression canonicalisation warnings. Defaults to console.warn.
+	 * Receives live expression canonicalisation warnings. Defaults to the core logger.
 	 */
 	readonly onWarning?: (message: string) => void;
 	/** Receives the identity-bearing canonicalisation warning before its string form. */
@@ -1272,7 +1272,7 @@ function toCanonicalizerOptions(
 			if (options?.onWarning !== undefined) {
 				options.onWarning(warning.message);
 			} else if (onStructuredWarning === undefined) {
-				console.warn(`Warning: ${warning.message}`);
+				emitWarning(`Warning: ${warning.message}`, 'runtime');
 			}
 		},
 	};
