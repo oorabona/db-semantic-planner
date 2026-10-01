@@ -26,6 +26,7 @@ import {
 } from '../mutations/index.js';
 import { CamelCaseNamingPlugin } from '../naming-plugin.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { queryLocal } from '../sql-identifier.js';
 
 describe('Mutation Compiler', () => {
 	const naming = new CamelCaseNamingPlugin();
@@ -638,8 +639,11 @@ describe('UPSERT Compiler', () => {
 	});
 
 	describe('excludedRef', () => {
+		// @ts-expect-error Mutation exports require an identifier that crossed authority.
+		excludedRef('name');
+
 		it('should create EXCLUDED.column reference', () => {
-			const result = excludedRef('name', naming) as any;
+			const result = excludedRef(queryLocal('name')) as any;
 
 			expect(result).toHaveProperty('ColumnRef');
 			expect(result.ColumnRef.fields).toHaveLength(2);

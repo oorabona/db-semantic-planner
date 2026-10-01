@@ -13,6 +13,7 @@
 import type { CommonTableExpr, Node, SelectStmt } from '@pgsql/types';
 import { binaryExpr, eqExpr, integerNode } from '../ast-helpers.js';
 import type { CompilerContext } from '../handlers/types.js';
+import { queryLocal, type SqlIdentifier } from '../sql-identifier.js';
 import {
 	buildCycleDetection,
 	buildPg14CycleClause,
@@ -35,21 +36,21 @@ export const MAX_DEPTH_LIMIT = 100;
  */
 export interface RecursiveCteConfig {
 	/** Unique CTE name (e.g., '__rc_0') */
-	cteAlias: string;
+	cteAlias: SqlIdentifier | string;
 	/** Table to traverse */
-	table: string;
+	table: SqlIdentifier | string;
 	/** Primary key column */
-	pkColumn: string;
+	pkColumn: SqlIdentifier | string;
 	/** Foreign key column for self-reference (adjacency mode only) */
-	fkColumn: string;
+	fkColumn: SqlIdentifier | string;
 	/** Outer query alias to correlate with */
-	outerAlias: string;
+	outerAlias: SqlIdentifier | string;
 	/** true = traverse up (ancestors), false = traverse down (descendants) */
 	isAncestors: boolean;
 	/** Maximum recursion depth (default: {@link MAX_DEPTH_LIMIT}) */
 	maxDepth: number;
 	/** Column(s) to select from each row */
-	selectColumns: string[];
+	selectColumns: (SqlIdentifier | string)[];
 	/** Whether to track traversal path */
 	trackPath?: boolean;
 	/** Whether to use PG14+ CYCLE clause (vs __visited array) */
@@ -59,11 +60,11 @@ export interface RecursiveCteConfig {
 
 	// Edge-table mode (optional — when set, uses edge-table traversal)
 	/** Edge table name (e.g., "role_edges") */
-	edgeTable?: string;
+	edgeTable?: SqlIdentifier | string;
 	/** Source column in edge table (e.g., "parent_role_id") */
-	edgeFrom?: string;
+	edgeFrom?: SqlIdentifier | string;
 	/** Target column in edge table (e.g., "child_role_id") */
-	edgeTo?: string;
+	edgeTo?: SqlIdentifier | string;
 	/** Bidirectional strategy: 'union' (safe, dedup) or 'union-all' (no dedup) */
 	bidirectionalStrategy?: 'union' | 'union-all';
 
@@ -124,20 +125,19 @@ export function buildRecursiveCte(config: RecursiveCteConfig): {
 		ctx,
 	} = config;
 
-	const naming = ctx.naming;
-	const dbTable = naming.resolve(table);
-	const dbPk = naming.resolve(pkColumn);
-	const dbFk = naming.resolve(fkColumn);
-	const dbOuter = naming.resolve(outerAlias);
+	const dbTable = queryLocal(table);
+	const dbPk = queryLocal(pkColumn);
+	const dbFk = queryLocal(fkColumn);
+	const dbOuter = queryLocal(outerAlias);
 	const innerAlias = '__n';
 
 	// Build anchor target list
-	const anchorTargets: Node[] = buildTargetList(
-		selectColumns,
-		innerAlias,
-		ctx,
-		{ isAnchor: true, trackPath, pkColumn: dbPk, usePg14Cycle },
-	);
+	const anchorTargets: Node[] = buildTargetList(selectColumns, innerAlias, {
+		isAnchor: true,
+		trackPath,
+		pkColumn: dbPk,
+		usePg14Cycle,
+	});
 
 	// Build anchor WHERE clause
 	const anchorWhere = buildAnchorWhere(
@@ -166,12 +166,13 @@ export function buildRecursiveCte(config: RecursiveCteConfig): {
 	};
 
 	// Build recursive target list
-	const recursiveTargets: Node[] = buildTargetList(
-		selectColumns,
-		innerAlias,
-		ctx,
-		{ isAnchor: false, trackPath, pkColumn: dbPk, cteAlias, usePg14Cycle },
-	);
+	const recursiveTargets: Node[] = buildTargetList(selectColumns, innerAlias, {
+		isAnchor: false,
+		trackPath,
+		pkColumn: dbPk,
+		cteAlias,
+		usePg14Cycle,
+	});
 
 	// Build recursive WHERE clause (depth limit + cycle detection)
 	const recursiveWhere = buildRecursiveWhere(
@@ -250,7 +251,6 @@ export function buildRecursiveCte(config: RecursiveCteConfig): {
 function buildTargetList(
 	columns: string[],
 	alias: string,
-	ctx: CompilerContext,
 	options: {
 		isAnchor: boolean;
 		trackPath: boolean;
@@ -263,7 +263,7 @@ function buildTargetList(
 
 	// Add requested columns
 	for (const col of columns) {
-		const dbCol = ctx.naming.resolve(col);
+		const dbCol = queryLocal(col);
 		targets.push({
 			ResTarget: {
 				val: {
@@ -584,12 +584,11 @@ function buildEdgeTableRecursiveCte(config: RecursiveCteConfig): {
 		);
 	}
 
-	const naming = ctx.naming;
-	const dbTable = naming.resolve(table);
-	const dbPk = naming.resolve(pkColumn);
-	const dbEdgeTable = naming.resolve(edgeTable);
-	const dbEdgeFrom = naming.resolve(edgeFrom);
-	const dbEdgeTo = naming.resolve(edgeTo);
+	const dbTable = queryLocal(table);
+	const dbPk = queryLocal(pkColumn);
+	const dbEdgeTable = queryLocal(edgeTable);
+	const dbEdgeFrom = queryLocal(edgeFrom);
+	const dbEdgeTo = queryLocal(edgeTo);
 	const innerAlias = '__n';
 	const edgeAlias = '__e';
 	const isBidirectional = bidirectionalStrategy !== undefined;
@@ -597,12 +596,12 @@ function buildEdgeTableRecursiveCte(config: RecursiveCteConfig): {
 
 	// ── Anchor SELECT ───────────────────────────────────────────────────────
 
-	const anchorTargets: Node[] = buildTargetList(
-		selectColumns,
-		innerAlias,
-		ctx,
-		{ isAnchor: true, trackPath, pkColumn: dbPk, usePg14Cycle },
-	);
+	const anchorTargets: Node[] = buildTargetList(selectColumns, innerAlias, {
+		isAnchor: true,
+		trackPath,
+		pkColumn: dbPk,
+		usePg14Cycle,
+	});
 
 	// Anchor WHERE: use external filter (from intent.start.where compilation)
 	// or fall back to a trivial TRUE (should not happen in practice)
@@ -628,12 +627,13 @@ function buildEdgeTableRecursiveCte(config: RecursiveCteConfig): {
 
 	// ── Recursive SELECT ────────────────────────────────────────────────────
 
-	const recursiveTargets: Node[] = buildTargetList(
-		selectColumns,
-		innerAlias,
-		ctx,
-		{ isAnchor: false, trackPath, pkColumn: dbPk, cteAlias, usePg14Cycle },
-	);
+	const recursiveTargets: Node[] = buildTargetList(selectColumns, innerAlias, {
+		isAnchor: false,
+		trackPath,
+		pkColumn: dbPk,
+		cteAlias,
+		usePg14Cycle,
+	});
 
 	const recursiveWhere = buildRecursiveWhere(
 		cteAlias,

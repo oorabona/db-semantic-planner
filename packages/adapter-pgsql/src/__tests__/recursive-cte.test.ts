@@ -243,9 +243,9 @@ describe('Edge-Table Recursive CTE', () => {
 		isAncestors: false,
 		maxDepth: 10,
 		selectColumns: ['id', 'name'],
-		edgeTable: 'roleEdges',
-		edgeFrom: 'parentRoleId',
-		edgeTo: 'childRoleId',
+		edgeTable: 'role_edges',
+		edgeFrom: 'parent_role_id',
+		edgeTo: 'child_role_id',
 		anchorWhere: {
 			A_Expr: {
 				kind: 'AEXPR_OP',
@@ -343,8 +343,8 @@ describe('Edge-Table Recursive CTE', () => {
 			const inConfig: RecursiveCteConfig = {
 				...edgeConfig,
 				// For 'in' direction, caller swaps edgeFrom/edgeTo
-				edgeFrom: 'childRoleId',
-				edgeTo: 'parentRoleId',
+				edgeFrom: 'child_role_id',
+				edgeTo: 'parent_role_id',
 			};
 
 			const { cte } = buildRecursiveCte(inConfig);

@@ -82,7 +82,7 @@ describe('query naming boundary', () => {
 		expect(source).not.toMatch(/\.(?:toDatabase|toModel)\s*\(/);
 	});
 
-	it('resolves declared conflict constraints and preserves catalog constraints', () => {
+	it('resolves declared conflict constraints and rejects catalog-only constraints', () => {
 		const model = schema({
 			userProfiles: {
 				id: { type: 'integer', primaryKey: true },
@@ -106,15 +106,17 @@ describe('query naming boundary', () => {
 				{ model },
 			).sql,
 		).toContain('ON CONFLICT ON CONSTRAINT pk_user_profiles');
-		expect(
+		expect(() =>
 			adapter.compileUpsert(
 				{
 					...base,
 					onConflict: { constraint: 'runtime_user_profiles_email_uq' },
 				},
 				{ model },
-			).sql,
-		).toContain('ON CONFLICT ON CONSTRAINT runtime_user_profiles_email_uq');
+			),
+		).toThrow(
+			/Declared constraint 'userProfiles\.runtime_user_profiles_email_uq'/,
+		);
 	});
 
 	it('does not call naming-plugin conversion methods from query, hydration, or helper modules', () => {

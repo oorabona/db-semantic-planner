@@ -31,6 +31,8 @@ import { compileSelect } from './adapter-compiler-select.js';
 import {
 	emittedBindName,
 	hasBindingName,
+	queryScope,
+	relationBinding,
 	withBindingName,
 } from './binding-registry.js';
 import {
@@ -73,7 +75,6 @@ import {
 	type UpsertConfig,
 	type UpsertFromConfig,
 } from './mutations/index.js';
-import type { NamingPlugin } from './naming-plugin.js';
 import {
 	finalizeEnvelope,
 	fromAstProjection,
@@ -81,6 +82,13 @@ import {
 	preserveOneToOne,
 } from './projection-envelope.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
+import {
+	declaredColumn,
+	declaredConstraint,
+	declaredTable,
+	queryLocal,
+	type SqlIdentifier,
+} from './sql-identifier.js';
 
 // ============================================================================
 // Internal helpers
@@ -166,19 +174,97 @@ function prependSourceCte(
 	query: ProjectionEnvelope,
 	sourceName: string,
 	sourceCte: SourceCteFragment | undefined,
-	naming: NamingPlugin,
 ): CompiledQuery {
 	if (sourceCte === undefined) {
 		return finalizeEnvelope(query);
 	}
 	const cteParamCount = sourceCte.parameters.length;
-	const sourceCteName = emittedBindName(sourceName, naming);
+	const sourceCteName = emittedBindName(sourceName);
 	return finalizeEnvelope(
 		preserveOneToOne(query, {
 			sql: `WITH ${quoteIdent(sourceCteName, 'alias')} as (${sourceCte.sql}) ${renumberSqlParams(query.sql, cteParamCount)}`,
 			parameters: [...sourceCte.parameters, ...query.parameters],
 		}),
 	);
+}
+
+function declaredMutationTable(
+	deps: AdapterCompilerDeps,
+	table: string,
+): SqlIdentifier {
+	return deps.declaredNames
+		? declaredTable(deps.declaredNames, table)
+		: queryLocal(table);
+}
+
+function declaredMutationColumn(
+	deps: AdapterCompilerDeps,
+	table: string,
+	column: string,
+): SqlIdentifier {
+	return deps.declaredNames
+		? declaredColumn(deps.declaredNames, table, column)
+		: queryLocal(column);
+}
+
+function mutationBinding(deps: AdapterCompilerDeps, table: string) {
+	if (
+		hasBindingName(deps.bindingNames, table) ||
+		(deps.declaredNames !== undefined &&
+			deps.declaredNames.table(table) === undefined)
+	) {
+		return relationBinding({ qualifier: queryLocal(table), kind: 'cte-bind' });
+	}
+	return relationBinding({
+		qualifier: declaredMutationTable(deps, table),
+		kind: 'declared-table',
+		logicalTable: table,
+	});
+}
+
+function mutationSourceColumn(
+	deps: AdapterCompilerDeps,
+	binding: ReturnType<typeof mutationBinding>,
+	logicalTable: string,
+	column: string,
+): SqlIdentifier {
+	if (binding.kind !== 'declared-table') return queryLocal(column);
+	if (
+		deps.declaredNames !== undefined &&
+		deps.declaredNames.column(logicalTable, column) === undefined
+	) {
+		return queryLocal(column);
+	}
+	return declaredMutationColumn(deps, logicalTable, column);
+}
+
+function mutationReturningSources(
+	deps: AdapterCompilerDeps,
+	table: string,
+	returning: readonly string[],
+	items: readonly { source: string }[] | undefined,
+): SqlIdentifier[] {
+	return (items?.map((item) => item.source) ?? returning).map((column) =>
+		column === '*'
+			? queryLocal(column)
+			: declaredMutationColumn(deps, table, column),
+	);
+}
+
+function mutationContext(
+	deps: AdapterCompilerDeps,
+	rootTable: string,
+	maxRecursiveDepth: number,
+): CompilerContext {
+	const binding = mutationBinding(deps, rootTable);
+	return {
+		...deps,
+		rootTable,
+		scope: deps.scope ?? queryScope([binding]),
+		...(deps.schemaName !== undefined && { schema: deps.schemaName }),
+		maxRecursiveDepth,
+		compileCustomFnFilter: buildCustomFnFilter,
+	} as CompilerContext;
 }
 
 function resolveMutationExistsForeignKey(
@@ -416,23 +502,7 @@ export function compileInsert(
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
-	const schemaName = deps.schemaName;
-
-	const ctx: CompilerContext = {
-		naming: deps.naming,
-		...(deps.declaredNames !== undefined && {
-			declaredNames: deps.declaredNames,
-		}),
-		rootTable: intent.table,
-		...(schemaName !== undefined && { schema: schemaName }),
-		...(deps.dialectCapabilities !== undefined && {
-			dialectCapabilities: deps.dialectCapabilities,
-		}),
-		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
-		...(deps.scope !== undefined && { scope: deps.scope }),
-		maxRecursiveDepth: MAX_DEPTH_LIMIT,
-		compileCustomFnFilter: buildCustomFnFilter,
-	};
+	const ctx = mutationContext(deps, intent.table, MAX_DEPTH_LIMIT);
 	const state = createCompilerState();
 
 	const firstRow = intent.values?.[0] ?? {};
@@ -443,10 +513,20 @@ export function compileInsert(
 	const columnTypes = getColumnTypes(intent.table, columns, deps);
 
 	const config: InsertConfig = {
-		table: intent.table,
-		columns,
+		table: declaredMutationTable(deps, intent.table),
+		columns: columns.map((column) =>
+			declaredMutationColumn(deps, intent.table, column),
+		),
 		values,
 		...(intent.returning && { returning: [...intent.returning] }),
+		...(intent.returning && {
+			returningSources: mutationReturningSources(
+				deps,
+				intent.table,
+				intent.returning,
+				intent.returningItems,
+			),
+		}),
 		...(intent.returningItems && { returningItems: intent.returningItems }),
 		...(columnTypes && { columnTypes }),
 	};
@@ -487,10 +567,9 @@ export function compileInsertFrom(
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
-	const schemaName = deps.schemaName;
 	const sourceCte =
 		intent.sourceQuery !== undefined &&
-		!hasBindingName(deps.bindingNames, intent.source, deps.naming)
+		!hasBindingName(deps.bindingNames, intent.source)
 			? compileSourceQueryCte(
 					'compileInsertFrom',
 					intent.source,
@@ -501,36 +580,48 @@ export function compileInsertFrom(
 			: undefined;
 	const bindingNames =
 		intent.sourceQuery !== undefined
-			? withBindingName(deps.bindingNames, intent.source, deps.naming)
+			? withBindingName(deps.bindingNames, intent.source)
 			: deps.bindingNames;
 
-	const ctx: CompilerContext = {
-		naming: deps.naming,
-		...(deps.declaredNames !== undefined && {
-			declaredNames: deps.declaredNames,
-		}),
-		rootTable: intent.source,
-		...(schemaName !== undefined && { schema: schemaName }),
-		...(deps.dialectCapabilities !== undefined && {
-			dialectCapabilities: deps.dialectCapabilities,
-		}),
-		...(bindingNames !== undefined && { bindingNames }),
-		...(deps.scope !== undefined && { scope: deps.scope }),
-		maxRecursiveDepth: MAX_DEPTH_LIMIT,
-		compileCustomFnFilter: buildCustomFnFilter,
-	};
+	const ctx = mutationContext(
+		{ ...deps, ...(bindingNames !== undefined && { bindingNames }) },
+		intent.source,
+		MAX_DEPTH_LIMIT,
+	);
 	const state = createCompilerState();
 	const resolvedWhere = intent.where
 		? resolveExistsIntent(intent.where, intent.source, deps)
 		: undefined;
 
+	const sourceBinding = mutationBinding(
+		{ ...deps, ...(bindingNames !== undefined && { bindingNames }) },
+		intent.source,
+	);
 	const config: InsertFromConfig = {
-		targetTable: intent.table,
-		sourceTable: intent.source,
-		...(intent.columns && { columns: [...intent.columns] }),
+		targetTable: declaredMutationTable(deps, intent.table),
+		source: sourceBinding,
+		...(intent.columns && {
+			columns: intent.columns.map((column) => ({
+				target: declaredMutationColumn(deps, intent.table, column),
+				source: mutationSourceColumn(
+					deps,
+					sourceBinding,
+					intent.source,
+					column,
+				),
+			})),
+		}),
 		...(resolvedWhere && { where: [whereIntentAsDecision(resolvedWhere)] }),
 		...(intent.limit !== undefined && { limit: intent.limit }),
 		...(intent.returning && { returning: [...intent.returning] }),
+		...(intent.returning && {
+			returningSources: mutationReturningSources(
+				deps,
+				intent.table,
+				intent.returning,
+				intent.returningItems,
+			),
+		}),
 		...(intent.returningItems && { returningItems: intent.returningItems }),
 	};
 
@@ -540,7 +631,6 @@ export function compileInsertFrom(
 		compileMutationEnvelope(ast, intent.table, state, options, deps),
 		intent.source,
 		sourceCte,
-		deps.naming,
 	);
 }
 
@@ -558,25 +648,7 @@ export function compileUpdate(
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
-	const schemaName = deps.schemaName;
-	const resolvedModel = options?.model ?? deps.model;
-
-	const ctx: CompilerContext = {
-		naming: deps.naming,
-		...(deps.declaredNames !== undefined && {
-			declaredNames: deps.declaredNames,
-		}),
-		rootTable: intent.table,
-		...(schemaName !== undefined && { schema: schemaName }),
-		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
-		...(deps.scope !== undefined && { scope: deps.scope }),
-		...(resolvedModel !== undefined && { model: resolvedModel }),
-		...(deps.dialectCapabilities !== undefined && {
-			dialectCapabilities: deps.dialectCapabilities,
-		}),
-		maxRecursiveDepth: MAX_DEPTH_LIMIT,
-		compileCustomFnFilter: buildCustomFnFilter,
-	};
+	const ctx = mutationContext(deps, intent.table, MAX_DEPTH_LIMIT);
 	const state = createCompilerState();
 
 	const setColumns = Object.keys(intent.set ?? {});
@@ -586,13 +658,21 @@ export function compileUpdate(
 		: undefined;
 
 	const config: UpdateConfig = {
-		table: intent.table,
+		table: declaredMutationTable(deps, intent.table),
 		set: Object.entries(intent.set ?? {}).map(([column, value]) => ({
-			column,
+			column: declaredMutationColumn(deps, intent.table, column),
 			value,
 		})),
 		...(resolvedWhere && { where: [whereIntentAsDecision(resolvedWhere)] }),
 		...(intent.returning && { returning: [...intent.returning] }),
+		...(intent.returning && {
+			returningSources: mutationReturningSources(
+				deps,
+				intent.table,
+				intent.returning,
+				intent.returningItems,
+			),
+		}),
 		...(intent.returningItems && { returningItems: intent.returningItems }),
 		...(columnTypes && { columnTypes }),
 	};
@@ -623,22 +703,7 @@ export function compileBatchUpdate(
 ): CompiledQuery {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const schemaName = deps.schemaName;
-
-	const ctx: CompilerContext = {
-		naming: deps.naming,
-		...(deps.declaredNames !== undefined && {
-			declaredNames: deps.declaredNames,
-		}),
-		rootTable: intent.table,
-		...(schemaName !== undefined && { schema: schemaName }),
-		...(deps.dialectCapabilities !== undefined && {
-			dialectCapabilities: deps.dialectCapabilities,
-		}),
-		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
-		...(deps.scope !== undefined && { scope: deps.scope }),
-		maxRecursiveDepth: MAX_DEPTH_LIMIT,
-		compileCustomFnFilter: buildCustomFnFilter,
-	};
+	const ctx = mutationContext(deps, intent.table, MAX_DEPTH_LIMIT);
 	const state = createCompilerState();
 
 	if (intent.updates.length === 0) {
@@ -716,12 +781,29 @@ export function compileBatchUpdate(
 	}
 
 	const config: BatchUpdateConfig = {
-		table: intent.table,
-		matchColumns,
-		allColumns,
+		table: declaredMutationTable(deps, intent.table),
+		matchColumns: matchColumns.map((column) =>
+			declaredMutationColumn(deps, intent.table, column),
+		),
+		allColumns: allColumns.map((column) =>
+			declaredMutationColumn(deps, intent.table, column),
+		),
 		columnArrays,
-		...(scalarSet && { scalarSet }),
+		...(scalarSet && {
+			scalarSet: scalarSet.map(({ column, value }) => ({
+				column: declaredMutationColumn(deps, intent.table, column),
+				value,
+			})),
+		}),
 		...(intent.returning && { returning: [...intent.returning] }),
+		...(intent.returning && {
+			returningSources: mutationReturningSources(
+				deps,
+				intent.table,
+				intent.returning,
+				intent.returningItems,
+			),
+		}),
 		...(intent.returningItems && { returningItems: intent.returningItems }),
 		...(columnTypes && { columnTypes }),
 		...(whereGuard !== undefined && { whereGuard }),
@@ -745,28 +827,7 @@ export function compileDelete(
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
-	const schemaName = deps.schemaName;
-
-	const resolvedModel = options?.model ?? deps.model;
-	const ctx: CompilerContext = {
-		naming: deps.naming,
-		...(deps.declaredNames !== undefined && {
-			declaredNames: deps.declaredNames,
-		}),
-		rootTable: intent.table,
-		...(schemaName !== undefined && { schema: schemaName }),
-		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
-		...(deps.scope !== undefined && { scope: deps.scope }),
-		...(deps.relationTargetProjections !== undefined && {
-			relationTargetProjections: deps.relationTargetProjections,
-		}),
-		...(deps.dialectCapabilities !== undefined && {
-			dialectCapabilities: deps.dialectCapabilities,
-		}),
-		maxRecursiveDepth: MAX_DEPTH_LIMIT,
-		...(resolvedModel !== undefined && { model: resolvedModel }),
-		compileCustomFnFilter: buildCustomFnFilter,
-	};
+	const ctx = mutationContext(deps, intent.table, MAX_DEPTH_LIMIT);
 	const state = createCompilerState();
 
 	// Resolve exists/notExists relation name → real table name before compiling.
@@ -776,9 +837,17 @@ export function compileDelete(
 		: undefined;
 
 	const config: DeleteConfig = {
-		table: intent.table,
+		table: declaredMutationTable(deps, intent.table),
 		...(resolvedWhere && { where: [whereIntentAsDecision(resolvedWhere)] }),
 		...(intent.returning && { returning: [...intent.returning] }),
+		...(intent.returning && {
+			returningSources: mutationReturningSources(
+				deps,
+				intent.table,
+				intent.returning,
+				intent.returningItems,
+			),
+		}),
 		...(intent.returningItems && { returningItems: intent.returningItems }),
 	};
 
@@ -801,23 +870,7 @@ export function compileUpsert(
 ): CompiledQuery {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const schemaName = deps.schemaName;
-
-	const ctx: CompilerContext = {
-		naming: deps.naming,
-		...(deps.declaredNames !== undefined && {
-			declaredNames: deps.declaredNames,
-		}),
-		rootTable: intent.table,
-		...(schemaName !== undefined && { schema: schemaName }),
-		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
-		...(deps.scope !== undefined && { scope: deps.scope }),
-		...(deps.model !== undefined && { model: deps.model }),
-		...(deps.dialectCapabilities !== undefined && {
-			dialectCapabilities: deps.dialectCapabilities,
-		}),
-		maxRecursiveDepth: MAX_DEPTH_LIMIT,
-		compileCustomFnFilter: buildCustomFnFilter,
-	};
+	const ctx = mutationContext(deps, intent.table, MAX_DEPTH_LIMIT);
 	const state = createCompilerState();
 
 	const firstRow = intent.values?.[0] ?? {};
@@ -853,14 +906,24 @@ export function compileUpsert(
 
 	// Build conflict target
 	const conflictTarget: {
-		columns?: string[];
-		constraint?: string;
+		columns?: SqlIdentifier[];
+		constraint?: SqlIdentifier;
 	} = {};
 
 	if ('columns' in intent.onConflict) {
-		conflictTarget.columns = [...intent.onConflict.columns];
+		conflictTarget.columns = intent.onConflict.columns.map((column) =>
+			declaredMutationColumn(deps, intent.table, column),
+		);
 	} else if ('constraint' in intent.onConflict) {
-		conflictTarget.constraint = intent.onConflict.constraint;
+		if (deps.declaredNames === undefined) {
+			conflictTarget.constraint = queryLocal(intent.onConflict.constraint);
+		} else {
+			conflictTarget.constraint = declaredConstraint(
+				deps.declaredNames,
+				intent.table,
+				intent.onConflict.constraint,
+			);
+		}
 	}
 
 	// Build conflict action
@@ -870,16 +933,20 @@ export function compileUpsert(
 	// Determine update columns.
 	// All columns in intent.action.set are update columns (both scalar and raw).
 	// Scalar ones use EXCLUDED.column, raw ones use the parsed SQL expression.
-	let updateColumns: string[] | undefined;
+	let updateColumns: SqlIdentifier[] | undefined;
 	if (intent.action.type === 'doUpdate') {
 		if (intent.action.set) {
 			// All keys in set become update columns (raw + scalar combined)
-			updateColumns = Object.keys(intent.action.set);
+			updateColumns = Object.keys(intent.action.set).map((column) =>
+				declaredMutationColumn(deps, intent.table, column),
+			);
 		} else {
 			// Default: update all non-conflict columns
 			const conflictCols =
 				'columns' in intent.onConflict ? intent.onConflict.columns : [];
-			updateColumns = columns.filter((col) => !conflictCols.includes(col));
+			updateColumns = columns
+				.filter((col) => !conflictCols.includes(col))
+				.map((column) => declaredMutationColumn(deps, intent.table, column));
 		}
 	}
 
@@ -894,16 +961,33 @@ export function compileUpsert(
 		: undefined;
 
 	const config: UpsertConfig = {
-		table: intent.table,
-		columns,
+		table: declaredMutationTable(deps, intent.table),
+		columns: columns.map((column) =>
+			declaredMutationColumn(deps, intent.table, column),
+		),
 		values,
 		conflictTarget,
 		conflictAction,
 		...(updateColumns && { updateColumns }),
 		...(intent.returning && { returning: [...intent.returning] }),
+		...(intent.returning && {
+			returningSources: mutationReturningSources(
+				deps,
+				intent.table,
+				intent.returning,
+				intent.returningItems,
+			),
+		}),
 		...(intent.returningItems && { returningItems: intent.returningItems }),
 		...(columnTypes && { columnTypes }),
-		...(hasRawExprs && { updateExpressions: rawExprs }),
+		...(hasRawExprs && {
+			updateExpressions: new Map(
+				Object.entries(rawExprs).map(([column, sql]) => [
+					declaredMutationColumn(deps, intent.table, column),
+					sql,
+				]),
+			),
+		}),
 		...(resolvedActionWhere && {
 			actionWhereIntent: resolvedActionWhere,
 			compileActionWhere: (where, paramState) =>
@@ -953,10 +1037,9 @@ export function compileUpsertFrom(
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
-	const schemaName = deps.schemaName;
 	const sourceCte =
 		intent.sourceQuery !== undefined &&
-		!hasBindingName(deps.bindingNames, intent.source, deps.naming)
+		!hasBindingName(deps.bindingNames, intent.source)
 			? compileSourceQueryCte(
 					'compileUpsertFrom',
 					intent.source,
@@ -967,24 +1050,14 @@ export function compileUpsertFrom(
 			: undefined;
 	const bindingNames =
 		intent.sourceQuery !== undefined
-			? withBindingName(deps.bindingNames, intent.source, deps.naming)
+			? withBindingName(deps.bindingNames, intent.source)
 			: deps.bindingNames;
 
-	const ctx: CompilerContext = {
-		naming: deps.naming,
-		...(deps.declaredNames !== undefined && {
-			declaredNames: deps.declaredNames,
-		}),
-		rootTable: intent.source,
-		...(schemaName !== undefined && { schema: schemaName }),
-		...(deps.dialectCapabilities !== undefined && {
-			dialectCapabilities: deps.dialectCapabilities,
-		}),
-		...(bindingNames !== undefined && { bindingNames }),
-		...(deps.scope !== undefined && { scope: deps.scope }),
-		maxRecursiveDepth: MAX_DEPTH_LIMIT,
-		compileCustomFnFilter: buildCustomFnFilter,
-	};
+	const ctx = mutationContext(
+		{ ...deps, ...(bindingNames !== undefined && { bindingNames }) },
+		intent.source,
+		MAX_DEPTH_LIMIT,
+	);
 	const state = createCompilerState();
 	const resolvedWhere = intent.where
 		? resolveExistsIntent(intent.where, intent.source, deps)
@@ -1001,14 +1074,38 @@ export function compileUpsertFrom(
 		}
 	}
 
+	const sourceBinding = mutationBinding(
+		{ ...deps, ...(bindingNames !== undefined && { bindingNames }) },
+		intent.source,
+	);
 	const config: UpsertFromConfig = {
-		targetTable: intent.table,
-		sourceTable: intent.source,
-		conflictColumns: [...intent.conflictColumns],
-		...(columns && { columns }),
+		targetTable: declaredMutationTable(deps, intent.table),
+		source: sourceBinding,
+		conflictColumns: intent.conflictColumns.map((column) =>
+			declaredMutationColumn(deps, intent.table, column),
+		),
+		...(columns && {
+			columns: columns.map((column) => ({
+				target: declaredMutationColumn(deps, intent.table, column),
+				source: mutationSourceColumn(
+					deps,
+					sourceBinding,
+					intent.source,
+					column,
+				),
+			})),
+		}),
 		...(resolvedWhere && { where: [whereIntentAsDecision(resolvedWhere)] }),
 		...(intent.limit !== undefined && { limit: intent.limit }),
 		...(intent.returning && { returning: [...intent.returning] }),
+		...(intent.returning && {
+			returningSources: mutationReturningSources(
+				deps,
+				intent.table,
+				intent.returning,
+				intent.returningItems,
+			),
+		}),
 		...(intent.returningItems && { returningItems: intent.returningItems }),
 	};
 
@@ -1018,6 +1115,5 @@ export function compileUpsertFrom(
 		compileMutationEnvelope(ast, intent.table, state, options, deps),
 		intent.source,
 		sourceCte,
-		deps.naming,
 	);
 }

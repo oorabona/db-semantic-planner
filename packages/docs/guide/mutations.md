@@ -204,7 +204,7 @@ The basic upsert patterns above cover most use cases. The following patterns han
 
 #### Selecting a specific constraint
 
-When a table has multiple unique constraints, specify which one governs conflict detection. Use `.onConflictConstraint(name)` to target a named constraint instead of listing columns. A constraint declared on the target table is resolved to its physical database name; a name not declared in the model is emitted unchanged as a catalog constraint name:
+When a table has multiple unique constraints, specify which one governs conflict detection. Use `.onConflictConstraint(name)` to target a constraint declared on the target table instead of listing columns. The declared constraint is resolved to its physical database name; a name absent from that table's model declaration is rejected rather than passed through as a catalog constraint.
 
 ```typescript
 // doctest: skip — constraint names are DB-specific
