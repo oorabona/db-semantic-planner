@@ -6,6 +6,7 @@ import { schema } from '@dbsp/core';
 import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
+import { queryScope, relationBinding } from '../binding-registry.js';
 import {
 	createDeclaredNameResolver,
 	getCachedPgPhysicalModel,
@@ -24,6 +25,7 @@ import {
 	createCompilerState,
 } from '../handlers/types.js';
 import { CamelCaseNamingPlugin } from '../naming-plugin.js';
+import { queryLocal } from '../sql-identifier.js';
 
 describe('Pseudo-Column Handlers', () => {
 	const naming = new CamelCaseNamingPlugin();
@@ -203,8 +205,99 @@ describe('Pseudo-Column Handlers', () => {
 			);
 
 			expect(sql).toBe(
-				'select (select __p.name from authors as __p where __p.id = posts.author_id limit 1) from tenant_42.posts',
+				'select (select __p.name from tenant_42.authors as __p where __p.id = posts.author_id limit 1) from tenant_42.posts',
 			);
+		});
+
+		it('keeps a camel-case CTE outer qualifier verbatim in recursive, single-hop, and chained traversal', () => {
+			const activeCategories = queryLocal('activeCategories');
+			const outputs = new Map([
+				[
+					queryLocal('id'),
+					{
+						outputKey: queryLocal('id'),
+						logicalKey: 'id',
+					} as any,
+				],
+				[
+					queryLocal('authorId'),
+					{
+						outputKey: queryLocal('authorId'),
+						logicalKey: 'authorId',
+					} as any,
+				],
+			]);
+			const ctx: CompilerContext = {
+				...baseCtx,
+				rootTable: 'activeCategories',
+				currentAlias: 'activeCategories',
+				declaredNames,
+				scope: queryScope([
+					relationBinding({
+						qualifier: activeCategories,
+						kind: 'cte-bind',
+						outputs,
+					}),
+				]),
+			};
+			const decisions = [
+				[
+					pseudoColumnHandler,
+					{
+						type: 'pseudoColumn',
+						traversal: 'ascendant',
+						table: 'posts',
+						column: 'id',
+						pkColumn: 'id',
+						fkColumn: 'authorId',
+					},
+				],
+				[
+					singleHopPseudoHandler,
+					{
+						type: 'singleHopPseudo',
+						traversal: 'parent',
+						table: 'posts',
+						column: 'id',
+						pkColumn: 'id',
+						fkColumn: 'authorId',
+					},
+				],
+				[
+					chainedPseudoHandler,
+					{
+						type: 'chainedPseudo',
+						table: 'posts',
+						pkColumn: 'id',
+						fkColumn: 'authorId',
+						traversals: [{ traversal: 'parent', targetColumn: 'id' }],
+					},
+				],
+			] as const;
+			for (const [handler, decision] of decisions) {
+				const sql = deparseSync({
+					SelectStmt: {
+						targetList: [
+							{
+								ResTarget: {
+									val: handler.compile(decision, ctx, createCompilerState()),
+								},
+							},
+						],
+						fromClause: [
+							{
+								RangeVar: {
+									relname: 'activeCategories',
+									inh: true,
+									relpersistence: 'p',
+								},
+							},
+						],
+					},
+				});
+				expect(sql).toContain('activeCategories');
+				expect(sql).not.toContain('active_categories');
+			}
 		});
 	});
 

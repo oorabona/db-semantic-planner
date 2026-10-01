@@ -7,14 +7,14 @@
  */
 
 import type { Node, SortBy, WindowDef } from '@pgsql/types';
-import { columnRef } from '../../ast-helpers.js';
 import { unwrapParamIntent } from '../../param-intent.js';
 import type {
-	CompilerContext,
 	CompilerState,
 	Decision,
+	ExpressionCompilerContext,
 	ExpressionHandler,
 } from '../types.js';
+import { expressionColumnRef } from '../types.js';
 import { bindParameter } from './param-value.js';
 
 /**
@@ -46,16 +46,9 @@ function isWindowOrderBy(
 function buildSortBy(
 	column: string,
 	direction: 'ASC' | 'DESC' | undefined,
-	ctx: CompilerContext,
+	ctx: ExpressionCompilerContext,
 ): Node {
-	const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-	const colRef = columnRef(
-		column,
-		tableAlias,
-		undefined,
-		ctx.naming,
-		ctx.aliasColumnAuthorities,
-	);
+	const colRef = expressionColumnRef(column, ctx);
 
 	const sortBy: SortBy = {
 		node: colRef,
@@ -69,14 +62,15 @@ function buildSortBy(
 /**
  * Build a WindowDef (OVER clause)
  */
-function buildWindowDef(decision: Decision, ctx: CompilerContext): WindowDef {
+function buildWindowDef(
+	decision: Decision,
+	ctx: ExpressionCompilerContext,
+): WindowDef {
 	const partition = decision.partition;
 	const orderBy = isWindowOrderBy(decision.orderBy)
 		? decision.orderBy
 		: undefined;
 	const frame = decision.frame;
-
-	const tableAlias = ctx.currentAlias ?? ctx.rootTable;
 
 	// frameOptions: WINDOW_FRAME_DEFAULT is the default implicit frame (NONDEFAULT
 	// bit not set → no frame clause emitted by deparser). Required for the OVER()
@@ -86,13 +80,7 @@ function buildWindowDef(decision: Decision, ctx: CompilerContext): WindowDef {
 	// PARTITION BY
 	if (partition && partition.length > 0) {
 		windowDef.partitionClause = partition.map((col) =>
-			columnRef(
-				col,
-				tableAlias,
-				undefined,
-				ctx.naming,
-				ctx.aliasColumnAuthorities,
-			),
+			expressionColumnRef(col, ctx),
 		);
 	}
 
@@ -120,7 +108,7 @@ function buildWindowFunction(
 	funcName: string,
 	args: Node[],
 	decision: Decision,
-	ctx: CompilerContext,
+	ctx: ExpressionCompilerContext,
 ): Node {
 	const windowDef = buildWindowDef(decision, ctx);
 
@@ -145,7 +133,7 @@ function createNoArgWindowHandler(
 		types,
 		compile(
 			decision: Decision,
-			ctx: CompilerContext,
+			ctx: ExpressionCompilerContext,
 			_state: CompilerState,
 		): Node {
 			return buildWindowFunction(funcName, [], decision, ctx);
@@ -178,7 +166,7 @@ export const ntileHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		ctx: ExpressionCompilerContext,
 		state: CompilerState,
 	): Node {
 		const n = decision.value ?? decision.args?.[0] ?? 4;
@@ -200,7 +188,7 @@ function createLagLeadHandler(
 		types,
 		compile(
 			decision: Decision,
-			ctx: CompilerContext,
+			ctx: ExpressionCompilerContext,
 			state: CompilerState,
 		): Node {
 			const column = decision.column;
@@ -208,14 +196,7 @@ function createLagLeadHandler(
 				throw new Error(`${upperName} requires a column`);
 			}
 
-			const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-			const colRef = columnRef(
-				column,
-				tableAlias,
-				undefined,
-				ctx.naming,
-				ctx.aliasColumnAuthorities,
-			);
+			const colRef = expressionColumnRef(column, ctx);
 
 			const args: Node[] = [colRef];
 
@@ -252,7 +233,7 @@ function createColumnWindowHandler(
 		types,
 		compile(
 			decision: Decision,
-			ctx: CompilerContext,
+			ctx: ExpressionCompilerContext,
 			_state: CompilerState,
 		): Node {
 			const column = decision.column;
@@ -260,14 +241,7 @@ function createColumnWindowHandler(
 				throw new Error(`${upperName} requires a column`);
 			}
 
-			const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-			const colRef = columnRef(
-				column,
-				tableAlias,
-				undefined,
-				ctx.naming,
-				ctx.aliasColumnAuthorities,
-			);
+			const colRef = expressionColumnRef(column, ctx);
 
 			return buildWindowFunction(funcName, [colRef], decision, ctx);
 		},
@@ -296,7 +270,7 @@ export const genericWindowHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		ctx: ExpressionCompilerContext,
 		state: CompilerState,
 	): Node {
 		const funcName = decision.function;
@@ -325,16 +299,7 @@ export const genericWindowHandler: ExpressionHandler = {
 
 		// Add column if specified
 		if (decision.column) {
-			const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-			args.push(
-				columnRef(
-					decision.column,
-					tableAlias,
-					undefined,
-					ctx.naming,
-					ctx.aliasColumnAuthorities,
-				),
-			);
+			args.push(expressionColumnRef(decision.column, ctx));
 		}
 
 		// Add other args (e.g., offset for lag/lead)

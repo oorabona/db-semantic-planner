@@ -6,14 +6,16 @@
  * Produces ColumnRef and ResTarget nodes for SELECT lists.
  */
 
-import type { Node, ResTarget } from '@pgsql/types';
-import { columnRef } from '../../ast-helpers.js';
+import type { Node } from '@pgsql/types';
+import { sqlResTarget } from '../../ast-helpers.js';
+import { queryLocal } from '../../sql-identifier.js';
 import type {
-	CompilerContext,
 	CompilerState,
 	Decision,
+	ExpressionCompilerContext,
 	ExpressionHandler,
 } from '../types.js';
+import { expressionColumnRef, expressionColumnRefStar } from '../types.js';
 
 /**
  * Column reference handler
@@ -25,7 +27,7 @@ export const columnHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		ctx: ExpressionCompilerContext,
 		_state: CompilerState,
 	): Node {
 		const column = decision.column;
@@ -33,14 +35,7 @@ export const columnHandler: ExpressionHandler = {
 			throw new Error('Column handler requires column');
 		}
 
-		const alias = ctx.currentAlias ?? ctx.rootTable;
-		return columnRef(
-			column,
-			alias,
-			undefined,
-			ctx.naming,
-			ctx.aliasColumnAuthorities,
-		);
+		return expressionColumnRef(column, ctx);
 	},
 };
 
@@ -55,7 +50,7 @@ export const columnAliasHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		ctx: ExpressionCompilerContext,
 		_state: CompilerState,
 	): Node {
 		const column = decision.column;
@@ -65,14 +60,7 @@ export const columnAliasHandler: ExpressionHandler = {
 			throw new Error('Column alias handler requires column');
 		}
 
-		const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-		const colRef = columnRef(
-			column,
-			tableAlias,
-			undefined,
-			ctx.naming,
-			ctx.aliasColumnAuthorities,
-		);
+		const colRef = expressionColumnRef(column, ctx);
 
 		// If no alias specified, return just the column reference
 		if (!outputAlias) {
@@ -80,12 +68,7 @@ export const columnAliasHandler: ExpressionHandler = {
 		}
 
 		// Wrap in ResTarget with alias for SELECT list
-		const resTarget: ResTarget = {
-			val: colRef,
-			name: outputAlias,
-		};
-
-		return { ResTarget: resTarget };
+		return sqlResTarget(colRef, queryLocal(outputAlias));
 	},
 };
 
@@ -99,16 +82,9 @@ export const starHandler: ExpressionHandler = {
 
 	compile(
 		_decision: Decision,
-		ctx: CompilerContext,
+		ctx: ExpressionCompilerContext,
 		_state: CompilerState,
 	): Node {
-		const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-
-		// table.* — qualified star
-		return {
-			ColumnRef: {
-				fields: [{ String: { sval: tableAlias } }, { A_Star: {} }],
-			},
-		};
+		return expressionColumnRefStar(ctx);
 	},
 };

@@ -8,10 +8,11 @@
  * (PlanReport) for full-pipeline tests that include the 't0' root table alias.
  */
 
-import { fullTextSearch, textScore } from '@dbsp/core';
+import { createOrm, fullTextSearch, schema, textScore } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
+import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -259,6 +260,37 @@ describe('fullTextSearch', () => {
 		expect(op.kind).toBe('customOp');
 		expect(op.left.kind).toBe('ref');
 		expect(op.left.column).toBe('symbols');
+	});
+
+	it('resolves tableAlias as a whole-row binding, never a same-named column', () => {
+		const model = schema({
+			documents: {
+				id: { type: 'integer', primaryKey: true },
+				doc: 'text',
+			},
+		}).model;
+		const orm = createOrm({
+			model,
+			adapter: createPgsqlCompileOnlyAdapter({
+				model,
+				dbCasing: 'snake_case',
+			}),
+		});
+
+		const query = orm
+			.select('documents')
+			.where(
+				fullTextSearch({
+					query: 'database',
+					tableAlias: 'documents',
+					fields: [{ name: 'doc', boost: 1 }],
+				}),
+			)
+			.dump();
+
+		// Before the whole-row path this attempted declaredColumn(documents,
+		// documents), which is absent from this physical model and throws.
+		expect(normalizeSQL(query.sql)).toContain('documents @@@');
 	});
 });
 

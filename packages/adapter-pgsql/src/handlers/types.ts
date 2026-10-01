@@ -14,13 +14,26 @@ import type {
 } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { FkColumnDerivation } from '../assert-field.js';
-import type { BindingNameRegistry, QueryScope } from '../binding-registry.js';
+import { sqlColumnRef, sqlColumnRefStar } from '../ast-helpers.js';
+import {
+	type BindingNameRegistry,
+	declaredRelationBindingFor,
+	type QueryScope,
+	type RelationBinding,
+	relationBinding,
+	relationBindingFor,
+} from '../binding-registry.js';
 import type { DeclaredNameResolver } from '../declared-name-resolver.js';
 import type { NamingPlugin } from '../naming-plugin.js';
 import type {
 	AliasColumnAuthority,
 	RelationTargetProjectionRegistry,
 } from '../relation-target-projection.js';
+import {
+	declaredColumn,
+	queryLocal,
+	type SqlIdentifier,
+} from '../sql-identifier.js';
 
 /** Built-in include strategies, shared by the runtime registry and public types. */
 export const INCLUDE_STRATEGIES = Object.freeze([
@@ -40,9 +53,12 @@ export type IncludeHandlerStrategy = (typeof INCLUDE_STRATEGIES)[number];
 /**
  * Immutable context passed to all handlers during compilation.
  */
-export interface CompilerContext {
-	/** Naming convention transformer */
+interface LegacyHandlerPolicy {
+	/** @deprecated Retained for unconverted WHERE/include/mutation handlers. */
 	readonly naming: NamingPlugin;
+}
+
+export interface CompilerContext extends LegacyHandlerPolicy {
 	/** Addressed authority for model-backed identifiers. */
 	readonly declaredNames?: DeclaredNameResolver;
 	/** Schema name for table qualification (optional) */
@@ -69,6 +85,12 @@ export interface CompilerContext {
 	readonly bindingNames?: BindingNameRegistry;
 	/** Query-local relation authority; bindings and their outputs never hit the model resolver. */
 	readonly scope?: QueryScope;
+	/**
+	 * The binding that owns unqualified expression columns.  New callers provide
+	 * this directly; the string fields above remain only at pre-lot-4 compiler
+	 * boundaries while they are converted to bindings.
+	 */
+	readonly currentBinding?: RelationBinding;
 	/** Known projections for visible CTE/binding relation targets. */
 	readonly relationTargetProjections?: RelationTargetProjectionRegistry;
 	/** Lexically visible SQL aliases that expose a known CTE projection. */
@@ -112,6 +134,184 @@ export interface CompilerContext {
 	 * PostgreSQL type inference ambiguity for nullable columns.
 	 */
 	readonly model?: ModelIR;
+}
+
+/**
+ * The expression boundary deliberately excludes the legacy transform policy.
+ * Expressions receive addressed declared names and query scope/bindings instead.
+ */
+export type ExpressionCompilerContext = Omit<
+	CompilerContext,
+	keyof LegacyHandlerPolicy
+>;
+
+/**
+ * Resolve the current relation once, before an expression reaches the AST
+ * façade.  A local binding owns its output identifiers verbatim; a declared
+ * binding addresses its columns through the physical-name resolver.
+ */
+export function currentExpressionBinding(
+	ctx: ExpressionCompilerContext,
+): RelationBinding {
+	if (ctx.currentBinding !== undefined) return ctx.currentBinding;
+	const qualifier = queryLocal(ctx.currentAlias ?? ctx.rootTable);
+	const bound = relationBindingFor(ctx.scope, qualifier);
+	if (bound !== undefined) return bound;
+	return relationBinding({
+		qualifier,
+		kind: 'declared-table',
+		logicalTable: ctx.currentAlias ?? ctx.rootTable,
+	});
+}
+
+/** Resolve one logical expression column through an authoritative binding. */
+export function expressionColumnIdentifier(
+	column: string,
+	binding: RelationBinding,
+	resolver: DeclaredNameResolver | undefined,
+): SqlIdentifier {
+	if (binding.kind === 'declared-table') {
+		if (binding.logicalTable === undefined) {
+			throw new Error(
+				'Declared expression binding is missing its logical table.',
+			);
+		}
+		// Model-less direct compiler construction is a compatibility boundary.
+		// Normal adapter compilation always supplies the resolver and therefore
+		// takes the fail-closed addressed path below.
+		return resolver === undefined
+			? queryLocal(column)
+			: declaredColumn(resolver, binding.logicalTable, column);
+	}
+	const output =
+		binding.outputs?.get(queryLocal(column)) ??
+		binding.outputsByLogicalKey?.get(column);
+	if (output === undefined) {
+		throw new Error(
+			`Local relation '${binding.qualifier}' does not project expression column '${column}'.`,
+		);
+	}
+	return output.outputKey;
+}
+
+/** Build an expression column reference without a transform-policy dependency. */
+export function expressionColumnRef(
+	column: string,
+	ctx: ExpressionCompilerContext,
+	binding: RelationBinding = currentExpressionBinding(ctx),
+): Node {
+	return expressionResolvedColumnRef(
+		expressionColumnIdentifier(column, binding, ctx.declaredNames),
+		binding,
+	);
+}
+
+/** Build a reference only from an already-classified expression identifier. */
+export function expressionResolvedColumnRef(
+	column: SqlIdentifier,
+	binding: RelationBinding,
+): Node {
+	return sqlColumnRef(column, binding.qualifier);
+}
+
+/** Resolve a column through its binding but retain an intentionally bare ref. */
+export function expressionUnqualifiedColumnRef(
+	column: string,
+	ctx: ExpressionCompilerContext,
+	binding: RelationBinding = currentExpressionBinding(ctx),
+): Node {
+	return sqlColumnRef(
+		expressionColumnIdentifier(column, binding, ctx.declaredNames),
+	);
+}
+
+/** Resolve a qualified relation from scope, retaining local spelling verbatim. */
+export function expressionRelationBinding(
+	qualifier: string,
+	ctx: ExpressionCompilerContext,
+): RelationBinding {
+	const identifier = queryLocal(qualifier);
+	const bound = relationBindingFor(ctx.scope, identifier);
+	if (bound !== undefined) return bound;
+	const declaredBound = declaredRelationBindingFor(ctx.scope, qualifier);
+	if (declaredBound !== undefined) return declaredBound;
+	const aliasAuthority = ctx.aliasColumnAuthorities?.get(qualifier);
+	if (
+		aliasAuthority?.logicalTable !== undefined &&
+		aliasAuthority.outputs === undefined
+	) {
+		return relationBinding({
+			qualifier: identifier,
+			kind: 'declared-table',
+			logicalTable: aliasAuthority.logicalTable,
+		});
+	}
+	if (aliasAuthority?.outputs !== undefined) {
+		return relationBinding({
+			qualifier: identifier,
+			kind: 'join-alias',
+			outputs: new Map(
+				[...aliasAuthority.outputs].map(([key, output]) => [
+					queryLocal(key),
+					{
+						...output,
+						outputKey: queryLocal(output.outputKey),
+						logicalKey: output.logicalKey,
+					},
+				]),
+			),
+		});
+	}
+	for (const [logicalTable, emittedAlias] of ctx.aliases ?? []) {
+		if (emittedAlias === qualifier) {
+			const relationTarget = ctx.model
+				?.getRelationsFrom(ctx.rootTable)
+				.find((relation) => relation.name === logicalTable)?.target;
+			return relationBinding({
+				qualifier: identifier,
+				kind: 'declared-table',
+				logicalTable: relationTarget ?? logicalTable,
+			});
+		}
+	}
+	return relationBinding({
+		qualifier: identifier,
+		kind: 'declared-table',
+		logicalTable: qualifier,
+	});
+}
+
+/** Build a qualified expression reference after resolving its relation binding. */
+export function expressionQualifiedColumnRef(
+	column: string,
+	qualifier: string,
+	ctx: ExpressionCompilerContext,
+): Node {
+	const binding = expressionRelationBinding(qualifier, ctx);
+	return expressionColumnRef(column, ctx, binding);
+}
+
+/**
+ * Build a whole-row reference from a relation binding.
+ *
+ * PostgreSQL's ParadeDB `relation @@@ query` form is not a column reference:
+ * its sole identifier is the relation/range-variable qualifier.  In
+ * particular, a root `documents` binding must not be addressed as the
+ * declared column `documents.documents`.
+ */
+export function expressionWholeRowRef(
+	qualifier: string,
+	ctx: ExpressionCompilerContext,
+): Node {
+	return sqlColumnRef(expressionRelationBinding(qualifier, ctx).qualifier);
+}
+
+/** Build a qualified expression star from the current relation binding. */
+export function expressionColumnRefStar(
+	ctx: ExpressionCompilerContext,
+	binding: RelationBinding = currentExpressionBinding(ctx),
+): Node {
+	return sqlColumnRefStar(binding.qualifier);
 }
 
 // ============================================================================
@@ -316,7 +516,11 @@ export interface ExpressionHandler {
 	 * @param state Mutable compiler state
 	 * @returns PostgreSQL AST node for the expression
 	 */
-	compile(decision: Decision, ctx: CompilerContext, state: CompilerState): Node;
+	compile(
+		decision: Decision,
+		ctx: ExpressionCompilerContext,
+		state: CompilerState,
+	): Node;
 }
 
 /**

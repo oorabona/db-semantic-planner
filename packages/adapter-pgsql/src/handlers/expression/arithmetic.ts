@@ -6,14 +6,15 @@
  */
 
 import type { Node } from '@pgsql/types';
-import { columnRef } from '../../ast-helpers.js';
 import { unwrapParamIntent } from '../../param-intent.js';
 import type {
 	CompilerContext,
 	CompilerState,
 	Decision,
+	ExpressionCompilerContext,
 	ExpressionHandler,
 } from '../types.js';
+import { expressionColumnRef } from '../types.js';
 import { bindParameter } from './param-value.js';
 
 /**
@@ -23,18 +24,11 @@ import { bindParameter } from './param-value.js';
  */
 function resolveOperand(
 	operand: unknown,
-	ctx: CompilerContext,
+	ctx: ExpressionCompilerContext,
 	state: CompilerState,
 ): Node {
 	if (typeof operand === 'string') {
-		const alias = ctx.currentAlias ?? ctx.rootTable;
-		return columnRef(
-			operand,
-			alias,
-			undefined,
-			ctx.naming,
-			ctx.aliasColumnAuthorities,
-		);
+		return expressionColumnRef(operand, ctx);
 	}
 	if (
 		typeof operand === 'object' &&
@@ -42,7 +36,11 @@ function resolveOperand(
 		'kind' in operand &&
 		ctx.compileNqlSelectExpression
 	) {
-		return ctx.compileNqlSelectExpression(operand, ctx, state);
+		return ctx.compileNqlSelectExpression(
+			operand,
+			ctx as CompilerContext,
+			state,
+		);
 	}
 	// Numeric or other literal → parametrize
 	return bindParameter(unwrapParamIntent(operand), state);
@@ -57,7 +55,7 @@ export const arithmeticHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		ctx: ExpressionCompilerContext,
 		state: CompilerState,
 	): Node {
 		const left = decision.args?.[0];

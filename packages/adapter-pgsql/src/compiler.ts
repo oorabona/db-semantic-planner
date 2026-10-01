@@ -55,8 +55,11 @@ import {
 } from './ast-helpers.js';
 import {
 	type BindingNameRegistry,
+	declaredRelationBindingFor,
 	hasBindingName,
 	type QueryScope,
+	queryScope,
+	relationBinding,
 	schemaForFromName,
 } from './binding-registry.js';
 import { deparseQuoted } from './deparse.js';
@@ -102,7 +105,7 @@ import type {
 	JoinExprNode,
 	SelectStmtNode,
 } from './handlers/types.js';
-import { isSelectWithFields } from './handlers/types.js';
+import { expressionColumnRef, isSelectWithFields } from './handlers/types.js';
 import { buildColumnRef, compileValue } from './handlers/where/utils.js';
 import {
 	assertNoUnsupportedSubqueryModifiers,
@@ -119,6 +122,7 @@ import {
 	isAmbiguousRelationAlias,
 	resolveVisibleRelationAlias,
 } from './relation-alias.js';
+import { declaredTable, identifierText, queryLocal } from './sql-identifier.js';
 import { assertNoDroppedDecisionModifiers } from './subquery-emission.js';
 import { validateIdentifier } from './validate.js';
 
@@ -1457,6 +1461,38 @@ export class PlanCompiler {
 		currentAlias?: string,
 	): HandlerCompilerContext {
 		const alias = currentAlias ?? plan.rootTable;
+		const bindings = [...(this.scope?.bindings.values() ?? [])];
+		const boundQualifiers = new Set(
+			bindings.map((binding) => identifierText(binding.qualifier)),
+		);
+		const declaredRoot = this.declaredNames?.table(plan.rootTable);
+		if (
+			declaredRoot !== undefined &&
+			!boundQualifiers.has(declaredRoot) &&
+			declaredRelationBindingFor(this.scope, plan.rootTable) === undefined
+		) {
+			bindings.push(
+				relationBinding({
+					qualifier: declaredTable(this.declaredNames!, plan.rootTable),
+					kind: 'declared-table',
+					logicalTable: plan.rootTable,
+				}),
+			);
+			boundQualifiers.add(declaredRoot);
+		}
+		for (const entry of this.joinAliasMap.values()) {
+			if (entry.targetTable === undefined || boundQualifiers.has(entry.alias)) {
+				continue;
+			}
+			bindings.push(
+				relationBinding({
+					qualifier: queryLocal(entry.alias),
+					kind: 'declared-table',
+					logicalTable: entry.targetTable,
+				}),
+			);
+		}
+		const scope = bindings.length > 0 ? queryScope(bindings) : undefined;
 		return {
 			naming: this.naming,
 			rootTable: plan.rootTable,
@@ -1472,7 +1508,7 @@ export class PlanCompiler {
 				dialectCapabilities: this.dialectCapabilities,
 			}),
 			...(this.bindingNames != null && { bindingNames: this.bindingNames }),
-			...(this.scope != null && { scope: this.scope }),
+			...(scope !== undefined && { scope }),
 			...(this.relationTargetProjections != null && {
 				relationTargetProjections: this.relationTargetProjections,
 			}),
@@ -3357,7 +3393,8 @@ export class PlanCompiler {
 			value,
 			alias,
 			undefined,
-			this.naming,
+			(column) =>
+				expressionColumnRef(column, this.createHandlerContext(plan, alias)),
 			this.state,
 			(expr) => {
 				const nestedDecision = {
@@ -3380,7 +3417,6 @@ export class PlanCompiler {
 					expr as unknown as ExpressionIntent,
 					plan,
 				),
-			this.aliasColumnAuthorities,
 		);
 	}
 

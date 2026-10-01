@@ -7,14 +7,15 @@
  */
 
 import type { CoalesceExpr, Node } from '@pgsql/types';
-import { columnRef } from '../../ast-helpers.js';
 import { unwrapParamIntent } from '../../param-intent.js';
 import type {
 	CompilerContext,
 	CompilerState,
 	Decision,
+	ExpressionCompilerContext,
 	ExpressionHandler,
 } from '../types.js';
+import { expressionColumnRef } from '../types.js';
 import { bindParameter } from './param-value.js';
 
 /**
@@ -22,33 +23,19 @@ import { bindParameter } from './param-value.js';
  */
 function buildValueNode(
 	value: unknown,
-	ctx: CompilerContext,
+	ctx: ExpressionCompilerContext,
 	state: CompilerState,
 ): Node {
 	// If it's a column reference
 	if (typeof value === 'string' && !value.includes(' ')) {
-		const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-		return columnRef(
-			value,
-			tableAlias,
-			undefined,
-			ctx.naming,
-			ctx.aliasColumnAuthorities,
-		);
+		return expressionColumnRef(value, ctx);
 	}
 
 	// If it's a decision with type 'column'
 	if (typeof value === 'object' && value !== null && 'type' in value) {
 		const decision = value as Decision;
 		if (decision.type === 'column' && decision.column) {
-			const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-			return columnRef(
-				decision.column,
-				tableAlias,
-				undefined,
-				ctx.naming,
-				ctx.aliasColumnAuthorities,
-			);
+			return expressionColumnRef(decision.column, ctx);
 		}
 	}
 
@@ -58,7 +45,7 @@ function buildValueNode(
 		'kind' in value &&
 		ctx.compileNqlSelectExpression
 	) {
-		return ctx.compileNqlSelectExpression(value, ctx, state);
+		return ctx.compileNqlSelectExpression(value, ctx as CompilerContext, state);
 	}
 
 	// Otherwise, parameterize it
@@ -77,7 +64,7 @@ export const coalesceHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		ctx: ExpressionCompilerContext,
 		state: CompilerState,
 	): Node {
 		const args = decision.args;
@@ -89,16 +76,7 @@ export const coalesceHandler: ExpressionHandler = {
 
 		// If column is specified, add it first
 		if (column) {
-			const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-			argNodes.push(
-				columnRef(
-					column,
-					tableAlias,
-					undefined,
-					ctx.naming,
-					ctx.aliasColumnAuthorities,
-				),
-			);
+			argNodes.push(expressionColumnRef(column, ctx));
 		}
 
 		// Add args array if present
@@ -136,7 +114,7 @@ export const nullIfHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		ctx: ExpressionCompilerContext,
 		state: CompilerState,
 	): Node {
 		const column = decision.column;
@@ -150,14 +128,7 @@ export const nullIfHandler: ExpressionHandler = {
 			throw new Error('NULLIF requires a comparison value');
 		}
 
-		const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-		const colRef = columnRef(
-			column,
-			tableAlias,
-			undefined,
-			ctx.naming,
-			ctx.aliasColumnAuthorities,
-		);
+		const colRef = expressionColumnRef(column, ctx);
 
 		const valueRef = bindParameter(unwrapParamIntent(value), state);
 
@@ -179,7 +150,7 @@ export const greatestHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		ctx: ExpressionCompilerContext,
 		state: CompilerState,
 	): Node {
 		const args = decision.args;
@@ -209,7 +180,7 @@ export const leastHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		ctx: ExpressionCompilerContext,
 		state: CompilerState,
 	): Node {
 		const args = decision.args;

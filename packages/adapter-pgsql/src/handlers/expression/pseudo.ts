@@ -18,21 +18,28 @@ import {
 	funcCall,
 	integerNode,
 	sortBy,
+	sqlColumnRefStar,
 } from '../../ast-helpers.js';
-import { hasBindingName, schemaForFromName } from '../../binding-registry.js';
-import {
-	declaredColumnName,
-	declaredTableName,
-} from '../../declared-name-resolver.js';
+import { schemaForFromName } from '../../binding-registry.js';
 import {
 	requireRelationTargetColumns,
 	resolveRelationTarget,
 } from '../../relation-target-projection.js';
+import {
+	declaredColumn,
+	declaredTable,
+	queryLocal,
+	type SqlIdentifier,
+} from '../../sql-identifier.js';
 import type {
-	CompilerContext,
 	CompilerState,
 	Decision,
+	ExpressionCompilerContext,
 	ExpressionHandler,
+} from '../types.js';
+import {
+	expressionColumnIdentifier,
+	expressionRelationBinding,
 } from '../types.js';
 
 // ============================================================================
@@ -45,38 +52,46 @@ import type {
  * here prevents pseudo traversals from silently changing a binding such as
  * `activeCategories` into a non-existent `active_categories` range variable.
  */
-function emittedQualifier(ctx: CompilerContext, qualifier: string): string {
-	if (
-		ctx.aliasColumnAuthorities?.has(qualifier) ||
-		hasBindingName(ctx.bindingNames, qualifier, ctx.naming)
-	) {
-		return qualifier;
-	}
-	return declaredTableName(ctx.declaredNames, qualifier);
+function emittedQualifier(
+	ctx: ExpressionCompilerContext,
+	qualifier: string,
+): SqlIdentifier {
+	const binding = expressionRelationBinding(qualifier, ctx);
+	if (binding.kind !== 'declared-table') return binding.qualifier;
+	return ctx.declaredNames === undefined
+		? binding.qualifier
+		: declaredTable(ctx.declaredNames, binding.logicalTable!);
 }
 
 function emittedQualifierColumn(
-	ctx: CompilerContext,
+	ctx: ExpressionCompilerContext,
 	qualifier: string,
 	column: string,
-): string {
-	const authority = ctx.aliasColumnAuthorities?.get(qualifier);
-	if (authority !== undefined) {
-		return (
-			authority.outputs?.get(column)?.outputKey ??
-			authority.outputsByLogicalKey?.get(column)?.outputKey ??
-			column
-		);
-	}
-	if (hasBindingName(ctx.bindingNames, qualifier, ctx.naming)) {
-		const target = resolveRelationTarget(qualifier, ctx);
-		return (
-			target.outputs?.get(column)?.outputKey ??
-			target.outputsByLogicalKey?.get(column)?.outputKey ??
-			column
-		);
-	}
-	return declaredColumnName(ctx.declaredNames, qualifier, column);
+): SqlIdentifier {
+	return expressionColumnIdentifier(
+		column,
+		expressionRelationBinding(qualifier, ctx),
+		ctx.declaredNames,
+	);
+}
+
+function addressedTable(
+	ctx: ExpressionCompilerContext,
+	table: string,
+): SqlIdentifier {
+	return ctx.declaredNames === undefined
+		? queryLocal(table)
+		: declaredTable(ctx.declaredNames, table);
+}
+
+function addressedColumn(
+	ctx: ExpressionCompilerContext,
+	table: string,
+	column: string,
+): SqlIdentifier {
+	return ctx.declaredNames === undefined
+		? queryLocal(column)
+		: declaredColumn(ctx.declaredNames, table, column);
 }
 
 /**
@@ -92,7 +107,7 @@ export interface RecursiveCteConfig {
 	isAncestors: boolean;
 	maxDepth: number;
 	selectColumn: string;
-	ctx: CompilerContext;
+	ctx: ExpressionCompilerContext;
 }
 
 /**
@@ -137,23 +152,16 @@ export function buildRecursiveScalarSubquery(config: RecursiveCteConfig): Node {
 		ctx,
 		'traversal column',
 	);
-
-	const naming = ctx.naming;
-	const dbTable = declaredTableName(ctx.declaredNames, table);
-	const dbPk = declaredColumnName(ctx.declaredNames, table, pkColumn);
-	const dbFk = declaredColumnName(ctx.declaredNames, table, fkColumn);
+	const dbTable = addressedTable(ctx, table);
+	const dbPk = addressedColumn(ctx, table, pkColumn);
+	const dbFk = addressedColumn(ctx, table, fkColumn);
 	const dbOuter = emittedQualifier(ctx, outerAlias);
 	const dbOuterSeed = emittedQualifierColumn(
 		ctx,
 		outerAlias,
 		outerSeedColumn ?? (isAncestors ? fkColumn : pkColumn),
 	);
-	const schemaName = schemaForFromName(
-		ctx.schema,
-		table,
-		ctx.bindingNames,
-		naming,
-	);
+	const schemaName = schemaForFromName(ctx.schema, table, ctx.scope);
 
 	// Inner alias for CTE iterations
 	const innerAlias = '__n';
@@ -163,13 +171,7 @@ export function buildRecursiveScalarSubquery(config: RecursiveCteConfig): Node {
 		targetList: [
 			// Select all columns from inner table
 			{
-				ResTarget: {
-					val: {
-						ColumnRef: {
-							fields: [{ String: { sval: innerAlias } }, { A_Star: {} }],
-						},
-					},
-				},
+				ResTarget: { val: sqlColumnRefStar(queryLocal(innerAlias)) },
 			},
 			// __depth = 1
 			{
@@ -257,13 +259,7 @@ export function buildRecursiveScalarSubquery(config: RecursiveCteConfig): Node {
 		targetList: [
 			// Select all from new row
 			{
-				ResTarget: {
-					val: {
-						ColumnRef: {
-							fields: [{ String: { sval: innerAlias } }, { A_Star: {} }],
-						},
-					},
-				},
+				ResTarget: { val: sqlColumnRefStar(queryLocal(innerAlias)) },
 			},
 			// __depth + 1
 			{
@@ -436,11 +432,7 @@ export function buildRecursiveScalarSubquery(config: RecursiveCteConfig): Node {
 	};
 
 	// Build final SELECT with json_agg
-	const dbSelectCol = declaredColumnName(
-		ctx.declaredNames,
-		table,
-		selectColumn,
-	);
+	const dbSelectCol = addressedColumn(ctx, table, selectColumn);
 	const finalSelect: SelectStmt = {
 		targetList: [
 			{
@@ -517,7 +509,7 @@ export const pseudoColumnHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		ctx: ExpressionCompilerContext,
 		state: CompilerState,
 	): Node {
 		const traversal = decision.traversal;
@@ -580,7 +572,7 @@ export const singleHopPseudoHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		ctx: ExpressionCompilerContext,
 		_state: CompilerState,
 	): Node {
 		const targetColumn = requiredColumn(
@@ -602,17 +594,10 @@ export const singleHopPseudoHandler: ExpressionHandler = {
 			ctx,
 			'traversal column',
 		);
-
-		const naming = ctx.naming;
-		const dbTable = declaredTableName(ctx.declaredNames, table);
-		const dbPk = declaredColumnName(ctx.declaredNames, table, pkColumn);
-		const schemaName = schemaForFromName(
-			ctx.schema,
-			table,
-			ctx.bindingNames,
-			naming,
-		);
-		const dbCol = declaredColumnName(ctx.declaredNames, table, targetColumn);
+		const dbTable = addressedTable(ctx, table);
+		const dbPk = addressedColumn(ctx, table, pkColumn);
+		const schemaName = schemaForFromName(ctx.schema, table, ctx.scope);
+		const dbCol = addressedColumn(ctx, table, targetColumn);
 		const outerAlias = emittedQualifier(ctx, ctx.currentAlias ?? ctx.rootTable);
 		const outerParentFk = emittedQualifierColumn(
 			ctx,
@@ -684,11 +669,7 @@ export const singleHopPseudoHandler: ExpressionHandler = {
 									{ String: { sval: innerAlias } },
 									{
 										String: {
-											sval: declaredColumnName(
-												ctx.declaredNames,
-												table,
-												fkColumn,
-											),
+											sval: addressedColumn(ctx, table, fkColumn),
 										},
 									},
 								],
@@ -727,7 +708,7 @@ export const chainedPseudoHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		ctx: ExpressionCompilerContext,
 		_state: CompilerState,
 	): Node {
 		const traversals = decision.traversals;
@@ -743,16 +724,10 @@ export const chainedPseudoHandler: ExpressionHandler = {
 			throw new Error('Chained pseudo handler requires traversals array');
 		}
 
-		const naming = ctx.naming;
-		const dbTable = declaredTableName(ctx.declaredNames, table);
-		const dbPk = declaredColumnName(ctx.declaredNames, table, pkColumn);
-		const dbFk = declaredColumnName(ctx.declaredNames, table, fkColumn);
-		const schemaName = schemaForFromName(
-			ctx.schema,
-			table,
-			ctx.bindingNames,
-			naming,
-		);
+		const dbTable = addressedTable(ctx, table);
+		const dbPk = addressedColumn(ctx, table, pkColumn);
+		const dbFk = addressedColumn(ctx, table, fkColumn);
+		const schemaName = schemaForFromName(ctx.schema, table, ctx.scope);
 
 		// Build from innermost to outermost
 		// Start with the final column selection
@@ -762,17 +737,13 @@ export const chainedPseudoHandler: ExpressionHandler = {
 			'targetColumn',
 			'chained pseudo',
 		);
-		const targetCol = declaredColumnName(
-			ctx.declaredNames,
-			table,
-			targetColumn,
-		);
 		requireRelationTargetColumns(
 			resolveRelationTarget(table, ctx),
 			[pkColumn, fkColumn, targetColumn],
 			ctx,
 			'traversal column',
 		);
+		const targetCol = addressedColumn(ctx, table, targetColumn);
 
 		// Build nested subqueries from inside out
 		let currentExpr: Node = {

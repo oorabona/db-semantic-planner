@@ -7,14 +7,15 @@
  */
 
 import type { Node } from '@pgsql/types';
-import { columnRef, funcCall } from '../../ast-helpers.js';
+import { funcCall } from '../../ast-helpers.js';
 import { escapeDiagnosticText } from '../../validate.js';
 import type {
-	CompilerContext,
 	CompilerState,
 	Decision,
+	ExpressionCompilerContext,
 	ExpressionHandler,
 } from '../types.js';
+import { expressionColumnRef, expressionQualifiedColumnRef } from '../types.js';
 
 // Aggregate handlers for COUNT, SUM, AVG, MIN, MAX
 
@@ -25,7 +26,7 @@ function buildAggregate(
 	funcName: string,
 	column: string | undefined,
 	distinct: boolean,
-	ctx: CompilerContext,
+	ctx: ExpressionCompilerContext,
 	filterNode?: Node,
 ): Node {
 	const isStarColumn = !column || column === '*';
@@ -55,27 +56,16 @@ function buildAggregate(
 		);
 	}
 
-	const tableAlias = ctx.currentAlias ?? ctx.rootTable;
 	let colRef: Node;
 	if (column.includes('.')) {
 		const dotIdx = column.indexOf('.');
-		const table = column.slice(0, dotIdx);
-		const col = column.slice(dotIdx + 1);
-		colRef = columnRef(
-			col,
-			table,
-			undefined,
-			ctx.naming,
-			ctx.aliasColumnAuthorities,
+		colRef = expressionQualifiedColumnRef(
+			column.slice(dotIdx + 1),
+			column.slice(0, dotIdx),
+			ctx,
 		);
 	} else {
-		colRef = columnRef(
-			column,
-			tableAlias,
-			undefined,
-			ctx.naming,
-			ctx.aliasColumnAuthorities,
-		);
+		colRef = expressionColumnRef(column, ctx);
 	}
 
 	return funcCall(funcName, [colRef], {
@@ -94,7 +84,7 @@ export const countHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		ctx: ExpressionCompilerContext,
 		_state: CompilerState,
 	): Node {
 		const column = decision.column;
@@ -118,7 +108,7 @@ export const countDistinctHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		ctx: ExpressionCompilerContext,
 		_state: CompilerState,
 	): Node {
 		const column = decision.column;
@@ -141,7 +131,7 @@ function createSimpleAggregateHandler(
 		types,
 		compile(
 			decision: Decision,
-			ctx: CompilerContext,
+			ctx: ExpressionCompilerContext,
 			_state: CompilerState,
 		): Node {
 			return buildAggregate(
@@ -179,7 +169,7 @@ export const genericAggregateHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		ctx: ExpressionCompilerContext,
 		_state: CompilerState,
 	): Node {
 		const funcName = decision.function;

@@ -23,7 +23,6 @@ import type {
 import type { Node } from '@pgsql/types';
 import {
 	booleanConstNode,
-	columnRef,
 	floatNode,
 	funcCall,
 	integerNode,
@@ -39,8 +38,14 @@ import type {
 	CompilerContext,
 	CompilerState,
 	Decision,
+	ExpressionCompilerContext,
 	ExpressionHandler,
 	WhereDispatcher,
+} from '../types.js';
+import {
+	expressionQualifiedColumnRef,
+	expressionUnqualifiedColumnRef,
+	expressionWholeRowRef,
 } from '../types.js';
 
 // ---------------------------------------------------------------------------
@@ -151,7 +156,7 @@ function assertSafeOperator(
  */
 export function compileExpressionIntent(
 	intent: ExpressionIntent,
-	ctx: CompilerContext,
+	ctx: ExpressionCompilerContext,
 	state: CompilerState,
 ): Node {
 	const kind = intent.kind;
@@ -164,7 +169,14 @@ export function compileExpressionIntent(
 			// first read (assertSafeOperator) and a malicious value on the second read (render).
 			const operator = i.operator;
 			assertSafeOperator(operator);
-			const leftNode = compileExpressionIntent(i.left, ctx, state);
+			// ParadeDB's `relation @@@ query` takes a whole-row relation reference
+			// on its left.  fullTextSearch() and bm25Search() encode that relation
+			// as a ref intent, so resolve its QueryScope binding rather than trying
+			// to address a same-named declared column.
+			const leftNode =
+				operator === '@@@' && i.left.kind === 'ref'
+					? expressionWholeRowRef((i.left as RefExpressionIntent).column, ctx)
+					: compileExpressionIntent(i.left, ctx, state);
 			const rightNode = compileExpressionIntent(i.right, ctx, state);
 			return {
 				A_Expr: {
@@ -194,12 +206,7 @@ export function compileExpressionIntent(
 			const orderByNodes =
 				i.aggOrderBy && i.aggOrderBy.length > 0
 					? i.aggOrderBy.map((ob: AggOrderByArg) => {
-							const colNode = columnRef(
-								ob.field,
-								undefined,
-								undefined,
-								ctx.naming,
-							);
+							const colNode = expressionUnqualifiedColumnRef(ob.field, ctx);
 							return sortBy(colNode, ob.direction === 'desc' ? 'DESC' : 'ASC');
 						})
 					: undefined;
@@ -207,7 +214,7 @@ export function compileExpressionIntent(
 			// importing WHERE-dispatcher machinery into expression handlers (the
 			// no-hook case already failed loud above, before any args were compiled).
 			const filterNode = i.filter
-				? ctx.compileCustomFnFilter?.(i.filter, ctx, state)
+				? ctx.compileCustomFnFilter?.(i.filter, ctx as CompilerContext, state)
 				: undefined;
 			// The hook's return type permits undefined; a hook that returns undefined
 			// for a present filter must NOT silently drop it to an unfiltered aggregate.
@@ -231,21 +238,9 @@ export function compileExpressionIntent(
 			if (dotIdx !== -1) {
 				const table = i.column.slice(0, dotIdx);
 				const col = i.column.slice(dotIdx + 1);
-				return columnRef(
-					col,
-					table,
-					undefined,
-					ctx.naming,
-					ctx.aliasColumnAuthorities,
-				);
+				return expressionQualifiedColumnRef(col, table, ctx);
 			}
-			return columnRef(
-				i.column,
-				undefined,
-				undefined,
-				ctx.naming,
-				ctx.aliasColumnAuthorities,
-			);
+			return expressionUnqualifiedColumnRef(i.column, ctx);
 		}
 
 		case 'param': {
@@ -406,13 +401,7 @@ export function compileExpressionIntent(
 				rc.column,
 				state.aliases,
 			);
-			return columnRef(
-				rc.column,
-				alias,
-				undefined,
-				ctx.naming,
-				ctx.aliasColumnAuthorities,
-			);
+			return expressionQualifiedColumnRef(rc.column, alias, ctx);
 		}
 
 		case 'case': {
@@ -430,9 +419,12 @@ export function compileExpressionIntent(
 
 			const caseArgs: Node[] = caseIntent.when.map((branch) => {
 				// dispatch accepts WhereIntent (via normalizeToDecision which handles `kind` field)
+				// WHERE compilation remains a lot-5 boundary. The dispatcher is
+				// installed by the compiler, whose runtime context is complete; this
+				// cast is limited to handing that legacy callback its own context.
 				const whenNode = dispatch(
 					branch.condition as unknown as import('../types.js').Decision,
-					ctx,
+					ctx as CompilerContext,
 					state,
 				);
 				const thenNode = compileExpressionIntent(branch.result, ctx, state);
@@ -480,7 +472,7 @@ export const customExpressionHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		ctx: ExpressionCompilerContext,
 		state: CompilerState,
 	): Node {
 		const expressionIntent = decision.expressionIntent as ExpressionIntent;

@@ -122,6 +122,27 @@ export function relationBindingFor(
 	return scope?.bindings.get(identifierText(qualifier));
 }
 
+/**
+ * Find a declared relation by its logical address, while retaining the
+ * qualifier the binding established for SQL emission.  This is needed when a
+ * planner-level root table spelling differs from its physical range-variable
+ * spelling (for example `userProfiles` -> `user_profiles`).
+ */
+export function declaredRelationBindingFor(
+	scope: QueryScope | undefined,
+	logicalTable: string,
+): RelationBinding | undefined {
+	for (const binding of scope?.bindings.values() ?? []) {
+		if (
+			binding.kind === 'declared-table' &&
+			binding.logicalTable === logicalTable
+		) {
+			return binding;
+		}
+	}
+	return undefined;
+}
+
 export function hasBindingName(
 	scope: QueryScope | BindingNameRegistry | undefined,
 	name: SqlIdentifier | string,
