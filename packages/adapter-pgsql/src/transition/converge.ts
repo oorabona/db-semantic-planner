@@ -419,13 +419,33 @@ function applicationStepFailure(error: PgApplicationStepError): {
 	readonly detail: string;
 	readonly cause: unknown;
 } {
-	const cause = originalApplicationStepCause(error.cause ?? error);
-	const code = pgErrorCode(cause);
-	const message = cause instanceof Error ? cause.message : String(cause);
+	const originalCause = error.cause ?? error;
+	const leafCause = originalApplicationStepCause(originalCause);
+	const compositeCause = applicationStepCleanupCause(originalCause);
+	const code = pgErrorCode(leafCause);
+	const message =
+		leafCause instanceof Error ? leafCause.message : String(leafCause);
 	return {
 		detail: `application step ${escapeDiagnosticText(error.stepId)}: ${code === undefined ? escapeDiagnosticText(message) : `${escapeDiagnosticText(code)} ${escapeDiagnosticText(message)}`}`,
-		cause,
+		cause: compositeCause ?? leafCause,
 	};
+}
+
+function applicationStepCleanupCause(error: unknown): unknown | undefined {
+	const seen = new Set<unknown>();
+	let current = error;
+	while (
+		typeof current === 'object' &&
+		current !== null &&
+		!seen.has(current)
+	) {
+		seen.add(current);
+		if (Object.hasOwn(current, 'cleanupError')) return current;
+		const cause = (current as { readonly cause?: unknown }).cause;
+		if (cause === undefined) break;
+		current = cause;
+	}
+	return undefined;
 }
 
 function originalApplicationStepCause(error: unknown): unknown {

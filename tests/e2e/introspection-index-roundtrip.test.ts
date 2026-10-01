@@ -116,7 +116,7 @@ describe('#245 introspection index intent round-trip (real PG)', () => {
 		const warnings = generated.warnings;
 		const generatedCode = generated.code;
 		expect(warnings).toContain(
-			'Expression index "idx_rt_users_lower_email" on table "index_roundtrip_users" cannot be represented in the schema. dbsp reports it as destructive drift; declare it in externalIndexes or recreate it by hand.',
+			'Expression index "idx_rt_users_lower_email" on table "index_roundtrip_users" cannot be represented in the schema. It may be reported as destructive drift; list it in externalIndexes to keep it.',
 		);
 		expect(warnings).not.toContainEqual(
 			expect.stringContaining('idx_rt_users_note_literal'),

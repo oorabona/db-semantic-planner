@@ -436,7 +436,8 @@ await convergePg(pool, createPgPhysicalModel({ mode: 'logical', model, schema: '
 ```
 
 Each entry names a declared table and the exact physical index name. An undeclared index is drift
-whatever its name or form; use `externalIndexes` to keep one. Converge never drops a live index
+unless it is an automatic foreign-key index or column-UNIQUE index that comparison accepts; use
+`externalIndexes` to keep one. Converge never drops a live index
 named here and does not report it as drift. This is unlike `owns`: an external index is not
 declared in the model and only filters a live-side `drop_index`; an owned index remains declared,
 is removed from both comparison sides, and is maintained by an assert.

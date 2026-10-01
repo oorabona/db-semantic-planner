@@ -982,7 +982,7 @@ describe('generateSchemaFileWithDiagnostics', () => {
 			expect(error).not.toHaveBeenCalled();
 			expect(log).not.toHaveBeenCalled();
 			expect(warningText).toContain(
-				'Expression index "idx_users_lower_email" on table "users" cannot be represented in the schema. dbsp reports it as destructive drift; declare it in externalIndexes or recreate it by hand.',
+				'Expression index "idx_users_lower_email" on table "users" cannot be represented in the schema. It may be reported as destructive drift; list it in externalIndexes to keep it.',
 			);
 			expect(result).not.toContain('Warnings:');
 			expect(result).not.toContain('idx_users_lower_email');
@@ -1143,7 +1143,7 @@ describe('generateSchemaFileWithDiagnostics', () => {
 			expect(result.warnings[0]).toBe(model.warnings[0]);
 			expect(result.warnings).toContainEqual(
 				expect.stringContaining(
-					'Expression index "idx_notes_lower_email" on table "notes" cannot be represented in the schema. dbsp reports it as destructive drift',
+					'Expression index "idx_notes_lower_email" on table "notes" cannot be represented in the schema. It may be reported as destructive drift; list it in externalIndexes to keep it.',
 				),
 			);
 			expect(result.warnings).not.toContainEqual(

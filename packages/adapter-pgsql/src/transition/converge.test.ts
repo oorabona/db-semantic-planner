@@ -962,6 +962,91 @@ describe('convergePg refusal boundary', () => {
 		}
 	});
 
+	it('keeps a scratch-cleanup failure as the cause while reporting the SQLSTATE leaf', async () => {
+		const timeout = Object.assign(new Error('statement timed out'), {
+			code: '57014',
+		});
+		const cleanupError = new Error('rollback to savepoint failed');
+		const withScratchScope = mocks.adapter.withScratchScope;
+		mocks.adapter.withScratchScope = async (callback) => {
+			type ScratchScope = {
+				readonly executeRaw: (sql: string) => Promise<unknown[]>;
+				readonly transaction: (
+					inner: (value: ScratchScope) => Promise<unknown>,
+				) => Promise<unknown>;
+			};
+			const scope: ScratchScope = {
+				executeRaw: async (sql: string) => {
+					if (sql.includes("current_setting('search_path')"))
+						return [{ search_path: 'public' }];
+					if (sql.includes('SELECT pg_catalog.to_regclass'))
+						return [{ exists: true }];
+					if (sql.includes('FROM pg_catalog.pg_constraint c'))
+						return [
+							{
+								name: 'positive',
+								expression: 'CHECK ((score > 0))',
+								validated: true,
+							},
+						];
+					if (sql.startsWith('ALTER TABLE ')) throw timeout;
+					return [];
+				},
+				transaction: async (inner) => inner(scope),
+			};
+			try {
+				return await callback(scope);
+			} catch (originalError) {
+				throw Object.assign(
+					new AggregateError(
+						[originalError, cleanupError],
+						'owned-CHECK rendering and cleanup failed',
+						{ cause: originalError },
+					),
+					{ cleanupError, originalError },
+				);
+			}
+		};
+		mocks.compare.mockResolvedValue({ changes: [] });
+		mockManagedObjectsWithUnmanagedApplicationSteps();
+		try {
+			const error = await convergePg(
+				poolFor(),
+				modelWithTables([
+					{
+						name: 'projects',
+						columns: [{ name: 'score', type: 'integer', nullable: false }],
+						foreignKeys: [],
+						indexes: [],
+						checkConstraints: [{ name: 'positive', expression: 'score > 0' }],
+					},
+				]),
+				{
+					steps: [
+						{
+							kind: 'assert',
+							id: 'owned-check-cleanup-timeout',
+							digest: 'v1',
+							phase: 'after-generated-ddl',
+							owns: { checks: [{ table: 'projects', name: 'positive' }] },
+							inspect: async () => 'healthy' as const,
+							apply: async () => undefined,
+						},
+					],
+				},
+			).catch((caught: unknown) => caught);
+			expect(error).toMatchObject({
+				refusal: 'application-step-failed',
+				detail:
+					'application step owned-check-cleanup-timeout: 57014 statement timed out',
+			});
+			expect((error as Error).cause).toBeInstanceOf(AggregateError);
+			expect((error as Error).cause).toMatchObject({ cleanupError });
+		} finally {
+			mocks.adapter.withScratchScope = withScratchScope;
+		}
+	});
+
 	it('refuses a renderer-invalid schema before application step handling', async () => {
 		mocks.compare.mockResolvedValue({ changes: [] });
 		await expect(

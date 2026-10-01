@@ -1299,6 +1299,34 @@ describe('compareSchemata', () => {
 			]);
 		});
 
+		it('matches an unrecreatable duplicate before a recreatable duplicate', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'email', type: 'string' })],
+					indexes: [{ name: 'users_email', columns: ['email'] }],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'email', type: 'string' })],
+					indexes: [
+						{ name: 'a_valid', columns: ['email'] },
+						{ name: 'z-invalid', columns: ['email'] },
+					],
+				}),
+			]);
+
+			expect(compareSchemata(schema, db).changes).toEqual([
+				expect.objectContaining({
+					kind: 'drop_index',
+					destructive: false,
+					meta: { index: { name: 'a_valid', columns: ['email'] } },
+				}),
+			]);
+		});
+
 		it('budgets each automatic FK-index exemption and preserves live drop order', () => {
 			const fk: ForeignKeyIR = {
 				columns: ['user_id'],
@@ -1369,6 +1397,66 @@ describe('compareSchemata', () => {
 					table: 'posts',
 					meta: expect.objectContaining({
 						index: expect.objectContaining({ name: 'manual_duplicate' }),
+					}),
+				}),
+			]);
+		});
+
+		it('spends an automatic FK-index exemption on an unrecreatable duplicate', () => {
+			const fk: ForeignKeyIR = {
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+			};
+			const desired = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'integer' })],
+					primaryKey: 'id',
+				}),
+				makeTable({
+					name: 'posts',
+					columns: [
+						makeCol({ name: 'id', type: 'integer' }),
+						makeCol({ name: 'user_id', type: 'integer' }),
+					],
+					primaryKey: 'id',
+					foreignKeys: [fk],
+				}),
+			]);
+			const live = makeModel([
+				...Array.from(desired.tables.values()).filter(
+					(table) => table.name !== 'posts',
+				),
+				makeTable({
+					name: 'posts',
+					columns: [
+						makeCol({ name: 'id', type: 'integer' }),
+						makeCol({ name: 'user_id', type: 'integer' }),
+					],
+					primaryKey: 'id',
+					foreignKeys: [fk],
+					indexes: [
+						{ name: 'a_valid', columns: ['user_id'] },
+						{ name: 'z-invalid', columns: ['user_id'] },
+					],
+				}),
+			]);
+
+			const diff = comparePhysicalSchemata(
+				createPgPhysicalModel({
+					mode: 'logical',
+					model: desired,
+					schema: 'app',
+				}),
+				createPgPhysicalModel({ mode: 'physical', model: live, schema: 'app' }),
+			);
+			expect(diff.changes).toEqual([
+				expect.objectContaining({
+					kind: 'drop_index',
+					table: 'posts',
+					destructive: false,
+					meta: expect.objectContaining({
+						index: expect.objectContaining({ name: 'a_valid' }),
 					}),
 				}),
 			]);

@@ -1248,11 +1248,16 @@ function compareIndexes(
 	const unmatchedDbIndexes = db.indexes.map((index) => ({
 		index,
 		matched: false,
+		exempted: false,
 	}));
 	const unmatchedDbIndexesByKey = new Map<
 		string,
 		{
-			readonly items: { readonly index: IndexIR; matched: boolean }[];
+			readonly items: {
+				readonly index: IndexIR;
+				matched: boolean;
+				exempted: boolean;
+			}[];
 			next: number;
 		}
 	>();
@@ -1265,6 +1270,12 @@ function compareIndexes(
 			bucket.items.push(unmatched);
 		}
 	}
+	for (const bucket of unmatchedDbIndexesByKey.values())
+		bucket.items.sort(
+			(left, right) =>
+				Number(isManagedIndex(schema.name, left.index)) -
+				Number(isManagedIndex(schema.name, right.index)),
+		);
 	const pendingCreates: PendingIndexCreate[] = [];
 
 	// Index identity is structural and each occurrence consumes one matching
@@ -1302,29 +1313,37 @@ function compareIndexes(
 			.map((col) => col.name),
 	);
 
+	const consumeExemptions = (budgets: Map<string, number>) => {
+		for (const [key, bucket] of unmatchedDbIndexesByKey) {
+			let remaining = budgets.get(key) ?? 0;
+			for (const unmatched of bucket.items) {
+				if (remaining === 0) break;
+				if (!unmatched.matched && !unmatched.exempted) {
+					unmatched.exempted = true;
+					remaining -= 1;
+				}
+			}
+			budgets.set(key, remaining);
+		}
+	};
+	consumeExemptions(autoFkIndexBudgets);
+	consumeExemptions(declaredUnemittableFkAutoIndexBudgets);
+
 	// Indexes in DB but not in schema → drop (skip auto-FK and auto-unique indexes — they are auto-managed)
 	const pendingDrops: PendingIndexDrop[] = [];
-	for (const { index: idx, matched } of unmatchedDbIndexes) {
-		if (matched) continue;
-		const key = indexComparisonKey(idx);
-		const consumeExemption = (budgets: Map<string, number>): boolean => {
-			const remaining = budgets.get(key) ?? 0;
-			if (remaining === 0) return false;
-			budgets.set(key, remaining - 1);
-			return true;
-		};
+	for (const { index: idx, matched, exempted } of unmatchedDbIndexes) {
 		if (
-			!consumeExemption(autoFkIndexBudgets) &&
-			!consumeExemption(declaredUnemittableFkAutoIndexBudgets) &&
-			!isAutoUniqueIndex(schema.name, idx, autoUniqueIndexColumns)
-		) {
-			pendingDrops.push({
-				index: idx,
-				replacementKey: indexReplacementKey(schema.name, idx),
-				destructive: idx.unique === true || !isManagedIndex(schema.name, idx),
-				details: `Drop index ${idx.name === undefined ? `on (${formatIndexTargets(idx)})` : escapeDiagnosticText(idx.name)}`,
-			});
-		}
+			matched ||
+			exempted ||
+			isAutoUniqueIndex(schema.name, idx, autoUniqueIndexColumns)
+		)
+			continue;
+		pendingDrops.push({
+			index: idx,
+			replacementKey: indexReplacementKey(schema.name, idx),
+			destructive: idx.unique === true || !isManagedIndex(schema.name, idx),
+			details: `Drop index ${idx.name === undefined ? `on (${formatIndexTargets(idx)})` : escapeDiagnosticText(idx.name)}`,
+		});
 	}
 
 	// Same-name replacements must be all-or-nothing: with destructive changes
