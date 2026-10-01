@@ -138,12 +138,22 @@ export const joinIncludeHandler: IncludeHandler = {
 		if (columns && columns.length > 0) {
 			if (columns.length === 1 && columns[0] === '*') {
 				// Wildcard: select all columns from the joined relation
-				targets.push(starTarget(targetAlias, ctx.naming));
+				targets.push(
+					starTarget(targetAlias, ctx.naming, ctx.aliasColumnAuthorities),
+				);
 			} else {
 				for (const col of columns) {
 					const outputAlias =
 						columnAliases?.[col] ?? `${hydrationPrefix}.${col}`;
-					targets.push(columnTarget(col, outputAlias, targetAlias, ctx.naming));
+					targets.push(
+						columnTarget(
+							col,
+							outputAlias,
+							targetAlias,
+							ctx.naming,
+							ctx.aliasColumnAuthorities,
+						),
+					);
 				}
 			}
 		}

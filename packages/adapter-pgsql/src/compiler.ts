@@ -81,6 +81,7 @@ import { buildKeyCorrelation } from './handlers/where/exists.js';
 import {
 	type AliasColumnAuthority,
 	bindAliasAuthority,
+	emittedColumnReference,
 	type RelationTargetProjectionRegistry,
 	type ResolvedRelationTarget,
 	requireRelationTargetColumns,
@@ -797,9 +798,11 @@ export class PlanCompiler {
 	 * SQL alias that is actually emitted for that relation.
 	 */
 	private visibleSqlQualifiers: ReadonlyMap<string, string> = new Map();
+	/** Projection labels are query-local and take precedence in bare ORDER BY. */
+	private projectionAliases: ReadonlySet<string> = new Set();
 	/**
 	 * Tracks all join aliases in use for the current query.
-	 * Entries are stored in emitted database-alias space, after naming.toDatabase().
+	 * Entries are stored in query-local alias space, exactly as written.
 	 * Ensures no two JOINs share the same alias (DOUBLE-ALIAS prevention).
 	 */
 	private usedJoinAliases: Set<string> = new Set();
@@ -910,9 +913,8 @@ export class PlanCompiler {
 	}
 
 	private emittedJoinAlias(alias: string): string {
-		const dbAlias = this.naming.toDatabase(alias);
-		validateIdentifier(dbAlias, 'alias');
-		return dbAlias;
+		validateIdentifier(alias, 'alias');
+		return alias;
 	}
 
 	private resolvedJoinAliases(): Map<string, string> {
@@ -2241,7 +2243,13 @@ export class PlanCompiler {
 		switch (decision.type) {
 			case 'select':
 				if (decision.column === '*') {
-					targetList.push(starTarget(decision.table, this.naming));
+					targetList.push(
+						starTarget(
+							decision.table,
+							this.naming,
+							this.createHandlerContext(plan).aliasColumnAuthorities,
+						),
+					);
 				} else if (decision.column) {
 					targetList.push(
 						columnTarget(
@@ -2286,9 +2294,7 @@ export class PlanCompiler {
 				targetList.push({
 					ResTarget: {
 						val: node,
-						...(decision.alias
-							? { name: this.naming.toDatabase(decision.alias) }
-							: {}),
+						...(decision.alias ? { name: decision.alias } : {}),
 					},
 				});
 				break;
@@ -2327,9 +2333,7 @@ export class PlanCompiler {
 				targetList.push({
 					ResTarget: {
 						val: node,
-						...(decision.alias
-							? { name: this.naming.toDatabase(decision.alias) }
-							: {}),
+						...(decision.alias ? { name: decision.alias } : {}),
 					},
 				});
 				break;
@@ -2342,7 +2346,7 @@ export class PlanCompiler {
 					targetList.push({
 						ResTarget: {
 							val: caseNode,
-							...(alias ? { name: this.naming.toDatabase(alias) } : {}),
+							...(alias ? { name: alias } : {}),
 						},
 					});
 				}
@@ -2356,7 +2360,7 @@ export class PlanCompiler {
 				targetList.push({
 					ResTarget: {
 						val: node,
-						...(alias ? { name: this.naming.toDatabase(alias) } : {}),
+						...(alias ? { name: alias } : {}),
 					},
 				});
 				break;
@@ -2376,9 +2380,7 @@ export class PlanCompiler {
 						targetList.push({
 							ResTarget: {
 								val: node,
-								...(decision.alias
-									? { name: this.naming.toDatabase(decision.alias) }
-									: {}),
+								...(decision.alias ? { name: decision.alias } : {}),
 							},
 						});
 						break;
@@ -2410,9 +2412,7 @@ export class PlanCompiler {
 				targetList.push({
 					ResTarget: {
 						val: node,
-						...(decision.alias
-							? { name: this.naming.toDatabase(decision.alias) }
-							: {}),
+						...(decision.alias ? { name: decision.alias } : {}),
 					},
 				});
 				break;
@@ -2442,9 +2442,7 @@ export class PlanCompiler {
 				targetList.push({
 					ResTarget: {
 						val: winNode,
-						...(decision.alias
-							? { name: this.naming.toDatabase(decision.alias) }
-							: {}),
+						...(decision.alias ? { name: decision.alias } : {}),
 					},
 				});
 				break;
@@ -2542,6 +2540,12 @@ export class PlanCompiler {
 				const alias = decision.alias ?? decision.targetTable;
 				if (!alias) continue;
 				emittedAliases.set(alias, alias);
+				if (decision.targetTable) {
+					// Manual JOIN aliases are visible to SELECT expressions and ORDER BY
+					// before the JOIN node itself is emitted. Register their target now
+					// so all those references keep the alias spelling verbatim.
+					this.registerAliasAuthority(alias, decision.targetTable);
+				}
 				continue;
 			}
 			if (
@@ -2739,6 +2743,9 @@ export class PlanCompiler {
 			}
 			this.state.paramIndex = this.state.parameters.length;
 		}
+		if (this.isNqlBindingRoot(plan)) {
+			this.registerAliasAuthority(plan.rootTable, plan.rootTable);
+		}
 		return [
 			plan.batchValuesFromNode
 				? (plan.batchValuesFromNode as Node)
@@ -2746,7 +2753,7 @@ export class PlanCompiler {
 						plan.rootTable,
 						undefined,
 						this.schemaForRangeVar(plan, plan.rootTable),
-						this.naming,
+						this.isNqlBindingRoot(plan) ? identityNaming : this.naming,
 					),
 		];
 	}
@@ -2878,6 +2885,16 @@ export class PlanCompiler {
 			);
 		}
 		if (decision.column) {
+			// PostgreSQL resolves a bare ORDER BY identifier against a SELECT output
+			// label before a source column.  Labels are local identifiers, so they
+			// must not be passed through db casing.
+			if (this.projectionAliases.has(decision.column)) {
+				return sortBy(
+					columnRef(emittedColumnReference(decision.column)),
+					decision.direction ?? 'ASC',
+					decision.nulls ?? 'DEFAULT',
+				);
+			}
 			return sortBy(
 				this.compileRelationAwareColumnRef(
 					decision.column as string,
@@ -3037,6 +3054,24 @@ export class PlanCompiler {
 			plan,
 		);
 		const targetList: Node[] = [];
+		this.projectionAliases = new Set(
+			decisions.flatMap((decision) => {
+				if (
+					decision.type === 'select' ||
+					decision.type === 'selectFunction' ||
+					decision.type === 'selectNqlFunction' ||
+					decision.type === 'selectExpression' ||
+					decision.type === 'selectRelationColumn' ||
+					decision.type === 'selectPseudoColumn' ||
+					decision.type === 'selectArithmetic' ||
+					decision.type === 'selectWindow' ||
+					decision.type === 'selectCustomExpression'
+				) {
+					return typeof decision.alias === 'string' ? [decision.alias] : [];
+				}
+				return [];
+			}),
+		);
 		const from = this.compileFromClause(plan);
 		let where: Node | undefined;
 		const orderBy: Node[] = [];

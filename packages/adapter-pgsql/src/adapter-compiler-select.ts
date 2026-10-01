@@ -25,7 +25,7 @@ import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { defaultFkDerivation } from './assert-field.js';
 import { funcCall, rangeVar } from './ast-helpers.js';
-import { schemaForFromName } from './binding-registry.js';
+import { hasBindingName, schemaForFromName } from './binding-registry.js';
 import { compileWhereIntent, type WhereCompilerCtx } from './compile-where.js';
 import {
 	type CompilerOptions,
@@ -43,6 +43,7 @@ import {
 	jsonAggContainerShape,
 	resolveJsonAggColumnReadHandling,
 } from './json-agg-read-handling.js';
+import { identityNaming } from './naming-plugin.js';
 import { createTypeCastParamRef } from './param-ref.js';
 import {
 	convertDottedFieldsToExists,
@@ -325,14 +326,24 @@ function compileJoinIntents(
 			const tableAliasMap = new Map<string, string>();
 			tableAliasMap.set(rootTable, rootTable);
 			if (tableAlias !== rootTable) {
-				tableAliasMap.set(tableAlias, intent.table);
+				// A manual join alias is query-local. Preserve it in ON references;
+				// rangeVar() emits the same spelling rather than a physical table name.
+				tableAliasMap.set(tableAlias, tableAlias);
 			}
+			const onNaming =
+				tableAlias === rootTable
+					? naming
+					: {
+							toDatabase: (name: string) =>
+								name === tableAlias ? name : naming.toDatabase(name),
+							toModel: naming.toModel,
+						};
 
 			const ctx: WhereCompilerCtx = {
 				rootTable,
 				aliases: tableAliasMap,
 				paramState,
-				naming,
+				naming: onNaming,
 				// outerTable = tableAlias so FieldRef(scope:'outer') resolves to the
 				// joined alias (e.g. 'e2' in self-join ON conditions).
 				outerTable: tableAlias,
@@ -360,7 +371,9 @@ function compileJoinIntents(
 				intent.table,
 				tableAlias,
 				schemaForFromName(schemaName, intent.table, deps.bindingNames, naming),
-				naming,
+				hasBindingName(deps.bindingNames, intent.table, naming)
+					? identityNaming
+					: naming,
 			);
 
 			const joinDecision: PrecompiledJoinDecision = {

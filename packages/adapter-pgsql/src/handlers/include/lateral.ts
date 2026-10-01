@@ -57,7 +57,7 @@ function buildLateralTargets(
 	}
 
 	// Select all columns
-	return [starTarget(alias, ctx.naming)];
+	return [starTarget(alias, ctx.naming, ctx.aliasColumnAuthorities)];
 }
 
 /**
@@ -116,14 +116,14 @@ function buildLateralSubquery(
 function buildLateralJoin(
 	subquery: Node,
 	lateralAlias: string,
-	ctx: CompilerContext,
+	_ctx: CompilerContext,
 ): Node {
 	// Wrap subquery as a RangeSubselect
 	const rangeSubselect: Node = {
 		RangeSubselect: {
 			lateral: true,
 			subquery,
-			alias: { aliasname: ctx.naming.toDatabase(lateralAlias) },
+			alias: { aliasname: lateralAlias },
 		},
 	};
 

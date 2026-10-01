@@ -43,6 +43,7 @@ import { deparseQuoted } from './deparse.js';
 import type { CompilerContext } from './handlers/index.js';
 import { createCompilerState } from './handlers/index.js';
 import { compileValue } from './handlers/where/utils.js';
+import { identityNaming } from './naming-plugin.js';
 import { createTypeCastParamRef } from './param-ref.js';
 import { mapComparisonOperator } from './plan-decision-extractor.js';
 import {
@@ -117,7 +118,10 @@ function createPlanReportForCteQuery(
 }
 
 function dbOutputKey(name: string, deps: AdapterCompilerDeps): string {
-	return deps.naming.toDatabase(name);
+	// CTE projection labels are query-local, including labels that happen to
+	// have the same spelling as a declared model column.
+	void deps;
+	return name;
 }
 
 function addSelection(
@@ -528,7 +532,7 @@ export function compileRecursive<T = unknown>(
 	const finalSelections: ProjectNamedFieldsSelection[] = [];
 	const finalExpressions: ProjectNamedFieldsExpression[] = [];
 	const finalTargets: Node[] = config.selectColumns.map((col: string) => {
-		const outputKey = deps.naming.toDatabase(col);
+		const outputKey = col;
 		addSelection(finalSelections, outputKey, outputKey);
 		return {
 			ResTarget: {
@@ -858,10 +862,7 @@ function buildUnnestCte(
 	});
 
 	// All column alias names: col1, col2, ...[, ordinality]
-	const allAliasNames = [
-		...columns.map((c) => deps.naming.toDatabase(c)),
-		...(hasIndex ? ['ordinality'] : []),
-	];
+	const allAliasNames = [...columns, ...(hasIndex ? ['ordinality'] : [])];
 
 	// FROM unnest(args...) [WITH ORDINALITY] AS t("col1", "col2"[, ordinality])
 	const rangeFunc: Node = {
@@ -878,14 +879,18 @@ function buildUnnestCte(
 	// SELECT targets: t."col1", t."col2"[, (t.ordinality - 1) AS "idx"]
 	const targets: Node[] = columns.map((col) => ({
 		ResTarget: {
-			val: columnRef(col, 't', undefined, deps.naming),
-			name: deps.naming.toDatabase(col),
+			val: columnRef(col, 't', undefined, identityNaming),
+			name: col,
 		},
 	}));
 	if (hasIndex) {
 		targets.push({
 			ResTarget: {
-				val: binaryExpr('-', columnRef('ordinality', 't'), integerNode(1)),
+				val: binaryExpr(
+					'-',
+					columnRef('ordinality', 't', undefined, identityNaming),
+					integerNode(1),
+				),
 				name: indexCol,
 			},
 		});

@@ -236,7 +236,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect(sql).toContain('FROM "archivedItems"');
 	});
 
-	it('dedupes local WITH CTE shadowing by emitted snake_case binding name', () => {
+	it('keeps distinct local CTE names distinct under snake_case', () => {
 		const bundle = compileNqlBundle(
 			'items | select id | bind activeItems\nwith active_items as (archivedItems | select id) active_items | select id',
 		);
@@ -246,13 +246,13 @@ describe('NQL bind CTE identifier injection defense', () => {
 		});
 
 		expect(error).toBeUndefined();
+		expect(sql?.match(/"activeItems"\s+as\s+\(/gi)).toHaveLength(1);
 		expect(sql?.match(/"active_items"\s+as\s+\(/gi)).toHaveLength(1);
 		expect(sql).toContain('FROM archived_items');
-		expect(sql).not.toContain('"active_items" as (SELECT items.id FROM items)');
-		expect(sql).not.toContain('activeItems');
+		expect(sql).toContain('"activeItems" as (SELECT items.id FROM items)');
 	});
 
-	it('emits camelCase read binding declarations and references through snake_case naming', () => {
+	it('emits camelCase read binding declarations and references verbatim', () => {
 		const bundle = compileNqlBundle(
 			'items | select id | bind activeItems\nitems | where id in (activeItems) | select id',
 		);
@@ -262,12 +262,11 @@ describe('NQL bind CTE identifier injection defense', () => {
 		});
 
 		expect(error).toBeUndefined();
-		expect(sql).toContain('WITH "active_items" as (');
-		expect(sql).toContain('FROM active_items AS active_items_subq_');
-		expect(sql).not.toContain('activeItems');
+		expect(sql).toContain('WITH "activeItems" as (');
+		expect(sql).toContain('FROM "activeItems" AS "activeItems_subq_');
 	});
 
-	it('emits camelCase binding-final FROM through the same snake_case CTE name as the declaration', () => {
+	it('emits camelCase binding-final FROM through the verbatim CTE name', () => {
 		const bundle = compileNqlBundle(
 			'items | select id | bind activeItems\nactiveItems | select id',
 		);
@@ -277,9 +276,8 @@ describe('NQL bind CTE identifier injection defense', () => {
 		});
 
 		expect(error).toBeUndefined();
-		expect(sql).toContain('WITH "active_items" as (');
-		expect(sql).toContain('FROM active_items');
-		expect(sql).not.toContain('activeItems');
+		expect(sql).toContain('WITH "activeItems" as (');
+		expect(sql).toContain('FROM "activeItems"');
 	});
 
 	it('keeps scalar subquery binding CTE unqualified under withSchema while real tables are qualified', () => {
@@ -296,7 +294,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect(result.sql).not.toContain('tenant_1.recent_items');
 	});
 
-	it('rejects distinct NQL bind names that emit to the same snake_case CTE name', () => {
+	it('allows distinct NQL bind names that would collide only after casing', () => {
 		const bundle = compileNqlBundle(
 			'items | select id | bind fooBar\nitems | select id | bind foo_bar\nitems | select id',
 		);
@@ -305,10 +303,9 @@ describe('NQL bind CTE identifier injection defense', () => {
 			dbCasing: 'snake_case',
 		});
 
-		expect(sql).toBeUndefined();
-		expect(error).toBeInstanceOf(Error);
-		expect((error as Error).message).toContain('fooBar');
-		expect((error as Error).message).toContain('foo_bar');
+		expect(error).toBeUndefined();
+		expect(sql).toContain('WITH "fooBar" as (');
+		expect(sql).toContain('"foo_bar" as (');
 	});
 
 	it('rejects read binding name that collides with a physical table name', () => {
@@ -335,7 +332,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expectBindTableCollision(error, 'archived_items');
 	});
 
-	it('rejects camelCase read binding name that collides after snake_case emission', () => {
+	it('rejects camelCase read binding name that equals a declared logical table', () => {
 		const bundle = compileNqlBundle(
 			'items | select id | bind archivedItems\nitems | where id in (archivedItems) | select id',
 		);
@@ -345,7 +342,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		});
 
 		expect(sql).toBeUndefined();
-		expectBindTableCollision(error, 'archived_items');
+		expectBindTableCollision(error, 'archivedItems', 'archivedItems');
 	});
 
 	it('rejects insert-from sourceQuery bind name that collides with a physical table name', () => {
@@ -417,7 +414,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect(upsert.sql).toContain('WITH "staged_items" as (');
 	});
 
-	it('emits camelCase insert/upsert sourceQuery bindings through snake_case naming', () => {
+	it('emits camelCase insert/upsert sourceQuery bindings verbatim', () => {
 		const insertBundle = compileNqlBundle(
 			'items | select id, name | bind activeItems\ninsert into archivedItems from activeItems',
 		);
@@ -433,13 +430,11 @@ describe('NQL bind CTE identifier injection defense', () => {
 		});
 
 		expect(insert.error).toBeUndefined();
-		expect(insert.sql).toContain('WITH "active_items" as (');
-		expect(insert.sql).toContain('FROM active_items');
-		expect(insert.sql).not.toContain('activeItems');
+		expect(insert.sql).toContain('WITH "activeItems" as (');
+		expect(insert.sql).toContain('FROM "activeItems"');
 		expect(upsert.error).toBeUndefined();
-		expect(upsert.sql).toContain('WITH "active_items" as (');
-		expect(upsert.sql).toContain('FROM active_items');
-		expect(upsert.sql).not.toContain('activeItems');
+		expect(upsert.sql).toContain('WITH "activeItems" as (');
+		expect(upsert.sql).toContain('FROM "activeItems"');
 	});
 
 	it('rejects direct CompiledNqlQuery.bindings malicious bind name before WITH CTE emission', () => {
@@ -456,7 +451,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expectInvalidBindIdentifier(error, dangerousBindName);
 	});
 
-	it('rejects direct CompiledNqlQuery.bindings names that emit to the same CTE name', () => {
+	it('allows direct bindings whose names differ before physical casing', () => {
 		const bundle: CompiledNqlQuery = {
 			query: itemsQuery,
 			bindings: new Map([
@@ -469,10 +464,9 @@ describe('NQL bind CTE identifier injection defense', () => {
 			dbCasing: 'snake_case',
 		});
 
-		expect(sql).toBeUndefined();
-		expect(error).toBeInstanceOf(Error);
-		expect((error as Error).message).toContain('fooBar');
-		expect((error as Error).message).toContain('foo_bar');
+		expect(error).toBeUndefined();
+		expect(sql).toContain('WITH "fooBar" as (');
+		expect(sql).toContain('"foo_bar" as (');
 	});
 
 	it('compiles well-formed direct binding-final bundles without adapter-side output schemas', () => {

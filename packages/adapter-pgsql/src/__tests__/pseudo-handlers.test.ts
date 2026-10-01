@@ -334,7 +334,7 @@ describe('Relation Expression Handlers', () => {
 			) as any;
 
 			expect(result).toHaveProperty('ResTarget');
-			expect(result.ResTarget).toHaveProperty('name', 'author_name');
+			expect(result.ResTarget).toHaveProperty('name', 'authorName');
 			expect(result.ResTarget).toHaveProperty('val');
 			expect(result.ResTarget.val).toHaveProperty('ColumnRef');
 		});

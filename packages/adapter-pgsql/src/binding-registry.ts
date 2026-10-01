@@ -10,7 +10,10 @@ import type { NamingPlugin } from './naming-plugin.js';
 export type BindingNameRegistry = ReadonlySet<string>;
 
 export function emittedBindName(name: string, naming: NamingPlugin): string {
-	return naming.toDatabase(name);
+	// Bindings are CTE names, not declared database objects.  Keep their exact
+	// spelling even when the adapter uses snake_case for physical model names.
+	void naming;
+	return name;
 }
 
 export function hasBindingName(

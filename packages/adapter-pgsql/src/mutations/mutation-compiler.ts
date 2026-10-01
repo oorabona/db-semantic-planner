@@ -29,7 +29,7 @@ import {
 	type UpdateOptions,
 	updateStmt,
 } from '../ast-helpers.js';
-import { schemaForFromName } from '../binding-registry.js';
+import { hasBindingName, schemaForFromName } from '../binding-registry.js';
 import {
 	inferPgArrayType,
 	parseRawExpression,
@@ -85,7 +85,9 @@ export function buildReturningExprs(
 					`Invalid mutation RETURNING items: returningItems[${index}].output '${item.output}' must match returning[${index}] '${returning[index]}'.`,
 				);
 			}
-			const emittedOutput = naming.toDatabase(item.output);
+			// RETURNING labels are query-local output identifiers, not declared
+			// columns. Keep the alias exactly as the caller wrote it.
+			const emittedOutput = item.output;
 			const previousOutput = emittedOutputs.get(emittedOutput);
 			if (previousOutput !== undefined) {
 				throw new Error(
@@ -103,10 +105,7 @@ export function buildReturningExprs(
 	return columns.map((col) =>
 		col === '*'
 			? starTarget()
-			: resTarget(
-					columnRef(col, tableRef, ctx.schema, naming),
-					naming.toDatabase(col),
-				),
+			: resTarget(columnRef(col, tableRef, ctx.schema, naming), col),
 	);
 }
 
@@ -618,7 +617,13 @@ export function compileInsertFrom(
 ): Node {
 	const naming = ctx.naming;
 	const _dbTargetTable = naming.toDatabase(config.targetTable);
-	const dbSourceTable = naming.toDatabase(config.sourceTable);
+	const dbSourceTable = hasBindingName(
+		ctx.bindingNames,
+		config.sourceTable,
+		naming,
+	)
+		? config.sourceTable
+		: naming.toDatabase(config.sourceTable);
 	const sourceAlias = config.sourceTable;
 	const sourceSchema = schemaForFromName(
 		ctx.schema,
@@ -736,7 +741,13 @@ export function compileUpsertFrom(
 	state: CompilerState,
 ): Node {
 	const naming = ctx.naming;
-	const dbSourceTable = naming.toDatabase(config.sourceTable);
+	const dbSourceTable = hasBindingName(
+		ctx.bindingNames,
+		config.sourceTable,
+		naming,
+	)
+		? config.sourceTable
+		: naming.toDatabase(config.sourceTable);
 	const sourceAlias = config.sourceTable;
 	const sourceSchema = schemaForFromName(
 		ctx.schema,

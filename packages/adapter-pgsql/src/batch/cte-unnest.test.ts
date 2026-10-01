@@ -9,7 +9,14 @@
  *   SELECT ... FROM "outerTable" WHERE ...
  */
 
-import { createOrm, eq, InvalidOperationError, ref, schema } from '@dbsp/core';
+import {
+	createOrm,
+	eq,
+	exprRef,
+	InvalidOperationError,
+	ref,
+	schema,
+} from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { stringMutationOrm } from '../test-compat/issue-441.js';
@@ -173,7 +180,7 @@ describe('SC-15: CTE joined with outer query', () => {
 		expect(result.parameters[1]).toEqual(['a', 'b']);
 	});
 
-	it('emits camel-case CTE declarations with their snake-case references', () => {
+	it('emits camel-case CTE declarations and references verbatim', () => {
 		const orm = stringMutationOrm(
 			createOrm({
 				schema: batchSchema,
@@ -187,8 +194,34 @@ describe('SC-15: CTE joined with outer query', () => {
 			.query(cteOrm.select('activeUsers'))
 			.dump();
 
-		expect(result.sql).toContain('WITH active_users AS');
-		expect(result.sql).toContain('SELECT active_users.* FROM active_users');
+		expect(result.sql).toContain('WITH "activeUsers" AS');
+		expect(result.sql).toContain('SELECT "activeUsers".* FROM "activeUsers"');
+	});
+
+	it('uses a camelCase CTE as a manual JOIN source verbatim', () => {
+		const orm = stringMutationOrm(
+			createOrm({
+				schema: batchSchema,
+				adapter: createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' }),
+			}),
+		);
+		const cteOrm = orm as any;
+		const result = cteOrm
+			.withCte('activeUsers')
+			.fromUnnest({ id: [1, 2] })
+			.query(
+				cteOrm
+					.select('symbols')
+					.join('activeUsers', {
+						as: 'activeJoin',
+						on: eq('symbols.id', exprRef('activeJoin.id')),
+					})
+					.columns(['id']),
+			)
+			.dump();
+
+		expect(result.sql).toContain('JOIN "activeUsers" AS "activeJoin"');
+		expect(result.sql).toContain('symbols.id = "activeJoin".id');
 	});
 });
 

@@ -152,7 +152,8 @@ export function columnRef(
 		fields.push(stringNode(schema));
 	}
 	if (table) {
-		const dbTable = naming.toDatabase(table);
+		const localAuthority = authorities?.get(table);
+		const dbTable = localAuthority ? table : naming.toDatabase(table);
 		validateIdentifier(dbTable, 'table');
 		fields.push(stringNode(dbTable));
 	}
@@ -160,7 +161,7 @@ export function columnRef(
 		typeof column === 'string' ? column === '*' : column.emittedName === '*';
 	const authority =
 		table && !isWildcard
-			? authorities?.get(naming.toDatabase(table))
+			? (authorities?.get(table) ?? authorities?.get(naming.toDatabase(table)))
 			: undefined;
 	const resolved =
 		typeof column === 'string'
@@ -199,11 +200,17 @@ export function columnRef(
 export function columnRefStar(
 	table?: string,
 	naming: NamingPlugin = identityNaming,
+	authorities?: AliasColumnAuthority,
 ): Node {
 	const fields: Node[] = [];
 
 	if (table) {
-		fields.push(stringNode(naming.toDatabase(table)));
+		// A qualifier is local whenever it names an alias/CTE authority.  Applying
+		// db casing here made `activeUsers.*` reference a non-existent
+		// `active_users` range variable.
+		fields.push(
+			stringNode(authorities?.has(table) ? table : naming.toDatabase(table)),
+		);
 	}
 	fields.push({ A_Star: {} });
 
@@ -234,9 +241,8 @@ export function rangeVar(
 	}
 
 	if (alias) {
-		const dbAlias = naming.toDatabase(alias);
-		validateIdentifier(dbAlias, 'alias');
-		rv.alias = { aliasname: dbAlias };
+		validateIdentifier(alias, 'alias');
+		rv.alias = { aliasname: alias };
 	}
 
 	return { RangeVar: rv };
@@ -283,8 +289,9 @@ export function columnTarget(
 export function starTarget(
 	table?: string,
 	naming: NamingPlugin = identityNaming,
+	authorities?: AliasColumnAuthority,
 ): Node {
-	return resTarget(columnRefStar(table, naming));
+	return resTarget(columnRefStar(table, naming, authorities));
 }
 
 // ============================================================================

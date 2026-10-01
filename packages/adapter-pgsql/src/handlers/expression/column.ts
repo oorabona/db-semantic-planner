@@ -82,7 +82,7 @@ export const columnAliasHandler: ExpressionHandler = {
 		// Wrap in ResTarget with alias for SELECT list
 		const resTarget: ResTarget = {
 			val: colRef,
-			name: ctx.naming.toDatabase(outputAlias),
+			name: outputAlias,
 		};
 
 		return { ResTarget: resTarget };
@@ -107,10 +107,7 @@ export const starHandler: ExpressionHandler = {
 		// table.* — qualified star
 		return {
 			ColumnRef: {
-				fields: [
-					{ String: { sval: ctx.naming.toDatabase(tableAlias) } },
-					{ A_Star: {} },
-				],
+				fields: [{ String: { sval: tableAlias } }, { A_Star: {} }],
 			},
 		};
 	},

@@ -951,20 +951,54 @@ users | select id`.dump(),
 		);
 	});
 
-	it('emits NQL CTE declarations with the same casing as references', () => {
+	it('#762: keeps CTE output aliases verbatim under snake_case', () => {
 		const orm = createOrm({
-			model: testSchema.model,
+			model: blogSchema.model,
 			adapter: createPgsqlCompileOnlyAdapter({
-				model: testSchema.model,
+				model: blogSchema.model,
 				dbCasing: 'snake_case',
 			}),
 		});
 
-		const result = orm.nql`with activeUsers as (users | select id)
-activeUsers | select id`.dump();
+		const result = orm.nql`with t as (posts | select title as postTitle)
+t | select postTitle`.dump();
 
-		expect(normalizeSQL(result.sql)).toBe(
-			'with "active_users" as (select users.id from users) select active_users.id from active_users',
+		expect(result.sql).toBe(
+			'WITH "t" AS (SELECT posts.title AS "postTitle" FROM posts) SELECT t."postTitle" FROM t',
+		);
+	});
+
+	it('#762: keeps a nested CTE output alias verbatim under snake_case', () => {
+		const orm = createOrm({
+			model: blogSchema.model,
+			adapter: createPgsqlCompileOnlyAdapter({
+				model: blogSchema.model,
+				dbCasing: 'snake_case',
+			}),
+		});
+
+		const result =
+			orm.nql`with t as (posts | select title as postTitle), u as (t | select postTitle)
+u | select postTitle`.dump();
+
+		expect(result.sql).toBe(
+			'WITH "t" AS (SELECT posts.title AS "postTitle" FROM posts), "u" AS (SELECT t."postTitle" FROM t) SELECT u."postTitle" FROM u',
+		);
+	});
+
+	it('#762: qualifies a projected relation column with its verbatim join alias', () => {
+		const orm = createOrm({
+			model: queryLocalAliasSchema.model,
+			adapter: createPgsqlCompileOnlyAdapter({
+				model: queryLocalAliasSchema.model,
+				dbCasing: 'snake_case',
+			}),
+		});
+
+		const result = orm.nql`users | select *, userRoles.roleId | flat`.dump();
+
+		expect(result.sql).toBe(
+			'SELECT users.*, "userRoles".role_id AS "userRoles.roleId" FROM users LEFT JOIN user_roles AS "userRoles" ON users.id = "userRoles".user_id',
 		);
 	});
 
@@ -1421,6 +1455,17 @@ const blogSchema = schema({
 	},
 });
 
+const queryLocalAliasSchema = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+	},
+	userRoles: {
+		id: { type: 'integer', primaryKey: true },
+		userId: ref('users', { inverse: 'userRoles' }),
+		roleId: 'integer',
+	},
+});
+
 function blogToSQL(nql: string): { sql: string; params: readonly unknown[] } {
 	const compiled = compile(nql, blogSchema.model);
 	if (!compiled.success || !compiled.ast?.query) {
@@ -1533,17 +1578,21 @@ describe('CTE relation planning', () => {
 		);
 	});
 
-	it('keeps reduced root CTE references unqualified in SELECT and WHERE', () => {
-		expect(
+	it('rejects root CTE references outside the CTE projection', () => {
+		expect(() =>
 			blogCteToSQL(
 				'with authors as (authors | select name) authors | select id',
 			),
-		).toContain('select authors.id from authors');
-		expect(
+		).toThrow(
+			"target 'authors' resolves to the CTE 'authors', which does not project 'id' (column reference). Available: name",
+		);
+		expect(() =>
 			blogCteToSQL(
 				'with authors as (authors | select name) authors | where id = 1 | select id',
 			),
-		).toContain('select authors.id from authors where authors.id = $1');
+		).toThrow(
+			"target 'authors' resolves to the CTE 'authors', which does not project 'id' (column reference). Available: name",
+		);
 	});
 
 	it('expands a reduced visible CTE wildcard from its projection', () => {
@@ -2120,6 +2169,54 @@ function mutationToSQLWithNamedParams(
 }
 
 describe('NQL → SQL mutation E2E', () => {
+	it('#762: resolves declared camelCase mutation names while keeping RETURNING labels local', () => {
+		const compileSnakeMutation = (nql: string): string => {
+			const compiled = compile(nql, mutationSchema.model);
+			if (!compiled.success || !compiled.ast?.mutation) {
+				throw new Error(
+					`NQL mutation compilation failed: ${compiled.errors.map((error) => error.message).join(', ')}`,
+				);
+			}
+			const adapter = createPgsqlCompileOnlyAdapter({
+				dbCasing: 'snake_case',
+			});
+			const options = { model: mutationSchema.model };
+			const mutation = compiled.ast.mutation;
+			if (isInsertIntent(mutation))
+				return adapter.compileInsert(mutation, options).sql;
+			if (isUpdateIntent(mutation))
+				return adapter.compileUpdate(mutation, options).sql;
+			if (isUpsertIntent(mutation))
+				return adapter.compileUpsert(mutation, options).sql;
+			throw new Error(`Unexpected mutation ${mutation.type}`);
+		};
+
+		const select = createOrm({
+			model: mutationSchema.model,
+			adapter: createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' }),
+		})
+			.select('archivedPosts')
+			.columns(['userId'])
+			.dump().sql;
+		const insert = compileSnakeMutation(
+			"insert into archivedPosts set title = 'new', published = true, userId = 1 | select userId as returnedUserId",
+		);
+		const update = compileSnakeMutation(
+			'update archivedPosts set userId = 2 where id = 1 | select userId as returnedUserId',
+		);
+		const upsert = compileSnakeMutation(
+			"upsert into archivedPosts on id set id = 1, title = 'new', published = true, userId = 1 | select userId as returnedUserId",
+		);
+
+		for (const sql of [select, insert, update, upsert]) {
+			expect(sql).toContain('archived_posts');
+			expect(sql).toContain('user_id');
+		}
+		for (const sql of [insert, update, upsert]) {
+			expect(sql).toContain('AS "returnedUserId"');
+		}
+	});
+
 	it('S1: update with IN subquery produces inline SQL subquery', () => {
 		const { sql } = mutationToSQL(
 			'update authors set active = false where id in (posts | where published = false | select userId)',

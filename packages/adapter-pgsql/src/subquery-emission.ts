@@ -44,7 +44,7 @@
 import { isParamIntent, type QueryIntent } from '@dbsp/types';
 import type { Node, SelectStmt } from '@pgsql/types';
 import { columnRef, integerNode, rangeVar, sortBy } from './ast-helpers.js';
-import { schemaForFromName } from './binding-registry.js';
+import { hasBindingName, schemaForFromName } from './binding-registry.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -55,7 +55,12 @@ import {
 	assertNoUnsupportedSubqueryModifiers,
 	containsOuterRef,
 } from './intent-to-decisions.js';
+import { identityNaming } from './naming-plugin.js';
 import { unwrapParamIntent } from './param-intent.js';
+import {
+	bindAliasAuthority,
+	resolveRelationTarget,
+} from './relation-target-projection.js';
 
 // ============================================================================
 // Predicate use discriminant
@@ -254,6 +259,19 @@ export function buildPredicateSubquerySelect(
 	const existingAliases = state.aliases.size;
 	const targetAlias = `${targetTable}_subq_${existingAliases}`;
 	state.aliases.set(`subquery_${targetTable}`, targetAlias);
+	const sourceIsBinding = hasBindingName(
+		ctx.bindingNames,
+		targetTable,
+		ctx.naming,
+	);
+	// The subquery range alias is query-local even when its source is a
+	// declared table; register it so every qualifier remains verbatim.
+	const aliasColumnAuthorities = bindAliasAuthority(
+		ctx.aliasColumnAuthorities,
+		targetAlias,
+		resolveRelationTarget(targetTable, ctx),
+		ctx,
+	);
 
 	// Build target list (what to select)
 	let targetVal: Node;
@@ -281,6 +299,7 @@ export function buildPredicateSubquerySelect(
 				targetAlias,
 				undefined,
 				ctx.naming,
+				aliasColumnAuthorities,
 			);
 			targetVal = {
 				FuncCall: {
@@ -291,7 +310,13 @@ export function buildPredicateSubquerySelect(
 			};
 		}
 	} else {
-		targetVal = columnRef(selectColumn, targetAlias, undefined, ctx.naming);
+		targetVal = columnRef(
+			selectColumn,
+			targetAlias,
+			undefined,
+			ctx.naming,
+			aliasColumnAuthorities,
+		);
 	}
 
 	// Build WHERE clause if conditions exist
@@ -304,6 +329,7 @@ export function buildPredicateSubquerySelect(
 			...ctx,
 			rootTable: targetTable,
 			currentAlias: targetAlias,
+			...(aliasColumnAuthorities !== undefined && { aliasColumnAuthorities }),
 		};
 
 		if (decision.conditions.length === 1) {
@@ -333,7 +359,7 @@ export function buildPredicateSubquerySelect(
 					ctx.bindingNames,
 					ctx.naming,
 				),
-				ctx.naming,
+				sourceIsBinding ? identityNaming : ctx.naming,
 			),
 		],
 		...(whereClause && { whereClause }),
@@ -346,7 +372,13 @@ export function buildPredicateSubquerySelect(
 	if (orderBy && orderBy.length > 0) {
 		stmt.sortClause = orderBy.map((o) =>
 			sortBy(
-				columnRef(o.column, targetAlias, undefined, ctx.naming),
+				columnRef(
+					o.column,
+					targetAlias,
+					undefined,
+					ctx.naming,
+					aliasColumnAuthorities,
+				),
 				o.direction ?? 'ASC',
 				'DEFAULT',
 			),

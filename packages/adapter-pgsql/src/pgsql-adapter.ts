@@ -119,6 +119,11 @@ import {
 	generateTruncateSQL,
 	generateVacuumSQL,
 } from './ddl/table-operations.js';
+import {
+	canCreatePgPhysicalModel,
+	createDeclaredNameResolver,
+	getCachedPgPhysicalModel,
+} from './declared-name-resolver.js';
 import { deparseQuoted } from './deparse.js';
 import { compileExpressionIntent } from './handlers/expression/custom.js';
 import { createCompilerState } from './handlers/types.js';
@@ -3044,11 +3049,33 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		const naming =
 			(options as PgsqlInternalCompileOptions | undefined)?.naming ??
 			this.naming;
+		const model = options?.model ?? this.model;
+		const schemaName = options?.schemaName || this.schemaName;
+		const physicalModel =
+			model === undefined || !canCreatePgPhysicalModel(model)
+				? undefined
+				: getCachedPgPhysicalModel(
+						model,
+						schemaName ?? 'public',
+						this._dbCasing,
+					);
+		const declaredNames =
+			physicalModel === undefined
+				? undefined
+				: createDeclaredNameResolver(physicalModel, naming);
+		// Legacy compile modules still accept a NamingPlugin.  Feed them the
+		// resolver bridge so all declared names already get the physical spelling;
+		// query-local paths are explicitly emitted below and do not use this bridge.
+		const resolvedNaming: NamingPlugin = declaredNames
+			? { toDatabase: declaredNames.toDatabase, toModel: naming.toModel }
+			: naming;
 		return {
-			naming,
+			naming: resolvedNaming,
 			// `||` (not `??`): empty string is treated as "no override" and falls back to this.schemaName (which may be a configured schema or undefined)
-			schemaName: options?.schemaName || this.schemaName,
-			model: options?.model ?? this.model,
+			schemaName,
+			model,
+			physicalModel,
+			declaredNames,
 			dialectCapabilities:
 				options?.dialectCapabilities ?? this.dialectCapabilities,
 			defaultPk: this.defaultPk,

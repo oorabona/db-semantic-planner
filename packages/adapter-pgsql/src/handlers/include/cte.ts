@@ -47,13 +47,13 @@ function buildCteTargets(
 						ctx.naming,
 						ctx.aliasColumnAuthorities,
 					),
-					name: ctx.naming.toDatabase(col),
+					name: col,
 				},
 			}));
 	}
 
 	// Select all columns
-	return [starTarget(alias, ctx.naming)];
+	return [starTarget(alias, ctx.naming, ctx.aliasColumnAuthorities)];
 }
 
 /**
@@ -122,10 +122,10 @@ function buildCteSelect(
 function buildCTE(
 	cteName: string,
 	cteSelect: Node,
-	ctx: CompilerContext,
+	_ctx: CompilerContext,
 ): Node {
 	const cte: CommonTableExpr = {
-		ctename: ctx.naming.toDatabase(cteName),
+		ctename: cteName,
 		ctequery: cteSelect,
 	};
 
@@ -155,10 +155,10 @@ function buildCteJoin(
 	// Reference the CTE as if it were a table
 	const cteRef: Node = {
 		RangeVar: {
-			relname: ctx.naming.toDatabase(cteName),
+			relname: cteName,
 			inh: true,
 			relpersistence: 'p',
-			alias: { aliasname: ctx.naming.toDatabase(cteAlias) },
+			alias: { aliasname: cteAlias },
 		},
 	};
 

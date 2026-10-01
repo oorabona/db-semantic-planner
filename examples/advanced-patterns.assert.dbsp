@@ -104,7 +104,7 @@ db.success: true
 # ─────────────────────────────────────────
 --- query: 11
 success: true
-sql.equals: SELECT roles.* FROM advanced_patterns.roles WHERE roles.id = ANY (SELECT user_roles_subq_0.role_id FROM advanced_patterns.user_roles AS user_roles_subq_0 WHERE user_roles_subq_0.user_id = $1) AND EXISTS (SELECT 1 FROM advanced_patterns.user_roles AS user_roles_exists_1 WHERE roles.id = user_roles_exists_1.role_id)
+sql.equals: SELECT roles.* FROM advanced_patterns.roles WHERE roles.id = ANY (SELECT "userRoles_subq_0".role_id FROM advanced_patterns.user_roles AS "userRoles_subq_0" WHERE "userRoles_subq_0".user_id = $1) AND EXISTS (SELECT 1 FROM advanced_patterns.user_roles AS "userRoles_exists_1" WHERE roles.id = "userRoles_exists_1".role_id)
 params.equals: [1]
 db.success: true
 
@@ -117,7 +117,7 @@ db.success: true
 # ─────────────────────────────────────────
 --- query: 12
 success: true
-sql.equals: SELECT users.*, user_roles_lat_0.* FROM advanced_patterns.users LEFT JOIN LATERAL ( SELECT user_roles_inner_0.* FROM advanced_patterns.user_roles AS user_roles_inner_0 WHERE user_roles_inner_0.user_id = users.id LIMIT 2 ) AS user_roles_lat_0 ON true
+sql.equals: SELECT users.*, "userRoles_lat_0".* FROM advanced_patterns.users LEFT JOIN LATERAL ( SELECT "userRoles_inner_0".* FROM advanced_patterns.user_roles AS "userRoles_inner_0" WHERE "userRoles_inner_0".user_id = users.id LIMIT 2 ) AS "userRoles_lat_0" ON true
 db.success: true
 
 # =============================================================================

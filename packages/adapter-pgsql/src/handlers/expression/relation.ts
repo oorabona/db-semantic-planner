@@ -30,7 +30,7 @@ export const relationStarHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		_ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
 		const relation = decision.relation ?? decision.expandRelation;
@@ -40,7 +40,7 @@ export const relationStarHandler: ExpressionHandler = {
 		}
 
 		const alias = resolveVisibleRelationAlias(relation, '*', state.aliases);
-		const dbAlias = ctx.naming.toDatabase(alias);
+		const dbAlias = alias;
 
 		// Return qualified star: alias.*
 		return {
@@ -80,7 +80,7 @@ export const relationColumnHandler: ExpressionHandler = {
 
 		// Wildcard: relation.* should produce unquoted * (A_Star), not quoted "*"
 		if (column === '*') {
-			return columnRefStar(alias, ctx.naming);
+			return columnRefStar(alias, ctx.naming, ctx.aliasColumnAuthorities);
 		}
 
 		return columnRef(
@@ -145,7 +145,7 @@ export const relationColumnsHandler: ExpressionHandler = {
 		if (outputAlias) {
 			const resTarget: ResTarget = {
 				val: colRef,
-				name: ctx.naming.toDatabase(outputAlias),
+				name: outputAlias,
 			};
 			return { ResTarget: resTarget };
 		}
@@ -201,7 +201,7 @@ export const relationAliasHandler: ExpressionHandler = {
 		// Wrap in ResTarget with output alias
 		const resTarget: ResTarget = {
 			val: colRef,
-			name: ctx.naming.toDatabase(outputAlias),
+			name: outputAlias,
 		};
 
 		return { ResTarget: resTarget };
@@ -254,7 +254,7 @@ export const prefixedRelationColumnHandler: ExpressionHandler = {
 
 		const resTarget: ResTarget = {
 			val: colRef,
-			name: ctx.naming.toDatabase(prefixedAlias),
+			name: prefixedAlias,
 		};
 
 		return { ResTarget: resTarget };

@@ -59,10 +59,12 @@ export function bindAliasAuthority(
 	authorities: AliasColumnAuthority | undefined,
 	alias: string,
 	target: ResolvedRelationTarget,
-	ctx: RelationTargetProjectionContext,
+	_ctx: RelationTargetProjectionContext,
 ): AliasColumnAuthority {
 	const next = new Map(authorities);
-	next.set(ctx.naming.toDatabase(alias), target);
+	// Aliases are query-local identifiers.  Do not re-case an authority key or
+	// a later reference can no longer address the alias that was emitted.
+	next.set(alias, target);
 	return next;
 }
 

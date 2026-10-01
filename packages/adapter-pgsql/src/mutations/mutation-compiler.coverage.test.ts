@@ -109,13 +109,12 @@ describe('mutation-compiler - coverage', () => {
 			).toThrow(/returningItems\[0\]\.output/);
 		});
 
-		it('rejects post-naming duplicate output aliases', () => {
-			expect(() =>
-				buildReturningExprs(['userId', 'user_id'], 'users', ctx, [
-					{ source: 'id', output: 'userId' },
-					{ source: 'email', output: 'user_id' },
-				]),
-			).toThrow(/Duplicate mutation RETURNING output after database naming/);
+		it('keeps distinct local RETURNING output aliases distinct', () => {
+			const result = buildReturningExprs(['userId', 'user_id'], 'users', ctx, [
+				{ source: 'id', output: 'userId' },
+				{ source: 'email', output: 'user_id' },
+			]);
+			expect(result).toHaveLength(2);
 		});
 	});
 
