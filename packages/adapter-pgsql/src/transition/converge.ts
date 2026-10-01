@@ -115,8 +115,9 @@ export type PgConvergeRefusalChange = Pick<
 	'kind' | 'table' | 'column' | 'details'
 > & {
 	/**
-	 * Present for create_index and drop_index when the index has a name. Models
-	 * built by createPgPhysicalModel always materialize index names.
+	 * Present for create_index and drop_index when the index has a name: always
+	 * for a live index and for a logical-mode physical model, which names every
+	 * index; a physical-mode snapshot passes its own names through as given.
 	 */
 	readonly index?: string;
 };

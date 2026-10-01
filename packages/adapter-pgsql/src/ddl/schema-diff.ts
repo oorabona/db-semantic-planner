@@ -1251,13 +1251,19 @@ function compareIndexes(
 	}));
 	const unmatchedDbIndexesByKey = new Map<
 		string,
-		{ readonly index: IndexIR; matched: boolean }[]
+		{
+			readonly items: { readonly index: IndexIR; matched: boolean }[];
+			next: number;
+		}
 	>();
 	for (const unmatched of unmatchedDbIndexes) {
 		const key = indexComparisonKey(unmatched.index);
 		const bucket = unmatchedDbIndexesByKey.get(key);
-		if (bucket === undefined) unmatchedDbIndexesByKey.set(key, [unmatched]);
-		else bucket.push(unmatched);
+		if (bucket === undefined) {
+			unmatchedDbIndexesByKey.set(key, { items: [unmatched], next: 0 });
+		} else {
+			bucket.items.push(unmatched);
+		}
 	}
 	const pendingCreates: PendingIndexCreate[] = [];
 
@@ -1265,7 +1271,8 @@ function compareIndexes(
 	// counterpart. Names are cosmetic, but duplicate structural indexes are not.
 	for (const idx of schema.indexes) {
 		const key = indexComparisonKey(idx);
-		const dbIndex = unmatchedDbIndexesByKey.get(key)?.shift();
+		const bucket = unmatchedDbIndexesByKey.get(key);
+		const dbIndex = bucket?.items[bucket.next++];
 		if (dbIndex === undefined) {
 			pendingCreates.push({
 				index: idx,
@@ -1383,7 +1390,13 @@ function markDestructiveReplacementCreates(
 	}
 }
 
-function isManagedIndex(tableName: string, idx: IndexIR): boolean {
+/**
+ * Whether dbsp can faithfully manage an index from its captured IndexIR.
+ *
+ * This predicate governs both destructive-drop classification and DOWN index
+ * recreation, so the two paths cannot disagree about representability.
+ */
+export function isManagedIndex(tableName: string, idx: IndexIR): boolean {
 	return (
 		(idx.expressions === undefined || idx.expressions.length === 0) &&
 		canGenerateCreateIndex(tableName, idx) &&

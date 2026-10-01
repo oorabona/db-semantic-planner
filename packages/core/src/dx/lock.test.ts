@@ -12,6 +12,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { POSTGRESQL_CAPABILITIES } from '../dialects/index.js';
 import { InvalidOperationError } from './errors.js';
+import { resetLogger, setLogger } from './logger.js';
 import { createOrm } from './orm.js';
 import { QueryBuilderImpl } from './query-builder.js';
 import type { QueryBuilderContext } from './query-builder-context.js';
@@ -204,6 +205,22 @@ describe('E15 — Lock methods', () => {
 			expect.stringContaining('outside a transaction'),
 		);
 		warnSpy.mockRestore();
+	});
+
+	it('routes an outside-transaction lock warning through the runtime logger', () => {
+		const logger = { warn: vi.fn() };
+		const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		setLogger(logger);
+		try {
+			makeBuilder(false).forUpdate().plan();
+			expect(logger.warn).toHaveBeenCalledWith(
+				expect.stringContaining('outside a transaction'),
+			);
+			expect(consoleWarn).not.toHaveBeenCalled();
+		} finally {
+			resetLogger();
+			consoleWarn.mockRestore();
+		}
 	});
 
 	it('does not warn when lock used inside transaction', () => {

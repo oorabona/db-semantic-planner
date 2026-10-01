@@ -60,6 +60,7 @@ import {
 	type RecursiveIncludeConfig,
 	validateRecursiveInclude,
 } from './intent-builder.js';
+import { emitWarning } from './logger.js';
 import {
 	isWhereIntent,
 	objectToWhereIntent,
@@ -686,9 +687,10 @@ export class QueryBuilderImpl<TResult = unknown>
 
 		// E15: Warn when lock is used outside a transaction context
 		if (intent.lock && !this.ctx.inTransaction) {
-			console.warn(
+			emitWarning(
 				'[dbsp] Row-level lock (FOR UPDATE/SHARE) used outside a transaction. ' +
 					'Locks are only effective within a transaction.',
+				'runtime',
 			);
 		}
 

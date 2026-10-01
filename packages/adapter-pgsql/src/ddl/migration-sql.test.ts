@@ -24,7 +24,6 @@ import { describe, expect, it } from 'vitest';
 import { createPgPhysicalModel } from '../physical-model/index.js';
 import { generateDDL } from './ddl-generator.js';
 import {
-	DownIndexRecreationError,
 	generateDownMigrationSQL,
 	generateDownSQL,
 	generateMigrationSQL,
@@ -2192,8 +2191,7 @@ describe('generateDownSQL', () => {
 			expect(withoutNullsSql).toEqual([
 				'CREATE UNIQUE INDEX "idx_users_email_unique_plain" ON "users" ("email") WHERE deleted_at IS NULL;',
 			]);
-			// #245: recreating a non-unique index that declares nullsNotDistinct is a fail-loud input error.
-			expect(() =>
+			expect(
 				generateDownSQL(
 					makeDiff([
 						{
@@ -2205,11 +2203,26 @@ describe('generateDownSQL', () => {
 						},
 					]),
 				),
-			).toThrow(DownIndexRecreationError);
+			).toEqual([
+				'-- WARNING: Cannot reverse drop_index "users"."idx_users_email_plain" -- index definition cannot be recreated faithfully',
+			]);
 		});
 
-		it('refuses an unrecreatable dropped catalog index before returning DOWN SQL', () => {
+		it('writes warnings instead of recreating unmanaged dropped catalog indexes', () => {
 			const diff = makeDiff([
+				{
+					kind: 'drop_index',
+					table: 'users',
+					destructive: true,
+					details: '',
+					meta: {
+						index: {
+							name: 'idx_users_email_lower',
+							columns: ['email'],
+							expressions: ['lower(email)'],
+						},
+					},
+				},
 				{
 					kind: 'drop_index',
 					table: 'embeddings',
@@ -2222,17 +2235,26 @@ describe('generateDownSQL', () => {
 						},
 					},
 				},
+				{
+					kind: 'drop_index',
+					table: 'users',
+					destructive: false,
+					details: '',
+					meta: {
+						index: { name: 'idx_users_email', columns: ['email'] },
+					},
+				},
 			]);
 
-			expect(() => generateDownSQL(diff)).toThrow(
-				expect.objectContaining({
-					name: 'DownIndexRecreationError',
-					table: 'embeddings',
-					index: 'idx-embeddings-manual',
-					message: expect.stringContaining('idx-embeddings-manual'),
-				}),
-			);
-			expect(() => generateDownSQL(diff)).toThrow(DownIndexRecreationError);
+			const sql = generateDownSQL(diff);
+			expect(sql).toEqual([
+				'-- WARNING: Cannot reverse drop_index "users"."idx_users_email_lower" -- index definition cannot be recreated faithfully',
+				'-- WARNING: Cannot reverse drop_index "embeddings"."idx-embeddings-manual" -- index definition cannot be recreated faithfully',
+				'CREATE INDEX "idx_users_email" ON "users" ("email");',
+			]);
+			expect(
+				sql.filter((statement) => statement.includes('CREATE INDEX')),
+			).toEqual(['CREATE INDEX "idx_users_email" ON "users" ("email");']);
 		});
 
 		it('SC-07: alter_foreign_key with oldFk → DROP + re-add old', () => {

@@ -44,7 +44,7 @@ export function convergePg(
 		throw new PgConvergeRefusalError(
 			'invalid-options',
 			[],
-			`converge refuses physical schema ${escapeDiagnosticText(physical.schema)}: ${escapeDiagnosticText(error instanceof Error ? error.message : String(error))}`,
+			`converge refuses physical schema ${escapeDiagnosticText(String(physical.schema))}: ${escapeDiagnosticText(error instanceof Error ? error.message : String(error))}`,
 		);
 	}
 	return convergePgPhysical(

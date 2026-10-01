@@ -149,6 +149,16 @@ describe('public convergePg', () => {
 		expect(pool.connect).not.toHaveBeenCalled();
 	});
 
+	it('refuses a non-string physical schema before connecting', () => {
+		const physical = {
+			...physicalWithUsers(),
+			schema: 42,
+		} as unknown as PgPhysicalModel;
+		const pool = poolThatMustNotConnect();
+
+		expectInvalidOptionsBeforeConnection(pool, physical, {});
+	});
+
 	it('refuses an undeclared external-index table before inventory resolution', () => {
 		const physical = createPgPhysicalModel({
 			mode: 'logical',
