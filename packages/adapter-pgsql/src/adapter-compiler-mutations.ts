@@ -145,6 +145,9 @@ function compileMutationEnvelope(
 		rootTable,
 		model: options?.model ?? deps.model,
 		naming: deps.naming,
+		...(deps.declaredNames !== undefined && {
+			declaredNames: deps.declaredNames,
+		}),
 	});
 }
 

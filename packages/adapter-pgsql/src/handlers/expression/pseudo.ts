@@ -19,7 +19,11 @@ import {
 	integerNode,
 	sortBy,
 } from '../../ast-helpers.js';
-import { schemaForFromName } from '../../binding-registry.js';
+import { hasBindingName, schemaForFromName } from '../../binding-registry.js';
+import {
+	declaredColumnName,
+	declaredTableName,
+} from '../../declared-name-resolver.js';
 import {
 	requireRelationTargetColumns,
 	resolveRelationTarget,
@@ -34,6 +38,46 @@ import type {
 // ============================================================================
 // Helper: Build Recursive CTE
 // ============================================================================
+
+/**
+ * A qualifier is either a query-local range variable/CTE or a declared table.
+ * Only the latter crosses the physical-name boundary.  Keeping this decision
+ * here prevents pseudo traversals from silently changing a binding such as
+ * `activeCategories` into a non-existent `active_categories` range variable.
+ */
+function emittedQualifier(ctx: CompilerContext, qualifier: string): string {
+	if (
+		ctx.aliasColumnAuthorities?.has(qualifier) ||
+		hasBindingName(ctx.bindingNames, qualifier, ctx.naming)
+	) {
+		return qualifier;
+	}
+	return declaredTableName(ctx.declaredNames, qualifier);
+}
+
+function emittedQualifierColumn(
+	ctx: CompilerContext,
+	qualifier: string,
+	column: string,
+): string {
+	const authority = ctx.aliasColumnAuthorities?.get(qualifier);
+	if (authority !== undefined) {
+		return (
+			authority.outputs?.get(column)?.outputKey ??
+			authority.outputsByLogicalKey?.get(column)?.outputKey ??
+			column
+		);
+	}
+	if (hasBindingName(ctx.bindingNames, qualifier, ctx.naming)) {
+		const target = resolveRelationTarget(qualifier, ctx);
+		return (
+			target.outputs?.get(column)?.outputKey ??
+			target.outputsByLogicalKey?.get(column)?.outputKey ??
+			column
+		);
+	}
+	return declaredColumnName(ctx.declaredNames, qualifier, column);
+}
 
 /**
  * Configuration for recursive CTE builder
@@ -95,11 +139,13 @@ export function buildRecursiveScalarSubquery(config: RecursiveCteConfig): Node {
 	);
 
 	const naming = ctx.naming;
-	const dbTable = naming.resolve(table);
-	const dbPk = naming.resolve(pkColumn);
-	const dbFk = naming.resolve(fkColumn);
-	const dbOuter = naming.resolve(outerAlias);
-	const dbOuterSeed = naming.resolve(
+	const dbTable = declaredTableName(ctx.declaredNames, table);
+	const dbPk = declaredColumnName(ctx.declaredNames, table, pkColumn);
+	const dbFk = declaredColumnName(ctx.declaredNames, table, fkColumn);
+	const dbOuter = emittedQualifier(ctx, outerAlias);
+	const dbOuterSeed = emittedQualifierColumn(
+		ctx,
+		outerAlias,
 		outerSeedColumn ?? (isAncestors ? fkColumn : pkColumn),
 	);
 	const schemaName = schemaForFromName(
@@ -390,7 +436,11 @@ export function buildRecursiveScalarSubquery(config: RecursiveCteConfig): Node {
 	};
 
 	// Build final SELECT with json_agg
-	const dbSelectCol = naming.resolve(selectColumn);
+	const dbSelectCol = declaredColumnName(
+		ctx.declaredNames,
+		table,
+		selectColumn,
+	);
 	const finalSelect: SelectStmt = {
 		targetList: [
 			{
@@ -554,17 +604,26 @@ export const singleHopPseudoHandler: ExpressionHandler = {
 		);
 
 		const naming = ctx.naming;
-		const dbTable = naming.resolve(table);
-		const dbPk = naming.resolve(pkColumn);
-		const dbFk = naming.resolve(fkColumn);
+		const dbTable = declaredTableName(ctx.declaredNames, table);
+		const dbPk = declaredColumnName(ctx.declaredNames, table, pkColumn);
 		const schemaName = schemaForFromName(
 			ctx.schema,
 			table,
 			ctx.bindingNames,
 			naming,
 		);
-		const dbCol = naming.resolve(targetColumn);
-		const outerAlias = naming.resolve(ctx.currentAlias ?? ctx.rootTable);
+		const dbCol = declaredColumnName(ctx.declaredNames, table, targetColumn);
+		const outerAlias = emittedQualifier(ctx, ctx.currentAlias ?? ctx.rootTable);
+		const outerParentFk = emittedQualifierColumn(
+			ctx,
+			ctx.currentAlias ?? ctx.rootTable,
+			fkColumn,
+		);
+		const outerChildPk = emittedQualifierColumn(
+			ctx,
+			ctx.currentAlias ?? ctx.rootTable,
+			pkColumn,
+		);
 
 		const innerAlias = '__p';
 
@@ -613,7 +672,7 @@ export const singleHopPseudoHandler: ExpressionHandler = {
 							ColumnRef: {
 								fields: [
 									{ String: { sval: outerAlias } },
-									{ String: { sval: dbFk } },
+									{ String: { sval: outerParentFk } },
 								],
 							},
 						},
@@ -623,7 +682,15 @@ export const singleHopPseudoHandler: ExpressionHandler = {
 							ColumnRef: {
 								fields: [
 									{ String: { sval: innerAlias } },
-									{ String: { sval: dbFk } },
+									{
+										String: {
+											sval: declaredColumnName(
+												ctx.declaredNames,
+												table,
+												fkColumn,
+											),
+										},
+									},
 								],
 							},
 						},
@@ -631,7 +698,7 @@ export const singleHopPseudoHandler: ExpressionHandler = {
 							ColumnRef: {
 								fields: [
 									{ String: { sval: outerAlias } },
-									{ String: { sval: dbPk } },
+									{ String: { sval: outerChildPk } },
 								],
 							},
 						},
@@ -677,9 +744,9 @@ export const chainedPseudoHandler: ExpressionHandler = {
 		}
 
 		const naming = ctx.naming;
-		const dbTable = naming.resolve(table);
-		const dbPk = naming.resolve(pkColumn);
-		const dbFk = naming.resolve(fkColumn);
+		const dbTable = declaredTableName(ctx.declaredNames, table);
+		const dbPk = declaredColumnName(ctx.declaredNames, table, pkColumn);
+		const dbFk = declaredColumnName(ctx.declaredNames, table, fkColumn);
 		const schemaName = schemaForFromName(
 			ctx.schema,
 			table,
@@ -695,7 +762,11 @@ export const chainedPseudoHandler: ExpressionHandler = {
 			'targetColumn',
 			'chained pseudo',
 		);
-		const targetCol = naming.resolve(targetColumn);
+		const targetCol = declaredColumnName(
+			ctx.declaredNames,
+			table,
+			targetColumn,
+		);
 		requireRelationTargetColumns(
 			resolveRelationTarget(table, ctx),
 			[pkColumn, fkColumn, targetColumn],
@@ -718,7 +789,7 @@ export const chainedPseudoHandler: ExpressionHandler = {
 			const alias = `__p${i}`;
 			const outerRef =
 				i === 0
-					? naming.resolve(ctx.currentAlias ?? ctx.rootTable)
+					? emittedQualifier(ctx, ctx.currentAlias ?? ctx.rootTable)
 					: `__p${i - 1}`;
 
 			const subSelect: SelectStmt = {

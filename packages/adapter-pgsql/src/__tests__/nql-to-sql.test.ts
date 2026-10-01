@@ -1065,11 +1065,12 @@ u | select postTitle`.dump();
 		);
 	});
 
-	it('compiles flat include with all columns', () => {
-		const sql = nqlToSQL('departments | select *, employees.* | flat');
-		// flat = non-nested strategy (join or lateral, planner decides)
-		expect(sql).toContain('join');
-		expect(sql).toContain('employees');
+	it('refuses flat include with duplicate returned labels', () => {
+		expect(() =>
+			nqlToSQL('departments | select *, employees.* | flat'),
+		).toThrow(
+			"Projection output label 'id' is produced by multiple candidates",
+		);
 	});
 
 	it('propagates specific columns through flat include', () => {
@@ -1089,13 +1090,11 @@ u | select postTitle`.dump();
 		expect(sql).toContain('.email');
 	});
 
-	it('uses star for flat include with relation.*', () => {
-		const sql = nqlToSQL('departments | select id, employees.* | flat');
-		expect(sql).toContain('employees');
-		// Wildcard must produce star target, not just 'id'
-		// SQL should have employees.* (star) NOT just "employees"."id"
-		expect(sql).not.toMatch(
-			/"employees_0"\."id"\s+as\s+"employees\.id"\s*from/i,
+	it('refuses relation stars that duplicate a returned root label', () => {
+		expect(() =>
+			nqlToSQL('departments | select id, employees.* | flat'),
+		).toThrow(
+			"Projection output label 'id' is produced by multiple candidates",
 		);
 	});
 
@@ -1609,7 +1608,7 @@ describe('CTE relation planning', () => {
 				'with authors as (authors | select id, id, name) posts | select title, author.id | flat',
 			),
 		).toThrow(
-			"Relation 'author' target 'authors' resolves to the CTE 'authors', whose projected column 'id' is ambiguous and cannot be referenced (join key).",
+			"Projection output label 'id' is produced by multiple candidates",
 		);
 	});
 

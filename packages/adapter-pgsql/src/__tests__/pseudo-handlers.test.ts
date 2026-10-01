@@ -2,9 +2,14 @@
  * Pseudo-Column and Relation Expression Handler Tests
  */
 
+import { schema } from '@dbsp/core';
 import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
+import {
+	createDeclaredNameResolver,
+	getCachedPgPhysicalModel,
+} from '../declared-name-resolver.js';
 import {
 	chainedPseudoHandler,
 	prefixedRelationColumnHandler,
@@ -22,6 +27,13 @@ import { CamelCaseNamingPlugin } from '../naming-plugin.js';
 
 describe('Pseudo-Column Handlers', () => {
 	const naming = new CamelCaseNamingPlugin();
+	const pseudoModel = schema({
+		posts: { id: 'integer', authorId: 'integer' },
+		authors: { id: 'integer', name: 'string' },
+	}).model;
+	const declaredNames = createDeclaredNameResolver(
+		getCachedPgPhysicalModel(pseudoModel, 'public', 'snake_case'),
+	);
 	const baseCtx: CompilerContext = {
 		naming,
 		rootTable: 'employees',
@@ -168,6 +180,7 @@ describe('Pseudo-Column Handlers', () => {
 					currentAlias: 'posts',
 					schema: 'tenant_42',
 					bindingNames: new Set(['authors']),
+					declaredNames,
 				},
 				state,
 			);

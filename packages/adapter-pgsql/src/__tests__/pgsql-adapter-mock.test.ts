@@ -3745,7 +3745,7 @@ describe('PgsqlAdapter.execute — row transformation', () => {
 		expect(rows).toEqual([{ user_id: 1, full_name: 'Alice', is_active: true }]);
 	});
 
-	it('maps rows through a compiler projection output map', async () => {
+	it('leaves multiple projectionless rows unchanged', async () => {
 		const pool = makePool({
 			rows: [
 				{ order_id: 1, total_price: 100 },
@@ -3793,7 +3793,7 @@ describe('PgsqlAdapter.execute — row transformation', () => {
 		expect(rows[0]).not.toHaveProperty(longColumn.slice(0, 63));
 	});
 
-	it('maps a declared snake_case projection through its compiler output map', async () => {
+	it('keeps a declared snake_case projection at its declared logical key', async () => {
 		const model = schema({ records: { record_id: 'integer' } }).model;
 		const adapter = createPgsqlAdapter(
 			makePool({ rows: [{ record_id: 42 }] }),
@@ -3811,8 +3811,8 @@ describe('PgsqlAdapter.execute — row transformation', () => {
 			{ model },
 		);
 
-		expect(query.outputKeyMap?.get('record_id')).toBe('recordId');
-		expect(await adapter.execute(query)).toEqual([{ recordId: 42 }]);
+		expect(query.outputKeyMap?.get('record_id')).toBe('record_id');
+		expect(await adapter.execute(query)).toEqual([{ record_id: 42 }]);
 	});
 
 	it('hydrates a __proto__ output label as an own data property', async () => {

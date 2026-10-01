@@ -36,6 +36,7 @@ import {
 } from './compiler.js';
 import { inferPgArrayType, stripArraySuffix } from './compiler-utils.js';
 import { validateDbType } from './db-type.js';
+import { declaredColumnName } from './declared-name-resolver.js';
 import { createCompilerState } from './handlers/types.js';
 import { intentToDecisions } from './intent-to-decisions.js';
 import {
@@ -333,26 +334,18 @@ function compileJoinIntents(
 				// rangeVar() emits the same spelling rather than a physical table name.
 				tableAliasMap.set(tableAlias, tableAlias);
 			}
-			const onNaming =
-				tableAlias === rootTable
-					? naming
-					: {
-							resolve: (name: string) =>
-								name === tableAlias ? name : naming.resolve(name),
-							model: naming.model,
-							toDatabase: (name: string) =>
-								name === tableAlias ? name : naming.resolve(name),
-							toModel: naming.model,
-						};
-
 			const ctx: WhereCompilerCtx = {
 				rootTable,
 				aliases: tableAliasMap,
 				paramState,
-				naming: onNaming,
+				naming,
 				// outerTable = tableAlias so FieldRef(scope:'outer') resolves to the
 				// joined alias (e.g. 'e2' in self-join ON conditions).
 				outerTable: tableAlias,
+				// A join alias is query-local. Mark it as an authority at the AST
+				// boundary instead of altering the naming plugin used by the WHERE
+				// compiler for declared table and column references.
+				aliasColumnAuthorities: new Map([[tableAlias, { target: tableAlias }]]),
 				...(schemaName !== undefined && { schemaName }),
 				...(deps.bindingNames !== undefined && {
 					bindingNames: deps.bindingNames,
@@ -661,7 +654,6 @@ function buildJsonAggColumnKeyMap(
 	decision: PlanDecision,
 	targetTable: string,
 	model: ModelIR | undefined,
-	naming: AdapterCompilerDeps['naming'],
 	deps?: AdapterCompilerDeps,
 ): Record<string, string> | undefined {
 	const columns = jsonAggProjectedColumns(decision, targetTable, model, deps);
@@ -693,10 +685,8 @@ function buildJsonAggColumnKeyMap(
 		const modelColumn =
 			table?.columns.find((column) => column.name === columnName)?.name ??
 			columnName;
-		map[
-			deps?.declaredNames?.column(targetTable, modelColumn) ??
-				naming.resolve(modelColumn)
-		] = modelColumn;
+		map[declaredColumnName(deps?.declaredNames, targetTable, modelColumn)] =
+			modelColumn;
 	}
 	return Object.keys(map).length > 0 ? map : undefined;
 }
@@ -846,7 +836,7 @@ function trustedRelationColumnShape(
 function buildTrustedRelationColumnOutputDescriptor(
 	decision: PlanDecision,
 	model: ModelIR | undefined,
-	naming: AdapterCompilerDeps['naming'],
+	deps: AdapterCompilerDeps,
 ): OutputDescriptor | undefined {
 	if (decision.type !== 'selectRelationColumn') return undefined;
 	const trusted = getTrustedNqlRelationFilterFields(decision);
@@ -858,15 +848,16 @@ function buildTrustedRelationColumnOutputDescriptor(
 	const column = table?.columns.find(
 		(candidate) =>
 			candidate.name === trusted.selectedColumn ||
-			naming.resolve(candidate.name) === trusted.selectedColumn,
+			declaredColumnName(deps.declaredNames, sourceTable, candidate.name) ===
+				trusted.selectedColumn,
 	);
 	if (table === undefined || column === undefined) return undefined;
-	const outputColumn =
-		decision.alias ?? decision.column ?? trusted.selectedColumn;
 	const js = column.type === 'bigint' ? column.js : undefined;
 	return {
-		outputKey: naming.resolve(outputColumn),
-		logicalKey: decision.alias ?? naming.model(column.name),
+		outputKey:
+			decision.alias ??
+			declaredColumnName(deps.declaredNames, table.name, column.name),
+		logicalKey: decision.alias ?? column.name,
 		source: {
 			kind: 'modelColumn',
 			table: table.name,
@@ -880,14 +871,14 @@ function buildTrustedRelationColumnOutputDescriptor(
 function buildTrustedRelationColumnOutputDescriptors(
 	decisions: readonly PlanDecision[],
 	model: ModelIR | undefined,
-	naming: AdapterCompilerDeps['naming'],
+	deps: AdapterCompilerDeps,
 ): readonly OutputDescriptor[] {
 	const descriptors: OutputDescriptor[] = [];
 	for (const decision of decisions) {
 		const descriptor = buildTrustedRelationColumnOutputDescriptor(
 			decision,
 			model,
-			naming,
+			deps,
 		);
 		if (descriptor) descriptors.push(descriptor);
 	}
@@ -923,7 +914,6 @@ function buildPhysicalRelationColumnOutputDescriptor(
 	decision: PlanDecision,
 	rootTable: string,
 	model: ModelIR | undefined,
-	naming: AdapterCompilerDeps['naming'],
 	deps: AdapterCompilerDeps,
 ): OutputDescriptor | undefined {
 	if (
@@ -943,18 +933,18 @@ function buildPhysicalRelationColumnOutputDescriptor(
 	);
 	if (targetTable) {
 		const target = resolveRelationTarget(targetTable, deps);
-		const descriptor = target.outputs?.get(naming.resolve(decision.column));
+		const descriptor =
+			target.outputs?.get(decision.column) ??
+			target.outputsByLogicalKey?.get(decision.column);
 		if (descriptor) {
 			return {
 				...descriptor,
-				outputKey: naming.resolve(decision.alias ?? decision.column),
+				outputKey: decision.alias ?? descriptor.outputKey,
 				logicalKey:
 					decision.alias ??
-					naming.model(
-						descriptor.source.kind === 'modelColumn'
-							? descriptor.source.column
-							: decision.column,
-					),
+					(descriptor.source.kind === 'modelColumn'
+						? descriptor.source.column
+						: decision.column),
 				shape: { kind: 'scalar', cardinality: 'one' },
 			};
 		}
@@ -963,14 +953,16 @@ function buildPhysicalRelationColumnOutputDescriptor(
 	const column = table?.columns.find(
 		(candidate) =>
 			candidate.name === decision.column ||
-			naming.resolve(candidate.name) === decision.column,
+			declaredColumnName(deps.declaredNames, targetTable!, candidate.name) ===
+				decision.column,
 	);
 	if (table === undefined || column === undefined) return undefined;
 
-	const outputColumn = decision.alias ?? decision.column;
 	return {
-		outputKey: naming.resolve(outputColumn),
-		logicalKey: decision.alias ?? naming.model(column.name),
+		outputKey:
+			decision.alias ??
+			declaredColumnName(deps.declaredNames, table.name, column.name),
+		logicalKey: decision.alias ?? column.name,
 		source: {
 			kind: 'modelColumn',
 			table: table.name,
@@ -985,7 +977,6 @@ function buildPhysicalRelationColumnOutputDescriptors(
 	decisions: readonly PlanDecision[],
 	rootTable: string,
 	model: ModelIR | undefined,
-	naming: AdapterCompilerDeps['naming'],
 	deps: AdapterCompilerDeps,
 ): readonly OutputDescriptor[] {
 	const descriptors: OutputDescriptor[] = [];
@@ -994,7 +985,6 @@ function buildPhysicalRelationColumnOutputDescriptors(
 			decision,
 			rootTable,
 			model,
-			naming,
 			deps,
 		);
 		if (descriptor) descriptors.push(descriptor);
@@ -1031,7 +1021,6 @@ function annotateJsonAggColumnKeyMaps(
 	plan: PlanReport,
 	decisions: readonly PlanDecision[],
 	model: ModelIR | undefined,
-	naming: AdapterCompilerDeps['naming'],
 	deps?: AdapterCompilerDeps,
 ): boolean {
 	let annotated = false;
@@ -1043,7 +1032,7 @@ function annotateJsonAggColumnKeyMaps(
 				: undefined;
 			const keyMap =
 				targetTable && planDecision
-					? buildJsonAggColumnKeyMap(decision, targetTable, model, naming, deps)
+					? buildJsonAggColumnKeyMap(decision, targetTable, model, deps)
 					: undefined;
 			const nestedReadTransforms =
 				targetTable && planDecision
@@ -1064,13 +1053,8 @@ function annotateJsonAggColumnKeyMaps(
 		}
 		if (decision.children && decision.children.length > 0) {
 			annotated =
-				annotateJsonAggColumnKeyMaps(
-					plan,
-					decision.children,
-					model,
-					naming,
-					deps,
-				) || annotated;
+				annotateJsonAggColumnKeyMaps(plan, decision.children, model, deps) ||
+				annotated;
 		}
 	}
 	return annotated;
@@ -1341,7 +1325,6 @@ export function compileSelectEnvelope<T = unknown>(
 			candidateHydrationPlan,
 			allDecisions,
 			resolvedModelForCompiler,
-			deps.naming,
 			deps,
 		);
 		if (hasJsonAggColumnKeyMaps) {
@@ -1375,6 +1358,9 @@ export function compileSelectEnvelope<T = unknown>(
 		rootTable: plan.rootTable,
 		model: resolvedModelForCompiler,
 		naming: deps.naming,
+		...(deps.declaredNames !== undefined && {
+			declaredNames: deps.declaredNames,
+		}),
 		...(hydrationPlan ? { hydrationPlan } : {}),
 	});
 	return supplementOutputDescriptors(baseEnv, [
@@ -1387,13 +1373,12 @@ export function compileSelectEnvelope<T = unknown>(
 			simplifiedPlan.decisions,
 			plan.rootTable,
 			resolvedModelForCompiler,
-			deps.naming,
 			deps,
 		),
 		...buildTrustedRelationColumnOutputDescriptors(
 			simplifiedPlan.decisions,
 			resolvedModelForCompiler,
-			deps.naming,
+			deps,
 		),
 	]);
 }

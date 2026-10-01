@@ -15,6 +15,7 @@ import {
 	buildModelColumnProjections,
 	type ColumnMetadataProjection,
 } from './column-metadata.js';
+import type { DeclaredNameResolver } from './declared-name-resolver.js';
 import type { NamingPlugin } from './naming-plugin.js';
 
 const projectionEnvelopeBrand: unique symbol = Symbol('projectionEnvelope');
@@ -64,6 +65,7 @@ export type FromAstProjectionOptions = {
 	readonly rootTable: string;
 	readonly model: ModelIR | undefined;
 	readonly naming: NamingPlugin;
+	readonly declaredNames?: DeclaredNameResolver;
 	readonly hydrationPlan?: PlanReport;
 };
 
@@ -74,6 +76,7 @@ export type FromModelColumnsOptions = {
 	readonly columns: readonly string[];
 	readonly model: ModelIR;
 	readonly naming: NamingPlugin;
+	readonly declaredNames?: DeclaredNameResolver;
 };
 
 export type FromOutputDescriptorsOptions = {
@@ -333,7 +336,7 @@ export function fromAstProjection<T = unknown>(
 			options.ast,
 			options.rootTable,
 			options.model,
-			options.naming,
+			options.declaredNames,
 		),
 	);
 	return makeEnvelope<T>({
@@ -360,7 +363,7 @@ export function fromModelColumns<T = unknown>(
 					options.table,
 					options.columns,
 					options.model,
-					options.naming,
+					options.declaredNames,
 				),
 			),
 		},
@@ -369,11 +372,10 @@ export function fromModelColumns<T = unknown>(
 
 function outputDescriptorWithEmittedKey(
 	output: OutputDescriptor,
-	naming: NamingPlugin,
 	emittedKey?: string,
 ): OutputProjection {
 	return descriptor(
-		emittedKey ?? naming.resolve(output.outputKey),
+		emittedKey ?? output.outputKey,
 		output.source,
 		output.shape,
 		(output as OutputDescriptor & { logicalKey?: string }).logicalKey ??
@@ -387,8 +389,7 @@ export function fromOutputDescriptors<T = unknown>(
 	const descriptorsByOutput = new Map<string, OutputDescriptor[]>();
 	for (const output of options.declaredOutputs ?? []) {
 		const outputKey =
-			options.emittedOutputKeys?.get(output.outputKey) ??
-			options.naming.resolve(output.outputKey);
+			options.emittedOutputKeys?.get(output.outputKey) ?? output.outputKey;
 		const entries = descriptorsByOutput.get(outputKey) ?? [];
 		entries.push(output);
 		descriptorsByOutput.set(outputKey, entries);
@@ -396,8 +397,7 @@ export function fromOutputDescriptors<T = unknown>(
 
 	const outputs = new Map<string, OutputProjection>();
 	for (const column of options.columns) {
-		const outputKey =
-			options.emittedOutputKeys?.get(column) ?? options.naming.resolve(column);
+		const outputKey = options.emittedOutputKeys?.get(column) ?? column;
 		const entries = descriptorsByOutput.get(outputKey) ?? [];
 		if (entries.length === 0) {
 			outputs.set(
@@ -429,7 +429,7 @@ export function fromOutputDescriptors<T = unknown>(
 		outputs.set(
 			outputKey,
 			output !== undefined
-				? outputDescriptorWithEmittedKey(output, options.naming, outputKey)
+				? outputDescriptorWithEmittedKey(output, outputKey)
 				: descriptorForSource(outputKey, {
 						kind: 'unresolved',
 						reason: 'binding output descriptor could not be read',

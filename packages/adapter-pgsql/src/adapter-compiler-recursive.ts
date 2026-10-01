@@ -619,6 +619,9 @@ export function compileRecursive<T = unknown>(
 		columns: config.selectColumns,
 		model,
 		naming: deps.naming,
+		...(deps.declaredNames !== undefined && {
+			declaredNames: deps.declaredNames,
+		}),
 	});
 	const env = projectNamedFields<T>(sourceEnv, {
 		sql,

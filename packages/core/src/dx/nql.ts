@@ -946,7 +946,15 @@ function toRuntimeBindingRow(
 				`NQL mutation binding '${bindName}' returned a row without projected column '${column}'.`,
 			);
 		}
-		materialized[column] = source[column];
+		// `__proto__` is a valid projected label. Assignment on a normal object
+		// invokes Object.prototype's legacy setter instead of preserving it as an
+		// own value, so materialize every binding field as a data property.
+		Object.defineProperty(materialized, column, {
+			value: source[column],
+			enumerable: true,
+			writable: true,
+			configurable: true,
+		});
 	}
 	return materialized;
 }

@@ -45,6 +45,7 @@ import {
 	requestedColumnReference,
 	requireEmittedRelationTargetColumn,
 } from './relation-target-projection.js';
+import { identifierText, type SqlIdentifier } from './sql-identifier.js';
 import { validateIdentifier } from './validate.js';
 
 // Re-export normalizeSQL from core (canonical location since A-9 DRY refactor)
@@ -179,17 +180,14 @@ export function columnRef(
 	const authorityOutput =
 		typeof column === 'string'
 			? (authority?.outputs?.get(column) ??
-				[...(authority?.outputs?.values() ?? [])].find(
-					(output) =>
-						output.logicalKey === column ||
-						output.outputKey === pgReturnedIdentifier(naming.resolve(column)),
-				))
+				authority?.outputsByLogicalKey?.get(column) ??
+				authority?.outputs?.get(pgReturnedIdentifier(naming.resolve(column))))
 			: undefined;
 	const resolved =
 		typeof column === 'string'
 			? authorityOutput !== undefined
 				? emittedColumnReference(authorityOutput.outputKey)
-				: requestedColumnReference(column, { naming })
+				: requestedColumnReference(naming.resolve(column))
 			: column;
 	const dbColumn = resolved.emittedName;
 	if (table) {
@@ -1003,7 +1001,6 @@ export function windowFuncCall(
  * @param whereExpr - The correlation WHERE expression
  * @param alias - The column alias (e.g., 'author_json')
  * @param schemaName - Optional schema name
- * @param naming - Naming plugin for identifier transformation
  */
 export function jsonAggSubquery(
 	targetTable: string,
@@ -1196,5 +1193,172 @@ export function jsonAggCorrelation(
 	return eqExpr(
 		columnRef(targetColumn, targetAlias, undefined, naming),
 		columnRef(parentColumn, parentAlias, undefined, naming),
+	);
+}
+
+// ============================================================================
+// Established-identifier façade
+// ============================================================================
+
+/** Build a column reference from identifiers that have already crossed authority. */
+export function sqlColumnRef(
+	column: SqlIdentifier,
+	table?: SqlIdentifier,
+	schema?: SqlIdentifier,
+): Node {
+	const fields: Node[] = [];
+	if (schema !== undefined) fields.push(stringNode(identifierText(schema)));
+	if (table !== undefined) fields.push(stringNode(identifierText(table)));
+	fields.push(stringNode(identifierText(column)));
+	return { ColumnRef: { fields } };
+}
+
+/** Build an established `table.*` reference without applying naming. */
+export function sqlColumnRefStar(table?: SqlIdentifier): Node {
+	const fields: Node[] = [];
+	if (table !== undefined) fields.push(stringNode(identifierText(table)));
+	fields.push({ A_Star: {} });
+	return { ColumnRef: { fields } };
+}
+
+/** Build a FROM range variable from established table, alias, and schema names. */
+export function sqlRangeVar(
+	table: SqlIdentifier,
+	alias?: SqlIdentifier,
+	schema?: SqlIdentifier,
+): Node {
+	const range: RangeVar = {
+		relname: identifierText(table),
+		inh: true,
+		relpersistence: 'p',
+	};
+	if (schema !== undefined) range.schemaname = identifierText(schema);
+	if (alias !== undefined) range.alias = sqlRangeAlias(alias);
+	return { RangeVar: range };
+}
+
+/** Build a query-local range alias. */
+export function sqlRangeAlias(alias: SqlIdentifier): { aliasname: string } {
+	return { aliasname: identifierText(alias) };
+}
+
+/** Build a SELECT target with an established output alias. */
+export function sqlResTarget(val: Node, alias?: SqlIdentifier): Node {
+	return {
+		ResTarget: {
+			val,
+			...(alias !== undefined && { name: identifierText(alias) }),
+		},
+	};
+}
+
+export type SqlInsertOptions = Omit<
+	InsertOptions,
+	'table' | 'columns' | 'naming'
+> & {
+	table: SqlIdentifier;
+	columns?: readonly SqlIdentifier[];
+};
+
+/** Build INSERT with a declared target and declared column list. */
+export function sqlInsertStmt(options: SqlInsertOptions): Node {
+	const { columns, ...rest } = options;
+	return insertStmt({
+		...rest,
+		table: identifierText(options.table),
+		...(columns !== undefined && {
+			columns: columns.map(identifierText),
+		}),
+		naming: identityNaming,
+	});
+}
+
+export type SqlUpdateOptions = Omit<
+	UpdateOptions,
+	'table' | 'set' | 'naming'
+> & {
+	table: SqlIdentifier;
+	set: ReadonlyArray<{ column: SqlIdentifier; value: Node }>;
+};
+
+/** Build UPDATE with a declared target and declared assignment columns. */
+export function sqlUpdateStmt(options: SqlUpdateOptions): Node {
+	return updateStmt({
+		...options,
+		table: identifierText(options.table),
+		set: options.set.map(({ column, value }) => ({
+			column: identifierText(column),
+			value,
+		})),
+		naming: identityNaming,
+	});
+}
+
+export type SqlDeleteOptions = Omit<DeleteOptions, 'table' | 'naming'> & {
+	table: SqlIdentifier;
+};
+
+/** Build DELETE with a declared target. */
+export function sqlDeleteStmt(options: SqlDeleteOptions): Node {
+	return deleteStmt({
+		...options,
+		table: identifierText(options.table),
+		naming: identityNaming,
+	});
+}
+
+export type SqlJsonAggOptions = Omit<
+	NonNullable<Parameters<typeof jsonAggSubquery>[5]>,
+	'innerAlias' | 'columns' | 'childNodes'
+> & {
+	innerAlias?: SqlIdentifier;
+	columns?: readonly SqlIdentifier[];
+	childNodes?: readonly { key: SqlIdentifier; node: Node }[];
+};
+
+/** Build a JSON aggregate using only established relation and output identifiers. */
+export function sqlJsonAggSubquery(
+	targetTable: SqlIdentifier,
+	whereExpr: Node,
+	alias: SqlIdentifier,
+	schemaName?: SqlIdentifier,
+	options?: SqlJsonAggOptions,
+): Node {
+	return jsonAggSubquery(
+		identifierText(targetTable),
+		whereExpr,
+		identifierText(alias),
+		schemaName === undefined ? undefined : identifierText(schemaName),
+		identityNaming,
+		options === undefined
+			? undefined
+			: {
+					...options,
+					...(options.innerAlias !== undefined && {
+						innerAlias: identifierText(options.innerAlias),
+					}),
+					...(options.columns !== undefined && {
+						columns: options.columns.map(identifierText),
+					}),
+					...(options.childNodes !== undefined && {
+						childNodes: options.childNodes.map(({ key, node }) => ({
+							key: identifierText(key),
+							node,
+						})),
+					}),
+				},
+	);
+}
+
+/** Build a JSON aggregate correlation from established column and alias names. */
+export function sqlJsonAggCorrelation(
+	parentAlias: SqlIdentifier,
+	parentColumn: SqlIdentifier,
+	targetAlias: SqlIdentifier,
+	targetColumn: SqlIdentifier,
+): Node {
+	return eqExpr(
+		sqlColumnRef(targetColumn, targetAlias),
+		sqlColumnRef(parentColumn, parentAlias),
 	);
 }

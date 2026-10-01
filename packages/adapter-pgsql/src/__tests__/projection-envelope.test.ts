@@ -58,7 +58,7 @@ function selectAst(targetList: readonly unknown[]): Node {
 }
 
 describe('projection envelope', () => {
-	it('maps a declared snake_case projection to its logical result key', () => {
+	it('keeps a declared snake_case projection at its declared logical key', () => {
 		const snakeSchema = schema({ events: { event_id: 'integer' } });
 		const env = fromAstProjection({
 			sql: 'SELECT event_id FROM events',
@@ -71,7 +71,7 @@ describe('projection envelope', () => {
 
 		const compiled = finalizeEnvelope(env);
 
-		expect(compiled.outputKeyMap?.get('event_id')).toBe('eventId');
+		expect(compiled.outputKeyMap?.get('event_id')).toBe('event_id');
 	});
 
 	it('preserves a source logical key through an unchanged CTE output label', () => {

@@ -31,6 +31,10 @@ const testSchema = schema({
 		eventId: ref('events', { as: 'event', references: ['id'] }),
 		bigCount: { type: 'bigint', js: 'bigint' },
 	},
+	event_metrics: {
+		eventId: 'uuid',
+		metricId: 'bigint',
+	},
 });
 
 function compile(plan: PlanReport) {
@@ -168,26 +172,27 @@ describe('bigint js column metadata provenance', () => {
 		});
 	});
 
-	it('drops ambiguous colliding output keys', () => {
-		const compiled = compile({
-			rootTable: 'events',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'includeStrategy',
-					choice: 'join',
-					relation: 'metrics',
-					relationName: 'metrics',
-					targetTable: 'metrics',
-					sourceColumn: ['id'],
-					targetColumn: ['eventId'],
-					columns: ['*'],
-				},
-			],
-		} as unknown as PlanReport);
-
-		expect(compiled.columnMetadata?.has('id')).toBe(false);
-		expect(compiled.columnMetadata?.has('bigCount')).toBe(false);
+	it('refuses duplicate returned output labels', () => {
+		expect(() =>
+			compile({
+				rootTable: 'events',
+				decisions: [
+					{ type: 'select', column: '*' },
+					{
+						type: 'includeStrategy',
+						choice: 'join',
+						relation: 'metrics',
+						relationName: 'metrics',
+						targetTable: 'metrics',
+						sourceColumn: ['id'],
+						targetColumn: ['eventId'],
+						columns: ['*'],
+					},
+				],
+			} as unknown as PlanReport),
+		).toThrow(
+			"Projection output label 'id' is produced by multiple candidates",
+		);
 	});
 
 	it('uses output aliases to distinguish same-name joined ids', () => {

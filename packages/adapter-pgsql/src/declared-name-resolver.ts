@@ -16,11 +16,59 @@ export interface DeclaredNameResolver {
 	readonly physicalModel: PgPhysicalModel;
 	table(name: string): string | undefined;
 	column(table: string, name: string): string | undefined;
+	/** Restores the declared logical column key for one emitted physical column. */
+	logicalColumn(table: string, physicalName: string): string | undefined;
 	index(table: string, name: string): string | undefined;
 	constraint(table: string, name: string): string | undefined;
 	enum(name: string): string | undefined;
 	/** Resolve an index only when its logical name is unique across the model. */
 	uniqueIndex(name: string): string | undefined;
+}
+
+/**
+ * Cross a declared logical address into the physical inventory.  The absence of
+ * an authority is the deliberately supported `dbCasing: 'preserve'` model-less
+ * compatibility mode, where the logical spelling is already the SQL spelling.
+ * Once an authority exists, a missing address is an error rather than a
+ * casing-based fallback.
+ */
+export function declaredTableName(
+	declaredNames: DeclaredNameResolver | undefined,
+	table: string,
+): string {
+	if (declaredNames === undefined) return table;
+	const physical = declaredNames.table(table);
+	if (physical !== undefined) return physical;
+	throw new Error(
+		`Declared table '${table}' is absent from the physical model.`,
+	);
+}
+
+export function declaredColumnName(
+	declaredNames: DeclaredNameResolver | undefined,
+	table: string,
+	column: string,
+): string {
+	if (declaredNames === undefined) return column;
+	const physical = declaredNames.column(table, column);
+	if (physical !== undefined) return physical;
+	throw new Error(
+		`Declared column '${table}.${column}' is absent from the physical model.`,
+	);
+}
+
+/** Recover a declared logical key from a returned physical column label. */
+export function declaredLogicalColumnName(
+	declaredNames: DeclaredNameResolver | undefined,
+	table: string,
+	physicalColumn: string,
+): string {
+	if (declaredNames === undefined) return physicalColumn;
+	const logical = declaredNames.logicalColumn(table, physicalColumn);
+	if (logical !== undefined) return logical;
+	throw new Error(
+		`Physical column '${table}.${physicalColumn}' is absent from the declared model.`,
+	);
 }
 
 type PerModelPhysicalCache = Map<string, PgPhysicalModel>;
@@ -109,10 +157,18 @@ export function createDeclaredNameResolver(
 	// across the model. Build that reverse lookup once with the cached physical
 	// model rather than scanning the inventory for every helper call.
 	const uniqueIndexes = new Map<string, string | undefined>();
+	const logicalColumns = new Map<string, string>();
 	for (const entry of inventory.entries) {
 		if (entry.logical.kind !== 'index') continue;
 		const seen = uniqueIndexes.has(entry.logical.name);
 		uniqueIndexes.set(entry.logical.name, seen ? undefined : entry.physical);
+	}
+	for (const entry of inventory.entries) {
+		if (entry.logical.kind !== 'column') continue;
+		logicalColumns.set(
+			`${entry.logical.table}\u0000${entry.physical}`,
+			entry.logical.name,
+		);
 	}
 	const get = (
 		address: Parameters<typeof inventory.get>[0],
@@ -124,6 +180,8 @@ export function createDeclaredNameResolver(
 		table: (name: string) => get({ kind: 'table', schema, name }),
 		column: (table: string, name: string) =>
 			get({ kind: 'column', schema, table, name }),
+		logicalColumn: (table: string, physicalName: string) =>
+			logicalColumns.get(`${table}\u0000${physicalName}`),
 		index: (table: string, name: string) =>
 			get({ kind: 'index', schema, table, name }),
 		constraint: (table: string, name: string) =>

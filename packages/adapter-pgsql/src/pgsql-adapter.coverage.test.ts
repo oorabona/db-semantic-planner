@@ -786,7 +786,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			expect(adapter.dbCasing).toBe('camelCase');
 		});
 
-		it('compile respects all adapter options', () => {
+		it('refuses non-preserve compilation without a model', () => {
 			const adapter = createPgsqlCompileOnlyAdapter({
 				schemaName: 'tenant_all',
 				dbCasing: 'snake_case',
@@ -797,9 +797,9 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				decisions: [{ type: 'select', column: '*' }],
 			} as any;
 
-			const result = adapter.compile(plan);
-
-			expect(result.sql).toContain('tenant_all');
+			expect(() => adapter.compile(plan)).toThrow(
+				"PgsqlAdapter compilation with dbCasing 'snake_case' requires a ModelIR",
+			);
 		});
 	});
 
@@ -2038,7 +2038,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 	});
 
 	describe('compile - dbCasing variants', () => {
-		it('compiles with snake_case naming', () => {
+		it('refuses snake_case naming without a model', () => {
 			const adapter = createPgsqlCompileOnlyAdapter({
 				dbCasing: 'snake_case',
 			});
@@ -2046,11 +2046,10 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				rootTable: 'users',
 				decisions: [{ type: 'select', column: '*' }],
 			} as any;
-			const result = adapter.compile(plan);
-			expect(result.sql).toContain('SELECT');
+			expect(() => adapter.compile(plan)).toThrow('requires a ModelIR');
 		});
 
-		it('compiles with camelCase naming', () => {
+		it('refuses camelCase naming without a model', () => {
 			const adapter = createPgsqlCompileOnlyAdapter({
 				dbCasing: 'camelCase',
 			});
@@ -2058,8 +2057,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				rootTable: 'users',
 				decisions: [{ type: 'select', column: '*' }],
 			} as any;
-			const result = adapter.compile(plan);
-			expect(result.sql).toContain('SELECT');
+			expect(() => adapter.compile(plan)).toThrow('requires a ModelIR');
 		});
 	});
 

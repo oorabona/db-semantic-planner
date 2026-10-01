@@ -35,6 +35,9 @@ function compileIncludeSelectEnvelope(
 			rootTable: targetTable,
 			model: deps.model,
 			naming: deps.naming,
+			...(deps.declaredNames !== undefined && {
+				naming: deps.naming,
+			}),
 		}),
 	);
 }

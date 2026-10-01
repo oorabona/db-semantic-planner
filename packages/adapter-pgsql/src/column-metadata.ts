@@ -1,6 +1,10 @@
 import type { ColumnIR, ColumnJsReadType, ModelIR, TableIR } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
-import type { NamingPlugin } from './naming-plugin.js';
+import {
+	type DeclaredNameResolver,
+	declaredColumnName,
+	declaredTableName,
+} from './declared-name-resolver.js';
 
 type ProjectionSource = {
 	readonly table: string;
@@ -40,6 +44,20 @@ type AliasContext = {
 	readonly visibleTables: readonly string[];
 };
 
+function declaredNameAuthority(
+	value: unknown,
+): DeclaredNameResolver | undefined {
+	if (
+		value !== null &&
+		typeof value === 'object' &&
+		typeof (value as { table?: unknown }).table === 'function' &&
+		typeof (value as { column?: unknown }).column === 'function'
+	) {
+		return value as DeclaredNameResolver;
+	}
+	return undefined;
+}
+
 function hasTableMap(model: ModelIR): boolean {
 	const tables = (model as { tables?: unknown }).tables;
 	return (
@@ -51,12 +69,15 @@ function hasTableMap(model: ModelIR): boolean {
 
 function recordTableLookup(
 	model: ModelIR,
-	naming: NamingPlugin,
+	declaredNames: DeclaredNameResolver | undefined,
 ): Map<string, string> {
 	const lookup = new Map<string, string>();
 	for (const table of model.tables.values()) {
 		lookup.set(table.name, table.name);
-		lookup.set(pgReturnedIdentifier(naming.resolve(table.name)), table.name);
+		lookup.set(
+			pgReturnedIdentifier(declaredTableName(declaredNames, table.name)),
+			table.name,
+		);
 	}
 	return lookup;
 }
@@ -195,9 +216,9 @@ function buildAliasContext(
 	ast: Node,
 	rootTable: string,
 	model: ModelIR,
-	naming: NamingPlugin,
+	declaredNames: DeclaredNameResolver | undefined,
 ): AliasContext {
-	const tableLookup = recordTableLookup(model, naming);
+	const tableLookup = recordTableLookup(model, declaredNames);
 	const cteNames = collectWithCteNames(ast);
 	const aliases = new Map<string, string>();
 	const visibleTables: string[] = [];
@@ -225,7 +246,7 @@ function buildAliasContext(
 		addVisibleTable(
 			aliases,
 			visibleTables,
-			pgReturnedIdentifier(naming.resolve(rootTable)),
+			pgReturnedIdentifier(declaredTableName(declaredNames, rootTable)),
 			rootTable,
 		);
 	}
@@ -256,13 +277,15 @@ function columnRefFields(value: unknown): readonly unknown[] | undefined {
 function findColumnByDbName(
 	table: TableIR | undefined,
 	dbColumn: string,
-	naming: NamingPlugin,
+	declaredNames: DeclaredNameResolver | undefined,
 ): ColumnIR | undefined {
 	if (!table) return undefined;
 	return table.columns.find(
 		(column) =>
 			column.name === dbColumn ||
-			pgReturnedIdentifier(naming.resolve(column.name)) === dbColumn,
+			pgReturnedIdentifier(
+				declaredColumnName(declaredNames, table.name, column.name),
+			) === dbColumn,
 	);
 }
 
@@ -283,12 +306,12 @@ function resolveQualifiedColumn(
 	dbColumn: string,
 	ctx: AliasContext,
 	model: ModelIR,
-	naming: NamingPlugin,
+	declaredNames: DeclaredNameResolver | undefined,
 ): ProjectionSource | 'ambiguous' | undefined {
 	const tableName = ctx.aliases.get(qualifier);
 	if (!tableName) return undefined;
 	const table = model.getTable(tableName);
-	const column = findColumnByDbName(table, dbColumn, naming);
+	const column = findColumnByDbName(table, dbColumn, declaredNames);
 	return column ? { table: tableName, column } : undefined;
 }
 
@@ -296,12 +319,12 @@ function resolveUnqualifiedColumn(
 	dbColumn: string,
 	ctx: AliasContext,
 	model: ModelIR,
-	naming: NamingPlugin,
+	declaredNames: DeclaredNameResolver | undefined,
 ): ProjectionSource | 'ambiguous' | undefined {
 	const matches: ProjectionSource[] = [];
 	for (const tableName of ctx.visibleTables) {
 		const table = model.getTable(tableName);
-		const column = findColumnByDbName(table, dbColumn, naming);
+		const column = findColumnByDbName(table, dbColumn, declaredNames);
 		if (column) matches.push({ table: tableName, column });
 	}
 	if (matches.length === 1) return matches[0];
@@ -364,7 +387,7 @@ function expandStar(
 	qualifier: string | undefined,
 	ctx: AliasContext,
 	model: ModelIR,
-	naming: NamingPlugin,
+	declaredNames: DeclaredNameResolver | undefined,
 ): void {
 	const tableNames = qualifier
 		? [...new Set([ctx.aliases.get(qualifier)].filter(Boolean) as string[])]
@@ -375,11 +398,10 @@ function expandStar(
 		for (const column of table.columns) {
 			addCandidate(
 				candidates,
-				pgReturnedIdentifier(naming.resolve(column.name)),
-				projectionForSource(
-					{ table: tableName, column },
-					naming.model(column.name),
+				pgReturnedIdentifier(
+					declaredColumnName(declaredNames, tableName, column.name),
 				),
+				projectionForSource({ table: tableName, column }),
 			);
 		}
 	}
@@ -390,7 +412,7 @@ function addTargetCandidates(
 	candidates: Map<string, ProjectionCandidate[]>,
 	ctx: AliasContext,
 	model: ModelIR,
-	naming: NamingPlugin,
+	declaredNames: DeclaredNameResolver | undefined,
 ): void {
 	const resTarget = (
 		target as { ResTarget?: { val?: unknown; name?: unknown } }
@@ -422,7 +444,7 @@ function addTargetCandidates(
 			});
 			return;
 		}
-		expandStar(candidates, qualifier, ctx, model, naming);
+		expandStar(candidates, qualifier, ctx, model, declaredNames);
 		return;
 	}
 
@@ -440,16 +462,14 @@ function addTargetCandidates(
 	const qualifier =
 		fields.length >= 2 ? stringField(fields[fields.length - 2]) : undefined;
 	const source = qualifier
-		? resolveQualifiedColumn(qualifier, dbColumn, ctx, model, naming)
-		: resolveUnqualifiedColumn(dbColumn, ctx, model, naming);
+		? resolveQualifiedColumn(qualifier, dbColumn, ctx, model, declaredNames)
+		: resolveUnqualifiedColumn(dbColumn, ctx, model, declaredNames);
 	addColumnCandidate(
 		candidates,
 		outputAlias ?? dbColumn,
 		source,
 		outputAlias ??
-			(source && source !== 'ambiguous'
-				? naming.model(source.column.name)
-				: dbColumn),
+			(source && source !== 'ambiguous' ? source.column.name : dbColumn),
 	);
 }
 
@@ -459,12 +479,9 @@ function finalizeProjections(
 	const projections = new Map<string, ColumnMetadataProjection>();
 	for (const [outputKey, entries] of candidates) {
 		if (entries.length !== 1) {
-			projections.set(outputKey, {
-				kind: 'ambiguous',
-				logicalKey: outputKey,
-				reason: 'projection output key matched multiple sources',
-			});
-			continue;
+			throw new Error(
+				`Projection output label '${outputKey}' is produced by multiple candidates and cannot be returned losslessly.`,
+			);
 		}
 		const entry = entries[0];
 		if (entry) projections.set(outputKey, entry.projection);
@@ -491,15 +508,16 @@ export function buildCompiledColumnProjections(
 	ast: Node,
 	rootTable: string,
 	model: ModelIR | undefined,
-	naming: NamingPlugin,
+	authority?: unknown,
 ): ReadonlyMap<string, ColumnMetadataProjection> | undefined {
 	if (!model || !hasTableMap(model)) return undefined;
+	const declaredNames = declaredNameAuthority(authority);
 	const targets = targetListForAst(ast);
 	if (!targets || targets.length === 0) return undefined;
-	const ctx = buildAliasContext(ast, rootTable, model, naming);
+	const ctx = buildAliasContext(ast, rootTable, model, declaredNames);
 	const candidates = new Map<string, ProjectionCandidate[]>();
 	for (const target of targets) {
-		addTargetCandidates(target, candidates, ctx, model, naming);
+		addTargetCandidates(target, candidates, ctx, model, declaredNames);
 	}
 	return finalizeProjections(candidates);
 }
@@ -508,11 +526,12 @@ export function buildModelColumnProjections(
 	tableName: string,
 	columns: readonly string[],
 	model: ModelIR,
-	naming: NamingPlugin,
+	authority?: unknown,
 ): ReadonlyMap<string, ColumnMetadataProjection> | undefined {
 	if (typeof (model as { getTable?: unknown }).getTable !== 'function') {
 		return undefined;
 	}
+	const declaredNames = declaredNameAuthority(authority);
 	const table = model.getTable(tableName);
 	if (!table) return undefined;
 	const projections = new Map<string, ColumnMetadataProjection>();
@@ -522,11 +541,10 @@ export function buildModelColumnProjections(
 		);
 		if (!column) continue;
 		projections.set(
-			pgReturnedIdentifier(naming.resolve(column.name)),
-			projectionForSource(
-				{ table: tableName, column },
-				naming.model(column.name),
+			pgReturnedIdentifier(
+				declaredColumnName(declaredNames, tableName, column.name),
 			),
+			projectionForSource({ table: tableName, column }),
 		);
 	}
 	return projections.size > 0 ? projections : undefined;

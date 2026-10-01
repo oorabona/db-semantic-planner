@@ -13,6 +13,10 @@ const inverseFkSchema = schema({
 		id: { type: 'integer', primaryKey: true },
 		name: { type: 'text' },
 	},
+	symbols_archive: {
+		id: { type: 'integer', primaryKey: true },
+		name: { type: 'text' },
+	},
 	calls: {
 		id: { type: 'integer', primaryKey: true },
 		callee_ref: ref('symbols', {

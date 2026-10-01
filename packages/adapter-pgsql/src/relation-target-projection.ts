@@ -30,6 +30,8 @@ export type ResolvedRelationTarget = {
 	readonly target: string;
 	readonly cteName?: string;
 	readonly outputs?: ReadonlyMap<string, OutputDescriptor>;
+	/** Built once when the authority is bound; no reference path scans outputs. */
+	readonly outputsByLogicalKey?: ReadonlyMap<string, OutputDescriptor>;
 };
 
 export type RelationTargetProjectionContext = {
@@ -41,11 +43,31 @@ export type RelationTargetProjectionContext = {
 		| undefined;
 };
 
+function withLogicalOutputAuthority(
+	target: ResolvedRelationTarget,
+): ResolvedRelationTarget {
+	if (
+		target.outputs === undefined ||
+		target.outputsByLogicalKey !== undefined
+	) {
+		return target;
+	}
+	const outputsByLogicalKey = new Map<string, OutputDescriptor>();
+	for (const output of target.outputs.values()) {
+		if (typeof output.logicalKey === 'string') {
+			outputsByLogicalKey.set(output.logicalKey, output);
+		}
+	}
+	return { ...target, outputsByLogicalKey };
+}
+
 export function requestedColumnReference(
 	requestedName: string,
-	ctx: RelationTargetProjectionContext,
 ): ResolvedColumnReference {
-	return { requestedName, emittedName: ctx.naming.resolve(requestedName) };
+	// This helper is only reached after the caller has established a relation
+	// authority.  Its columns are query-local projection outputs and therefore
+	// retain their exact emitted spelling.
+	return { requestedName, emittedName: requestedName };
 }
 
 /** Projection keys have already crossed the naming boundary. */
@@ -64,7 +86,7 @@ export function bindAliasAuthority(
 	const next = new Map(authorities);
 	// Aliases are query-local identifiers.  Do not re-case an authority key or
 	// a later reference can no longer address the alias that was emitted.
-	next.set(alias, target);
+	next.set(alias, withLogicalOutputAuthority(target));
 	return next;
 }
 
@@ -82,7 +104,11 @@ export function resolveRelationTarget(
 		envelope?.projection.kind === 'known' &&
 		envelope.projection.outputs.size > 0
 	) {
-		return { target, cteName, outputs: envelope.projection.outputs };
+		return withLogicalOutputAuthority({
+			target,
+			cteName,
+			outputs: envelope.projection.outputs,
+		});
 	}
 	// A raw/positional projection deliberately remains unknown: retain the
 	// historical physical-table SQL behaviour and do not validate it.
@@ -105,20 +131,18 @@ export function requireRelationTargetColumn(
 			relationName,
 		);
 	}
-	for (const output of target.outputs.values()) {
-		if (output.logicalKey === column) {
-			return requireEmittedRelationTargetColumn(
-				target,
-				emittedColumnReference(output.outputKey),
-				purpose,
-				relationName,
-			);
-		}
+	const logicalOutput = target.outputsByLogicalKey?.get(column);
+	if (logicalOutput !== undefined) {
+		return requireEmittedRelationTargetColumn(
+			target,
+			emittedColumnReference(logicalOutput.outputKey),
+			purpose,
+			relationName,
+		);
 	}
-	const dbColumn = ctx.naming.resolve(column);
 	return requireEmittedRelationTargetColumn(
 		target,
-		emittedColumnReference(dbColumn),
+		emittedColumnReference(ctx.naming.resolve(column)),
 		purpose,
 		relationName,
 	);

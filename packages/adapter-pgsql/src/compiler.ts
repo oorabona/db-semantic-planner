@@ -859,6 +859,9 @@ export class PlanCompiler {
 	private handlerCtx(): HandlerCompilerContext {
 		return {
 			naming: this.naming,
+			...(this.declaredNames !== undefined && {
+				declaredNames: this.declaredNames,
+			}),
 			rootTable: this.currentRootTable,
 			aliases:
 				this.visibleSqlQualifiers.size > 0

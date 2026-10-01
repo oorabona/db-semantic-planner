@@ -58,7 +58,7 @@ import type {
 	UpsertFromIntent,
 	UpsertIntent,
 } from '@dbsp/types';
-import { convertBigintJsReadValue } from '@dbsp/types';
+import { convertBigintJsReadValue, toColumnList } from '@dbsp/types';
 import {
 	assertCompiledQuery,
 	projectionlessCompiledQuery,
@@ -122,6 +122,8 @@ import {
 import {
 	canCreatePgPhysicalModel,
 	createDeclaredNameResolver,
+	declaredColumnName,
+	declaredTableName,
 	getCachedPgPhysicalModel,
 } from './declared-name-resolver.js';
 import { deparseQuoted } from './deparse.js';
@@ -1772,15 +1774,10 @@ function mapRuntimeBindingColumnType(type: ColumnType): string | undefined {
 function findRuntimeBindingSourceTable(
 	model: ModelIR,
 	sourceTable: string,
-	naming?: NamingPlugin,
 ): TableIR | undefined {
 	return (
 		model.getTable(sourceTable) ??
-		[...model.tables.values()].find(
-			(table) =>
-				table.name === sourceTable ||
-				(naming !== undefined && naming.resolve(table.name) === sourceTable),
-		)
+		[...model.tables.values()].find((table) => table.name === sourceTable)
 	);
 }
 
@@ -1799,9 +1796,7 @@ function resolveRuntimeBindingColumnType(
 	naming: NamingPlugin,
 ): string {
 	const column = sourceTable.columns.find(
-		(candidate) =>
-			candidate.name === columnName ||
-			naming.resolve(candidate.name) === columnName,
+		(candidate) => candidate.name === columnName,
 	);
 	if (column === undefined) {
 		throw new Error(
@@ -1843,11 +1838,7 @@ function resolveRuntimeBindingColumnTypes(
 			`NQL runtime binding '${name}' cannot materialize non-empty rows because no model is available for source-table column type resolution.`,
 		);
 	}
-	const sourceTable = findRuntimeBindingSourceTable(
-		model,
-		sourceTableName,
-		naming,
-	);
+	const sourceTable = findRuntimeBindingSourceTable(model, sourceTableName);
 	if (sourceTable === undefined) {
 		throw new Error(
 			`NQL runtime binding '${name}' cannot resolve source table '${sourceTableName}' in the model.`,
@@ -1866,11 +1857,10 @@ function resolveRuntimeBindingColumnTypes(
 
 function runtimeBindingDeclaredOutputsByColumn(
 	declaredOutputs: readonly OutputDescriptor[],
-	naming: NamingPlugin,
 ): ReadonlyMap<string, OutputDescriptor[]> {
 	const byColumn = new Map<string, OutputDescriptor[]>();
 	for (const entry of declaredOutputs) {
-		const outputKey = naming.resolve(entry.outputKey);
+		const outputKey = entry.outputKey;
 		const entries = byColumn.get(outputKey) ?? [];
 		entries.push(entry);
 		byColumn.set(outputKey, entries);
@@ -1888,11 +1878,10 @@ function resolveRuntimeBindingDeclaredOutputColumnTypes(
 	if (binding.declaredOutputs === undefined) return undefined;
 	const descriptorsByColumn = runtimeBindingDeclaredOutputsByColumn(
 		binding.declaredOutputs,
-		naming,
 	);
 	const pgTypes: (string | undefined)[] = [];
 	for (const column of binding.columns) {
-		const entries = descriptorsByColumn.get(naming.resolve(column)) ?? [];
+		const entries = descriptorsByColumn.get(column) ?? [];
 		if (entries.length === 0) return undefined;
 		if (entries.length > 1) {
 			throw new Error(
@@ -1916,7 +1905,6 @@ function resolveRuntimeBindingDeclaredOutputColumnTypes(
 		const sourceTable = findRuntimeBindingSourceTable(
 			model,
 			descriptor.source.table,
-			naming,
 		);
 		if (sourceTable === undefined) {
 			throw new Error(
@@ -2071,7 +2059,6 @@ function compileTypedNqlRuntimeBindingCte(
 	return compileNqlRuntimeBindingCteWithPgTypes(
 		name,
 		binding,
-		naming,
 		parameterOffset,
 		cteName,
 		columnSql,
@@ -2082,7 +2069,6 @@ function compileTypedNqlRuntimeBindingCte(
 function compileNqlRuntimeBindingCteWithPgTypes(
 	name: string,
 	binding: NqlRuntimeBinding,
-	naming: NamingPlugin,
 	parameterOffset: number,
 	cteName: string,
 	columnSql: string,
@@ -2090,7 +2076,7 @@ function compileNqlRuntimeBindingCteWithPgTypes(
 ): { cte: string; parameters: readonly unknown[] } {
 	const anchorColumns = binding.columns
 		.map((column, columnIndex) => {
-			const columnAlias = quoteIdent(naming.resolve(column), 'column');
+			const columnAlias = quoteIdent(column, 'column');
 			const pgType = pgTypes[columnIndex];
 			return pgType === undefined
 				? `NULL AS ${columnAlias}`
@@ -2152,9 +2138,13 @@ function compileNqlRuntimeBindingCte(
 	const sourceColumnFor = (output: string): string =>
 		returningItems?.find((item) => item.output === output)?.source ?? output;
 	const sourcePhysicalColumnFor = (output: string): string =>
-		(sourceTable !== undefined
-			? deps.declaredNames?.column(sourceTable, sourceColumnFor(output))
-			: undefined) ?? naming.resolve(sourceColumnFor(output));
+		sourceTable !== undefined
+			? declaredColumnName(
+					deps.declaredNames,
+					sourceTable,
+					sourceColumnFor(output),
+				)
+			: sourceColumnFor(output);
 	const physicalColumnFor = (output: string): string =>
 		sourceColumnFor(output) !== output
 			? output
@@ -2202,7 +2192,6 @@ function compileNqlRuntimeBindingCte(
 		return compileNqlRuntimeBindingCteWithPgTypes(
 			name,
 			binding,
-			naming,
 			parameterOffset,
 			cteName,
 			columnSql,
@@ -2218,7 +2207,7 @@ function compileNqlRuntimeBindingCte(
 	const projectedColumns = binding.columns
 		.map((column) => quoteIdent(sourcePhysicalColumnFor(column), 'column'))
 		.join(', ');
-	const sourceAnchorSql = `SELECT ${projectedColumns} FROM ${schemaName ? `${quoteIdent(schemaName, 'schema')}.` : ''}${quoteIdent(naming.resolve(sourceTable), 'table')} WHERE false`;
+	const sourceAnchorSql = `SELECT ${projectedColumns} FROM ${schemaName ? `${quoteIdent(schemaName, 'schema')}.` : ''}${quoteIdent(declaredTableName(deps.declaredNames, sourceTable), 'table')} WHERE false`;
 	if (binding.rows.length === 0) {
 		return {
 			cte: `${cteName} (${columnSql}) as (${sourceAnchorSql})`,
@@ -2278,7 +2267,6 @@ type NqlBindingProjectionRegistry = ReadonlyMap<string, ProjectionEnvelope>;
 function nqlBindingSourceOutputKey(
 	source: ProjectionEnvelope,
 	name: string,
-	naming: NamingPlugin,
 ): string {
 	if (source.projection.kind === 'known') {
 		const exact = source.projection.outputs.get(name);
@@ -2287,7 +2275,7 @@ function nqlBindingSourceOutputKey(
 			if (output.logicalKey === name) return output.outputKey;
 		}
 	}
-	return naming.resolve(name);
+	return name;
 }
 
 function nqlBindingLocalOutputKey(name: string): string {
@@ -2337,7 +2325,6 @@ function nqlBindingExpressionOutputKey(
 function buildNqlBindingProjectionShape(
 	source: ProjectionEnvelope,
 	select: SelectIntent | undefined,
-	naming: NamingPlugin,
 ): {
 	selections: ProjectNamedFieldsSelection[];
 	expressions: ProjectNamedFieldsExpression[];
@@ -2361,7 +2348,7 @@ function buildNqlBindingProjectionShape(
 				addNqlBindingStarSelections(source, selections);
 				continue;
 			}
-			const outputKey = nqlBindingSourceOutputKey(source, field, naming);
+			const outputKey = nqlBindingSourceOutputKey(source, field);
 			addNqlBindingSelection(selections, outputKey, outputKey);
 		}
 		return { selections, expressions, preserveOneToOne: false };
@@ -2369,7 +2356,7 @@ function buildNqlBindingProjectionShape(
 
 	if (select.type === 'aggregate') {
 		for (const field of select.fields ?? []) {
-			const outputKey = nqlBindingSourceOutputKey(source, field, naming);
+			const outputKey = nqlBindingSourceOutputKey(source, field);
 			addNqlBindingSelection(selections, outputKey, outputKey);
 		}
 		for (const aggregate of select.aggregates) {
@@ -2401,9 +2388,9 @@ function buildNqlBindingProjectionShape(
 				}
 				addNqlBindingSelection(
 					selections,
-					nqlBindingSourceOutputKey(source, column, naming),
+					nqlBindingSourceOutputKey(source, column),
 					nqlBindingAliasOutputKey(record.as) ??
-						nqlBindingSourceOutputKey(source, column, naming),
+						nqlBindingSourceOutputKey(source, column),
 				);
 				break;
 			}
@@ -2420,7 +2407,7 @@ function buildNqlBindingProjectionShape(
 				}
 				addNqlBindingSelection(
 					selections,
-					nqlBindingSourceOutputKey(source, column, naming),
+					nqlBindingSourceOutputKey(source, column),
 					nqlBindingLocalOutputKey(alias),
 				);
 				break;
@@ -2443,10 +2430,9 @@ function projectNqlBindingQueryEnvelope<T = unknown>(
 	query: QueryIntent,
 	sql: string,
 	parameters: readonly unknown[],
-	naming: NamingPlugin,
 	hydrationPlan: PlanReport | undefined,
 ): ProjectionEnvelope<T> {
-	const shape = buildNqlBindingProjectionShape(source, query.select, naming);
+	const shape = buildNqlBindingProjectionShape(source, query.select);
 	if (shape.preserveOneToOne) {
 		return preserveOneToOne(source, {
 			sql,
@@ -3059,6 +3045,20 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			this.naming;
 		const model = options?.model ?? this.model;
 		const schemaName = options?.schemaName || this.schemaName;
+		if (model === undefined && this._dbCasing !== 'preserve') {
+			throw new Error(
+				`PgsqlAdapter compilation with dbCasing '${this._dbCasing}' requires a ModelIR; declared names cannot be resolved without a model.`,
+			);
+		}
+		if (
+			model !== undefined &&
+			this._dbCasing !== 'preserve' &&
+			!canCreatePgPhysicalModel(model)
+		) {
+			throw new Error(
+				`PgsqlAdapter compilation with dbCasing '${this._dbCasing}' requires a complete ModelIR physical-name inventory.`,
+			);
+		}
 		const physicalModel =
 			model === undefined || !canCreatePgPhysicalModel(model)
 				? undefined
@@ -3190,7 +3190,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 						bundle.query,
 						compiled.sql,
 						compiled.parameters,
-						deps.naming,
 						compiled.hydrationPlan,
 					)
 				: compiled;
@@ -3288,9 +3287,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 							output,
 							source !== output
 								? output
-								: ((runtimeSourceTable !== undefined
-										? deps.declaredNames?.column(runtimeSourceTable, source)
-										: undefined) ?? naming.resolve(source)),
+								: runtimeSourceTable !== undefined
+									? declaredColumnName(
+											deps.declaredNames,
+											runtimeSourceTable,
+											source,
+										)
+									: source,
 						] as const;
 					}),
 				);
@@ -3514,6 +3517,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		plan: PlanReport,
 		options?: CompileOptions,
 	): CompileResultWithIncludes<T> {
+		this.assertDeclaredPlanReferences(plan, options);
 		return guardCompileResultWithIncludes(
 			compileWithIncludesImpl<T>(plan, options, this.buildCompileDeps(options)),
 			'select plan with includes',
@@ -3534,6 +3538,24 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		parentIds: readonly unknown[],
 		options?: CompileOptions,
 	): CompiledQuery {
+		this.assertDeclaredMutationReferences(
+			info.targetTable,
+			[
+				...toColumnList(info.foreignKey),
+				...(info.sourceKey ? toColumnList(info.sourceKey) : []),
+			],
+			options,
+		);
+		if (info.through) {
+			this.assertDeclaredMutationReferences(
+				info.through,
+				[
+					...toColumnList(info.throughSourceKey),
+					...toColumnList(info.throughTargetKey),
+				],
+				options,
+			);
+		}
 		return guardCompiledQuery(
 			compileSubqueryIncludeImpl(
 				info,
@@ -3557,7 +3579,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	compileSelectExpression<T = unknown>(
 		expr: ExpressionIntent,
 	): CompiledQuery<T> {
-		const naming = this.naming;
+		// This public path does not otherwise build compiler dependencies, so it
+		// must enter the same model/casing gate as every table-backed compiler.
+		const compileDeps = this.buildCompileDeps();
+		const naming = compileDeps.naming;
 		const schemaName = this.schemaName;
 		const dialectCapabilities = this.dialectCapabilities;
 		const state = createCompilerState();
@@ -3636,6 +3661,23 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		intent: InsertFromIntent,
 		options?: CompileOptions,
 	): CompiledQuery {
+		this.assertDeclaredMutationReferences(
+			intent.table,
+			[
+				...(intent.columns ?? []),
+				...(intent.returningItems?.map((item) => item.source) ??
+					intent.returning ??
+					[]),
+			],
+			options,
+		);
+		if (intent.sourceQuery === undefined) {
+			this.assertDeclaredMutationReferences(
+				intent.source,
+				intent.columns ?? [],
+				options,
+			);
+		}
 		return guardCompiledQuery(
 			compileInsertFromImpl(intent, options, this.buildCompileDeps(options)),
 			'insert from',
@@ -3734,6 +3776,24 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		intent: UpsertFromIntent,
 		options?: CompileOptions,
 	): CompiledQuery {
+		this.assertDeclaredMutationReferences(
+			intent.table,
+			[
+				...intent.conflictColumns,
+				...(intent.columns ?? []),
+				...(intent.returningItems?.map((item) => item.source) ??
+					intent.returning ??
+					[]),
+			],
+			options,
+		);
+		if (intent.sourceQuery === undefined) {
+			this.assertDeclaredMutationReferences(
+				intent.source,
+				intent.columns ?? [],
+				options,
+			);
+		}
 		return guardCompiledQuery(
 			compileUpsertFromImpl(intent, options, this.buildCompileDeps(options)),
 			'upsert from',
@@ -3749,12 +3809,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		model: ModelIR,
 		options?: CompileOptions,
 	): CompiledQuery<T> {
+		const compileOptions: CompileOptions = { ...options, model };
 		return guardCompiledQuery(
 			compileRecursiveImpl<T>(
 				report,
 				model,
-				options,
-				this.buildCompileDeps(options),
+				compileOptions,
+				this.buildCompileDeps(compileOptions),
 			),
 			'recursive query',
 		);
@@ -3827,7 +3888,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 						query,
 						compiled.sql,
 						compiled.parameters,
-						deps.naming,
 						compiled.hydrationPlan,
 					)
 				: compiled;
