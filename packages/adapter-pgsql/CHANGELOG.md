@@ -1,5 +1,68 @@
 # Changelog
 
+## [6.0.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v5.0.0...adapter-pgsql-v6.0.0) (2026-10-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* **adapter-pgsql:** generateDDL, compareSchemata, generateMigrationSQL, generateDownSQL, comparePgsqlDatabaseSchema, convergePg and planPgTransitionRun take a PgPhysicalModel built with createPgPhysicalModel; the per-call schema, dbCasing, naming and fkAutoIndex options move to it. declarationSetFromModel takes no naming. DeclarationNamingStrategy, DDLGeneratingAdapter, supportsDDLGeneration and SetNotNullRuleOptions are removed. convergePg honours fkAutoIndex, default true.
+
+### Features
+
+* **adapter-pgsql:** A primary key or leading-column index covers a foreign key ([#833](https://github.com/oorabona/db-semantic-planner/issues/833)) ([133eac6](https://github.com/oorabona/db-semantic-planner/commit/133eac65dff53b7939c7f5b898f2d76af62ac8de))
+* **adapter-pgsql:** An assert's inspect receives the state of each owned CHECK ([#857](https://github.com/oorabona/db-semantic-planner/issues/857)) ([946ed66](https://github.com/oorabona/db-semantic-planner/commit/946ed66cbce2eb09b02bf5f37b6c69ed7facd4b3)), closes [#855](https://github.com/oorabona/db-semantic-planner/issues/855) [#837](https://github.com/oorabona/db-semantic-planner/issues/837)
+* **adapter-pgsql:** Auto-increment transitions are reported and refused by name ([#802](https://github.com/oorabona/db-semantic-planner/issues/802)) ([d02e01d](https://github.com/oorabona/db-semantic-planner/commit/d02e01dce74f868ce6217e49338c2a3956a6f6fe))
+* **adapter-pgsql:** Converge a declared model onto a live schema ([#786](https://github.com/oorabona/db-semantic-planner/issues/786)) ([be4c57f](https://github.com/oorabona/db-semantic-planner/commit/be4c57fd74e53561c707f4f2deab5c2a0c2cfba9))
+* **adapter-pgsql:** Converge adds NOT NULL columns with a literal default to managed tables ([#808](https://github.com/oorabona/db-semantic-planner/issues/808)) ([7d95da4](https://github.com/oorabona/db-semantic-planner/commit/7d95da4fdc0c09b6886328cd287b51445e69a8f7))
+* **adapter-pgsql:** Converge creates a whole declared schema on a fresh install ([#805](https://github.com/oorabona/db-semantic-planner/issues/805)) ([5c61f2b](https://github.com/oorabona/db-semantic-planner/commit/5c61f2bb8ea1f9c70101f8b7a487076d358f22a0))
+* **adapter-pgsql:** Converge leaves alone the indexes its caller names as external ([#809](https://github.com/oorabona/db-semantic-planner/issues/809)) ([033aac7](https://github.com/oorabona/db-semantic-planner/commit/033aac771c534807ef9ca27bdd64124b844ee4e6))
+* **adapter-pgsql:** ConvergePg adopts an existing declared table marked adopt ([#816](https://github.com/oorabona/db-semantic-planner/issues/816)) ([9688a36](https://github.com/oorabona/db-semantic-planner/commit/9688a3621f25eb5a080d34a6defcfa5091401d4e))
+* **adapter-pgsql:** ConvergePg adopts existing standalone sequences ([#834](https://github.com/oorabona/db-semantic-planner/issues/834)) ([72da9f0](https://github.com/oorabona/db-semantic-planner/commit/72da9f099226a62c480c622fd530863c4684e2ca))
+* **adapter-pgsql:** ConvergePg assert steps own CHECKs, column types and indexes ([#854](https://github.com/oorabona/db-semantic-planner/issues/854)) ([68000e4](https://github.com/oorabona/db-semantic-planner/commit/68000e438420bef26ab72cca8b9af7b68bef51cf)), closes [#837](https://github.com/oorabona/db-semantic-planner/issues/837)
+* **adapter-pgsql:** ConvergePg check mode plans without applying ([#838](https://github.com/oorabona/db-semantic-planner/issues/838)) ([ac4d6dc](https://github.com/oorabona/db-semantic-planner/commit/ac4d6dc841419e7e477454430148cf99353e1a19))
+* **adapter-pgsql:** ConvergePg creates a fresh table and everything on it in one transaction ([#814](https://github.com/oorabona/db-semantic-planner/issues/814)) ([a08db11](https://github.com/oorabona/db-semantic-planner/commit/a08db11d26d255f78dc5506dcad1fa19836290e5))
+* **adapter-pgsql:** ConvergePg initializes an absent ledger on request ([#840](https://github.com/oorabona/db-semantic-planner/issues/840)) ([327caec](https://github.com/oorabona/db-semantic-planner/commit/327caec3ddba8f70874b79dc1aa66fb6544d5b94))
+* **adapter-pgsql:** ConvergePg never starts over another writer's open claim ([#813](https://github.com/oorabona/db-semantic-planner/issues/813)) ([3aebf09](https://github.com/oorabona/db-semantic-planner/commit/3aebf0953b7f83cecfbe9e24478a614207b50c40))
+* **adapter-pgsql:** ConvergePg runs once and assert application steps ([#844](https://github.com/oorabona/db-semantic-planner/issues/844)) ([491698e](https://github.com/oorabona/db-semantic-planner/commit/491698e2879d81815280a9b9567c8eed4006be8a))
+* **adapter-pgsql:** One PostgreSQL physical name authority for schema generation, comparison and converge ([#865](https://github.com/oorabona/db-semantic-planner/issues/865)) ([662d66f](https://github.com/oorabona/db-semantic-planner/commit/662d66f6242ec9092acfd00345fcc7a2185e551d)), closes [#784](https://github.com/oorabona/db-semantic-planner/issues/784)
+* **adapter-pgsql:** ReconcilePgTransitionRun resolves a run's open claims without the CLI ([#812](https://github.com/oorabona/db-semantic-planner/issues/812)) ([4c44f5a](https://github.com/oorabona/db-semantic-planner/commit/4c44f5a5c0649097270f6c1bcfd6518ca57c2c83))
+* **adapter-pgsql:** The pristine guard refuses with its own code ([#842](https://github.com/oorabona/db-semantic-planner/issues/842)) ([46967cc](https://github.com/oorabona/db-semantic-planner/commit/46967cc9c600a26e3816a966ccf9ab3e4898324d))
+* **adapter-pgsql:** The reinitialize preflight creates and owns the transition journal ([#811](https://github.com/oorabona/db-semantic-planner/issues/811)) ([8fd7fca](https://github.com/oorabona/db-semantic-planner/commit/8fd7fca7d392d78c6fd4384ebcd18566db461b5a))
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** A ledger check no longer changes the search_path of the step it guards ([#798](https://github.com/oorabona/db-semantic-planner/issues/798)) ([78e0c63](https://github.com/oorabona/db-semantic-planner/commit/78e0c63f65285989d1ac1c883e01455ec4903e9a))
+* **adapter-pgsql:** A registration is dispatchable, or refused whole ([#722](https://github.com/oorabona/db-semantic-planner/issues/722)) ([9390704](https://github.com/oorabona/db-semantic-planner/commit/9390704b8a8ccca0a3fffb7b1d6c67c80e3b52de))
+* **adapter-pgsql:** A relation column needs an alias a join emitted ([#794](https://github.com/oorabona/db-semantic-planner/issues/794)) ([19a3ea4](https://github.com/oorabona/db-semantic-planner/commit/19a3ea43e1ff4cdb7c4b9cef22e459734674df6f))
+* **adapter-pgsql:** A relation target resolved to a CTE uses that CTE's projection ([#772](https://github.com/oorabona/db-semantic-planner/issues/772)) ([b93f976](https://github.com/oorabona/db-semantic-planner/commit/b93f9769676cbdd7404d31469db509781379b811))
+* **adapter-pgsql:** Adopt tables whose foreign keys reference other tables ([#832](https://github.com/oorabona/db-semantic-planner/issues/832)) ([53c7295](https://github.com/oorabona/db-semantic-planner/commit/53c7295fd5f15895127b758dc7d313118aff5bf5))
+* **adapter-pgsql:** Application steps resolve names in the converged schema ([#848](https://github.com/oorabona/db-semantic-planner/issues/848)) ([cf4aab5](https://github.com/oorabona/db-semantic-planner/commit/cf4aab5b3e3b74e2fe77fc54453a89af57092829))
+* **adapter-pgsql:** Application-step planning admits every step before anything runs ([#846](https://github.com/oorabona/db-semantic-planner/issues/846)) ([8412f92](https://github.com/oorabona/db-semantic-planner/commit/8412f92a857aa958544bee4f17756cdc3623a0da))
+* **adapter-pgsql:** Converge admits a foreign key whenever generation needs no automatic index ([#836](https://github.com/oorabona/db-semantic-planner/issues/836)) ([2cfb487](https://github.com/oorabona/db-semantic-planner/commit/2cfb487c5f795a7549c08e4009174eed0415b781))
+* **adapter-pgsql:** Converge refuses read-only targets; one adoption comparison; index before FK ([#824](https://github.com/oorabona/db-semantic-planner/issues/824)) ([933ac76](https://github.com/oorabona/db-semantic-planner/commit/933ac767195bc930dfcb0e3293a12e7b62969195))
+* **adapter-pgsql:** Converge reports every live index and its real failure cause ([#868](https://github.com/oorabona/db-semantic-planner/issues/868)) ([0ee2301](https://github.com/oorabona/db-semantic-planner/commit/0ee2301abded8dac106ea73bd7c3f85447a4a6e1)), closes [#863](https://github.com/oorabona/db-semantic-planner/issues/863) [#864](https://github.com/oorabona/db-semantic-planner/issues/864) [#866](https://github.com/oorabona/db-semantic-planner/issues/866) [#867](https://github.com/oorabona/db-semantic-planner/issues/867)
+* **adapter-pgsql:** ConvergePg compares only the enums the model declares ([#820](https://github.com/oorabona/db-semantic-planner/issues/820)) ([2c266e7](https://github.com/oorabona/db-semantic-planner/commit/2c266e7ae018d06addaa9f648ed1862c09f2df98))
+* **adapter-pgsql:** Declared sequence names follow dbCasing everywhere they are decided ([#826](https://github.com/oorabona/db-semantic-planner/issues/826)) ([60073ef](https://github.com/oorabona/db-semantic-planner/commit/60073ef361aa75e0cfc317e9979d3772a0b14e30))
+* **adapter-pgsql:** Diagnostics print caller-supplied identifiers on one escaped line ([#760](https://github.com/oorabona/db-semantic-planner/issues/760)) ([c3a3cc7](https://github.com/oorabona/db-semantic-planner/commit/c3a3cc704123abeb0c3708032ea368a775f7212c)), closes [#585](https://github.com/oorabona/db-semantic-planner/issues/585)
+* **adapter-pgsql:** Enforce noImplicitOverride like the other six packages ([#738](https://github.com/oorabona/db-semantic-planner/issues/738)) ([5886ec6](https://github.com/oorabona/db-semantic-planner/commit/5886ec609cf1373268ccaa666814a23020190220))
+* **adapter-pgsql:** Generated postconditions compare user-defined column types by catalog namespace ([#821](https://github.com/oorabona/db-semantic-planner/issues/821)) ([e1b5e5d](https://github.com/oorabona/db-semantic-planner/commit/e1b5e5d83e5136a64a651c4b4df5f38d0ef559c8))
+* **adapter-pgsql:** Refuse to render the removal of a key a live foreign key references ([#828](https://github.com/oorabona/db-semantic-planner/issues/828)) ([abc9be5](https://github.com/oorabona/db-semantic-planner/commit/abc9be539b1b23a130081a0aef8ed9dc3c8f1fed))
+* **adapter-pgsql:** Relation paths inside NQL CTE queries get their joins ([#767](https://github.com/oorabona/db-semantic-planner/issues/767)) ([2663476](https://github.com/oorabona/db-semantic-planner/commit/266347619e02c0710cb5253d17a2b934a7978bd5))
+* **adapter-pgsql:** The live comparison reaches a fixed point on a schema dbsp generated ([#801](https://github.com/oorabona/db-semantic-planner/issues/801)) ([dbace4e](https://github.com/oorabona/db-semantic-planner/commit/dbace4ec04aac02c3eb725211201375b0b6c85dd))
+* **adapter-pgsql:** The step search_path setup resolves only pg_catalog objects ([#853](https://github.com/oorabona/db-semantic-planner/issues/853)) ([da05417](https://github.com/oorabona/db-semantic-planner/commit/da0541730e408fc4d06019642caebc7d2221d294))
+* **core:** Declared enum names stay physical under every dbCasing ([#827](https://github.com/oorabona/db-semantic-planner/issues/827)) ([b4d5d04](https://github.com/oorabona/db-semantic-planner/commit/b4d5d0416390719e912ceddb0595ce85706aed1b))
+* **core:** Orm.nql runs the CTE and set-operation queries the NQL guide documents ([#756](https://github.com/oorabona/db-semantic-planner/issues/756)) ([2ec48e3](https://github.com/oorabona/db-semantic-planner/commit/2ec48e379acca1989bc9d8594f00897c336c875d))
+* **gui:** Schema Apply runs only non-destructive changes on the compared connection ([#765](https://github.com/oorabona/db-semantic-planner/issues/765)) ([01b3a10](https://github.com/oorabona/db-semantic-planner/commit/01b3a1098c0dd556d63e1fe6bf6e7f5895e362f6))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/core bumped to 5.0.0
+    * @dbsp/types bumped to 5.0.0
+
 ## [5.0.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v4.0.0...adapter-pgsql-v5.0.0) (2026-09-05)
 
 

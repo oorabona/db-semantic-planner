@@ -1,5 +1,40 @@
 # Changelog
 
+## [4.0.0](https://github.com/oorabona/db-semantic-planner/compare/cli-v3.0.1...cli-v4.0.0) (2026-10-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* **adapter-pgsql:** generateDDL, compareSchemata, generateMigrationSQL, generateDownSQL, comparePgsqlDatabaseSchema, convergePg and planPgTransitionRun take a PgPhysicalModel built with createPgPhysicalModel; the per-call schema, dbCasing, naming and fkAutoIndex options move to it. declarationSetFromModel takes no naming. DeclarationNamingStrategy, DDLGeneratingAdapter, supportsDDLGeneration and SetNotNullRuleOptions are removed. convergePg honours fkAutoIndex, default true.
+
+### Features
+
+* **adapter-pgsql:** Auto-increment transitions are reported and refused by name ([#802](https://github.com/oorabona/db-semantic-planner/issues/802)) ([d02e01d](https://github.com/oorabona/db-semantic-planner/commit/d02e01dce74f868ce6217e49338c2a3956a6f6fe))
+* **adapter-pgsql:** ConvergePg adopts an existing declared table marked adopt ([#816](https://github.com/oorabona/db-semantic-planner/issues/816)) ([9688a36](https://github.com/oorabona/db-semantic-planner/commit/9688a3621f25eb5a080d34a6defcfa5091401d4e))
+* **adapter-pgsql:** ConvergePg adopts existing standalone sequences ([#834](https://github.com/oorabona/db-semantic-planner/issues/834)) ([72da9f0](https://github.com/oorabona/db-semantic-planner/commit/72da9f099226a62c480c622fd530863c4684e2ca))
+* **adapter-pgsql:** ConvergePg initializes an absent ledger on request ([#840](https://github.com/oorabona/db-semantic-planner/issues/840)) ([327caec](https://github.com/oorabona/db-semantic-planner/commit/327caec3ddba8f70874b79dc1aa66fb6544d5b94))
+* **adapter-pgsql:** ConvergePg runs once and assert application steps ([#844](https://github.com/oorabona/db-semantic-planner/issues/844)) ([491698e](https://github.com/oorabona/db-semantic-planner/commit/491698e2879d81815280a9b9567c8eed4006be8a))
+* **adapter-pgsql:** One PostgreSQL physical name authority for schema generation, comparison and converge ([#865](https://github.com/oorabona/db-semantic-planner/issues/865)) ([662d66f](https://github.com/oorabona/db-semantic-planner/commit/662d66f6242ec9092acfd00345fcc7a2185e551d)), closes [#784](https://github.com/oorabona/db-semantic-planner/issues/784)
+* **adapter-pgsql:** ReconcilePgTransitionRun resolves a run's open claims without the CLI ([#812](https://github.com/oorabona/db-semantic-planner/issues/812)) ([4c44f5a](https://github.com/oorabona/db-semantic-planner/commit/4c44f5a5c0649097270f6c1bcfd6518ca57c2c83))
+* **cli:** Dbsp migrate converges a schema file through convergePg ([#822](https://github.com/oorabona/db-semantic-planner/issues/822)) ([a1addc1](https://github.com/oorabona/db-semantic-planner/commit/a1addc1f2c95c0f1d55a096907bc90721fd53cdd))
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** Converge refuses read-only targets; one adoption comparison; index before FK ([#824](https://github.com/oorabona/db-semantic-planner/issues/824)) ([933ac76](https://github.com/oorabona/db-semantic-planner/commit/933ac767195bc930dfcb0e3293a12e7b62969195))
+* **adapter-pgsql:** Converge reports every live index and its real failure cause ([#868](https://github.com/oorabona/db-semantic-planner/issues/868)) ([0ee2301](https://github.com/oorabona/db-semantic-planner/commit/0ee2301abded8dac106ea73bd7c3f85447a4a6e1)), closes [#863](https://github.com/oorabona/db-semantic-planner/issues/863) [#864](https://github.com/oorabona/db-semantic-planner/issues/864) [#866](https://github.com/oorabona/db-semantic-planner/issues/866) [#867](https://github.com/oorabona/db-semantic-planner/issues/867)
+* **adapter-pgsql:** Refuse to render the removal of a key a live foreign key references ([#828](https://github.com/oorabona/db-semantic-planner/issues/828)) ([abc9be5](https://github.com/oorabona/db-semantic-planner/commit/abc9be539b1b23a130081a0aef8ed9dc3c8f1fed))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/adapter-pgsql bumped to 6.0.0
+    * @dbsp/core bumped to 5.0.0
+    * @dbsp/nql bumped to 1.10.5
+    * @dbsp/types bumped to 5.0.0
+
 ## [3.0.1](https://github.com/oorabona/db-semantic-planner/compare/cli-v3.0.0...cli-v3.0.1) (2026-09-05)
 
 
