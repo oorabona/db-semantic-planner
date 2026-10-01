@@ -8,16 +8,14 @@ import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it } from 'vitest';
 
 import {
-	columnRef,
 	eqExpr,
 	integerNode,
 	mapLockToAst,
 	normalizeSQL,
-	rangeVar,
 	selectStmt,
-	starTarget,
 } from '../ast-helpers.js';
 import { createParamRef } from '../param-ref.js';
+import { columnRef, rangeVar, starTarget } from './typed-ast-test-helpers.js';
 
 /** Deparse + normalize for consistent comparisons. */
 function sql(node: ReturnType<typeof selectStmt>): string {

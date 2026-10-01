@@ -24,7 +24,6 @@ import {
 	relationBindingFor,
 } from '../binding-registry.js';
 import type { DeclaredNameResolver } from '../declared-name-resolver.js';
-import type { NamingPlugin } from '../naming-plugin.js';
 import type {
 	AliasColumnAuthority,
 	RelationTargetProjectionRegistry,
@@ -53,12 +52,7 @@ export type IncludeHandlerStrategy = (typeof INCLUDE_STRATEGIES)[number];
 /**
  * Immutable context passed to all handlers during compilation.
  */
-interface LegacyHandlerPolicy {
-	/** @deprecated Retained for unconverted WHERE/include/mutation handlers. */
-	readonly naming: NamingPlugin;
-}
-
-export interface CompilerContext extends LegacyHandlerPolicy {
+export interface CompilerContext {
 	/** Addressed authority for model-backed identifiers. */
 	readonly declaredNames?: DeclaredNameResolver;
 	/** Schema name for table qualification (optional) */
@@ -140,10 +134,7 @@ export interface CompilerContext extends LegacyHandlerPolicy {
  * The expression boundary deliberately excludes the legacy transform policy.
  * Expressions receive addressed declared names and query scope/bindings instead.
  */
-export type ExpressionCompilerContext = Omit<
-	CompilerContext,
-	keyof LegacyHandlerPolicy
->;
+export type ExpressionCompilerContext = Omit<CompilerContext, never>;
 
 /**
  * Resolve the current relation once, before an expression reaches the AST

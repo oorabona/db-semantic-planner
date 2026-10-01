@@ -1117,7 +1117,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 						'Pass an adapter when creating the ORM.',
 				);
 			}
-			const compiled = adapter.compileSelectExpression(expr.intent);
+			const compiled = adapter.compileSelectExpression(expr.intent, { model });
 			return {
 				sql: compiled.sql,
 				parameters: compiled.parameters,

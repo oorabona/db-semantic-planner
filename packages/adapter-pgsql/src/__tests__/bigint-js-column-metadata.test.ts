@@ -10,7 +10,9 @@ import { compile as compileNql } from '@dbsp/nql';
 import type { CompiledNqlQuery } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { buildCompiledColumnProjections } from '../column-metadata.js';
+import { createDeclaredNameResolver } from '../declared-name-resolver.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgPhysicalModel } from '../physical-model/index.js';
 
 const testSchema = schema({
 	users: {
@@ -35,6 +37,17 @@ const testSchema = schema({
 		metricId: 'bigint',
 	},
 });
+
+function resolverFor(model: typeof testSchema.model) {
+	return createDeclaredNameResolver(
+		createPgPhysicalModel({
+			mode: 'logical',
+			model,
+			schema: 'public',
+			dbCasing: 'preserve',
+		}),
+	);
+}
 
 function compile(plan: PlanReport) {
 	const adapter = createPgsqlCompileOnlyAdapter();
@@ -171,27 +184,24 @@ describe('bigint js column metadata provenance', () => {
 		});
 	});
 
-	it('refuses duplicate returned output labels', () => {
-		expect(() =>
-			compile({
-				rootTable: 'events',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{
-						type: 'includeStrategy',
-						choice: 'join',
-						relation: 'metrics',
-						relationName: 'metrics',
-						targetTable: 'metrics',
-						sourceColumn: ['id'],
-						targetColumn: ['eventId'],
-						columns: ['*'],
-					},
-				],
-			} as unknown as PlanReport),
-		).toThrow(
-			"Projection output label 'id' is produced by multiple candidates",
-		);
+	it('leaves duplicate returned output labels without source mapping', () => {
+		const compiled = compile({
+			rootTable: 'events',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'includeStrategy',
+					choice: 'join',
+					relation: 'metrics',
+					relationName: 'metrics',
+					targetTable: 'metrics',
+					sourceColumn: ['id'],
+					targetColumn: ['eventId'],
+					columns: ['*'],
+				},
+			],
+		} as unknown as PlanReport);
+		expect(compiled.outputKeyMap?.has('id')).toBe(false);
 	});
 
 	it('uses output aliases to distinguish same-name joined ids', () => {
@@ -503,6 +513,7 @@ describe('bigint js column metadata provenance', () => {
 			} as never,
 			'events',
 			testSchema.model,
+			resolverFor(testSchema.model),
 		);
 
 		expect(projections?.get('sequence')).toEqual({

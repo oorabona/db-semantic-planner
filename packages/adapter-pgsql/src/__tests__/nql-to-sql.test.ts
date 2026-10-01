@@ -1065,12 +1065,10 @@ u | select postTitle`.dump();
 		);
 	});
 
-	it('refuses flat include with duplicate returned labels', () => {
-		expect(() =>
-			nqlToSQL('departments | select *, employees.* | flat'),
-		).toThrow(
-			"Projection output label 'id' is produced by multiple candidates",
-		);
+	it('compiles flat includes with duplicate returned labels', () => {
+		const sql = nqlToSQL('departments | select *, employees.* | flat');
+		expect(sql).toContain('departments.*');
+		expect(sql).toContain('employees.*');
 	});
 
 	it('propagates specific columns through flat include', () => {
@@ -1090,11 +1088,11 @@ u | select postTitle`.dump();
 		expect(sql).toContain('.email');
 	});
 
-	it('refuses relation stars that duplicate a returned root label', () => {
+	it('refuses an explicit output that collides with a relation star label', () => {
 		expect(() =>
 			nqlToSQL('departments | select id, employees.* | flat'),
 		).toThrow(
-			"Projection output label 'id' is produced by multiple candidates",
+			"Projection output label 'id' is produced by multiple candidates and cannot be returned losslessly.",
 		);
 	});
 
@@ -1508,6 +1506,27 @@ describe('CTE relation planning', () => {
 		);
 	});
 
+	it('keeps the relation binding in scope across a CTE body filter and projection', () => {
+		const adapter = createPgsqlCompileOnlyAdapter({ model: blogSchema.model });
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(
+			'tenant_42',
+		);
+		const dump = orm.nql<{
+			title: string;
+			author_name: string;
+		}>`with filtered_posts as (posts
+			| where some(author).name = ${'Bob Smith'}
+			| select title, author.name as author_name
+			| flat)
+filtered_posts
+			| select title, author_name
+			| order by title`.dump();
+
+		expect(normalizeSQL(dump.sql)).toBe(
+			'with "filtered_posts" as (select posts.title, author.name as author_name from tenant_42.posts join tenant_42.authors as author on posts."authorid" = author.id where author.name = $1) select filtered_posts.title, filtered_posts.author_name from filtered_posts order by filtered_posts.title asc',
+		);
+	});
+
 	it('plans relation paths in the outer model-table query', () => {
 		expect(
 			blogCteToSQL(
@@ -1608,7 +1627,7 @@ describe('CTE relation planning', () => {
 				'with authors as (authors | select id, id, name) posts | select title, author.id | flat',
 			),
 		).toThrow(
-			"Projection output label 'id' is produced by multiple candidates",
+			"Projection output label 'id' is produced by multiple candidates and cannot be returned losslessly.",
 		);
 	});
 

@@ -719,8 +719,8 @@ orm.select('posts')
   .count('id', 'postCount')
   .having(gt('postCount', 10))
   .dump()
-// SQL: SELECT "published", COUNT("id") AS "postCount" FROM "posts"
-//      GROUP BY "published" HAVING "postCount" > $1
+// SQL: SELECT posts.published, count(posts.id) AS "postCount" FROM posts
+//      GROUP BY posts.published HAVING count(posts.id) > $1
 ```
 
 ### Window Functions
@@ -865,21 +865,21 @@ const users = await orm.select('users')
 Combine query results with UNION, INTERSECT, or EXCEPT. All variants support the `All` suffix (e.g., `.unionAll()`) to preserve duplicates.
 
 ```typescript
-const q1 = orm.select('users').where(eq('role', 'admin'));
-const q2 = orm.select('users').where(eq('role', 'moderator'));
-const q3 = orm.select('users').where(eq('active', true));
+const q1 = orm.select('users').where(eq('active', true));
+const q2 = orm.select('users').where(eq('email', 'alice@example.com'));
+const q3 = orm.select('users').where(eq('active', false));
 
 // UNION (deduplicated)
-const staff = q1.union(q2).dump();
+const activeOrAlice = q1.union(q2).dump();
 
 // UNION ALL (with duplicates)
-const allStaff = q1.unionAll(q2).dump();
+const allRows = q1.unionAll(q2).dump();
 
 // INTERSECT
-const both = q1.intersect(q2).dump();
+const activeAlice = q1.intersect(q2).dump();
 
 // EXCEPT
-const adminsOnly = q1.except(q2).dump();
+const activeExceptAlice = q1.except(q2).dump();
 
 // Chaining
 const result = q1.union(q2).except(q3).dump();
@@ -1035,9 +1035,9 @@ const deleted = await orm.delete('posts')
 
 ### Upsert (Insert or Update on Conflict)
 
-For `.onConflictConstraint(name)`, a constraint declared on the target table is
-resolved to its physical database name. A name not declared in the model is
-emitted unchanged as a catalog constraint name.
+For `.onConflictConstraint(name)`, the constraint must be declared on the target
+table; it is then resolved to its physical database name. An undeclared name is
+rejected.
 
 ```typescript
 // On conflict by columns — auto-update non-conflict fields
@@ -1079,10 +1079,10 @@ const guarded = orm.upsert('users')
 console.log(guarded.sql);
 console.log(guarded.parameters);
 
-// On conflict by constraint name
+// On conflict by columns
 orm.upsert('users')
   .values({ name: 'Alice', email: 'alice@example.com' })
-  .onConflictConstraint('users_email_unique')
+  .onConflict(['email'])
   .doNothing()
   .dump();
 

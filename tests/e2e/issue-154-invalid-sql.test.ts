@@ -160,7 +160,7 @@ describe('FIX-154 invalid SQL regressions', () => {
 				join: 'inner',
 				select: { type: 'fields', fields: ['path'] },
 			})
-			.columns(['id', 'def_id', 'file_id', 'alt_file_id'])
+			.columns(['id', 'defId', 'fileId', 'altFileId'])
 			.orderBy('id');
 
 		const rows = (await query.execute()) as unknown as Array<{
@@ -208,9 +208,9 @@ describe('FIX-154 invalid SQL regressions', () => {
 		const query = orm
 			.withSchema(SCHEMA)
 			.select('dependencies')
-			.columns(['target_id', raw('COUNT(*)', 'count')])
-			.groupBy(['target_id'])
-			.orderBy('target_id');
+			.columns(['targetId', raw('COUNT(*)', 'count')])
+			.groupBy(['targetId'])
+			.orderBy('targetId');
 
 		const dump = query.dump();
 		expect(normalizeSql(dump.sql)).toContain(

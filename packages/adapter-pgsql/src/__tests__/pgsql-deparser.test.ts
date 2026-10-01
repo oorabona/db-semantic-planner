@@ -17,9 +17,6 @@ import {
 	boolExpr,
 	booleanConstNode,
 	coalesceExpr,
-	columnRef,
-	columnRefStar,
-	deleteStmt,
 	distinctExpr,
 	eqExpr,
 	funcCall,
@@ -27,7 +24,6 @@ import {
 	gteExpr,
 	ilikeExpr,
 	innerJoin,
-	insertStmt,
 	integerNode,
 	leftJoin,
 	likeExpr,
@@ -36,16 +32,22 @@ import {
 	neExpr,
 	nullConstNode,
 	orExpr,
-	rangeVar,
-	resTarget,
 	selectStmt,
 	sortBy,
 	stringNode,
 	typeCast,
-	updateStmt,
 } from '../ast-helpers.js';
 import { createParamRef, createTypeCastParamRef } from '../param-ref.js';
 import { deparse } from '../pgsql-deparser.js';
+import {
+	columnRef,
+	columnRefStar,
+	deleteStmt,
+	insertStmt,
+	rangeVar,
+	resTarget,
+	updateStmt,
+} from './typed-ast-test-helpers.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

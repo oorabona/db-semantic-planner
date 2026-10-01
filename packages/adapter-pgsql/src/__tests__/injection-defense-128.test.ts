@@ -22,12 +22,19 @@ import {
 } from '@dbsp/core';
 import type { PolicyIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { columnRef, rangeVar } from '../ast-helpers.js';
+import { sqlColumnRef, sqlRangeVar } from '../ast-helpers.js';
 import { inferPgArrayType } from '../compiler-utils.js';
 import { generateCreatePolicy } from '../ddl/ddl-generator.js';
 import { generateAlterColumnSQL } from '../ddl/table-operations.js';
+import { createDeclaredNameResolver } from '../declared-name-resolver.js';
 import { identityNaming } from '../naming-plugin.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgPhysicalModel } from '../physical-model/index.js';
+import {
+	declaredColumn,
+	declaredTable,
+	queryLocal,
+} from '../sql-identifier.js';
 import { InvalidIdentifierError } from '../validate.js';
 
 // Minimal schema for ORM integration tests
@@ -114,69 +121,90 @@ describe('ITEM-2: literal() rejects non-primitive values (injection defense)', (
 });
 
 // ============================================================================
-// ITEM 3: columnRef / rangeVar — validateIdentifier after naming
+// ITEM 3: established identifiers — declared addresses fail closed and local
+// spellings are emitted as one escaped AST token
 // ============================================================================
 
-describe('ITEM-3: columnRef rejects unsafe identifiers', () => {
-	it('rejects column name with semicolon', () => {
-		expect(() =>
-			columnRef('users; DROP TABLE foo', undefined, undefined, identityNaming),
-		).toThrow(InvalidIdentifierError);
-	});
+const identifierSchema = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		userId: 'integer',
+		email: 'string',
+	},
+	posts: { id: { type: 'integer', primaryKey: true } },
+} as const);
+const identifierResolver = createDeclaredNameResolver(
+	createPgPhysicalModel({
+		mode: 'logical',
+		model: identifierSchema.model,
+		schema: 'public',
+		dbCasing: 'snake_case',
+	}),
+);
 
-	it('rejects column name with embedded double-quote', () => {
-		expect(() =>
-			columnRef('col"name', undefined, undefined, identityNaming),
-		).toThrow(InvalidIdentifierError);
-	});
+function declaredIdentifier(table: string, column: string) {
+	return {
+		table: declaredTable(identifierResolver, table),
+		column: declaredColumn(identifierResolver, table, column),
+	};
+}
 
-	it('rejects column starting with a digit', () => {
+describe('ITEM-3: typed identifiers refuse unsafe declared addresses', () => {
+	it('refuses a declared column name with semicolon', () => {
 		expect(() =>
-			columnRef('1col', undefined, undefined, identityNaming),
-		).toThrow(InvalidIdentifierError);
+			declaredIdentifier('users', 'users; DROP TABLE foo'),
+		).toThrow();
 	});
-
-	it('rejects schema with injection payload', () => {
-		expect(() =>
-			columnRef('id', 'users', 'public; DROP SCHEMA pg_catalog'),
-		).toThrow(InvalidIdentifierError);
+	it('refuses a declared column name with embedded double-quote', () => {
+		expect(() => declaredIdentifier('users', 'col"name')).toThrow();
 	});
-
-	it('allows valid identifier: user_id', () => {
-		expect(() =>
-			columnRef('user_id', undefined, undefined, identityNaming),
-		).not.toThrow();
+	it('refuses a declared column starting with a digit', () => {
+		expect(() => declaredIdentifier('users', '1col')).toThrow();
 	});
-
-	it('allows valid qualified identifier: schema.table.column', () => {
+	it('refuses an undeclared qualified table address', () => {
 		expect(() =>
-			columnRef('email', 'users', 'tenant_123', identityNaming),
+			declaredIdentifier('users; DROP SCHEMA pg_catalog', 'id'),
+		).toThrow();
+	});
+	it('allows a declared physical column', () => {
+		const { column } = declaredIdentifier('users', 'userId');
+		expect(() => sqlColumnRef(column)).not.toThrow();
+	});
+	it('allows a declared qualified physical identifier', () => {
+		const { table, column } = declaredIdentifier('users', 'email');
+		expect(() =>
+			sqlColumnRef(column, table, queryLocal('tenant_123')),
 		).not.toThrow();
 	});
 });
 
-describe('ITEM-3: rangeVar rejects unsafe identifiers', () => {
-	it('rejects table name with semicolon', () => {
-		expect(() =>
-			rangeVar('users; DROP TABLE foo', undefined, undefined, identityNaming),
-		).toThrow(InvalidIdentifierError);
+describe('ITEM-3: query-local identifiers remain one escaped AST token', () => {
+	it('does not splice a malicious table spelling into SQL syntax', () => {
+		const result = sqlRangeVar(queryLocal('users; DROP TABLE foo'));
+		expect(result).toMatchObject({
+			RangeVar: { relname: 'users; DROP TABLE foo' },
+		});
 	});
-
-	it('rejects alias with embedded quote', () => {
-		expect(() =>
-			rangeVar('users', 'u"alias', undefined, identityNaming),
-		).toThrow(InvalidIdentifierError);
+	it('does not splice a quote-bearing alias into SQL syntax', () => {
+		const result = sqlRangeVar(queryLocal('users'), queryLocal('u"alias'));
+		expect(result).toMatchObject({
+			RangeVar: { alias: { aliasname: 'u"alias' } },
+		});
 	});
-
-	it('rejects schema with injection payload', () => {
-		expect(() =>
-			rangeVar('users', undefined, 'public; DROP TABLE t', identityNaming),
-		).toThrow(InvalidIdentifierError);
+	it('does not splice a schema payload into SQL syntax', () => {
+		const result = sqlRangeVar(
+			queryLocal('users'),
+			undefined,
+			queryLocal('public; DROP TABLE t'),
+		);
+		expect(result).toMatchObject({
+			RangeVar: { schemaname: 'public; DROP TABLE t' },
+		});
 	});
-
-	it('allows valid table + alias + schema', () => {
+	it('allows a declared table with query-local alias and schema', () => {
+		const { table } = declaredIdentifier('posts', 'id');
 		expect(() =>
-			rangeVar('posts', 'p', 'tenant_42', identityNaming),
+			sqlRangeVar(table, queryLocal('p'), queryLocal('tenant_42')),
 		).not.toThrow();
 	});
 });
@@ -194,7 +222,6 @@ describe('ITEM-4: generateAlterColumnSQL USING injection defense', () => {
 			}),
 		).toThrow(/Unsafe SQL/);
 	});
-
 	it('rejects USING with line-comment injection', () => {
 		expect(() =>
 			generateAlterColumnSQL('users', 'public', 'score', {
@@ -203,7 +230,6 @@ describe('ITEM-4: generateAlterColumnSQL USING injection defense', () => {
 			}),
 		).toThrow(/Unsafe SQL/);
 	});
-
 	it('rejects USING with block-comment injection', () => {
 		expect(() =>
 			generateAlterColumnSQL('users', 'public', 'val', {
@@ -212,7 +238,6 @@ describe('ITEM-4: generateAlterColumnSQL USING injection defense', () => {
 			}),
 		).toThrow(/Unsafe SQL/);
 	});
-
 	it('allows valid USING expression: old_column::text', () => {
 		expect(() =>
 			generateAlterColumnSQL('users', 'public', 'status', {
@@ -221,7 +246,6 @@ describe('ITEM-4: generateAlterColumnSQL USING injection defense', () => {
 			}),
 		).not.toThrow();
 	});
-
 	it('allows valid USING with type cast: CAST(old_col AS varchar)', () => {
 		expect(() =>
 			generateAlterColumnSQL('users', 'public', 'name', {
@@ -231,7 +255,6 @@ describe('ITEM-4: generateAlterColumnSQL USING injection defense', () => {
 		).not.toThrow();
 	});
 });
-
 // ============================================================================
 // ITEM 5a: Partition strategy — allowlist
 // ============================================================================

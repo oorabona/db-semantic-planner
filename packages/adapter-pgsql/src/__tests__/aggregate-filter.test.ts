@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { columnRef, eqExpr, normalizeSQL } from '../ast-helpers.js';
+import { eqExpr, normalizeSQL, sqlColumnRef } from '../ast-helpers.js';
 import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
 import {
 	avgHandler,
@@ -19,7 +19,7 @@ import {
 } from '../handlers/expression/aggregate.js';
 import type { CompilerContext, Decision } from '../handlers/types.js';
 import { createCompilerState } from '../handlers/types.js';
-import { identityNaming } from '../naming-plugin.js';
+import { queryLocal } from '../sql-identifier.js';
 
 // ============================================================================
 // Helpers
@@ -27,7 +27,6 @@ import { identityNaming } from '../naming-plugin.js';
 
 function makeCtx(overrides: Partial<CompilerContext> = {}): CompilerContext {
 	return {
-		naming: identityNaming,
 		rootTable: 'orders',
 		maxRecursiveDepth: 100,
 		...overrides,
@@ -36,7 +35,7 @@ function makeCtx(overrides: Partial<CompilerContext> = {}): CompilerContext {
 
 /** Build a pre-compiled filterWhere node: "status" = $1 */
 function makeFilterWhere(): import('@pgsql/types').Node {
-	const col = columnRef('status', 'orders', undefined, identityNaming);
+	const col = sqlColumnRef(queryLocal('status'), queryLocal('orders'));
 	return eqExpr(col, { ParamRef: { number: 1 } });
 }
 

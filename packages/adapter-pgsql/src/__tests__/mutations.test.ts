@@ -2,7 +2,7 @@
  * Mutation Compiler Tests
  */
 
-import { exists, notExists } from '@dbsp/core';
+import { exists, notExists, ref, schema } from '@dbsp/core';
 import type { Node } from '@pgsql/types';
 import { describe, expect, it } from 'vitest';
 import type {
@@ -24,16 +24,12 @@ import {
 	type UpdateConfig,
 	type UpsertConfig,
 } from '../mutations/index.js';
-import { CamelCaseNamingPlugin } from '../naming-plugin.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { queryLocal } from '../sql-identifier.js';
 
 describe('Mutation Compiler', () => {
-	const naming = new CamelCaseNamingPlugin();
-
 	const createContext = (table: string, schema?: string): CompilerContext => {
 		const ctx: CompilerContext = {
-			naming,
 			rootTable: table,
 			maxRecursiveDepth: 100,
 		};
@@ -442,10 +438,7 @@ describe('Mutation Compiler', () => {
 });
 
 describe('UPSERT Compiler', () => {
-	const naming = new CamelCaseNamingPlugin();
-
 	const createContext = (table: string): CompilerContext => ({
-		naming,
 		rootTable: table,
 		maxRecursiveDepth: 100,
 	});
@@ -835,7 +828,6 @@ describe('DELETE with notExists / exists WHERE (DELETE-NOT-EXISTS)', () => {
 			aliases: new Map<string, string>(),
 		};
 		const ctx: import('../handlers/types.js').CompilerContext = {
-			naming: new CamelCaseNamingPlugin(),
 			rootTable: 'embeddings',
 			maxRecursiveDepth: 100,
 		};
@@ -857,33 +849,13 @@ describe('DELETE with notExists / exists WHERE (DELETE-NOT-EXISTS)', () => {
 
 describe('DELETE-NOTEXISTS-ALIAS: notExists() resolves relation to real table name', () => {
 	it('uses ModelIR to resolve relation "symbol" -> table "symbols" in NOT EXISTS subquery', async () => {
-		// Build a minimal ModelIR with relation embeddings.symbol -> symbols table
-		const relations = new Map([
-			[
-				'embeddings.symbol',
-				{
-					name: 'symbol',
-					type: 'belongsTo' as const,
-					source: 'embeddings',
-					target: 'symbols',
-					cardinality: 'many-to-one' as const,
-					optionality: 'optional' as const,
-					includeStrategy: 'auto' as const,
-					filterStrategy: 'auto' as const,
-					joinDefault: 'auto' as const,
-					foreignKeys: [],
-				},
-			],
-		]);
-		const model = {
-			tables: new Map(),
-			relations,
-			getTable: () => undefined,
-			getRelation: (qname: string) => relations.get(qname),
-			getRelationsFrom: () => [],
-			getRelationsTo: () => [],
-			isAmbiguous: () => ({ ambiguous: false }),
-		} as unknown as import('@dbsp/types').ModelIR;
+		const model = schema({
+			symbols: { id: 'integer' },
+			embeddings: {
+				id: 'integer',
+				symbolId: ref('symbols', { as: 'symbol', references: ['id'] }),
+			},
+		}).model;
 
 		const { createPgsqlCompileOnlyAdapter: createAdapter } = await import(
 			'../pgsql-adapter.js'

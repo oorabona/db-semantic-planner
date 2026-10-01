@@ -70,19 +70,35 @@ FROM name
 Suppose an `employees` table with a `manager_id` self-reference:
 
 ```typescript
-// Assumes `db` from `schema({...})` and `orm` from `createOrm({ schema: db, adapter })` are in scope.
-import { createOrm, eq } from '@dbsp/core';
+// Standalone example: define the schema and compile-only ORM used below.
+import { createOrm, eq, ref, schema } from '@dbsp/core';
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+
+const employeeDb = schema({
+  employees: {
+    id: { type: 'integer', primaryKey: true },
+    name: 'string',
+    managerId: { type: ref('employees'), nullable: true },
+  },
+} as const);
+const orm = createOrm({
+  schema: employeeDb,
+  adapter: createPgsqlCompileOnlyAdapter({
+    model: employeeDb.model,
+    dbCasing: 'snake_case',
+  }),
+});
 
 const employeeId = 1;
 
-type Employee = { id: number; name: string; manager_id: number | null };
+type Employee = { id: number; name: string; managerId: number | null };
 
 const ancestors = await orm
   .recursive<Employee>('ancestor_chain', {
     base: orm.select('employees').where(eq('id', employeeId)),
     step: orm.select('ancestor_chain'),
   })
-  .columns(['id', 'name', 'manager_id'])
+  .columns(['id', 'name', 'managerId'])
   .dump();
 ```
 
@@ -103,19 +119,36 @@ FROM ancestor_chain
 When cycles are possible or the tree depth is unbounded, use `maxDepth` to prevent infinite recursion. The depth guard is injected automatically into the step query.
 
 ```typescript
-// Assumes `db` from `schema({...})` and `orm` from `createOrm({ schema: db, adapter })` are in scope.
-import { eq } from '@dbsp/core';
+// Standalone example: define the schema and compile-only ORM used below.
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createOrm, eq, ref, schema } from '@dbsp/core';
+
+const categoryDb = schema({
+  categories: {
+    id: { type: 'integer', primaryKey: true },
+    name: 'string',
+    parentId: { type: ref('categories'), nullable: true },
+    depth: 'integer',
+  },
+} as const);
+const orm = createOrm({
+  schema: categoryDb,
+  adapter: createPgsqlCompileOnlyAdapter({
+    model: categoryDb.model,
+    dbCasing: 'snake_case',
+  }),
+});
 
 const rootId = 1;
 
 const subtree = await orm
   .recursive('cat_tree', {
-    base: orm.select('categories').where(eq('parent_id', rootId)),
+    base: orm.select('categories').where(eq('parentId', rootId)),
     step: orm.select('cat_tree'),
     maxDepth: 10,
     depthColumn: 'depth',  // your query must track this column in base+step
   })
-  .columns(['id', 'name', 'parent_id'])
+  .columns(['id', 'name', 'parentId'])
   .orderBy('id')
   .dump();
 ```
@@ -147,18 +180,33 @@ SELECT chain.* FROM chain WHERE chain.name = $2 AND "depth" < $3
 Use `unionAll: false` when the same node can be reached by multiple paths and you only want it once in the result:
 
 ```typescript
-// Assumes `db` from `schema({...})` and `orm` from `createOrm({ schema: db, adapter })` are in scope.
-import { eq } from '@dbsp/core';
+// Standalone example: define the schema and compile-only ORM used below.
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createOrm, eq, schema } from '@dbsp/core';
+
+const graphDb = schema({
+  graphEdges: {
+    fromId: { type: 'integer', primaryKey: true },
+    toId: { type: 'integer', primaryKey: true },
+  },
+} as const);
+const orm = createOrm({
+  schema: graphDb,
+  adapter: createPgsqlCompileOnlyAdapter({
+    model: graphDb.model,
+    dbCasing: 'snake_case',
+  }),
+});
 
 const startId = 1;
 
 const reachable = await orm
   .recursive('reachable_nodes', {
-    base: orm.select('graph_edges').where(eq('from_id', startId)),
+    base: orm.select('graphEdges').where(eq('fromId', startId)),
     step: orm.select('reachable_nodes'),
     unionAll: false,   // UNION deduplicates across iterations
   })
-  .columns(['from_id', 'to_id'])
+  .columns(['fromId', 'toId'])
   .dump();
 ```
 
@@ -181,8 +229,24 @@ Note: `UNION ALL` is the default and is faster — it avoids the deduplication p
 Inspect the compiled SQL and parameters without running against the database:
 
 ```typescript
-// Assumes `db` from `schema({...})` and `orm` from `createOrm({ schema: db, adapter })` are in scope.
-import { eq } from '@dbsp/core';
+// Standalone example: define the schema and compile-only ORM used below.
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createOrm, eq, ref, schema } from '@dbsp/core';
+
+const employeeDb = schema({
+  employees: {
+    id: { type: 'integer', primaryKey: true },
+    name: 'string',
+    managerId: { type: ref('employees'), nullable: true },
+  },
+} as const);
+const orm = createOrm({
+  schema: employeeDb,
+  adapter: createPgsqlCompileOnlyAdapter({
+    model: employeeDb.model,
+    dbCasing: 'snake_case',
+  }),
+});
 
 const builder = orm.recursive('parent_chain', {
   base: orm.select('employees').where(eq('id', 7)),
@@ -214,4 +278,3 @@ console.log(params); // [7, 20]
 - **`UNION ALL` (default) does not deduplicate.** For trees this is fine — each path is unique. For graphs where the same node is reachable via multiple paths, use `unionAll: false` to avoid duplicate rows, at the cost of a deduplication pass per iteration.
 - **No adapter = runtime error.** Calling `.dump()` or `.all()` on a builder constructed without an adapter throws `InvalidOperationError`. Always obtain the builder via `orm.recursive()` (which has an adapter bound), not via `createRawCteBuilder()` directly unless you pass an adapter explicitly.
 - **Schema scoping is inherited.** If you obtained the ORM via `orm.withSchema('tenant_123')`, the recursive query will use `"tenant_123"."table"` in the base and step queries automatically.
-

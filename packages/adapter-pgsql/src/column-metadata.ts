@@ -13,6 +13,8 @@ type ProjectionSource = {
 
 type ProjectionCandidate = {
 	readonly projection: ColumnMetadataProjection;
+	/** True when the compiler emitted this output label in the target list. */
+	readonly explicitOutputLabel: boolean;
 };
 
 export type ColumnMetadataProjection =
@@ -332,9 +334,10 @@ function addCandidate(
 	candidates: Map<string, ProjectionCandidate[]>,
 	outputKey: string,
 	projection: ColumnMetadataProjection,
+	explicitOutputLabel = true,
 ): void {
 	const entries = candidates.get(outputKey) ?? [];
-	entries.push({ projection });
+	entries.push({ projection, explicitOutputLabel });
 	candidates.set(outputKey, entries);
 }
 
@@ -379,10 +382,9 @@ function expandStar(
 		for (const column of table.columns) {
 			addCandidate(
 				candidates,
-				pgReturnedIdentifier(
-					declaredColumnName(declaredNames, tableName, column.name),
-				),
+				declaredColumnName(declaredNames, tableName, column.name),
 				projectionForSource({ table: tableName, column }),
+				false,
 			);
 		}
 	}
@@ -458,16 +460,50 @@ function finalizeProjections(
 	candidates: ReadonlyMap<string, readonly ProjectionCandidate[]>,
 ): ReadonlyMap<string, ColumnMetadataProjection> | undefined {
 	const projections = new Map<string, ColumnMetadataProjection>();
-	for (const [outputKey, entries] of candidates) {
-		if (entries.length !== 1) {
+	const candidatesByReturnedName = new Map<
+		string,
+		{ label: string; candidate: ProjectionCandidate }[]
+	>();
+	for (const [label, entries] of candidates) {
+		const returnedName = truncateIdentifier(label, 63);
+		const returnedEntries = candidatesByReturnedName.get(returnedName) ?? [];
+		returnedEntries.push(...entries.map((candidate) => ({ label, candidate })));
+		candidatesByReturnedName.set(returnedName, returnedEntries);
+	}
+	for (const [outputKey, returnedEntries] of candidatesByReturnedName) {
+		const explicitEntries = returnedEntries.filter(
+			({ candidate }) => candidate.explicitOutputLabel,
+		);
+		if (returnedEntries.length > 1 && explicitEntries.length > 0) {
+			const labels = [...new Set(returnedEntries.map(({ label }) => label))];
+			if (labels.length > 1) {
+				throw new Error(
+					`Projection output labels '${labels[0]}' and '${labels[1]}' collide after PostgreSQL's 63-byte identifier truncation ('${outputKey}').`,
+				);
+			}
 			throw new Error(
-				`Projection output label '${outputKey}' is produced by multiple candidates and cannot be returned losslessly.`,
+				`Projection output label '${labels[0]}' is produced by multiple candidates and cannot be returned losslessly.`,
 			);
 		}
-		const entry = entries[0];
-		if (entry) projections.set(outputKey, entry.projection);
+		// PostgreSQL can expand two stars to the same returned key. Preserve the
+		// SQL and leave only that ambiguous key unmapped.
+		if (returnedEntries.length !== 1) continue;
+		const entry = returnedEntries[0]?.candidate.projection;
+		if (entry) projections.set(outputKey, entry);
 	}
 	return projections.size > 0 ? projections : undefined;
+}
+
+function truncateIdentifier(identifier: string, maxBytes: number): string {
+	let result = '';
+	let byteLength = 0;
+	for (const character of identifier) {
+		const characterBytes = new TextEncoder().encode(character).length;
+		if (byteLength + characterBytes > maxBytes) break;
+		result += character;
+		byteLength += characterBytes;
+	}
+	return result;
 }
 
 function targetListForAst(ast: Node): readonly unknown[] | undefined {

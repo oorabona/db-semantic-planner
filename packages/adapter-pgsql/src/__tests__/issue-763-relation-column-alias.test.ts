@@ -407,7 +407,7 @@ describe('issue 763: relation qualifiers require an emitted SQL alias', () => {
 			],
 		});
 
-		expect(result.sql).toContain('users.name AS "authorName"');
+		expect(result.sql).toContain('author.name AS "authorName"');
 	});
 
 	it('refuses caller-supplied qualifiers that have no emitted alias', () => {

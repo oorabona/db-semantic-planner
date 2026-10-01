@@ -56,6 +56,25 @@ function expectQueryDump(dump: { readonly sql: string }): asserts dump is {
 
 describe('DX-040 Block 8: NQL Template Literal Integration', () => {
 	describe('createNqlTag', () => {
+		it('passes its logical model when compiling a plan-backed NQL dump', () => {
+			const s = createTestSchema();
+			let compileOptions: { model?: unknown } | undefined;
+			const adapter = {
+				compile: (_plan: unknown, options?: { model?: unknown }) => {
+					compileOptions = options;
+					return { sql: 'SELECT users.* FROM users', parameters: [] };
+				},
+				createDump: () => {
+					throw new Error('not implemented');
+				},
+			};
+			const nql = createNqlTag(s.definition, s.model, adapter as never);
+
+			nql`users | select name`.dump();
+
+			expect(compileOptions?.model).toBe(s.model);
+		});
+
 		it('creates a template tag function', () => {
 			const s = createTestSchema();
 			const nql = createNqlTag(s.definition, s.model);

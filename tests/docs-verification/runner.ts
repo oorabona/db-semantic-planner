@@ -159,7 +159,7 @@ const __defaultDb = __doctestSchema({
 		id: { type: 'uuid', primaryKey: true },
 		title: 'string',
 		content: { type: 'text', nullable: true },
-		authorId: __doctestRef('users'),
+		authorId: __doctestRef('users', { inverse: 'posts' }),
 		published: 'boolean',
 		createdAt: 'timestamp',
 		searchVector: { type: 'tsvector', nullable: true },

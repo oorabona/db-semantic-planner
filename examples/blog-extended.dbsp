@@ -78,8 +78,8 @@ insert into tags set name = 'kubernetes', slug = 'kubernetes'!
 # Update a post to be featured
 update posts set featured = true where id = 1!
 
-# Update view count (use snake_case column names for mutations)
-update posts set view_count = 5000 where id = 1!
+# Update view count
+update posts set viewCount = 5000 where id = 1!
 
 # Delete draft posts
 delete from posts where published = false!

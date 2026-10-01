@@ -363,15 +363,19 @@ function compileJsonAggRecursive(
 	const limit = typeof decision.limit === 'number' ? decision.limit : undefined;
 	const orderBy = resolveJsonAggOrderBy(decision, targetTable, innerCtx);
 	const resolvedTarget = resolveRelationTarget(targetTable, innerCtx);
-	if (orderBy) {
-		requireRelationTargetColumns(
-			resolvedTarget,
-			orderBy.columns,
-			innerCtx,
-			'order key',
-			relation,
-		);
-	}
+	const orderByIdentifiers = orderBy?.columns.map(
+		(column) =>
+			requireRelationTargetColumn(
+				resolvedTarget,
+				column,
+				innerCtx,
+				'order key',
+				relation,
+			)?.outputKey ??
+			(innerCtx.declaredNames === undefined
+				? queryLocal(column)
+				: declaredColumn(innerCtx.declaredNames, targetTable, column)),
+	);
 	const shape = jsonAggContainerShape(decision.relationType);
 	const columns = resolveJsonAggProjection(
 		decision,
@@ -407,7 +411,7 @@ function compileJsonAggRecursive(
 				aliasColumnAuthorities: innerCtx.aliasColumnAuthorities,
 			}),
 			...(columnValueOverrides && { columnValueOverrides }),
-			...(orderBy && { orderBy: orderBy.columns }),
+			...(orderByIdentifiers && { orderBy: orderByIdentifiers }),
 			...(orderBy?.fallback && { orderByFallback: true }),
 		},
 	);

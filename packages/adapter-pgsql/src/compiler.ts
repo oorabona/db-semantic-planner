@@ -108,6 +108,7 @@ import type {
 import {
 	expressionColumnRef,
 	expressionQualifiedColumnRef,
+	expressionRelationBinding,
 	expressionUnqualifiedColumnRef,
 	isSelectWithFields,
 } from './handlers/types.js';
@@ -117,7 +118,6 @@ import {
 	convertWhereCondition,
 	intentToDecisions,
 } from './intent-to-decisions.js';
-import type { NamingPlugin } from './naming-plugin.js';
 import { unwrapParamIntent } from './param-intent.js';
 import { createParamRef } from './param-ref.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
@@ -592,7 +592,7 @@ function mergeDuplicateJoinIncludeDecisions(
 
 	for (const decision of decisions) {
 		const identityPath =
-			decision.type === 'includeStrategy' && decision.choice === 'join'
+			decision.type === 'includeStrategy'
 				? getRelationIdentityPath(decision, rootTable)
 				: undefined;
 		if (!identityPath) {
@@ -616,6 +616,10 @@ function mergeDuplicateJoinIncludeDecisions(
 			merged.push(copy);
 			continue;
 		}
+		if (existing.choice !== decision.choice) {
+			merged.push(decision);
+			continue;
+		}
 
 		const existingJoinType = existing.joinType ?? 'left';
 		const nextJoinType = decision.joinType ?? 'left';
@@ -631,6 +635,7 @@ function mergeDuplicateJoinIncludeDecisions(
 			columns?: readonly string[];
 			columnAliases?: Readonly<Record<string, string>>;
 			conditions?: readonly PlanDecision[];
+			children?: readonly PlanDecision[];
 		};
 		const columns = mergeColumnLists(existing.columns, decision.columns);
 		if (columns) mutable.columns = columns;
@@ -645,6 +650,9 @@ function mergeDuplicateJoinIncludeDecisions(
 				...(existing.conditions ?? []),
 				...decision.conditions,
 			];
+		}
+		if (decision.children && decision.children.length > 0) {
+			mutable.children = [...(existing.children ?? []), ...decision.children];
 		}
 	}
 
@@ -757,8 +765,6 @@ function maxParamRefNumber(value: unknown): number {
 // ============================================================================
 
 export interface CompilerOptions {
-	/** @deprecated Kept only so pre-lot callers remain structurally assignable. */
-	readonly naming?: NamingPlugin;
 	readonly declaredNames?: DeclaredNameResolver;
 	readonly schema?: string;
 	readonly dialectCapabilities?: DialectCapabilities;
@@ -1003,9 +1009,12 @@ export class PlanCompiler {
 
 	private filterJoinAlias(decision: PlanDecision): string {
 		const targetTable = decision.targetTable!;
-		return targetTable === this.currentRootTable
-			? (decision.relationName ?? `${targetTable}_join`)
-			: targetTable;
+		return (
+			decision.relationName ??
+			(targetTable === this.currentRootTable
+				? `${targetTable}_join`
+				: targetTable)
+		);
 	}
 
 	/**
@@ -2371,12 +2380,13 @@ export class PlanCompiler {
 		switch (decision.type) {
 			case 'select':
 				if (decision.column === '*') {
+					const ctx = this.createHandlerContext(plan);
 					targetList.push(
 						sqlResTarget(
 							sqlColumnRefStar(
 								decision.table === undefined
 									? undefined
-									: queryLocal(decision.table),
+									: expressionRelationBinding(decision.table, ctx).qualifier,
 							),
 						),
 					);
@@ -2759,7 +2769,7 @@ export class PlanCompiler {
 					this.registerJoinFilter(decision);
 					// Add user conditions (on joined table) to WHERE
 					if (decision.conditions && decision.conditions.length > 0) {
-						const joinTarget = decision.targetTable!;
+						const joinTarget = this.filterJoinAlias(decision);
 						const condNodes = decision.conditions.map((c) =>
 							this.dispatchWhere(c as PlanDecision, {
 								currentAlias: joinTarget,
@@ -3181,6 +3191,31 @@ export class PlanCompiler {
 		return selectStmt(options);
 	}
 
+	/**
+	 * PostgreSQL does not resolve SELECT labels in HAVING. Reuse the selected
+	 * aggregate's source expression when HAVING names its output alias.
+	 */
+	private resolveHavingAggregateAlias(
+		decision: PlanDecision,
+		decisions: readonly PlanDecision[],
+	): PlanDecision {
+		if (!decision.column) return decision;
+		const projection = decisions.find(
+			(candidate) =>
+				candidate.type === 'selectFunction' &&
+				candidate.alias === decision.column,
+		);
+		if (!projection?.function || !projection.column) return decision;
+		return {
+			...decision,
+			column: projection.column,
+			function: projection.function,
+			...(projection.distinct !== undefined && {
+				distinct: projection.distinct,
+			}),
+		};
+	}
+
 	private compileSelect(plan: SimplifiedPlanReport): Node {
 		const decisions = mergeDuplicateJoinIncludeDecisions(
 			plan.decisions,
@@ -3266,7 +3301,9 @@ export class PlanCompiler {
 					break;
 
 				case 'having':
-					having = this.dispatchWhere(decision);
+					having = this.dispatchWhere(
+						this.resolveHavingAggregateAlias(decision, decisions),
+					);
 					break;
 
 				case 'limit':
@@ -3547,7 +3584,7 @@ export class PlanCompiler {
 					: declaredColumn(this.declaredNames, plan.rootTable, column),
 			),
 			values,
-			...(schema !== undefined && { schema }),
+			...(schema !== undefined && { schema: queryLocal(schema) }),
 			...(returning.length > 0 && { returning }),
 		});
 	}
@@ -3609,7 +3646,7 @@ export class PlanCompiler {
 		return sqlUpdateStmt({
 			table: this.tableIdentifier(plan.rootTable),
 			set,
-			...(updateSchema !== undefined && { schema: updateSchema }),
+			...(updateSchema !== undefined && { schema: queryLocal(updateSchema) }),
 			...(where !== undefined && { where }),
 			...(returning.length > 0 && { returning }),
 		});
@@ -3656,7 +3693,7 @@ export class PlanCompiler {
 		const deleteSchema = plan.schema ?? this.schema;
 		return sqlDeleteStmt({
 			table: this.tableIdentifier(plan.rootTable),
-			...(deleteSchema !== undefined && { schema: deleteSchema }),
+			...(deleteSchema !== undefined && { schema: queryLocal(deleteSchema) }),
 			...(where !== undefined && { where }),
 			...(returning.length > 0 && { returning }),
 		});
@@ -3679,6 +3716,16 @@ export class PlanCompiler {
 		// e.g., posts.author_id → authors.id
 		// Use relation-based alias for self-referential tables
 		const targetAlias = this.filterJoinAlias(decision);
+		// A selected relation may already have emitted the same FK join during
+		// alias allocation. Reuse that range variable so WHERE references and
+		// projected relation columns share one query-local qualifier.
+		const alreadyJoined = [...this.joinAliasMap.values()].some(
+			(entry) =>
+				entry.alias === targetAlias &&
+				entry.targetTable === targetTable &&
+				entry.relationName === decision.relationName,
+		);
+		if (alreadyJoined) return;
 		const alias = targetAlias === targetTable ? undefined : targetAlias;
 		const fkColumn = decision.foreignKey ?? [
 			this.deriveFk(targetTable, this.defaultPk),

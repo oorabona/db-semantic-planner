@@ -11,7 +11,6 @@ import {
 	createWhereDispatcher,
 	type Decision,
 } from '../handlers/index.js';
-import { identityNaming } from '../naming-plugin.js';
 
 // Helper to compile a decision to SQL
 function compileToSql(
@@ -19,7 +18,6 @@ function compileToSql(
 	ctx?: Partial<CompilerContext>,
 ): { sql: string; params: unknown[] } {
 	const fullCtx: CompilerContext = {
-		naming: identityNaming,
 		rootTable: 'users',
 		maxRecursiveDepth: 100,
 		...ctx,

@@ -23,11 +23,11 @@ import {
 	type SqlInsertOptions,
 	type SqlUpdateOptions,
 	sqlColumnRef,
+	sqlColumnRefStar,
 	sqlDeleteStmt,
 	sqlInsertStmt,
 	sqlResTarget,
 	sqlUpdateStmt,
-	starTarget,
 } from '../ast-helpers.js';
 import { type RelationBinding, relationBinding } from '../binding-registry.js';
 import {
@@ -117,7 +117,7 @@ export function buildReturningExprs(
 	if (!columns || columns.length === 0) return undefined;
 	return columns.map((col, index) =>
 		col === '*'
-			? starTarget()
+			? sqlResTarget(sqlColumnRefStar())
 			: sqlResTarget(
 					sqlColumnRef(addressedSources?.[index] ?? queryLocal(col), table),
 					queryLocal(col),

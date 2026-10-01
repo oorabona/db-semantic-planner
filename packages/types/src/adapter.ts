@@ -602,6 +602,7 @@ export interface CompilingAdapter extends BaseAdapter {
 	/** Compile a FROM-less SELECT expression to SQL (e.g. SELECT nextval('seq')). */
 	compileSelectExpression<T = unknown>(
 		expr: ExpressionIntent,
+		options?: CompileOptions,
 	): CompiledQuery<T>;
 
 	/** Create a dump for observability. */

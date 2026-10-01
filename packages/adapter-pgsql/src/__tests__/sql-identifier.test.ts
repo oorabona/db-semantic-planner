@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { sqlColumnRef } from '../ast-helpers.js';
 import type { DeclaredNameResolver } from '../declared-name-resolver.js';
 import {
 	catalogName,
@@ -30,6 +31,13 @@ function resolver(entries: {
 }
 
 function acceptsSqlIdentifier(_identifier: SqlIdentifier): void {}
+
+function typedAstRequiresEstablishedIdentifiers(): void {
+	sqlColumnRef(queryLocal('name'));
+	// @ts-expect-error Raw strings cannot reach the converted typed AST helper.
+	sqlColumnRef('name');
+}
+void typedAstRequiresEstablishedIdentifiers;
 
 describe('SqlIdentifier', () => {
 	it('resolves declared addresses and preserves their physical spelling', () => {

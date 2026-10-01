@@ -7,7 +7,6 @@
  * deliberately left to the caller: they are query-local SQL identifiers.
  */
 import type { ModelIR } from '@dbsp/types';
-import type { NamingPlugin } from './naming-plugin.js';
 import {
 	createPgPhysicalModel,
 	type PgPhysicalModel,
@@ -26,6 +25,46 @@ export interface DeclaredNameResolver {
 	uniqueIndex(name: string): string | undefined;
 }
 
+function requireResolver(
+	resolver: DeclaredNameResolver | undefined,
+): DeclaredNameResolver {
+	if (resolver === undefined) {
+		throw new Error(
+			'Declared SQL identifiers require a physical-name resolver.',
+		);
+	}
+	return resolver;
+}
+
+/** Resolve a declared table; absence is never a casing fallback. */
+export function declaredTableName(
+	resolver: DeclaredNameResolver | undefined,
+	table: string,
+): string {
+	const physical = requireResolver(resolver).table(table);
+	if (physical === undefined) {
+		throw new Error(
+			`Declared table '${table}' is absent from the physical model.`,
+		);
+	}
+	return physical;
+}
+
+/** Resolve a declared column; absence is never a casing fallback. */
+export function declaredColumnName(
+	resolver: DeclaredNameResolver | undefined,
+	table: string,
+	column: string,
+): string {
+	const physical = requireResolver(resolver).column(table, column);
+	if (physical === undefined) {
+		throw new Error(
+			`Declared column '${table}.${column}' is absent from the physical model.`,
+		);
+	}
+	return physical;
+}
+
 /**
  * Cross a declared logical address into the physical inventory.  The absence of
  * an authority is the deliberately supported `dbCasing: 'preserve'` model-less
@@ -33,130 +72,36 @@ export interface DeclaredNameResolver {
  * Once an authority exists, a missing address is an error rather than a
  * casing-based fallback.
  */
-export function declaredTableName(
-	declaredNames: DeclaredNameResolver | undefined,
-	table: string,
-): string {
-	if (declaredNames === undefined) return table;
-	const physical = declaredNames.table(table);
-	if (physical !== undefined) return physical;
-	throw new Error(
-		`Declared table '${table}' is absent from the physical model.`,
-	);
-}
-
-export function declaredColumnName(
-	declaredNames: DeclaredNameResolver | undefined,
-	table: string,
-	column: string,
-): string {
-	if (declaredNames === undefined) return column;
-	const physical = declaredNames.column(table, column);
-	if (physical !== undefined) return physical;
-	throw new Error(
-		`Declared column '${table}.${column}' is absent from the physical model.`,
-	);
-}
-
-/** Recover a declared logical key from a returned physical column label. */
-export function declaredLogicalColumnName(
-	declaredNames: DeclaredNameResolver | undefined,
-	table: string,
-	physicalColumn: string,
-): string {
-	if (declaredNames === undefined) return physicalColumn;
-	const logical = declaredNames.logicalColumn(table, physicalColumn);
-	if (logical !== undefined) return logical;
-	throw new Error(
-		`Physical column '${table}.${physicalColumn}' is absent from the declared model.`,
-	);
-}
-
 type PerModelPhysicalCache = Map<string, PgPhysicalModel>;
 const physicalModels = new WeakMap<ModelIR, PerModelPhysicalCache>();
 const declaredResolvers = new WeakMap<PgPhysicalModel, DeclaredNameResolver>();
-const namingPluginCacheKeys = new WeakMap<NamingPlugin, number>();
-let nextNamingPluginCacheKey = 0;
-
-function namingPluginCacheKey(naming: NamingPlugin | undefined): string {
-	if (naming === undefined) return 'db-casing';
-	let key = namingPluginCacheKeys.get(naming);
-	if (key === undefined) {
-		key = nextNamingPluginCacheKey++;
-		namingPluginCacheKeys.set(naming, key);
-	}
-	return `plugin:${key}`;
-}
 
 /**
  * Cache physical models by logical-model identity, effective schema and
- * db-casing and naming-plugin identity. Module scope is intentional:
+ * db-casing. Module scope is intentional:
  * withSchema() constructs a sibling adapter and must reuse the same cache.
  */
 export function getCachedPgPhysicalModel(
 	model: ModelIR,
 	schema: string,
 	dbCasing: import('@dbsp/types').DbCasing,
-	naming?: NamingPlugin,
 ): PgPhysicalModel {
 	let byKey = physicalModels.get(model);
 	if (byKey === undefined) {
 		byKey = new Map();
 		physicalModels.set(model, byKey);
 	}
-	const key = `${schema}\u0000${dbCasing}\u0000${namingPluginCacheKey(naming)}`;
+	const key = `${schema}\u0000${dbCasing}`;
 	const cached = byKey.get(key);
 	if (cached !== undefined) return cached;
-	const physical = createPgPhysicalModel(
-		naming === undefined
-			? { mode: 'logical', model, schema, dbCasing }
-			: { mode: 'logical', model, schema, naming },
-	);
+	const physical = createPgPhysicalModel({
+		mode: 'logical',
+		model,
+		schema,
+		dbCasing,
+	});
 	byKey.set(key, physical);
 	return physical;
-}
-
-/**
- * Some direct adapter tests use partial ModelIR-shaped fixtures solely for
- * relation/type inference. They are not a complete declared inventory, so
- * preserve the legacy naming-only path rather than treating a partial fixture
- * as an authority. Normal schema()/ModelIR instances always take the
- * fail-closed physical-model path.
- */
-export function canCreatePgPhysicalModel(model: ModelIR): boolean {
-	if (!(model.tables instanceof Map) || model.tables.size === 0) return false;
-	for (const table of model.tables.values()) {
-		if (
-			table.primaryKey !== undefined &&
-			typeof table.primaryKey !== 'string' &&
-			!Array.isArray(table.primaryKey)
-		) {
-			return true;
-		}
-	}
-	if (
-		typeof (model as { getRelationsFrom?: unknown }).getRelationsFrom !==
-			'function' ||
-		typeof (model as { isAmbiguous?: unknown }).isAmbiguous !== 'function'
-	) {
-		return false;
-	}
-	for (const [key, table] of model.tables) {
-		if (
-			key !== table.name ||
-			!Array.isArray(table.columns) ||
-			!Array.isArray(table.foreignKeys) ||
-			!Array.isArray(table.indexes) ||
-			(table.checkConstraints !== undefined &&
-				!Array.isArray(table.checkConstraints)) ||
-			(table.pseudoColumns !== undefined &&
-				!Array.isArray(table.pseudoColumns)) ||
-			(table.policies !== undefined && !Array.isArray(table.policies))
-		) {
-			return false;
-		}
-	}
-	return true;
 }
 
 export function createDeclaredNameResolver(

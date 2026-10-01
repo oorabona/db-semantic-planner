@@ -3858,7 +3858,7 @@ describe('PgsqlAdapter.execute — row transformation', () => {
 				{ model },
 			),
 		).toThrow(
-			`PostgreSQL projection outputs '${prefix}one' and '${prefix}two' both return label '${prefix}'`,
+			`Projection output labels '${prefix}one' and '${prefix}two' collide after PostgreSQL's 63-byte identifier truncation ('${prefix}')`,
 		);
 	});
 

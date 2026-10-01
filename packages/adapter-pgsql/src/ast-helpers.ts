@@ -5,15 +5,10 @@
  * All functions follow a consistent pattern:
  * - Return wrapped Node types (e.g., { SelectStmt: {...} })
  * - Handle optional properties with exactOptionalPropertyTypes
- * - Support the NamingPlugin for identifier transformation
+ * - Accept identifiers only after their authority is established
  */
 
-import type {
-	JsonAggOrderByEntry,
-	LockIntent,
-	LockStrength,
-	LockWaitPolicy,
-} from '@dbsp/types';
+import type { LockIntent, LockStrength, LockWaitPolicy } from '@dbsp/types';
 import type {
 	A_Expr,
 	A_Expr_Kind,
@@ -28,7 +23,6 @@ import type {
 	Node,
 	LockWaitPolicy as PgLockWaitPolicy,
 	RangeVar,
-	ResTarget,
 	SelectStmt,
 	SortBy,
 	TypeCast,
@@ -36,17 +30,11 @@ import type {
 	UpdateStmt,
 } from '@pgsql/types';
 
-import type { NamingPlugin } from './naming-plugin.js';
-import { asQueryNaming, identityNaming } from './naming-plugin.js';
 import {
-	type AliasColumnAuthority,
-	emittedColumnReference,
-	type ResolvedColumnReference,
-	requestedColumnReference,
-	requireEmittedRelationTargetColumn,
-} from './relation-target-projection.js';
-import { identifierText, type SqlIdentifier } from './sql-identifier.js';
-import { validateIdentifier } from './validate.js';
+	identifierText,
+	queryLocal,
+	type SqlIdentifier,
+} from './sql-identifier.js';
 
 // Re-export normalizeSQL from core (canonical location since A-9 DRY refactor)
 export { normalizeSQL } from '@dbsp/core';
@@ -62,18 +50,6 @@ function applyReturningClause(
 	if (returning && returning.length > 0) {
 		stmt.returningClause = { exprs: returning };
 	}
-}
-
-function pgReturnedIdentifier(identifier: string): string {
-	let result = '';
-	let bytes = 0;
-	for (const character of identifier) {
-		const width = Buffer.byteLength(character, 'utf8');
-		if (bytes + width > 63) break;
-		result += character;
-		bytes += width;
-	}
-	return result;
 }
 
 // ============================================================================
@@ -141,182 +117,6 @@ export function nullConstNode(): Node {
 }
 
 // ============================================================================
-// Column and Table References
-// ============================================================================
-
-/**
- * Create a ColumnRef node
- * @param column - Column name
- * @param table - Optional table name or alias
- * @param schema - Optional database schema identifier
- * @param naming - Naming plugin for table, alias, and column transformation
- */
-export function columnRef(
-	column: string | ResolvedColumnReference,
-	table?: string,
-	schema?: string,
-	naming: NamingPlugin = identityNaming,
-	authorities?: AliasColumnAuthority,
-): Node {
-	naming = asQueryNaming(naming);
-	const fields: Node[] = [];
-
-	if (schema) {
-		validateIdentifier(schema, 'schema');
-		fields.push(stringNode(schema));
-	}
-	if (table) {
-		const localAuthority = authorities?.get(table);
-		const dbTable = localAuthority ? table : naming.resolve(table);
-		validateIdentifier(dbTable, 'table');
-		fields.push(stringNode(dbTable));
-	}
-	const isWildcard =
-		typeof column === 'string' ? column === '*' : column.emittedName === '*';
-	const authority =
-		table && !isWildcard
-			? (authorities?.get(table) ?? authorities?.get(naming.resolve(table)))
-			: undefined;
-	const authorityOutput =
-		typeof column === 'string'
-			? (authority?.outputs?.get(column) ??
-				authority?.outputsByLogicalKey?.get(column) ??
-				authority?.outputs?.get(pgReturnedIdentifier(naming.resolve(column))))
-			: undefined;
-	const resolved =
-		typeof column === 'string'
-			? authorityOutput !== undefined
-				? emittedColumnReference(authorityOutput.outputKey)
-				: requestedColumnReference(naming.resolve(column))
-			: column;
-	const dbColumn = resolved.emittedName;
-	if (table) {
-		if (authority) {
-			requireEmittedRelationTargetColumn(
-				authority,
-				emittedColumnReference(dbColumn),
-				'column reference',
-			);
-		}
-	}
-	// Defense-in-depth: validate that the column is a safe SQL identifier.
-	// Skip validation for the two internal compiler escape hatches:
-	//   '*'  — SELECT * wildcard (callers should prefer columnRefStar(); legacy path)
-	//   /^\d+$/ — integer literal used as a SELECT column (e.g. SELECT 1)
-	// All other values must be valid PostgreSQL identifiers.
-	if (dbColumn !== '*' && !/^\d+$/.test(dbColumn)) {
-		// column must be pre-split — a `rel.col` dotted ref is decomposed upstream;
-		// a raw dotted string here is rejected by design.
-		validateIdentifier(dbColumn, 'column');
-	}
-	fields.push(stringNode(dbColumn));
-
-	return { ColumnRef: { fields } };
-}
-
-/**
- * Create a ColumnRef for "table.*" (star/wildcard)
- */
-export function columnRefStar(
-	table?: string,
-	naming: NamingPlugin = identityNaming,
-	authorities?: AliasColumnAuthority,
-): Node {
-	naming = asQueryNaming(naming);
-	const fields: Node[] = [];
-
-	if (table) {
-		// A qualifier is local whenever it names an alias/CTE authority.  Applying
-		// db casing here made `activeUsers.*` reference a non-existent
-		// `active_users` range variable.
-		fields.push(
-			stringNode(authorities?.has(table) ? table : naming.resolve(table)),
-		);
-	}
-	fields.push({ A_Star: {} });
-
-	return { ColumnRef: { fields } };
-}
-
-/**
- * Create a RangeVar node (table reference in FROM clause)
- * The schema argument is a database identifier and is not transformed.
- */
-export function rangeVar(
-	table: string,
-	alias?: string,
-	schema?: string,
-	naming: NamingPlugin = identityNaming,
-): Node {
-	naming = asQueryNaming(naming);
-	const dbTable = naming.resolve(table);
-	validateIdentifier(dbTable, 'table');
-	const rv: RangeVar = {
-		relname: dbTable,
-		inh: true,
-		relpersistence: 'p',
-	};
-
-	if (schema) {
-		validateIdentifier(schema, 'schema');
-		rv.schemaname = schema;
-	}
-
-	if (alias) {
-		validateIdentifier(alias, 'alias');
-		rv.alias = { aliasname: alias };
-	}
-
-	return { RangeVar: rv };
-}
-
-// ============================================================================
-// Target List (SELECT expressions)
-// ============================================================================
-
-/**
- * Create a ResTarget node (target in SELECT list)
- * @param val - Expression value
- * @param name - Optional alias (AS name)
- */
-export function resTarget(val: Node, name?: string): Node {
-	const rt: ResTarget = { val };
-
-	if (name) {
-		rt.name = name;
-	}
-
-	return { ResTarget: rt };
-}
-
-/**
- * Create a ResTarget for a simple column
- */
-export function columnTarget(
-	column: string,
-	alias?: string,
-	table?: string,
-	naming: NamingPlugin = identityNaming,
-	authorities?: AliasColumnAuthority,
-): Node {
-	return resTarget(
-		columnRef(column, table, undefined, naming, authorities),
-		alias,
-	);
-}
-
-/**
- * Create a ResTarget for "*" (all columns)
- */
-export function starTarget(
-	table?: string,
-	naming: NamingPlugin = identityNaming,
-	authorities?: AliasColumnAuthority,
-): Node {
-	return resTarget(columnRefStar(table, naming, authorities));
-}
-
-// ============================================================================
 // Expressions
 // ============================================================================
 
@@ -344,23 +144,6 @@ export function binaryExpr(
  */
 export function eqExpr(left: Node, right: Node): Node {
 	return binaryExpr('=', left, right);
-}
-
-/**
- * Build an FK-based correlation condition: alias1.col1 = alias2.col2
- * Used by all include handlers (JOIN, LATERAL, CTE, JSON_AGG).
- */
-export function fkCorrelation(
-	col1: string,
-	alias1: string,
-	col2: string,
-	alias2: string,
-	naming: NamingPlugin,
-): Node {
-	return eqExpr(
-		columnRef(col1, alias1, undefined, naming),
-		columnRef(col2, alias2, undefined, naming),
-	);
 }
 
 /**
@@ -756,232 +539,6 @@ export function mapLockToAst(lock: LockIntent): {
 // INSERT Statement
 // ============================================================================
 
-export interface InsertOptions {
-	table: string;
-	schema?: string;
-	columns?: string[];
-	/** VALUES rows for INSERT ... VALUES */
-	values?: Node[][];
-	/** SELECT query for INSERT ... SELECT */
-	selectQuery?: Node;
-	returning?: Node[];
-	onConflict?: {
-		target?: string[];
-		action: 'nothing' | 'update';
-		updateSet?: Array<{ column: string; value: Node }>;
-	};
-	naming?: NamingPlugin;
-}
-
-/**
- * Create an InsertStmt node
- */
-export function insertStmt(options: InsertOptions): Node {
-	const naming = asQueryNaming(options.naming ?? identityNaming);
-
-	const relation: RangeVar = {
-		relname: naming.resolve(options.table),
-		inh: true,
-		relpersistence: 'p',
-	};
-
-	if (options.schema) {
-		validateIdentifier(options.schema, 'schema');
-		relation.schemaname = options.schema;
-	}
-
-	const stmt: InsertStmt = {
-		relation,
-	};
-
-	if (options.columns && options.columns.length > 0) {
-		stmt.cols = options.columns.map((col) => ({
-			ResTarget: { name: naming.resolve(col) },
-		}));
-	}
-
-	if (options.selectQuery) {
-		// INSERT ... SELECT: use provided query directly
-		stmt.selectStmt = options.selectQuery;
-	} else if (options.values && options.values.length > 0) {
-		// VALUES clause represented as a SelectStmt with valuesLists
-		// Each row is wrapped in a List node
-		stmt.selectStmt = {
-			SelectStmt: {
-				valuesLists: options.values.map((row) => ({ List: { items: row } })),
-			},
-		};
-	}
-
-	applyReturningClause(stmt, options.returning);
-
-	// ON CONFLICT handling would go here (complex, defer for now)
-
-	return { InsertStmt: stmt };
-}
-
-// ============================================================================
-// UPDATE Statement
-// ============================================================================
-
-export interface UpdateOptions {
-	table: string;
-	schema?: string;
-	set: Array<{ column: string; value: Node }>;
-	where?: Node;
-	from?: Node[];
-	returning?: Node[];
-	naming?: NamingPlugin;
-}
-
-/**
- * Create an UpdateStmt node
- */
-export function updateStmt(options: UpdateOptions): Node {
-	const naming = asQueryNaming(options.naming ?? identityNaming);
-
-	const relation: RangeVar = {
-		relname: naming.resolve(options.table),
-		inh: true,
-		relpersistence: 'p',
-	};
-
-	if (options.schema) {
-		validateIdentifier(options.schema, 'schema');
-		relation.schemaname = options.schema;
-	}
-
-	const stmt: UpdateStmt = {
-		relation,
-		targetList: options.set.map(({ column, value }) => ({
-			ResTarget: {
-				name: naming.resolve(column),
-				val: value,
-			},
-		})),
-	};
-
-	if (options.where) {
-		stmt.whereClause = options.where;
-	}
-
-	if (options.from && options.from.length > 0) {
-		stmt.fromClause = options.from;
-	}
-
-	applyReturningClause(stmt, options.returning);
-
-	return { UpdateStmt: stmt };
-}
-
-// ============================================================================
-// DELETE Statement
-// ============================================================================
-
-export interface DeleteOptions {
-	table: string;
-	schema?: string;
-	where?: Node;
-	using?: Node[];
-	returning?: Node[];
-	naming?: NamingPlugin;
-}
-
-/**
- * Create a DeleteStmt node
- */
-export function deleteStmt(options: DeleteOptions): Node {
-	const naming = asQueryNaming(options.naming ?? identityNaming);
-
-	const relation: RangeVar = {
-		relname: naming.resolve(options.table),
-		inh: true,
-		relpersistence: 'p',
-	};
-
-	if (options.schema) {
-		validateIdentifier(options.schema, 'schema');
-		relation.schemaname = options.schema;
-	}
-
-	const stmt: DeleteStmt = {
-		relation,
-	};
-
-	if (options.where) {
-		stmt.whereClause = options.where;
-	}
-
-	if (options.using && options.using.length > 0) {
-		stmt.usingClause = options.using;
-	}
-
-	applyReturningClause(stmt, options.returning);
-
-	return { DeleteStmt: stmt };
-}
-
-// ============================================================================
-// Window Functions
-// ============================================================================
-
-/**
- * Create a window function call with OVER clause.
- * Example: ROW_NUMBER() OVER (PARTITION BY x ORDER BY y) AS alias
- */
-export function windowFuncCall(
-	funcName: string,
-	args: Node[],
-	over: {
-		partitionBy?: readonly string[];
-		orderBy?: readonly { field: string; direction?: 'asc' | 'desc' }[];
-	},
-	naming: NamingPlugin,
-	table?: string,
-): Node {
-	// Build partition clause
-	const partitionClause: Node[] = (over.partitionBy ?? []).map((col) =>
-		columnRef(col, table, undefined, naming),
-	);
-
-	// Build order clause using existing sortBy helper
-	const orderClause: Node[] = (over.orderBy ?? []).map((ob) =>
-		sortBy(
-			columnRef(ob.field, table, undefined, naming),
-			ob.direction === 'desc' ? 'DESC' : 'ASC',
-		),
-	);
-
-	// Window definition
-	const windowDef: Record<string, unknown> = {
-		frameOptions: 1034, // Implicit default frame (NONDEFAULT bit not set → no frame clause emitted)
-	};
-
-	if (partitionClause.length > 0) {
-		windowDef.partitionClause = partitionClause;
-	}
-	if (orderClause.length > 0) {
-		windowDef.orderClause = orderClause;
-	}
-
-	// Build the FuncCall with over property
-	// Window functions like row_number, rank, etc. are actual database functions
-	// and will work correctly even when quoted by the deparser
-	const funcCallObj: Record<string, unknown> = {
-		funcname: [stringNode(funcName)],
-		over: windowDef,
-	};
-
-	if (args.length > 0) {
-		funcCallObj.args = args;
-	} else if (funcName.toLowerCase() === 'count') {
-		// count() without args → count(*) via agg_star
-		funcCallObj.agg_star = true;
-	}
-
-	return { FuncCall: funcCallObj as FuncCall };
-}
-
 // ============================================================================
 // JSON Aggregation (for include strategies)
 // ============================================================================
@@ -1002,200 +559,6 @@ export function windowFuncCall(
  * @param alias - The column alias (e.g., 'author_json')
  * @param schemaName - Optional schema name
  */
-export function jsonAggSubquery(
-	targetTable: string,
-	whereExpr: Node,
-	alias: string,
-	schemaName?: string,
-	naming: NamingPlugin = identityNaming,
-	options?: {
-		/** Nested child subqueries to merge via jsonb_build_object */
-		childNodes?: readonly { key: string; node: Node }[];
-		/** Override the default __t__ alias (for nested depth) */
-		innerAlias?: string;
-		/** Optional LIMIT on the subquery rows */
-		limit?: number;
-		/** Column projection — if specified, use jsonb_build_object instead of to_jsonb(__t__) */
-		columns?: readonly string[];
-		/** `columns` are projection output keys, not logical model names. */
-		columnsAreEmitted?: boolean;
-		aliasColumnAuthorities?: AliasColumnAuthority;
-		/** Per-column expression overrides for jsonb_build_object projection values. */
-		columnValueOverrides?: ReadonlyMap<string, Node>;
-		/** Aggregate ORDER BY columns for deterministic json_agg array order */
-		orderBy?: readonly JsonAggOrderByEntry[];
-		/** True for the no-PK deterministic fallback order key. */
-		orderByFallback?: boolean;
-	},
-): Node {
-	const targetAlias = options?.innerAlias ?? '__t__';
-
-	// Build row expression: either projected columns or full row
-	const cols = options?.columns;
-	const hasProjection =
-		cols && cols.length > 0 && !(cols.length === 1 && cols[0] === '*');
-
-	let toJsonbCall: Node;
-	if (hasProjection) {
-		// Column projection: jsonb_build_object('col1', __t__."col1", 'col2', __t__."col2", ...)
-		const projArgs: Node[] = [];
-		for (const col of cols) {
-			projArgs.push(
-				stringConstNode(options?.columnsAreEmitted ? col : naming.resolve(col)),
-			);
-			projArgs.push(
-				options?.columnValueOverrides?.get(col) ??
-					columnRef(
-						options?.columnsAreEmitted ? emittedColumnReference(col) : col,
-						targetAlias,
-						undefined,
-						naming,
-						options?.aliasColumnAuthorities,
-					),
-			);
-		}
-		toJsonbCall = {
-			FuncCall: {
-				funcname: [stringNode('jsonb_build_object')],
-				args: projArgs,
-			} as FuncCall,
-		};
-	} else {
-		// Full row: to_jsonb(__t__)
-		// In PostgreSQL, __t__ refers to the entire row when used with aggregate/jsonb functions
-		const rowRef: Node = {
-			ColumnRef: {
-				fields: [stringNode(targetAlias)],
-			},
-		};
-		toJsonbCall = {
-			FuncCall: {
-				funcname: [stringNode('to_jsonb')],
-				args: [rowRef],
-			} as FuncCall,
-		};
-	}
-
-	// If there are nested children, merge them via:
-	// to_jsonb(__t__) || jsonb_build_object('child1', <subquery1>, 'child2', <subquery2>)
-	if (options?.childNodes && options.childNodes.length > 0) {
-		const buildObjectArgs: Node[] = [];
-		for (const child of options.childNodes) {
-			buildObjectArgs.push(stringConstNode(child.key));
-			buildObjectArgs.push(child.node);
-		}
-
-		const jsonbBuildObject: Node = {
-			FuncCall: {
-				funcname: [stringNode('jsonb_build_object')],
-				args: buildObjectArgs,
-			} as FuncCall,
-		};
-
-		// to_jsonb(__t__) || jsonb_build_object(...)
-		toJsonbCall = {
-			A_Expr: {
-				kind: 'AEXPR_OP',
-				name: [stringNode('||')],
-				lexpr: toJsonbCall,
-				rexpr: jsonbBuildObject,
-			},
-		};
-	}
-
-	const aggOrder =
-		options?.orderBy && options.orderBy.length > 0
-			? options.orderBy.map((col) =>
-					sortBy(
-						jsonAggOrderByExpression(
-							col,
-							targetAlias,
-							naming,
-							options.orderByFallback === true,
-						),
-						'ASC',
-						'LAST',
-					),
-				)
-			: undefined;
-
-	// Build: json_agg(to_jsonb(__t__) [|| jsonb_build_object(...)] ORDER BY __t__.pk)
-	const jsonAggCall: Node = {
-		FuncCall: {
-			funcname: [stringNode('json_agg')],
-			args: [toJsonbCall],
-			...(aggOrder && { agg_order: aggOrder }),
-		} as FuncCall,
-	};
-
-	// Build the FROM clause: schema.table AS __t__
-	const fromTable = rangeVar(targetTable, targetAlias, schemaName, naming);
-
-	// Build the inner SELECT statement
-	const limitNode =
-		options?.limit !== undefined
-			? { A_Const: { ival: { ival: options.limit } } }
-			: undefined;
-	const innerSelect = selectStmt({
-		targetList: [{ ResTarget: { val: jsonAggCall } }],
-		from: [fromTable],
-		where: whereExpr,
-		...(limitNode && { limit: limitNode }),
-	});
-
-	// Wrap in SubLink (subquery expression)
-	const subLink: Node = {
-		SubLink: {
-			subLinkType: 'EXPR_SUBLINK', // scalar subquery
-			subselect: innerSelect,
-		},
-	};
-
-	// Build: '[]'::json (empty array default)
-	const emptyArrayDefault = emptyJsonArrayNode();
-
-	// Build: COALESCE(subquery, '[]'::json)
-	const coalesceNode = coalesceExpr([subLink, emptyArrayDefault]);
-
-	// Wrap in ResTarget with alias
-	return {
-		ResTarget: {
-			val: coalesceNode,
-			name: alias,
-		} as ResTarget,
-	};
-}
-
-function jsonAggOrderByExpression(
-	entry: JsonAggOrderByEntry,
-	targetAlias: string,
-	naming: NamingPlugin,
-	castToText: boolean,
-): Node {
-	const ref = columnRef(entry, targetAlias, undefined, naming);
-	return castToText ? typeCast(ref, 'text') : ref;
-}
-
-/**
- * Build a correlation WHERE expression for json_agg.
- *
- * For belongsTo: target.pk = parent.fk  (e.g., authors.id = posts.author_id)
- * For hasMany:   target.fk = parent.pk  (e.g., posts.author_id = authors.id)
- */
-export function jsonAggCorrelation(
-	parentAlias: string,
-	parentColumn: string,
-	targetAlias: string,
-	targetColumn: string,
-	naming: NamingPlugin = identityNaming,
-): Node {
-	// __t__.column = parent.column
-	return eqExpr(
-		columnRef(targetColumn, targetAlias, undefined, naming),
-		columnRef(parentColumn, parentAlias, undefined, naming),
-	);
-}
-
 // ============================================================================
 // Established-identifier façade
 // ============================================================================
@@ -1252,68 +615,109 @@ export function sqlResTarget(val: Node, alias?: SqlIdentifier): Node {
 	};
 }
 
-export type SqlInsertOptions = Omit<
-	InsertOptions,
-	'table' | 'columns' | 'naming'
-> & {
+export type SqlInsertOptions = {
 	table: SqlIdentifier;
+	schema?: SqlIdentifier;
 	columns?: readonly SqlIdentifier[];
+	values?: readonly Node[][];
+	selectQuery?: Node;
+	returning?: Node[];
 };
 
 /** Build INSERT with a declared target and declared column list. */
 export function sqlInsertStmt(options: SqlInsertOptions): Node {
-	const { columns, ...rest } = options;
-	return insertStmt({
-		...rest,
-		table: identifierText(options.table),
-		...(columns !== undefined && {
-			columns: columns.map(identifierText),
+	const relation: RangeVar = {
+		relname: identifierText(options.table),
+		inh: true,
+		relpersistence: 'p',
+		...(options.schema !== undefined && {
+			schemaname: identifierText(options.schema),
 		}),
-		naming: identityNaming,
-	});
+	};
+	const stmt: InsertStmt = { relation };
+	if (options.columns?.length) {
+		stmt.cols = options.columns.map((column) => ({
+			ResTarget: { name: identifierText(column) },
+		}));
+	}
+	if (options.selectQuery !== undefined) stmt.selectStmt = options.selectQuery;
+	else if (options.values?.length) {
+		stmt.selectStmt = {
+			SelectStmt: {
+				valuesLists: options.values.map((row) => ({
+					List: { items: [...row] },
+				})),
+			},
+		};
+	}
+	applyReturningClause(stmt, options.returning);
+	return { InsertStmt: stmt };
 }
 
-export type SqlUpdateOptions = Omit<
-	UpdateOptions,
-	'table' | 'set' | 'naming'
-> & {
+export type SqlUpdateOptions = {
 	table: SqlIdentifier;
+	schema?: SqlIdentifier;
 	set: ReadonlyArray<{ column: SqlIdentifier; value: Node }>;
+	where?: Node;
+	from?: Node[];
+	returning?: Node[];
 };
 
 /** Build UPDATE with a declared target and declared assignment columns. */
 export function sqlUpdateStmt(options: SqlUpdateOptions): Node {
-	return updateStmt({
-		...options,
-		table: identifierText(options.table),
-		set: options.set.map(({ column, value }) => ({
-			column: identifierText(column),
-			value,
+	const relation: RangeVar = {
+		relname: identifierText(options.table),
+		inh: true,
+		relpersistence: 'p',
+		...(options.schema !== undefined && {
+			schemaname: identifierText(options.schema),
+		}),
+	};
+	const stmt: UpdateStmt = {
+		relation,
+		targetList: options.set.map(({ column, value }) => ({
+			ResTarget: { name: identifierText(column), val: value },
 		})),
-		naming: identityNaming,
-	});
+	};
+	if (options.where !== undefined) stmt.whereClause = options.where;
+	if (options.from?.length) stmt.fromClause = options.from;
+	applyReturningClause(stmt, options.returning);
+	return { UpdateStmt: stmt };
 }
 
-export type SqlDeleteOptions = Omit<DeleteOptions, 'table' | 'naming'> & {
+export type SqlDeleteOptions = {
 	table: SqlIdentifier;
+	schema?: SqlIdentifier;
+	where?: Node;
+	using?: Node[];
+	returning?: Node[];
 };
 
 /** Build DELETE with a declared target. */
 export function sqlDeleteStmt(options: SqlDeleteOptions): Node {
-	return deleteStmt({
-		...options,
-		table: identifierText(options.table),
-		naming: identityNaming,
-	});
+	const relation: RangeVar = {
+		relname: identifierText(options.table),
+		inh: true,
+		relpersistence: 'p',
+		...(options.schema !== undefined && {
+			schemaname: identifierText(options.schema),
+		}),
+	};
+	const stmt: DeleteStmt = { relation };
+	if (options.where !== undefined) stmt.whereClause = options.where;
+	if (options.using?.length) stmt.usingClause = options.using;
+	applyReturningClause(stmt, options.returning);
+	return { DeleteStmt: stmt };
 }
 
-export type SqlJsonAggOptions = Omit<
-	NonNullable<Parameters<typeof jsonAggSubquery>[5]>,
-	'innerAlias' | 'columns' | 'childNodes'
-> & {
+export type SqlJsonAggOptions = {
 	innerAlias?: SqlIdentifier;
 	columns?: readonly SqlIdentifier[];
 	childNodes?: readonly { key: SqlIdentifier; node: Node }[];
+	limit?: number;
+	columnValueOverrides?: ReadonlyMap<string, Node>;
+	orderBy?: readonly SqlIdentifier[];
+	orderByFallback?: boolean;
 };
 
 /** Build a JSON aggregate using only established relation and output identifiers. */
@@ -1324,29 +728,87 @@ export function sqlJsonAggSubquery(
 	schemaName?: SqlIdentifier,
 	options?: SqlJsonAggOptions,
 ): Node {
-	return jsonAggSubquery(
-		identifierText(targetTable),
-		whereExpr,
-		identifierText(alias),
-		schemaName === undefined ? undefined : identifierText(schemaName),
-		identityNaming,
-		options === undefined
-			? undefined
-			: {
-					...options,
-					...(options.innerAlias !== undefined && {
-						innerAlias: identifierText(options.innerAlias),
-					}),
-					...(options.columns !== undefined && {
-						columns: options.columns.map(identifierText),
-					}),
-					...(options.childNodes !== undefined && {
-						childNodes: options.childNodes.map(({ key, node }) => ({
-							key: identifierText(key),
-							node,
-						})),
-					}),
+	const innerAlias = options?.innerAlias ?? queryLocal('__t__');
+	const columns = options?.columns;
+	let row: Node;
+	if (
+		columns !== undefined &&
+		!(columns.length === 1 && identifierText(columns[0]!) === '*')
+	) {
+		const args: Node[] = [];
+		for (const column of columns) {
+			const key = identifierText(column);
+			args.push(stringConstNode(key));
+			args.push(
+				options?.columnValueOverrides?.get(key) ??
+					sqlColumnRef(column, innerAlias),
+			);
+		}
+		row = {
+			FuncCall: {
+				funcname: [stringNode('jsonb_build_object')],
+				args,
+			} as FuncCall,
+		};
+	} else {
+		row = {
+			FuncCall: {
+				funcname: [stringNode('to_jsonb')],
+				args: [
+					{ ColumnRef: { fields: [stringNode(identifierText(innerAlias))] } },
+				],
+			} as FuncCall,
+		};
+	}
+	if (options?.childNodes?.length) {
+		const args: Node[] = [];
+		for (const child of options.childNodes) {
+			args.push(stringConstNode(identifierText(child.key)), child.node);
+		}
+		row = {
+			A_Expr: {
+				kind: 'AEXPR_OP',
+				name: [stringNode('||')],
+				lexpr: row,
+				rexpr: {
+					FuncCall: {
+						funcname: [stringNode('jsonb_build_object')],
+						args,
+					} as FuncCall,
 				},
+			},
+		};
+	}
+	const order = options?.orderBy?.map((entry) =>
+		sortBy(
+			options.orderByFallback
+				? typeCast(sqlColumnRef(entry, innerAlias), 'text')
+				: sqlColumnRef(entry, innerAlias),
+			'ASC',
+			'LAST',
+		),
+	);
+	const aggregate: Node = {
+		FuncCall: {
+			funcname: [stringNode('json_agg')],
+			args: [row],
+			...(order !== undefined && { agg_order: order }),
+		} as FuncCall,
+	};
+	const subselect = selectStmt({
+		targetList: [{ ResTarget: { val: aggregate } }],
+		from: [sqlRangeVar(targetTable, innerAlias, schemaName)],
+		where: whereExpr,
+		...(options?.limit !== undefined && {
+			limit: { A_Const: { ival: { ival: options.limit } } },
+		}),
+	});
+	return sqlResTarget(
+		coalesceExpr([
+			{ SubLink: { subLinkType: 'EXPR_SUBLINK', subselect } },
+			emptyJsonArrayNode(),
+		]),
+		alias,
 	);
 }
 
@@ -1361,4 +823,39 @@ export function sqlJsonAggCorrelation(
 		sqlColumnRef(targetColumn, targetAlias),
 		sqlColumnRef(parentColumn, parentAlias),
 	);
+}
+
+/** Build a window-function expression from established identifiers. */
+export function sqlWindowFuncCall(
+	functionName: SqlIdentifier,
+	args: readonly Node[],
+	over: {
+		partitionBy?: readonly SqlIdentifier[];
+		orderBy?: readonly {
+			field: SqlIdentifier;
+			direction?: 'asc' | 'desc';
+		}[];
+	},
+	table?: SqlIdentifier,
+): Node {
+	const partitionClause = (over.partitionBy ?? []).map((column) =>
+		sqlColumnRef(column, table),
+	);
+	const orderClause = (over.orderBy ?? []).map(({ field, direction }) =>
+		sortBy(sqlColumnRef(field, table), direction === 'desc' ? 'DESC' : 'ASC'),
+	);
+	const window: Record<string, unknown> = { frameOptions: 1034 };
+	if (partitionClause.length) window.partitionClause = partitionClause;
+	if (orderClause.length) window.orderClause = orderClause;
+	return {
+		FuncCall: {
+			funcname: [stringNode(identifierText(functionName))],
+			over: window,
+			...(args.length
+				? { args: [...args] }
+				: identifierText(functionName).toLowerCase() === 'count'
+					? { agg_star: true }
+					: {}),
+		} as FuncCall,
+	};
 }

@@ -84,7 +84,7 @@ describe('E2E-003: IAM/RBAC Recursive CTE', () => {
 				traversal: {
 					kind: 'edge-table',
 					nodeTable: 'roles',
-					edgeTable: 'role_edges',
+					edgeTable: 'roleEdges',
 					nodeId: 'id',
 					edgeFrom: 'parentRoleId',
 					edgeTo: 'childRoleId',
@@ -164,7 +164,7 @@ describe('E2E-003: IAM/RBAC Recursive CTE', () => {
 					traversal: {
 						kind: 'edge-table',
 						nodeTable: 'roles',
-						edgeTable: 'role_edges',
+						edgeTable: 'roleEdges',
 						nodeId: 'id',
 						edgeFrom: 'parentRoleId',
 						edgeTo: 'childRoleId',
@@ -251,7 +251,7 @@ describe('E2E-003: IAM/RBAC Recursive CTE', () => {
 				traversal: {
 					kind: 'edge-table',
 					nodeTable: 'roles',
-					edgeTable: 'role_edges',
+					edgeTable: 'roleEdges',
 					nodeId: 'id',
 					edgeFrom: 'parentRoleId',
 					edgeTo: 'childRoleId',
@@ -305,7 +305,7 @@ describe('E2E-003: IAM/RBAC Recursive CTE', () => {
 				traversal: {
 					kind: 'edge-table',
 					nodeTable: 'roles',
-					edgeTable: 'role_edges',
+					edgeTable: 'roleEdges',
 					nodeId: 'id',
 					edgeFrom: 'parentRoleId',
 					edgeTo: 'childRoleId',
@@ -358,7 +358,7 @@ describe('E2E-003: IAM/RBAC Recursive CTE', () => {
 				traversal: {
 					kind: 'edge-table',
 					nodeTable: 'roles',
-					edgeTable: 'role_edges',
+					edgeTable: 'roleEdges',
 					nodeId: 'id',
 					edgeFrom: 'childRoleId', // Reverse: from child to parent
 					edgeTo: 'parentRoleId',
@@ -516,7 +516,7 @@ describe('E2E-003: IAM/RBAC Recursive CTE', () => {
 				traversal: {
 					kind: 'edge-table',
 					nodeTable: 'roles',
-					edgeTable: 'role_edges',
+					edgeTable: 'roleEdges',
 					nodeId: 'id',
 					edgeFrom: 'parentRoleId',
 					edgeTo: 'childRoleId',

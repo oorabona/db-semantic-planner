@@ -37,7 +37,6 @@ describe('Pseudo-Column Handlers', () => {
 		getCachedPgPhysicalModel(pseudoModel, 'public', 'snake_case'),
 	);
 	const baseCtx: CompilerContext = {
-		naming,
 		rootTable: 'employees',
 		maxRecursiveDepth: 100,
 	};
@@ -347,7 +346,6 @@ describe('Pseudo-Column Handlers', () => {
 describe('Relation Expression Handlers', () => {
 	const naming = new CamelCaseNamingPlugin();
 	const baseCtx: CompilerContext = {
-		naming,
 		rootTable: 'posts',
 		maxRecursiveDepth: 100,
 	};

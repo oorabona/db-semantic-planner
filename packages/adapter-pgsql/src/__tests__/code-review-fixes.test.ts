@@ -32,7 +32,7 @@ import { validateSqlExpression } from '../validate.js';
 const naming = new CamelCaseNamingPlugin();
 
 function makeCtx(table: string): CompilerContext {
-	return { naming, rootTable: table, maxRecursiveDepth: 100 };
+	return { rootTable: table, maxRecursiveDepth: 100 };
 }
 
 function makeState(): CompilerState {

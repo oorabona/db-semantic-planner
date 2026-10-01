@@ -140,31 +140,3 @@ export function getNamingPluginForDbCasing(
 			return identityNaming;
 	}
 }
-
-/**
- * Compatibility adapter for callers that supplied the long-standing two-method
- * plugin shape. Query modules use the physical-name vocabulary (`resolve` and
- * `model`) without calling the plugin conversion methods themselves.
- */
-export function asQueryNaming(naming: NamingPlugin): NamingPlugin {
-	if (
-		typeof naming.resolve === 'function' &&
-		typeof naming.model === 'function'
-	) {
-		return naming;
-	}
-	const toDatabase =
-		typeof naming.toDatabase === 'function'
-			? naming.toDatabase.bind(naming)
-			: (identifier: string) => identifier;
-	const toModel =
-		typeof naming.toModel === 'function'
-			? naming.toModel.bind(naming)
-			: (identifier: string) => identifier;
-	return {
-		resolve: toDatabase,
-		model: toModel,
-		toDatabase,
-		toModel,
-	};
-}

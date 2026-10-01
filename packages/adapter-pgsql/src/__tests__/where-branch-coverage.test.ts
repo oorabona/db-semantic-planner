@@ -31,7 +31,6 @@ import {
 	jsonContainsHandler,
 	jsonExistsHandler,
 } from '../handlers/where/json.js';
-import { identityNaming } from '../naming-plugin.js';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -75,7 +74,6 @@ function compileNode(
 /** Build a minimal CompilerContext for direct handler tests */
 function makeHandlerCtx(overrides?: Partial<CompilerContext>): CompilerContext {
 	return {
-		naming: identityNaming,
 		rootTable: 'items',
 		currentAlias: 'items',
 		maxRecursiveDepth: 100,

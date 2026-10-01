@@ -23,10 +23,8 @@ afterAll(async () => {
 	await closeTestDb();
 });
 
-// The ORM hydrates top-level result columns to camelCase (order_id → orderId),
-// so result rows are read with camelCase keys here. Nested json_agg items
-// (e.g. `items[].sku` below) keep their raw to_jsonb DB names (snake_case) —
-// this top-level-camel / nested-snake asymmetry is intentional ORM behavior.
+// Top-level result labels map back to the logical ModelIR keys (orderId and
+// tenantId). Nested json_agg items keep their raw to_jsonb DB names.
 function orderKey(row: { orderId: number; tenantId: number }): string {
 	return `${row.orderId}:${row.tenantId}`;
 }
@@ -40,7 +38,7 @@ describe('Composite FK correlation', () => {
 			.withSchema(SCHEMA)
 			.select('orders')
 			.include('items')
-			.columns(['order_id', 'tenant_id', 'status'])
+			.columns(['orderId', 'tenantId', 'status'])
 			.execute()) as unknown as Array<{
 			orderId: number;
 			tenantId: number;
@@ -68,7 +66,7 @@ describe('Composite FK correlation', () => {
 			.withSchema(SCHEMA)
 			.select('orders')
 			.where(exists('items', { where: eq('sku', 'sku-a') }))
-			.columns(['order_id', 'tenant_id'])
+			.columns(['orderId', 'tenantId'])
 			.execute()) as unknown as Array<{ orderId: number; tenantId: number }>;
 
 		expect(rows.map(orderKey).sort()).toEqual(['100:1', '101:1']);
@@ -77,7 +75,7 @@ describe('Composite FK correlation', () => {
 	it('binding relation columns resolve through the full composite key', async () => {
 		const adapter = await getTestAdapter();
 		const compiled = compile(
-			`order_items | select id, order_id, tenant_id, sku | bind projected_items
+			`order_items | select id, orderId, tenantId, sku | bind projected_items
 projected_items | select id, sku, order.status`,
 			compositeFkModel,
 		);

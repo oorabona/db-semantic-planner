@@ -124,19 +124,40 @@ function buildExistsSubquery(
 	dispatch: WhereDispatcher,
 ): Node {
 	const relation = decision.relation;
-	const targetTable = decision.targetTable ?? relation;
+	const relationMetadata =
+		relation === undefined
+			? undefined
+			: ctx.model?.getRelation(`${ctx.rootTable}.${relation}`);
+	const targetTable =
+		decision.targetTable ?? relationMetadata?.target ?? relation;
 	// sourceColumn: prefer explicit value from decision (set by planner's mapToHandlerDecision).
 	// When called directly from mutation WHERE (DELETE/UPDATE), the planner is bypassed and
 	// sourceColumn is absent — fall back to the PK convention (typically 'id' for hasMany).
-	const sourceColumn = decision.sourceColumn ?? [
-		ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
-	];
-	const targetColumn = decision.targetColumn ?? [
-		(ctx.deriveFkColumnName ?? defaultFkDerivation)(
-			ctx.rootTable,
-			ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
-		),
-	];
+	const primaryKey =
+		ctx.model?.getTable(ctx.rootTable)?.primaryKey ??
+		ctx.defaultPkColumnName ??
+		DEFAULT_PK_COLUMN;
+	const sourceColumn =
+		relationMetadata === undefined
+			? (decision.sourceColumn ?? primaryKey)
+			: relationMetadata.type === 'belongsTo'
+				? (relationMetadata.foreignKey ?? decision.sourceColumn ?? primaryKey)
+				: (relationMetadata.sourceKey ?? decision.sourceColumn ?? primaryKey);
+	const targetColumn =
+		relationMetadata === undefined
+			? (decision.targetColumn ??
+				(ctx.deriveFkColumnName ?? defaultFkDerivation)(
+					ctx.rootTable,
+					ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
+				))
+			: relationMetadata.type === 'belongsTo'
+				? (relationMetadata.targetKey ?? decision.targetColumn ?? primaryKey)
+				: (relationMetadata.foreignKey ??
+					decision.targetColumn ??
+					(ctx.deriveFkColumnName ?? defaultFkDerivation)(
+						ctx.rootTable,
+						ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
+					));
 
 	if (!targetTable) {
 		throw new Error('EXISTS handler requires targetTable or relation');
@@ -164,7 +185,7 @@ function buildExistsSubquery(
 	// outerAlias): a generated alias equal to one of those would shadow the outer
 	// reference and degenerate the correlation into a self-comparison. Aliases
 	// are query-local, so collision checks deliberately compare their verbatim
-	// spelling rather than a naming-plugin projection.
+	// spelling.
 	const scopeName = (identifier: string): string => identifier;
 	const outerAliases = new Set<string>();
 	if (ctx.currentAlias) outerAliases.add(scopeName(ctx.currentAlias));

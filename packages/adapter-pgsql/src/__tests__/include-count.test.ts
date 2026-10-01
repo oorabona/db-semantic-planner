@@ -19,14 +19,12 @@ import type { AdapterCompilerDeps } from '../adapter-compiler-deps.js';
 import { compileSelect } from '../adapter-compiler-select.js';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../assert-field.js';
 import { normalizeSQL } from '../ast-helpers.js';
-import { identityNaming } from '../naming-plugin.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 const deps: AdapterCompilerDeps = {
-	naming: identityNaming,
 	schemaName: undefined,
 	model: undefined,
 	defaultPk: DEFAULT_PK_COLUMN,

@@ -19,7 +19,6 @@ import type { AdapterCompilerDeps } from '../adapter-compiler-deps.js';
 import { compileSelect } from '../adapter-compiler-select.js';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../assert-field.js';
 import { normalizeSQL } from '../ast-helpers.js';
-import { identityNaming } from '../naming-plugin.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
@@ -42,7 +41,6 @@ const testSchema = schema({
 // Strategy A: low-level PlanReport approach (no planner, direct compile)
 // ---------------------------------------------------------------------------
 const deps: AdapterCompilerDeps = {
-	naming: identityNaming,
 	schemaName: undefined,
 	model: undefined,
 	defaultPk: DEFAULT_PK_COLUMN,

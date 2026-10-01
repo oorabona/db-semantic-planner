@@ -13,7 +13,8 @@
  * - Adapter capabilities (execution/streaming support)
  */
 
-import type { PlanReport } from '@dbsp/types';
+import { schema } from '@dbsp/core';
+import type { ModelIR, PlanReport } from '@dbsp/types';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import { describe, expect, it } from 'vitest';
 import {
@@ -21,6 +22,44 @@ import {
 	PgsqlAdapter,
 } from './pgsql-adapter.js';
 import { createPgPhysicalModel } from './physical-model/index.js';
+
+function completeModel(
+	definition: Record<string, Record<string, unknown>>,
+): ModelIR {
+	const model = schema(definition as any).model;
+	return {
+		...model,
+		getTable: (name: string) => model.tables.get(name),
+		getRelation: () => undefined,
+		getRelationsFrom: () => [],
+		getRelationsTo: () => [],
+		isAmbiguous: () => ({ ambiguous: false }),
+	} as unknown as ModelIR;
+}
+
+const coverageModel = completeModel({
+	users: { id: 'integer', name: 'text', email: 'text', active: 'boolean' },
+	categories: {
+		id: 'integer',
+		parent_id: 'integer',
+		name: 'text',
+		active: 'boolean',
+	},
+	nodes: {
+		id: 'integer',
+		name: 'text',
+		active: 'boolean',
+		x: 'integer',
+		y: 'integer',
+	},
+	edges: { id: 'integer', from_id: 'integer', to_id: 'integer' },
+	staging_users: {
+		id: 'integer',
+		name: 'text',
+		email: 'text',
+		active: 'boolean',
+	},
+});
 
 function testQuery<T = unknown>(
 	sql: string,
@@ -723,12 +762,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 	describe('compile with model option', () => {
 		it('passes model to compile function', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
-			const mockModel = {
-				tables: new Map(),
-				relations: new Map(),
-				getTable: () => undefined,
-				getRelation: () => undefined,
-			};
+			const mockModel = coverageModel;
 
 			const plan: PlanReport = {
 				rootTable: 'users',
@@ -1248,7 +1282,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const model = {} as any;
+			const model = coverageModel;
 			const result = adapter.compileRecursive(report as any, model);
 			const sql = result.sql.toLowerCase();
 			expect(sql).toContain('with recursive');
@@ -1275,7 +1309,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const result = adapter.compileRecursive(report as any, {} as any);
+			const result = adapter.compileRecursive(report as any, coverageModel);
 			const sql = result.sql.toLowerCase();
 			expect(sql).toContain('with recursive');
 		});
@@ -1302,7 +1336,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const result = adapter.compileRecursive(report as any, {} as any);
+			const result = adapter.compileRecursive(report as any, coverageModel);
 			const sql = result.sql.toLowerCase();
 			expect(sql).toContain('with recursive');
 			expect(sql).toContain('edges');
@@ -1331,7 +1365,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const result = adapter.compileRecursive(report as any, {} as any);
+			const result = adapter.compileRecursive(report as any, coverageModel);
 			const sql = result.sql.toLowerCase();
 			expect(sql).toContain('with recursive');
 		});
@@ -1356,7 +1390,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const result = adapter.compileRecursive(report as any, {} as any);
+			const result = adapter.compileRecursive(report as any, coverageModel);
 			expect(result.sql).toContain('level');
 		});
 
@@ -1380,7 +1414,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const result = adapter.compileRecursive(report as any, {} as any);
+			const result = adapter.compileRecursive(report as any, coverageModel);
 			expect(result.sql).toContain('trail');
 		});
 
@@ -1406,7 +1440,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const result = adapter.compileRecursive(report as any, {} as any);
+			const result = adapter.compileRecursive(report as any, coverageModel);
 			expect(result.sql).toContain('tenant_rec');
 		});
 
@@ -1428,9 +1462,9 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			expect(() => adapter.compileRecursive(report as any, {} as any)).toThrow(
-				/Unsupported traversal kind/,
-			);
+			expect(() =>
+				adapter.compileRecursive(report as any, coverageModel),
+			).toThrow(/Unsupported traversal kind/);
 		});
 
 		it('compiles edge-table with anchor WHERE', () => {
@@ -1461,7 +1495,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const result = adapter.compileRecursive(report as any, {} as any);
+			const result = adapter.compileRecursive(report as any, coverageModel);
 			expect(result.sql).toBeDefined();
 		});
 
@@ -1487,7 +1521,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const result = adapter.compileRecursive(report as any, {} as any);
+			const result = adapter.compileRecursive(report as any, coverageModel);
 			expect(result.sql).toBeDefined();
 		});
 	});
@@ -1521,7 +1555,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const result = adapter.compileRecursive(report as any, {} as any);
+			const result = adapter.compileRecursive(report as any, coverageModel);
 			expect(result.sql).toBeDefined();
 		});
 
@@ -1554,7 +1588,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const result = adapter.compileRecursive(report as any, {} as any);
+			const result = adapter.compileRecursive(report as any, coverageModel);
 			expect(result.sql).toBeDefined();
 		});
 
@@ -1581,7 +1615,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const result = adapter.compileRecursive(report as any, {} as any);
+			const result = adapter.compileRecursive(report as any, coverageModel);
 			expect(result.sql).toBeDefined();
 		});
 
@@ -1609,7 +1643,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				},
 			};
 			// null where means no anchorWhere → should still compile
-			const result = adapter.compileRecursive(report as any, {} as any);
+			const result = adapter.compileRecursive(report as any, coverageModel);
 			expect(result.sql).toBeDefined();
 		});
 	});
@@ -2371,13 +2405,10 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			expect(result.sql).toContain('INSERT');
 		});
 
-		it('returns undefined when table not found in model', () => {
-			const model = {
-				tables: new Map(),
-				relations: new Map(),
-				getTable: () => undefined,
-				getRelation: () => undefined,
-			} as any;
+		it('returns no special column types for a declared table', () => {
+			const model = completeModel({
+				unknown_table: { foo: 'text' },
+			});
 
 			const adapter = createPgsqlCompileOnlyAdapter({ model });
 			const result = adapter.compileInsert({
@@ -2427,29 +2458,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compileUpsertFrom — columns from model', () => {
 		it('derives columns from model when not specified', () => {
-			const model = {
-				tables: new Map([
-					[
-						'users',
-						{
-							name: 'users',
-							columns: [
-								{ name: 'id', type: 'integer', nullable: false },
-								{ name: 'name', type: 'text', nullable: false },
-								{ name: 'email', type: 'text', nullable: true },
-							],
-							primaryKey: 'id',
-							foreignKeys: [],
-							indexes: [],
-						},
-					],
-				]),
-				relations: new Map(),
-				getTable: function (n) {
-					return this.tables.get(n);
-				},
-				getRelation: () => undefined,
-			} as any;
+			const model = coverageModel;
 
 			const adapter = createPgsqlCompileOnlyAdapter();
 			const result = adapter.compileUpsertFrom(

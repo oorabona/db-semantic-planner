@@ -9,7 +9,7 @@
  * targetTable over the fallback relation name.
  */
 
-import { exists, notExists } from '@dbsp/core';
+import { exists, notExists, schema } from '@dbsp/core';
 import type { ModelIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -20,6 +20,11 @@ function buildModel(
 	target: string,
 	foreignKey?: string,
 ): ModelIR {
+	const effectiveForeignKey = foreignKey ?? `${name}_id`;
+	const base = schema({
+		[source]: { id: 'integer', [effectiveForeignKey]: 'integer' },
+		[target]: { id: 'integer' },
+	} as any).model;
 	const rel = {
 		name,
 		type: 'belongsTo' as const,
@@ -34,10 +39,10 @@ function buildModel(
 	};
 	const relations = new Map([[`${source}.${name}`, rel]]);
 	return {
-		tables: new Map(),
+		...base,
 		relations,
-		getTable: () => undefined,
-		getRelation: (qname: string) => relations.get(qname),
+		getTable: (tableName: string) => base.tables.get(tableName),
+		getRelation: (qualifiedName: string) => relations.get(qualifiedName),
 		getRelationsFrom: () => [],
 		getRelationsTo: () => [],
 		isAmbiguous: () => ({ ambiguous: false }),

@@ -128,7 +128,7 @@ const __mutationGuardDb = schema({
   },
   comments: {
     id: { type: 'integer', primaryKey: true },
-    postId: ref('posts'),
+		postId: ref('posts', { as: 'post', inverse: 'comments' }),
     flagged: 'boolean',
   },
 } as const);
@@ -182,10 +182,10 @@ orm.upsert('users')
   .doNothing()
   .dump();
 
-// Conflict by constraint name instead of columns
+// Conflict by columns
 orm.upsert('users')
   .values({ name: 'Alice', email: 'alice@example.com' })
-  .onConflictConstraint('users_email_unique')
+  .onConflict(['email'])
   .doNothing()
   .dump();
 

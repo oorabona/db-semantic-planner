@@ -13,7 +13,6 @@ import {
 	PlanCompiler,
 	type SimplifiedPlanReport,
 } from '../compiler.js';
-import { CamelCaseNamingPlugin } from '../naming-plugin.js';
 
 describe('PlanCompiler', () => {
 	describe('SELECT queries', () => {
@@ -455,9 +454,7 @@ describe('PlanCompiler', () => {
 
 	describe('Naming convention', () => {
 		it('does not apply the legacy naming policy to direct compilation', () => {
-			const compiler = new PlanCompiler({
-				naming: new CamelCaseNamingPlugin(),
-			});
+			const compiler = new PlanCompiler();
 
 			const plan: SimplifiedPlanReport = {
 				rootTable: 'userProfiles',
@@ -886,7 +883,7 @@ describe('DISTINCT ON compilation', () => {
 			decisions: [{ type: 'distinctOn', columns: ['createdAt'] }],
 		};
 
-		const compiler = new PlanCompiler({ naming: new CamelCaseNamingPlugin() });
+		const compiler = new PlanCompiler();
 		const result = compiler.compile(plan);
 		const normalized = normalizeSQL(result.sql);
 

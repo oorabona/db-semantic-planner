@@ -35,7 +35,6 @@ describe('Recursive CTE Compiler', () => {
 		maxDepth: 100,
 		selectColumns: ['id', 'name'],
 		ctx: {
-			naming,
 			rootTable: 'employees',
 			maxRecursiveDepth: 100,
 		},
@@ -259,7 +258,6 @@ describe('Edge-Table Recursive CTE', () => {
 			},
 		},
 		ctx: {
-			naming,
 			rootTable: 'roles',
 			maxRecursiveDepth: 10,
 		},

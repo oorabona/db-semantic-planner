@@ -1590,7 +1590,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		const compiled =
 			bindingFinalQuery || hasNqlBindings(finalBundle)
 				? this.adapter.compile<T>(finalBundle, this.nqlBundleCompileOptions())
-				: this.adapter.compile<T>(planReport);
+				: this.adapter.compile<T>(planReport, this.nqlBundleCompileOptions());
 
 		try {
 			return this.adapter.createDump(planReport, compiled, meta);
@@ -2191,7 +2191,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		const finalBundle = this.createFinalNqlStatementBundle(compiledIntent);
 		const compiled = hasNqlBindings(finalBundle)
 			? adapter.compile<T>(finalBundle, this.nqlBundleCompileOptions())
-			: adapter.compile<T>(planReport);
+			: adapter.compile<T>(planReport, this.nqlBundleCompileOptions());
 		return executeCompiledQuery(adapter, compiled, 'nql().all()');
 	}
 

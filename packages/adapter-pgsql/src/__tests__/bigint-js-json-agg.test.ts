@@ -8,8 +8,9 @@ import {
 import { describe, expect, it } from 'vitest';
 import { compileCteQuery } from '../adapter-compiler-recursive.js';
 import { compilePlan } from '../compiler.js';
-import { identityNaming } from '../naming-plugin.js';
+import { createDeclaredNameResolver } from '../declared-name-resolver.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgPhysicalModel } from '../physical-model/index.js';
 import { fromOutputDescriptors } from '../projection-envelope.js';
 
 const includeSchema = schema({
@@ -30,6 +31,17 @@ const includeSchema = schema({
 		legacyCount: 'bigint',
 	},
 });
+
+function resolverFor(model: typeof includeSchema.model) {
+	return createDeclaredNameResolver(
+		createPgPhysicalModel({
+			mode: 'logical',
+			model,
+			schema: 'public',
+			dbCasing: 'preserve',
+		}),
+	);
+}
 
 describe('bigint js json_agg SQL projection', () => {
 	it('maps a truncated physical json_agg key back to its full logical column', () => {
@@ -498,9 +510,10 @@ describe('bigint js json_agg SQL projection', () => {
 			},
 			{ model: includeSchema.model },
 			{
-				naming: identityNaming,
 				schemaName: undefined,
 				model: includeSchema.model,
+				declaredNames: resolverFor(includeSchema.model),
+				bindingNames: new Set(['include_source']),
 				defaultPk: 'id',
 				deriveFk: (relation: string) => `${relation}Id`,
 			},

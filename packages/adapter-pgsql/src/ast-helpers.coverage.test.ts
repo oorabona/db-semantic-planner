@@ -2,30 +2,37 @@
 import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it } from 'vitest';
 import {
+	columnRef,
+	columnRefStar,
+	columnTarget,
+	deleteStmt,
+	fkCorrelation,
+	insertStmt,
+	jsonAggCorrelation,
+	jsonAggSubquery,
+	rangeVar,
+	resTarget,
+	starTarget,
+	updateStmt,
+	windowFuncCall,
+} from './__tests__/typed-ast-test-helpers.js';
+import {
 	andExpr,
 	binaryExpr,
 	boolExpr,
 	booleanConstNode,
 	coalesceExpr,
-	columnRef,
-	columnRefStar,
-	columnTarget,
 	countDistinct,
 	countStar,
-	deleteStmt,
 	eqExpr,
-	fkCorrelation,
 	floatNode,
 	funcCall,
 	gtExpr,
 	gteExpr,
 	ilikeExpr,
 	innerJoin,
-	insertStmt,
 	integerNode,
 	joinExpr,
-	jsonAggCorrelation,
-	jsonAggSubquery,
 	leftJoin,
 	likeExpr,
 	ltExpr,
@@ -35,18 +42,12 @@ import {
 	notExpr,
 	nullConstNode,
 	orExpr,
-	rangeVar,
-	resTarget,
 	selectStmt,
 	sortBy,
-	starTarget,
 	stringConstNode,
 	stringNode,
 	typeCast,
-	updateStmt,
-	windowFuncCall,
 } from './ast-helpers.js';
-import { identityNaming } from './naming-plugin.js';
 
 function deparseSelect(node) {
 	return deparseSync(
@@ -139,7 +140,7 @@ describe('ast-helpers coverage tests', () => {
 		});
 
 		it('columnRef with naming plugin', () => {
-			const result = columnRef('name', 'users', undefined, identityNaming);
+			const result = columnRef('name', 'users', undefined);
 			expect(result.ColumnRef.fields).toHaveLength(2);
 			expect(result.ColumnRef.fields[1].String.sval).toBe('name');
 		});
@@ -158,7 +159,7 @@ describe('ast-helpers coverage tests', () => {
 		});
 
 		it('columnRefStar with naming plugin', () => {
-			const result = columnRefStar('users', identityNaming);
+			const result = columnRefStar('users');
 			expect(result.ColumnRef.fields[0].String.sval).toBe('users');
 		});
 
@@ -184,7 +185,7 @@ describe('ast-helpers coverage tests', () => {
 		});
 
 		it('rangeVar with all parameters', () => {
-			const result = rangeVar('users', 'u', 'public', identityNaming);
+			const result = rangeVar('users', 'u', 'public');
 			expect(result.RangeVar.schemaname).toBe('public');
 			expect(result.RangeVar.relname).toBe('users');
 			expect(result.RangeVar.alias.aliasname).toBe('u');
@@ -466,13 +467,7 @@ describe('ast-helpers coverage tests', () => {
 		});
 
 		it('fkCorrelation builds correlation expression', () => {
-			const result = fkCorrelation(
-				'id',
-				'users',
-				'user_id',
-				'posts',
-				identityNaming,
-			);
+			const result = fkCorrelation('id', 'users', 'user_id', 'posts');
 			expect(result.A_Expr).toBeDefined();
 			expect(result.A_Expr.name[0].String.sval).toBe('=');
 		});
@@ -741,7 +736,6 @@ describe('ast-helpers coverage tests', () => {
 		it('insertStmt with naming plugin', () => {
 			const result = insertStmt({
 				table: 'users',
-				naming: identityNaming,
 			});
 			expect(result.InsertStmt.relation.relname).toBe('users');
 		});
@@ -803,7 +797,6 @@ describe('ast-helpers coverage tests', () => {
 			const result = updateStmt({
 				table: 'users',
 				set: [{ column: 'name', value: stringConstNode('Bob') }],
-				naming: identityNaming,
 			});
 			expect(result.UpdateStmt.relation.relname).toBe('users');
 		});
@@ -851,7 +844,6 @@ describe('ast-helpers coverage tests', () => {
 		it('deleteStmt with naming plugin', () => {
 			const result = deleteStmt({
 				table: 'users',
-				naming: identityNaming,
 			});
 			expect(result.DeleteStmt.relation.relname).toBe('users');
 		});
@@ -859,7 +851,7 @@ describe('ast-helpers coverage tests', () => {
 
 	describe('Window Functions', () => {
 		it('windowFuncCall without partition or order', () => {
-			const result = windowFuncCall('row_number', [], {}, identityNaming);
+			const result = windowFuncCall('row_number', [], {});
 			expect(result.FuncCall).toBeDefined();
 			expect(result.FuncCall.funcname[0].String.sval).toBe('row_number');
 			expect(result.FuncCall.over).toBeDefined();
@@ -867,22 +859,16 @@ describe('ast-helpers coverage tests', () => {
 		});
 
 		it('windowFuncCall with partitionBy', () => {
-			const result = windowFuncCall(
-				'row_number',
-				[],
-				{ partitionBy: ['category'] },
-				identityNaming,
-			);
+			const result = windowFuncCall('row_number', [], {
+				partitionBy: ['category'],
+			});
 			expect(result.FuncCall.over.partitionClause).toHaveLength(1);
 		});
 
 		it('windowFuncCall with orderBy asc', () => {
-			const result = windowFuncCall(
-				'row_number',
-				[],
-				{ orderBy: [{ field: 'created_at', direction: 'asc' }] },
-				identityNaming,
-			);
+			const result = windowFuncCall('row_number', [], {
+				orderBy: [{ field: 'created_at', direction: 'asc' }],
+			});
 			expect(result.FuncCall.over.orderClause).toHaveLength(1);
 			expect(result.FuncCall.over.orderClause[0].SortBy.sortby_dir).toBe(
 				'SORTBY_ASC',
@@ -890,12 +876,9 @@ describe('ast-helpers coverage tests', () => {
 		});
 
 		it('windowFuncCall with orderBy desc', () => {
-			const result = windowFuncCall(
-				'row_number',
-				[],
-				{ orderBy: [{ field: 'created_at', direction: 'desc' }] },
-				identityNaming,
-			);
+			const result = windowFuncCall('row_number', [], {
+				orderBy: [{ field: 'created_at', direction: 'desc' }],
+			});
 			expect(result.FuncCall.over.orderClause[0].SortBy.sortby_dir).toBe(
 				'SORTBY_DESC',
 			);
@@ -906,7 +889,6 @@ describe('ast-helpers coverage tests', () => {
 				'row_number',
 				[],
 				{ partitionBy: ['category'] },
-				identityNaming,
 				'products',
 			);
 			expect(
@@ -915,17 +897,12 @@ describe('ast-helpers coverage tests', () => {
 		});
 
 		it('windowFuncCall with args', () => {
-			const result = windowFuncCall(
-				'rank',
-				[columnRef('score')],
-				{},
-				identityNaming,
-			);
+			const result = windowFuncCall('rank', [columnRef('score')], {});
 			expect(result.FuncCall.args).toHaveLength(1);
 		});
 
 		it('windowFuncCall for count with agg_star', () => {
-			const result = windowFuncCall('count', [], {}, identityNaming);
+			const result = windowFuncCall('count', [], {});
 			expect(result.FuncCall.agg_star).toBe(true);
 		});
 	});
@@ -946,7 +923,6 @@ describe('ast-helpers coverage tests', () => {
 				whereExpr,
 				'posts_json',
 				'public',
-				identityNaming,
 			);
 			expect(result.ResTarget.name).toBe('posts_json');
 		});
@@ -958,7 +934,6 @@ describe('ast-helpers coverage tests', () => {
 				whereExpr,
 				'posts_json',
 				undefined,
-				identityNaming,
 				{ innerAlias: '__p__' },
 			);
 			expect(result.ResTarget.name).toBe('posts_json');
@@ -971,7 +946,6 @@ describe('ast-helpers coverage tests', () => {
 				whereExpr,
 				'posts_json',
 				undefined,
-				identityNaming,
 				{ limit: 10 },
 			);
 			expect(result.ResTarget.name).toBe('posts_json');
@@ -984,7 +958,6 @@ describe('ast-helpers coverage tests', () => {
 				whereExpr,
 				'posts_json',
 				undefined,
-				identityNaming,
 				{ columns: ['id', 'title'] },
 			);
 			expect(result.ResTarget.name).toBe('posts_json');
@@ -997,7 +970,6 @@ describe('ast-helpers coverage tests', () => {
 				whereExpr,
 				'posts_json',
 				undefined,
-				identityNaming,
 				{ orderBy: ['id', 'created_at'] },
 			);
 			const funcCall =
@@ -1029,7 +1001,6 @@ describe('ast-helpers coverage tests', () => {
 				whereExpr,
 				'posts_json',
 				undefined,
-				identityNaming,
 				{
 					childNodes: [{ key: 'comments', node: childNode }],
 				},
@@ -1038,13 +1009,7 @@ describe('ast-helpers coverage tests', () => {
 		});
 
 		it('jsonAggCorrelation builds correlation', () => {
-			const result = jsonAggCorrelation(
-				'users',
-				'id',
-				'__t__',
-				'user_id',
-				identityNaming,
-			);
+			const result = jsonAggCorrelation('users', 'id', '__t__', 'user_id');
 			expect(result.A_Expr).toBeDefined();
 			expect(result.A_Expr.name[0].String.sval).toBe('=');
 		});

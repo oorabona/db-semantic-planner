@@ -170,6 +170,20 @@ describe('nql-executor', () => {
 			});
 		});
 
+		describe('mutation queries', () => {
+			it('passes the model to snake_case mutation compilation', async () => {
+				const result = await compileNqlToSql(
+					"insert into users set name = 'Ada', email = 'ada@example.test'",
+					testModel,
+					{ dbCasing: 'snake_case' },
+				);
+
+				expect(result.intentType).toBe('insert');
+				expect(result.sql).toContain('INSERT INTO users');
+				expect(result.sql).toContain('(name, email)');
+			});
+		});
+
 		describe('error handling', () => {
 			it('throws NqlParseError for invalid syntax', async () => {
 				await expect(
