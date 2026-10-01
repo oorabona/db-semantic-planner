@@ -105,6 +105,16 @@ export function requireRelationTargetColumn(
 			relationName,
 		);
 	}
+	for (const output of target.outputs.values()) {
+		if (output.logicalKey === column) {
+			return requireEmittedRelationTargetColumn(
+				target,
+				emittedColumnReference(output.outputKey),
+				purpose,
+				relationName,
+			);
+		}
+	}
 	const dbColumn = ctx.naming.resolve(column);
 	return requireEmittedRelationTargetColumn(
 		target,

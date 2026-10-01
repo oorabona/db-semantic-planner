@@ -23,6 +23,11 @@ const testSchema = schema({
 		id: { type: 'integer', primaryKey: true },
 		name: 'string',
 	},
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		title: 'string',
+		displayName: 'string',
+	},
 });
 
 const itemsQuery: QueryIntent = {
@@ -80,17 +85,6 @@ function expectInvalidBindIdentifier(error: unknown, identifier: string): void {
 	expect(invalid.identifier).toBe(identifier);
 	expect(invalid.identifierType).toBe('alias');
 	expect(invalid.reason).toContain('contains invalid characters');
-}
-
-function expectBindTableCollision(
-	error: unknown,
-	bindingName: string,
-	physicalTableName = bindingName,
-): void {
-	expect(error).toBeInstanceOf(Error);
-	expect((error as Error).message).toContain(
-		`NQL binding '${bindingName}' collides with physical table name '${physicalTableName}'`,
-	);
 }
 
 function withOriginalDbType<T>(
@@ -200,6 +194,65 @@ function aggregateOutput(outputKey: string): OutputDescriptor {
 }
 
 describe('NQL bind CTE identifier injection defense', () => {
+	it('keeps bind output aliases query-local when they match a declared column', () => {
+		const bundle = compileNqlBundle(
+			'posts | select title as displayName | bind b\nb | select displayName',
+		);
+		const { error, sql } = tryCompileNqlBundle(bundle, {
+			dbCasing: 'snake_case',
+		});
+
+		expect(error).toBeUndefined();
+		expect(sql).toContain('AS "displayName"');
+		expect(sql).toContain('b."displayName"');
+		expect(sql).not.toContain('b.display_name');
+	});
+
+	it('keeps aggregate bind aliases query-local when they match a declared column', () => {
+		const bundle = compileNqlBundle(
+			'posts | select count(title) as displayName | bind b\nb | select displayName',
+		);
+		const { error, sql } = tryCompileNqlBundle(bundle, {
+			dbCasing: 'snake_case',
+		});
+
+		expect(error).toBeUndefined();
+		expect(sql).toContain('AS "displayName"');
+		expect(sql).toContain('b."displayName"');
+		expect(sql).not.toContain('b.display_name');
+	});
+
+	it('keeps materialized mutation bind aliases query-local under snake_case', () => {
+		const mutation: UpdateIntent = {
+			type: 'update',
+			table: 'posts',
+			set: { title: 'unused' },
+			allowAll: true,
+			returning: ['displayName'],
+			returningItems: [{ source: 'title', output: 'displayName' }],
+		};
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'b',
+				select: { type: 'fields', fields: ['displayName'] },
+			},
+			runtimeBindings: new Map([
+				['b', { columns: ['displayName'], rows: [{ displayName: 'title' }] }],
+			]),
+			mutationBindings: new Map([['b', mutation]]),
+		};
+
+		const { error, sql } = tryCompileNqlBundle(bundle, {
+			dbCasing: 'snake_case',
+		});
+
+		expect(error).toBeUndefined();
+		expect(sql).toContain('WITH "b" ("displayName")');
+		expect(sql).toContain('SELECT b."displayName" FROM b');
+		expect(sql).not.toContain('b.display_name');
+	});
+
 	it('materializes long logical bind columns through their physical PostgreSQL name', () => {
 		const longColumn =
 			'extremelyLongCamelCaseColumnNameThatExceedsPostgresqlIdentifierLimitByFar';
@@ -340,18 +393,19 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect(sql).toContain('"foo_bar" as (');
 	});
 
-	it('rejects read binding name that collides with a physical table name', () => {
+	it('allows a read binding to shadow a physical table name', () => {
 		const bundle = compileNqlBundle(
 			'items | select id | bind items\narchivedItems | where id in (items) | select id',
 		);
 
 		const { error, sql } = tryCompileNqlBundle(bundle);
 
-		expect(sql).toBeUndefined();
-		expectBindTableCollision(error, 'items');
+		expect(error).toBeUndefined();
+		expect(sql).toContain('WITH "items" as');
+		expect(sql).toContain('FROM items AS items_subq_0');
 	});
 
-	it('rejects read binding name that collides with a snake_case emitted table name', () => {
+	it('allows a read binding to shadow a snake_case table name', () => {
 		const bundle = compileNqlBundle(
 			'items | select id | bind archived_items\nitems | where id in (archived_items) | select id',
 		);
@@ -360,11 +414,12 @@ describe('NQL bind CTE identifier injection defense', () => {
 			dbCasing: 'snake_case',
 		});
 
-		expect(sql).toBeUndefined();
-		expectBindTableCollision(error, 'archived_items');
+		expect(error).toBeUndefined();
+		expect(sql).toContain('WITH "archived_items" as');
+		expect(sql).toContain('FROM archived_items AS archived_items_subq_0');
 	});
 
-	it('rejects camelCase read binding name that equals a declared logical table', () => {
+	it('allows a camelCase read binding to shadow a declared logical table', () => {
 		const bundle = compileNqlBundle(
 			'items | select id | bind archivedItems\nitems | where id in (archivedItems) | select id',
 		);
@@ -373,22 +428,24 @@ describe('NQL bind CTE identifier injection defense', () => {
 			dbCasing: 'snake_case',
 		});
 
-		expect(sql).toBeUndefined();
-		expectBindTableCollision(error, 'archivedItems', 'archivedItems');
+		expect(error).toBeUndefined();
+		expect(sql).toContain('WITH "archivedItems" as');
+		expect(sql).toContain('FROM "archivedItems" AS "archivedItems_subq_0"');
 	});
 
-	it('rejects insert-from sourceQuery bind name that collides with a physical table name', () => {
+	it('allows an insert-from binding to shadow a physical table name', () => {
 		const bundle = compileNqlBundle(
 			'items | select id, name | bind items\ninsert into archivedItems from items',
 		);
 
 		const { error, sql } = tryCompileNqlBundle(bundle);
 
-		expect(sql).toBeUndefined();
-		expectBindTableCollision(error, 'items');
+		expect(error).toBeUndefined();
+		expect(sql).toContain('WITH "items" as');
+		expect(sql).toContain('INSERT INTO "archivedItems" SELECT * FROM items');
 	});
 
-	it('rejects insert-from sourceQuery bind name that collides with a snake_case emitted table name', () => {
+	it('allows an insert-from binding to shadow a snake_case table name', () => {
 		const bundle = compileNqlBundle(
 			'items | select id, name | bind archived_items\ninsert into items from archived_items',
 		);
@@ -397,22 +454,26 @@ describe('NQL bind CTE identifier injection defense', () => {
 			dbCasing: 'snake_case',
 		});
 
-		expect(sql).toBeUndefined();
-		expectBindTableCollision(error, 'archived_items');
+		expect(error).toBeUndefined();
+		expect(sql).toContain('WITH "archived_items" as');
+		expect(sql).toContain('INSERT INTO items SELECT * FROM archived_items');
 	});
 
-	it('rejects upsert-from sourceQuery bind name that collides with a physical table name', () => {
+	it('allows an upsert-from binding to shadow a physical table name', () => {
 		const bundle = compileNqlBundle(
 			'items | select id, name | bind items\nupsert into archivedItems on id from items',
 		);
 
 		const { error, sql } = tryCompileNqlBundle(bundle);
 
-		expect(sql).toBeUndefined();
-		expectBindTableCollision(error, 'items');
+		expect(error).toBeUndefined();
+		expect(sql).toContain('WITH "items" as');
+		expect(sql).toContain(
+			'INSERT INTO "archivedItems" (id, name) SELECT items.id AS id, items.name AS name FROM items',
+		);
 	});
 
-	it('rejects upsert-from sourceQuery bind name that collides with a snake_case emitted table name', () => {
+	it('allows an upsert-from binding to shadow a snake_case table name', () => {
 		const bundle = compileNqlBundle(
 			'items | select id, name | bind archived_items\nupsert into items on id from archived_items',
 		);
@@ -421,8 +482,11 @@ describe('NQL bind CTE identifier injection defense', () => {
 			dbCasing: 'snake_case',
 		});
 
-		expect(sql).toBeUndefined();
-		expectBindTableCollision(error, 'archived_items');
+		expect(error).toBeUndefined();
+		expect(sql).toContain('WITH "archived_items" as');
+		expect(sql).toContain(
+			'INSERT INTO items (id, name) SELECT archived_items.id AS id, archived_items.name AS name FROM archived_items',
+		);
 	});
 
 	it('keeps non-colliding insert/upsert sourceQuery bindings working', () => {

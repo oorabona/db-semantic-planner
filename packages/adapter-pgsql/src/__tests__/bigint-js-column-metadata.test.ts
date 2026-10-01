@@ -728,24 +728,22 @@ describe('bigint js column metadata provenance', () => {
 
 	it('drops recursive depth metadata when the tracking alias collides with a selected js column', () => {
 		const adapter = createPgsqlCompileOnlyAdapter();
-		const compiled = adapter.compileRecursive(
-			recursiveEventsReport({ depth: { as: 'sequence' } }),
-			testSchema.model,
-		);
-
-		expect(compiled.sql).toContain('__depth AS sequence');
-		expect(compiled.columnMetadata?.has('sequence') ?? false).toBe(false);
+		expect(() =>
+			adapter.compileRecursive(
+				recursiveEventsReport({ depth: { as: 'sequence' } }),
+				testSchema.model,
+			),
+		).toThrow("Duplicate projected output 'sequence'");
 	});
 
 	it('drops recursive path metadata when the tracking alias collides with a selected js column', () => {
 		const adapter = createPgsqlCompileOnlyAdapter();
-		const compiled = adapter.compileRecursive(
-			recursiveEventsReport({ path: { as: 'sequence' } }),
-			testSchema.model,
-		);
-
-		expect(compiled.sql).toContain('__path AS sequence');
-		expect(compiled.columnMetadata?.has('sequence') ?? false).toBe(false);
+		expect(() =>
+			adapter.compileRecursive(
+				recursiveEventsReport({ path: { as: 'sequence' } }),
+				testSchema.model,
+			),
+		).toThrow("Duplicate projected output 'sequence'");
 	});
 
 	it('keeps non-colliding recursive tracking aliases metadata-free', () => {

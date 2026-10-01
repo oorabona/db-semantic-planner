@@ -142,6 +142,18 @@ const __defaultDb = __doctestSchema({
 		email: 'string',
 		createdAt: 'timestamp',
 		active: 'boolean',
+		department: { type: 'string', nullable: true },
+	},
+	products: {
+		id: { type: 'uuid', primaryKey: true },
+		sku: 'string',
+		price: 'decimal',
+		active: 'boolean',
+	},
+	userRoles: {
+		userId: 'integer',
+		roleId: 'integer',
+		grantedAt: 'timestamp',
 	},
 	posts: {
 		id: { type: 'uuid', primaryKey: true },

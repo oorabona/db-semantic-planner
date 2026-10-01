@@ -113,6 +113,40 @@ describe('FR-3: batchValues()', () => {
 		expect(dump.params[1]).toEqual([10, 20, 30]);
 	});
 
+	it('keeps a BatchValues alias verbatim when it collides with a declared table', () => {
+		const collisionSchema = schema({
+			users: { id: 'integer' },
+			activeItems: { id: 'integer' },
+		});
+		const adapter = createPgsqlCompileOnlyAdapter({
+			model: collisionSchema.model,
+			dbCasing: 'snake_case',
+		});
+		const orm = createOrm({ model: collisionSchema.model, adapter });
+		const activeItems = batchValues([[1]], ['id'], ['integer'], {
+			alias: 'activeItems',
+		});
+
+		const fromSql = ws(
+			(orm as any).from(activeItems).columns(['id']).dump().sql,
+		);
+		expect(fromSql).toContain('AS "activeItems"(id)');
+		expect(fromSql).toContain('"activeItems".id');
+
+		const joinSql = ws(
+			orm
+				.select('users')
+				.join(activeItems, {
+					on: eq('users.id', ref('activeItems.id')),
+					type: 'inner',
+				})
+				.dump().sql,
+		);
+		expect(joinSql).toContain('AS "activeItems"(id)');
+		expect(joinSql).toContain('users.id = "activeItems".id');
+		expect(joinSql).not.toContain('active_items');
+	});
+
 	it('T4: batchValues() returns correct BatchValuesRef shape', () => {
 		const batch = batchValues(
 			[

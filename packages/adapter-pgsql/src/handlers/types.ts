@@ -15,6 +15,7 @@ import type {
 import type { Node } from '@pgsql/types';
 import type { FkColumnDerivation } from '../assert-field.js';
 import type { BindingNameRegistry } from '../binding-registry.js';
+import type { DeclaredNameResolver } from '../declared-name-resolver.js';
 import type { NamingPlugin } from '../naming-plugin.js';
 import type {
 	AliasColumnAuthority,
@@ -42,6 +43,8 @@ export type IncludeHandlerStrategy = (typeof INCLUDE_STRATEGIES)[number];
 export interface CompilerContext {
 	/** Naming convention transformer */
 	readonly naming: NamingPlugin;
+	/** Addressed authority for model-backed identifiers. */
+	readonly declaredNames?: DeclaredNameResolver;
 	/** Schema name for table qualification (optional) */
 	readonly schema?: string;
 	/** Dialect capabilities for adapter-layer SQL surface gates */

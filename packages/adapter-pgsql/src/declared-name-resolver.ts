@@ -21,12 +21,11 @@ export interface DeclaredNameResolver {
 	enum(name: string): string | undefined;
 	/** Resolve an index only when its logical name is unique across the model. */
 	uniqueIndex(name: string): string | undefined;
-	/** Legacy call sites without an address: declared inventory entries win; local SQL names remain verbatim. */
-	resolve(name: string): string;
 }
 
 type PerModelPhysicalCache = Map<string, PgPhysicalModel>;
 const physicalModels = new WeakMap<ModelIR, PerModelPhysicalCache>();
+const declaredResolvers = new WeakMap<PgPhysicalModel, DeclaredNameResolver>();
 
 /**
  * Cache physical models by logical-model identity, effective schema and
@@ -56,17 +55,71 @@ export function getCachedPgPhysicalModel(
 	return physical;
 }
 
+/**
+ * Some direct adapter tests use partial ModelIR-shaped fixtures solely for
+ * relation/type inference. They are not a complete declared inventory, so
+ * preserve the legacy naming-only path rather than treating a partial fixture
+ * as an authority. Normal schema()/ModelIR instances always take the
+ * fail-closed physical-model path.
+ */
+export function canCreatePgPhysicalModel(model: ModelIR): boolean {
+	if (!(model.tables instanceof Map) || model.tables.size === 0) return false;
+	for (const table of model.tables.values()) {
+		if (
+			table.primaryKey !== undefined &&
+			typeof table.primaryKey !== 'string' &&
+			!Array.isArray(table.primaryKey)
+		) {
+			return true;
+		}
+	}
+	if (
+		typeof (model as { getRelationsFrom?: unknown }).getRelationsFrom !==
+			'function' ||
+		typeof (model as { isAmbiguous?: unknown }).isAmbiguous !== 'function'
+	) {
+		return false;
+	}
+	for (const [key, table] of model.tables) {
+		if (
+			key !== table.name ||
+			!Array.isArray(table.columns) ||
+			!Array.isArray(table.foreignKeys) ||
+			!Array.isArray(table.indexes) ||
+			(table.checkConstraints !== undefined &&
+				!Array.isArray(table.checkConstraints)) ||
+			(table.pseudoColumns !== undefined &&
+				!Array.isArray(table.pseudoColumns)) ||
+			(table.policies !== undefined && !Array.isArray(table.policies))
+		) {
+			return false;
+		}
+	}
+	return true;
+}
+
 export function createDeclaredNameResolver(
 	physicalModel: PgPhysicalModel,
 ): DeclaredNameResolver {
+	const cached = declaredResolvers.get(physicalModel);
+	if (cached !== undefined) return cached;
 	const { inventory } = physicalModel;
 	const schema = physicalModel.schema;
+	// DDL helper lookup permits a logical index name only when it is unique
+	// across the model. Build that reverse lookup once with the cached physical
+	// model rather than scanning the inventory for every helper call.
+	const uniqueIndexes = new Map<string, string | undefined>();
+	for (const entry of inventory.entries) {
+		if (entry.logical.kind !== 'index') continue;
+		const seen = uniqueIndexes.has(entry.logical.name);
+		uniqueIndexes.set(entry.logical.name, seen ? undefined : entry.physical);
+	}
 	const get = (
 		address: Parameters<typeof inventory.get>[0],
 	): string | undefined =>
 		inventory.has(address) ? inventory.get(address) : undefined;
 
-	return Object.freeze({
+	const resolver = Object.freeze({
 		physicalModel,
 		table: (name: string) => get({ kind: 'table', schema, name }),
 		column: (table: string, name: string) =>
@@ -76,18 +129,8 @@ export function createDeclaredNameResolver(
 		constraint: (table: string, name: string) =>
 			get({ kind: 'constraint', schema, table, name }),
 		enum: (name: string) => get({ kind: 'enum', schema, name }),
-		uniqueIndex: (name: string) => {
-			const matches = inventory.entries.filter(
-				(entry) =>
-					entry.logical.kind === 'index' && entry.logical.name === name,
-			);
-			return matches.length === 1 ? matches[0]!.physical : undefined;
-		},
-		resolve: (name: string) => {
-			const match = inventory.entries.find(
-				(entry) => entry.logical.name === name,
-			);
-			return match?.physical ?? name;
-		},
+		uniqueIndex: (name: string) => uniqueIndexes.get(name),
 	});
+	declaredResolvers.set(physicalModel, resolver);
+	return resolver;
 }

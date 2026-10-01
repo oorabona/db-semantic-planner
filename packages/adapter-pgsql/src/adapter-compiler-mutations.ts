@@ -412,6 +412,9 @@ export function compileInsert(
 
 	const ctx: CompilerContext = {
 		naming: deps.naming,
+		...(deps.declaredNames !== undefined && {
+			declaredNames: deps.declaredNames,
+		}),
 		rootTable: intent.table,
 		...(schemaName !== undefined && { schema: schemaName }),
 		...(deps.dialectCapabilities !== undefined && {
@@ -494,6 +497,9 @@ export function compileInsertFrom(
 
 	const ctx: CompilerContext = {
 		naming: deps.naming,
+		...(deps.declaredNames !== undefined && {
+			declaredNames: deps.declaredNames,
+		}),
 		rootTable: intent.source,
 		...(schemaName !== undefined && { schema: schemaName }),
 		...(deps.dialectCapabilities !== undefined && {
@@ -547,6 +553,9 @@ export function compileUpdate(
 
 	const ctx: CompilerContext = {
 		naming: deps.naming,
+		...(deps.declaredNames !== undefined && {
+			declaredNames: deps.declaredNames,
+		}),
 		rootTable: intent.table,
 		...(schemaName !== undefined && { schema: schemaName }),
 		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
@@ -606,6 +615,9 @@ export function compileBatchUpdate(
 
 	const ctx: CompilerContext = {
 		naming: deps.naming,
+		...(deps.declaredNames !== undefined && {
+			declaredNames: deps.declaredNames,
+		}),
 		rootTable: intent.table,
 		...(schemaName !== undefined && { schema: schemaName }),
 		...(deps.dialectCapabilities !== undefined && {
@@ -723,6 +735,9 @@ export function compileDelete(
 	const resolvedModel = options?.model ?? deps.model;
 	const ctx: CompilerContext = {
 		naming: deps.naming,
+		...(deps.declaredNames !== undefined && {
+			declaredNames: deps.declaredNames,
+		}),
 		rootTable: intent.table,
 		...(schemaName !== undefined && { schema: schemaName }),
 		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
@@ -770,6 +785,9 @@ export function compileUpsert(
 
 	const ctx: CompilerContext = {
 		naming: deps.naming,
+		...(deps.declaredNames !== undefined && {
+			declaredNames: deps.declaredNames,
+		}),
 		rootTable: intent.table,
 		...(schemaName !== undefined && { schema: schemaName }),
 		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
@@ -934,6 +952,9 @@ export function compileUpsertFrom(
 
 	const ctx: CompilerContext = {
 		naming: deps.naming,
+		...(deps.declaredNames !== undefined && {
+			declaredNames: deps.declaredNames,
+		}),
 		rootTable: intent.source,
 		...(schemaName !== undefined && { schema: schemaName }),
 		...(deps.dialectCapabilities !== undefined && {

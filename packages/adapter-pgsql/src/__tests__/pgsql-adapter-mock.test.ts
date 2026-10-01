@@ -3815,6 +3815,32 @@ describe('PgsqlAdapter.execute — row transformation', () => {
 		expect(await adapter.execute(query)).toEqual([{ recordId: 42 }]);
 	});
 
+	it('hydrates a __proto__ output label as an own data property', async () => {
+		const model = schema({ records: { payload: 'jsonb' } }).model;
+		const returned = JSON.parse('{"__proto__":{"isAdmin":true}}') as Record<
+			string,
+			unknown
+		>;
+		const adapter = createPgsqlAdapter(makePool({ rows: [returned] }), {
+			model,
+		});
+		const query = adapter.compile<Record<string, unknown>>(
+			{
+				rootTable: 'records',
+				decisions: [{ type: 'select', column: 'payload', alias: '__proto__' }],
+			} as never,
+			{ model },
+		);
+
+		const [row] = await adapter.execute<Record<string, unknown>>(query);
+		expect(row).toBeDefined();
+		expect(Object.getPrototypeOf(row!)).toBe(Object.prototype);
+		expect(Object.hasOwn(row!, '__proto__')).toBe(true);
+		expect(Object.getOwnPropertyDescriptor(row!, '__proto__')?.value).toEqual({
+			isAdmin: true,
+		});
+	});
+
 	it('refuses compiler aliases that collide after PostgreSQL truncation', () => {
 		const prefix = 'a'.repeat(63);
 		const model = schema({ records: { id: 'integer' } }).model;

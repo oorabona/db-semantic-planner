@@ -1035,6 +1035,10 @@ const deleted = await orm.delete('posts')
 
 ### Upsert (Insert or Update on Conflict)
 
+For `.onConflictConstraint(name)`, a constraint declared on the target table is
+resolved to its physical database name. A name not declared in the model is
+emitted unchanged as a catalog constraint name.
+
 ```typescript
 // On conflict by columns — auto-update non-conflict fields
 orm.upsert('users')

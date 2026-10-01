@@ -1029,15 +1029,12 @@ user_post_counts | select postViewCount, postSafeViewCount, postStringViewCount`
 			makePool([{ id: 'event-1', sequence: 1 }]),
 			{ model: conversionSchema.model },
 		);
-		const compiled = adapter.compileRecursive(
-			recursiveConversionReport({ depth: { as: 'sequence' } }),
-			conversionSchema.model,
-		);
-
-		expect(compiled.columnMetadata?.has('sequence') ?? false).toBe(false);
-		await expect(adapter.execute(compiled)).resolves.toEqual([
-			{ id: 'event-1', sequence: 1 },
-		]);
+		expect(() =>
+			adapter.compileRecursive(
+				recursiveConversionReport({ depth: { as: 'sequence' } }),
+				conversionSchema.model,
+			),
+		).toThrow("Duplicate projected output 'sequence'");
 	});
 
 	it('does not convert recursive path tracking when its alias collides with a js column', async () => {
@@ -1045,15 +1042,12 @@ user_post_counts | select postViewCount, postSafeViewCount, postStringViewCount`
 			makePool([{ id: 'event-1', sequence: ['event-1'] }]),
 			{ model: conversionSchema.model },
 		);
-		const compiled = adapter.compileRecursive(
-			recursiveConversionReport({ path: { as: 'sequence' } }),
-			conversionSchema.model,
-		);
-
-		expect(compiled.columnMetadata?.has('sequence') ?? false).toBe(false);
-		await expect(adapter.execute(compiled)).resolves.toEqual([
-			{ id: 'event-1', sequence: ['event-1'] },
-		]);
+		expect(() =>
+			adapter.compileRecursive(
+				recursiveConversionReport({ path: { as: 'sequence' } }),
+				conversionSchema.model,
+			),
+		).toThrow("Duplicate projected output 'sequence'");
 	});
 
 	it('converts normal recursive js columns and leaves non-colliding tracking aliases raw', async () => {

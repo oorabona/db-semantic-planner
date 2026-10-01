@@ -122,7 +122,12 @@ function renameExistingKey(
 ): string {
 	if (fromKey === toKey) return fromKey;
 	if (!Object.hasOwn(record, toKey)) {
-		record[toKey] = record[fromKey];
+		Object.defineProperty(record, toKey, {
+			value: record[fromKey],
+			enumerable: true,
+			writable: true,
+			configurable: true,
+		});
 	}
 	delete record[fromKey];
 	return toKey;
@@ -216,10 +221,15 @@ function convertJsonAggPayload(
 				Object.hasOwn(value, key) &&
 				transform.table === tableName
 			) {
-				value[key] = convertBigintJsReadValue(value[key], transform.js, {
-					table: transform.table,
-					column: transform.column,
-					outputKey: key,
+				Object.defineProperty(value, key, {
+					value: convertBigintJsReadValue(value[key], transform.js, {
+						table: transform.table,
+						column: transform.column,
+						outputKey: key,
+					}),
+					enumerable: true,
+					writable: true,
+					configurable: true,
 				});
 			}
 		}
@@ -235,15 +245,16 @@ function convertJsonAggPayload(
 				transform.table === tableName &&
 				transform.column === column.name
 			) {
-				value[outputKey] = convertBigintJsReadValue(
-					value[outputKey],
-					transform.js,
-					{
+				Object.defineProperty(value, outputKey, {
+					value: convertBigintJsReadValue(value[outputKey], transform.js, {
 						table: transform.table,
 						column: transform.column,
 						outputKey,
-					},
-				);
+					}),
+					enumerable: true,
+					writable: true,
+					configurable: true,
+				});
 			}
 		}
 	}
@@ -261,12 +272,17 @@ function convertJsonAggPayload(
 			info.columnKeyMap,
 			info.nestedReadTransforms,
 		);
-		value[key] =
-			info.isToOne && Array.isArray(converted)
-				? converted.length > 0
-					? converted[0]
-					: null
-				: converted;
+		Object.defineProperty(value, key, {
+			value:
+				info.isToOne && Array.isArray(converted)
+					? converted.length > 0
+						? converted[0]
+						: null
+					: converted,
+			enumerable: true,
+			writable: true,
+			configurable: true,
+		});
 	}
 	return value;
 }
@@ -406,7 +422,12 @@ export function hydrateJsonAggIncludes<T>(
 				// Set property using includeAlias (user-facing name, e.g., 'posts')
 				// and remove the raw JSON column
 				const outputKey = info.includeAlias ?? relationName;
-				record[outputKey] = parsed;
+				Object.defineProperty(record, outputKey, {
+					value: parsed,
+					enumerable: true,
+					writable: true,
+					configurable: true,
+				});
 				delete record[actualColumnName];
 			}
 		}

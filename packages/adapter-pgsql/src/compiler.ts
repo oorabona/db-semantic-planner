@@ -93,6 +93,7 @@ import {
 // compileExpressionIntent (from custom.ts) and createWhereDispatcher (from handlers/index.ts).
 registerWhereDispatcherFactory(createWhereDispatcher);
 
+import type { DeclaredNameResolver } from './declared-name-resolver.js';
 import type {
 	CompilerContext as HandlerCompilerContext,
 	CompilerState as HandlerCompilerState,
@@ -653,6 +654,8 @@ export interface SimplifiedPlanReport {
 	 */
 	readonly batchValuesFromNode?: unknown;
 	readonly batchValuesFromParams?: readonly unknown[];
+	/** Query-local alias emitted by a BatchValues FROM source. */
+	readonly batchValuesFromAlias?: string;
 }
 
 /**
@@ -740,6 +743,7 @@ function maxParamRefNumber(value: unknown): number {
 
 export interface CompilerOptions {
 	readonly naming?: NamingPlugin;
+	readonly declaredNames?: DeclaredNameResolver;
 	readonly schema?: string;
 	readonly dialectCapabilities?: DialectCapabilities;
 	/** Default primary key column name convention (default: 'id') */
@@ -755,6 +759,7 @@ export interface CompilerOptions {
 
 export class PlanCompiler {
 	private readonly naming: NamingPlugin;
+	private readonly declaredNames: DeclaredNameResolver | undefined;
 	private readonly schema: string | undefined;
 	private readonly defaultPk: string;
 	private readonly deriveFk: FkColumnDerivation;
@@ -815,6 +820,7 @@ export class PlanCompiler {
 
 	constructor(options: CompilerOptions = {}) {
 		this.naming = options.naming ?? identityNaming;
+		this.declaredNames = options.declaredNames;
 		this.schema = options.schema ?? undefined;
 		this.defaultPk = options.defaultPkColumnName ?? DEFAULT_PK_COLUMN;
 		this.deriveFk = options.deriveFkColumnName ?? defaultFkDerivation;
@@ -829,6 +835,9 @@ export class PlanCompiler {
 	): CompilerOptions {
 		return {
 			naming: this.naming,
+			...(this.declaredNames !== undefined && {
+				declaredNames: this.declaredNames,
+			}),
 			...(this.schema !== undefined && { schema: this.schema }),
 			defaultPkColumnName: this.defaultPk,
 			deriveFkColumnName: this.deriveFk,
@@ -2251,9 +2260,28 @@ export class PlanCompiler {
 						),
 					);
 				} else if (decision.column) {
+					const sourceTable = decision.table ?? plan.rootTable;
+					const authority =
+						this.createHandlerContext(plan).aliasColumnAuthorities?.get(
+							sourceTable,
+						);
+					const declaredColumn =
+						authority === undefined
+							? this.declaredNames?.column(sourceTable, decision.column)
+							: undefined;
+					if (
+						authority === undefined &&
+						this.declaredNames &&
+						!declaredColumn
+					) {
+						throw new Error(
+							`Declared column '${sourceTable}.${decision.column}' is missing from the physical inventory.`,
+						);
+					}
+					const emittedColumn = declaredColumn ?? decision.column;
 					targetList.push(
 						columnTarget(
-							decision.column,
+							emittedColumn,
 							decision.alias,
 							decision.table,
 							this.naming,
@@ -2745,6 +2773,11 @@ export class PlanCompiler {
 		}
 		if (this.isNqlBindingRoot(plan)) {
 			this.registerAliasAuthority(plan.rootTable, plan.rootTable);
+		}
+		if (plan.batchValuesFromAlias !== undefined) {
+			this.registerAliasAuthority(plan.batchValuesFromAlias, {
+				target: plan.batchValuesFromAlias,
+			});
 		}
 		return [
 			plan.batchValuesFromNode

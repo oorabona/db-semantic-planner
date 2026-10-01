@@ -204,7 +204,7 @@ The basic upsert patterns above cover most use cases. The following patterns han
 
 #### Selecting a specific constraint
 
-When a table has multiple unique constraints, specify which one governs conflict detection. Use `.onConflictConstraint(name)` to target a named constraint instead of listing columns:
+When a table has multiple unique constraints, specify which one governs conflict detection. Use `.onConflictConstraint(name)` to target a named constraint instead of listing columns. A constraint declared on the target table is resolved to its physical database name; a name not declared in the model is emitted unchanged as a catalog constraint name:
 
 ```typescript
 // doctest: skip — constraint names are DB-specific
@@ -262,12 +262,12 @@ This `WHERE` belongs to the `DO UPDATE` action. If it evaluates to false, Postgr
 List all columns that compose the unique constraint when the conflict target spans multiple columns:
 
 ```typescript
-orm.upsert('user_roles')
+orm.upsert('userRoles')
   .values({ userId: 1, roleId: 3, grantedAt: new Date() })
   .onConflict(['userId', 'roleId'])
   .doUpdate({ grantedAt: new Date() })
   .dump();
-// SQL: INSERT INTO "user_roles" (...) VALUES ($1, $2, $3)
+// SQL: INSERT INTO "userRoles" (...) VALUES ($1, $2, $3)
 // ON CONFLICT ("userId", "roleId")
 // DO UPDATE SET "grantedAt" = $4
 ```

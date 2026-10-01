@@ -530,17 +530,19 @@ function setProjectedOutput(
 	outputKey: string,
 	output: OutputProjection,
 ): void {
-	if (outputs.has(outputKey)) {
-		outputs.set(
-			outputKey,
-			descriptorForSource(outputKey, {
-				kind: 'ambiguous',
-				reason: `projection output '${outputKey}' was selected more than once`,
-			}),
+	const existing = outputs.get(outputKey);
+	if (existing !== undefined) {
+		throw new Error(
+			`Duplicate projected output '${outputKey}': '${outputOrigin(existing)}' and '${outputOrigin(output)}' both return that label.`,
 		);
-		return;
 	}
 	outputs.set(outputKey, output);
+}
+
+function outputOrigin(output: OutputProjection): string {
+	return output.source.kind === 'modelColumn'
+		? `${output.source.table}.${output.source.column}`
+		: output.logicalKey;
 }
 
 export function preserveOneToOne<T = unknown>(

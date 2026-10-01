@@ -63,6 +63,18 @@ function applyReturningClause(
 	}
 }
 
+function pgReturnedIdentifier(identifier: string): string {
+	let result = '';
+	let bytes = 0;
+	for (const character of identifier) {
+		const width = Buffer.byteLength(character, 'utf8');
+		if (bytes + width > 63) break;
+		result += character;
+		bytes += width;
+	}
+	return result;
+}
+
 // ============================================================================
 // Basic Value Nodes
 // ============================================================================
@@ -164,10 +176,19 @@ export function columnRef(
 		table && !isWildcard
 			? (authorities?.get(table) ?? authorities?.get(naming.resolve(table)))
 			: undefined;
+	const authorityOutput =
+		typeof column === 'string'
+			? (authority?.outputs?.get(column) ??
+				[...(authority?.outputs?.values() ?? [])].find(
+					(output) =>
+						output.logicalKey === column ||
+						output.outputKey === pgReturnedIdentifier(naming.resolve(column)),
+				))
+			: undefined;
 	const resolved =
 		typeof column === 'string'
-			? authority?.outputs?.has(column)
-				? emittedColumnReference(column)
+			? authorityOutput !== undefined
+				? emittedColumnReference(authorityOutput.outputKey)
 				: requestedColumnReference(column, { naming })
 			: column;
 	const dbColumn = resolved.emittedName;

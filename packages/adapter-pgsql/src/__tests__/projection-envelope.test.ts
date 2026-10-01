@@ -164,6 +164,30 @@ describe('projection envelope', () => {
 		);
 	});
 
+	it('refuses exact duplicate returned projection labels', () => {
+		const source = fromModelColumns({
+			sql: 'SELECT sequence, label FROM events',
+			parameters: [],
+			table: 'events',
+			columns: ['sequence', 'label'],
+			model: testSchema.model,
+			naming: identityNaming,
+		});
+
+		expect(() =>
+			projectNamedFields(source, {
+				sql: 'SELECT sequence AS display_name, label AS display_name FROM events',
+				parameters: [],
+				selections: [
+					{ inputKey: 'sequence', outputKey: 'display_name' },
+					{ inputKey: 'label', outputKey: 'display_name' },
+				],
+			}),
+		).toThrow(
+			"Duplicate projected output 'display_name': 'events.sequence' and 'events.label' both return that label.",
+		);
+	});
+
 	it('finalizeEnvelope routes descriptor handling through the neutral resolver', () => {
 		const source = fromModelColumns({
 			sql: 'SELECT sequence FROM events',

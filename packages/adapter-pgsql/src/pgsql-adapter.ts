@@ -120,6 +120,7 @@ import {
 	generateVacuumSQL,
 } from './ddl/table-operations.js';
 import {
+	canCreatePgPhysicalModel,
 	createDeclaredNameResolver,
 	getCachedPgPhysicalModel,
 } from './declared-name-resolver.js';
@@ -1657,22 +1658,6 @@ function guardCompileResultWithIncludes<T>(
 	};
 }
 
-function findPhysicalTableNameCollision(
-	model: ModelIR,
-	bindingName: string,
-	naming: NamingPlugin,
-): string | undefined {
-	for (const [modelTableName, table] of model.tables) {
-		if (bindingName === table.name) return table.name;
-		if (bindingName === modelTableName) return table.name;
-		const emittedTableName = naming.resolve(table.name);
-		if (bindingName === emittedTableName) return emittedTableName;
-		const emittedModelTableName = naming.resolve(modelTableName);
-		if (bindingName === emittedModelTableName) return emittedModelTableName;
-	}
-	return undefined;
-}
-
 function findDuplicateEmittedNqlBindingName(
 	bindingNames: Iterable<string>,
 	naming: NamingPlugin,
@@ -2284,8 +2269,29 @@ function createNqlBindingSelectPlan(query: QueryIntent): PlanReport {
 
 type NqlBindingProjectionRegistry = ReadonlyMap<string, ProjectionEnvelope>;
 
-function nqlBindingOutputKey(name: string, naming: NamingPlugin): string {
+/**
+ * A binding projection has two namespaces. Its input may be a declared model
+ * column, but every output alias is SQL-local and is therefore emitted exactly
+ * as authored. When reading from a prior binding, its emitted output wins
+ * before a model-column lookup is even considered.
+ */
+function nqlBindingSourceOutputKey(
+	source: ProjectionEnvelope,
+	name: string,
+	naming: NamingPlugin,
+): string {
+	if (source.projection.kind === 'known') {
+		const exact = source.projection.outputs.get(name);
+		if (exact !== undefined) return exact.outputKey;
+		for (const output of source.projection.outputs.values()) {
+			if (output.logicalKey === name) return output.outputKey;
+		}
+	}
 	return naming.resolve(name);
+}
+
+function nqlBindingLocalOutputKey(name: string): string {
+	return name;
 }
 
 function addNqlBindingSelection(
@@ -2315,21 +2321,17 @@ function addNqlBindingStarSelections(
 	}
 }
 
-function nqlBindingAliasOutputKey(
-	value: unknown,
-	naming: NamingPlugin,
-): string | undefined {
+function nqlBindingAliasOutputKey(value: unknown): string | undefined {
 	return typeof value === 'string'
-		? nqlBindingOutputKey(value, naming)
+		? nqlBindingLocalOutputKey(value)
 		: undefined;
 }
 
 function nqlBindingExpressionOutputKey(
 	expr: ExpressionIntent,
-	naming: NamingPlugin,
 ): string | undefined {
 	const record = expr as unknown as Record<string, unknown>;
-	return nqlBindingAliasOutputKey(record.as ?? record.alias, naming);
+	return nqlBindingAliasOutputKey(record.as ?? record.alias);
 }
 
 function buildNqlBindingProjectionShape(
@@ -2359,7 +2361,7 @@ function buildNqlBindingProjectionShape(
 				addNqlBindingStarSelections(source, selections);
 				continue;
 			}
-			const outputKey = nqlBindingOutputKey(field, naming);
+			const outputKey = nqlBindingSourceOutputKey(source, field, naming);
 			addNqlBindingSelection(selections, outputKey, outputKey);
 		}
 		return { selections, expressions, preserveOneToOne: false };
@@ -2367,13 +2369,13 @@ function buildNqlBindingProjectionShape(
 
 	if (select.type === 'aggregate') {
 		for (const field of select.fields ?? []) {
-			const outputKey = nqlBindingOutputKey(field, naming);
+			const outputKey = nqlBindingSourceOutputKey(source, field, naming);
 			addNqlBindingSelection(selections, outputKey, outputKey);
 		}
 		for (const aggregate of select.aggregates) {
 			addNqlBindingExpression(
 				expressions,
-				nqlBindingAliasOutputKey(aggregate.as, naming),
+				nqlBindingAliasOutputKey(aggregate.as),
 				'aggregate projection has no raw column provenance',
 			);
 		}
@@ -2392,16 +2394,16 @@ function buildNqlBindingProjectionShape(
 				if (typeof column !== 'string') {
 					addNqlBindingExpression(
 						expressions,
-						nqlBindingExpressionOutputKey(expr, naming),
+						nqlBindingExpressionOutputKey(expr),
 						'column projection could not be resolved',
 					);
 					break;
 				}
 				addNqlBindingSelection(
 					selections,
-					nqlBindingOutputKey(column, naming),
-					nqlBindingAliasOutputKey(record.as, naming) ??
-						nqlBindingOutputKey(column, naming),
+					nqlBindingSourceOutputKey(source, column, naming),
+					nqlBindingAliasOutputKey(record.as) ??
+						nqlBindingSourceOutputKey(source, column, naming),
 				);
 				break;
 			}
@@ -2411,22 +2413,22 @@ function buildNqlBindingProjectionShape(
 				if (typeof column !== 'string' || typeof alias !== 'string') {
 					addNqlBindingExpression(
 						expressions,
-						nqlBindingExpressionOutputKey(expr, naming),
+						nqlBindingExpressionOutputKey(expr),
 						'column alias projection could not be resolved',
 					);
 					break;
 				}
 				addNqlBindingSelection(
 					selections,
-					nqlBindingOutputKey(column, naming),
-					nqlBindingOutputKey(alias, naming),
+					nqlBindingSourceOutputKey(source, column, naming),
+					nqlBindingLocalOutputKey(alias),
 				);
 				break;
 			}
 			default:
 				addNqlBindingExpression(
 					expressions,
-					nqlBindingExpressionOutputKey(expr, naming),
+					nqlBindingExpressionOutputKey(expr),
 					'expression projection has no raw column provenance',
 				);
 				break;
@@ -3058,7 +3060,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		const model = options?.model ?? this.model;
 		const schemaName = options?.schemaName || this.schemaName;
 		const physicalModel =
-			model === undefined
+			model === undefined || !canCreatePgPhysicalModel(model)
 				? undefined
 				: getCachedPgPhysicalModel(
 						model,
@@ -3069,20 +3071,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			physicalModel === undefined
 				? undefined
 				: createDeclaredNameResolver(physicalModel);
-		// Legacy compile modules still accept a NamingPlugin.  Feed them the
-		// resolver bridge so all declared names already get the physical spelling;
-		// query-local paths are explicitly emitted below and do not use this bridge.
-		const resolvedNaming: NamingPlugin = declaredNames
-			? {
-					resolve: declaredNames.resolve,
-					model: naming.model,
-					// Kept only for DDL/physical-model consumers of the shared type.
-					toDatabase: declaredNames.resolve,
-					toModel: naming.model,
-				}
-			: naming;
 		return {
-			naming: resolvedNaming,
+			// Naming supplies the legacy no-model path. Model-backed compiler sites
+			// resolve declared objects through declaredNames and a full address.
+			naming,
 			// `||` (not `??`): empty string is treated as "no override" and falls back to this.schemaName (which may be a configured schema or undefined)
 			schemaName,
 			model,
@@ -3107,28 +3099,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			);
 		}
 		return model;
-	}
-
-	private assertNqlBindingNamesDisjointFromTables(
-		bindingNames: BindingNameRegistry | undefined,
-		options?: CompileOptions,
-	): void {
-		if (bindingNames === undefined || bindingNames.size === 0) return;
-		const model = this.requireNqlCompileModel(options);
-		const naming = this.buildCompileDeps(options, bindingNames).naming;
-		for (const bindingName of bindingNames) {
-			const physicalTableName = findPhysicalTableNameCollision(
-				model,
-				bindingName,
-				naming,
-			);
-			if (physicalTableName !== undefined) {
-				throw new Error(
-					`NQL binding '${bindingName}' collides with physical table name '${physicalTableName}'. ` +
-						'NQL binding names must be disjoint from model table names.',
-				);
-			}
-		}
 	}
 
 	private compileNqlMutation(
@@ -3293,7 +3263,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 						bindingNamesInOrder.map((name) => emittedBindName(name, naming)),
 					)
 				: undefined;
-		this.assertNqlBindingNamesDisjointFromTables(bindingNames, options);
 		const bindingProjections = new Map<string, ProjectionEnvelope>();
 
 		for (const name of bindingNamesInOrder) {
@@ -3368,6 +3337,24 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				bindingProjections,
 			);
 			const outputSchema = bundle.bindingOutputSchemas?.get(name);
+			const compiledBindingOutputs =
+				compiled.projection.kind === 'known'
+					? compiled.projection.outputs
+					: undefined;
+			const emittedBindingOutputKeys =
+				outputSchema?.declaredOutputs !== undefined &&
+				compiledBindingOutputs !== undefined
+					? new Map(
+							outputSchema.columns.map((column) => {
+								const output =
+									compiledBindingOutputs.get(column) ??
+									[...compiledBindingOutputs.values()].find(
+										(candidate) => candidate.logicalKey === column,
+									);
+								return [column, output?.outputKey ?? column] as const;
+							}),
+						)
+					: undefined;
 			const bindingProjection =
 				outputSchema?.declaredOutputs !== undefined
 					? fromOutputDescriptors({
@@ -3376,6 +3363,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 							columns: outputSchema.columns,
 							declaredOutputs: outputSchema.declaredOutputs,
 							naming,
+							...(emittedBindingOutputKeys !== undefined && {
+								emittedOutputKeys: emittedBindingOutputKeys,
+							}),
 							...(compiled.hydrationPlan !== undefined && {
 								hydrationPlan: compiled.hydrationPlan,
 							}),
@@ -3510,6 +3500,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		if (isCompiledNqlQuery(plan)) {
 			return this.compileNqlBundle<T>(plan, options);
 		}
+		this.assertDeclaredPlanReferences(plan, options);
 		return guardCompiledQuery(
 			compileSelect<T>(plan, options, this.buildCompileDeps(options)),
 			'select plan',
@@ -3621,6 +3612,16 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * - rows > batchThreshold OR batchThreshold === 0: SELECT unnest($1::type[]),...
 	 */
 	compileInsert(intent: InsertIntent, options?: CompileOptions): CompiledQuery {
+		this.assertDeclaredMutationReferences(
+			intent.table,
+			[
+				...Object.keys(intent.values?.[0] ?? {}),
+				...(intent.returningItems?.map((item) => item.source) ??
+					intent.returning ??
+					[]),
+			],
+			options,
+		);
 		return guardCompiledQuery(
 			compileInsertImpl(intent, options, this.buildCompileDeps(options)),
 			'insert',
@@ -3645,6 +3646,16 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * Compile an update intent to executable SQL.
 	 */
 	compileUpdate(intent: UpdateIntent, options?: CompileOptions): CompiledQuery {
+		this.assertDeclaredMutationReferences(
+			intent.table,
+			[
+				...Object.keys(intent.set ?? {}),
+				...(intent.returningItems?.map((item) => item.source) ??
+					intent.returning ??
+					[]),
+			],
+			options,
+		);
 		return guardCompiledQuery(
 			compileUpdateImpl(intent, options, this.buildCompileDeps(options)),
 			'update',
@@ -3674,6 +3685,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * Compile a delete intent to executable SQL.
 	 */
 	compileDelete(intent: DeleteIntent, options?: CompileOptions): CompiledQuery {
+		this.assertDeclaredMutationReferences(
+			intent.table,
+			intent.returningItems?.map((item) => item.source) ??
+				intent.returning ??
+				[],
+			options,
+		);
 		return guardCompiledQuery(
 			compileDeleteImpl(intent, options, this.buildCompileDeps(options)),
 			'delete',
@@ -3684,6 +3702,24 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * Compile an upsert intent to executable SQL (DX-026).
 	 */
 	compileUpsert(intent: UpsertIntent, options?: CompileOptions): CompiledQuery {
+		const conflictColumns =
+			'columns' in intent.onConflict ? intent.onConflict.columns : [];
+		const actionColumns =
+			intent.action.type === 'doUpdate'
+				? Object.keys(intent.action.set ?? {})
+				: [];
+		this.assertDeclaredMutationReferences(
+			intent.table,
+			[
+				...Object.keys(intent.values?.[0] ?? {}),
+				...conflictColumns,
+				...actionColumns,
+				...(intent.returningItems?.map((item) => item.source) ??
+					intent.returning ??
+					[]),
+			],
+			options,
+		);
 		return guardCompiledQuery(
 			compileUpsertImpl(intent, options, this.buildCompileDeps(options)),
 			'upsert',
@@ -3872,7 +3908,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 							})
 						: value;
 				const modelKey = outputKeyMapFor(query)?.get(key) ?? key;
-				transformed[modelKey] = converted;
+				Object.defineProperty(transformed, modelKey, {
+					value: converted,
+					enumerable: true,
+					writable: true,
+					configurable: true,
+				});
 			}
 			return transformed;
 		});
@@ -7030,6 +7071,87 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				this._dbCasing,
 			),
 		);
+	}
+
+	/**
+	 * Public compilation APIs receive logical model references.  Do the
+	 * addressable inventory check at their boundary so forged/stale plans cannot
+	 * fall through to a coincidentally named database object. Query-local names
+	 * are deliberately not passed to this method.
+	 */
+	private assertDeclaredMutationReferences(
+		table: string,
+		columns: readonly string[],
+		options?: CompileOptions,
+	): void {
+		const names = this.buildCompileDeps(options).declaredNames;
+		if (names === undefined) return;
+		if (names.table(table) === undefined) {
+			throw new Error(
+				`Declared table '${table}' is missing from the physical inventory.`,
+			);
+		}
+		for (const column of columns) {
+			if (column === '*') continue;
+			if (names.column(table, column) === undefined) {
+				throw new Error(
+					`Declared column '${table}.${column}' is missing from the physical inventory.`,
+				);
+			}
+		}
+	}
+
+	private assertDeclaredPlanReferences(
+		plan: PlanReport,
+		options?: CompileOptions,
+	): void {
+		// The root of a BatchValues plan is an unnest range variable, not a
+		// model-backed relation. Its alias and output columns are query-local.
+		if (plan.intent?.batchValuesSource !== undefined) return;
+		// Legacy adapter-only decision fixtures have no QueryIntent and therefore
+		// do not carry enough address information to classify each identifier.
+		// Public planner output always has an intent and is checked below.
+		if (plan.intent === undefined) return;
+		const names = this.buildCompileDeps(options).declaredNames;
+		if (names === undefined) return;
+		const rootTable = plan.intent?.from ?? plan.rootTable;
+		if (names.table(rootTable) === undefined) {
+			throw new Error(
+				`Declared table '${rootTable}' is missing from the physical inventory.`,
+			);
+		}
+		const select = plan.intent?.select;
+		const selectedColumns =
+			select?.type === 'fields'
+				? select.fields
+				: select?.type === 'aggregate'
+					? (select.fields ?? [])
+					: [];
+		for (const column of selectedColumns) {
+			if (column === '*') continue;
+			if (names.column(rootTable, column) === undefined) {
+				throw new Error(
+					`Declared column '${rootTable}.${column}' is missing from the physical inventory.`,
+				);
+			}
+		}
+		for (const decision of plan.decisions) {
+			const decisionRecord = decision as unknown as {
+				type?: string;
+				column?: string;
+				table?: string;
+			};
+			if (decisionRecord.type !== 'select') continue;
+			const column = decisionRecord.column;
+			if (!column || column === '*') continue;
+			const table = decisionRecord.table ?? rootTable;
+			if (table !== rootTable) continue;
+			if (names.column(rootTable, column) === undefined) {
+				throw new Error(
+					`Declared column '${rootTable}.${column}' is missing from the physical inventory.`,
+				);
+			}
+		}
 	}
 
 	private helperTableName(table: string, schema?: string): string {

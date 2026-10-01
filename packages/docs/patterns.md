@@ -138,7 +138,7 @@ const result = orm
 const inserted = await orm
   .insert('users')
   .values({ name: 'Alice', email: 'alice@example.com' })
-  .returning(['id', 'created_at'])
+  .returning(['id', 'createdAt'])
   .dump();
 ```
 

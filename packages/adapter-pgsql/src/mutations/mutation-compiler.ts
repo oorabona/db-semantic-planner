@@ -208,6 +208,36 @@ export interface UpsertFromConfig {
 // Compilers
 // ============================================================================
 
+function declaredTableName(ctx: CompilerContext, table: string): string {
+	const physical = ctx.declaredNames?.table(table);
+	if (ctx.declaredNames !== undefined) {
+		if (physical === undefined) {
+			throw new Error(
+				`Declared table '${table}' is missing from the physical inventory.`,
+			);
+		}
+		return physical;
+	}
+	return ctx.naming.resolve(table);
+}
+
+function declaredColumnName(
+	ctx: CompilerContext,
+	table: string,
+	column: string,
+): string {
+	const physical = ctx.declaredNames?.column(table, column);
+	if (ctx.declaredNames !== undefined) {
+		if (physical === undefined) {
+			throw new Error(
+				`Declared column '${table}.${column}' is missing from the physical inventory.`,
+			);
+		}
+		return physical;
+	}
+	return ctx.naming.resolve(column);
+}
+
 /**
  * Compile an INSERT statement from configuration.
  */
@@ -217,8 +247,10 @@ export function compileInsert(
 	state: CompilerState,
 ): Node {
 	const naming = ctx.naming;
-	const dbTable = naming.resolve(config.table);
-	const dbColumns = config.columns.map((c) => naming.resolve(c));
+	const dbTable = declaredTableName(ctx, config.table);
+	const dbColumns = config.columns.map((c) =>
+		declaredColumnName(ctx, config.table, c),
+	);
 
 	// Build VALUES as Node[][] (each row is Node[])
 	const columnTypes = config.columnTypes;
@@ -281,7 +313,7 @@ export function compileUnnestInsert(
 	state: CompilerState,
 ): Node {
 	const naming = ctx.naming;
-	const dbTable = naming.resolve(config.table);
+	const dbTable = declaredTableName(ctx, config.table);
 	const { columns, values, columnTypes } = config;
 
 	// Validate cardinality before any SQL generation (INV-02)
@@ -315,7 +347,7 @@ export function compileUnnestInsert(
 		// ResTarget with column alias: unnest(...) AS "colname"
 		return {
 			ResTarget: {
-				name: naming.resolve(col),
+				name: declaredColumnName(ctx, config.table, col),
 				val: unnestCall,
 			},
 		};
@@ -339,7 +371,7 @@ export function compileUnnestInsert(
 	// Build INSERT INTO "table" ("col1", "col2") <selectQuery>
 	const options: InsertOptions = {
 		table: config.table,
-		columns: columns.map((c) => naming.resolve(c)),
+		columns: columns.map((c) => declaredColumnName(ctx, config.table, c)),
 		selectQuery,
 		naming,
 	};
@@ -366,7 +398,7 @@ export function compileUpdate(
 	const columnTypes = config.columnTypes;
 	const setClause: Array<{ column: string; value: Node }> = config.set.map(
 		({ column, value }) => ({
-			column: naming.resolve(column),
+			column: declaredColumnName(ctx, config.table, column),
 			value: isSqlRaw(value)
 				? parseRawExpression(value.sql)
 				: valueToNode(value, state, columnTypes?.[column]),
@@ -459,7 +491,7 @@ export function compileUnnestUpdate(
 ): Node {
 	const naming = ctx.naming;
 	const { table, matchColumns, allColumns, columnArrays, columnTypes } = config;
-	const dbTable = naming.resolve(table);
+	const dbTable = declaredTableName(ctx, table);
 	const updateColumns = allColumns.filter((c) => !matchColumns.includes(c));
 
 	// Build unnest arguments: CAST($N AS type[]) for each column
@@ -485,7 +517,7 @@ export function compileUnnestUpdate(
 			alias: {
 				aliasname: 't',
 				colnames: allColumns.map((c) => ({
-					String: { sval: naming.resolve(c) },
+					String: { sval: declaredColumnName(ctx, table, c) },
 				})),
 			},
 		},
@@ -495,12 +527,12 @@ export function compileUnnestUpdate(
 	const setClause: Array<{ column: string; value: Node }> = [
 		// Array-sourced update columns: "col" = t."col"
 		...updateColumns.map((col) => ({
-			column: naming.resolve(col),
+			column: declaredColumnName(ctx, table, col),
 			value: columnRef(col, 't', undefined, naming),
 		})),
 		// Scalar SET from scalarSet (e.g. .set({ confidence: 0.85 }))
 		...(config.scalarSet ?? []).map(({ column, value }) => ({
-			column: naming.resolve(column),
+			column: declaredColumnName(ctx, table, column),
 			value: valueToNode(value, state, columnTypes?.[column]),
 		})),
 	];

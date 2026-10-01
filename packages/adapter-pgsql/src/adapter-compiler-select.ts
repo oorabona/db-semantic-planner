@@ -272,6 +272,9 @@ function compileJoinIntents(
 				paramState: bvOnParamState,
 				naming,
 				outerTable: alias,
+				// A BatchValues range variable is query-local even when its spelling
+				// collides with a declared table. Its columns are supplied by unnest().
+				aliasColumnAuthorities: new Map([[alias, { target: alias }]]),
 				...(schemaName !== undefined && { schemaName }),
 				...(deps.bindingNames !== undefined && {
 					bindingNames: deps.bindingNames,
@@ -1109,6 +1112,7 @@ function buildSimplifiedPlanReport(
 				return {
 					batchValuesFromNode: rangeFunction,
 					batchValuesFromParams: params,
+					batchValuesFromAlias: bvFromSource.alias,
 				};
 			})()
 		: {};
@@ -1142,6 +1146,9 @@ export function compileSelectEnvelope<T = unknown>(
 	const resolvedModelForCompiler = options?.model ?? deps.model;
 	const compilerOptions: CompilerOptions = {
 		naming: deps.naming,
+		...(deps.declaredNames !== undefined && {
+			declaredNames: deps.declaredNames,
+		}),
 		...(schemaName && { schema: schemaName }),
 		defaultPkColumnName: deps.defaultPk,
 		deriveFkColumnName: deps.deriveFk,
