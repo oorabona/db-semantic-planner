@@ -25,10 +25,9 @@ import { deparseQuoted } from './deparse.js';
 import { createCompilerState } from './handlers/index.js';
 import { finalizeEnvelope, fromAstProjection } from './projection-envelope.js';
 import {
-	declaredColumn,
-	declaredTable,
 	identifierText,
 	queryLocal,
+	resolveDeclaredIdentifier,
 } from './sql-identifier.js';
 
 function compileIncludeSelectEnvelope(
@@ -73,10 +72,11 @@ export function compileSubqueryInclude(
 
 	// Handle empty parent IDs - return query that returns no results
 	if (parentIds.length === 0) {
-		const dbTargetTable =
-			deps.declaredNames === undefined
-				? queryLocal(info.targetTable)
-				: declaredTable(deps.declaredNames, info.targetTable);
+		const dbTargetTable = resolveDeclaredIdentifier(
+			deps.declaredNames,
+			deps.dbCasing ?? 'preserve',
+			{ kind: 'table', table: info.targetTable },
+		);
 		const targetList = [{ ResTarget: { val: sqlColumnRefStar() } }];
 		const fromClause = [
 			sqlRangeVar(
@@ -129,9 +129,14 @@ export function compileSubqueryInclude(
 	// Build FROM clause
 	const fromClause = [
 		sqlRangeVar(
-			deps.declaredNames === undefined
-				? queryLocal(info.targetTable)
-				: declaredTable(deps.declaredNames, info.targetTable),
+			resolveDeclaredIdentifier(
+				deps.declaredNames,
+				deps.dbCasing ?? 'preserve',
+				{
+					kind: 'table',
+					table: info.targetTable,
+				},
+			),
 			undefined,
 			schemaName === undefined ? undefined : queryLocal(schemaName),
 		),
@@ -153,13 +158,15 @@ export function compileSubqueryInclude(
 				kind: 'AEXPR_IN',
 				name: [{ String: { sval: '=' } }],
 				lexpr: sqlColumnRef(
-					deps.declaredNames === undefined
-						? queryLocal(fkColumns[0]!)
-						: declaredColumn(
-								deps.declaredNames,
-								info.targetTable,
-								fkColumns[0]!,
-							),
+					resolveDeclaredIdentifier(
+						deps.declaredNames,
+						deps.dbCasing ?? 'preserve',
+						{
+							kind: 'column',
+							table: info.targetTable,
+							column: fkColumns[0]!,
+						},
+					),
 				),
 				rexpr: { List: { items: paramRefs } },
 			},
@@ -182,9 +189,15 @@ export function compileSubqueryInclude(
 						kind: 'AEXPR_OP',
 						name: [{ String: { sval: '=' } }],
 						lexpr: sqlColumnRef(
-							deps.declaredNames === undefined
-								? queryLocal(col)
-								: declaredColumn(deps.declaredNames, info.targetTable, col),
+							resolveDeclaredIdentifier(
+								deps.declaredNames,
+								deps.dbCasing ?? 'preserve',
+								{
+									kind: 'column',
+									table: info.targetTable,
+									column: col,
+								},
+							),
 						),
 						rexpr: { ParamRef: { number: state.paramIndex } },
 					},
@@ -244,18 +257,26 @@ function compileSubqueryIncludeManyToMany(
 	const throughTable = info.through!;
 	const throughSourceKey = info.throughSourceKey!;
 	const throughTargetKey = info.throughTargetKey!;
-	const targetTable = deps.declaredNames
-		? declaredTable(deps.declaredNames, info.targetTable)
-		: queryLocal(info.targetTable);
-	const junctionTable = deps.declaredNames
-		? declaredTable(deps.declaredNames, throughTable)
-		: queryLocal(throughTable);
-	const junctionSourceColumn = deps.declaredNames
-		? declaredColumn(deps.declaredNames, throughTable, throughSourceKey)
-		: queryLocal(throughSourceKey);
-	const junctionTargetColumn = deps.declaredNames
-		? declaredColumn(deps.declaredNames, throughTable, throughTargetKey)
-		: queryLocal(throughTargetKey);
+	const targetTable = resolveDeclaredIdentifier(
+		deps.declaredNames,
+		deps.dbCasing ?? 'preserve',
+		{ kind: 'table', table: info.targetTable },
+	);
+	const junctionTable = resolveDeclaredIdentifier(
+		deps.declaredNames,
+		deps.dbCasing ?? 'preserve',
+		{ kind: 'table', table: throughTable },
+	);
+	const junctionSourceColumn = resolveDeclaredIdentifier(
+		deps.declaredNames,
+		deps.dbCasing ?? 'preserve',
+		{ kind: 'column', table: throughTable, column: throughSourceKey },
+	);
+	const junctionTargetColumn = resolveDeclaredIdentifier(
+		deps.declaredNames,
+		deps.dbCasing ?? 'preserve',
+		{ kind: 'column', table: throughTable, column: throughTargetKey },
+	);
 
 	// Determine target PK (usually 'id', but could be from sourceKey)
 	const targetPkColumns = toColumnList(info.sourceKey);
@@ -265,9 +286,11 @@ function compileSubqueryIncludeManyToMany(
 		);
 	}
 	const targetPk = targetPkColumns[0]!;
-	const targetPkColumn = deps.declaredNames
-		? declaredColumn(deps.declaredNames, info.targetTable, targetPk)
-		: queryLocal(targetPk);
+	const targetPkColumn = resolveDeclaredIdentifier(
+		deps.declaredNames,
+		deps.dbCasing ?? 'preserve',
+		{ kind: 'column', table: info.targetTable, column: targetPk },
+	);
 
 	// Build param refs for parent IDs
 	const paramRefs = parentIds.map((id) => {

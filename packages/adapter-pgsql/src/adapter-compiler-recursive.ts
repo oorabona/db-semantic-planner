@@ -61,7 +61,7 @@ import {
 	type RecursiveCteConfig,
 } from './recursive/index.js';
 import { queryScopeForBindingProjections } from './relation-target-projection.js';
-import { declaredColumn, declaredTable, queryLocal } from './sql-identifier.js';
+import { queryLocal, resolveDeclaredIdentifier } from './sql-identifier.js';
 import { validateIdentifier } from './validate.js';
 
 type CteProjectionRegistry = ReadonlyMap<string, ProjectionEnvelope>;
@@ -434,7 +434,17 @@ export function compileRecursive<T = unknown>(
 				: pkColumn;
 		const selectColumns = Array.from(
 			new Set([nodeIdColumn, ...startSelect]),
-		).map((column) => declaredColumn(deps.declaredNames!, table, column));
+		).map((column) =>
+			resolveDeclaredIdentifier(
+				deps.declaredNames,
+				deps.dbCasing ?? 'preserve',
+				{
+					kind: 'column',
+					table,
+					column,
+				},
+			),
+		);
 
 		// Edge-table traversal: join through a junction table
 		const edgeFrom =
@@ -449,21 +459,55 @@ export function compileRecursive<T = unknown>(
 
 		const base: RecursiveCteConfig = {
 			cteAlias: queryLocal(intent.cteName),
-			table: declaredTable(deps.declaredNames!, table),
-			pkColumn: declaredColumn(deps.declaredNames!, table, pkColumn),
+			table: resolveDeclaredIdentifier(
+				deps.declaredNames,
+				deps.dbCasing ?? 'preserve',
+				{
+					kind: 'table',
+					table,
+				},
+			),
+			pkColumn: resolveDeclaredIdentifier(
+				deps.declaredNames,
+				deps.dbCasing ?? 'preserve',
+				{
+					kind: 'column',
+					table,
+					column: pkColumn,
+				},
+			),
 			outerAlias: queryLocal('t0'),
 			isAncestors: false,
 			maxDepth: intent.maxDepth,
 			selectColumns,
 			trackPath,
 			usePg14Cycle: false,
-			edgeTable: declaredTable(deps.declaredNames!, traversal.edgeTable),
-			edgeFrom: declaredColumn(
-				deps.declaredNames!,
-				traversal.edgeTable,
-				edgeFrom,
+			edgeTable: resolveDeclaredIdentifier(
+				deps.declaredNames,
+				deps.dbCasing ?? 'preserve',
+				{
+					kind: 'table',
+					table: traversal.edgeTable,
+				},
 			),
-			edgeTo: declaredColumn(deps.declaredNames!, traversal.edgeTable, edgeTo),
+			edgeFrom: resolveDeclaredIdentifier(
+				deps.declaredNames,
+				deps.dbCasing ?? 'preserve',
+				{
+					kind: 'column',
+					table: traversal.edgeTable,
+					column: edgeFrom,
+				},
+			),
+			edgeTo: resolveDeclaredIdentifier(
+				deps.declaredNames,
+				deps.dbCasing ?? 'preserve',
+				{
+					kind: 'column',
+					table: traversal.edgeTable,
+					column: edgeTo,
+				},
+			),
 			ctx,
 		};
 
@@ -495,14 +539,47 @@ export function compileRecursive<T = unknown>(
 				: pkColumn;
 		const selectColumns = Array.from(
 			new Set([nodeIdColumn, ...startSelect]),
-		).map((column) => declaredColumn(deps.declaredNames!, table, column));
+		).map((column) =>
+			resolveDeclaredIdentifier(
+				deps.declaredNames,
+				deps.dbCasing ?? 'preserve',
+				{
+					kind: 'column',
+					table,
+					column,
+				},
+			),
+		);
 
 		// Adjacency-list traversal: self-referencing FK
 		config = {
 			cteAlias: queryLocal(intent.cteName),
-			table: declaredTable(deps.declaredNames!, table),
-			pkColumn: declaredColumn(deps.declaredNames!, table, pkColumn),
-			fkColumn: declaredColumn(deps.declaredNames!, table, traversal.parentId),
+			table: resolveDeclaredIdentifier(
+				deps.declaredNames,
+				deps.dbCasing ?? 'preserve',
+				{
+					kind: 'table',
+					table,
+				},
+			),
+			pkColumn: resolveDeclaredIdentifier(
+				deps.declaredNames,
+				deps.dbCasing ?? 'preserve',
+				{
+					kind: 'column',
+					table,
+					column: pkColumn,
+				},
+			),
+			fkColumn: resolveDeclaredIdentifier(
+				deps.declaredNames,
+				deps.dbCasing ?? 'preserve',
+				{
+					kind: 'column',
+					table,
+					column: traversal.parentId,
+				},
+			),
 			outerAlias: queryLocal('t0'),
 			isAncestors: traversal.direction === 'ancestors',
 			maxDepth: intent.maxDepth,
@@ -1049,12 +1126,11 @@ function buildRecursiveAnchorWhere(
 			const operator = w.operator as string;
 			const op = mapComparisonOperator(operator);
 			const field = w.field as string;
-			if (deps.declaredNames === undefined) {
-				throw new Error(
-					`Recursive anchor column '${table}.${field}' requires a declared-name resolver.`,
-				);
-			}
-			const dbCol = declaredColumn(deps.declaredNames, table, field);
+			const dbCol = resolveDeclaredIdentifier(
+				deps.declaredNames,
+				deps.dbCasing ?? 'preserve',
+				{ kind: 'column', table, column: field },
+			);
 			const left: Node = {
 				ColumnRef: {
 					fields: [

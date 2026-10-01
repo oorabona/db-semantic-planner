@@ -26,7 +26,7 @@ import {
 	requireRelationTargetColumns,
 	resolveRelationTarget,
 } from '../../relation-target-projection.js';
-import { declaredTable, queryLocal } from '../../sql-identifier.js';
+import { queryLocal, resolveDeclaredIdentifier } from '../../sql-identifier.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -90,9 +90,14 @@ function buildLateralSubquery(
 		targetList,
 		fromClause: [
 			sqlRangeVar(
-				ctx.declaredNames === undefined
-					? queryLocal(targetTable)
-					: declaredTable(ctx.declaredNames, targetTable),
+				resolveDeclaredIdentifier(
+					ctx.declaredNames,
+					ctx.dbCasing ?? 'preserve',
+					{
+						kind: 'table',
+						table: targetTable,
+					},
+				),
 				queryLocal(innerAlias),
 				ctx.schema === undefined ? undefined : queryLocal(ctx.schema),
 			),

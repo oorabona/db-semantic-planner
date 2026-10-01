@@ -27,7 +27,7 @@ import {
 	requireRelationTargetColumns,
 	resolveRelationTarget,
 } from '../../relation-target-projection.js';
-import { declaredTable, queryLocal } from '../../sql-identifier.js';
+import { queryLocal, resolveDeclaredIdentifier } from '../../sql-identifier.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -63,9 +63,14 @@ function buildJoin(
 		jointype: joinType === 'inner' ? 'JOIN_INNER' : 'JOIN_LEFT',
 		rarg: sqlRangeVar(
 			resolveRelationTarget(queryLocal(targetTable), ctx).cteName ??
-				(ctx.declaredNames === undefined
-					? queryLocal(targetTable)
-					: declaredTable(ctx.declaredNames, targetTable)),
+				resolveDeclaredIdentifier(
+					ctx.declaredNames,
+					ctx.dbCasing ?? 'preserve',
+					{
+						kind: 'table',
+						table: targetTable,
+					},
+				),
 			queryLocal(targetAlias),
 			resolveRelationTarget(queryLocal(targetTable), ctx).cteName ===
 				undefined && ctx.schema !== undefined

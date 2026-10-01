@@ -170,6 +170,21 @@ describe('notExists() with include — DELETE mutation path', () => {
 		expect(sql).toContain('caller_file_id');
 	});
 
+	it('without ModelIR falls back to FK derivation and still produces a JOIN', () => {
+		const adapter = createPgsqlCompileOnlyAdapter();
+
+		const { sql } = adapter.compileDelete({
+			type: 'delete' as const,
+			table: 'symbols',
+			where: notExists('callers', {
+				include: { callerFile: { join: 'inner' } },
+			}),
+		});
+
+		expect(ws(sql)).toMatch(/JOIN/i);
+		expect(ws(sql)).toMatch(/NOT.*EXISTS/i);
+	});
+
 	it('uses the complete model to produce a JOIN', () => {
 		const adapter = buildAdapter();
 

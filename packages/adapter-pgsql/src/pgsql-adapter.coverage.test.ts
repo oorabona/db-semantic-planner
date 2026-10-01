@@ -2108,6 +2108,65 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			} as any;
 			expect(() => adapter.compile(plan)).toThrow('requires a ModelIR');
 		});
+
+		it('refuses INSERT compilation without a model', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' });
+			expect(() => adapter.compileInsert({ table: 'users' } as any)).toThrow(
+				'requires a ModelIR',
+			);
+		});
+
+		it('refuses INSERT FROM compilation without a model', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' });
+			expect(() =>
+				adapter.compileInsertFrom({ table: 'users' } as any),
+			).toThrow('requires a ModelIR');
+		});
+
+		it('refuses UPDATE compilation without a model', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' });
+			expect(() => adapter.compileUpdate({ table: 'users' } as any)).toThrow(
+				'requires a ModelIR',
+			);
+		});
+
+		it('refuses batch UPDATE compilation without a model', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' });
+			expect(() =>
+				adapter.compileBatchUpdate({ table: 'users' } as any),
+			).toThrow('requires a ModelIR');
+		});
+
+		it('refuses DELETE compilation without a model', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' });
+			expect(() => adapter.compileDelete({ table: 'users' } as any)).toThrow(
+				'requires a ModelIR',
+			);
+		});
+
+		it('refuses UPSERT compilation without a model', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' });
+			expect(() =>
+				adapter.compileUpsert({
+					table: 'users',
+					values: [],
+					onConflict: { columns: [] },
+					action: { type: 'doNothing' },
+				} as any),
+			).toThrow('requires a ModelIR');
+		});
+
+		it('refuses UPSERT FROM compilation without a model', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' });
+			expect(() =>
+				adapter.compileUpsertFrom({
+					table: 'users',
+					source: 'users_import',
+					conflictColumns: [],
+					sourceQuery: {} as any,
+				} as any),
+			).toThrow('requires a ModelIR');
+		});
 	});
 
 	describe('generateDDL', () => {
@@ -2409,6 +2468,16 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 	});
 
 	describe('getColumnTypes — coverage', () => {
+		it('returns undefined when model is absent', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const result = adapter.compileInsert({
+				type: 'insert',
+				table: 'users',
+				values: [{ name: 'alice' }],
+			} as any);
+			expect(result.sql).toContain('INSERT');
+		});
+
 		it('returns no special column types for scalar columns in a declared model', () => {
 			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			// getColumnTypes is private, but exercised through compileInsert

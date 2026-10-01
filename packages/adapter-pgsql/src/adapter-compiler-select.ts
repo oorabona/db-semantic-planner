@@ -67,7 +67,7 @@ import {
 	assertProjectedJsonContainerCanBeAggregated,
 	resolveRelationTarget,
 } from './relation-target-projection.js';
-import { declaredTable, queryLocal } from './sql-identifier.js';
+import { queryLocal, resolveDeclaredIdentifier } from './sql-identifier.js';
 
 /** Establish the output authority of an unnest() range at the point it enters. */
 function batchValuesBinding(
@@ -101,9 +101,11 @@ function sourceBinding(
 		declaredRelationBindingFor(deps.scope, rootTable);
 	if (existing !== undefined) return existing;
 	return relationBinding({
-		qualifier: deps.declaredNames
-			? declaredTable(deps.declaredNames, rootTable)
-			: queryLocal(rootTable),
+		qualifier: resolveDeclaredIdentifier(
+			deps.declaredNames,
+			deps.dbCasing ?? 'preserve',
+			{ kind: 'table', table: rootTable },
+		),
 		kind: 'declared-table',
 		logicalTable: rootTable,
 	});
@@ -337,6 +339,7 @@ function compileJoinIntents(
 						...(bv.ordinality ? ['ord'] : []),
 					]),
 				]),
+				dbCasing: deps.dbCasing ?? 'preserve',
 				...(deps.declaredNames !== undefined && {
 					declaredNames: deps.declaredNames,
 				}),
@@ -437,6 +440,7 @@ function compileJoinIntents(
 				outerTable: tableAlias,
 				...(schemaName !== undefined && { schemaName }),
 				scope: queryScope([...scopeBindings]),
+				dbCasing: deps.dbCasing ?? 'preserve',
 				...(deps.declaredNames !== undefined && {
 					declaredNames: deps.declaredNames,
 				}),
@@ -458,9 +462,11 @@ function compileJoinIntents(
 			// from[0] as larg so multiple .join() calls chain correctly.
 			const joinedRangeVar = sqlRangeVar(
 				joinedSource?.qualifier ??
-					(deps.declaredNames
-						? declaredTable(deps.declaredNames, intent.table)
-						: queryLocal(intent.table)),
+					resolveDeclaredIdentifier(
+						deps.declaredNames,
+						deps.dbCasing ?? 'preserve',
+						{ kind: 'table', table: intent.table },
+					),
 				queryLocal(tableAlias),
 				joinedSource?.kind === 'cte-bind' ||
 					joinedSource?.kind === 'batch-values'
@@ -1235,6 +1241,7 @@ export function compileSelectEnvelope<T = unknown>(
 					]),
 				]);
 	const compilerOptions: CompilerOptions = {
+		dbCasing: deps.dbCasing ?? 'preserve',
 		...(deps.declaredNames !== undefined && {
 			declaredNames: deps.declaredNames,
 		}),

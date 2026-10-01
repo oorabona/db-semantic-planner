@@ -37,10 +37,9 @@ import {
 	resolveRelationTarget,
 } from '../../relation-target-projection.js';
 import {
-	declaredColumn,
-	declaredTable,
 	identifierText,
 	queryLocal,
+	resolveDeclaredIdentifier,
 	type SqlIdentifier,
 } from '../../sql-identifier.js';
 import type {
@@ -113,9 +112,15 @@ function resolveJsonAggProjection(
 						'selected column',
 						decision.relation,
 					)?.outputKey ??
-					(ctx.declaredNames === undefined
-						? queryLocal(column)
-						: declaredColumn(ctx.declaredNames, targetTable, column))),
+					resolveDeclaredIdentifier(
+						ctx.declaredNames,
+						ctx.dbCasing ?? 'preserve',
+						{
+							kind: 'column',
+							table: targetTable,
+							column,
+						},
+					)),
 		);
 	}
 	if (target.outputs !== undefined) {
@@ -125,9 +130,15 @@ function resolveJsonAggProjection(
 		const physical = ctx.model?.getTable(targetTable);
 		const physicalKeys = new Set(
 			physical?.columns.map((column) =>
-				ctx.declaredNames === undefined
-					? queryLocal(column.name)
-					: declaredColumn(ctx.declaredNames, targetTable, column.name),
+				resolveDeclaredIdentifier(
+					ctx.declaredNames,
+					ctx.dbCasing ?? 'preserve',
+					{
+						kind: 'column',
+						table: targetTable,
+						column: column.name,
+					},
+				),
 			),
 		);
 		const isFullPhysicalProjection =
@@ -152,9 +163,11 @@ function resolveJsonAggProjection(
 		) ?? false;
 	if (!needsExplicitProjection || !table) return requested?.map(queryLocal);
 	return table.columns.map((column) =>
-		ctx.declaredNames === undefined
-			? queryLocal(column.name)
-			: declaredColumn(ctx.declaredNames, targetTable, column.name),
+		resolveDeclaredIdentifier(ctx.declaredNames, ctx.dbCasing ?? 'preserve', {
+			kind: 'column',
+			table: targetTable,
+			column: column.name,
+		}),
 	);
 }
 
@@ -372,9 +385,15 @@ function compileJsonAggRecursive(
 				'order key',
 				relation,
 			)?.outputKey ??
-			(innerCtx.declaredNames === undefined
-				? queryLocal(column)
-				: declaredColumn(innerCtx.declaredNames, targetTable, column)),
+			resolveDeclaredIdentifier(
+				innerCtx.declaredNames,
+				innerCtx.dbCasing ?? 'preserve',
+				{
+					kind: 'column',
+					table: targetTable,
+					column,
+				},
+			),
 	);
 	const shape = jsonAggContainerShape(decision.relationType);
 	const columns = resolveJsonAggProjection(
@@ -393,9 +412,10 @@ function compileJsonAggRecursive(
 
 	return sqlJsonAggSubquery(
 		resolvedTarget.cteName ??
-			(ctx.declaredNames === undefined
-				? queryLocal(targetTable)
-				: declaredTable(ctx.declaredNames, targetTable)),
+			resolveDeclaredIdentifier(ctx.declaredNames, ctx.dbCasing ?? 'preserve', {
+				kind: 'table',
+				table: targetTable,
+			}),
 		whereExpr,
 		queryLocal(`${relation}_json`),
 		resolvedTarget.cteName === undefined && ctx.schema !== undefined

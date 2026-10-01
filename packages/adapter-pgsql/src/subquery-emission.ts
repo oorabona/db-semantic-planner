@@ -67,7 +67,7 @@ import {
 } from './intent-to-decisions.js';
 import { unwrapParamIntent } from './param-intent.js';
 import { queryScopeForBindingProjections } from './relation-target-projection.js';
-import { declaredTable, queryLocal } from './sql-identifier.js';
+import { queryLocal, resolveDeclaredIdentifier } from './sql-identifier.js';
 
 // ============================================================================
 // Predicate use discriminant
@@ -283,9 +283,11 @@ export function buildPredicateSubquerySelect(
 	const sourceBinding =
 		relationBindingFor(visibleScope, queryLocal(targetTable)) ??
 		relationBinding({
-			qualifier: ctx.declaredNames
-				? declaredTable(ctx.declaredNames, targetTable)
-				: queryLocal(targetTable),
+			qualifier: resolveDeclaredIdentifier(
+				ctx.declaredNames,
+				ctx.dbCasing ?? 'preserve',
+				{ kind: 'table', table: targetTable },
+			),
 			kind: 'declared-table',
 			logicalTable: targetTable,
 		});

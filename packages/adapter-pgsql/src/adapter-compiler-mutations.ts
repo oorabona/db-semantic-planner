@@ -83,10 +83,8 @@ import {
 } from './projection-envelope.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
 import {
-	declaredColumn,
-	declaredConstraint,
-	declaredTable,
 	queryLocal,
+	resolveDeclaredIdentifier,
 	type SqlIdentifier,
 } from './sql-identifier.js';
 
@@ -192,12 +190,14 @@ function declaredMutationTable(
 	deps: AdapterCompilerDeps,
 	table: string,
 ): SqlIdentifier {
-	if (!deps.declaredNames) {
-		throw new Error(
-			`No declared-name resolver is available for table '${table}'.`,
-		);
-	}
-	return declaredTable(deps.declaredNames, table);
+	return resolveDeclaredIdentifier(
+		deps.declaredNames,
+		deps.dbCasing ?? 'preserve',
+		{
+			kind: 'table',
+			table,
+		},
+	);
 }
 
 function declaredMutationColumn(
@@ -205,12 +205,15 @@ function declaredMutationColumn(
 	table: string,
 	column: string,
 ): SqlIdentifier {
-	if (!deps.declaredNames) {
-		throw new Error(
-			`No declared-name resolver is available for column '${table}.${column}'.`,
-		);
-	}
-	return declaredColumn(deps.declaredNames, table, column);
+	return resolveDeclaredIdentifier(
+		deps.declaredNames,
+		deps.dbCasing ?? 'preserve',
+		{
+			kind: 'column',
+			table,
+			column,
+		},
+	);
 }
 
 function mutationBinding(deps: AdapterCompilerDeps, table: string) {
@@ -459,6 +462,7 @@ function compileUpsertActionWhere(
 		...(schemaName !== undefined && { schemaName }),
 		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
 		...(deps.scope !== undefined && { scope: deps.scope }),
+		dbCasing: deps.dbCasing ?? 'preserve',
 		...(deps.relationTargetProjections !== undefined && {
 			relationTargetProjections: deps.relationTargetProjections,
 		}),
@@ -478,6 +482,7 @@ function compileUpsertActionWhere(
 				'rawExists',
 				deps.scope,
 				deps.dialectCapabilities,
+				deps.dbCasing,
 			),
 	};
 	return compileWhereIntent(where, whereCtx);
@@ -759,6 +764,7 @@ export function compileBatchUpdate(
 				bindingNames: deps.bindingNames,
 			}),
 			...(deps.scope !== undefined && { scope: deps.scope }),
+			dbCasing: deps.dbCasing ?? 'preserve',
 			...(deps.declaredNames !== undefined && {
 				declaredNames: deps.declaredNames,
 			}),
@@ -775,6 +781,7 @@ export function compileBatchUpdate(
 					'rawExists',
 					deps.scope,
 					deps.dialectCapabilities,
+					deps.dbCasing,
 				),
 		};
 		whereGuard = compileWhereIntent(resolvedWhere, whereCtx);
@@ -915,15 +922,15 @@ export function compileUpsert(
 			declaredMutationColumn(deps, intent.table, column),
 		);
 	} else if ('constraint' in intent.onConflict) {
-		if (deps.declaredNames === undefined) {
-			conflictTarget.constraint = queryLocal(intent.onConflict.constraint);
-		} else {
-			conflictTarget.constraint = declaredConstraint(
-				deps.declaredNames,
-				intent.table,
-				intent.onConflict.constraint,
-			);
-		}
+		conflictTarget.constraint = resolveDeclaredIdentifier(
+			deps.declaredNames,
+			deps.dbCasing ?? 'preserve',
+			{
+				kind: 'constraint',
+				table: intent.table,
+				constraint: intent.onConflict.constraint,
+			},
+		);
 	}
 
 	// Build conflict action

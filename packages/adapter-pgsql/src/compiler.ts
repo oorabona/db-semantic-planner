@@ -127,10 +127,9 @@ import {
 	resolveVisibleRelationAlias,
 } from './relation-alias.js';
 import {
-	declaredColumn,
-	declaredTable,
 	identifierText,
 	queryLocal,
+	resolveDeclaredIdentifier,
 	type SqlIdentifier,
 } from './sql-identifier.js';
 import { assertNoDroppedDecisionModifiers } from './subquery-emission.js';
@@ -766,6 +765,7 @@ function maxParamRefNumber(value: unknown): number {
 
 export interface CompilerOptions {
 	readonly declaredNames?: DeclaredNameResolver;
+	readonly dbCasing?: import('@dbsp/types').DbCasing;
 	readonly schema?: string;
 	readonly dialectCapabilities?: DialectCapabilities;
 	/** Default primary key column name convention (default: 'id') */
@@ -782,6 +782,7 @@ export interface CompilerOptions {
 
 export class PlanCompiler {
 	private readonly declaredNames: DeclaredNameResolver | undefined;
+	private readonly dbCasing: import('@dbsp/types').DbCasing;
 	private readonly schema: string | undefined;
 	private readonly defaultPk: string;
 	private readonly deriveFk: FkColumnDerivation;
@@ -843,6 +844,7 @@ export class PlanCompiler {
 
 	constructor(options: CompilerOptions = {}) {
 		this.declaredNames = options.declaredNames;
+		this.dbCasing = options.dbCasing ?? 'preserve';
 		this.schema = options.schema ?? undefined;
 		this.defaultPk = options.defaultPkColumnName ?? DEFAULT_PK_COLUMN;
 		this.deriveFk = options.deriveFkColumnName ?? defaultFkDerivation;
@@ -860,6 +862,7 @@ export class PlanCompiler {
 			...(this.declaredNames !== undefined && {
 				declaredNames: this.declaredNames,
 			}),
+			dbCasing: this.dbCasing,
 			...(this.schema !== undefined && { schema: this.schema }),
 			defaultPkColumnName: this.defaultPk,
 			deriveFkColumnName: this.deriveFk,
@@ -908,6 +911,7 @@ export class PlanCompiler {
 		}
 		const scope = bindings.length > 0 ? queryScope(bindings) : undefined;
 		return {
+			dbCasing: this.dbCasing,
 			...(this.declaredNames !== undefined && {
 				declaredNames: this.declaredNames,
 			}),
@@ -1615,10 +1619,11 @@ export class PlanCompiler {
 		if (hasBindingName(this.bindingNames, queryLocal(table))) {
 			return queryLocal(table);
 		}
-		const identifier =
-			this.declaredNames === undefined
-				? queryLocal(table)
-				: declaredTable(this.declaredNames, table);
+		const identifier = resolveDeclaredIdentifier(
+			this.declaredNames,
+			this.dbCasing,
+			{ kind: 'table', table },
+		);
 		const emittedName = identifierText(identifier);
 		const shadowingLocal = [...(this.scope?.bindings.values() ?? [])].find(
 			(binding) =>
@@ -1946,9 +1951,10 @@ export class PlanCompiler {
 				? this.allocateBindingRelationAlias()
 				: undefined;
 			const junctionTable = hasCompleteManyToManyProof
-				? this.declaredNames === undefined
-					? queryLocal(fields.through!)
-					: declaredTable(this.declaredNames, fields.through!)
+				? resolveDeclaredIdentifier(this.declaredNames, this.dbCasing, {
+						kind: 'table',
+						table: fields.through!,
+					})
 				: undefined;
 			const junctionSchema = hasCompleteManyToManyProof
 				? this.schemaForRangeVar(plan, fields.through!)
@@ -3573,15 +3579,13 @@ export class PlanCompiler {
 				} else if (decision.column) {
 					returning.push(
 						sqlResTarget(
-							this.declaredNames === undefined
-								? sqlColumnRef(queryLocal(decision.column))
-								: sqlColumnRef(
-										declaredColumn(
-											this.declaredNames,
-											plan.rootTable,
-											decision.column,
-										),
-									),
+							sqlColumnRef(
+								resolveDeclaredIdentifier(this.declaredNames, this.dbCasing, {
+									kind: 'column',
+									table: plan.rootTable,
+									column: decision.column,
+								}),
+							),
 							decision.alias === undefined
 								? undefined
 								: queryLocal(decision.alias),
@@ -3595,9 +3599,11 @@ export class PlanCompiler {
 		return sqlInsertStmt({
 			table: this.tableIdentifier(plan.rootTable),
 			columns: columns.map((column) =>
-				this.declaredNames === undefined
-					? queryLocal(column)
-					: declaredColumn(this.declaredNames, plan.rootTable, column),
+				resolveDeclaredIdentifier(this.declaredNames, this.dbCasing, {
+					kind: 'column',
+					table: plan.rootTable,
+					column,
+				}),
 			),
 			values,
 			...(schema !== undefined && { schema: queryLocal(schema) }),
@@ -3619,14 +3625,15 @@ export class PlanCompiler {
 				if (decision.set) {
 					for (const s of decision.set) {
 						set.push({
-							column:
-								this.declaredNames === undefined
-									? queryLocal(s.column)
-									: declaredColumn(
-											this.declaredNames,
-											plan.rootTable,
-											s.column,
-										),
+							column: resolveDeclaredIdentifier(
+								this.declaredNames,
+								this.dbCasing,
+								{
+									kind: 'column',
+									table: plan.rootTable,
+									column: s.column,
+								},
+							),
 							value: compileValue(s.value, this.state),
 						});
 					}
@@ -3641,13 +3648,11 @@ export class PlanCompiler {
 					returning.push(
 						sqlResTarget(
 							sqlColumnRef(
-								this.declaredNames === undefined
-									? queryLocal(decision.column)
-									: declaredColumn(
-											this.declaredNames,
-											plan.rootTable,
-											decision.column,
-										),
+								resolveDeclaredIdentifier(this.declaredNames, this.dbCasing, {
+									kind: 'column',
+									table: plan.rootTable,
+									column: decision.column,
+								}),
 							),
 							decision.alias === undefined
 								? undefined
@@ -3687,13 +3692,11 @@ export class PlanCompiler {
 					returning.push(
 						sqlResTarget(
 							sqlColumnRef(
-								this.declaredNames === undefined
-									? queryLocal(decision.column)
-									: declaredColumn(
-											this.declaredNames,
-											plan.rootTable,
-											decision.column,
-										),
+								resolveDeclaredIdentifier(this.declaredNames, this.dbCasing, {
+									kind: 'column',
+									table: plan.rootTable,
+									column: decision.column,
+								}),
 							),
 							decision.alias === undefined
 								? undefined

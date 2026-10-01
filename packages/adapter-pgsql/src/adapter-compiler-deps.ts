@@ -5,7 +5,7 @@
  * @internal
  */
 
-import type { DialectCapabilities, ModelIR } from '@dbsp/types';
+import type { DbCasing, DialectCapabilities, ModelIR } from '@dbsp/types';
 import type { FkColumnDerivation } from './assert-field.js';
 import type { BindingNameRegistry, QueryScope } from './binding-registry.js';
 import type { DeclaredNameResolver } from './declared-name-resolver.js';
@@ -17,6 +17,7 @@ import type { RelationTargetProjectionRegistry } from './relation-target-project
  * Passed by reference — constructed once in PgsqlAdapter constructor.
  */
 export interface AdapterCompilerDeps {
+	readonly dbCasing?: DbCasing;
 	readonly schemaName: string | undefined;
 	readonly model: ModelIR | undefined;
 	/** Cached physical authority for the logical model used by this compile. */

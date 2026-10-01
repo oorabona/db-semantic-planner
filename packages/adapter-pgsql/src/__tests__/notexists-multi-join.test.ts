@@ -260,6 +260,29 @@ describe('SC-06: declared FK addresses', () => {
 	});
 });
 
+describe('SC-06: FK fallback without ModelIR', () => {
+	it('multi-join without ModelIR falls back to convention and still emits JOINs', () => {
+		const adapter = createPgsqlCompileOnlyAdapter();
+
+		const { sql } = adapter.compileDelete({
+			type: 'delete' as const,
+			table: 'symbols',
+			where: notExists('callee_calls', {
+				include: {
+					calleeFile: { join: 'inner' },
+					calleeProject: { join: 'inner' },
+				},
+			}),
+		});
+
+		const normalized = ws(sql);
+		expect(normalized).toMatch(/NOT\s*\(?\s*EXISTS/i);
+		expect(normalized).toMatch(/JOIN/i);
+		const joinMatches = normalized.match(/\bJOIN\b/gi) ?? [];
+		expect(joinMatches.length).toBe(2);
+	});
+});
+
 // ---------------------------------------------------------------------------
 // SC-07: exists() (positive) with multi-join
 // ---------------------------------------------------------------------------

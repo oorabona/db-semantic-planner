@@ -3056,6 +3056,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			scope ??
 			queryScopeForBindingProjections(bindingNames, relationTargetProjections);
 		return {
+			dbCasing: this._dbCasing,
 			// `||` (not `??`): empty string is treated as "no override" and falls back to this.schemaName (which may be a configured schema or undefined)
 			schemaName,
 			model,
@@ -3557,6 +3558,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				paramOffset: number,
 			): CompileSubqueryResult {
 				const innerCompiler = new PlanCompiler({
+					dbCasing: deps.dbCasing ?? 'preserve',
 					...(schemaName !== undefined && { schema: schemaName }),
 					...(deps.declaredNames !== undefined && {
 						declaredNames: deps.declaredNames,

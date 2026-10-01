@@ -25,7 +25,7 @@ import {
 	requireRelationTargetColumns,
 	resolveRelationTarget,
 } from '../../relation-target-projection.js';
-import { declaredTable, queryLocal } from '../../sql-identifier.js';
+import { queryLocal, resolveDeclaredIdentifier } from '../../sql-identifier.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -132,9 +132,14 @@ function buildJoinFilter(
 		jointype: 'JOIN_INNER',
 		rarg: sqlRangeVar(
 			resolvedTarget.cteName ??
-				(ctx.declaredNames
-					? declaredTable(ctx.declaredNames, targetTable)
-					: queryLocal(targetTable)),
+				resolveDeclaredIdentifier(
+					ctx.declaredNames,
+					ctx.dbCasing ?? 'preserve',
+					{
+						kind: 'table',
+						table: targetTable,
+					},
+				),
 			queryLocal(targetAlias),
 			schemaForFromName(
 				ctx.schema === undefined ? undefined : queryLocal(ctx.schema),

@@ -47,9 +47,8 @@ import type {
 import { unwrapParamIntent } from '../param-intent.js';
 import { createTypeCastParamRef } from '../param-ref.js';
 import {
-	declaredColumn,
-	declaredTable,
 	queryLocal,
+	resolveDeclaredIdentifier,
 	type SqlIdentifier,
 } from '../sql-identifier.js';
 
@@ -986,17 +985,24 @@ export function compileMutation(
 		throw new Error(`Unknown mutation type: ${type}`);
 	}
 	const table = decision.table ?? ctx.rootTable;
-	if (!ctx.declaredNames) {
-		throw new Error(
-			`No declared-name resolver is available for table '${table}'.`,
-		);
-	}
-	const addressedTable = declaredTable(ctx.declaredNames, table);
+	const addressedTable = resolveDeclaredIdentifier(
+		ctx.declaredNames,
+		ctx.dbCasing ?? 'preserve',
+		{ kind: 'table', table },
+	);
 
 	switch (type) {
 		case 'insert': {
 			const columns = decision.columns?.map((column) =>
-				declaredColumn(ctx.declaredNames!, table, column),
+				resolveDeclaredIdentifier(
+					ctx.declaredNames,
+					ctx.dbCasing ?? 'preserve',
+					{
+						kind: 'column',
+						table,
+						column,
+					},
+				),
 			);
 			const insertConfig: InsertConfig = {
 				table: addressedTable,
@@ -1006,7 +1012,15 @@ export function compileMutation(
 			if (decision.columns) {
 				insertConfig.returning = [...decision.columns];
 				insertConfig.returningSources = decision.columns.map((column) =>
-					declaredColumn(ctx.declaredNames!, table, column),
+					resolveDeclaredIdentifier(
+						ctx.declaredNames,
+						ctx.dbCasing ?? 'preserve',
+						{
+							kind: 'column',
+							table,
+							column,
+						},
+					),
 				);
 			}
 			return compileInsert(insertConfig, ctx, state);
@@ -1014,7 +1028,11 @@ export function compileMutation(
 
 		case 'update': {
 			const set = decision.set?.map(({ column, value }) => ({
-				column: declaredColumn(ctx.declaredNames!, table, column),
+				column: resolveDeclaredIdentifier(
+					ctx.declaredNames,
+					ctx.dbCasing ?? 'preserve',
+					{ kind: 'column', table, column },
+				),
 				value,
 			}));
 			const updateConfig: UpdateConfig = {
@@ -1025,7 +1043,15 @@ export function compileMutation(
 			if (decision.columns) {
 				updateConfig.returning = [...decision.columns];
 				updateConfig.returningSources = decision.columns.map((column) =>
-					declaredColumn(ctx.declaredNames!, table, column),
+					resolveDeclaredIdentifier(
+						ctx.declaredNames,
+						ctx.dbCasing ?? 'preserve',
+						{
+							kind: 'column',
+							table,
+							column,
+						},
+					),
 				);
 			}
 			return compileUpdate(updateConfig, ctx, state);
@@ -1039,7 +1065,15 @@ export function compileMutation(
 			if (decision.columns) {
 				deleteConfig.returning = [...decision.columns];
 				deleteConfig.returningSources = decision.columns.map((column) =>
-					declaredColumn(ctx.declaredNames!, table, column),
+					resolveDeclaredIdentifier(
+						ctx.declaredNames,
+						ctx.dbCasing ?? 'preserve',
+						{
+							kind: 'column',
+							table,
+							column,
+						},
+					),
 				);
 			}
 			return compileDelete(deleteConfig, ctx, state);

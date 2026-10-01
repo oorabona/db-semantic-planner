@@ -7,6 +7,7 @@
 
 import type {
 	ColumnListInput,
+	DbCasing,
 	DialectCapabilities,
 	JsonAggOrderByEntry,
 	ModelIR,
@@ -29,8 +30,8 @@ import type {
 	RelationTargetProjectionRegistry,
 } from '../relation-target-projection.js';
 import {
-	declaredColumn,
 	queryLocal,
+	resolveDeclaredIdentifier,
 	type SqlIdentifier,
 } from '../sql-identifier.js';
 
@@ -55,6 +56,8 @@ export type IncludeHandlerStrategy = (typeof INCLUDE_STRATEGIES)[number];
 export interface CompilerContext {
 	/** Addressed authority for model-backed identifiers. */
 	readonly declaredNames?: DeclaredNameResolver;
+	/** Casing policy applied when a model is unavailable. */
+	readonly dbCasing?: DbCasing;
 	/** Schema name for table qualification (optional) */
 	readonly schema?: string;
 	/** Dialect capabilities for adapter-layer SQL surface gates */
@@ -153,6 +156,7 @@ export function expressionColumnIdentifier(
 	column: string,
 	binding: RelationBinding,
 	resolver: DeclaredNameResolver | undefined,
+	dbCasing: DbCasing = 'preserve',
 ): SqlIdentifier {
 	if (binding.kind === 'declared-table') {
 		if (binding.logicalTable === undefined) {
@@ -160,18 +164,18 @@ export function expressionColumnIdentifier(
 				'Declared expression binding is missing its logical table.',
 			);
 		}
-		// Model-less direct compiler construction is a compatibility boundary.
-		// Normal adapter compilation always supplies the resolver and therefore
-		// takes the fail-closed addressed path below.
-		if (resolver === undefined) return queryLocal(column);
 		// Include handlers not yet converted to addressed columns can carry the
 		// resolver's already-emitted spelling (e.g. parent_id). Recover its
 		// declared address from the physical inventory, never by casing guesswork.
 		const logicalColumn =
-			resolver.column(binding.logicalTable, column) !== undefined
+			resolver?.column(binding.logicalTable, column) !== undefined
 				? column
-				: (resolver.logicalColumn(binding.logicalTable, column) ?? column);
-		return declaredColumn(resolver, binding.logicalTable, logicalColumn);
+				: (resolver?.logicalColumn(binding.logicalTable, column) ?? column);
+		return resolveDeclaredIdentifier(resolver, dbCasing, {
+			kind: 'column',
+			table: binding.logicalTable,
+			column: logicalColumn,
+		});
 	}
 	const output =
 		binding.outputs?.get(queryLocal(column)) ??
@@ -194,7 +198,12 @@ export function expressionColumnRef(
 	binding: RelationBinding = currentExpressionBinding(ctx),
 ): Node {
 	return expressionResolvedColumnRef(
-		expressionColumnIdentifier(column, binding, ctx.declaredNames),
+		expressionColumnIdentifier(
+			column,
+			binding,
+			ctx.declaredNames,
+			ctx.dbCasing,
+		),
 		binding,
 	);
 }
@@ -214,7 +223,12 @@ export function expressionUnqualifiedColumnRef(
 	binding: RelationBinding = currentExpressionBinding(ctx),
 ): Node {
 	return sqlColumnRef(
-		expressionColumnIdentifier(column, binding, ctx.declaredNames),
+		expressionColumnIdentifier(
+			column,
+			binding,
+			ctx.declaredNames,
+			ctx.dbCasing,
+		),
 	);
 }
 

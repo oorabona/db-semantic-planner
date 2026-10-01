@@ -900,6 +900,20 @@ describe('DELETE with notExists / exists WHERE (DELETE-NOT-EXISTS)', () => {
 		expect(sql).toMatch(/comment/i);
 	});
 
+	it('falls back to relation name when no model is available (compile-only mode)', () => {
+		// Preserve casing means caller-provided declared names are already SQL names.
+		const adapterNoModel = createPgsqlCompileOnlyAdapter();
+
+		const intent = {
+			type: 'delete' as const,
+			table: 'embeddings',
+			where: notExists('symbols'),
+		};
+		const { sql } = adapterNoModel.compileDelete(intent);
+		expect(sql).toMatch(/NOT.*EXISTS/i);
+		expect(sql).toMatch(/symbols/i);
+	});
+
 	it('normalizeToDecision: kind=notExists routes to NOT EXISTS handler (not "=" comparison)', () => {
 		const state = {
 			parameters: [] as unknown[],

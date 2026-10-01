@@ -9,6 +9,7 @@
  */
 
 import type {
+	DbCasing,
 	DialectCapabilities,
 	ExpressionIntent,
 	ModelIR,
@@ -84,7 +85,7 @@ import type {
 	AliasColumnAuthority,
 	RelationTargetProjectionRegistry,
 } from './relation-target-projection.js';
-import { declaredTable, queryLocal } from './sql-identifier.js';
+import { queryLocal, resolveDeclaredIdentifier } from './sql-identifier.js';
 
 // ============================================================================
 // Module-level constants
@@ -141,6 +142,7 @@ export type WhereCompilerCtx = {
 	readonly aliasColumnAuthorities?: AliasColumnAuthority;
 	/** Addressed authority for all declared relation and column references. */
 	readonly declaredNames?: DeclaredNameResolver;
+	readonly dbCasing?: DbCasing;
 	/** Lexically visible relation bindings. */
 	readonly scope?: QueryScope;
 	/** Binding that owns unqualified columns in this WHERE expression. */
@@ -193,6 +195,7 @@ function toHandlerContext(ctx: WhereCompilerCtx): CompilerContext {
 		...(ctx.declaredNames !== undefined && {
 			declaredNames: ctx.declaredNames,
 		}),
+		dbCasing: ctx.dbCasing,
 		...(ctx.relationTargetProjections !== undefined && {
 			relationTargetProjections: ctx.relationTargetProjections,
 		}),
@@ -229,6 +232,7 @@ export function buildSubqueryFromIntent(
 	use: 'rawExists' | 'scalar-direct' = 'rawExists',
 	scope?: QueryScope,
 	dialectCapabilities?: DialectCapabilities,
+	dbCasing: DbCasing = 'preserve',
 ): { sql: Node; paramCount: number; parameters?: unknown[] } {
 	// CHOKEPOINT GUARD: buildSubqueryFromIntent emits ONLY SELECT/FROM/WHERE —
 	// it never emits LIMIT, ORDER BY, OFFSET, GROUP BY, HAVING, DISTINCT, DISTINCT ON,
@@ -260,9 +264,10 @@ export function buildSubqueryFromIntent(
 	const sourceBinding =
 		relationBindingFor(scope, queryLocal(targetTable)) ??
 		relationBinding({
-			qualifier: declaredNames
-				? declaredTable(declaredNames, targetTable)
-				: queryLocal(targetTable),
+			qualifier: resolveDeclaredIdentifier(declaredNames, dbCasing, {
+				kind: 'table',
+				table: targetTable,
+			}),
 			kind: 'declared-table',
 			logicalTable: targetTable,
 		});
@@ -368,6 +373,7 @@ export function buildSubqueryFromIntent(
 			// Bug 2 fix: use the alias name as rootTable so WHERE handlers emit
 			// "posts_sq"."col" = $N instead of "posts"."col" = $N (table is aliased).
 			rootTable: innerAlias,
+			dbCasing,
 			aliases: new Map(),
 			paramState: innerState,
 			...(schemaName !== undefined && { schemaName }),

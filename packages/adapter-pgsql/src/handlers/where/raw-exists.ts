@@ -62,6 +62,7 @@ export const rawExistsHandler: WhereHandler = {
 			'rawExists',
 			ctx.scope,
 			ctx.dialectCapabilities,
+			ctx.dbCasing,
 		);
 
 		if (innerParams) {

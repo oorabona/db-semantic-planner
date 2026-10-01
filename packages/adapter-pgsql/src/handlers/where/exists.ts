@@ -21,7 +21,7 @@ import {
 	requireRelationTargetColumns,
 	resolveRelationTarget,
 } from '../../relation-target-projection.js';
-import { declaredTable, queryLocal } from '../../sql-identifier.js';
+import { queryLocal, resolveDeclaredIdentifier } from '../../sql-identifier.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -312,9 +312,10 @@ function buildExistsSubquery(
 
 	// Build SELECT 1 FROM targetTable AS targetAlias [JOIN ...] WHERE ...
 	let fromNode: Node = sqlRangeVar(
-		ctx.declaredNames
-			? declaredTable(ctx.declaredNames, targetTable)
-			: queryLocal(targetTable),
+		resolveDeclaredIdentifier(ctx.declaredNames, ctx.dbCasing ?? 'preserve', {
+			kind: 'table',
+			table: targetTable,
+		}),
 		queryLocal(targetAlias),
 		ctx.schema === undefined ? undefined : queryLocal(ctx.schema),
 	);
@@ -452,9 +453,14 @@ function buildExistsSubquery(
 					: 'JOIN_INNER';
 
 			const joinRangeVar = sqlRangeVar(
-				ctx.declaredNames
-					? declaredTable(ctx.declaredNames, joinTargetTable)
-					: queryLocal(joinTargetTable),
+				resolveDeclaredIdentifier(
+					ctx.declaredNames,
+					ctx.dbCasing ?? 'preserve',
+					{
+						kind: 'table',
+						table: joinTargetTable,
+					},
+				),
 				queryLocal(joinAlias),
 				ctx.schema === undefined ? undefined : queryLocal(ctx.schema),
 			);
