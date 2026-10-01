@@ -89,8 +89,18 @@ function quoteIdent(name: string): string {
 
 const DEFAULT_DDL_SCHEMA_NAME = 'public';
 
-function resolveDDLSchemaName(schemaName: string | undefined): string {
-	const resolved = schemaName ?? DEFAULT_DDL_SCHEMA_NAME;
+type SchemaConfiguredDDLAdapter = {
+	getSchemaName?(): string | undefined;
+};
+
+function resolveDDLSchemaName(
+	schemaName: string | undefined,
+	adapter?: Adapter<unknown>,
+): string {
+	const resolved =
+		schemaName ??
+		(adapter as SchemaConfiguredDDLAdapter | undefined)?.getSchemaName?.() ??
+		DEFAULT_DDL_SCHEMA_NAME;
 	validateIdentifier(resolved, 'schema');
 	return resolved;
 }
@@ -291,7 +301,7 @@ function buildIndexAPI(
 			if (opts.concurrently) {
 				assertOutsideTransaction(a, 'createIndex', 'CREATE INDEX CONCURRENTLY');
 			}
-			const ddlSchemaName = resolveDDLSchemaName(schemaName);
+			const ddlSchemaName = resolveDDLSchemaName(schemaName, a);
 			const sql = a.generateCreateIndex(tableName, ddlSchemaName, opts);
 			await a.executeDDL?.(sql);
 		},
@@ -301,11 +311,26 @@ function buildIndexAPI(
 			if (options?.concurrently) {
 				assertOutsideTransaction(a, 'dropIndex', 'DROP INDEX CONCURRENTLY');
 			}
-			const ddlSchemaName = resolveDDLSchemaName(schemaName);
+			const ddlSchemaName = resolveDDLSchemaName(schemaName, a);
 			const sanitizedOptions = sanitizeDropIndexOptions(options);
-			const sql = a.generateDropIndex
-				? a.generateDropIndex(name, ddlSchemaName, sanitizedOptions)
-				: generateDropIndexSQL(name, ddlSchemaName, sanitizedOptions);
+			const scopedDropGenerator = a as Adapter<unknown> & {
+				generateTableDropIndex?: (
+					table: string,
+					name: string,
+					schema: string,
+					options?: DropIndexOptions,
+				) => string;
+			};
+			const sql = scopedDropGenerator.generateTableDropIndex
+				? scopedDropGenerator.generateTableDropIndex(
+						tableName,
+						name,
+						ddlSchemaName,
+						sanitizedOptions,
+					)
+				: a.generateDropIndex
+					? a.generateDropIndex(name, ddlSchemaName, sanitizedOptions)
+					: generateDropIndexSQL(name, ddlSchemaName, sanitizedOptions);
 			await a.executeDDL?.(sql);
 		},
 
@@ -326,7 +351,11 @@ function buildIndexAPI(
 					'indexes.list() requires an adapter that implements listIndexes().',
 				);
 			}
-			return adapter.listIndexes(tableName, schemaName, options);
+			return adapter.listIndexes(
+				tableName,
+				resolveDDLSchemaName(schemaName, adapter),
+				options,
+			);
 		},
 
 		async exists(name: string): Promise<boolean> {
@@ -342,7 +371,11 @@ function buildIndexAPI(
 					'indexes.exists() requires an adapter that implements indexExists().',
 				);
 			}
-			return adapter.indexExists(name, tableName, schemaName);
+			return adapter.indexExists(
+				name,
+				tableName,
+				resolveDDLSchemaName(schemaName, adapter),
+			);
 		},
 	};
 }
@@ -371,7 +404,7 @@ function buildTableDDL(
 	return {
 		async truncate(options?: TruncateOptions): Promise<void> {
 			const a = requireAdapter();
-			const ddlSchemaName = resolveDDLSchemaName(schemaName);
+			const ddlSchemaName = resolveDDLSchemaName(schemaName, a);
 			const sql = a.generateTruncate
 				? a.generateTruncate(tableName, ddlSchemaName, options)
 				: generateTruncateSQL(tableName, ddlSchemaName, options);
@@ -381,7 +414,7 @@ function buildTableDDL(
 		async vacuum(options?: VacuumOptions): Promise<void> {
 			const a = requireAdapter();
 			assertOutsideTransaction(a, 'vacuum', 'VACUUM');
-			const ddlSchemaName = resolveDDLSchemaName(schemaName);
+			const ddlSchemaName = resolveDDLSchemaName(schemaName, a);
 			const sql = a.generateVacuum
 				? a.generateVacuum(tableName, ddlSchemaName, options)
 				: generateVacuumSQL(tableName, ddlSchemaName, options);
@@ -395,7 +428,7 @@ function buildTableDDL(
 			validateIdentifier(tableName, 'table');
 			validateIdentifier(column, 'column');
 			const a = requireAdapter();
-			const ddlSchemaName = resolveDDLSchemaName(schemaName);
+			const ddlSchemaName = resolveDDLSchemaName(schemaName, a);
 			const sql = a.generateAlterColumn
 				? a.generateAlterColumn(tableName, ddlSchemaName, column, options)
 				: generateAlterColumnSQL(tableName, ddlSchemaName, column, options);
@@ -417,7 +450,10 @@ function buildTableDDL(
 					'storageSize() requires an adapter that implements storageSize().',
 				);
 			}
-			return adapter.storageSize(tableName, schemaName);
+			return adapter.storageSize(
+				tableName,
+				resolveDDLSchemaName(schemaName, adapter),
+			);
 		},
 	};
 }
@@ -1139,7 +1175,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 				}
 				// FIND-003: Validate index name and schema before building SQL
 				validateIdentifier(name, 'index');
-				const ddlSchemaName = resolveDDLSchemaName(schemaName);
+				const ddlSchemaName = resolveDDLSchemaName(schemaName, adapter);
 				const sanitizedOptions = sanitizeDropIndexOptions(options);
 				const sql = adapter.generateDropIndex
 					? adapter.generateDropIndex(name, ddlSchemaName, sanitizedOptions)

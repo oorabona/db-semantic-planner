@@ -158,8 +158,10 @@ describe('DEFECT-2: batchSet().where(rawExists with LIMIT) throws (mutation guar
 	// adapter satisfies the type expected by createOrm.
 	function makeOrm() {
 		return createOrm({
-			model: { getTable: () => undefined } as any,
-			adapter: createPgsqlCompileOnlyAdapter() as any,
+			model: testSchema.model,
+			adapter: createPgsqlCompileOnlyAdapter({
+				model: testSchema.model,
+			}) as any,
 		}) as any;
 	}
 

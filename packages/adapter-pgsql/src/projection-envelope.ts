@@ -373,7 +373,7 @@ function outputDescriptorWithEmittedKey(
 	emittedKey?: string,
 ): OutputProjection {
 	return descriptor(
-		emittedKey ?? naming.toDatabase(output.outputKey),
+		emittedKey ?? naming.resolve(output.outputKey),
 		output.source,
 		output.shape,
 		(output as OutputDescriptor & { logicalKey?: string }).logicalKey ??
@@ -388,7 +388,7 @@ export function fromOutputDescriptors<T = unknown>(
 	for (const output of options.declaredOutputs ?? []) {
 		const outputKey =
 			options.emittedOutputKeys?.get(output.outputKey) ??
-			options.naming.toDatabase(output.outputKey);
+			options.naming.resolve(output.outputKey);
 		const entries = descriptorsByOutput.get(outputKey) ?? [];
 		entries.push(output);
 		descriptorsByOutput.set(outputKey, entries);
@@ -397,8 +397,7 @@ export function fromOutputDescriptors<T = unknown>(
 	const outputs = new Map<string, OutputProjection>();
 	for (const column of options.columns) {
 		const outputKey =
-			options.emittedOutputKeys?.get(column) ??
-			options.naming.toDatabase(column);
+			options.emittedOutputKeys?.get(column) ?? options.naming.resolve(column);
 		const entries = descriptorsByOutput.get(outputKey) ?? [];
 		if (entries.length === 0) {
 			outputs.set(

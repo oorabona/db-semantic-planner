@@ -3193,31 +3193,22 @@ describe('PgsqlAdapter', () => {
 		});
 
 		it('validates columns against model schema', () => {
+			const orders = {
+				name: 'orders',
+				columns: [
+					{ name: 'id', type: 'integer', nullable: false },
+					{ name: 'name', type: 'string', nullable: false },
+					{ name: 'total', type: 'numeric', nullable: false },
+				],
+				primaryKey: 'id',
+				foreignKeys: [],
+				indexes: [],
+			};
+			const tables = new Map([['orders', orders]]);
 			const model = {
-				getTable: (name: string) => {
-					if (name === 'orders') {
-						return {
-							name: 'orders',
-							columns: [
-								{ name: 'id', type: 'integer', nullable: false },
-								{
-									name: 'name',
-									type: 'string',
-									nullable: false,
-								},
-								{
-									name: 'total',
-									type: 'numeric',
-									nullable: false,
-								},
-							],
-							primaryKey: 'id',
-							foreignKeys: [],
-							indexes: [],
-						};
-					}
-					return undefined;
-				},
+				tables,
+				relations: new Map(),
+				getTable: (name: string) => tables.get(name),
 				getRelation: () => undefined,
 			};
 
@@ -3262,6 +3253,8 @@ describe('PgsqlAdapter', () => {
 
 		it('skips validation when target table not found in model', () => {
 			const model = {
+				tables: new Map(),
+				relations: new Map(),
 				getTable: () => undefined, // No tables known
 				getRelation: () => undefined,
 			};

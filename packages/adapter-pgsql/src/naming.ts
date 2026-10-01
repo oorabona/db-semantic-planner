@@ -35,7 +35,7 @@ export function resolveLogicalName(
 	casing: DbCasing,
 ): string | undefined {
 	const plugin = getNamingPluginForDbCasing(casing);
-	const logicalName = plugin.toModel(dbName);
+	const logicalName = plugin.model(dbName);
 
 	// Try converted name first
 	if (model.getTable(logicalName)) {

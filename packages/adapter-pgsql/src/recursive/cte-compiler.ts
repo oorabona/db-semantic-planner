@@ -125,10 +125,10 @@ export function buildRecursiveCte(config: RecursiveCteConfig): {
 	} = config;
 
 	const naming = ctx.naming;
-	const dbTable = naming.toDatabase(table);
-	const dbPk = naming.toDatabase(pkColumn);
-	const dbFk = naming.toDatabase(fkColumn);
-	const dbOuter = naming.toDatabase(outerAlias);
+	const dbTable = naming.resolve(table);
+	const dbPk = naming.resolve(pkColumn);
+	const dbFk = naming.resolve(fkColumn);
+	const dbOuter = naming.resolve(outerAlias);
 	const innerAlias = '__n';
 
 	// Build anchor target list
@@ -263,7 +263,7 @@ function buildTargetList(
 
 	// Add requested columns
 	for (const col of columns) {
-		const dbCol = ctx.naming.toDatabase(col);
+		const dbCol = ctx.naming.resolve(col);
 		targets.push({
 			ResTarget: {
 				val: {
@@ -585,11 +585,11 @@ function buildEdgeTableRecursiveCte(config: RecursiveCteConfig): {
 	}
 
 	const naming = ctx.naming;
-	const dbTable = naming.toDatabase(table);
-	const dbPk = naming.toDatabase(pkColumn);
-	const dbEdgeTable = naming.toDatabase(edgeTable);
-	const dbEdgeFrom = naming.toDatabase(edgeFrom);
-	const dbEdgeTo = naming.toDatabase(edgeTo);
+	const dbTable = naming.resolve(table);
+	const dbPk = naming.resolve(pkColumn);
+	const dbEdgeTable = naming.resolve(edgeTable);
+	const dbEdgeFrom = naming.resolve(edgeFrom);
+	const dbEdgeTo = naming.resolve(edgeTo);
 	const innerAlias = '__n';
 	const edgeAlias = '__e';
 	const isBidirectional = bidirectionalStrategy !== undefined;

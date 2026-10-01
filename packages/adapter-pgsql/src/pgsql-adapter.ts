@@ -120,7 +120,6 @@ import {
 	generateVacuumSQL,
 } from './ddl/table-operations.js';
 import {
-	canCreatePgPhysicalModel,
 	createDeclaredNameResolver,
 	getCachedPgPhysicalModel,
 } from './declared-name-resolver.js';
@@ -1666,9 +1665,9 @@ function findPhysicalTableNameCollision(
 	for (const [modelTableName, table] of model.tables) {
 		if (bindingName === table.name) return table.name;
 		if (bindingName === modelTableName) return table.name;
-		const emittedTableName = naming.toDatabase(table.name);
+		const emittedTableName = naming.resolve(table.name);
 		if (bindingName === emittedTableName) return emittedTableName;
-		const emittedModelTableName = naming.toDatabase(modelTableName);
+		const emittedModelTableName = naming.resolve(modelTableName);
 		if (bindingName === emittedModelTableName) return emittedModelTableName;
 	}
 	return undefined;
@@ -1795,7 +1794,7 @@ function findRuntimeBindingSourceTable(
 		[...model.tables.values()].find(
 			(table) =>
 				table.name === sourceTable ||
-				(naming !== undefined && naming.toDatabase(table.name) === sourceTable),
+				(naming !== undefined && naming.resolve(table.name) === sourceTable),
 		)
 	);
 }
@@ -1817,7 +1816,7 @@ function resolveRuntimeBindingColumnType(
 	const column = sourceTable.columns.find(
 		(candidate) =>
 			candidate.name === columnName ||
-			naming.toDatabase(candidate.name) === columnName,
+			naming.resolve(candidate.name) === columnName,
 	);
 	if (column === undefined) {
 		throw new Error(
@@ -1886,7 +1885,7 @@ function runtimeBindingDeclaredOutputsByColumn(
 ): ReadonlyMap<string, OutputDescriptor[]> {
 	const byColumn = new Map<string, OutputDescriptor[]>();
 	for (const entry of declaredOutputs) {
-		const outputKey = naming.toDatabase(entry.outputKey);
+		const outputKey = naming.resolve(entry.outputKey);
 		const entries = byColumn.get(outputKey) ?? [];
 		entries.push(entry);
 		byColumn.set(outputKey, entries);
@@ -1908,7 +1907,7 @@ function resolveRuntimeBindingDeclaredOutputColumnTypes(
 	);
 	const pgTypes: (string | undefined)[] = [];
 	for (const column of binding.columns) {
-		const entries = descriptorsByColumn.get(naming.toDatabase(column)) ?? [];
+		const entries = descriptorsByColumn.get(naming.resolve(column)) ?? [];
 		if (entries.length === 0) return undefined;
 		if (entries.length > 1) {
 			throw new Error(
@@ -2106,7 +2105,7 @@ function compileNqlRuntimeBindingCteWithPgTypes(
 ): { cte: string; parameters: readonly unknown[] } {
 	const anchorColumns = binding.columns
 		.map((column, columnIndex) => {
-			const columnAlias = quoteIdent(naming.toDatabase(column), 'column');
+			const columnAlias = quoteIdent(naming.resolve(column), 'column');
 			const pgType = pgTypes[columnIndex];
 			return pgType === undefined
 				? `NULL AS ${columnAlias}`
@@ -2170,7 +2169,7 @@ function compileNqlRuntimeBindingCte(
 	const sourcePhysicalColumnFor = (output: string): string =>
 		(sourceTable !== undefined
 			? deps.declaredNames?.column(sourceTable, sourceColumnFor(output))
-			: undefined) ?? naming.toDatabase(sourceColumnFor(output));
+			: undefined) ?? naming.resolve(sourceColumnFor(output));
 	const physicalColumnFor = (output: string): string =>
 		sourceColumnFor(output) !== output
 			? output
@@ -2234,7 +2233,7 @@ function compileNqlRuntimeBindingCte(
 	const projectedColumns = binding.columns
 		.map((column) => quoteIdent(sourcePhysicalColumnFor(column), 'column'))
 		.join(', ');
-	const sourceAnchorSql = `SELECT ${projectedColumns} FROM ${schemaName ? `${quoteIdent(schemaName, 'schema')}.` : ''}${quoteIdent(naming.toDatabase(sourceTable), 'table')} WHERE false`;
+	const sourceAnchorSql = `SELECT ${projectedColumns} FROM ${schemaName ? `${quoteIdent(schemaName, 'schema')}.` : ''}${quoteIdent(naming.resolve(sourceTable), 'table')} WHERE false`;
 	if (binding.rows.length === 0) {
 		return {
 			cte: `${cteName} (${columnSql}) as (${sourceAnchorSql})`,
@@ -2286,7 +2285,7 @@ function createNqlBindingSelectPlan(query: QueryIntent): PlanReport {
 type NqlBindingProjectionRegistry = ReadonlyMap<string, ProjectionEnvelope>;
 
 function nqlBindingOutputKey(name: string, naming: NamingPlugin): string {
-	return naming.toDatabase(name);
+	return naming.resolve(name);
 }
 
 function addNqlBindingSelection(
@@ -3059,7 +3058,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		const model = options?.model ?? this.model;
 		const schemaName = options?.schemaName || this.schemaName;
 		const physicalModel =
-			model === undefined || !canCreatePgPhysicalModel(model)
+			model === undefined
 				? undefined
 				: getCachedPgPhysicalModel(
 						model,
@@ -3069,12 +3068,18 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		const declaredNames =
 			physicalModel === undefined
 				? undefined
-				: createDeclaredNameResolver(physicalModel, naming);
+				: createDeclaredNameResolver(physicalModel);
 		// Legacy compile modules still accept a NamingPlugin.  Feed them the
 		// resolver bridge so all declared names already get the physical spelling;
 		// query-local paths are explicitly emitted below and do not use this bridge.
 		const resolvedNaming: NamingPlugin = declaredNames
-			? { toDatabase: declaredNames.toDatabase, toModel: naming.toModel }
+			? {
+					resolve: declaredNames.resolve,
+					model: naming.model,
+					// Kept only for DDL/physical-model consumers of the shared type.
+					toDatabase: declaredNames.resolve,
+					toModel: naming.model,
+				}
 			: naming;
 		return {
 			naming: resolvedNaming,
@@ -3316,7 +3321,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 								? output
 								: ((runtimeSourceTable !== undefined
 										? deps.declaredNames?.column(runtimeSourceTable, source)
-										: undefined) ?? naming.toDatabase(source)),
+										: undefined) ?? naming.resolve(source)),
 						] as const;
 					}),
 				);
@@ -6356,6 +6361,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	/**
 	 * Create a schema-scoped adapter for multi-tenant queries.
 	 */
+	getSchemaName(): string | undefined {
+		return this.schemaName;
+	}
+
 	withSchema(schemaName: string): Adapter<DB> {
 		// Validate schema name
 		validateIdentifier(schemaName, 'schema');
@@ -7007,6 +7016,51 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	}
 
 	/**
+	 * DDL helpers are invoked by core with declared logical names.  Keep the
+	 * model-to-physical boundary here: core deliberately does not know about the
+	 * PostgreSQL physical model.  Direct adapter calls without a configured model
+	 * remain catalog-level operations and therefore keep their supplied names.
+	 */
+	private helperDeclaredNames(schema?: string) {
+		if (this.model === undefined) return undefined;
+		return createDeclaredNameResolver(
+			getCachedPgPhysicalModel(
+				this.model,
+				schema ?? this.schemaName ?? 'public',
+				this._dbCasing,
+			),
+		);
+	}
+
+	private helperTableName(table: string, schema?: string): string {
+		const names = this.helperDeclaredNames(schema);
+		if (names === undefined) return table;
+		const physical = names.table(table);
+		if (physical === undefined) {
+			throw new Error(
+				`Declared table "${table}" is missing from the physical inventory`,
+			);
+		}
+		return physical;
+	}
+
+	private helperColumnName(
+		table: string,
+		column: string,
+		schema?: string,
+	): string {
+		const names = this.helperDeclaredNames(schema);
+		if (names === undefined) return column;
+		const physical = names.column(table, column);
+		if (physical === undefined) {
+			throw new Error(
+				`Declared column "${table}.${column}" is missing from the physical inventory`,
+			);
+		}
+		return physical;
+	}
+
+	/**
 	 * List all indexes on a table by querying pg_indexes.
 	 *
 	 * @param table - Table name
@@ -7018,7 +7072,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		options?: { namePattern?: string },
 	): Promise<IndexInfo[]> {
 		this.requireConnection('listIndexes');
-		const params: unknown[] = [table, this.explicitSchema(schema) ?? null];
+		const physicalTable = this.helperTableName(table, schema);
+		const params: unknown[] = [
+			physicalTable,
+			this.explicitSchema(schema) ?? null,
+		];
 		let sql =
 			'SELECT indexname, indexdef FROM pg_indexes ' +
 			`WHERE tablename = $1 AND schemaname = COALESCE($2, ${RESOLVE_TABLE_SCHEMA_SQL('$1')})`;
@@ -7053,12 +7111,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		schema?: string,
 	): Promise<boolean> {
 		this.requireConnection('indexExists');
+		const names = this.helperDeclaredNames(schema);
+		const physicalName = names?.index(table, name) ?? name;
+		const physicalTable = this.helperTableName(table, schema);
 		const result = await this.executeQueryProtectingOpenTransaction<{
 			exists: boolean;
 		}>(
 			'SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = $1 AND tablename = $2 ' +
 				`AND schemaname = COALESCE($3, ${RESOLVE_TABLE_SCHEMA_SQL('$2')})) AS exists`,
-			[name, table, this.explicitSchema(schema) ?? null],
+			[physicalName, physicalTable, this.explicitSchema(schema) ?? null],
 		);
 		return result.rows[0]?.exists ?? false;
 	}
@@ -7077,8 +7138,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	async storageSize(table: string, schema?: string): Promise<number> {
 		this.requireConnection('storageSize');
 		const schemaName = this.explicitSchema(schema);
+		const physicalTable = this.helperTableName(table, schema);
 		// Double any embedded double-quotes to prevent injection.
-		const quotedTable = `"${table.replace(/"/g, '""')}"`;
+		const quotedTable = `"${physicalTable.replace(/"/g, '""')}"`;
 		const identifier =
 			schemaName !== undefined
 				? `"${schemaName.replace(/"/g, '""')}".${quotedTable}`
@@ -7100,7 +7162,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		schemaName: string,
 		options?: TruncateOptions,
 	): string {
-		return generateTruncateSQL(table, schemaName ?? this.schemaName, options);
+		return generateTruncateSQL(
+			this.helperTableName(table, schemaName),
+			schemaName ?? this.schemaName,
+			options,
+		);
 	}
 
 	/**
@@ -7112,7 +7178,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		schemaName: string,
 		options?: VacuumOptions,
 	): string {
-		return generateVacuumSQL(table, schemaName ?? this.schemaName, options);
+		return generateVacuumSQL(
+			this.helperTableName(table, schemaName),
+			schemaName ?? this.schemaName,
+			options,
+		);
 	}
 
 	/**
@@ -7126,9 +7196,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		options: AlterColumnOptions,
 	): string {
 		return generateAlterColumnSQL(
-			table,
+			this.helperTableName(table, schemaName),
 			schemaName ?? this.schemaName,
-			column,
+			this.helperColumnName(table, column, schemaName),
 			options,
 		);
 	}
@@ -7142,10 +7212,36 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		schemaName: string,
 		options: CreateIndexOptions,
 	): string {
+		const names = this.helperDeclaredNames(schemaName);
+		const physicalOptions =
+			names === undefined
+				? options
+				: {
+						...options,
+						name: names.index(table, options.name) ?? options.name,
+						columns: options.columns.map((column) =>
+							typeof column === 'string'
+								? this.helperColumnName(table, column, schemaName)
+								: column,
+						),
+						...(options.include !== undefined && {
+							include: options.include.map((column) =>
+								this.helperColumnName(table, column, schemaName),
+							),
+						}),
+						...(options.opclass !== undefined && {
+							opclass: Object.fromEntries(
+								Object.entries(options.opclass).map(([column, opclass]) => [
+									this.helperColumnName(table, column, schemaName),
+									opclass,
+								]),
+							),
+						}),
+					};
 		return generateCreateIndexSQL(
-			table,
+			this.helperTableName(table, schemaName),
 			schemaName ?? this.schemaName,
-			options,
+			physicalOptions,
 			{
 				caps: this.dialectCapabilities,
 				targetVersion: getPostgresqlCapabilitiesTargetVersion(
@@ -7164,7 +7260,26 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		schemaName: string,
 		options?: DropIndexOptions,
 	): string {
-		return generateDropIndexSQL(name, schemaName ?? this.schemaName, options);
+		const names = this.helperDeclaredNames(schemaName);
+		return generateDropIndexSQL(
+			names?.uniqueIndex(name) ?? name,
+			schemaName ?? this.schemaName,
+			options,
+		);
+	}
+
+	generateTableDropIndex(
+		table: string,
+		name: string,
+		schemaName: string,
+		options?: DropIndexOptions,
+	): string {
+		const names = this.helperDeclaredNames(schemaName);
+		return generateDropIndexSQL(
+			names?.index(table, name) ?? name,
+			schemaName ?? this.schemaName,
+			options,
+		);
 	}
 
 	// =========================================================================

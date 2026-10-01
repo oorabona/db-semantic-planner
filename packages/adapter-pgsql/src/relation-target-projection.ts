@@ -45,7 +45,7 @@ export function requestedColumnReference(
 	requestedName: string,
 	ctx: RelationTargetProjectionContext,
 ): ResolvedColumnReference {
-	return { requestedName, emittedName: ctx.naming.toDatabase(requestedName) };
+	return { requestedName, emittedName: ctx.naming.resolve(requestedName) };
 }
 
 /** Projection keys have already crossed the naming boundary. */
@@ -105,7 +105,7 @@ export function requireRelationTargetColumn(
 			relationName,
 		);
 	}
-	const dbColumn = ctx.naming.toDatabase(column);
+	const dbColumn = ctx.naming.resolve(column);
 	return requireEmittedRelationTargetColumn(
 		target,
 		emittedColumnReference(dbColumn),

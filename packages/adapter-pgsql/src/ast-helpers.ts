@@ -37,7 +37,7 @@ import type {
 } from '@pgsql/types';
 
 import type { NamingPlugin } from './naming-plugin.js';
-import { identityNaming } from './naming-plugin.js';
+import { asQueryNaming, identityNaming } from './naming-plugin.js';
 import {
 	type AliasColumnAuthority,
 	emittedColumnReference,
@@ -145,6 +145,7 @@ export function columnRef(
 	naming: NamingPlugin = identityNaming,
 	authorities?: AliasColumnAuthority,
 ): Node {
+	naming = asQueryNaming(naming);
 	const fields: Node[] = [];
 
 	if (schema) {
@@ -153,7 +154,7 @@ export function columnRef(
 	}
 	if (table) {
 		const localAuthority = authorities?.get(table);
-		const dbTable = localAuthority ? table : naming.toDatabase(table);
+		const dbTable = localAuthority ? table : naming.resolve(table);
 		validateIdentifier(dbTable, 'table');
 		fields.push(stringNode(dbTable));
 	}
@@ -161,7 +162,7 @@ export function columnRef(
 		typeof column === 'string' ? column === '*' : column.emittedName === '*';
 	const authority =
 		table && !isWildcard
-			? (authorities?.get(table) ?? authorities?.get(naming.toDatabase(table)))
+			? (authorities?.get(table) ?? authorities?.get(naming.resolve(table)))
 			: undefined;
 	const resolved =
 		typeof column === 'string'
@@ -202,6 +203,7 @@ export function columnRefStar(
 	naming: NamingPlugin = identityNaming,
 	authorities?: AliasColumnAuthority,
 ): Node {
+	naming = asQueryNaming(naming);
 	const fields: Node[] = [];
 
 	if (table) {
@@ -209,7 +211,7 @@ export function columnRefStar(
 		// db casing here made `activeUsers.*` reference a non-existent
 		// `active_users` range variable.
 		fields.push(
-			stringNode(authorities?.has(table) ? table : naming.toDatabase(table)),
+			stringNode(authorities?.has(table) ? table : naming.resolve(table)),
 		);
 	}
 	fields.push({ A_Star: {} });
@@ -227,7 +229,8 @@ export function rangeVar(
 	schema?: string,
 	naming: NamingPlugin = identityNaming,
 ): Node {
-	const dbTable = naming.toDatabase(table);
+	naming = asQueryNaming(naming);
+	const dbTable = naming.resolve(table);
 	validateIdentifier(dbTable, 'table');
 	const rv: RangeVar = {
 		relname: dbTable,
@@ -755,10 +758,10 @@ export interface InsertOptions {
  * Create an InsertStmt node
  */
 export function insertStmt(options: InsertOptions): Node {
-	const naming = options.naming ?? identityNaming;
+	const naming = asQueryNaming(options.naming ?? identityNaming);
 
 	const relation: RangeVar = {
-		relname: naming.toDatabase(options.table),
+		relname: naming.resolve(options.table),
 		inh: true,
 		relpersistence: 'p',
 	};
@@ -774,7 +777,7 @@ export function insertStmt(options: InsertOptions): Node {
 
 	if (options.columns && options.columns.length > 0) {
 		stmt.cols = options.columns.map((col) => ({
-			ResTarget: { name: naming.toDatabase(col) },
+			ResTarget: { name: naming.resolve(col) },
 		}));
 	}
 
@@ -816,10 +819,10 @@ export interface UpdateOptions {
  * Create an UpdateStmt node
  */
 export function updateStmt(options: UpdateOptions): Node {
-	const naming = options.naming ?? identityNaming;
+	const naming = asQueryNaming(options.naming ?? identityNaming);
 
 	const relation: RangeVar = {
-		relname: naming.toDatabase(options.table),
+		relname: naming.resolve(options.table),
 		inh: true,
 		relpersistence: 'p',
 	};
@@ -833,7 +836,7 @@ export function updateStmt(options: UpdateOptions): Node {
 		relation,
 		targetList: options.set.map(({ column, value }) => ({
 			ResTarget: {
-				name: naming.toDatabase(column),
+				name: naming.resolve(column),
 				val: value,
 			},
 		})),
@@ -869,10 +872,10 @@ export interface DeleteOptions {
  * Create a DeleteStmt node
  */
 export function deleteStmt(options: DeleteOptions): Node {
-	const naming = options.naming ?? identityNaming;
+	const naming = asQueryNaming(options.naming ?? identityNaming);
 
 	const relation: RangeVar = {
-		relname: naming.toDatabase(options.table),
+		relname: naming.resolve(options.table),
 		inh: true,
 		relpersistence: 'p',
 	};
@@ -1020,9 +1023,7 @@ export function jsonAggSubquery(
 		const projArgs: Node[] = [];
 		for (const col of cols) {
 			projArgs.push(
-				stringConstNode(
-					options?.columnsAreEmitted ? col : naming.toDatabase(col),
-				),
+				stringConstNode(options?.columnsAreEmitted ? col : naming.resolve(col)),
 			);
 			projArgs.push(
 				options?.columnValueOverrides?.get(col) ??

@@ -104,7 +104,7 @@ function resolveJsonAggProjection(
 						ctx,
 						'selected column',
 						decision.relation,
-					)?.outputKey ?? ctx.naming.toDatabase(column)),
+					)?.outputKey ?? ctx.naming.resolve(column)),
 		);
 	}
 	if (target.outputs !== undefined) {
@@ -113,7 +113,7 @@ function resolveJsonAggProjection(
 		// columns the CTE did not produce.
 		const physical = ctx.model?.getTable(targetTable);
 		const physicalKeys = new Set(
-			physical?.columns.map((column) => ctx.naming.toDatabase(column.name)),
+			physical?.columns.map((column) => ctx.naming.resolve(column.name)),
 		);
 		const isFullPhysicalProjection =
 			physical !== undefined &&

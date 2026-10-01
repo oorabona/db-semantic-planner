@@ -60,7 +60,7 @@ export function compileSubqueryInclude(
 
 	// Handle empty parent IDs - return query that returns no results
 	if (parentIds.length === 0) {
-		const dbTargetTable = deps.naming.toDatabase(info.targetTable);
+		const dbTargetTable = deps.naming.resolve(info.targetTable);
 		const targetList = [
 			{ ResTarget: { val: { ColumnRef: { fields: [{ A_Star: {} }] } } } },
 		];
@@ -123,7 +123,7 @@ export function compileSubqueryInclude(
 	const fromClause = [
 		{
 			RangeVar: {
-				relname: deps.naming.toDatabase(info.targetTable),
+				relname: deps.naming.resolve(info.targetTable),
 				inh: true,
 				relpersistence: 'p',
 				...(schemaName && {

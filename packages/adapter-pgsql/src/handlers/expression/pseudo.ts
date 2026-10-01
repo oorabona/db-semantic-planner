@@ -95,11 +95,11 @@ export function buildRecursiveScalarSubquery(config: RecursiveCteConfig): Node {
 	);
 
 	const naming = ctx.naming;
-	const dbTable = naming.toDatabase(table);
-	const dbPk = naming.toDatabase(pkColumn);
-	const dbFk = naming.toDatabase(fkColumn);
-	const dbOuter = naming.toDatabase(outerAlias);
-	const dbOuterSeed = naming.toDatabase(
+	const dbTable = naming.resolve(table);
+	const dbPk = naming.resolve(pkColumn);
+	const dbFk = naming.resolve(fkColumn);
+	const dbOuter = naming.resolve(outerAlias);
+	const dbOuterSeed = naming.resolve(
 		outerSeedColumn ?? (isAncestors ? fkColumn : pkColumn),
 	);
 	const schemaName = schemaForFromName(
@@ -390,7 +390,7 @@ export function buildRecursiveScalarSubquery(config: RecursiveCteConfig): Node {
 	};
 
 	// Build final SELECT with json_agg
-	const dbSelectCol = naming.toDatabase(selectColumn);
+	const dbSelectCol = naming.resolve(selectColumn);
 	const finalSelect: SelectStmt = {
 		targetList: [
 			{
@@ -554,17 +554,17 @@ export const singleHopPseudoHandler: ExpressionHandler = {
 		);
 
 		const naming = ctx.naming;
-		const dbTable = naming.toDatabase(table);
-		const dbPk = naming.toDatabase(pkColumn);
-		const dbFk = naming.toDatabase(fkColumn);
+		const dbTable = naming.resolve(table);
+		const dbPk = naming.resolve(pkColumn);
+		const dbFk = naming.resolve(fkColumn);
 		const schemaName = schemaForFromName(
 			ctx.schema,
 			table,
 			ctx.bindingNames,
 			naming,
 		);
-		const dbCol = naming.toDatabase(targetColumn);
-		const outerAlias = naming.toDatabase(ctx.currentAlias ?? ctx.rootTable);
+		const dbCol = naming.resolve(targetColumn);
+		const outerAlias = naming.resolve(ctx.currentAlias ?? ctx.rootTable);
 
 		const innerAlias = '__p';
 
@@ -677,9 +677,9 @@ export const chainedPseudoHandler: ExpressionHandler = {
 		}
 
 		const naming = ctx.naming;
-		const dbTable = naming.toDatabase(table);
-		const dbPk = naming.toDatabase(pkColumn);
-		const dbFk = naming.toDatabase(fkColumn);
+		const dbTable = naming.resolve(table);
+		const dbPk = naming.resolve(pkColumn);
+		const dbFk = naming.resolve(fkColumn);
 		const schemaName = schemaForFromName(
 			ctx.schema,
 			table,
@@ -695,7 +695,7 @@ export const chainedPseudoHandler: ExpressionHandler = {
 			'targetColumn',
 			'chained pseudo',
 		);
-		const targetCol = naming.toDatabase(targetColumn);
+		const targetCol = naming.resolve(targetColumn);
 		requireRelationTargetColumns(
 			resolveRelationTarget(table, ctx),
 			[pkColumn, fkColumn, targetColumn],
@@ -718,7 +718,7 @@ export const chainedPseudoHandler: ExpressionHandler = {
 			const alias = `__p${i}`;
 			const outerRef =
 				i === 0
-					? naming.toDatabase(ctx.currentAlias ?? ctx.rootTable)
+					? naming.resolve(ctx.currentAlias ?? ctx.rootTable)
 					: `__p${i - 1}`;
 
 			const subSelect: SelectStmt = {

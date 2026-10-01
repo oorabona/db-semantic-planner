@@ -288,7 +288,7 @@ function addJsonAggOutputKeyCandidates(
 	if (baseName === undefined) return;
 	const rawJsonKey = `${baseName}_json`;
 	keys.add(rawJsonKey);
-	keys.add(deps.naming.toDatabase(rawJsonKey));
+	keys.add(deps.naming.resolve(rawJsonKey));
 }
 
 function jsonAggHydrationOutputKeys(
@@ -1039,7 +1039,7 @@ function buildRecursiveAnchorWhere(
 		case 'comparison': {
 			const operator = w.operator as string;
 			const op = mapComparisonOperator(operator);
-			const dbCol = deps.naming.toDatabase(w.field as string);
+			const dbCol = deps.naming.resolve(w.field as string);
 			const left: Node = {
 				ColumnRef: {
 					fields: [

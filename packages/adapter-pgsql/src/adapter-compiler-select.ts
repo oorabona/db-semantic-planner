@@ -334,9 +334,12 @@ function compileJoinIntents(
 				tableAlias === rootTable
 					? naming
 					: {
+							resolve: (name: string) =>
+								name === tableAlias ? name : naming.resolve(name),
+							model: naming.model,
 							toDatabase: (name: string) =>
-								name === tableAlias ? name : naming.toDatabase(name),
-							toModel: naming.toModel,
+								name === tableAlias ? name : naming.resolve(name),
+							toModel: naming.model,
 						};
 
 			const ctx: WhereCompilerCtx = {
@@ -689,7 +692,7 @@ function buildJsonAggColumnKeyMap(
 			columnName;
 		map[
 			deps?.declaredNames?.column(targetTable, modelColumn) ??
-				naming.toDatabase(modelColumn)
+				naming.resolve(modelColumn)
 		] = modelColumn;
 	}
 	return Object.keys(map).length > 0 ? map : undefined;
@@ -852,15 +855,15 @@ function buildTrustedRelationColumnOutputDescriptor(
 	const column = table?.columns.find(
 		(candidate) =>
 			candidate.name === trusted.selectedColumn ||
-			naming.toDatabase(candidate.name) === trusted.selectedColumn,
+			naming.resolve(candidate.name) === trusted.selectedColumn,
 	);
 	if (table === undefined || column === undefined) return undefined;
 	const outputColumn =
 		decision.alias ?? decision.column ?? trusted.selectedColumn;
 	const js = column.type === 'bigint' ? column.js : undefined;
 	return {
-		outputKey: naming.toDatabase(outputColumn),
-		logicalKey: decision.alias ?? naming.toModel(column.name),
+		outputKey: naming.resolve(outputColumn),
+		logicalKey: decision.alias ?? naming.model(column.name),
 		source: {
 			kind: 'modelColumn',
 			table: table.name,
@@ -937,14 +940,14 @@ function buildPhysicalRelationColumnOutputDescriptor(
 	);
 	if (targetTable) {
 		const target = resolveRelationTarget(targetTable, deps);
-		const descriptor = target.outputs?.get(naming.toDatabase(decision.column));
+		const descriptor = target.outputs?.get(naming.resolve(decision.column));
 		if (descriptor) {
 			return {
 				...descriptor,
-				outputKey: naming.toDatabase(decision.alias ?? decision.column),
+				outputKey: naming.resolve(decision.alias ?? decision.column),
 				logicalKey:
 					decision.alias ??
-					naming.toModel(
+					naming.model(
 						descriptor.source.kind === 'modelColumn'
 							? descriptor.source.column
 							: decision.column,
@@ -957,14 +960,14 @@ function buildPhysicalRelationColumnOutputDescriptor(
 	const column = table?.columns.find(
 		(candidate) =>
 			candidate.name === decision.column ||
-			naming.toDatabase(candidate.name) === decision.column,
+			naming.resolve(candidate.name) === decision.column,
 	);
 	if (table === undefined || column === undefined) return undefined;
 
 	const outputColumn = decision.alias ?? decision.column;
 	return {
-		outputKey: naming.toDatabase(outputColumn),
-		logicalKey: decision.alias ?? naming.toModel(column.name),
+		outputKey: naming.resolve(outputColumn),
+		logicalKey: decision.alias ?? naming.model(column.name),
 		source: {
 			kind: 'modelColumn',
 			table: table.name,

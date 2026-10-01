@@ -56,7 +56,7 @@ function recordTableLookup(
 	const lookup = new Map<string, string>();
 	for (const table of model.tables.values()) {
 		lookup.set(table.name, table.name);
-		lookup.set(pgReturnedIdentifier(naming.toDatabase(table.name)), table.name);
+		lookup.set(pgReturnedIdentifier(naming.resolve(table.name)), table.name);
 	}
 	return lookup;
 }
@@ -225,7 +225,7 @@ function buildAliasContext(
 		addVisibleTable(
 			aliases,
 			visibleTables,
-			pgReturnedIdentifier(naming.toDatabase(rootTable)),
+			pgReturnedIdentifier(naming.resolve(rootTable)),
 			rootTable,
 		);
 	}
@@ -262,7 +262,7 @@ function findColumnByDbName(
 	return table.columns.find(
 		(column) =>
 			column.name === dbColumn ||
-			pgReturnedIdentifier(naming.toDatabase(column.name)) === dbColumn,
+			pgReturnedIdentifier(naming.resolve(column.name)) === dbColumn,
 	);
 }
 
@@ -375,10 +375,10 @@ function expandStar(
 		for (const column of table.columns) {
 			addCandidate(
 				candidates,
-				pgReturnedIdentifier(naming.toDatabase(column.name)),
+				pgReturnedIdentifier(naming.resolve(column.name)),
 				projectionForSource(
 					{ table: tableName, column },
-					naming.toModel(column.name),
+					naming.model(column.name),
 				),
 			);
 		}
@@ -448,7 +448,7 @@ function addTargetCandidates(
 		source,
 		outputAlias ??
 			(source && source !== 'ambiguous'
-				? naming.toModel(source.column.name)
+				? naming.model(source.column.name)
 				: dbColumn),
 	);
 }
@@ -522,10 +522,10 @@ export function buildModelColumnProjections(
 		);
 		if (!column) continue;
 		projections.set(
-			pgReturnedIdentifier(naming.toDatabase(column.name)),
+			pgReturnedIdentifier(naming.resolve(column.name)),
 			projectionForSource(
 				{ table: tableName, column },
-				naming.toModel(column.name),
+				naming.model(column.name),
 			),
 		);
 	}

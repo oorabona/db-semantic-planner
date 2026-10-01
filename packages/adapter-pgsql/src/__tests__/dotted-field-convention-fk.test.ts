@@ -52,12 +52,14 @@ function makeConventionFkModel(): ModelIR {
 		foreignKeys: [],
 	};
 
+	const tables = new Map([
+		['posts', postsTable],
+		['users', usersTable],
+	]);
 	return {
-		getTable: (name: string) => {
-			if (name === 'posts') return postsTable as any;
-			if (name === 'users') return usersTable as any;
-			return undefined;
-		},
+		tables,
+		relations: new Map(),
+		getTable: (name: string) => tables.get(name) as any,
 		getRelation: (qualifiedName: string) => {
 			if (qualifiedName === 'users.posts') {
 				return {

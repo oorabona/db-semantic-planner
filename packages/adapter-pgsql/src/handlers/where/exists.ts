@@ -184,7 +184,7 @@ function buildExistsSubquery(
 		) {
 			return identifier;
 		}
-		return ctx.naming.toDatabase(identifier);
+		return ctx.naming.resolve(identifier);
 	};
 	const outerAliases = new Set<string>();
 	if (ctx.currentAlias) outerAliases.add(scopeName(ctx.currentAlias));

@@ -7,7 +7,6 @@
  * deliberately left to the caller: they are query-local SQL identifiers.
  */
 import type { ModelIR } from '@dbsp/types';
-import type { NamingPlugin } from './naming-plugin.js';
 import {
 	createPgPhysicalModel,
 	type PgPhysicalModel,
@@ -20,8 +19,10 @@ export interface DeclaredNameResolver {
 	index(table: string, name: string): string | undefined;
 	constraint(table: string, name: string): string | undefined;
 	enum(name: string): string | undefined;
-	/** Compatibility bridge for legacy compiler paths while they are migrated. */
-	toDatabase(name: string): string;
+	/** Resolve an index only when its logical name is unique across the model. */
+	uniqueIndex(name: string): string | undefined;
+	/** Legacy call sites without an address: declared inventory entries win; local SQL names remain verbatim. */
+	resolve(name: string): string;
 }
 
 type PerModelPhysicalCache = Map<string, PgPhysicalModel>;
@@ -55,34 +56,8 @@ export function getCachedPgPhysicalModel(
 	return physical;
 }
 
-/** Some legacy compile-only tests provide deliberately partial ModelIR-like
- * objects for type inference. They are not a logical model that the physical
- * model can inventory; retain the historical naming path for those fixtures. */
-export function canCreatePgPhysicalModel(model: ModelIR): boolean {
-	if (!(model.tables instanceof Map)) return false;
-	for (const table of model.tables.values()) {
-		if (
-			!Array.isArray(table.columns) ||
-			(table.primaryKey !== undefined &&
-				typeof table.primaryKey !== 'string' &&
-				!Array.isArray(table.primaryKey)) ||
-			!Array.isArray(table.foreignKeys) ||
-			!Array.isArray(table.indexes) ||
-			(table.checkConstraints !== undefined &&
-				!Array.isArray(table.checkConstraints)) ||
-			(table.pseudoColumns !== undefined &&
-				!Array.isArray(table.pseudoColumns)) ||
-			(table.policies !== undefined && !Array.isArray(table.policies))
-		) {
-			return false;
-		}
-	}
-	return true;
-}
-
 export function createDeclaredNameResolver(
 	physicalModel: PgPhysicalModel,
-	fallbackNaming: NamingPlugin,
 ): DeclaredNameResolver {
 	const { inventory } = physicalModel;
 	const schema = physicalModel.schema;
@@ -101,14 +76,18 @@ export function createDeclaredNameResolver(
 		constraint: (table: string, name: string) =>
 			get({ kind: 'constraint', schema, table, name }),
 		enum: (name: string) => get({ kind: 'enum', schema, name }),
-		// Older call sites do not carry a table address yet.  The physical model
-		// uses the same db-casing/truncation rule for declared table/column names;
-		// use a matching inventory entry before preserving historical fallback.
-		toDatabase: (name: string) => {
-			for (const entry of inventory.entries) {
-				if (entry.logical.name === name) return entry.physical;
-			}
-			return fallbackNaming.toDatabase(name);
+		uniqueIndex: (name: string) => {
+			const matches = inventory.entries.filter(
+				(entry) =>
+					entry.logical.kind === 'index' && entry.logical.name === name,
+			);
+			return matches.length === 1 ? matches[0]!.physical : undefined;
+		},
+		resolve: (name: string) => {
+			const match = inventory.entries.find(
+				(entry) => entry.logical.name === name,
+			);
+			return match?.physical ?? name;
 		},
 	});
 }

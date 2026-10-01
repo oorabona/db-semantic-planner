@@ -42,6 +42,8 @@ function buildModel(tableName: string, columns: ColumnDef[]): ModelIR {
 		name: tableName,
 		columns: tableColumns,
 		relations: [],
+		primaryKey: 'id',
+		foreignKeys: [],
 		indexes: [],
 		rlsEnabled: false,
 		policies: [],

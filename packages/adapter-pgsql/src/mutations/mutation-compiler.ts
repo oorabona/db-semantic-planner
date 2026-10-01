@@ -217,8 +217,8 @@ export function compileInsert(
 	state: CompilerState,
 ): Node {
 	const naming = ctx.naming;
-	const dbTable = naming.toDatabase(config.table);
-	const dbColumns = config.columns.map((c) => naming.toDatabase(c));
+	const dbTable = naming.resolve(config.table);
+	const dbColumns = config.columns.map((c) => naming.resolve(c));
 
 	// Build VALUES as Node[][] (each row is Node[])
 	const columnTypes = config.columnTypes;
@@ -281,7 +281,7 @@ export function compileUnnestInsert(
 	state: CompilerState,
 ): Node {
 	const naming = ctx.naming;
-	const dbTable = naming.toDatabase(config.table);
+	const dbTable = naming.resolve(config.table);
 	const { columns, values, columnTypes } = config;
 
 	// Validate cardinality before any SQL generation (INV-02)
@@ -315,7 +315,7 @@ export function compileUnnestInsert(
 		// ResTarget with column alias: unnest(...) AS "colname"
 		return {
 			ResTarget: {
-				name: naming.toDatabase(col),
+				name: naming.resolve(col),
 				val: unnestCall,
 			},
 		};
@@ -339,7 +339,7 @@ export function compileUnnestInsert(
 	// Build INSERT INTO "table" ("col1", "col2") <selectQuery>
 	const options: InsertOptions = {
 		table: config.table,
-		columns: columns.map((c) => naming.toDatabase(c)),
+		columns: columns.map((c) => naming.resolve(c)),
 		selectQuery,
 		naming,
 	};
@@ -366,7 +366,7 @@ export function compileUpdate(
 	const columnTypes = config.columnTypes;
 	const setClause: Array<{ column: string; value: Node }> = config.set.map(
 		({ column, value }) => ({
-			column: naming.toDatabase(column),
+			column: naming.resolve(column),
 			value: isSqlRaw(value)
 				? parseRawExpression(value.sql)
 				: valueToNode(value, state, columnTypes?.[column]),
@@ -459,7 +459,7 @@ export function compileUnnestUpdate(
 ): Node {
 	const naming = ctx.naming;
 	const { table, matchColumns, allColumns, columnArrays, columnTypes } = config;
-	const dbTable = naming.toDatabase(table);
+	const dbTable = naming.resolve(table);
 	const updateColumns = allColumns.filter((c) => !matchColumns.includes(c));
 
 	// Build unnest arguments: CAST($N AS type[]) for each column
@@ -485,7 +485,7 @@ export function compileUnnestUpdate(
 			alias: {
 				aliasname: 't',
 				colnames: allColumns.map((c) => ({
-					String: { sval: naming.toDatabase(c) },
+					String: { sval: naming.resolve(c) },
 				})),
 			},
 		},
@@ -495,12 +495,12 @@ export function compileUnnestUpdate(
 	const setClause: Array<{ column: string; value: Node }> = [
 		// Array-sourced update columns: "col" = t."col"
 		...updateColumns.map((col) => ({
-			column: naming.toDatabase(col),
+			column: naming.resolve(col),
 			value: columnRef(col, 't', undefined, naming),
 		})),
 		// Scalar SET from scalarSet (e.g. .set({ confidence: 0.85 }))
 		...(config.scalarSet ?? []).map(({ column, value }) => ({
-			column: naming.toDatabase(column),
+			column: naming.resolve(column),
 			value: valueToNode(value, state, columnTypes?.[column]),
 		})),
 	];
@@ -616,14 +616,14 @@ export function compileInsertFrom(
 	state: CompilerState,
 ): Node {
 	const naming = ctx.naming;
-	const _dbTargetTable = naming.toDatabase(config.targetTable);
+	const _dbTargetTable = naming.resolve(config.targetTable);
 	const dbSourceTable = hasBindingName(
 		ctx.bindingNames,
 		config.sourceTable,
 		naming,
 	)
 		? config.sourceTable
-		: naming.toDatabase(config.sourceTable);
+		: naming.resolve(config.sourceTable);
 	const sourceAlias = config.sourceTable;
 	const sourceSchema = schemaForFromName(
 		ctx.schema,
@@ -633,7 +633,7 @@ export function compileInsertFrom(
 	);
 
 	// Build column list
-	const dbColumns = config.columns?.map((c) => naming.toDatabase(c));
+	const dbColumns = config.columns?.map((c) => naming.resolve(c));
 
 	// Build SELECT target list
 	let targetList: Node[];
@@ -641,7 +641,7 @@ export function compileInsertFrom(
 		targetList = config.columns.map((col) =>
 			resTarget(
 				columnRef(col, sourceAlias, sourceSchema, naming),
-				naming.toDatabase(col),
+				naming.resolve(col),
 			),
 		);
 	} else {
@@ -747,7 +747,7 @@ export function compileUpsertFrom(
 		naming,
 	)
 		? config.sourceTable
-		: naming.toDatabase(config.sourceTable);
+		: naming.resolve(config.sourceTable);
 	const sourceAlias = config.sourceTable;
 	const sourceSchema = schemaForFromName(
 		ctx.schema,
@@ -757,7 +757,7 @@ export function compileUpsertFrom(
 	);
 
 	// Build column list
-	const dbColumns = config.columns?.map((c) => naming.toDatabase(c));
+	const dbColumns = config.columns?.map((c) => naming.resolve(c));
 
 	// Build SELECT target list
 	let targetList: Node[];
@@ -765,7 +765,7 @@ export function compileUpsertFrom(
 		targetList = config.columns.map((col) =>
 			resTarget(
 				columnRef(col, sourceAlias, sourceSchema, naming),
-				naming.toDatabase(col),
+				naming.resolve(col),
 			),
 		);
 	} else {
@@ -843,7 +843,7 @@ export function compileUpsertFrom(
 	const conflictInfer = {
 		indexElems: config.conflictColumns.map((col) => ({
 			IndexElem: {
-				name: naming.toDatabase(col),
+				name: naming.resolve(col),
 			},
 		})),
 	};
@@ -854,7 +854,7 @@ export function compileUpsertFrom(
 		: [];
 
 	const onConflictTargetList: Node[] = updateColumns.map((col) => {
-		const dbCol = naming.toDatabase(col);
+		const dbCol = naming.resolve(col);
 		return {
 			ResTarget: {
 				name: dbCol,

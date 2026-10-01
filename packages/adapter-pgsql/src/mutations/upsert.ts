@@ -153,7 +153,7 @@ export function buildOnConflictClause(
 		infer = {
 			indexElems: config.conflictTarget.columns.map((col) => ({
 				IndexElem: {
-					name: naming.toDatabase(col),
+					name: naming.resolve(col),
 				},
 			})),
 		};
@@ -170,7 +170,7 @@ export function buildOnConflictClause(
 	} else if (config.conflictTarget.constraint) {
 		// Conflict on named constraint
 		infer = {
-			conname: naming.toDatabase(config.conflictTarget.constraint),
+			conname: naming.resolve(config.conflictTarget.constraint),
 		};
 	}
 
@@ -187,7 +187,7 @@ export function buildOnConflictClause(
 	const useExcluded = config.useExcluded ?? true;
 
 	const targetList: Node[] = updateColumns.map((col) => {
-		const dbCol = naming.toDatabase(col);
+		const dbCol = naming.resolve(col);
 
 		// Raw SQL expression: emit the parsed AST node verbatim
 		const rawExpr = config.updateExpressions?.[col];
@@ -237,8 +237,8 @@ export function compileUpsert(
 	state: CompilerState,
 ): Node {
 	const naming = ctx.naming;
-	const dbTable = naming.toDatabase(config.table);
-	const dbColumns = config.columns.map((c) => naming.toDatabase(c));
+	const dbTable = naming.resolve(config.table);
+	const dbColumns = config.columns.map((c) => naming.resolve(c));
 
 	// Build column names
 	const cols = dbColumns.map((c) => ({ String: { sval: c } }));
@@ -301,7 +301,7 @@ export function compileUnnestUpsert(
 	state: CompilerState,
 ): Node {
 	const naming = ctx.naming;
-	const dbTable = naming.toDatabase(config.table);
+	const dbTable = naming.resolve(config.table);
 	const { columns, values, columnTypes } = config;
 
 	// Validate cardinality before any SQL generation (INV-02)
@@ -333,7 +333,7 @@ export function compileUnnestUpsert(
 		// ResTarget with column alias: unnest(...) AS "colname"
 		return {
 			ResTarget: {
-				name: naming.toDatabase(col),
+				name: naming.resolve(col),
 				val: unnestCall,
 			},
 		};
@@ -367,7 +367,7 @@ export function compileUnnestUpsert(
 				relpersistence: 'p',
 			},
 			cols: columns.map((c) => ({
-				ResTarget: { name: naming.toDatabase(c) },
+				ResTarget: { name: naming.resolve(c) },
 			})),
 			selectStmt: selectQuery,
 			onConflictClause: onConflict,
@@ -404,13 +404,13 @@ function valueToParam(state: CompilerState, value?: unknown): Node {
  */
 export function excludedRef(
 	column: string,
-	naming: { toDatabase: (s: string) => string },
+	naming: { resolve: (s: string) => string },
 ): Node {
 	return {
 		ColumnRef: {
 			fields: [
 				{ String: { sval: 'excluded' } },
-				{ String: { sval: naming.toDatabase(column) } },
+				{ String: { sval: naming.resolve(column) } },
 			],
 		},
 	};
@@ -428,8 +428,8 @@ export function conditionalUpdate(
 	ctx: CompilerContext,
 ): Node {
 	const naming = ctx.naming;
-	const _dbCol = naming.toDatabase(column);
-	const dbTable = naming.toDatabase(table);
+	const _dbCol = naming.resolve(column);
+	const dbTable = naming.resolve(table);
 
 	return {
 		FuncCall: {
