@@ -34,8 +34,8 @@ The PostgreSQL adapter owns one immutable physical model, `PgPhysicalModel`, bui
 introspected physical model (with the target schema and no naming). Logical names are mapped exactly once;
 physical input is never mapped. Every PostgreSQL schema consumer of a declared object — DDL generation, schema
 comparison and migration SQL, live comparison and converge, and declaration binding — takes this value. Model-backed
-query compilation still maps names with the adapter's naming plugin; it moves onto this value in the second delivery
-(#762).
+query compilation resolves declared names through it as well; queries still name tables and columns by their
+logical names (#762).
 
 The model records the physical name of every table, column, index (explicit, default and automatic
 foreign-key), primary-key, foreign-key, CHECK and column-unique constraint, standalone sequence, enum and policy.

@@ -835,6 +835,7 @@ export type AlterColumnOptions = {
 	/** USING expression for the type conversion. Column names in this physical SQL use database names after `dbCasing`; identifiers inside it are not rewritten. */
 	readonly using?: string;
 	readonly setNotNull?: boolean;
+	/** New column default. `{ sql: string }` and a string ending in `()` are emitted as SQL text, not parameterized; column names in that text are database names after `dbCasing`, which does not rewrite them. */
 	readonly setDefault?: unknown;
 	readonly dropDefault?: boolean;
 };
