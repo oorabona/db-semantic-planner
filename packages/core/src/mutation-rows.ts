@@ -8,14 +8,19 @@ export function inspectMutationRows(
 		homogeneous?: boolean;
 		requiredKeys?: readonly string[];
 	},
-): { columns: string[]; heterogeneous: boolean } {
-	const columns = Object.keys(rows[0] ?? {});
+): {
+	columns: string[];
+	heterogeneous: boolean;
+	rowKeys: ReadonlySet<string>[];
+} {
+	const rowKeys = rows.map((row) => new Set(Object.keys(row)));
+	const columns = [...(rowKeys[0] ?? [])];
 	const firstKeys = [...columns];
 	const seen = new Set(columns);
 	let heterogeneous = false;
-	for (const [index, row] of rows.entries()) {
+	for (const [index, keys] of rowKeys.entries()) {
 		for (const key of firstKeys) {
-			if (!Object.hasOwn(row, key)) {
+			if (!keys.has(key)) {
 				heterogeneous = true;
 				if (options.homogeneous)
 					throw new InvalidOperationError(
@@ -24,8 +29,8 @@ export function inspectMutationRows(
 					);
 			}
 		}
-		for (const key of Object.keys(row)) {
-			if (!Object.hasOwn(rows[0] ?? {}, key)) {
+		for (const key of keys) {
+			if (!rowKeys[0]?.has(key)) {
 				heterogeneous = true;
 				if (options.homogeneous)
 					throw new InvalidOperationError(
@@ -39,12 +44,12 @@ export function inspectMutationRows(
 			}
 		}
 		for (const key of options.requiredKeys ?? []) {
-			if (!Object.hasOwn(row, key))
+			if (!keys.has(key))
 				throw new InvalidOperationError(
 					options.operation,
 					`${options.operation}: row ${index} lacks required match key '${key}'`,
 				);
 		}
 	}
-	return { columns, heterogeneous };
+	return { columns, heterogeneous, rowKeys };
 }

@@ -3599,10 +3599,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * - rows > batchThreshold OR batchThreshold === 0: SELECT unnest($1::type[]),...
 	 */
 	compileInsert(intent: InsertIntent, options?: CompileOptions): CompiledQuery {
-		validateMutationRowCount('insert', intent.values ?? [], options);
 		const rowShape = inspectMutationRows(intent.values ?? [], {
 			operation: 'insert',
 		});
+		validateMutationRowCount('insert', intent.values ?? [], options);
 		this.assertDeclaredMutationReferences(
 			intent.table,
 			[
@@ -3715,11 +3715,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * Compile an upsert intent to executable SQL (DX-026).
 	 */
 	compileUpsert(intent: UpsertIntent, options?: CompileOptions): CompiledQuery {
-		validateMutationRowCount('upsert', intent.values ?? [], options);
 		const rowShape = inspectMutationRows(intent.values ?? [], {
 			operation: 'upsert',
 			homogeneous: true,
 		});
+		validateMutationRowCount('upsert', intent.values ?? [], options);
 		const conflictColumns =
 			'columns' in intent.onConflict ? intent.onConflict.columns : [];
 		const actionColumns =

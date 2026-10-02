@@ -95,7 +95,7 @@ import {
 
 export const POSTGRESQL_PARAMETER_LIMIT = 65_535;
 
-/** Validate row count before inspecting payload shapes. */
+/** Validate nonempty input and the insert/upsert batch-size limit. */
 export function validateMutationRowCount(
 	operation: 'insert' | 'upsert' | 'update',
 	rows: readonly Record<string, unknown>[],
@@ -108,7 +108,11 @@ export function validateMutationRowCount(
 				? 'batchSet requires at least one row'
 				: `${operation}: values requires at least one row`,
 		);
-	if (options?.maxBatchSize !== undefined && rows.length > options.maxBatchSize)
+	if (
+		operation !== 'update' &&
+		options?.maxBatchSize !== undefined &&
+		rows.length > options.maxBatchSize
+	)
 		throw new InvalidOperationError(
 			operation,
 			`Batch size ${rows.length} exceeds maxBatchSize ${options.maxBatchSize}`,
@@ -587,15 +591,15 @@ export function compileInsert(
 	const state = createCompilerState();
 
 	const rows = intent.values ?? [];
-	validateMutationRowCount('insert', rows, options);
-	const { columns, heterogeneous } =
+	const { columns, heterogeneous, rowKeys } =
 		rowShape ??
 		inspectMutationRows(rows, {
 			operation: 'insert',
 		});
-	const values = rows.map((row) =>
+	validateMutationRowCount('insert', rows, options);
+	const values = rows.map((row, index) =>
 		columns.map((col) =>
-			Object.hasOwn(row, col) ? (row[col] ?? null) : DEFAULT_INSERT_CELL,
+			rowKeys[index]?.has(col) ? (row[col] ?? null) : DEFAULT_INSERT_CELL,
 		),
 	);
 	const batchThreshold = options?.batchThreshold ?? 50;
@@ -814,7 +818,7 @@ export function compileBatchUpdate(
 		);
 
 	const matchColumns = [...intent.matchColumns];
-	const { columns: allColumns } = inspectMutationRows(intent.updates, {
+	const { columns: allColumns, rowKeys } = inspectMutationRows(intent.updates, {
 		operation: 'update',
 		homogeneous: true,
 		requiredKeys: matchColumns,
@@ -838,8 +842,10 @@ export function compileBatchUpdate(
 	}
 
 	// Build row-major values matrix and validate cardinality
-	const values = intent.updates.map((row) =>
-		allColumns.map((col) => row[col] ?? null),
+	const values = intent.updates.map((row, index) =>
+		allColumns.map((col) =>
+			rowKeys[index]?.has(col) ? (row[col] ?? null) : null,
+		),
 	);
 	validateBatchCardinality(allColumns, values);
 
@@ -997,14 +1003,14 @@ export function compileUpsert(
 	const state = createCompilerState();
 
 	const rows = intent.values ?? [];
-	validateMutationRowCount('upsert', rows, options);
-	const { columns: inspectedColumns } =
+	const { columns: inspectedColumns, rowKeys } =
 		rowShape ??
 		inspectMutationRows(rows, {
 			operation: 'upsert',
 			homogeneous: true,
 		});
 
+	validateMutationRowCount('upsert', rows, options);
 	const columns = [...inspectedColumns];
 
 	// Separate raw SQL expressions from scalar set values.
@@ -1025,14 +1031,19 @@ export function compileUpsert(
 
 	// Merge only scalar set values into INSERT VALUES rows so EXCLUDED.column
 	// references resolve correctly.
-	const hasScalarSet = Object.keys(scalarSet).length > 0;
 	for (const key of Object.keys(scalarSet)) {
 		if (!columns.includes(key)) columns.push(key);
 	}
-	const values = rows.map((row) => {
-		const mergedRow = hasScalarSet ? { ...row, ...scalarSet } : row;
-		return columns.map((col) => mergedRow[col] ?? null);
-	});
+	const scalarKeys = new Set(Object.keys(scalarSet));
+	const values = rows.map((row, index) =>
+		columns.map((col) =>
+			scalarKeys.has(col)
+				? (scalarSet[col] ?? null)
+				: rowKeys[index]?.has(col)
+					? (row[col] ?? null)
+					: null,
+		),
+	);
 	const batchThreshold = options?.batchThreshold ?? 50;
 	const useUnnest =
 		values.length > 0 &&
@@ -1182,7 +1193,7 @@ export function compileUpsert(
 	const ast = useUnnest
 		? compileUnnestUpsertMutation(config, ctx, state)
 		: compileUpsertMutation(config, ctx, state);
-	if (!useUnnest) assertParameterLimit('upsert', state.parameters.length);
+	assertParameterLimit('upsert', state.parameters.length);
 	return compileMutationQuery(ast, intent.table, state, options, deps);
 }
 

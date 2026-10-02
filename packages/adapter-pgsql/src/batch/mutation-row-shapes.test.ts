@@ -402,10 +402,8 @@ describe('mutation enumerable own keys contract', () => {
 		);
 	});
 	for (const operation of ['insert', 'upsert'] as const) {
-		it(`prioritizes maxBatchSize over ${operation} shape and bind inspection`, () => {
-			const rows = Array.from({ length: 32769 }, (_, i) =>
-				i === 0 ? { a: 1 } : { a: 1, b: 2 },
-			);
+		it(`checks maxBatchSize before ${operation} bind limits`, () => {
+			const rows = Array.from({ length: 32769 }, (_, i) => ({ a: i, b: 2 }));
 			const options = { maxBatchSize: 100 };
 			const message = `Invalid ${operation}: Batch size 32769 exceeds maxBatchSize 100`;
 			exactRefusal(
@@ -427,13 +425,10 @@ describe('mutation enumerable own keys contract', () => {
 							),
 				message,
 			);
-			// Mutate retained rows after builder validation, so compilation must honor the limit before shape inspection.
-			const retained = [{ a: 1 }];
 			const built =
 				operation === 'insert'
-					? orm.insert('t').values(retained)
-					: orm.upsert('t').values(retained).onConflict(['id']).doNothing();
-			retained.push(...rows.slice(1));
+					? orm.insert('t').values(rows)
+					: orm.upsert('t').values(rows).onConflict(['id']).doNothing();
 			exactRefusal(() => built.dump(options), message);
 		});
 		it(`inspects ${operation} enumerable own keys once per public compilation`, () => {
@@ -458,10 +453,106 @@ describe('mutation enumerable own keys contract', () => {
 			]) {
 				scans = 0;
 				expect(run().sql).toBe(expected);
-				expect(scans).toBe(2);
+				expect(scans).toBe(1);
 			}
 		});
 	}
+	it('ignores hidden insert cells and refuses hidden upsert and match keys', () => {
+		const hidden = Object.defineProperty({ id: 1 }, 'a', { value: 99 });
+		const rows = [hidden, { id: 2, a: 2 }];
+		const expected = 'INSERT INTO t (id, a) VALUES ($1, DEFAULT), ($2, $3)';
+		expect(insert(rows, 0)).toMatchObject({
+			sql: expected,
+			parameters: [1, 2, 2],
+		});
+		expect(orm.insert('t').values(rows).dump({ batchThreshold: 0 }).sql).toBe(
+			expected,
+		);
+		const mismatch =
+			"Invalid upsert: upsert: row 1 has key 'a' that row 0 does not";
+		exactRefusal(() => upsert(rows), mismatch);
+		exactRefusal(() => orm.upsert('t').values(rows), mismatch);
+		const hiddenMatch = Object.defineProperty({ a: 2 }, 'id', { value: 1 });
+		const missing =
+			"Invalid update: update: row 0 lacks required match key 'id'";
+		exactRefusal(() => update([hiddenMatch]), missing);
+		exactRefusal(() => orm.update('t').batchSet('id', [hiddenMatch]), missing);
+	});
+	it('keeps batch updates outside maxBatchSize', () => {
+		const rows = [
+			{ id: 1, a: 2 },
+			{ id: 2, a: 3 },
+		];
+		expect(
+			orm.update('t').batchSet('id', rows).dump({ maxBatchSize: 1 }).sql,
+		).toBe(update(rows).sql);
+	});
+	it('validates upsert shape before maxBatchSize', () => {
+		const rows = [{ id: 1, a: 2 }, { id: 2 }];
+		const message =
+			"Invalid upsert: upsert: row 1 lacks key 'a' present in row 0";
+		exactRefusal(
+			() =>
+				adapter.compileUpsert(
+					{
+						type: 'upsert',
+						table: 't',
+						values: rows,
+						onConflict: { columns: ['id'] },
+						action: { type: 'doNothing' },
+					},
+					{ maxBatchSize: 1 },
+				),
+			message,
+		);
+		exactRefusal(
+			() =>
+				orm
+					.upsert('t')
+					.values(rows)
+					.onConflict(['id'])
+					.doNothing()
+					.dump({ maxBatchSize: 1 }),
+			message,
+		);
+	});
+	it('checks the final bind limit after unnest upsert action renumbering', () => {
+		const where = {
+			kind: 'and' as const,
+			conditions: Array.from({ length: 65535 }, () => ({
+				kind: 'comparison' as const,
+				field: 'id',
+				operator: 'eq' as const,
+				value: 7,
+			})),
+		};
+		const message =
+			'Invalid upsert: upsert: batch requires 65536 parameters, exceeding PostgreSQL limit 65535';
+		exactRefusal(
+			() =>
+				adapter.compileUpsert(
+					{
+						type: 'upsert',
+						table: 't',
+						values: [{ id: 1 }],
+						onConflict: { columns: ['id'] },
+						action: { type: 'doUpdate', set: { a: sql('42') }, where },
+					},
+					{ batchThreshold: 0 },
+				),
+			message,
+		);
+		exactRefusal(
+			() =>
+				orm
+					.upsert('t')
+					.values([{ id: 1 }])
+					.onConflict(['id'])
+					.doUpdate({ a: sql('42') }, where)
+					.dump({ batchThreshold: 0 }),
+			message,
+		);
+	});
 	it('discovers only enumerable own keys', () => {
 		const row = Object.defineProperty({ a: 1 }, 'b', {
 			value: 2,

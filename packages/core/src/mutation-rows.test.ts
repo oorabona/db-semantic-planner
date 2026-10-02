@@ -14,6 +14,7 @@ describe('inspectMutationRows', () => {
 		expect(inspectMutationRows(rows, { operation: 'insert' })).toEqual({
 			columns: ['b', 'a', 'c', 'd'],
 			heterogeneous: true,
+			rowKeys: rows.map((row) => new Set(Object.keys(row))),
 		});
 		expect(Object.hasOwn(rows[1]!, 'b')).toBe(false);
 	});
@@ -24,7 +25,11 @@ describe('inspectMutationRows', () => {
 		);
 		expect(
 			inspectMutationRows([{ a: 1 }, row], { operation: 'insert' }),
-		).toEqual({ columns: ['a', 'b'], heterogeneous: true });
+		).toEqual({
+			columns: ['a', 'b'],
+			heterogeneous: true,
+			rowKeys: [new Set(['a']), new Set(['b'])],
+		});
 	});
 	it('checks missing row-zero keys before extra keys', () => {
 		expect(() =>
