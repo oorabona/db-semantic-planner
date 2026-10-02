@@ -43,7 +43,7 @@ it('subquery includes return exactly selected columns at top and nested levels',
 		.where(eq('id', 961001))
 		.include('posts', { select: { type: 'fields', fields: ['title'] } });
 	expect(top.dump().sql).toBe(
-		'SELECT authors.id FROM include_subquery_e2e.authors WHERE authors.id = CAST($1 AS integer)',
+		'SELECT authors.id FROM include_subquery_e2e.authors WHERE authors.id = $1',
 	);
 	expect(top.dump().params).toEqual([961001]);
 	expect(await top.all()).toEqual([
