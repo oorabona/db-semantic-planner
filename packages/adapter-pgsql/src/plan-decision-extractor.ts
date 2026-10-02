@@ -1646,7 +1646,8 @@ export function enrichExistsDecisionsInPlace(
 /**
  * Extract ALL include decisions from include-strategy plan decisions.
  * Produces decisions with type 'includeStrategy' for all strategies:
- * - json_agg, subquery → tree-structured with children (like extractJsonAggDecisions)
+ * - json_agg → tree-structured with children (like extractJsonAggDecisions)
+ * - subquery → omitted; hydrated by separate queries
  * - join → flat decisions with columns (like extractLeftJoinIncludeDecisions)
  * - lateral → tree-structured with children
  * - cte → flat decisions
@@ -1665,14 +1666,14 @@ export function extractAllIncludeDecisions(
 	if (includeDecisions.length === 0) return [];
 
 	// Separate by strategy group
-	const treeStrategies = new Set(['json_agg', 'subquery', 'lateral']);
+	const treeStrategies = new Set(['json_agg', 'lateral']);
 	const treeDecisions: (PlanDecision & { intentPath?: string })[] = [];
 	const flatDecisions: PlanDecision[] = [];
 
 	for (const d of includeDecisions) {
 		const choice = d.choice as string;
 		if (treeStrategies.has(choice)) {
-			// Convert to tree-compatible decision (json_agg / lateral / subquery)
+			// Convert to tree-compatible decision (json_agg / lateral)
 			const converted = toIncludeDecision(d, choice, plan, defaultPk, deriveFk);
 			if (converted) treeDecisions.push(converted);
 		} else if (choice === 'join') {
@@ -1686,7 +1687,7 @@ export function extractAllIncludeDecisions(
 		}
 	}
 
-	// Build tree for json_agg / lateral / subquery (using intentPath)
+	// Build tree for json_agg / lateral (using intentPath)
 	const builtTree = buildIncludeTree(treeDecisions);
 
 	return [...builtTree, ...flatDecisions];
@@ -1715,10 +1716,6 @@ function toIncludeDecision(
 		| 'hasOne'
 		| undefined;
 
-	// Map subquery to json_agg — PostgreSQL always supports json_agg,
-	// so the subquery strategy is implemented via json_agg correlated subquery
-	const effectiveChoice = choice === 'subquery' ? 'json_agg' : choice;
-
 	// Extract per-include limit from the original intent using intentPath
 	// intentPath is e.g. "include[0]" or "include[0].include[0]" for nested
 	const includeIntent = resolveIncludeByPath(
@@ -1739,7 +1736,7 @@ function toIncludeDecision(
 
 	return {
 		type: 'includeStrategy',
-		choice: effectiveChoice,
+		choice,
 		relationName,
 		relationPath:
 			deriveRelationPathFromIntentPath(

@@ -145,8 +145,7 @@ const sameSql: Record<string, string> = {
 	join: 'SELECT users.*, posts.id AS "posts.id", comments.id AS "comments.id" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId" LEFT JOIN comments AS comments ON posts.id = comments."postId"',
 	json_agg:
 		"SELECT users.*, COALESCE((SELECT json_agg(to_jsonb(__t__) || jsonb_build_object('comments', COALESCE((SELECT json_agg(to_jsonb(__t1__) ORDER BY __t1__.id ASC NULLS LAST) FROM comments AS __t1__ WHERE __t1__.\"postId\" = __t__.id), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST) FROM posts AS __t__ WHERE __t__.\"authorId\" = users.id), '[]'::json) AS posts_json FROM users",
-	subquery:
-		"SELECT users.*, COALESCE((SELECT json_agg(to_jsonb(__t__) || jsonb_build_object('comments', COALESCE((SELECT json_agg(to_jsonb(__t1__) ORDER BY __t1__.id ASC NULLS LAST) FROM comments AS __t1__ WHERE __t1__.\"postId\" = __t__.id), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST) FROM posts AS __t__ WHERE __t__.\"authorId\" = users.id), '[]'::json) AS posts_json FROM users",
+	subquery: 'SELECT users.* FROM users',
 	lateral:
 		'SELECT users.*, posts_lat_0.*, comments_lat_1.* FROM users LEFT JOIN LATERAL (SELECT posts_inner_0.* FROM posts AS posts_inner_0 WHERE posts_inner_0."authorId" = users.id) AS posts_lat_0 ON true LEFT JOIN LATERAL (SELECT comments_inner_1.* FROM comments AS comments_inner_1 WHERE comments_inner_1."postId" = posts_lat_0.id) AS comments_lat_1 ON true',
 };
@@ -171,18 +170,136 @@ describe('#894 supported SQL', () => {
 		);
 		expect(result.params).toEqual([]);
 	});
-	it('subquery→subquery fetches children by post keys and attaches under posts', async () => {
+	for (const fields of [['id'], ['authorId']] as const) {
+		it(`top-level subquery selects only ${fields[0]} and reads posts once`, async () => {
+			const query = vi.fn(async (sql: string) => {
+				if (sql === 'SELECT users.* FROM users') return { rows: [{ id: 1 }] };
+				expect(sql).toBe(
+					fields[0] === 'id'
+						? 'SELECT id, "authorId" FROM posts WHERE "authorId" IN ($1)'
+						: 'SELECT "authorId" FROM posts WHERE "authorId" IN ($1)',
+				);
+				return {
+					rows:
+						fields[0] === 'id' ? [{ id: 10, authorId: 1 }] : [{ authorId: 1 }],
+				};
+			});
+			const executionOrm = createOrm({
+				schema: db,
+				adapter: createPgAdapter({ query } as unknown as Pool, {
+					model: db.model,
+				}),
+			});
+			const builder = executionOrm
+				.select('users')
+				.withPlanOptions({ defaultIncludeStrategy: 'subquery' })
+				.include('posts', { select: { type: 'fields', fields } });
+			expect(builder.dump().sql).toBe('SELECT users.* FROM users');
+			expect(builder.dump().params).toEqual([]);
+			expect(await builder.all()).toEqual([
+				{ id: 1, posts: fields[0] === 'id' ? [{ id: 10 }] : [{ authorId: 1 }] },
+			]);
+			expect(query.mock.calls).toEqual([
+				['SELECT users.* FROM users', []],
+				[
+					fields[0] === 'id'
+						? 'SELECT id, "authorId" FROM posts WHERE "authorId" IN ($1)'
+						: 'SELECT "authorId" FROM posts WHERE "authorId" IN ($1)',
+					[1],
+				],
+			]);
+		});
+	}
+	it('subquery projection honours expression aliases and aggregates', async () => {
+		const info = {
+			relationName: 'posts',
+			targetTable: 'posts',
+			foreignKey: ['authorId'],
+			sourceKey: ['id'],
+		};
+		const expressions = adapter.compileSubqueryInclude(
+			{
+				...info,
+				select: {
+					type: 'expressions',
+					columns: [{ kind: 'columnAlias', column: 'id', alias: 'postId' }],
+				},
+			},
+			[1],
+		);
+		expect(expressions.sql).toBe(
+			'SELECT posts.id AS "postId", posts."authorId" FROM posts WHERE "authorId" IN ($1)',
+		);
+		expect(expressions.parameters).toEqual([1]);
+		const aggregate = adapter.compileSubqueryInclude(
+			{
+				...info,
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'count', as: 'total' }],
+				},
+			},
+			[1],
+		);
+		expect(aggregate.sql).toBe(
+			'SELECT count(*) AS total, posts."authorId" FROM posts WHERE "authorId" IN ($1) GROUP BY posts."authorId"',
+		);
+		expect(aggregate.parameters).toEqual([1]);
+		const query = vi.fn(async (sql: string) => {
+			if (sql === 'SELECT users.* FROM users') return { rows: [{ id: 1 }] };
+			expect(sql).toBe(expressions.sql);
+			return { rows: [{ postId: 10, authorId: 1 }] };
+		});
+		const executionOrm = createOrm({
+			schema: db,
+			adapter: createPgAdapter({ query } as unknown as Pool, {
+				model: db.model,
+			}),
+		});
+		expect(
+			await executionOrm
+				.select('users')
+				.withPlanOptions({ defaultIncludeStrategy: 'subquery' })
+				.include('posts', {
+					select: {
+						type: 'expressions',
+						columns: [{ kind: 'columnAlias', column: 'id', alias: 'postId' }],
+					},
+				})
+				.all(),
+		).toEqual([{ id: 1, posts: [{ postId: 10 }] }]);
+	});
+	it('keeps a parent FK needed by a belongsTo subquery in narrow main SQL', () => {
+		const p = plan(
+			{
+				type: 'select',
+				from: 'posts',
+				select: { type: 'fields', fields: ['id'] },
+				include: [{ relation: 'author' }],
+			},
+			db.model,
+			{ defaultIncludeStrategy: 'subquery' },
+		);
+		expect(adapter.compile(p).sql).toBe(
+			'SELECT posts.id, posts."authorId" FROM posts',
+		);
+		expect(adapter.compileWithIncludes(p).main.sql).toBe(
+			'SELECT posts.id, posts."authorId" FROM posts',
+		);
+	});
+	it('subquery→subquery fetches children by unselected post keys and attaches under posts', async () => {
 		const query = vi.fn<
 			(
 				sql: string,
 				params?: unknown[],
 			) => Promise<{ rows: Record<string, number>[] }>
 		>(async (sql) => ({
-			rows: sql.startsWith('SELECT * FROM comments')
-				? [{ id: 100, postId: 10 }]
-				: sql.startsWith('SELECT * FROM posts')
-					? [{ id: 10, authorId: 1 }]
-					: [{ id: 1 }],
+			rows:
+				sql === 'SELECT id, "postId" FROM comments WHERE "postId" IN ($1)'
+					? [{ id: 100, postId: 10 }]
+					: sql === 'SELECT "authorId", id FROM posts WHERE "authorId" IN ($1)'
+						? [{ id: 10, authorId: 1 }]
+						: [{ id: 1 }],
 		}));
 		const executionOrm = createOrm({
 			schema: db,
@@ -193,20 +310,27 @@ describe('#894 supported SQL', () => {
 		const rows = await executionOrm
 			.select('users')
 			.withPlanOptions({ defaultIncludeStrategy: 'subquery' })
-			.include('posts', { include: [{ relation: 'comments' }] })
+			.include('posts', {
+				select: { type: 'fields', fields: ['authorId'] },
+				include: [
+					{ relation: 'comments', select: { type: 'fields', fields: ['id'] } },
+				],
+			})
 			.all();
+		expect(query).toHaveBeenCalledTimes(3);
+		expect(query.mock.calls[0]).toEqual(['SELECT users.* FROM users', []]);
 		expect(query.mock.calls[1]).toEqual([
-			'SELECT * FROM posts WHERE "authorId" IN ($1)',
+			'SELECT "authorId", id FROM posts WHERE "authorId" IN ($1)',
 			[1],
 		]);
 		expect(query.mock.calls[2]).toEqual([
-			'SELECT * FROM comments WHERE "postId" IN ($1)',
+			'SELECT id, "postId" FROM comments WHERE "postId" IN ($1)',
 			[10],
 		]);
 		expect(rows).toEqual([
 			{
 				id: 1,
-				posts: [{ id: 10, authorId: 1, comments: [{ id: 100, postId: 10 }] }],
+				posts: [{ authorId: 1, comments: [{ id: 100 }] }],
 			},
 		]);
 	});

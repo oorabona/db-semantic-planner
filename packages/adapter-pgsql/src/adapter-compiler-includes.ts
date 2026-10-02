@@ -15,14 +15,16 @@ import { toColumnList } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import {
+	booleanConstNode,
 	innerJoin,
 	sqlColumnRef,
 	sqlColumnRefStar,
 	sqlRangeVar,
 } from './ast-helpers.js';
-import { quoteIdent } from './ddl/phases/utils.js';
+import { compilePlan } from './compiler.js';
 import { deparseQuoted } from './deparse.js';
 import { createCompilerState } from './handlers/index.js';
+import { intentToDecisions } from './intent-to-decisions.js';
 import { finalizeEnvelope, fromAstProjection } from './projection-envelope.js';
 import {
 	identifierText,
@@ -51,13 +53,132 @@ function compileIncludeSelectEnvelope(
 	);
 }
 
+/** Project requested fields plus keys used by this and nested hydration. */
+function includeProjection(
+	info: SubqueryIncludeInfo,
+	deps: AdapterCompilerDeps,
+	alias?: string,
+): {
+	targetList: Node[];
+	parameters: readonly unknown[];
+	groupClause?: Node[];
+} {
+	if (
+		!info.select ||
+		info.select.type === 'all' ||
+		(info.select.type === 'fields' && info.select.fields.includes('*'))
+	) {
+		return {
+			parameters: [],
+			targetList: [
+				{
+					ResTarget: {
+						val: sqlColumnRefStar(
+							alias === undefined ? undefined : queryLocal(alias),
+						),
+					},
+				},
+			],
+		};
+	}
+	const keys = [
+		...toColumnList(info.foreignKey),
+		...(info.nestedIncludes ?? []).flatMap((nested) =>
+			toColumnList(nested.sourceKey),
+		),
+	];
+	if (info.select.type !== 'fields') {
+		const decisions = intentToDecisions(
+			{ type: 'select', from: info.targetTable, select: info.select },
+			info.targetTable,
+		);
+		for (const column of new Set(keys)) {
+			if (
+				!decisions.some(
+					(d) => d.type === 'select' && d.column === column && !d.alias,
+				)
+			)
+				decisions.push({ type: 'select', table: info.targetTable, column });
+		}
+		if (decisions.some((d) => d.type === 'selectFunction')) {
+			for (const d of [...decisions]) {
+				if (d.type === 'select' && d.column)
+					decisions.push({
+						type: 'groupBy',
+						table: info.targetTable,
+						column: d.column,
+					});
+			}
+		}
+		const compiled = compilePlan(
+			{ rootTable: info.targetTable, decisions },
+			{
+				dbCasing: deps.dbCasing ?? 'preserve',
+				...(deps.declaredNames && { declaredNames: deps.declaredNames }),
+				...(deps.model && { model: deps.model }),
+			},
+		);
+		const stmt = (
+			'SelectStmt' in compiled.ast ? compiled.ast.SelectStmt : undefined
+		)!;
+		if (alias) {
+			const table = identifierText(
+				resolveDeclaredIdentifier(
+					deps.declaredNames,
+					deps.dbCasing ?? 'preserve',
+					{ kind: 'table', table: info.targetTable },
+				),
+			);
+			const rebind = (node: unknown): void => {
+				if (!node || typeof node !== 'object') return;
+				const ref =
+					'ColumnRef' in node
+						? (node as Extract<Node, { ColumnRef: unknown }>).ColumnRef
+						: undefined;
+				const first = ref?.fields?.[0];
+				if (
+					first &&
+					'String' in first &&
+					first.String?.sval === table &&
+					ref!.fields!.length > 1
+				)
+					first.String.sval = alias;
+				for (const child of Object.values(node)) rebind(child);
+			};
+			rebind(stmt.targetList);
+			rebind(stmt.groupClause);
+		}
+		return {
+			targetList: stmt.targetList ?? [],
+			parameters: compiled.parameters,
+			...(stmt.groupClause && { groupClause: stmt.groupClause }),
+		};
+	}
+	const fields = [...new Set([...info.select.fields, ...keys])];
+	return {
+		parameters: [],
+		targetList: fields.map((column) => ({
+			ResTarget: {
+				val: sqlColumnRef(
+					resolveDeclaredIdentifier(
+						deps.declaredNames,
+						deps.dbCasing ?? 'preserve',
+						{ kind: 'column', table: info.targetTable, column },
+					),
+					alias === undefined ? undefined : queryLocal(alias),
+				),
+			},
+		})),
+	};
+}
+
 // ============================================================================
 // compileSubqueryInclude
 // ============================================================================
 
 /**
  * Compile a subquery include query for given parent IDs (DX-033).
- * Generates: SELECT * FROM targetTable WHERE foreignKey IN ($1, $2, ...)
+ * Generates: SELECT requestedColumns FROM targetTable WHERE foreignKey IN ($1, $2, ...)
  * Extracted body of PgAdapter.compileSubqueryInclude().
  */
 export function compileSubqueryInclude(
@@ -82,7 +203,7 @@ export function compileSubqueryInclude(
 			deps.dbCasing ?? 'preserve',
 			{ kind: 'table', table: info.targetTable },
 		);
-		const targetList = [{ ResTarget: { val: sqlColumnRefStar() } }];
+		const projection = includeProjection(info, deps);
 		const fromClause = [
 			sqlRangeVar(
 				dbTargetTable,
@@ -92,20 +213,19 @@ export function compileSubqueryInclude(
 		];
 		const selectAst: Node = {
 			SelectStmt: {
-				targetList,
+				targetList: projection.targetList,
+				...(projection.groupClause && { groupClause: projection.groupClause }),
 				fromClause,
 			},
 		};
-		const tableName = schemaName
-			? `${quoteIdent(schemaName, 'schema')}.${quoteIdent(identifierText(dbTargetTable), 'table')}`
-			: quoteIdent(identifierText(dbTargetTable), 'table');
-
+		const sql = `${deparseQuoted(selectAst)} WHERE FALSE`;
+		selectAst.SelectStmt!.whereClause = booleanConstNode(false);
 		return compileIncludeSelectEnvelope(
 			selectAst,
 			info.targetTable,
 			[],
 			deps,
-			`SELECT * FROM ${tableName} WHERE FALSE`,
+			sql,
 		);
 	}
 
@@ -129,7 +249,10 @@ export function compileSubqueryInclude(
 	}
 
 	// Build SELECT target list
-	const targetList = [{ ResTarget: { val: sqlColumnRefStar() } }];
+	const projection = includeProjection(info, deps);
+
+	state.parameters.push(...projection.parameters);
+	state.paramIndex = projection.parameters.length;
 
 	// Build FROM clause
 	const fromClause = [
@@ -223,7 +346,8 @@ export function compileSubqueryInclude(
 	// Build SELECT statement
 	const selectAst: Node = {
 		SelectStmt: {
-			targetList,
+			targetList: projection.targetList,
+			...(projection.groupClause && { groupClause: projection.groupClause }),
 			fromClause,
 			whereClause,
 		},
@@ -297,6 +421,10 @@ function compileSubqueryIncludeManyToMany(
 		{ kind: 'column', table: info.targetTable, column: targetPk },
 	);
 
+	const projection = includeProjection(info, deps, targetAlias);
+	state.parameters.push(...projection.parameters);
+	state.paramIndex = projection.parameters.length;
+
 	// Build param refs for parent IDs
 	const paramRefs = parentIds.map((id) => {
 		state.parameters.push(id);
@@ -341,22 +469,10 @@ function compileSubqueryIncludeManyToMany(
 	const joinNode = innerJoin(targetRangeVar, junctionRangeVar, joinQuals);
 	const fromClause = [joinNode];
 
-	// Build SELECT t.*
-	const targetList = [
-		{
-			ResTarget: {
-				val: {
-					ColumnRef: {
-						fields: [{ String: { sval: targetAlias } }, { A_Star: {} }],
-					},
-				},
-			},
-		},
-	];
-
 	const selectAst: Node = {
 		SelectStmt: {
-			targetList,
+			targetList: projection.targetList,
+			...(projection.groupClause && { groupClause: projection.groupClause }),
 			fromClause,
 			whereClause,
 		},
