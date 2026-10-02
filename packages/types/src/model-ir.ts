@@ -206,7 +206,7 @@ export interface ColumnIR {
 	/** Whether NULL is allowed */
 	readonly nullable: boolean;
 
-	/** Default value (optional): `{ sql: string }` is SQL; a string ending in `()` is also emitted as SQL; other values are formatted as literals. SQL text is not identifier-rewritten: column names must use database names after `dbCasing`. */
+	/** Default value (optional). `{ sql: string }` and a string ending in `()` are emitted as SQL text; column names in that text are database names after `dbCasing`, which does not rewrite them. */
 	readonly default?: unknown;
 
 	/**

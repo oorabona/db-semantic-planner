@@ -59,7 +59,8 @@ model carries, primary-key, foreign-key and automatic-index names included. Ever
 in the adapter.
 
 Expression text — CHECK expressions, index predicates and expressions, policy `USING`/`WITH CHECK`, SQL column
-defaults — is physical SQL and is never rewritten (#318, option a). Enum names keep their existing physical
+defaults — is physical SQL: it names database columns, and `dbCasing` never maps identifiers inside it (#318,
+option a). The DDL renderer may still trim and wrap a CHECK clause and re-escape engine-canonical literals. Enum names keep their existing physical
 meaning. Query-local aliases (CTE columns, relation aliases, `RETURNING` labels) are compiler-local, not model
 names, and are handled with the query compiler (#762).
 
