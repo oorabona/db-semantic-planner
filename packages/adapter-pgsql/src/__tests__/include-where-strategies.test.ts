@@ -278,3 +278,31 @@ describe('#888 many-to-many batch subquery include where', () => {
 			expect(result.parameters).toEqual(params);
 		});
 });
+
+describe('#888 discarded projection bindings', () => {
+	for (const strategy of [
+		'json_agg',
+		'subquery',
+		'lateral',
+		'cte',
+		'join',
+	] as const) {
+		it(`exists ${strategy} binds exactly its SQL parameters`, () => {
+			const result = orm
+				.select('users')
+				.withPlanOptions({ defaultIncludeStrategy: strategy })
+				.where(eq('tenantId', 7))
+				.include('posts', { where: eq('published', true) })
+				.existsDump();
+			const references = [
+				...new Set(
+					[...result.sql.matchAll(/\$(\d+)/g)].map((match) => Number(match[1])),
+				),
+			].sort((a, b) => a - b);
+			expect(references).toEqual(result.params.map((_, index) => index + 1));
+			expect(result.params).toEqual(
+				strategy === 'json_agg' || strategy === 'subquery' ? [7] : [7, true],
+			);
+		});
+	}
+});

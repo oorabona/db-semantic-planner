@@ -1364,14 +1364,12 @@ export class PlanCompiler {
 			: undefined;
 		const cteParentPath = getParentRelationPath(decision.relationPath);
 		const cteParent =
-			decision.choice === 'cte'
+			decision.choice === 'cte' && cteParentPath
 				? plan.decisions.find(
 						(candidate) =>
 							candidate.type === 'includeStrategy' &&
 							candidate.choice === 'cte' &&
-							(cteParentPath
-								? candidate.relationPath === cteParentPath
-								: candidate.targetTable === decision.sourceTable),
+							candidate.relationPath === cteParentPath,
 					)
 				: undefined;
 		const sourceAlias =
@@ -3296,10 +3294,17 @@ export class PlanCompiler {
 				case 'selectArithmetic':
 				case 'selectWindow':
 				case 'selectCustomExpression':
-					this.compileSelectTarget(decision, plan, targetList);
+					if (!plan.existsWrap)
+						this.compileSelectTarget(decision, plan, targetList);
 					break;
 
 				case 'includeStrategy':
+					// EXISTS discards projection-only includes. Do not allocate their bindings.
+					if (
+						plan.existsWrap &&
+						(decision.choice === 'json_agg' || decision.choice === 'subquery')
+					)
+						break;
 					this.compileIncludeDecision(
 						decision,
 						plan,

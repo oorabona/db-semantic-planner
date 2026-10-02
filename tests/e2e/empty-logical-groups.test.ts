@@ -25,7 +25,7 @@ beforeAll(async () => {
 	await createSchema(SCHEMA);
 	await execInSchema(
 		SCHEMA,
-		'CREATE TABLE users (id integer PRIMARY KEY, "tenantId" integer NOT NULL); INSERT INTO users VALUES (1, 1), (2, 1), (3, 2); CREATE TABLE posts (id integer PRIMARY KEY, published boolean NOT NULL, "authorId" integer REFERENCES users(id)); INSERT INTO posts VALUES (11, true, 1), (12, false, 1), (21, false, 2), (22, true, 2);',
+		'CREATE TABLE users (id integer PRIMARY KEY, tenant_id integer NOT NULL); INSERT INTO users VALUES (1, 1), (2, 1), (3, 2); CREATE TABLE posts (id integer PRIMARY KEY, published boolean NOT NULL, author_id integer REFERENCES users(id)); INSERT INTO posts VALUES (11, true, 1), (12, false, 1), (21, false, 2), (22, true, 2);',
 	);
 });
 afterAll(async () => {
