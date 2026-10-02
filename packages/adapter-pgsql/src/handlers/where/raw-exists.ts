@@ -17,7 +17,7 @@
 import type { QueryIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import { notExpr } from '../../ast-helpers.js';
-import { buildSubqueryFromIntent } from '../../compile-where.js';
+import { buildSubqueryFromIntent } from '../../condition-subquery.js';
 import type {
 	CompilerContext,
 	CompilerState,

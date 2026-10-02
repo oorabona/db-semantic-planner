@@ -11,8 +11,8 @@ import {
 	type Mutable,
 	markNqlTrustedRelationFilter,
 } from '@dbsp/types/internal';
-import type { PlanDecision } from './compiler.js';
 import type { WindowOver } from './handlers/types.js';
+import type { PlanDecision } from './plan-decision.js';
 
 // ============================================================================
 // Handler Type
