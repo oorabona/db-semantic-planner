@@ -106,20 +106,7 @@ dependency-free — `core/src/dx/nql.ts` imports `@dbsp/nql`, and both it and `n
 
 **Option 2: Dependency Cruiser**
 
-```javascript
-// .dependency-cruiser.cjs
-module.exports = {
-  forbidden: [
-    {
-      name: 'core-no-adapter',
-      from: { path: 'packages/core' },
-      to: { path: 'packages/adapter-' }
-    }
-  ]
-};
-```
-
-**CI Integration:** Add architecture check to CI pipeline to prevent violations.
+`pnpm check:arch` enforces ARCH-001 and declared workspace dependencies in CI before any build. The exact-path test exceptions in `.dependency-cruiser.cjs` are tracked in #450 and may only shrink.
 
 ## Scopes
 

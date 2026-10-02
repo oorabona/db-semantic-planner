@@ -1,0 +1,25 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"paths": {
+			"@dbsp/adapter-pgsql": ["packages/adapter-pgsql/src/index.ts"],
+			"@dbsp/adapter-pgsql/internal": [
+				"packages/adapter-pgsql/src/internal.ts"
+			],
+			"@dbsp/cli": ["packages/cli/src/index.ts"],
+			"@dbsp/cli/generators/schema-codegen": [
+				"packages/cli/src/generators/schema-codegen.ts"
+			],
+			"@dbsp/cli/batch": ["packages/cli/src/repl/batch.ts"],
+			"@dbsp/cli/schema-loader": ["packages/cli/src/utils/schema-loader.ts"],
+			"@dbsp/mcp-server": ["packages/mcp-server/src/api.ts"],
+			"@dbsp/mcp-server/cli": ["packages/mcp-server/src/index.ts"],
+			"@dbsp/core": ["packages/core/src/index.ts"],
+			"@dbsp/core/internal": ["packages/core/src/internal.ts"],
+			"@dbsp/nql": ["packages/nql/src/index.ts"],
+			"@dbsp/types": ["packages/types/src/index.ts"],
+			"@dbsp/types/internal": ["packages/types/src/internal.ts"],
+			"@dbsp/types/adapter-sdk": ["packages/types/src/adapter-sdk.ts"]
+		}
+	}
+}
