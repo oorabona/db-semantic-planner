@@ -445,7 +445,54 @@ describe('BATCH-INSERT-NULLABLE-INT: schema-driven int4[] for nullable integer c
 				},
 				UNNEST_OPTIONS,
 			),
-		).toThrow(/array-typed column 'tags'.*not supported/);
+		).toThrow(
+			"Batch mutation of array-typed column 'tags' (integer[]) is not supported: unnest flattens multi-dimensional arrays. Set batchThreshold to at least the batch size to use VALUES, or use single-row mutations for array columns.",
+		);
+	});
+
+	it('uses VALUES for an array-typed column when batchThreshold reaches the batch size', () => {
+		const table = {
+			name: 'events',
+			columns: [
+				{
+					name: 'id',
+					type: 'integer',
+					nullable: false,
+					originalDbType: 'int4',
+				},
+				{
+					name: 'tags',
+					type: 'string',
+					nullable: false,
+					originalDbType: 'integer[]',
+				},
+			],
+			relations: [],
+			primaryKey: 'id',
+			foreignKeys: [],
+			indexes: [],
+			rlsEnabled: false,
+			policies: [],
+		} as unknown as TableIR;
+		const adapter = createPgsqlCompileOnlyAdapter({
+			model: buildSingleTableModel(table),
+		});
+
+		const result = adapter.compileInsert(
+			{
+				type: 'insert',
+				table: 'events',
+				values: [
+					{ id: 1, tags: [10, 20] },
+					{ id: 2, tags: [30, 40] },
+				],
+			},
+			{ batchThreshold: 2 },
+		);
+
+		expect(result.sql).toBe(
+			'INSERT INTO events (id, tags) VALUES ($1, $2), ($3, $4)',
+		);
 	});
 
 	it('quotes case-sensitive UDT names in batch insert casts', () => {

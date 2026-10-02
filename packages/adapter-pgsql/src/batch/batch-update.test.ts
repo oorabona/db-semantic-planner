@@ -149,6 +149,65 @@ describe('SC-06: mixed scalar + array SET', () => {
 		expect(result.sql).toContain('confidence');
 		expect(result.parameters[2]).toBe(0.85);
 	});
+
+	it('keeps array-valued scalar SET columns out of the unnest refusal', () => {
+		const model = schema({
+			calls: {
+				id: { type: 'integer', primaryKey: true },
+				callee_id: 'integer',
+				tags: 'text',
+			},
+		}).model;
+		const tags = model
+			.getTable('calls')
+			?.columns.find((column) => column.name === 'tags');
+		if (!tags) throw new Error('Expected calls.tags in the schema model');
+		(tags as { originalDbType?: string }).originalDbType = 'text[]';
+		const orm = stringMutationOrm(
+			createOrm({
+				model,
+				adapter: createPgsqlCompileOnlyAdapter({ model }),
+			}),
+		);
+
+		const result = orm
+			.update('calls')
+			.batchSet('id', [{ id: 10, callee_id: 42 }])
+			.set({ tags: ['a', 'b'] } as never)
+			.dump();
+
+		expect(result.sql).toBe(
+			'UPDATE calls SET callee_id = t.callee_id,tags = $3 FROM unnest(CAST($1 AS int4[]), CAST($2 AS int4[])) AS t(id, callee_id) WHERE calls.id = t.id',
+		);
+		expect(result.parameters).toEqual([[10], [42], ['a', 'b']]);
+	});
+
+	it('still refuses array-typed columns that are unnested', () => {
+		const model = schema({
+			calls: {
+				id: { type: 'integer', primaryKey: true },
+				tags: 'text',
+			},
+		}).model;
+		const tags = model
+			.getTable('calls')
+			?.columns.find((column) => column.name === 'tags');
+		if (!tags) throw new Error('Expected calls.tags in the schema model');
+		(tags as { originalDbType?: string }).originalDbType = 'text[]';
+		const orm = stringMutationOrm(
+			createOrm({
+				model,
+				adapter: createPgsqlCompileOnlyAdapter({ model }),
+			}),
+		);
+
+		expect(() =>
+			orm
+				.update('calls')
+				.batchSet('id', [{ id: 10, tags: ['a', 'b'] } as never])
+				.dump(),
+		).toThrow('Batch mutation of array-typed column');
+	});
 });
 
 // ---------------------------------------------------------------------------

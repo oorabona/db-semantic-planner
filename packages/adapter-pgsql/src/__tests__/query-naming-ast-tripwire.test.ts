@@ -19,7 +19,7 @@ import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { queryLocal } from '../sql-identifier.js';
 
 const sourceRoot = fileURLToPath(new URL('..', import.meta.url));
-/** Syntactic checks for direct naming-module imports, property or destructured naming calls, SqlIdentifier assertions, and SqlIdentifier | string unions; not semantic proof. */
+/** Catches static imports from paths ending `/naming-plugin.js` or `/naming.js`; property or string-element calls named `resolve`, `model`, `toDatabase`, or `toModel` (except `Promise.resolve()`); and bare identifier calls with those same four literal names. It does not resolve aliases and is not semantic proof. */
 const namingAllowed = new Set([
 	'index.ts',
 	'naming-plugin.ts',
@@ -107,7 +107,7 @@ function namingViolations(relative: string, text: string): string[] {
 			)
 		)
 			violations.push(
-				`${relative}: destructured naming call ${node.expression.text}()`,
+				`${relative}: bare identifier naming call ${node.expression.text}()`,
 			);
 		if (
 			relative !== 'sql-identifier.ts' &&
@@ -203,7 +203,7 @@ function architectureViolations(): string[] {
 	);
 }
 
-describe('query naming syntax tripwire', () => {
+describe('query naming syntax tripwire for literal member and call forms', () => {
 	const typecheckMutationRawStringRefusal = (table: string): InsertConfig => ({
 		// @ts-expect-error mutation compiler configs require an addressed identifier
 		table,
@@ -632,13 +632,19 @@ describe('query naming syntax tripwire', () => {
 		]);
 	});
 
-	it('catches destructured naming calls', () => {
+	it('catches bare calls with a naming-method identifier', () => {
 		expect(
 			namingViolations(
 				'x.ts',
 				'const { toDatabase } = plugin; toDatabase(name);',
 			),
-		).toEqual(['x.ts: destructured naming call toDatabase()']);
+		).toEqual(['x.ts: bare identifier naming call toDatabase()']);
+	});
+
+	it('does not catch a destructured naming call under an alias', () => {
+		expect(
+			namingViolations('x.ts', 'const { toDatabase: emit } = plugin; emit(x);'),
+		).toEqual([]);
 	});
 
 	it('catches as and angle-bracket SqlIdentifier assertions', () => {
