@@ -67,9 +67,9 @@ pnpm dbsp repl --schema ./examples/ecommerce.schema.ts \
   --input ./examples/ecommerce.dbsp
 ```
 
-The result tables below are REPL output: column headers are the labels PostgreSQL returns, so model columns
-appear under their database names (`parent_id`) and written aliases as written (`userCount`). Queries run through
-the ORM return model columns under their logical keys (`parentId`).
+The result tables below summarize executed results. Their column headers are the labels PostgreSQL returns: model
+columns appear under their database names (`parent_id`) and written aliases as written (`userCount`). Queries run
+through the ORM return model columns under their logical keys (`parentId`).
 
 ### Pipe Syntax
 
@@ -651,8 +651,8 @@ WHERE users.active = $1
 | 1  | alice    | alice@example.com  | True   | [{"role_id":1,"role":[{"id":1,"name":"super_admin",...}]}]  |
 | 2  | bob      | bob@example.com    | True   | [{"role_id":2,"role":[{"id":2,"name":"admin",...}]}]        |
 | 3  | carol    | carol@example.com  | True   | [{"role_id":3,"role":[{"id":3,"name":"manager",...}]},...]  |
-| 4  | dave     | dave@example.com   | True   | [{"role_id":5,"role":[{"id":4,"name":"editor",...}]}]       |
-| 5  | eve      | eve@example.com    | True   | [{"role_id":6,"role":[{"id":5,"name":"viewer",...}]}]       |
+| 4  | dave     | dave@example.com   | True   | [{"role_id":4,"role":[{"id":4,"name":"editor",...}]}]       |
+| 5  | eve      | eve@example.com    | True   | [{"role_id":5,"role":[{"id":5,"name":"viewer",...}]}]       |
 
 *(5 rows — the planner traverses: users → userRoles → roles → rolePermissions → permissions)*
 
@@ -1405,7 +1405,7 @@ employees | select name, manager.name, manager.manager.name
 
 ### Recursive Ancestors (CTE)
 
-This query selects each employee's name and left-joins the employees they manage; it does not walk the management chain recursively (see #877).
+The `managementChain` pseudo-column walks all the way up to the root. NQL compiles this to a `WITH RECURSIVE` CTE — no manual recursion needed.
 
 ```nql
 employees | select name, managementChain.*
@@ -1414,14 +1414,24 @@ employees | select name, managementChain.*
 <details><summary>SQL</summary>
 
 ```sql
-WITH "managementChain_cte" AS (
-  SELECT employees_inner_0.*
-  FROM hierarchy.employees AS employees_inner_0
+WITH RECURSIVE management_chain_cte AS (
+  SELECT employees.id, employees.name, employees.title,
+    employees.manager_id, 1 AS depth
+  FROM hierarchy_example.employees
+  WHERE employees.id IN (SELECT manager_id FROM hierarchy_example.employees)
+  UNION ALL
+  SELECT e.id, e.name, e.title, e.manager_id, mc.depth + 1
+  FROM hierarchy_example.employees e
+  INNER JOIN management_chain_cte mc ON e.id = mc.manager_id
 )
-SELECT employees.name
-FROM hierarchy.employees
-LEFT JOIN "managementChain_cte" AS "managementChain_ref_0"
-  ON employees.id = "managementChain_ref_0".manager_id
+SELECT employees.name,
+  COALESCE(
+    (SELECT json_agg(to_jsonb(mc))
+     FROM management_chain_cte mc
+     WHERE mc.id = employees.manager_id),
+    '[]'::json
+  ) AS management_chain_json
+FROM hierarchy_example.employees
 ```
 </details>
 

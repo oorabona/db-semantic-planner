@@ -470,7 +470,7 @@ function getColumnTypes(
 			// clear message instead of emitting SQL PostgreSQL rejects at runtime.
 			if (unnestedColumns.has(col) && castTarget.trim().endsWith('[]')) {
 				throw new Error(
-					`Batch mutation of array-typed column '${col}' (${castTarget}) is not supported: unnest flattens multi-dimensional arrays. Use single-row mutations for array columns.`,
+					`Batch mutation of array-typed column '${col}' (${castTarget}) is not supported: unnest flattens multi-dimensional arrays. Set batchThreshold to at least the batch size to use VALUES, or use single-row mutations for array columns.`,
 				);
 			}
 			// Mutation compiler columns are physical identifiers. Keep the cast map
