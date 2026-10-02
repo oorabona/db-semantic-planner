@@ -63,7 +63,12 @@ export interface IncludeIntent {
 	/** What columns to select from related records */
 	readonly select?: SelectIntent | undefined;
 
-	/** Filter conditions on related records */
+	/**
+	 * Root WHERE predicate on the joined relation. Accepted on join includes only
+	 * (`join: 'inner'` keeps roots with a matching related row; `join: 'left'`
+	 * with a `where` behaves like an inner join). Other include strategies refuse
+	 * it (#892).
+	 */
 	readonly where?: WhereIntent | undefined;
 
 	/** Nested includes for deep loading */

@@ -6,8 +6,8 @@
  * 3. Range with model but table not found       → graceful fallback (no cast)
  * 4. LIKE with escape character                 → SQL with ESCAPE $N
  * 5. Range operator 'between' always uses BETWEEN regardless of model/type
- * 6. Empty AND conditions                       → tautology cast(1 as bool)
- * 7. Empty OR conditions                        → contradiction cast(0 as bool)
+ * 6. Empty AND conditions                       → boolean true
+ * 7. Empty OR conditions                        → boolean false
  * 8. Single-element AND/OR unwraps to the child node
  * 9. NOT wraps child expression
  * 10. Range 'overlaps' on non-range column (no model dataType) → plain &&

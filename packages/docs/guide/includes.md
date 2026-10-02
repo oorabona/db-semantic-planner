@@ -79,6 +79,7 @@ const posts = await orm.select('posts')
 
 | Option | Type | Description |
 |--------|------|-------------|
+| `join` | `'inner' \| 'left'` | Load the relation through a join instead of the planner's choice |
 | `where` | `WhereIntent` | Root WHERE predicate; join includes only |
 | `select` | `SelectSpec` | Columns to select on the related table |
 | `via` | `string` | Relation name hint when multiple FKs point to the same table |
@@ -120,12 +121,13 @@ For schema setup with self-referential `ref()` and `roles`, see [Getting Started
 
 ## How the Planner Chooses a Strategy
 
-You never specify the SQL strategy — the planner picks the best one based on query shape:
+The planner picks the SQL strategy from the query shape unless you override it: `join: 'inner'` or `join: 'left'` on
+an include, or `defaultIncludeStrategy` in the plan options. An include `where` requires a join override.
 
 | Strategy | When used | Notes |
 |----------|-----------|-------|
 | `json_agg` | Simple 1:N includes on the same root query | Aggregates rows with `json_agg()` + `GROUP BY` |
-| `lateral` | Filtered or ordered sub-collections | Uses `LATERAL` join for per-row subqueries |
+| `lateral` | Ordered sub-collections | Uses `LATERAL` join for per-row subqueries |
 | `subquery` | Large or deeply nested includes | Separate correlated subquery per relation |
 
 Inspect the chosen strategy at any time with `dump()`:

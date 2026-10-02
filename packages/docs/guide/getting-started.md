@@ -198,7 +198,7 @@ const usersWithComments = await orm.select('users')
   .dump();
 // usersWithComments[0].posts[0].comments — Comment[]
 
-// Filter and select within an include
+// Keep users with a published post, selecting columns on the joined posts
 const usersFiltered = await orm.select('users')
   .include('posts', {
     join: 'inner',
@@ -208,7 +208,7 @@ const usersFiltered = await orm.select('users')
   .dump();
 ```
 
-The planner selects the optimal fetch strategy (`json_agg`, lateral join, or separate query) based on the query shape. You do not choose the strategy — that is the planner's job.
+The planner selects the fetch strategy (`json_agg`, lateral join, or separate query) from the query shape unless an include sets `join: 'inner'` or `join: 'left'`. An include `where` requires such a join and filters the root rows: an inner join keeps only users with a matching post.
 
 ::: tip Try it
 Paste this NQL equivalent in the [Playground](/playground): `users | where active = true | select id, name`

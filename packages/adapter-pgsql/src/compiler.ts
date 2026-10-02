@@ -323,10 +323,9 @@ export function buildCustomFnFilter(
 	state: HandlerCompilerState,
 ): Node {
 	// Fail loud rather than treat "could not lower" as "no filter": a filter that
-	// lowers to nothing (e.g. an empty or()/and(), or an unsupported condition kind)
-	// must NOT silently drop to an unfiltered aggregate, which would broaden results.
-	// Well-defined degenerate semantics (empty or -> FALSE, empty and -> TRUE) are a
-	// separate condition-compiler concern tracked in #296.
+	// lowers to nothing (a malformed or unsupported condition) must NOT silently
+	// drop to an unfiltered aggregate, which would broaden results. An empty or()
+	// lowers to FALSE and an empty and() to TRUE, so neither reaches this branch.
 	const filterDecision = convertWhereCondition(filterIntent, ctx.rootTable);
 	const filterNode = filterDecision
 		? compileFilterCondition(
@@ -339,7 +338,7 @@ export function buildCustomFnFilter(
 	if (!filterNode) {
 		throw new Error(
 			'fn().filter(): the FILTER (WHERE ...) condition could not be compiled ' +
-				'(e.g. an empty or()/and() or an unsupported condition). ' +
+				'(a malformed or unsupported condition). ' +
 				'Provide a concrete filter condition.',
 		);
 	}
