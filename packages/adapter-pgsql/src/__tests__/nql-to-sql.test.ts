@@ -25,8 +25,10 @@ import {
 	plan,
 	type QueryIntent,
 	raw,
+	rawExists,
 	ref,
 	schema,
+	subquery,
 } from '@dbsp/core';
 import { compile } from '@dbsp/nql';
 import type {
@@ -852,20 +854,20 @@ describe('NQL → SQL compile-only pipeline', () => {
 
 	it('keeps structural ORDER BY columns and trusted nqlRaw ORDER BY fragments working', () => {
 		const structural = nqlToSQLWithNamedParams(
-			'users | select id | order by created_at desc',
+			'users | select id | order by createdAt desc',
 			{},
 		);
-		expect(structural.sql).toContain('order by users.created_at desc');
+		expect(structural.sql).toContain('order by users."createdat" desc');
 		expect(structural.params).toEqual([]);
 
 		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
 		const orm = createOrm({ model: testSchema.model, adapter });
 		const rawFragment = orm.nql<{
 			id: number;
-		}>`users | select id | ${nqlRaw('order by created_at desc')}`.dump();
+		}>`users | select id | ${nqlRaw('order by createdAt desc')}`.dump();
 
 		expect(normalizeSQL(rawFragment.sql)).toContain(
-			'order by users.created_at desc',
+			'order by users."createdat" desc',
 		);
 		if (!('params' in rawFragment)) {
 			throw new Error('expected NQL dump to be a query dump');
@@ -951,20 +953,55 @@ users | select id`.dump(),
 		);
 	});
 
-	it('emits NQL CTE declarations with the same casing as references', () => {
+	it('emits NQL CTE declarations and references with their exact casing', () => {
 		const orm = createOrm({
-			model: testSchema.model,
+			model: blogSchema.model,
 			adapter: createPgsqlCompileOnlyAdapter({
-				model: testSchema.model,
+				model: blogSchema.model,
 				dbCasing: 'snake_case',
 			}),
 		});
 
-		const result = orm.nql`with activeUsers as (users | select id)
-activeUsers | select id`.dump();
+		const result =
+			orm.nql`with activeUsers as (posts | select title as postTitle)
+activeUsers | select postTitle`.dump();
 
-		expect(normalizeSQL(result.sql)).toBe(
-			'with "active_users" as (select users.id from users) select active_users.id from active_users',
+		expect(result.sql).toBe(
+			'WITH "activeUsers" AS (SELECT posts.title AS "postTitle" FROM posts) SELECT "activeUsers"."postTitle" FROM "activeUsers"',
+		);
+	});
+
+	it('#762: keeps a nested CTE output alias verbatim under snake_case', () => {
+		const orm = createOrm({
+			model: blogSchema.model,
+			adapter: createPgsqlCompileOnlyAdapter({
+				model: blogSchema.model,
+				dbCasing: 'snake_case',
+			}),
+		});
+
+		const result =
+			orm.nql`with t as (posts | select title as postTitle), u as (t | select postTitle)
+u | select postTitle`.dump();
+
+		expect(result.sql).toBe(
+			'WITH "t" AS (SELECT posts.title AS "postTitle" FROM posts), "u" AS (SELECT t."postTitle" FROM t) SELECT u."postTitle" FROM u',
+		);
+	});
+
+	it('#762: qualifies a projected relation column with its verbatim join alias', () => {
+		const orm = createOrm({
+			model: queryLocalAliasSchema.model,
+			adapter: createPgsqlCompileOnlyAdapter({
+				model: queryLocalAliasSchema.model,
+				dbCasing: 'snake_case',
+			}),
+		});
+
+		const result = orm.nql`users | select *, userRoles.roleId | flat`.dump();
+
+		expect(result.sql).toBe(
+			'SELECT users.*, "userRoles".role_id AS "userRoles.roleId" FROM users LEFT JOIN user_roles AS "userRoles" ON users.id = "userRoles".user_id',
 		);
 	});
 
@@ -1031,11 +1068,10 @@ activeUsers | select id`.dump();
 		);
 	});
 
-	it('compiles flat include with all columns', () => {
+	it('compiles flat includes with duplicate returned labels', () => {
 		const sql = nqlToSQL('departments | select *, employees.* | flat');
-		// flat = non-nested strategy (join or lateral, planner decides)
-		expect(sql).toContain('join');
-		expect(sql).toContain('employees');
+		expect(sql).toContain('departments.*');
+		expect(sql).toContain('employees.*');
 	});
 
 	it('propagates specific columns through flat include', () => {
@@ -1055,13 +1091,11 @@ activeUsers | select id`.dump();
 		expect(sql).toContain('.email');
 	});
 
-	it('uses star for flat include with relation.*', () => {
-		const sql = nqlToSQL('departments | select id, employees.* | flat');
-		expect(sql).toContain('employees');
-		// Wildcard must produce star target, not just 'id'
-		// SQL should have employees.* (star) NOT just "employees"."id"
-		expect(sql).not.toMatch(
-			/"employees_0"\."id"\s+as\s+"employees\.id"\s*from/i,
+	it('refuses an explicit output that collides with a relation star label', () => {
+		expect(() =>
+			nqlToSQL('departments | select id, employees.* | flat'),
+		).toThrow(
+			"Projection output label 'id' is produced by multiple candidates and cannot be returned losslessly.",
 		);
 	});
 
@@ -1421,6 +1455,17 @@ const blogSchema = schema({
 	},
 });
 
+const queryLocalAliasSchema = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+	},
+	userRoles: {
+		id: { type: 'integer', primaryKey: true },
+		userId: ref('users', { inverse: 'userRoles' }),
+		roleId: 'integer',
+	},
+});
+
 function blogToSQL(nql: string): { sql: string; params: readonly unknown[] } {
 	const compiled = compile(nql, blogSchema.model);
 	if (!compiled.success || !compiled.ast?.query) {
@@ -1454,6 +1499,33 @@ function blogCteToSQL(nql: string, schemaName?: string): string {
 }
 
 describe('CTE relation planning', () => {
+	it('keeps a schema-scoped binding as a query-local source in rawExists', () => {
+		const adapter = createPgsqlCompileOnlyAdapter({
+			model: testSchema.model,
+			schemaName: 'tenant',
+		});
+		const result = adapter.compile({
+			bindings: new Map([
+				[
+					'activeUsers',
+					{
+						type: 'select',
+						from: 'users',
+						select: { type: 'fields', fields: ['id'] },
+					},
+				],
+			]),
+			query: {
+				type: 'select',
+				from: 'users',
+				select: { type: 'fields', fields: ['id'] },
+				where: rawExists(subquery('activeUsers').select('id')),
+			},
+		} satisfies CompiledNqlQuery);
+		expect(result.sql).toContain('FROM "activeUsers"');
+		expect(result.sql).not.toContain('tenant."activeUsers"');
+	});
+
 	it('plans relation paths in a simple CTE body', () => {
 		expect(
 			blogCteToSQL(
@@ -1461,6 +1533,27 @@ describe('CTE relation planning', () => {
 			),
 		).toBe(
 			'with "enriched" as (select posts.title, author.name as "author.name" from posts join authors as author on posts."authorid" = author.id) select enriched.* from enriched',
+		);
+	});
+
+	it('keeps the relation binding in scope across a CTE body filter and projection', () => {
+		const adapter = createPgsqlCompileOnlyAdapter({ model: blogSchema.model });
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(
+			'tenant_42',
+		);
+		const dump = orm.nql<{
+			title: string;
+			author_name: string;
+		}>`with filtered_posts as (posts
+			| where some(author).name = ${'Bob Smith'}
+			| select title, author.name as author_name
+			| flat)
+filtered_posts
+			| select title, author_name
+			| order by title`.dump();
+
+		expect(normalizeSQL(dump.sql)).toBe(
+			'with "filtered_posts" as (select posts.title, author.name as author_name from tenant_42.posts join tenant_42.authors as author on posts."authorid" = author.id where author.name = $1) select filtered_posts.title, filtered_posts.author_name from filtered_posts order by filtered_posts.title asc',
 		);
 	});
 
@@ -1529,21 +1622,25 @@ describe('CTE relation planning', () => {
 				'with authors as (authors | select id) posts | select title, author.id | flat | order by author.name',
 			),
 		).toThrow(
-			"target 'authors' resolves to the CTE 'authors', which does not project 'name' (column reference). Available: id",
+			"Local relation 'author' does not project expression column 'name'.",
 		);
 	});
 
-	it('keeps reduced root CTE references unqualified in SELECT and WHERE', () => {
-		expect(
+	it('rejects root CTE references outside the CTE projection', () => {
+		expect(() =>
 			blogCteToSQL(
 				'with authors as (authors | select name) authors | select id',
 			),
-		).toContain('select authors.id from authors');
-		expect(
+		).toThrow(
+			"Local relation 'authors' does not project expression column 'id'.",
+		);
+		expect(() =>
 			blogCteToSQL(
 				'with authors as (authors | select name) authors | where id = 1 | select id',
 			),
-		).toContain('select authors.id from authors where authors.id = $1');
+		).toThrow(
+			"Local relation 'authors' does not project expression column 'id'.",
+		);
 	});
 
 	it('expands a reduced visible CTE wildcard from its projection', () => {
@@ -1560,7 +1657,7 @@ describe('CTE relation planning', () => {
 				'with authors as (authors | select id, id, name) posts | select title, author.id | flat',
 			),
 		).toThrow(
-			"Relation 'author' target 'authors' resolves to the CTE 'authors', whose projected column 'id' is ambiguous and cannot be referenced (join key).",
+			"Projection output label 'id' is produced by multiple candidates and cannot be returned losslessly.",
 		);
 	});
 
@@ -2039,6 +2136,9 @@ const mutationSchema = schema({
 	},
 	posts: {
 		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		email: 'string',
+		active: 'boolean',
 		title: 'string',
 		published: 'boolean',
 		featured: 'boolean',
@@ -2120,6 +2220,54 @@ function mutationToSQLWithNamedParams(
 }
 
 describe('NQL → SQL mutation E2E', () => {
+	it('#762: resolves declared camelCase mutation names while keeping RETURNING labels local', () => {
+		const compileSnakeMutation = (nql: string): string => {
+			const compiled = compile(nql, mutationSchema.model);
+			if (!compiled.success || !compiled.ast?.mutation) {
+				throw new Error(
+					`NQL mutation compilation failed: ${compiled.errors.map((error) => error.message).join(', ')}`,
+				);
+			}
+			const adapter = createPgsqlCompileOnlyAdapter({
+				dbCasing: 'snake_case',
+			});
+			const options = { model: mutationSchema.model };
+			const mutation = compiled.ast.mutation;
+			if (isInsertIntent(mutation))
+				return adapter.compileInsert(mutation, options).sql;
+			if (isUpdateIntent(mutation))
+				return adapter.compileUpdate(mutation, options).sql;
+			if (isUpsertIntent(mutation))
+				return adapter.compileUpsert(mutation, options).sql;
+			throw new Error(`Unexpected mutation ${mutation.type}`);
+		};
+
+		const select = createOrm({
+			model: mutationSchema.model,
+			adapter: createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' }),
+		})
+			.select('archivedPosts')
+			.columns(['userId'])
+			.dump().sql;
+		const insert = compileSnakeMutation(
+			"insert into archivedPosts set title = 'new', published = true, userId = 1 | select userId as returnedUserId",
+		);
+		const update = compileSnakeMutation(
+			'update archivedPosts set userId = 2 where id = 1 | select userId as returnedUserId',
+		);
+		const upsert = compileSnakeMutation(
+			"upsert into archivedPosts on id set id = 1, title = 'new', published = true, userId = 1 | select userId as returnedUserId",
+		);
+
+		for (const sql of [select, insert, update, upsert]) {
+			expect(sql).toContain('archived_posts');
+			expect(sql).toContain('user_id');
+		}
+		for (const sql of [insert, update, upsert]) {
+			expect(sql).toContain('AS "returnedUserId"');
+		}
+	});
+
 	it('S1: update with IN subquery produces inline SQL subquery', () => {
 		const { sql } = mutationToSQL(
 			'update authors set active = false where id in (posts | where published = false | select userId)',
@@ -2381,7 +2529,7 @@ function bindToSQL(
 function boundBundleToSQL(
 	nql: string,
 	model: ReturnType<typeof schema>['model'],
-	schemaName: string,
+	schemaName?: string,
 ): { sql: string; params: readonly unknown[] } {
 	const compiled = compile(nql, model);
 	if (!compiled.success || !compiled.ast) {
@@ -2391,7 +2539,10 @@ function boundBundleToSQL(
 	}
 
 	const adapter = createPgsqlCompileOnlyAdapter();
-	const result = adapter.compile(compiled.ast, { model, schemaName });
+	const result = adapter.compile(compiled.ast, {
+		model,
+		...(schemaName !== undefined && { schemaName }),
+	});
 
 	return { sql: normalizeSQL(result.sql), params: result.parameters };
 }
@@ -2408,13 +2559,15 @@ describe('NQL → SQL bind + CTE E2E', () => {
 	});
 
 	it('D4: query bind + delete using bound ref in WHERE subquery', () => {
-		const { sql } = bindToSQL(
+		// Exercise the binding-aware adapter entry point. A handwritten WITH prefix
+		// has no QueryScope and therefore cannot establish toDelete's local outputs.
+		const { sql } = boundBundleToSQL(
 			'posts | where published = false | select id | bind toDelete\ndelete from comments where postId in (toDelete)',
 			mutationSchema.model,
 		);
-		expect(sql).toEqual(
-			'with "toDelete" as (select posts.id from posts where posts.published = $1) delete from comments where comments."postid" = any (select "todelete_subq_0".id from "todelete" as "todelete_subq_0")',
-		);
+		expect(sql).toContain('with "todelete" as');
+		expect(sql).toContain('delete from comments');
+		expect(sql).toContain('from "todelete" as "todelete_subq_0"');
 	});
 
 	it('binding-final recursive columns over a non-id self-ref correlate on the pseudo target key', () => {

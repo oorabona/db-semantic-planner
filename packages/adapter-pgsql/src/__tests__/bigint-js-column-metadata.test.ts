@@ -10,8 +10,9 @@ import { compile as compileNql } from '@dbsp/nql';
 import type { CompiledNqlQuery } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { buildCompiledColumnProjections } from '../column-metadata.js';
-import { identityNaming } from '../naming-plugin.js';
+import { createDeclaredNameResolver } from '../declared-name-resolver.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgPhysicalModel } from '../physical-model/index.js';
 
 const testSchema = schema({
 	users: {
@@ -31,7 +32,22 @@ const testSchema = schema({
 		eventId: ref('events', { as: 'event', references: ['id'] }),
 		bigCount: { type: 'bigint', js: 'bigint' },
 	},
+	event_metrics: {
+		eventId: 'uuid',
+		metricId: 'bigint',
+	},
 });
+
+function resolverFor(model: typeof testSchema.model) {
+	return createDeclaredNameResolver(
+		createPgPhysicalModel({
+			mode: 'logical',
+			model,
+			schema: 'public',
+			dbCasing: 'preserve',
+		}),
+	);
+}
 
 function compile(plan: PlanReport) {
 	const adapter = createPgsqlCompileOnlyAdapter();
@@ -168,7 +184,7 @@ describe('bigint js column metadata provenance', () => {
 		});
 	});
 
-	it('drops ambiguous colliding output keys', () => {
+	it('leaves duplicate returned output labels without source mapping', () => {
 		const compiled = compile({
 			rootTable: 'events',
 			decisions: [
@@ -185,9 +201,7 @@ describe('bigint js column metadata provenance', () => {
 				},
 			],
 		} as unknown as PlanReport);
-
-		expect(compiled.columnMetadata?.has('id')).toBe(false);
-		expect(compiled.columnMetadata?.has('bigCount')).toBe(false);
+		expect(compiled.outputKeyMap?.has('id')).toBe(false);
 	});
 
 	it('uses output aliases to distinguish same-name joined ids', () => {
@@ -499,11 +513,12 @@ describe('bigint js column metadata provenance', () => {
 			} as never,
 			'events',
 			testSchema.model,
-			identityNaming,
+			resolverFor(testSchema.model),
 		);
 
 		expect(projections?.get('sequence')).toEqual({
 			kind: 'unresolved',
+			logicalKey: 'sequence',
 			reason: 'projection column could not be resolved to a model column',
 		});
 	});
@@ -727,24 +742,22 @@ describe('bigint js column metadata provenance', () => {
 
 	it('drops recursive depth metadata when the tracking alias collides with a selected js column', () => {
 		const adapter = createPgsqlCompileOnlyAdapter();
-		const compiled = adapter.compileRecursive(
-			recursiveEventsReport({ depth: { as: 'sequence' } }),
-			testSchema.model,
-		);
-
-		expect(compiled.sql).toContain('__depth AS sequence');
-		expect(compiled.columnMetadata?.has('sequence') ?? false).toBe(false);
+		expect(() =>
+			adapter.compileRecursive(
+				recursiveEventsReport({ depth: { as: 'sequence' } }),
+				testSchema.model,
+			),
+		).toThrow("Duplicate projected output 'sequence'");
 	});
 
 	it('drops recursive path metadata when the tracking alias collides with a selected js column', () => {
 		const adapter = createPgsqlCompileOnlyAdapter();
-		const compiled = adapter.compileRecursive(
-			recursiveEventsReport({ path: { as: 'sequence' } }),
-			testSchema.model,
-		);
-
-		expect(compiled.sql).toContain('__path AS sequence');
-		expect(compiled.columnMetadata?.has('sequence') ?? false).toBe(false);
+		expect(() =>
+			adapter.compileRecursive(
+				recursiveEventsReport({ path: { as: 'sequence' } }),
+				testSchema.model,
+			),
+		).toThrow("Duplicate projected output 'sequence'");
 	});
 
 	it('keeps non-colliding recursive tracking aliases metadata-free', () => {

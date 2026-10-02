@@ -4,7 +4,6 @@
 
 import { describe, expect, it } from 'vitest';
 import { deparseQuoted } from '../deparse.js';
-import { CamelCaseNamingPlugin } from '../naming-plugin.js';
 import {
 	buildCycleCheck,
 	buildCycleDetection,
@@ -21,21 +20,19 @@ import {
 	buildPathColumn,
 	buildPathString,
 } from '../recursive/path-tracking.js';
+import { queryLocal } from '../sql-identifier.js';
 
 describe('Recursive CTE Compiler', () => {
-	const naming = new CamelCaseNamingPlugin();
-
 	const baseConfig: RecursiveCteConfig = {
-		cteAlias: '__rc_0',
-		table: 'employees',
-		pkColumn: 'id',
-		fkColumn: 'parent_id',
-		outerAlias: 't0',
+		cteAlias: queryLocal('__rc_0'),
+		table: queryLocal('employees'),
+		pkColumn: queryLocal('id'),
+		fkColumn: queryLocal('parent_id'),
+		outerAlias: queryLocal('t0'),
 		isAncestors: true,
 		maxDepth: 100,
-		selectColumns: ['id', 'name'],
+		selectColumns: ['id', 'name'].map(queryLocal),
 		ctx: {
-			naming,
 			rootTable: 'employees',
 			maxRecursiveDepth: 100,
 		},
@@ -232,20 +229,17 @@ describe('Cycle Detection', () => {
 // ============================================================================
 
 describe('Edge-Table Recursive CTE', () => {
-	const naming = new CamelCaseNamingPlugin();
-
 	const edgeConfig: RecursiveCteConfig = {
-		cteAlias: '__rc_0',
-		table: 'roles',
-		pkColumn: 'id',
-		fkColumn: '', // unused in edge-table mode
-		outerAlias: 't0',
+		cteAlias: queryLocal('__rc_0'),
+		table: queryLocal('roles'),
+		pkColumn: queryLocal('id'),
+		outerAlias: queryLocal('t0'),
 		isAncestors: false,
 		maxDepth: 10,
-		selectColumns: ['id', 'name'],
-		edgeTable: 'roleEdges',
-		edgeFrom: 'parentRoleId',
-		edgeTo: 'childRoleId',
+		selectColumns: ['id', 'name'].map(queryLocal),
+		edgeTable: queryLocal('role_edges'),
+		edgeFrom: queryLocal('parent_role_id'),
+		edgeTo: queryLocal('child_role_id'),
 		anchorWhere: {
 			A_Expr: {
 				kind: 'AEXPR_OP',
@@ -259,7 +253,6 @@ describe('Edge-Table Recursive CTE', () => {
 			},
 		},
 		ctx: {
-			naming,
 			rootTable: 'roles',
 			maxRecursiveDepth: 10,
 		},
@@ -343,8 +336,8 @@ describe('Edge-Table Recursive CTE', () => {
 			const inConfig: RecursiveCteConfig = {
 				...edgeConfig,
 				// For 'in' direction, caller swaps edgeFrom/edgeTo
-				edgeFrom: 'childRoleId',
-				edgeTo: 'parentRoleId',
+				edgeFrom: queryLocal('child_role_id'),
+				edgeTo: queryLocal('parent_role_id'),
 			};
 
 			const { cte } = buildRecursiveCte(inConfig);

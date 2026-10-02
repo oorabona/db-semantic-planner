@@ -11,7 +11,7 @@
 
 import type { MutationReturningItem, WhereIntent } from '@dbsp/types';
 import type { InferClause, Node, OnConflictClause } from '@pgsql/types';
-import { columnRef, funcCall } from '../ast-helpers.js';
+import { funcCall, sqlColumnRef } from '../ast-helpers.js';
 import {
 	inferPgArrayType,
 	parseRawExpression,
@@ -27,7 +27,13 @@ import type {
 } from '../handlers/types.js';
 import { unwrapParamIntent } from '../param-intent.js';
 import { createTypeCastParamRef } from '../param-ref.js';
-import { buildReturningExprs } from './mutation-compiler.js';
+import { queryLocal, type SqlIdentifier } from '../sql-identifier.js';
+import {
+	buildReturningExprs,
+	type MutationColumnAddress,
+	type MutationColumnMetadata,
+	type MutationTableMetadata,
+} from './mutation-compiler.js';
 
 // ============================================================================
 // Types
@@ -43,9 +49,15 @@ export type ConflictAction = 'nothing' | 'update';
  */
 export interface ConflictTarget {
 	/** Column names that form the unique constraint */
-	columns?: string[];
-	/** Named constraint */
-	constraint?: string;
+	columns?: SqlIdentifier[];
+	columnAddresses?: MutationColumnAddress[];
+	/** Addressed constraint declared by the target table. */
+	constraint?: SqlIdentifier;
+	constraintAddress?: {
+		readonly logicalTable: string;
+		readonly logicalConstraint: string;
+		readonly physicalName: SqlIdentifier;
+	};
 	/** WHERE clause for partial index */
 	where?: Decision[];
 }
@@ -55,9 +67,10 @@ export interface ConflictTarget {
  */
 export interface UpsertConfig {
 	/** Table to upsert into */
-	table: string;
+	table: SqlIdentifier;
+	tableMetadata?: MutationTableMetadata;
 	/** Columns to insert */
-	columns: string[];
+	columns: SqlIdentifier[];
 	/** Values for each column (array of rows) */
 	values: unknown[][];
 	/** Conflict target (unique columns or constraint) */
@@ -65,7 +78,8 @@ export interface UpsertConfig {
 	/** What to do on conflict */
 	conflictAction: ConflictAction;
 	/** Columns to update on conflict (for 'update' action) */
-	updateColumns?: string[];
+	updateColumns?: SqlIdentifier[];
+	updateColumnAddresses?: MutationColumnAddress[];
 	/** Optional WHERE clause for ON CONFLICT DO UPDATE */
 	actionWhere?: Decision[];
 	/** Optional direct WHERE intent for ON CONFLICT DO UPDATE */
@@ -76,21 +90,22 @@ export interface UpsertConfig {
 	useExcluded?: boolean;
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
+	returningSources?: SqlIdentifier[];
 	/** Alias-aware RETURNING projection items */
 	returningItems?: readonly MutationReturningItem[];
 	/** Optional column type hints for unnest casting (schema-driven) */
-	columnTypes?: Record<string, string>;
+	columnTypes?: Record<string, string | MutationColumnMetadata>;
 	/**
 	 * Raw SQL expressions for specific update columns.
 	 * These are injected verbatim into the ON CONFLICT DO UPDATE SET clause.
-	 * Keys are logical column names (before naming plugin), values are raw SQL fragments.
+	 * Keys are addressed target columns, values are raw SQL fragments.
 	 *
 	 * @warning SECURITY: fragments are inserted without parameterization.
 	 *   Only use with hardcoded expressions. Never with user input.
 	 *
 	 * @example { last_parsed: 'now()', count: 'excluded.count + 1' }
 	 */
-	updateExpressions?: Record<string, string>;
+	updateExpressions?: ReadonlyMap<SqlIdentifier, string>;
 }
 
 // ============================================================================
@@ -140,7 +155,6 @@ export function buildOnConflictClause(
 	ctx: CompilerContext,
 	state: CompilerState,
 ): OnConflictClause {
-	const naming = ctx.naming;
 	const action = config.conflictAction;
 
 	// Build conflict target
@@ -151,9 +165,13 @@ export function buildOnConflictClause(
 	) {
 		// Conflict on columns
 		infer = {
-			indexElems: config.conflictTarget.columns.map((col) => ({
+			indexElems: (
+				config.conflictTarget.columnAddresses?.map(
+					(address) => address.physicalName,
+				) ?? config.conflictTarget.columns
+			).map((col) => ({
 				IndexElem: {
-					name: naming.toDatabase(col),
+					name: col,
 				},
 			})),
 		};
@@ -170,7 +188,9 @@ export function buildOnConflictClause(
 	} else if (config.conflictTarget.constraint) {
 		// Conflict on named constraint
 		infer = {
-			conname: naming.toDatabase(config.conflictTarget.constraint),
+			conname:
+				config.conflictTarget.constraintAddress?.physicalName ??
+				config.conflictTarget.constraint,
 		};
 	}
 
@@ -183,14 +203,18 @@ export function buildOnConflictClause(
 	}
 
 	// DO UPDATE SET case
-	const updateColumns = config.updateColumns ?? config.columns;
+	const updateColumns =
+		config.updateColumnAddresses?.map((address) => address.physicalName) ??
+		config.updateColumns ??
+		config.columns;
 	const useExcluded = config.useExcluded ?? true;
 
 	const targetList: Node[] = updateColumns.map((col) => {
-		const dbCol = naming.toDatabase(col);
+		const dbCol = col;
 
 		// Raw SQL expression: emit the parsed AST node verbatim
-		const rawExpr = config.updateExpressions?.[col];
+		const updateExpressions = config.updateExpressions;
+		const rawExpr = updateExpressions?.get(col);
 		if (rawExpr !== undefined) {
 			return {
 				ResTarget: {
@@ -236,9 +260,8 @@ export function compileUpsert(
 	ctx: CompilerContext,
 	state: CompilerState,
 ): Node {
-	const naming = ctx.naming;
-	const dbTable = naming.toDatabase(config.table);
-	const dbColumns = config.columns.map((c) => naming.toDatabase(c));
+	const dbTable = config.tableMetadata?.physicalName ?? config.table;
+	const dbColumns = config.columns;
 
 	// Build column names
 	const cols = dbColumns.map((c) => ({ String: { sval: c } }));
@@ -257,7 +280,7 @@ export function compileUpsert(
 	const returningExprs = buildReturningExprs(
 		config.returning,
 		dbTable,
-		ctx,
+		config.returningSources,
 		config.returningItems,
 	);
 
@@ -300,9 +323,9 @@ export function compileUnnestUpsert(
 	ctx: CompilerContext,
 	state: CompilerState,
 ): Node {
-	const naming = ctx.naming;
-	const dbTable = naming.toDatabase(config.table);
-	const { columns, values, columnTypes } = config;
+	const dbTable = config.tableMetadata?.physicalName ?? config.table;
+	const { values, columnTypes } = config;
+	const columns = config.columns;
 
 	// Validate cardinality before any SQL generation (INV-02)
 	validateBatchCardinality(columns, values);
@@ -333,7 +356,7 @@ export function compileUnnestUpsert(
 		// ResTarget with column alias: unnest(...) AS "colname"
 		return {
 			ResTarget: {
-				name: naming.toDatabase(col),
+				name: col,
 				val: unnestCall,
 			},
 		};
@@ -353,7 +376,7 @@ export function compileUnnestUpsert(
 	const returningExprs = buildReturningExprs(
 		config.returning,
 		dbTable,
-		ctx,
+		config.returningSources,
 		config.returningItems,
 	);
 
@@ -367,7 +390,7 @@ export function compileUnnestUpsert(
 				relpersistence: 'p',
 			},
 			cols: columns.map((c) => ({
-				ResTarget: { name: naming.toDatabase(c) },
+				ResTarget: { name: c },
 			})),
 			selectStmt: selectQuery,
 			onConflictClause: onConflict,
@@ -402,16 +425,10 @@ function valueToParam(state: CompilerState, value?: unknown): Node {
  * EXCLUDED is a special table alias in ON CONFLICT ... DO UPDATE
  * that refers to the row that would have been inserted.
  */
-export function excludedRef(
-	column: string,
-	naming: { toDatabase: (s: string) => string },
-): Node {
+export function excludedRef(column: SqlIdentifier): Node {
 	return {
 		ColumnRef: {
-			fields: [
-				{ String: { sval: 'excluded' } },
-				{ String: { sval: naming.toDatabase(column) } },
-			],
+			fields: [{ String: { sval: 'excluded' } }, { String: { sval: column } }],
 		},
 	};
 }
@@ -423,20 +440,20 @@ export function excludedRef(
  * This keeps existing value if new value is NULL.
  */
 export function conditionalUpdate(
-	column: string,
-	table: string,
+	column: SqlIdentifier,
+	table: SqlIdentifier,
 	ctx: CompilerContext,
 ): Node {
-	const naming = ctx.naming;
-	const _dbCol = naming.toDatabase(column);
-	const dbTable = naming.toDatabase(table);
-
 	return {
 		FuncCall: {
 			funcname: [{ String: { sval: 'coalesce' } }],
 			args: [
-				excludedRef(column, naming),
-				columnRef(column, dbTable, ctx.schema, naming),
+				excludedRef(column),
+				sqlColumnRef(
+					column,
+					table,
+					ctx.schema ? queryLocal(ctx.schema) : undefined,
+				),
 			],
 		},
 	};

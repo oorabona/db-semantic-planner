@@ -18,7 +18,6 @@ import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it } from 'vitest';
 import { compileWhereIntent, type WhereCompilerCtx } from '../compile-where.js';
 import { createCompilerState } from '../handlers/types.js';
-import { identityNaming } from '../naming-plugin.js';
 import { deparse } from '../pgsql-deparser.js';
 
 // ---------------------------------------------------------------------------
@@ -31,7 +30,6 @@ function makeCtx(overrides?: Partial<WhereCompilerCtx>): WhereCompilerCtx {
 		rootTable: 'bookings',
 		aliases: new Map(),
 		paramState,
-		naming: identityNaming,
 		compileSubquery: () => {
 			throw new Error('compileSubquery not needed for this test');
 		},

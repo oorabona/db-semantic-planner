@@ -57,11 +57,12 @@ export const rawExistsHandler: WhereHandler = {
 		} = buildSubqueryFromIntent(
 			subIntent,
 			state.paramIndex,
-			ctx.naming,
+			ctx.declaredNames,
 			ctx.schema,
 			'rawExists',
-			ctx.bindingNames,
+			ctx.scope,
 			ctx.dialectCapabilities,
+			ctx.dbCasing,
 		);
 
 		if (innerParams) {

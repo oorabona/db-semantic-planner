@@ -497,7 +497,10 @@ describe('createPgPhysicalModel', () => {
 				model: source,
 				schema: 'app',
 				dbCasing: 'snake_case',
-				naming: { toDatabase: (value) => value, toModel: (value) => value },
+				naming: {
+					toDatabase: (value) => value,
+					toModel: (value) => value,
+				},
 			}),
 		).toThrow(PgPhysicalModelInputError);
 	});

@@ -15,7 +15,7 @@ import {
 	buildModelColumnProjections,
 	type ColumnMetadataProjection,
 } from './column-metadata.js';
-import type { NamingPlugin } from './naming-plugin.js';
+import type { DeclaredNameResolver } from './declared-name-resolver.js';
 
 const projectionEnvelopeBrand: unique symbol = Symbol('projectionEnvelope');
 
@@ -38,9 +38,13 @@ export type ProjectionState =
 			readonly kind: 'dropped';
 			readonly reason: ProjectionDropReason;
 			readonly hadConvertibleSource: boolean;
+			/** The left positional branch still determines PostgreSQL result labels. */
+			readonly outputKeyMap?: ReadonlyMap<string, string>;
 	  };
 
-export type OutputProjection = OutputDescriptor;
+export type OutputProjection = OutputDescriptor & {
+	readonly logicalKey: string;
+};
 export type {
 	OutputDescriptor,
 	OutputSource,
@@ -59,7 +63,7 @@ export type FromAstProjectionOptions = {
 	readonly ast: Node;
 	readonly rootTable: string;
 	readonly model: ModelIR | undefined;
-	readonly naming: NamingPlugin;
+	readonly declaredNames?: DeclaredNameResolver;
 	readonly hydrationPlan?: PlanReport;
 };
 
@@ -69,7 +73,7 @@ export type FromModelColumnsOptions = {
 	readonly table: string;
 	readonly columns: readonly string[];
 	readonly model: ModelIR;
-	readonly naming: NamingPlugin;
+	readonly declaredNames?: DeclaredNameResolver;
 };
 
 export type FromOutputDescriptorsOptions = {
@@ -77,7 +81,8 @@ export type FromOutputDescriptorsOptions = {
 	readonly parameters: readonly unknown[];
 	readonly columns: readonly string[];
 	readonly declaredOutputs?: readonly OutputDescriptor[];
-	readonly naming: NamingPlugin;
+	/** Explicit physical keys for a runtime binding materialized by the adapter. */
+	readonly emittedOutputKeys?: ReadonlyMap<string, string>;
 	readonly hydrationPlan?: PlanReport;
 };
 
@@ -125,6 +130,27 @@ type CompiledQueryWithHydrationPlan<T> = CompiledQuery<T> & {
 	readonly hydrationPlan?: CompiledQuery<T>['hydrationPlan'];
 };
 
+/** Supports source tests while @dbsp/types' checked-in SDK dist is intentionally stale. */
+const projectionOutputMaps = new WeakMap<object, ReadonlyMap<string, string>>();
+
+export function outputKeyMapFor(
+	query: CompiledQuery,
+): ReadonlyMap<string, string> | undefined {
+	return (
+		(query as CompiledQuery & { outputKeyMap?: ReadonlyMap<string, string> })
+			.outputKeyMap ?? projectionOutputMaps.get(query)
+	);
+}
+
+export function preserveOutputKeyMap<T>(
+	prior: CompiledQuery,
+	next: CompiledQuery<T>,
+): CompiledQuery<T> {
+	const map = outputKeyMapFor(prior);
+	if (map !== undefined) projectionOutputMaps.set(next, map);
+	return next;
+}
+
 const scalarOneShape: OutputValueShape = {
 	kind: 'scalar',
 	cardinality: 'one',
@@ -138,16 +164,18 @@ function descriptor(
 	outputKey: string,
 	source: OutputSource,
 	shape: OutputValueShape,
+	logicalKey = outputKey,
 ): OutputProjection {
-	return { outputKey, source, shape };
+	return { outputKey, logicalKey, source, shape };
 }
 
 function descriptorForSource(
 	outputKey: string,
 	source: OutputSource,
+	logicalKey = outputKey,
 ): OutputProjection {
 	if (source.kind === 'modelColumn') {
-		return descriptor(outputKey, source, scalarOneShape);
+		return descriptor(outputKey, source, scalarOneShape, logicalKey);
 	}
 	return descriptor(
 		outputKey,
@@ -155,14 +183,16 @@ function descriptorForSource(
 		unknownShape(
 			`projection output '${outputKey}' has no scalar model column shape`,
 		),
+		logicalKey,
 	);
 }
 
 function withOutputKey(
 	output: OutputProjection,
 	outputKey: string,
+	logicalKey = outputKey === output.outputKey ? output.logicalKey : outputKey,
 ): OutputProjection {
-	return descriptor(outputKey, output.source, output.shape);
+	return descriptor(outputKey, output.source, output.shape, logicalKey);
 }
 
 function makeEnvelope<T = unknown>(
@@ -206,9 +236,14 @@ function outputMapFromColumnProjections(
 	const outputs = new Map<string, OutputProjection>();
 	if (!projections) return outputs;
 	for (const [outputKey, projection] of projections) {
-		outputs.set(
+		setProjectedOutput(
+			outputs,
 			outputKey,
-			descriptorForSource(outputKey, outputFromColumnProjection(projection)),
+			descriptorForSource(
+				outputKey,
+				outputFromColumnProjection(projection),
+				projection.logicalKey,
+			),
 		);
 	}
 	return outputs;
@@ -218,6 +253,19 @@ export function fromCompiledQuery<T = unknown>(
 	compiled: CompiledQuery,
 ): ProjectionEnvelope<T> {
 	const outputs = new Map<string, OutputProjection>();
+	for (const [outputKey, logicalKey] of outputKeyMapFor(compiled) ?? []) {
+		outputs.set(
+			outputKey,
+			descriptorForSource(
+				outputKey,
+				{
+					kind: 'unresolved',
+					reason: 'compiled projection provenance was unavailable',
+				},
+				logicalKey,
+			),
+		);
+	}
 	for (const [outputKey, entry] of compiled.columnMetadata ?? []) {
 		outputs.set(
 			outputKey,
@@ -230,6 +278,7 @@ export function fromCompiledQuery<T = unknown>(
 					js: entry.js,
 				},
 				scalarOneShape,
+				outputKeyMapFor(compiled)?.get(outputKey) ?? entry.column,
 			),
 		);
 	}
@@ -284,7 +333,7 @@ export function fromAstProjection<T = unknown>(
 			options.ast,
 			options.rootTable,
 			options.model,
-			options.naming,
+			options.declaredNames,
 		),
 	);
 	return makeEnvelope<T>({
@@ -311,7 +360,7 @@ export function fromModelColumns<T = unknown>(
 					options.table,
 					options.columns,
 					options.model,
-					options.naming,
+					options.declaredNames,
 				),
 			),
 		},
@@ -320,12 +369,16 @@ export function fromModelColumns<T = unknown>(
 
 function outputDescriptorWithEmittedKey(
 	output: OutputDescriptor,
-	naming: NamingPlugin,
+	emittedKey?: string,
+	logicalKey?: string,
 ): OutputProjection {
 	return descriptor(
-		naming.toDatabase(output.outputKey),
+		emittedKey ?? output.outputKey,
 		output.source,
 		output.shape,
+		logicalKey ??
+			(output as OutputDescriptor & { logicalKey?: string }).logicalKey ??
+			output.outputKey,
 	);
 }
 
@@ -334,7 +387,8 @@ export function fromOutputDescriptors<T = unknown>(
 ): ProjectionEnvelope<T> {
 	const descriptorsByOutput = new Map<string, OutputDescriptor[]>();
 	for (const output of options.declaredOutputs ?? []) {
-		const outputKey = options.naming.toDatabase(output.outputKey);
+		const outputKey =
+			options.emittedOutputKeys?.get(output.outputKey) ?? output.outputKey;
 		const entries = descriptorsByOutput.get(outputKey) ?? [];
 		entries.push(output);
 		descriptorsByOutput.set(outputKey, entries);
@@ -342,20 +396,26 @@ export function fromOutputDescriptors<T = unknown>(
 
 	const outputs = new Map<string, OutputProjection>();
 	for (const column of options.columns) {
-		const outputKey = options.naming.toDatabase(column);
+		const outputKey = options.emittedOutputKeys?.get(column) ?? column;
 		const entries = descriptorsByOutput.get(outputKey) ?? [];
 		if (entries.length === 0) {
-			outputs.set(
+			setProjectedOutput(
+				outputs,
 				outputKey,
-				descriptorForSource(outputKey, {
-					kind: 'unresolved',
-					reason: 'binding output descriptor was not provided',
-				}),
+				descriptorForSource(
+					outputKey,
+					{
+						kind: 'unresolved',
+						reason: 'binding output descriptor was not provided',
+					},
+					column,
+				),
 			);
 			continue;
 		}
 		if (entries.length > 1) {
-			outputs.set(
+			setProjectedOutput(
+				outputs,
 				outputKey,
 				descriptor(
 					outputKey,
@@ -366,19 +426,25 @@ export function fromOutputDescriptors<T = unknown>(
 					unknownShape(
 						`binding output '${outputKey}' had multiple declared descriptors`,
 					),
+					column,
 				),
 			);
 			continue;
 		}
 		const [output] = entries;
-		outputs.set(
+		setProjectedOutput(
+			outputs,
 			outputKey,
 			output !== undefined
-				? outputDescriptorWithEmittedKey(output, options.naming)
-				: descriptorForSource(outputKey, {
-						kind: 'unresolved',
-						reason: 'binding output descriptor could not be read',
-					}),
+				? outputDescriptorWithEmittedKey(output, outputKey, column)
+				: descriptorForSource(
+						outputKey,
+						{
+							kind: 'unresolved',
+							reason: 'binding output descriptor could not be read',
+						},
+						column,
+					),
 		);
 	}
 
@@ -402,7 +468,18 @@ export function supplementOutputDescriptors<T = unknown>(
 
 	const outputs = new Map(source.projection.outputs);
 	for (const output of descriptors) {
-		outputs.set(output.outputKey, output);
+		// This enriches an existing emitted output's provenance; it does not add a
+		// second target-list item and therefore cannot create a returned-label collision.
+		outputs.set(
+			output.outputKey,
+			descriptor(
+				output.outputKey,
+				output.source,
+				output.shape,
+				(output as OutputDescriptor & { logicalKey?: string }).logicalKey ??
+					output.outputKey,
+			),
+		);
 	}
 
 	return makeEnvelope<T>({
@@ -466,17 +543,19 @@ function setProjectedOutput(
 	outputKey: string,
 	output: OutputProjection,
 ): void {
-	if (outputs.has(outputKey)) {
-		outputs.set(
-			outputKey,
-			descriptorForSource(outputKey, {
-				kind: 'ambiguous',
-				reason: `projection output '${outputKey}' was selected more than once`,
-			}),
+	const existing = outputs.get(outputKey);
+	if (existing !== undefined) {
+		throw new Error(
+			`Duplicate projected output '${outputKey}': '${outputOrigin(existing)}' and '${outputOrigin(output)}' both return that label.`,
 		);
-		return;
 	}
 	outputs.set(outputKey, output);
+}
+
+function outputOrigin(output: OutputProjection): string {
+	return output.source.kind === 'modelColumn'
+		? `${output.source.table}.${output.source.column}`
+		: output.logicalKey;
 }
 
 export function preserveOneToOne<T = unknown>(
@@ -505,6 +584,13 @@ export function dropPositionalUnion<T = unknown>(
 			hadConvertibleSource: branches.some((branch) =>
 				hasConvertibleModelColumn(branch.projection),
 			),
+			...(branches[0]?.projection.kind === 'known'
+				? {
+						outputKeyMap: buildReturnedOutputKeyMap(
+							branches[0].projection.outputs,
+						),
+					}
+				: {}),
 		},
 	});
 }
@@ -526,24 +612,39 @@ export function finalizeEnvelope<T = unknown>(
 		if (env.projection.hadConvertibleSource) {
 			throw new Error(droppedProjectionErrorMessage(env.projection.reason));
 		}
+		const fields: {
+			sql: string;
+			parameters: readonly unknown[];
+			columnMetadata: ReadonlyMap<string, CompiledColumnMetadata>;
+			outputKeyMap?: ReadonlyMap<string, string>;
+			hydrationPlan?: PlanReport;
+		} = {
+			sql: env.sql,
+			parameters: env.parameters,
+			columnMetadata: new Map<string, CompiledColumnMetadata>(),
+			...(env.projection.outputKeyMap !== undefined && {
+				outputKeyMap: env.projection.outputKeyMap,
+			}),
+			...(env.hydrationPlan !== undefined
+				? { hydrationPlan: env.hydrationPlan }
+				: {}),
+		};
 		const compiled: CompiledQueryWithHydrationPlan<T> =
-			compiledQueryFromProjection({
-				sql: env.sql,
-				parameters: env.parameters,
-				columnMetadata: new Map<string, CompiledColumnMetadata>(),
-				...(env.hydrationPlan !== undefined
-					? { hydrationPlan: env.hydrationPlan }
-					: {}),
-			});
+			compiledQueryFromProjection(fields);
+		if (env.projection.outputKeyMap !== undefined) {
+			projectionOutputMaps.set(compiled, env.projection.outputKeyMap);
+		}
 		return compiled;
 	}
 
 	const columnMetadata = new Map<string, CompiledColumnMetadata>();
+	const outputKeyMap = buildReturnedOutputKeyMap(env.projection.outputs);
 	for (const [outputKey, descriptor] of env.projection.outputs) {
+		const returnedLabel = truncatePgIdentifier(outputKey);
 		const handling = resolveOutputReadHandling(descriptor);
 		switch (handling.kind) {
 			case 'scalarConvert':
-				columnMetadata.set(outputKey, {
+				columnMetadata.set(returnedLabel, {
 					table: handling.table,
 					column: handling.column,
 					js: handling.js,
@@ -555,14 +656,54 @@ export function finalizeEnvelope<T = unknown>(
 		}
 	}
 
+	const fields: {
+		sql: string;
+		parameters: readonly unknown[];
+		columnMetadata: ReadonlyMap<string, CompiledColumnMetadata>;
+		outputKeyMap?: ReadonlyMap<string, string>;
+		hydrationPlan?: PlanReport;
+	} = {
+		sql: env.sql,
+		parameters: env.parameters,
+		columnMetadata,
+		outputKeyMap,
+		...(env.hydrationPlan !== undefined
+			? { hydrationPlan: env.hydrationPlan }
+			: {}),
+	};
 	const compiled: CompiledQueryWithHydrationPlan<T> =
-		compiledQueryFromProjection({
-			sql: env.sql,
-			parameters: env.parameters,
-			columnMetadata,
-			...(env.hydrationPlan !== undefined
-				? { hydrationPlan: env.hydrationPlan }
-				: {}),
-		});
+		compiledQueryFromProjection(fields);
+	projectionOutputMaps.set(compiled, outputKeyMap);
 	return compiled;
+}
+
+function buildReturnedOutputKeyMap(
+	outputs: ReadonlyMap<string, OutputProjection>,
+): ReadonlyMap<string, string> {
+	const outputKeyMap = new Map<string, string>();
+	for (const [outputKey, descriptor] of outputs) {
+		const returnedLabel = truncatePgIdentifier(outputKey);
+		const logicalKey = descriptor.logicalKey;
+		const priorLogicalKey = outputKeyMap.get(returnedLabel);
+		if (priorLogicalKey !== undefined) {
+			throw new Error(
+				`PostgreSQL projection outputs '${priorLogicalKey}' and '${logicalKey}' both return label '${returnedLabel}' after 63-byte identifier truncation.`,
+			);
+		}
+		outputKeyMap.set(returnedLabel, logicalKey);
+	}
+	return outputKeyMap;
+}
+
+/** PostgreSQL truncates even quoted identifiers to NAMEDATALEN - 1 bytes. */
+function truncatePgIdentifier(identifier: string): string {
+	let result = '';
+	let byteLength = 0;
+	for (const character of identifier) {
+		const width = Buffer.byteLength(character, 'utf8');
+		if (byteLength + width > 63) break;
+		result += character;
+		byteLength += width;
+	}
+	return result;
 }

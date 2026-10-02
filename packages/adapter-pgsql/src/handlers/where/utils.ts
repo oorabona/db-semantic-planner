@@ -5,7 +5,8 @@
 
 import { isFieldRef, isParamIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
-import { columnRef, nullConstNode } from '../../ast-helpers.js';
+import { nullConstNode } from '../../ast-helpers.js';
+import type { RelationBinding } from '../../binding-registry.js';
 import { mapModelIRTypeToPgBase } from '../../compiler-utils.js';
 import {
 	dbTypeCastTarget,
@@ -14,10 +15,28 @@ import {
 } from '../../db-type.js';
 import { unwrapParamIntent } from '../../param-intent.js';
 import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
+import type { SqlIdentifier } from '../../sql-identifier.js';
 import type { CompilerContext, CompilerState } from '../types.js';
-import { isParamRef } from '../types.js';
+import {
+	currentExpressionBinding,
+	expressionColumnRef,
+	expressionQualifiedColumnRef,
+	expressionResolvedColumnRef,
+	isParamRef,
+} from '../types.js';
 
 export { unwrapParamIntent } from '../../param-intent.js';
+
+/**
+ * Emit a WHERE column only after its caller has classified the identifier.
+ * This narrow export is also the typed boundary used by direct WHERE helpers.
+ */
+export function resolvedWhereColumnRef(
+	column: SqlIdentifier,
+	binding: RelationBinding,
+): Node {
+	return expressionResolvedColumnRef(column, binding);
+}
 
 /**
  * Build column reference from decision column, using current alias or root table.
@@ -32,24 +51,9 @@ export function buildColumnRef(column: string, ctx: CompilerContext): Node {
 		const relation = column.substring(0, dotIndex);
 		const table = ctx.aliases?.get(relation) ?? relation;
 		const col = column.substring(dotIndex + 1);
-		return columnRef(
-			col,
-			table,
-			undefined,
-			ctx.naming,
-			ctx.aliasColumnAuthorities,
-		);
+		return expressionQualifiedColumnRef(col, table, ctx);
 	}
-	const alias = ctx.currentAlias ?? ctx.rootTable;
-	// Schema is NOT used for column references — aliases and table names in WHERE
-	// are query-scoped, not schema-qualified. Schema is only for FROM/JOIN entries.
-	return columnRef(
-		column,
-		alias,
-		undefined,
-		ctx.naming,
-		ctx.aliasColumnAuthorities,
-	);
+	return expressionColumnRef(column, ctx, currentExpressionBinding(ctx));
 }
 
 /**
@@ -129,17 +133,14 @@ export function compileValueOrFieldRef(
 		return compileValue(value, state, columnType, true);
 	}
 	if (isFieldRef(value)) {
+		// A qualified field reference establishes its own addressed binding; the
+		// scope marker only applies to an unqualified field.
+		if (value.column.includes('.')) return buildColumnRef(value.column, ctx);
 		const alias =
 			value.scope === 'outer'
 				? (ctx.outerAlias ?? ctx.rootTable)
 				: (ctx.currentAlias ?? ctx.rootTable);
-		return columnRef(
-			value.column,
-			alias,
-			undefined,
-			ctx.naming,
-			ctx.aliasColumnAuthorities,
-		);
+		return expressionQualifiedColumnRef(value.column, alias, ctx);
 	}
 	return compileValue(value, state, columnType);
 }
@@ -153,7 +154,9 @@ export function resolveColumnPgType(
 	ctx: CompilerContext,
 ): string | undefined {
 	if (!ctx.model) return undefined;
-	const table = ctx.model.getTable(ctx.rootTable);
+	const table = ctx.model.getTable(
+		currentExpressionBinding(ctx).logicalTable ?? ctx.rootTable,
+	);
 	if (!table) return undefined;
 	const column = table.columns.find((c) => c.name === columnName);
 	if (!column) return undefined;
@@ -195,7 +198,9 @@ export function resolveColumnAbstractPgBase(
 	ctx: CompilerContext,
 ): string | undefined {
 	if (!ctx.model) return undefined;
-	const table = ctx.model.getTable(ctx.rootTable);
+	const table = ctx.model.getTable(
+		currentExpressionBinding(ctx).logicalTable ?? ctx.rootTable,
+	);
 	if (!table) return undefined;
 	const column = table.columns.find((c) => c.name === columnName);
 	if (!column) return undefined;

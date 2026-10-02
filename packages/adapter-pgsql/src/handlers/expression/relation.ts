@@ -8,14 +8,19 @@
  * Produces: qualified column references from related tables.
  */
 
-import type { Node, ResTarget } from '@pgsql/types';
-import { columnRef, columnRefStar } from '../../ast-helpers.js';
+import type { Node } from '@pgsql/types';
+import { sqlColumnRefStar, sqlResTarget } from '../../ast-helpers.js';
 import { resolveVisibleRelationAlias } from '../../relation-alias.js';
+import { queryLocal } from '../../sql-identifier.js';
 import type {
-	CompilerContext,
 	CompilerState,
 	Decision,
+	ExpressionCompilerContext,
 	ExpressionHandler,
+} from '../types.js';
+import {
+	expressionQualifiedColumnRef,
+	expressionRelationBinding,
 } from '../types.js';
 
 /**
@@ -30,7 +35,7 @@ export const relationStarHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		_ctx: ExpressionCompilerContext,
 		state: CompilerState,
 	): Node {
 		const relation = decision.relation ?? decision.expandRelation;
@@ -40,14 +45,7 @@ export const relationStarHandler: ExpressionHandler = {
 		}
 
 		const alias = resolveVisibleRelationAlias(relation, '*', state.aliases);
-		const dbAlias = ctx.naming.toDatabase(alias);
-
-		// Return qualified star: alias.*
-		return {
-			ColumnRef: {
-				fields: [{ String: { sval: dbAlias } }, { A_Star: {} }],
-			},
-		};
+		return sqlColumnRefStar(expressionRelationBinding(alias, _ctx).qualifier);
 	},
 };
 
@@ -63,7 +61,7 @@ export const relationColumnHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		ctx: ExpressionCompilerContext,
 		state: CompilerState,
 	): Node {
 		const relation = decision.relation ?? decision.expandRelation;
@@ -79,17 +77,10 @@ export const relationColumnHandler: ExpressionHandler = {
 		const alias = resolveVisibleRelationAlias(relation, column, state.aliases);
 
 		// Wildcard: relation.* should produce unquoted * (A_Star), not quoted "*"
-		if (column === '*') {
-			return columnRefStar(alias, ctx.naming);
-		}
+		if (column === '*')
+			return sqlColumnRefStar(expressionRelationBinding(alias, ctx).qualifier);
 
-		return columnRef(
-			column,
-			alias,
-			undefined,
-			ctx.naming,
-			ctx.aliasColumnAuthorities,
-		);
+		return expressionQualifiedColumnRef(column, alias, ctx);
 	},
 };
 
@@ -109,7 +100,7 @@ export const relationColumnsHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		ctx: ExpressionCompilerContext,
 		state: CompilerState,
 	): Node {
 		const relation = decision.relation ?? decision.expandRelation;
@@ -132,22 +123,12 @@ export const relationColumnsHandler: ExpressionHandler = {
 		// For multiple columns, the compiler should call this handler multiple times
 		// or use a different approach
 		const column = columns[0]!;
-		const colRef = columnRef(
-			column,
-			alias,
-			undefined,
-			ctx.naming,
-			ctx.aliasColumnAuthorities,
-		);
+		const colRef = expressionQualifiedColumnRef(column, alias, ctx);
 
 		// If there's an alias specified, wrap in ResTarget
 		const outputAlias = decision.alias;
 		if (outputAlias) {
-			const resTarget: ResTarget = {
-				val: colRef,
-				name: ctx.naming.toDatabase(outputAlias),
-			};
-			return { ResTarget: resTarget };
+			return sqlResTarget(colRef, queryLocal(outputAlias));
 		}
 
 		return colRef;
@@ -166,7 +147,7 @@ export const relationAliasHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		ctx: ExpressionCompilerContext,
 		state: CompilerState,
 	): Node {
 		const relation = decision.relation ?? decision.expandRelation;
@@ -185,13 +166,7 @@ export const relationAliasHandler: ExpressionHandler = {
 			column,
 			state.aliases,
 		);
-		const colRef = columnRef(
-			column,
-			tableAlias,
-			undefined,
-			ctx.naming,
-			ctx.aliasColumnAuthorities,
-		);
+		const colRef = expressionQualifiedColumnRef(column, tableAlias, ctx);
 
 		// If no output alias, return just the column ref
 		if (!outputAlias) {
@@ -199,12 +174,7 @@ export const relationAliasHandler: ExpressionHandler = {
 		}
 
 		// Wrap in ResTarget with output alias
-		const resTarget: ResTarget = {
-			val: colRef,
-			name: ctx.naming.toDatabase(outputAlias),
-		};
-
-		return { ResTarget: resTarget };
+		return sqlResTarget(colRef, queryLocal(outputAlias));
 	},
 };
 
@@ -221,7 +191,7 @@ export const prefixedRelationColumnHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		ctx: ExpressionCompilerContext,
 		state: CompilerState,
 	): Node {
 		const relation = decision.relation ?? decision.expandRelation;
@@ -241,22 +211,11 @@ export const prefixedRelationColumnHandler: ExpressionHandler = {
 			column,
 			state.aliases,
 		);
-		const colRef = columnRef(
-			column,
-			tableAlias,
-			undefined,
-			ctx.naming,
-			ctx.aliasColumnAuthorities,
-		);
+		const colRef = expressionQualifiedColumnRef(column, tableAlias, ctx);
 
 		// Create prefixed output alias: relation_column
 		const prefixedAlias = `${relation}_${column}`;
 
-		const resTarget: ResTarget = {
-			val: colRef,
-			name: ctx.naming.toDatabase(prefixedAlias),
-		};
-
-		return { ResTarget: resTarget };
+		return sqlResTarget(colRef, queryLocal(prefixedAlias));
 	},
 };

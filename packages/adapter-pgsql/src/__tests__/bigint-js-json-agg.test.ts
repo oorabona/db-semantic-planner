@@ -8,8 +8,9 @@ import {
 import { describe, expect, it } from 'vitest';
 import { compileCteQuery } from '../adapter-compiler-recursive.js';
 import { compilePlan } from '../compiler.js';
-import { identityNaming } from '../naming-plugin.js';
+import { createDeclaredNameResolver } from '../declared-name-resolver.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgPhysicalModel } from '../physical-model/index.js';
 import { fromOutputDescriptors } from '../projection-envelope.js';
 
 const includeSchema = schema({
@@ -31,7 +32,64 @@ const includeSchema = schema({
 	},
 });
 
+function resolverFor(model: typeof includeSchema.model) {
+	return createDeclaredNameResolver(
+		createPgPhysicalModel({
+			mode: 'logical',
+			model,
+			schema: 'public',
+			dbCasing: 'preserve',
+		}),
+	);
+}
+
 describe('bigint js json_agg SQL projection', () => {
+	it('maps a truncated physical json_agg key back to its full logical column', () => {
+		const longColumn =
+			'extremelyLongCamelCaseColumnNameThatExceedsPostgresqlIdentifierLimitByFar';
+		const longSchema = schema({
+			parents: { id: 'uuid' },
+			readings: {
+				id: 'uuid',
+				parentId: ref('parents', {
+					as: 'parent',
+					inverse: 'readings',
+					references: ['id'],
+				}),
+				[longColumn]: 'string',
+			},
+		});
+		const adapter = createPgsqlCompileOnlyAdapter({
+			model: longSchema.model,
+			dbCasing: 'snake_case',
+		});
+		const plan = createOrm({ model: longSchema.model, adapter })
+			.select('parents')
+			.include('readings')
+			.withPlanOptions({ defaultIncludeStrategy: 'json_agg' })
+			.plan();
+
+		const compiled = adapter.compileWithIncludes(plan, {
+			model: longSchema.model,
+		});
+		const physicalColumn = longColumn
+			.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)
+			.slice(0, 63);
+		const hydrationDecision = compiled.main.hydrationPlan?.decisions.find(
+			(candidate) =>
+				candidate.type === 'include-strategy' &&
+				candidate.context.relation === 'readings',
+		);
+
+		expect(
+			(
+				hydrationDecision?.context as
+					| { jsonAggColumnKeyMap?: Record<string, string> }
+					| undefined
+			)?.jsonAggColumnKeyMap?.[physicalColumn],
+		).toBe(longColumn);
+	});
+
 	it('refuses to carry a convertible JSON container through a projected CTE', () => {
 		const projectedReadings = fromOutputDescriptors({
 			sql: 'SELECT readings_json FROM prior_readings',
@@ -63,7 +121,6 @@ describe('bigint js json_agg SQL projection', () => {
 					shape: { kind: 'array', cardinality: 'many', aggregate: 'json_agg' },
 				},
 			],
-			naming: identityNaming,
 		});
 
 		expect(() =>
@@ -428,7 +485,6 @@ describe('bigint js json_agg SQL projection', () => {
 					shape: { kind: 'array', cardinality: 'many', aggregate: 'json_agg' },
 				},
 			],
-			naming: identityNaming,
 			hydrationPlan,
 		});
 
@@ -454,9 +510,10 @@ describe('bigint js json_agg SQL projection', () => {
 			},
 			{ model: includeSchema.model },
 			{
-				naming: identityNaming,
 				schemaName: undefined,
 				model: includeSchema.model,
+				declaredNames: resolverFor(includeSchema.model),
+				bindingNames: new Set(['include_source']),
 				defaultPk: 'id',
 				deriveFk: (relation: string) => `${relation}Id`,
 			},

@@ -35,10 +35,8 @@ import {
 } from '../handlers/index.js';
 import type { CompilerContext } from '../handlers/types.js';
 import { inHandler } from '../handlers/where/index.js';
-import { identityNaming } from '../naming-plugin.js';
 
 const ctx: CompilerContext = {
-	naming: identityNaming,
 	rootTable: 'users',
 	maxRecursiveDepth: 100,
 };

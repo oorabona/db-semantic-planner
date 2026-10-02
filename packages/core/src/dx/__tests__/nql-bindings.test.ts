@@ -332,7 +332,7 @@ function createBindingFinalBundle(include: IncludeIntent): CompiledNqlQuery {
 async function expectAuthorBindingProjectionMaterializes(
 	dbCasing: Adapter['dbCasing'],
 	projectedColumn: 'authorId' | 'author_id',
-	expectedCteColumn: 'authorId' | 'author_id',
+	expectedCteColumn: 'authorId',
 ) {
 	const execute = vi
 		.fn()
@@ -674,10 +674,10 @@ inactive_users | select id`.all();
 		expect(execute.mock.calls[3]?.[0].parameters).toEqual([5]);
 	});
 
-	it('canonicalizes snake_case read snapshot rows to logical binding columns', async () => {
+	it('accepts logical read snapshot rows for a snake_case binding', async () => {
 		const execute = vi
 			.fn()
-			.mockResolvedValueOnce([{ author_id: 7 }])
+			.mockResolvedValueOnce([{ authorId: 7 }])
 			.mockResolvedValueOnce([{ id: 1 }])
 			.mockResolvedValueOnce([{ authorId: 7 }]);
 		const { nql } = createMutationBindingTag(execute, undefined, undefined, {
@@ -695,7 +695,7 @@ posts | where authorId in (post_authors) | select authorId`.all();
 		expect(execute).toHaveBeenCalledTimes(3);
 		const finalSql = execute.mock.calls[2]?.[0].sql ?? '';
 		expect(finalSql).toContain(
-			'WITH "post_authors" ("author_id") as (SELECT CAST(NULL AS integer) AS "author_id" WHERE false UNION ALL VALUES ($1::integer))',
+			'WITH "post_authors" ("authorId") as (SELECT CAST(NULL AS integer) AS "authorId" WHERE false UNION ALL VALUES ($1::integer))',
 		);
 		expect(execute.mock.calls[2]?.[0].parameters).toEqual([7]);
 	});
@@ -772,19 +772,16 @@ b | select id, doubled`.dump();
 			});
 		});
 
-		it('flags duplicate output column names as untypeable', () => {
+		it('refuses duplicate output column names before their result map collapses', () => {
 			const { compile, nql } = createMutationBindingTag(vi.fn());
 
-			nql`users | select id as x, name as x | bind b
-b | select x`.dump();
-
-			const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
-			const outputSchema = bundle.bindingOutputSchemas?.get('b');
-			expect(outputSchema?.columnTypes).toBeUndefined();
-			expect(outputSchema?.columnTypesUnavailable).toEqual({
-				column: 'x',
-				reason: 'duplicate-output-name',
-			});
+			expect(() =>
+				nql`users | select id as x, name as x | bind b
+b | select x`.dump(),
+			).toThrow(
+				"Projection output label 'x' is produced by multiple candidates and cannot be returned losslessly.",
+			);
+			expect(compile).toHaveBeenCalledOnce();
 		});
 
 		it('marks relation-column projections as untypeable (relation-column)', () => {
@@ -2207,14 +2204,14 @@ update users set active = ${true} where id in (inactive_users) | select id | bin
 		});
 	});
 
-	it('materializes snake_case mutation RETURNING rows to logical binding columns', async () => {
+	it('accepts logical mutation RETURNING rows for a snake_case binding', async () => {
 		const afterMutation = vi.fn((_ctx, rows: unknown[]) => rows);
 		const hooks = getHookStore(
 			createHookManager().afterMutation(afterMutation as never),
 		);
 		const execute = vi
 			.fn()
-			.mockResolvedValueOnce([{ author_id: 7 }])
+			.mockResolvedValueOnce([{ authorId: 7 }])
 			.mockResolvedValueOnce([{ authorId: 7 }]);
 		const { nql } = createMutationBindingTag(execute, undefined, hooks, {
 			dbCasing: 'snake_case',
@@ -2227,7 +2224,7 @@ posts | where authorId in (touched) | select authorId`.all();
 
 		expect(rows).toEqual([{ authorId: 7 }]);
 		expect(afterMutation).toHaveBeenCalledOnce();
-		expect(afterMutation.mock.calls[0]?.[1]).toEqual([{ author_id: 7 }]);
+		expect(afterMutation.mock.calls[0]?.[1]).toEqual([{ authorId: 7 }]);
 		expect(execute).toHaveBeenCalledTimes(2);
 		expect(execute.mock.calls[1]?.[0].parameters).toEqual([7]);
 	});
@@ -2252,12 +2249,12 @@ posts | where authorId in (touched) | select authorId`.all();
 	});
 
 	it.each([
-		['snake_case', 'authorId', 'author_id'],
-		['snake_case', 'author_id', 'author_id'],
+		['snake_case', 'authorId', 'authorId'],
+		['snake_case', 'author_id', 'authorId'],
 		['preserve', 'authorId', 'authorId'],
 		['preserve', 'author_id', 'authorId'],
 	] as const)(
-		'materializes %s mutation binding projected as %s through canonical CTE column %s',
+		'materializes %s mutation binding projected as %s through its query-local CTE column %s',
 		async (dbCasing, projectedColumn, expectedCteColumn) => {
 			await expectAuthorBindingProjectionMaterializes(
 				dbCasing,

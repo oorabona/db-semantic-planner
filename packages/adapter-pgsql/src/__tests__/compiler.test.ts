@@ -13,7 +13,6 @@ import {
 	PlanCompiler,
 	type SimplifiedPlanReport,
 } from '../compiler.js';
-import { CamelCaseNamingPlugin } from '../naming-plugin.js';
 
 describe('PlanCompiler', () => {
 	describe('SELECT queries', () => {
@@ -454,10 +453,8 @@ describe('PlanCompiler', () => {
 	});
 
 	describe('Naming convention', () => {
-		it('applies CamelCase naming plugin', () => {
-			const compiler = new PlanCompiler({
-				naming: new CamelCaseNamingPlugin(),
-			});
+		it('does not apply the legacy naming policy to direct compilation', () => {
+			const compiler = new PlanCompiler();
 
 			const plan: SimplifiedPlanReport = {
 				rootTable: 'userProfiles',
@@ -477,10 +474,10 @@ describe('PlanCompiler', () => {
 			const result = compiler.compile(plan);
 			const normalized = normalizeSQL(result.sql);
 
-			expect(normalized).toContain('user_profiles');
-			expect(normalized).toContain('first_name');
-			expect(normalized).toContain('last_name');
-			expect(normalized).toContain('created_at');
+			expect(normalized).toContain('userprofiles');
+			expect(normalized).toContain('firstname');
+			expect(normalized).toContain('lastname');
+			expect(normalized).toContain('createdat');
 		});
 	});
 
@@ -880,16 +877,16 @@ describe('DISTINCT ON compilation', () => {
 		expect(normalized).toContain('email');
 	});
 
-	it('applies naming plugin to DISTINCT ON columns', () => {
+	it('does not apply the legacy naming policy to DISTINCT ON columns', () => {
 		const plan: SimplifiedPlanReport = {
 			rootTable: 'users',
 			decisions: [{ type: 'distinctOn', columns: ['createdAt'] }],
 		};
 
-		const compiler = new PlanCompiler({ naming: new CamelCaseNamingPlugin() });
+		const compiler = new PlanCompiler();
 		const result = compiler.compile(plan);
 		const normalized = normalizeSQL(result.sql);
 
-		expect(normalized).toMatch(/distinct on \([^)]*created_at[^)]*\)/i);
+		expect(normalized).toMatch(/distinct on \([^)]*createdat[^)]*\)/i);
 	});
 });

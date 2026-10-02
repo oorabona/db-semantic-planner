@@ -13,7 +13,8 @@
  * - Adapter capabilities (execution/streaming support)
  */
 
-import type { PlanReport } from '@dbsp/types';
+import { schema } from '@dbsp/core';
+import type { ModelIR, PlanReport } from '@dbsp/types';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import { describe, expect, it } from 'vitest';
 import {
@@ -22,6 +23,52 @@ import {
 } from './pgsql-adapter.js';
 import { createPgPhysicalModel } from './physical-model/index.js';
 
+function completeModel(
+	definition: Record<string, Record<string, unknown>>,
+): ModelIR {
+	const model = schema(definition as any).model;
+	return {
+		...model,
+		getTable: (name: string) => model.tables.get(name),
+		getRelation: () => undefined,
+		getRelationsFrom: () => [],
+		getRelationsTo: () => [],
+		isAmbiguous: () => ({ ambiguous: false }),
+	} as unknown as ModelIR;
+}
+
+const coverageModel = completeModel({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'text',
+		email: 'text',
+		active: 'boolean',
+	},
+	categories: {
+		id: 'integer',
+		parent_id: 'integer',
+		name: 'text',
+		active: 'boolean',
+	},
+	nodes: {
+		id: 'integer',
+		name: 'text',
+		active: 'boolean',
+		x: 'integer',
+		y: 'integer',
+	},
+	edges: { id: 'integer', from_id: 'integer', to_id: 'integer' },
+	staging_users: {
+		id: 'integer',
+		name: 'text',
+		email: 'text',
+		active: 'boolean',
+	},
+	archive_users: { id: 'integer', name: 'text', email: 'text' },
+	staging: { id: 'integer', name: 'text', email: 'text', active: 'boolean' },
+	posts: { id: 'integer', title: 'text', archived: 'boolean' },
+	archive: { id: 'integer', title: 'text' },
+});
 function testQuery<T = unknown>(
 	sql: string,
 	parameters: readonly unknown[] = [],
@@ -723,12 +770,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 	describe('compile with model option', () => {
 		it('passes model to compile function', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
-			const mockModel = {
-				tables: new Map(),
-				relations: new Map(),
-				getTable: () => undefined,
-				getRelation: () => undefined,
-			};
+			const mockModel = coverageModel;
 
 			const plan: PlanReport = {
 				rootTable: 'users',
@@ -786,7 +828,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			expect(adapter.dbCasing).toBe('camelCase');
 		});
 
-		it('compile respects all adapter options', () => {
+		it('refuses non-preserve compilation without a model', () => {
 			const adapter = createPgsqlCompileOnlyAdapter({
 				schemaName: 'tenant_all',
 				dbCasing: 'snake_case',
@@ -797,9 +839,9 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				decisions: [{ type: 'select', column: '*' }],
 			} as any;
 
-			const result = adapter.compile(plan);
-
-			expect(result.sql).toContain('tenant_all');
+			expect(() => adapter.compile(plan)).toThrow(
+				"PgsqlAdapter compilation with dbCasing 'snake_case' requires a ModelIR",
+			);
 		});
 	});
 
@@ -810,7 +852,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compileInsert', () => {
 		it('compiles a basic INSERT with single row', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				values: [{ name: 'Alice', email: 'alice@ex.com' }],
@@ -823,7 +865,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles INSERT with RETURNING', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				values: [{ name: 'Bob' }],
@@ -836,6 +878,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 		it('compiles INSERT with schema scoping', () => {
 			const adapter = createPgsqlCompileOnlyAdapter({
+				model: coverageModel,
 				schemaName: 'tenant_ins',
 			});
 			const intent = {
@@ -847,7 +890,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles INSERT with schema from compile options', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				values: [{ name: 'Dave' }],
@@ -862,6 +905,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			// Regression guard for M-1 fix: deps.schemaName is now authoritative.
 			// buildCompileDeps() uses || for schemaName, so '' falls through to constructor value.
 			const adapter = createPgsqlCompileOnlyAdapter({
+				model: coverageModel,
 				schemaName: 'adapter_default',
 			});
 			const intent = {
@@ -875,7 +919,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles INSERT with multiple rows', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				values: [
@@ -889,7 +933,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles INSERT with empty values array', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				values: [],
@@ -899,7 +943,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles INSERT with undefined values', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 			};
@@ -910,7 +954,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compileUpdate', () => {
 		it('compiles a basic UPDATE', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				set: { name: 'Updated' },
@@ -922,7 +966,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles UPDATE with WHERE clause', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				set: { active: false },
@@ -935,7 +979,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles UPDATE with RETURNING', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				set: { active: true },
@@ -948,6 +992,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 		it('compiles UPDATE with schema scoping', () => {
 			const adapter = createPgsqlCompileOnlyAdapter({
+				model: coverageModel,
 				schemaName: 'tenant_upd',
 			});
 			const intent = {
@@ -959,7 +1004,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles UPDATE with schema from compile options', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				set: { name: 'X' },
@@ -973,7 +1018,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compileDelete', () => {
 		it('compiles a basic DELETE', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = { table: 'users' };
 			const result = adapter.compileDelete(intent as any);
 			const sql = result.sql.toLowerCase();
@@ -982,7 +1027,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles DELETE with WHERE clause', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				where: { kind: 'comparison', field: 'id', operator: 'eq', value: 99 },
@@ -994,7 +1039,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles DELETE with RETURNING', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				where: { kind: 'comparison', field: 'id', operator: 'eq', value: 1 },
@@ -1007,6 +1052,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 		it('compiles DELETE with schema scoping', () => {
 			const adapter = createPgsqlCompileOnlyAdapter({
+				model: coverageModel,
 				schemaName: 'tenant_del',
 			});
 			const intent = { table: 'users' };
@@ -1015,7 +1061,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles DELETE with schema from compile options', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = { table: 'users' };
 			const result = adapter.compileDelete(intent as any, {
 				schemaName: 'del_schema',
@@ -1026,7 +1072,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compileUpsert', () => {
 		it('compiles upsert with doNothing action', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				values: [{ id: 1, name: 'Alice' }],
@@ -1041,7 +1087,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles upsert with doUpdate action (implicit update columns)', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				values: [{ id: 1, name: 'Alice', email: 'alice@ex.com' }],
@@ -1055,7 +1101,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles upsert with doUpdate and explicit set', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				values: [{ id: 1, name: 'Alice' }],
@@ -1068,11 +1114,11 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles upsert with constraint-based conflict', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				values: [{ id: 1, name: 'Alice' }],
-				onConflict: { constraint: 'users_pkey' },
+				onConflict: { constraint: 'pk_users' },
 				action: { type: 'doNothing' },
 			};
 			const result = adapter.compileUpsert(intent as any);
@@ -1081,7 +1127,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles upsert with RETURNING', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				values: [{ id: 1, name: 'Alice' }],
@@ -1096,6 +1142,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 		it('compiles upsert with schema scoping', () => {
 			const adapter = createPgsqlCompileOnlyAdapter({
+				model: coverageModel,
 				schemaName: 'tenant_ups',
 			});
 			const intent = {
@@ -1111,7 +1158,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compileInsertFrom', () => {
 		it('compiles INSERT FROM SELECT', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'archive_users',
 				source: 'users',
@@ -1124,7 +1171,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles INSERT FROM with WHERE', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'archive_users',
 				source: 'users',
@@ -1142,7 +1189,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles INSERT FROM with LIMIT', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'archive_users',
 				source: 'users',
@@ -1154,7 +1201,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles INSERT FROM with RETURNING', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'archive_users',
 				source: 'users',
@@ -1167,6 +1214,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 		it('compiles INSERT FROM with schema scoping', () => {
 			const adapter = createPgsqlCompileOnlyAdapter({
+				model: coverageModel,
 				schemaName: 'tenant_if',
 			});
 			const intent = {
@@ -1180,7 +1228,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compileUpsertFrom', () => {
 		it('compiles UPSERT FROM SELECT', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				source: 'staging_users',
@@ -1194,7 +1242,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles UPSERT FROM with WHERE', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				source: 'staging',
@@ -1214,6 +1262,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 		it('compiles UPSERT FROM with schema', () => {
 			const adapter = createPgsqlCompileOnlyAdapter({
+				model: coverageModel,
 				schemaName: 'tenant_uf',
 			});
 			const intent = {
@@ -1248,7 +1297,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const model = {} as any;
+			const model = coverageModel;
 			const result = adapter.compileRecursive(report as any, model);
 			const sql = result.sql.toLowerCase();
 			expect(sql).toContain('with recursive');
@@ -1275,7 +1324,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const result = adapter.compileRecursive(report as any, {} as any);
+			const result = adapter.compileRecursive(report as any, coverageModel);
 			const sql = result.sql.toLowerCase();
 			expect(sql).toContain('with recursive');
 		});
@@ -1302,7 +1351,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const result = adapter.compileRecursive(report as any, {} as any);
+			const result = adapter.compileRecursive(report as any, coverageModel);
 			const sql = result.sql.toLowerCase();
 			expect(sql).toContain('with recursive');
 			expect(sql).toContain('edges');
@@ -1331,7 +1380,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const result = adapter.compileRecursive(report as any, {} as any);
+			const result = adapter.compileRecursive(report as any, coverageModel);
 			const sql = result.sql.toLowerCase();
 			expect(sql).toContain('with recursive');
 		});
@@ -1356,7 +1405,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const result = adapter.compileRecursive(report as any, {} as any);
+			const result = adapter.compileRecursive(report as any, coverageModel);
 			expect(result.sql).toContain('level');
 		});
 
@@ -1380,7 +1429,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const result = adapter.compileRecursive(report as any, {} as any);
+			const result = adapter.compileRecursive(report as any, coverageModel);
 			expect(result.sql).toContain('trail');
 		});
 
@@ -1406,7 +1455,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const result = adapter.compileRecursive(report as any, {} as any);
+			const result = adapter.compileRecursive(report as any, coverageModel);
 			expect(result.sql).toContain('tenant_rec');
 		});
 
@@ -1428,9 +1477,9 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			expect(() => adapter.compileRecursive(report as any, {} as any)).toThrow(
-				/Unsupported traversal kind/,
-			);
+			expect(() =>
+				adapter.compileRecursive(report as any, coverageModel),
+			).toThrow(/Unsupported traversal kind/);
 		});
 
 		it('compiles edge-table with anchor WHERE', () => {
@@ -1461,7 +1510,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const result = adapter.compileRecursive(report as any, {} as any);
+			const result = adapter.compileRecursive(report as any, coverageModel);
 			expect(result.sql).toBeDefined();
 		});
 
@@ -1487,7 +1536,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const result = adapter.compileRecursive(report as any, {} as any);
+			const result = adapter.compileRecursive(report as any, coverageModel);
 			expect(result.sql).toBeDefined();
 		});
 	});
@@ -1521,7 +1570,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const result = adapter.compileRecursive(report as any, {} as any);
+			const result = adapter.compileRecursive(report as any, coverageModel);
 			expect(result.sql).toBeDefined();
 		});
 
@@ -1554,7 +1603,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const result = adapter.compileRecursive(report as any, {} as any);
+			const result = adapter.compileRecursive(report as any, coverageModel);
 			expect(result.sql).toBeDefined();
 		});
 
@@ -1581,7 +1630,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const result = adapter.compileRecursive(report as any, {} as any);
+			const result = adapter.compileRecursive(report as any, coverageModel);
 			expect(result.sql).toBeDefined();
 		});
 
@@ -1609,7 +1658,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				},
 			};
 			// null where means no anchorWhere → should still compile
-			const result = adapter.compileRecursive(report as any, {} as any);
+			const result = adapter.compileRecursive(report as any, coverageModel);
 			expect(result.sql).toBeDefined();
 		});
 	});
@@ -2038,7 +2087,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 	});
 
 	describe('compile - dbCasing variants', () => {
-		it('compiles with snake_case naming', () => {
+		it('refuses snake_case naming without a model', () => {
 			const adapter = createPgsqlCompileOnlyAdapter({
 				dbCasing: 'snake_case',
 			});
@@ -2046,11 +2095,10 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				rootTable: 'users',
 				decisions: [{ type: 'select', column: '*' }],
 			} as any;
-			const result = adapter.compile(plan);
-			expect(result.sql).toContain('SELECT');
+			expect(() => adapter.compile(plan)).toThrow('requires a ModelIR');
 		});
 
-		it('compiles with camelCase naming', () => {
+		it('refuses camelCase naming without a model', () => {
 			const adapter = createPgsqlCompileOnlyAdapter({
 				dbCasing: 'camelCase',
 			});
@@ -2058,8 +2106,66 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				rootTable: 'users',
 				decisions: [{ type: 'select', column: '*' }],
 			} as any;
-			const result = adapter.compile(plan);
-			expect(result.sql).toContain('SELECT');
+			expect(() => adapter.compile(plan)).toThrow('requires a ModelIR');
+		});
+
+		it('refuses INSERT compilation without a model', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' });
+			expect(() => adapter.compileInsert({ table: 'users' } as any)).toThrow(
+				'requires a ModelIR',
+			);
+		});
+
+		it('refuses INSERT FROM compilation without a model', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' });
+			expect(() =>
+				adapter.compileInsertFrom({ table: 'users' } as any),
+			).toThrow('requires a ModelIR');
+		});
+
+		it('refuses UPDATE compilation without a model', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' });
+			expect(() => adapter.compileUpdate({ table: 'users' } as any)).toThrow(
+				'requires a ModelIR',
+			);
+		});
+
+		it('refuses batch UPDATE compilation without a model', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' });
+			expect(() =>
+				adapter.compileBatchUpdate({ table: 'users' } as any),
+			).toThrow('requires a ModelIR');
+		});
+
+		it('refuses DELETE compilation without a model', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' });
+			expect(() => adapter.compileDelete({ table: 'users' } as any)).toThrow(
+				'requires a ModelIR',
+			);
+		});
+
+		it('refuses UPSERT compilation without a model', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' });
+			expect(() =>
+				adapter.compileUpsert({
+					table: 'users',
+					values: [],
+					onConflict: { columns: [] },
+					action: { type: 'doNothing' },
+				} as any),
+			).toThrow('requires a ModelIR');
+		});
+
+		it('refuses UPSERT FROM compilation without a model', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' });
+			expect(() =>
+				adapter.compileUpsertFrom({
+					table: 'users',
+					source: 'users_import',
+					conflictColumns: [],
+					sourceQuery: {} as any,
+				} as any),
+			).toThrow('requires a ModelIR');
 		});
 	});
 
@@ -2149,7 +2255,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 								{ name: 'id', type: 'integer', nullable: false },
 								{ name: 'author_id', type: 'integer', nullable: false },
 							],
-							primaryKey: { columns: ['id'] },
+							primaryKey: 'id',
 							foreignKeys: [],
 							indexes: [],
 						},
@@ -2162,7 +2268,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 								{ name: 'id', type: 'integer', nullable: false },
 								{ name: 'name', type: 'text', nullable: false },
 							],
-							primaryKey: { columns: ['id'] },
+							primaryKey: 'id',
 							foreignKeys: [],
 							indexes: [],
 						},
@@ -2231,7 +2337,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 								{ name: 'id', type: 'integer', nullable: false },
 								{ name: 'period', type: 'daterange', nullable: true },
 							],
-							primaryKey: { columns: ['id'] },
+							primaryKey: 'id',
 							foreignKeys: [],
 							indexes: [],
 						},
@@ -2364,6 +2470,16 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 	describe('getColumnTypes — coverage', () => {
 		it('returns undefined when model is absent', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
+			const result = adapter.compileInsert({
+				type: 'insert',
+				table: 'users',
+				values: [{ name: 'alice' }],
+			} as any);
+			expect(result.sql).toContain('INSERT');
+		});
+
+		it('returns no special column types for scalar columns in a declared model', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			// getColumnTypes is private, but exercised through compileInsert
 			const result = adapter.compileInsert({
 				type: 'insert',
@@ -2373,13 +2489,10 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			expect(result.sql).toContain('INSERT');
 		});
 
-		it('returns undefined when table not found in model', () => {
-			const model = {
-				tables: new Map(),
-				relations: new Map(),
-				getTable: () => undefined,
-				getRelation: () => undefined,
-			} as any;
+		it('returns no special column types for a declared table', () => {
+			const model = completeModel({
+				unknown_table: { foo: 'text' },
+			});
 
 			const adapter = createPgsqlCompileOnlyAdapter({ model });
 			const result = adapter.compileInsert({
@@ -2402,7 +2515,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 								{ name: 'period', type: 'daterange', nullable: true },
 								{ name: 'title', type: 'text', nullable: false },
 							],
-							primaryKey: { columns: ['id'] },
+							primaryKey: 'id',
 							foreignKeys: [],
 							indexes: [],
 						},
@@ -2429,29 +2542,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compileUpsertFrom — columns from model', () => {
 		it('derives columns from model when not specified', () => {
-			const model = {
-				tables: new Map([
-					[
-						'users',
-						{
-							name: 'users',
-							columns: [
-								{ name: 'id', type: 'integer', nullable: false },
-								{ name: 'name', type: 'text', nullable: false },
-								{ name: 'email', type: 'text', nullable: true },
-							],
-							primaryKey: { columns: ['id'] },
-							foreignKeys: [],
-							indexes: [],
-						},
-					],
-				]),
-				relations: new Map(),
-				getTable: function (n) {
-					return this.tables.get(n);
-				},
-				getRelation: () => undefined,
-			} as any;
+			const model = coverageModel;
 
 			const adapter = createPgsqlCompileOnlyAdapter();
 			const result = adapter.compileUpsertFrom(
@@ -2468,7 +2559,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('uses explicit columns when provided', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const result = adapter.compileUpsertFrom({
 				type: 'upsertFrom',
 				table: 'users',
@@ -2480,7 +2571,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles with where and limit', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const result = adapter.compileUpsertFrom({
 				type: 'upsertFrom',
 				table: 'users',
@@ -2676,7 +2767,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compileInsertFrom — coverage', () => {
 		it('compiles insert-from with columns, where, limit, returning', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const result = adapter.compileInsertFrom({
 				type: 'insertFrom',
 				table: 'archive',
@@ -2697,7 +2788,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles insert-from without optional fields', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const result = adapter.compileInsertFrom({
 				type: 'insertFrom',
 				table: 'archive',
@@ -2719,7 +2810,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 								{ name: 'id', type: 'integer', nullable: false },
 								{ name: 'period', type: 'tsrange', nullable: true },
 							],
-							primaryKey: { columns: ['id'] },
+							primaryKey: 'id',
 							foreignKeys: [],
 							indexes: [],
 						},

@@ -185,11 +185,12 @@ interface IncludeHandler {
 
 ```typescript
 interface CompilerContext {
-  naming: NamingPlugin;      // Name transformation
-  rootTable: string;         // Root entity table
-  schema?: string;           // PostgreSQL schema
-  maxRecursiveDepth: number; // CTE depth limit (default: 100)
-  currentAlias?: string;     // Current table alias
+  declaredNames: DeclaredNameResolver; // Logical declared address → physical model name
+  scope: QueryScope;                   // Query-local and declared relation bindings
+  rootTable: string;                   // Logical root entity table
+  schema?: string;                     // PostgreSQL schema
+  maxRecursiveDepth: number;           // CTE depth limit (default: 100)
+  currentAlias?: SqlIdentifier;        // Resolved relation qualifier
 }
 ```
 
@@ -207,19 +208,12 @@ interface CompilerState {
 
 ## Security
 
-### Identifier Validation
+### Identifier Authorities
 
-All identifiers pass through `validateIdentifier()`:
-
-```typescript
-function validateIdentifier(value: string, type: 'table' | 'column' | 'schema' | 'alias'): void {
-  // 1. Not empty
-  // 2. Max 63 characters (PostgreSQL limit)
-  // 3. Valid characters: ^[a-zA-Z_][a-zA-Z0-9_$]*$
-  // 4. No control characters
-  // 5. No SQL injection patterns
-}
-```
+Declared table and column names resolve through the physical model inventory. Query-local names such as aliases, CTEs,
+bindings, and output labels retain their AST identifier spelling. Catalog names are used by catalog and helper paths.
+Raw SQL and raw CTE bodies are physical SQL and are not rewritten. Schema names remain validated at `withSchema()` and
+`compile({ schemaName })`.
 
 ### Parameter Binding
 

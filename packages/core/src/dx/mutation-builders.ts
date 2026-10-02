@@ -1211,7 +1211,9 @@ export class UpsertBuilder<
 
 	/**
 	 * Specify conflict target by constraint name.
-	 * Alternative to onConflict() for named constraints.
+	 * Alternative to onConflict() for named constraints. The constraint must be
+	 * declared on this table; it is resolved to its physical database name, and
+	 * an undeclared name is rejected at compilation.
 	 */
 	onConflictConstraint(constraintName: string): UpsertBuilder<TRow, TResult> {
 		return new UpsertBuilder<TRow, TResult>({

@@ -10,13 +10,19 @@
 import { type ColumnListInput, toColumnList } from '@dbsp/types';
 import type { CommonTableExpr, JoinExpr, Node, SelectStmt } from '@pgsql/types';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
-import { columnRef, rangeVar, starTarget } from '../../ast-helpers.js';
-import { schemaForFromName } from '../../binding-registry.js';
+import {
+	sqlColumnRefStar,
+	sqlRangeVar,
+	sqlResTarget,
+} from '../../ast-helpers.js';
+import { queryScope, relationBinding } from '../../binding-registry.js';
 import {
 	bindAliasAuthority,
+	queryScopeForBindingProjections,
 	requireRelationTargetColumns,
 	resolveRelationTarget,
 } from '../../relation-target-projection.js';
+import { queryLocal, resolveDeclaredIdentifier } from '../../sql-identifier.js';
 import { createWhereDispatcher } from '../index.js';
 import type {
 	CompilerContext,
@@ -25,6 +31,7 @@ import type {
 	IncludeHandler,
 	IncludeResult,
 } from '../types.js';
+import { expressionQualifiedColumnRef } from '../types.js';
 import { buildKeyCorrelation } from '../where/exists.js';
 
 /**
@@ -38,22 +45,16 @@ function buildCteTargets(
 	if (columns && columns.length > 0 && !columns.every((c) => c === '*')) {
 		return columns
 			.filter((col) => col !== '*')
-			.map((col) => ({
-				ResTarget: {
-					val: columnRef(
-						col,
-						alias,
-						undefined,
-						ctx.naming,
-						ctx.aliasColumnAuthorities,
-					),
-					name: ctx.naming.toDatabase(col),
-				},
-			}));
+			.map((col) =>
+				sqlResTarget(
+					expressionQualifiedColumnRef(col, alias, ctx),
+					queryLocal(col),
+				),
+			);
 	}
 
 	// Select all columns
-	return [starTarget(alias, ctx.naming)];
+	return [sqlResTarget(sqlColumnRefStar(queryLocal(alias)))];
 }
 
 /**
@@ -98,16 +99,17 @@ function buildCteSelect(
 	const stmt: SelectStmt = {
 		targetList,
 		fromClause: [
-			rangeVar(
-				targetTable,
-				innerAlias,
-				schemaForFromName(
-					ctx.schema,
-					targetTable,
-					ctx.bindingNames,
-					ctx.naming,
+			sqlRangeVar(
+				resolveDeclaredIdentifier(
+					ctx.declaredNames,
+					ctx.dbCasing ?? 'preserve',
+					{
+						kind: 'table',
+						table: targetTable,
+					},
 				),
-				ctx.naming,
+				queryLocal(innerAlias),
+				ctx.schema === undefined ? undefined : queryLocal(ctx.schema),
 			),
 		],
 		...(whereClause && { whereClause }),
@@ -122,10 +124,10 @@ function buildCteSelect(
 function buildCTE(
 	cteName: string,
 	cteSelect: Node,
-	ctx: CompilerContext,
+	_ctx: CompilerContext,
 ): Node {
 	const cte: CommonTableExpr = {
-		ctename: ctx.naming.toDatabase(cteName),
+		ctename: cteName,
 		ctequery: cteSelect,
 	};
 
@@ -153,14 +155,7 @@ function buildCteJoin(
 	);
 
 	// Reference the CTE as if it were a table
-	const cteRef: Node = {
-		RangeVar: {
-			relname: ctx.naming.toDatabase(cteName),
-			inh: true,
-			relpersistence: 'p',
-			alias: { aliasname: ctx.naming.toDatabase(cteAlias) },
-		},
-	};
+	const cteRef = sqlRangeVar(queryLocal(cteName), queryLocal(cteAlias));
 
 	const joinExpr: JoinExpr = {
 		jointype: 'JOIN_LEFT',
@@ -216,19 +211,17 @@ export const cteIncludeHandler: IncludeHandler = {
 		if (!relation) {
 			throw new Error('CTE include requires relation name');
 		}
-		const target = resolveRelationTarget(targetTable, ctx);
+		const target = resolveRelationTarget(queryLocal(targetTable), ctx);
 		requireRelationTargetColumns(
 			target,
-			toColumnList(targetColumn),
-			ctx,
+			toColumnList(targetColumn).map(queryLocal),
 			'join key',
 			relation,
 		);
 		if (columns) {
 			requireRelationTargetColumns(
 				target,
-				columns.filter((column) => column !== '*'),
-				ctx,
+				columns.filter((column) => column !== '*').map(queryLocal),
 				'selected column',
 				relation,
 			);
@@ -241,12 +234,32 @@ export const cteIncludeHandler: IncludeHandler = {
 		const cteAlias = `${relation}_ref_${existingAliases}`;
 		state.aliases.set(`cte_${targetTable}`, cteName);
 		const aliasColumnAuthorities = bindAliasAuthority(
-			bindAliasAuthority(ctx.aliasColumnAuthorities, innerAlias, target, ctx),
-			cteAlias,
+			bindAliasAuthority(
+				ctx.aliasColumnAuthorities,
+				queryLocal(innerAlias),
+				target,
+			),
+			queryLocal(cteAlias),
 			target,
-			ctx,
 		);
-		const scopedCtx: CompilerContext = { ...ctx, aliasColumnAuthorities };
+		const scopedCtx: CompilerContext = {
+			...ctx,
+			aliasColumnAuthorities,
+			scope: queryScope([
+				...((
+					ctx.scope ??
+					queryScopeForBindingProjections(
+						ctx.bindingNames,
+						ctx.relationTargetProjections,
+					)
+				)?.bindings.values() ?? []),
+				relationBinding({
+					qualifier: queryLocal(innerAlias),
+					kind: 'declared-table',
+					logicalTable: targetTable,
+				}),
+			]),
+		};
 
 		const outerAlias = ctx.currentAlias ?? ctx.rootTable;
 

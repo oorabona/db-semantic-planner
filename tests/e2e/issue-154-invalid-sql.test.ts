@@ -59,11 +59,11 @@ describe('FIX-154 invalid SQL regressions', () => {
 
 		const rows = (await query.execute()) as unknown as Array<{
 			id: number;
-			useIds: number[] | null;
+			use_ids: number[] | null;
 		}>;
 		expect(rows).toEqual([
-			{ id: 100, useIds: [1000, 1001] },
-			{ id: 200, useIds: null },
+			{ id: 100, use_ids: [1000, 1001] },
+			{ id: 200, use_ids: null },
 		]);
 	});
 
@@ -95,12 +95,12 @@ describe('FIX-154 invalid SQL regressions', () => {
 		expect(sql).toContain('file_1.path AS use_file');
 
 		const rows = (await query.execute()) as unknown as Array<{
-			defFile: string;
-			useFile: string;
+			def_file: string;
+			use_file: string;
 		}>;
 		expect(rows).toEqual([
-			{ defFile: '/def.ts', useFile: '/use.ts' },
-			{ defFile: '/def.ts', useFile: '/use.ts' },
+			{ def_file: '/def.ts', use_file: '/use.ts' },
+			{ def_file: '/def.ts', use_file: '/use.ts' },
 		]);
 	});
 
@@ -160,7 +160,7 @@ describe('FIX-154 invalid SQL regressions', () => {
 				join: 'inner',
 				select: { type: 'fields', fields: ['path'] },
 			})
-			.columns(['id', 'def_id', 'file_id', 'alt_file_id'])
+			.columns(['id', 'defId', 'fileId', 'altFileId'])
 			.orderBy('id');
 
 		const rows = (await query.execute()) as unknown as Array<{
@@ -208,9 +208,9 @@ describe('FIX-154 invalid SQL regressions', () => {
 		const query = orm
 			.withSchema(SCHEMA)
 			.select('dependencies')
-			.columns(['target_id', raw('COUNT(*)', 'count')])
-			.groupBy(['target_id'])
-			.orderBy('target_id');
+			.columns(['targetId', raw('COUNT(*)', 'count')])
+			.groupBy(['targetId'])
+			.orderBy('targetId');
 
 		const dump = query.dump();
 		expect(normalizeSql(dump.sql)).toContain(

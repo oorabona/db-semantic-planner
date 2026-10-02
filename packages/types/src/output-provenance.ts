@@ -28,6 +28,8 @@ export type OutputSource =
 
 export type OutputDescriptor = {
 	readonly outputKey: string;
+	/** Logical result key when outputKey is an emitted SQL identifier. */
+	readonly logicalKey?: string;
 	readonly source: OutputSource;
 	readonly shape: OutputValueShape;
 };

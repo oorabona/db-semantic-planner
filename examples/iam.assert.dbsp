@@ -214,7 +214,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 24
 success: true
-sql.equals: SELECT user_roles.role_id, count(*) AS user_count FROM iam_example.user_roles GROUP BY user_roles.role_id
+sql.equals: SELECT user_roles.role_id, count(*) AS "userCount" FROM iam_example.user_roles GROUP BY user_roles.role_id
 db.rows.equals: 8
 
 # ─────────────────────────────────────────
@@ -222,7 +222,7 @@ db.rows.equals: 8
 # ─────────────────────────────────────────
 --- query: 25
 success: true
-sql.equals: SELECT role_permissions.role_id, count(*) AS perm_count FROM iam_example.role_permissions GROUP BY role_permissions.role_id
+sql.equals: SELECT role_permissions.role_id, count(*) AS "permCount" FROM iam_example.role_permissions GROUP BY role_permissions.role_id
 db.rows.equals: 9
 
 # ─────────────────────────────────────────
@@ -230,7 +230,7 @@ db.rows.equals: 9
 # ─────────────────────────────────────────
 --- query: 26
 success: true
-sql.equals: SELECT role_edges.parent_role_id, count(*) AS child_count FROM iam_example.role_edges GROUP BY role_edges.parent_role_id
+sql.equals: SELECT role_edges.parent_role_id, count(*) AS "childCount" FROM iam_example.role_edges GROUP BY role_edges.parent_role_id
 db.rows.equals: 5
 
 # ─────────────────────────────────────────
@@ -252,7 +252,7 @@ db.rows.equals: 5
 # Same as query 27 but with | flat — forces JOIN strategy instead of nested json_agg
 --- query: 28
 success: true
-sql.equals: SELECT users.*, user_roles.role_id AS "userRoles.roleId", permission.* FROM iam_example.users LEFT JOIN iam_example.user_roles AS user_roles ON users.id = user_roles.user_id LEFT JOIN iam_example.roles AS role ON user_roles.role_id = role.id LEFT JOIN iam_example.role_permissions AS role_permissions ON role.id = role_permissions.role_id LEFT JOIN iam_example.permissions AS permission ON role_permissions.permission_id = permission.id WHERE users.active = $1
+sql.equals: SELECT users.*, "userRoles".role_id AS "userRoles.roleId", permission.* FROM iam_example.users LEFT JOIN iam_example.user_roles AS "userRoles" ON users.id = "userRoles".user_id LEFT JOIN iam_example.roles AS role ON "userRoles".role_id = role.id LEFT JOIN iam_example.role_permissions AS "rolePermissions" ON role.id = "rolePermissions".role_id LEFT JOIN iam_example.permissions AS permission ON "rolePermissions".permission_id = permission.id WHERE users.active = $1
 params.equals: [true]
 
 # ─────────────────────────────────────────
@@ -278,7 +278,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 31
 success: true
-sql.equals: SELECT audit_log.id, audit_log.action, audit_log.details -> $1 AS ip_json FROM iam_example.audit_log WHERE audit_log.action = $2
+sql.equals: SELECT audit_log.id, audit_log.action, audit_log.details -> $1 AS "ipJson" FROM iam_example.audit_log WHERE audit_log.action = $2
 params.equals: ["ip","login"]
 db.rows.equals: 4
 
@@ -305,7 +305,7 @@ db.rows.equals: 4
 # ─────────────────────────────────────────
 --- query: 34
 success: true
-sql.equals: SELECT roles.* FROM iam_example.roles WHERE EXISTS (SELECT 1 FROM iam_example.user_roles AS user_roles_exists_0 WHERE roles.id = user_roles_exists_0.role_id AND user_roles_exists_0.user_id = $1)
+sql.equals: SELECT roles.* FROM iam_example.roles WHERE EXISTS (SELECT 1 FROM iam_example.user_roles AS "userRoles_exists_0" WHERE roles.id = "userRoles_exists_0".role_id AND "userRoles_exists_0".user_id = $1)
 params.equals: [1]
 db.rows.equals: 1
 
@@ -314,7 +314,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 35
 success: true
-sql.equals: SELECT users.*, user_roles_lat_0.* FROM iam_example.users LEFT JOIN LATERAL ( SELECT user_roles_inner_0.* FROM iam_example.user_roles AS user_roles_inner_0 WHERE user_roles_inner_0.user_id = users.id LIMIT 2 ) AS user_roles_lat_0 ON true
+sql.equals: SELECT users.*, "userRoles_lat_0".* FROM iam_example.users LEFT JOIN LATERAL ( SELECT "userRoles_inner_0".* FROM iam_example.user_roles AS "userRoles_inner_0" WHERE "userRoles_inner_0".user_id = users.id LIMIT 2 ) AS "userRoles_lat_0" ON true
 params.equals: []
 db.rows.equals: 8
 
@@ -341,6 +341,6 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 37
 success: true
-sql.equals: SELECT users.*, user_roles.* FROM iam_example.users LEFT JOIN iam_example.user_roles AS user_roles ON users.id = user_roles.user_id
+sql.equals: SELECT users.*, "userRoles".* FROM iam_example.users LEFT JOIN iam_example.user_roles AS "userRoles" ON users.id = "userRoles".user_id
 params.equals: []
 db.rows.equals: 8

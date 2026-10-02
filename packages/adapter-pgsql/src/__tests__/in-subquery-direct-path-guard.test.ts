@@ -20,7 +20,6 @@ import {
 	type WhereCompilerCtx,
 } from '../compile-where.js';
 import { createCompilerState } from '../handlers/types.js';
-import { identityNaming } from '../naming-plugin.js';
 
 const testSchema = schema({
 	users: {
@@ -40,10 +39,9 @@ function makeCtx(): WhereCompilerCtx {
 		rootTable: 'users',
 		aliases: new Map(),
 		paramState,
-		naming: identityNaming,
 		model: testSchema.model as any,
 		compileSubquery: (subIntent, paramOffset) =>
-			buildSubqueryFromIntent(subIntent, paramOffset, identityNaming),
+			buildSubqueryFromIntent(subIntent, paramOffset),
 	};
 }
 

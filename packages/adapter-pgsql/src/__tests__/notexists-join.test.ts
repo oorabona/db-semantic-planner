@@ -184,6 +184,21 @@ describe('notExists() with include — DELETE mutation path', () => {
 		expect(ws(sql)).toMatch(/JOIN/i);
 		expect(ws(sql)).toMatch(/NOT.*EXISTS/i);
 	});
+
+	it('uses the complete model to produce a JOIN', () => {
+		const adapter = buildAdapter();
+
+		const { sql } = adapter.compileDelete({
+			type: 'delete' as const,
+			table: 'symbols',
+			where: notExists('callers', {
+				include: { callerFile: { join: 'inner' } },
+			}),
+		});
+
+		expect(ws(sql)).toMatch(/JOIN/i);
+		expect(ws(sql)).toMatch(/NOT.*EXISTS/i);
+	});
 });
 
 // ---------------------------------------------------------------------------

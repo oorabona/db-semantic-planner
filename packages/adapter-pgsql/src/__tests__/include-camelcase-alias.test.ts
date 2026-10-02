@@ -13,7 +13,6 @@ import { describe, expect, it } from 'vitest';
 import type { AdapterCompilerDeps } from '../adapter-compiler-deps.js';
 import { compileSelect } from '../adapter-compiler-select.js';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../assert-field.js';
-import { identityNaming } from '../naming-plugin.js';
 
 // ---------------------------------------------------------------------------
 // Mock model: variable_defs with enclosing_symbol (FK: enclosing_symbol_id -> symbols)
@@ -56,7 +55,6 @@ const mockModel = {
 } as unknown as ModelIR;
 
 const deps: AdapterCompilerDeps = {
-	naming: identityNaming,
 	schemaName: undefined,
 	defaultPk: DEFAULT_PK_COLUMN,
 	deriveFk: defaultFkDerivation,

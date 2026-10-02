@@ -17,27 +17,32 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	andExpr,
-	columnRef,
-	columnTarget,
 	countStar,
-	deleteStmt,
 	eqExpr,
 	funcCall,
 	gtExpr,
 	innerJoin,
-	insertStmt,
 	integerNode,
 	leftJoin,
 	ltExpr,
 	orExpr,
-	rangeVar,
 	selectStmt,
 	sortBy,
+} from '../ast-helpers.js';
+import { createParamRef } from '../param-ref.js';
+import {
+	columnRef,
+	columnTarget,
+	deleteStmt,
+	insertStmt,
+	rangeVar,
+	snakeDeleteStmt,
+	snakeInsertStmt,
+	snakeUnqualifiedColumnRef,
+	snakeUpdateStmt,
 	starTarget,
 	updateStmt,
-} from '../ast-helpers.js';
-import { CamelCaseNamingPlugin } from '../naming-plugin.js';
-import { createParamRef } from '../param-ref.js';
+} from './typed-ast-test-helpers.js';
 
 /**
  * A golden asserts the SQL the deparser emits, byte for byte. A tolerant comparison is what let a
@@ -331,13 +336,11 @@ describe('Golden SQL: INSERT queries', () => {
 	});
 
 	it('INSERT with naming convention', () => {
-		const naming = new CamelCaseNamingPlugin();
-		const ast = insertStmt({
-			table: 'userAccounts',
-			columns: ['firstName', 'lastName', 'createdAt'],
-			values: [[createParamRef(1), createParamRef(2), funcCall('now')]],
-			naming,
-		});
+		const ast = snakeInsertStmt(
+			'userAccounts',
+			['firstName', 'lastName', 'createdAt'],
+			[[createParamRef(1), createParamRef(2), funcCall('now')]],
+		);
 
 		const sql = deparseSync(ast);
 		assertSQLGolden(
@@ -388,19 +391,17 @@ describe('Golden SQL: UPDATE queries', () => {
 	});
 
 	it('UPDATE with naming convention', () => {
-		const naming = new CamelCaseNamingPlugin();
-		const ast = updateStmt({
-			table: 'userProfiles',
-			set: [
+		const ast = snakeUpdateStmt(
+			'userProfiles',
+			[
 				{ column: 'displayName', value: createParamRef(1) },
 				{ column: 'updatedAt', value: funcCall('now') },
 			],
-			where: eqExpr(
-				columnRef('userId', undefined, undefined, naming),
+			eqExpr(
+				snakeUnqualifiedColumnRef('userProfiles', 'userId'),
 				createParamRef(2),
 			),
-			naming,
-		});
+		);
 
 		const sql = deparseSync(ast);
 		assertSQLGolden(
@@ -433,15 +434,13 @@ describe('Golden SQL: DELETE queries', () => {
 	});
 
 	it('DELETE with naming convention', () => {
-		const naming = new CamelCaseNamingPlugin();
-		const ast = deleteStmt({
-			table: 'userSessions',
-			where: eqExpr(
-				columnRef('userId', undefined, undefined, naming),
+		const ast = snakeDeleteStmt(
+			'userSessions',
+			eqExpr(
+				snakeUnqualifiedColumnRef('userSessions', 'userId'),
 				createParamRef(1),
 			),
-			naming,
-		});
+		);
 
 		const sql = deparseSync(ast);
 		assertSQLGolden(sql, `DELETE FROM user_sessions WHERE user_id = $1`);

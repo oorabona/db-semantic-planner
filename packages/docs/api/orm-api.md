@@ -719,8 +719,8 @@ orm.select('posts')
   .count('id', 'postCount')
   .having(gt('postCount', 10))
   .dump()
-// SQL: SELECT "published", COUNT("id") AS "postCount" FROM "posts"
-//      GROUP BY "published" HAVING "postCount" > $1
+// SQL: SELECT posts.published, count(posts.id) AS "postCount" FROM posts
+//      GROUP BY posts.published HAVING count(posts.id) > $1
 ```
 
 ### Window Functions
@@ -865,21 +865,21 @@ const users = await orm.select('users')
 Combine query results with UNION, INTERSECT, or EXCEPT. All variants support the `All` suffix (e.g., `.unionAll()`) to preserve duplicates.
 
 ```typescript
-const q1 = orm.select('users').where(eq('role', 'admin'));
-const q2 = orm.select('users').where(eq('role', 'moderator'));
-const q3 = orm.select('users').where(eq('active', true));
+const q1 = orm.select('users').where(eq('active', true));
+const q2 = orm.select('users').where(eq('email', 'alice@example.com'));
+const q3 = orm.select('users').where(eq('active', false));
 
 // UNION (deduplicated)
-const staff = q1.union(q2).dump();
+const activeOrAlice = q1.union(q2).dump();
 
 // UNION ALL (with duplicates)
-const allStaff = q1.unionAll(q2).dump();
+const allRows = q1.unionAll(q2).dump();
 
 // INTERSECT
-const both = q1.intersect(q2).dump();
+const activeAlice = q1.intersect(q2).dump();
 
 // EXCEPT
-const adminsOnly = q1.except(q2).dump();
+const activeExceptAlice = q1.except(q2).dump();
 
 // Chaining
 const result = q1.union(q2).except(q3).dump();
@@ -1035,6 +1035,10 @@ const deleted = await orm.delete('posts')
 
 ### Upsert (Insert or Update on Conflict)
 
+For `.onConflictConstraint(name)`, the constraint must be declared on the target
+table; it is then resolved to its physical database name. An undeclared name is
+rejected.
+
 ```typescript
 // On conflict by columns — auto-update non-conflict fields
 orm.upsert('users')
@@ -1075,10 +1079,10 @@ const guarded = orm.upsert('users')
 console.log(guarded.sql);
 console.log(guarded.parameters);
 
-// On conflict by constraint name
+// On conflict by columns
 orm.upsert('users')
   .values({ name: 'Alice', email: 'alice@example.com' })
-  .onConflictConstraint('users_email_unique')
+  .onConflict(['email'])
   .doNothing()
   .dump();
 
@@ -1430,9 +1434,9 @@ const adapter = createPgsqlAdapter(pool, {
 | `defaultPkColumnName` | `string` | `'id'` | Convention fallback when schema metadata doesn't provide an explicit PK column |
 | `deriveFkColumnName` | `(table: string, pk: string) => string` | `singularize(table)_pk` | Derives FK column names from the referenced table and its PK |
 
-### NamingPlugin — Column Name Transformation
+### NamingPlugin — Physical Column Names
 
-When your database uses `snake_case` columns but your TypeScript models use `camelCase`, the `NamingPlugin` handles bidirectional transformation automatically:
+`NamingPlugin` converts declared model names to physical database names during compilation. Result keys come from the query projection's logical keys; the adapter does not infer them from returned PostgreSQL labels.
 
 ```typescript
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
@@ -1442,8 +1446,8 @@ const adapter = createPgsqlAdapter(pool, {
   dbCasing: 'snake_case',  // enables CamelCaseNamingPlugin
 });
 
-// Query results: snake_case DB columns → camelCase JS properties
-// Query compilation: camelCase JS properties → snake_case SQL columns
+// Declared model names such as eventId compile to physical names such as event_id.
+// Projecting eventId returns the logical key eventId.
 ```
 
 Two built-in plugins:

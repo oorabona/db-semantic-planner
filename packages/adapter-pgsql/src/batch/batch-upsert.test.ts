@@ -105,6 +105,25 @@ const actionWhereSchema = schema({
 	},
 });
 
+const upsertFixtureModel = schema({
+	symbols: { id: 'integer', name: 'text', embedding_id: 'integer' },
+	embeddings: {
+		id: 'integer',
+		symbol_id: ref('symbols', { as: 'symbol', inverse: 'embeddings' }),
+		chunk_index: 'integer',
+		vector: 'text',
+		chunk_text: 'text',
+	},
+	audit_log: { id: 'integer', entity_type: 'text' },
+}).model;
+
+function createUpsertTestAdapter(options: Record<string, unknown> = {}) {
+	return createPgsqlCompileOnlyAdapter({
+		...options,
+		model: upsertFixtureModel,
+	});
+}
+
 function ws(sql: string): string {
 	return sql.replace(/\s+/g, ' ').trim();
 }
@@ -114,7 +133,7 @@ function ws(sql: string): string {
 // ---------------------------------------------------------------------------
 describe('SC-12: large batch upsert (100 rows) uses unnest strategy', () => {
 	it('generates INSERT ... SELECT unnest() ON CONFLICT DO UPDATE for 100 rows', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createUpsertTestAdapter();
 		const intent = makeUpsertIntent(
 			makeEmbeddingRows(100) as unknown as Record<string, unknown>[],
 			['symbol_id', 'chunk_index'],
@@ -140,7 +159,7 @@ describe('SC-12: large batch upsert (100 rows) uses unnest strategy', () => {
 	});
 
 	it('column arrays contain correct values', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createUpsertTestAdapter();
 		const rows = makeEmbeddingRows(100) as unknown as Record<string, unknown>[];
 		const intent = makeUpsertIntent(rows, ['symbol_id', 'chunk_index']);
 
@@ -162,7 +181,7 @@ describe('SC-12: large batch upsert (100 rows) uses unnest strategy', () => {
 	});
 
 	it('keeps wrapper-shaped row values opaque in unnest column arrays', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createUpsertTestAdapter();
 		const paramShaped = { kind: 'param', value: 7 };
 		const literalShaped = { kind: 'literal', value: 'x' };
 		const rows = makeEmbeddingRows(100).map((row, i) => ({
@@ -186,7 +205,7 @@ describe('SC-12: large batch upsert (100 rows) uses unnest strategy', () => {
 	});
 
 	it('conflict columns appear in ON CONFLICT clause', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createUpsertTestAdapter();
 		const intent = makeUpsertIntent(
 			makeEmbeddingRows(100) as unknown as Record<string, unknown>[],
 			['symbol_id', 'chunk_index'],
@@ -199,7 +218,7 @@ describe('SC-12: large batch upsert (100 rows) uses unnest strategy', () => {
 	});
 
 	it('EXCLUDED references appear in DO UPDATE SET', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createUpsertTestAdapter();
 		const intent = makeUpsertIntent(
 			makeSimpleRows(100) as unknown as Record<string, unknown>[],
 			['symbol_id'],
@@ -217,7 +236,7 @@ describe('SC-12: large batch upsert (100 rows) uses unnest strategy', () => {
 // ---------------------------------------------------------------------------
 describe('SC-13: batch upsert preserves conflict handling', () => {
 	it('generates ON CONFLICT DO NOTHING with unnest for 100 rows', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createUpsertTestAdapter();
 		const intent = makeUpsertIntent(
 			makeSimpleRows(100) as unknown as Record<string, unknown>[],
 			['symbol_id'],
@@ -234,7 +253,7 @@ describe('SC-13: batch upsert preserves conflict handling', () => {
 	});
 
 	it('DO NOTHING uses 2 column arrays for 2-column table', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createUpsertTestAdapter();
 		const intent = makeUpsertIntent(
 			makeSimpleRows(100) as unknown as Record<string, unknown>[],
 			['symbol_id'],
@@ -254,7 +273,7 @@ describe('SC-13: batch upsert preserves conflict handling', () => {
 // ---------------------------------------------------------------------------
 describe('small batch upsert uses VALUES strategy', () => {
 	it('generates INSERT ... VALUES for 3 rows', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createUpsertTestAdapter();
 		const intent = makeUpsertIntent(
 			makeSimpleRows(3) as unknown as Record<string, unknown>[],
 			['symbol_id'],
@@ -269,7 +288,7 @@ describe('small batch upsert uses VALUES strategy', () => {
 	});
 
 	it('exactly at threshold (50 rows) still uses VALUES', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createUpsertTestAdapter();
 		const intent = makeUpsertIntent(
 			makeSimpleRows(50) as unknown as Record<string, unknown>[],
 			['symbol_id'],
@@ -283,7 +302,7 @@ describe('small batch upsert uses VALUES strategy', () => {
 	});
 
 	it('one row above threshold (51 rows) uses unnest', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createUpsertTestAdapter();
 		const intent = makeUpsertIntent(
 			makeSimpleRows(51) as unknown as Record<string, unknown>[],
 			['symbol_id'],
@@ -299,7 +318,7 @@ describe('small batch upsert uses VALUES strategy', () => {
 
 describe('conditional upsert action WHERE direct compiler path', () => {
 	it('VALUES strategy preserves LIKE ESCAPE and direct-only predicates', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createUpsertTestAdapter();
 		const intent: Record<string, unknown> = {
 			type: 'upsert',
 			table: 'embeddings',
@@ -328,7 +347,7 @@ describe('conditional upsert action WHERE direct compiler path', () => {
 	});
 
 	it('unnest strategy preserves LIKE ESCAPE and direct-only predicates', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createUpsertTestAdapter();
 		const intent: Record<string, unknown> = {
 			type: 'upsert',
 			table: 'embeddings',
@@ -359,7 +378,7 @@ describe('conditional upsert action WHERE direct compiler path', () => {
 	});
 
 	it('VALUES strategy resolves action WHERE exists() relation metadata', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createUpsertTestAdapter({
 			model: actionWhereSchema.model,
 		});
 		const intent: Record<string, unknown> = {
@@ -385,7 +404,7 @@ describe('conditional upsert action WHERE direct compiler path', () => {
 	});
 
 	it('unnest strategy resolves action WHERE notExists() relation metadata', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createUpsertTestAdapter({
 			model: actionWhereSchema.model,
 		});
 		const intent: Record<string, unknown> = {
@@ -418,7 +437,7 @@ describe('conditional upsert action WHERE direct compiler path', () => {
 // ---------------------------------------------------------------------------
 describe('batchThreshold=0 forces unnest for upsert', () => {
 	it('uses unnest for 2 rows when batchThreshold=0', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createUpsertTestAdapter();
 		const intent = makeUpsertIntent(
 			makeSimpleRows(2) as unknown as Record<string, unknown>[],
 			['symbol_id'],
@@ -433,7 +452,7 @@ describe('batchThreshold=0 forces unnest for upsert', () => {
 	});
 
 	it('uses unnest for 1 row when batchThreshold=0', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createUpsertTestAdapter();
 		const intent = makeUpsertIntent(
 			[{ symbol_id: 42, vector: 'abc' }],
 			['symbol_id'],
@@ -455,7 +474,7 @@ describe('batchThreshold=0 forces unnest for upsert', () => {
 // ---------------------------------------------------------------------------
 describe('RETURNING clause with unnest upsert', () => {
 	it('includes RETURNING when specified with unnest strategy', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createUpsertTestAdapter();
 		const intent: Record<string, unknown> = {
 			type: 'upsert',
 			table: 'embeddings',
@@ -474,7 +493,7 @@ describe('RETURNING clause with unnest upsert', () => {
 	});
 
 	it('RETURNING does not add extra parameters', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createUpsertTestAdapter();
 		const intent: Record<string, unknown> = {
 			type: 'upsert',
 			table: 'embeddings',
@@ -497,7 +516,7 @@ describe('RETURNING clause with unnest upsert', () => {
 // ---------------------------------------------------------------------------
 describe('maxBatchSize guard for upsert', () => {
 	it('throws InvalidOperationError when rows exceed maxBatchSize', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createUpsertTestAdapter();
 		const intent = makeUpsertIntent(
 			makeSimpleRows(200) as unknown as Record<string, unknown>[],
 			['symbol_id'],
@@ -509,7 +528,7 @@ describe('maxBatchSize guard for upsert', () => {
 	});
 
 	it('error message includes batch size and limit', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createUpsertTestAdapter();
 		const intent = makeUpsertIntent(
 			makeSimpleRows(200) as unknown as Record<string, unknown>[],
 			['symbol_id'],
@@ -521,7 +540,7 @@ describe('maxBatchSize guard for upsert', () => {
 	});
 
 	it('does not throw when rows equal maxBatchSize', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createUpsertTestAdapter();
 		const intent = makeUpsertIntent(
 			makeSimpleRows(100) as unknown as Record<string, unknown>[],
 			['symbol_id'],
@@ -538,7 +557,7 @@ describe('maxBatchSize guard for upsert', () => {
 // ---------------------------------------------------------------------------
 describe('custom batchThreshold for upsert', () => {
 	it('uses unnest when rows exceed custom threshold', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createUpsertTestAdapter();
 		const intent = makeUpsertIntent(
 			makeSimpleRows(11) as unknown as Record<string, unknown>[],
 			['symbol_id'],
@@ -552,7 +571,7 @@ describe('custom batchThreshold for upsert', () => {
 	});
 
 	it('uses VALUES when rows are at custom threshold', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createUpsertTestAdapter();
 		const intent = makeUpsertIntent(
 			makeSimpleRows(10) as unknown as Record<string, unknown>[],
 			['symbol_id'],

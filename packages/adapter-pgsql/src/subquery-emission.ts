@@ -43,19 +43,31 @@
 
 import { isParamIntent, type QueryIntent } from '@dbsp/types';
 import type { Node, SelectStmt } from '@pgsql/types';
-import { columnRef, integerNode, rangeVar, sortBy } from './ast-helpers.js';
-import { schemaForFromName } from './binding-registry.js';
+import {
+	integerNode,
+	sortBy,
+	sqlColumnRef,
+	sqlRangeVar,
+} from './ast-helpers.js';
+import {
+	queryScope,
+	relationBinding,
+	relationBindingFor,
+} from './binding-registry.js';
 import type {
 	CompilerContext,
 	CompilerState,
 	Decision,
 	WhereDispatcher,
 } from './handlers/types.js';
+import { expressionColumnIdentifier } from './handlers/types.js';
 import {
 	assertNoUnsupportedSubqueryModifiers,
 	containsOuterRef,
 } from './intent-to-decisions.js';
 import { unwrapParamIntent } from './param-intent.js';
+import { queryScopeForBindingProjections } from './relation-target-projection.js';
+import { queryLocal, resolveDeclaredIdentifier } from './sql-identifier.js';
 
 // ============================================================================
 // Predicate use discriminant
@@ -254,6 +266,46 @@ export function buildPredicateSubquerySelect(
 	const existingAliases = state.aliases.size;
 	const targetAlias = `${targetTable}_subq_${existingAliases}`;
 	state.aliases.set(`subquery_${targetTable}`, targetAlias);
+	// A mutation may carry an outer scope and a newer CTE binding registry. Merge
+	// both at this boundary: the CTE entered before this subquery, so it remains a
+	// local relation even when the inherited scope predates that binding.
+	const legacyScope = queryScopeForBindingProjections(
+		ctx.bindingNames,
+		ctx.relationTargetProjections,
+	);
+	const visibleScope = queryScope([
+		...(ctx.scope?.bindings.values() ?? []),
+		...Array.from(legacyScope?.bindings.values() ?? []).filter(
+			(binding) =>
+				relationBindingFor(ctx.scope, binding.qualifier) === undefined,
+		),
+	]);
+	const sourceBinding =
+		relationBindingFor(visibleScope, queryLocal(targetTable)) ??
+		relationBinding({
+			qualifier: resolveDeclaredIdentifier(
+				ctx.declaredNames,
+				ctx.dbCasing ?? 'preserve',
+				{ kind: 'table', table: targetTable },
+			),
+			kind: 'declared-table',
+			logicalTable: targetTable,
+		});
+	const targetBinding = relationBinding(
+		sourceBinding.kind === 'declared-table'
+			? {
+					qualifier: queryLocal(targetAlias),
+					kind: 'declared-table',
+					logicalTable: sourceBinding.logicalTable ?? targetTable,
+				}
+			: {
+					qualifier: queryLocal(targetAlias),
+					kind: 'join-alias',
+					...(sourceBinding.outputs !== undefined && {
+						outputs: sourceBinding.outputs,
+					}),
+				},
+	);
 
 	// Build target list (what to select)
 	let targetVal: Node;
@@ -276,11 +328,13 @@ export function buildPredicateSubquerySelect(
 			};
 		} else {
 			// Aggregate with column — e.g. AVG(price)
-			const aggArg = columnRef(
-				selectColumn,
-				targetAlias,
-				undefined,
-				ctx.naming,
+			const aggArg = sqlColumnRef(
+				expressionColumnIdentifier(
+					selectColumn,
+					targetBinding,
+					ctx.declaredNames,
+				),
+				targetBinding.qualifier,
 			);
 			targetVal = {
 				FuncCall: {
@@ -291,7 +345,14 @@ export function buildPredicateSubquerySelect(
 			};
 		}
 	} else {
-		targetVal = columnRef(selectColumn, targetAlias, undefined, ctx.naming);
+		targetVal = sqlColumnRef(
+			expressionColumnIdentifier(
+				selectColumn,
+				targetBinding,
+				ctx.declaredNames,
+			),
+			targetBinding.qualifier,
+		);
 	}
 
 	// Build WHERE clause if conditions exist
@@ -304,6 +365,11 @@ export function buildPredicateSubquerySelect(
 			...ctx,
 			rootTable: targetTable,
 			currentAlias: targetAlias,
+			scope: queryScope([
+				...(visibleScope?.bindings.values() ?? []),
+				targetBinding,
+			]),
+			currentBinding: targetBinding,
 		};
 
 		if (decision.conditions.length === 1) {
@@ -324,16 +390,12 @@ export function buildPredicateSubquerySelect(
 	const stmt: SelectStmt = {
 		targetList: [{ ResTarget: { val: targetVal } }],
 		fromClause: [
-			rangeVar(
-				targetTable,
-				targetAlias,
-				schemaForFromName(
-					ctx.schema,
-					targetTable,
-					ctx.bindingNames,
-					ctx.naming,
-				),
-				ctx.naming,
+			sqlRangeVar(
+				sourceBinding.qualifier,
+				targetBinding.qualifier,
+				sourceBinding.kind === 'cte-bind' || ctx.schema === undefined
+					? undefined
+					: queryLocal(ctx.schema),
 			),
 		],
 		...(whereClause && { whereClause }),
@@ -346,7 +408,14 @@ export function buildPredicateSubquerySelect(
 	if (orderBy && orderBy.length > 0) {
 		stmt.sortClause = orderBy.map((o) =>
 			sortBy(
-				columnRef(o.column, targetAlias, undefined, ctx.naming),
+				sqlColumnRef(
+					expressionColumnIdentifier(
+						o.column,
+						targetBinding,
+						ctx.declaredNames,
+					),
+					targetBinding.qualifier,
+				),
 				o.direction ?? 'ASC',
 				'DEFAULT',
 			),

@@ -39,7 +39,6 @@ import {
 	type Adapter,
 	assertConnectionAvailable,
 	type CompileOptions,
-	type DbCasing,
 	type Dump,
 	type DumpMeta,
 	type DumpSequenceStep,
@@ -929,30 +928,10 @@ function requireMutationBindingColumns(
 	return columns;
 }
 
-function toSnakeCaseIdentifier(identifier: string): string {
-	if (!identifier) return identifier;
-
-	const leadingUnderscores = identifier.match(/^_+/)?.[0] ?? '';
-	const rest = identifier.slice(leadingUnderscores.length);
-	if (!rest) return identifier;
-
-	const snakeCase = rest
-		.replace(/([a-z0-9])([A-Z])/g, '$1_$2')
-		.replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
-		.toLowerCase();
-
-	return leadingUnderscores + snakeCase;
-}
-
-function toDatabaseColumnName(column: string, dbCasing?: DbCasing): string {
-	return dbCasing === 'snake_case' ? toSnakeCaseIdentifier(column) : column;
-}
-
 function toRuntimeBindingRow(
 	bindName: string,
 	row: unknown,
 	columns: readonly string[],
-	dbCasing?: DbCasing,
 ): Readonly<Record<string, unknown>> {
 	if (typeof row !== 'object' || row === null || Array.isArray(row)) {
 		throw new Error(
@@ -962,18 +941,20 @@ function toRuntimeBindingRow(
 	const source = row as Record<string, unknown>;
 	const materialized: Record<string, unknown> = {};
 	for (const column of columns) {
-		const dbColumn = toDatabaseColumnName(column, dbCasing);
-		const sourceColumn = Object.hasOwn(source, column)
-			? column
-			: dbColumn !== column && Object.hasOwn(source, dbColumn)
-				? dbColumn
-				: undefined;
-		if (sourceColumn === undefined) {
+		if (!Object.hasOwn(source, column)) {
 			throw new Error(
 				`NQL mutation binding '${bindName}' returned a row without projected column '${column}'.`,
 			);
 		}
-		materialized[column] = source[sourceColumn];
+		// `__proto__` is a valid projected label. Assignment on a normal object
+		// invokes Object.prototype's legacy setter instead of preserving it as an
+		// own value, so materialize every binding field as a data property.
+		Object.defineProperty(materialized, column, {
+			value: source[column],
+			enumerable: true,
+			writable: true,
+			configurable: true,
+		});
 	}
 	return materialized;
 }
@@ -982,7 +963,6 @@ function createRuntimeBinding(
 	bundle: CompiledNqlQuery,
 	bindName: string,
 	rows: readonly unknown[],
-	dbCasing?: DbCasing,
 ): NqlRuntimeBinding {
 	const columns = requireMutationBindingColumns(bundle, bindName);
 	const outputSchema = bundle.bindingOutputSchemas?.get(bindName);
@@ -990,9 +970,7 @@ function createRuntimeBinding(
 	const declaredOutputs = outputSchema?.declaredOutputs;
 	return {
 		columns,
-		rows: rows.map((row) =>
-			toRuntimeBindingRow(bindName, row, columns, dbCasing),
-		),
+		rows: rows.map((row) => toRuntimeBindingRow(bindName, row, columns)),
 		...(declaredOutputs !== undefined && { declaredOutputs }),
 		...(columnTypes !== undefined && { columnTypes }),
 	};
@@ -1612,7 +1590,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		const compiled =
 			bindingFinalQuery || hasNqlBindings(finalBundle)
 				? this.adapter.compile<T>(finalBundle, this.nqlBundleCompileOptions())
-				: this.adapter.compile<T>(planReport);
+				: this.adapter.compile<T>(planReport, this.nqlBundleCompileOptions());
 
 		try {
 			return this.adapter.createDump(planReport, compiled, meta);
@@ -1889,12 +1867,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 					if (step.bindName) {
 						runtimeBindings.set(
 							step.bindName,
-							createRuntimeBinding(
-								sourceBundle,
-								step.bindName,
-								rows.rawRows,
-								txAdapter.dbCasing,
-							),
+							createRuntimeBinding(sourceBundle, step.bindName, rows.rawRows),
 						);
 					}
 					if (step.final) {
@@ -1919,7 +1892,6 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 							sourceBundle,
 							step.bindName,
 							snapshotMutationRows(rows),
-							txAdapter.dbCasing,
 						),
 					);
 				} else if (step.final) {
@@ -2219,7 +2191,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		const finalBundle = this.createFinalNqlStatementBundle(compiledIntent);
 		const compiled = hasNqlBindings(finalBundle)
 			? adapter.compile<T>(finalBundle, this.nqlBundleCompileOptions())
-			: adapter.compile<T>(planReport);
+			: adapter.compile<T>(planReport, this.nqlBundleCompileOptions());
 		return executeCompiledQuery(adapter, compiled, 'nql().all()');
 	}
 

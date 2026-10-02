@@ -14,11 +14,21 @@ import type {
 import { toColumnList } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
-import { columnRef, innerJoin, rangeVar } from './ast-helpers.js';
+import {
+	innerJoin,
+	sqlColumnRef,
+	sqlColumnRefStar,
+	sqlRangeVar,
+} from './ast-helpers.js';
 import { quoteIdent } from './ddl/phases/utils.js';
 import { deparseQuoted } from './deparse.js';
 import { createCompilerState } from './handlers/index.js';
 import { finalizeEnvelope, fromAstProjection } from './projection-envelope.js';
+import {
+	identifierText,
+	queryLocal,
+	resolveDeclaredIdentifier,
+} from './sql-identifier.js';
 
 function compileIncludeSelectEnvelope(
 	selectAst: Node,
@@ -34,7 +44,9 @@ function compileIncludeSelectEnvelope(
 			ast: selectAst,
 			rootTable: targetTable,
 			model: deps.model,
-			naming: deps.naming,
+			...(deps.declaredNames !== undefined && {
+				declaredNames: deps.declaredNames,
+			}),
 		}),
 	);
 }
@@ -60,21 +72,18 @@ export function compileSubqueryInclude(
 
 	// Handle empty parent IDs - return query that returns no results
 	if (parentIds.length === 0) {
-		const dbTargetTable = deps.naming.toDatabase(info.targetTable);
-		const targetList = [
-			{ ResTarget: { val: { ColumnRef: { fields: [{ A_Star: {} }] } } } },
-		];
+		const dbTargetTable = resolveDeclaredIdentifier(
+			deps.declaredNames,
+			deps.dbCasing ?? 'preserve',
+			{ kind: 'table', table: info.targetTable },
+		);
+		const targetList = [{ ResTarget: { val: sqlColumnRefStar() } }];
 		const fromClause = [
-			{
-				RangeVar: {
-					relname: dbTargetTable,
-					inh: true,
-					relpersistence: 'p',
-					...(schemaName && {
-						schemaname: schemaName,
-					}),
-				},
-			},
+			sqlRangeVar(
+				dbTargetTable,
+				undefined,
+				schemaName === undefined ? undefined : queryLocal(schemaName),
+			),
 		];
 		const selectAst: Node = {
 			SelectStmt: {
@@ -83,8 +92,8 @@ export function compileSubqueryInclude(
 			},
 		};
 		const tableName = schemaName
-			? `${quoteIdent(schemaName, 'schema')}.${quoteIdent(dbTargetTable, 'table')}`
-			: quoteIdent(dbTargetTable, 'table');
+			? `${quoteIdent(schemaName, 'schema')}.${quoteIdent(identifierText(dbTargetTable), 'table')}`
+			: quoteIdent(identifierText(dbTargetTable), 'table');
 
 		return compileIncludeSelectEnvelope(
 			selectAst,
@@ -115,22 +124,22 @@ export function compileSubqueryInclude(
 	}
 
 	// Build SELECT target list
-	const targetList = [
-		{ ResTarget: { val: { ColumnRef: { fields: [{ A_Star: {} }] } } } },
-	];
+	const targetList = [{ ResTarget: { val: sqlColumnRefStar() } }];
 
 	// Build FROM clause
 	const fromClause = [
-		{
-			RangeVar: {
-				relname: deps.naming.toDatabase(info.targetTable),
-				inh: true,
-				relpersistence: 'p',
-				...(schemaName && {
-					schemaname: schemaName,
-				}),
-			},
-		},
+		sqlRangeVar(
+			resolveDeclaredIdentifier(
+				deps.declaredNames,
+				deps.dbCasing ?? 'preserve',
+				{
+					kind: 'table',
+					table: info.targetTable,
+				},
+			),
+			undefined,
+			schemaName === undefined ? undefined : queryLocal(schemaName),
+		),
 	];
 
 	// Build WHERE clause: foreignKey IN ($1, $2, ...)
@@ -148,7 +157,17 @@ export function compileSubqueryInclude(
 			A_Expr: {
 				kind: 'AEXPR_IN',
 				name: [{ String: { sval: '=' } }],
-				lexpr: columnRef(fkColumns[0]!, undefined, undefined, deps.naming),
+				lexpr: sqlColumnRef(
+					resolveDeclaredIdentifier(
+						deps.declaredNames,
+						deps.dbCasing ?? 'preserve',
+						{
+							kind: 'column',
+							table: info.targetTable,
+							column: fkColumns[0]!,
+						},
+					),
+				),
 				rexpr: { List: { items: paramRefs } },
 			},
 		};
@@ -169,7 +188,17 @@ export function compileSubqueryInclude(
 					A_Expr: {
 						kind: 'AEXPR_OP',
 						name: [{ String: { sval: '=' } }],
-						lexpr: columnRef(col, undefined, undefined, deps.naming),
+						lexpr: sqlColumnRef(
+							resolveDeclaredIdentifier(
+								deps.declaredNames,
+								deps.dbCasing ?? 'preserve',
+								{
+									kind: 'column',
+									table: info.targetTable,
+									column: col,
+								},
+							),
+						),
 						rexpr: { ParamRef: { number: state.paramIndex } },
 					},
 				};
@@ -228,6 +257,26 @@ function compileSubqueryIncludeManyToMany(
 	const throughTable = info.through!;
 	const throughSourceKey = info.throughSourceKey!;
 	const throughTargetKey = info.throughTargetKey!;
+	const targetTable = resolveDeclaredIdentifier(
+		deps.declaredNames,
+		deps.dbCasing ?? 'preserve',
+		{ kind: 'table', table: info.targetTable },
+	);
+	const junctionTable = resolveDeclaredIdentifier(
+		deps.declaredNames,
+		deps.dbCasing ?? 'preserve',
+		{ kind: 'table', table: throughTable },
+	);
+	const junctionSourceColumn = resolveDeclaredIdentifier(
+		deps.declaredNames,
+		deps.dbCasing ?? 'preserve',
+		{ kind: 'column', table: throughTable, column: throughSourceKey },
+	);
+	const junctionTargetColumn = resolveDeclaredIdentifier(
+		deps.declaredNames,
+		deps.dbCasing ?? 'preserve',
+		{ kind: 'column', table: throughTable, column: throughTargetKey },
+	);
 
 	// Determine target PK (usually 'id', but could be from sourceKey)
 	const targetPkColumns = toColumnList(info.sourceKey);
@@ -237,6 +286,11 @@ function compileSubqueryIncludeManyToMany(
 		);
 	}
 	const targetPk = targetPkColumns[0]!;
+	const targetPkColumn = resolveDeclaredIdentifier(
+		deps.declaredNames,
+		deps.dbCasing ?? 'preserve',
+		{ kind: 'column', table: info.targetTable, column: targetPk },
+	);
 
 	// Build param refs for parent IDs
 	const paramRefs = parentIds.map((id) => {
@@ -250,7 +304,7 @@ function compileSubqueryIncludeManyToMany(
 		A_Expr: {
 			kind: 'AEXPR_IN',
 			name: [{ String: { sval: '=' } }],
-			lexpr: columnRef(throughSourceKey, junctionAlias, undefined, deps.naming),
+			lexpr: sqlColumnRef(junctionSourceColumn, queryLocal(junctionAlias)),
 			rexpr: { List: { items: paramRefs } },
 		},
 	};
@@ -260,24 +314,22 @@ function compileSubqueryIncludeManyToMany(
 		A_Expr: {
 			kind: 'AEXPR_OP',
 			name: [{ String: { sval: '=' } }],
-			lexpr: columnRef(targetPk, targetAlias, undefined, deps.naming),
-			rexpr: columnRef(throughTargetKey, junctionAlias, undefined, deps.naming),
+			lexpr: sqlColumnRef(targetPkColumn, queryLocal(targetAlias)),
+			rexpr: sqlColumnRef(junctionTargetColumn, queryLocal(junctionAlias)),
 		},
 	};
 
 	// Build FROM clause with JOIN using helper functions
-	const targetRangeVar = rangeVar(
-		info.targetTable,
-		targetAlias,
-		schemaName,
-		deps.naming,
+	const targetRangeVar = sqlRangeVar(
+		targetTable,
+		queryLocal(targetAlias),
+		schemaName === undefined ? undefined : queryLocal(schemaName),
 	);
 
-	const junctionRangeVar = rangeVar(
-		throughTable,
-		junctionAlias,
-		schemaName,
-		deps.naming,
+	const junctionRangeVar = sqlRangeVar(
+		junctionTable,
+		queryLocal(junctionAlias),
+		schemaName === undefined ? undefined : queryLocal(schemaName),
 	);
 
 	// Use innerJoin helper for proper typing

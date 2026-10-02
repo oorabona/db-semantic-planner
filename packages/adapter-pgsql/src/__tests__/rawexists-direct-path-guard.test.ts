@@ -26,7 +26,6 @@ import {
 } from '../compile-where.js';
 import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
 import { createCompilerState } from '../handlers/types.js';
-import { identityNaming } from '../naming-plugin.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
@@ -54,7 +53,6 @@ function makeGuardCtx(): WhereCompilerCtx {
 		rootTable: 'users',
 		aliases: new Map(),
 		paramState,
-		naming: identityNaming,
 		// The guard must fire before compileSubquery is ever called.
 		// Throw a sentinel so we can distinguish guard-throw vs sentinel-throw.
 		compileSubquery: () => {
@@ -72,9 +70,8 @@ function makeRealCtx(): WhereCompilerCtx {
 		rootTable: 'users',
 		aliases: new Map(),
 		paramState,
-		naming: identityNaming,
 		compileSubquery: (subIntent, paramOffset) =>
-			buildSubqueryFromIntent(subIntent, paramOffset, identityNaming),
+			buildSubqueryFromIntent(subIntent, paramOffset),
 	};
 }
 
@@ -158,8 +155,10 @@ describe('DEFECT-2: batchSet().where(rawExists with LIMIT) throws (mutation guar
 	// adapter satisfies the type expected by createOrm.
 	function makeOrm() {
 		return createOrm({
-			model: { getTable: () => undefined } as any,
-			adapter: createPgsqlCompileOnlyAdapter() as any,
+			model: testSchema.model,
+			adapter: createPgsqlCompileOnlyAdapter({
+				model: testSchema.model,
+			}) as any,
 		}) as any;
 	}
 
@@ -227,9 +226,8 @@ describe('rawExists: field-based ORDER BY rejected on direct path', () => {
 			rootTable: 'users',
 			aliases: new Map(),
 			paramState,
-			naming: identityNaming,
 			compileSubquery: (subIntent: any, paramOffset: number) =>
-				buildSubqueryFromIntent(subIntent, paramOffset, identityNaming),
+				buildSubqueryFromIntent(subIntent, paramOffset),
 		};
 		expect(() => compileWhereIntent(intent as any, ctx)).toThrow(
 			/ORDER BY.*not supported|not supported.*ORDER BY/i,

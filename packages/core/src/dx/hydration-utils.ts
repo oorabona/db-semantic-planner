@@ -56,18 +56,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function camelize(value: string): string {
-	return value.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
-}
-
-function snakeCase(value: string): string {
-	return value.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
-}
-
-function keyCandidates(name: string): readonly string[] {
-	return [...new Set([name, camelize(name), snakeCase(name)])];
-}
-
 function readJsonAggColumnKeyMap(
 	context: PlanReport['decisions'][number]['context'],
 ): JsonAggColumnKeyMap | undefined {
@@ -124,10 +112,7 @@ function findExistingKey(
 		}
 		return undefined;
 	}
-	for (const candidate of keyCandidates(name)) {
-		if (Object.hasOwn(record, candidate)) return candidate;
-	}
-	return undefined;
+	return Object.hasOwn(record, name) ? name : undefined;
 }
 
 function renameExistingKey(
@@ -137,7 +122,12 @@ function renameExistingKey(
 ): string {
 	if (fromKey === toKey) return fromKey;
 	if (!Object.hasOwn(record, toKey)) {
-		record[toKey] = record[fromKey];
+		Object.defineProperty(record, toKey, {
+			value: record[fromKey],
+			enumerable: true,
+			writable: true,
+			configurable: true,
+		});
 	}
 	delete record[fromKey];
 	return toKey;
@@ -231,10 +221,15 @@ function convertJsonAggPayload(
 				Object.hasOwn(value, key) &&
 				transform.table === tableName
 			) {
-				value[key] = convertBigintJsReadValue(value[key], transform.js, {
-					table: transform.table,
-					column: transform.column,
-					outputKey: key,
+				Object.defineProperty(value, key, {
+					value: convertBigintJsReadValue(value[key], transform.js, {
+						table: transform.table,
+						column: transform.column,
+						outputKey: key,
+					}),
+					enumerable: true,
+					writable: true,
+					configurable: true,
 				});
 			}
 		}
@@ -250,15 +245,16 @@ function convertJsonAggPayload(
 				transform.table === tableName &&
 				transform.column === column.name
 			) {
-				value[outputKey] = convertBigintJsReadValue(
-					value[outputKey],
-					transform.js,
-					{
+				Object.defineProperty(value, outputKey, {
+					value: convertBigintJsReadValue(value[outputKey], transform.js, {
 						table: transform.table,
 						column: transform.column,
 						outputKey,
-					},
-				);
+					}),
+					enumerable: true,
+					writable: true,
+					configurable: true,
+				});
 			}
 		}
 	}
@@ -276,12 +272,17 @@ function convertJsonAggPayload(
 			info.columnKeyMap,
 			info.nestedReadTransforms,
 		);
-		value[key] =
-			info.isToOne && Array.isArray(converted)
-				? converted.length > 0
-					? converted[0]
-					: null
-				: converted;
+		Object.defineProperty(value, key, {
+			value:
+				info.isToOne && Array.isArray(converted)
+					? converted.length > 0
+						? converted[0]
+						: null
+					: converted,
+			enumerable: true,
+			writable: true,
+			configurable: true,
+		});
 	}
 	return value;
 }
@@ -370,10 +371,8 @@ export function hydrateJsonAggIncludes<T>(
 		const record = row as Record<string, unknown>;
 
 		for (const [relationName, info] of relationInfo) {
-			// The adapter generates the JSON column alias from the canonical relation name
-			// (e.g., 'author_posts' → 'author_posts_json'). The naming plugin may
-			// transform it to camelCase (e.g., 'authorPostsJson').
-			// We try both the canonical name and the includeAlias as base names.
+			// JSON aggregation labels are query-local identifiers and are preserved by
+			// the projection output map. No casing inference is permitted here.
 			const candidates = [relationName];
 			if (info.includeAlias && info.includeAlias !== relationName) {
 				candidates.push(info.includeAlias);
@@ -381,16 +380,9 @@ export function hydrateJsonAggIncludes<T>(
 
 			let actualColumnName: string | null = null;
 			for (const baseName of candidates) {
-				const snakeJson = `${baseName}_json`;
-				const camelJson = snakeJson.replace(/_([a-z])/g, (_, c: string) =>
-					c.toUpperCase(),
-				);
-				if (Object.hasOwn(record, snakeJson)) {
-					actualColumnName = snakeJson;
-					break;
-				}
-				if (Object.hasOwn(record, camelJson)) {
-					actualColumnName = camelJson;
+				const jsonColumn = `${baseName}_json`;
+				if (Object.hasOwn(record, jsonColumn)) {
+					actualColumnName = jsonColumn;
 					break;
 				}
 			}
@@ -430,7 +422,12 @@ export function hydrateJsonAggIncludes<T>(
 				// Set property using includeAlias (user-facing name, e.g., 'posts')
 				// and remove the raw JSON column
 				const outputKey = info.includeAlias ?? relationName;
-				record[outputKey] = parsed;
+				Object.defineProperty(record, outputKey, {
+					value: parsed,
+					enumerable: true,
+					writable: true,
+					configurable: true,
+				});
 				delete record[actualColumnName];
 			}
 		}

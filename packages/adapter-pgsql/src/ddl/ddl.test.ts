@@ -2048,6 +2048,8 @@ describe('Extensions and sequences in DDL', () => {
 			new Map([['orderSeq', { name: 'orderSeq' }]]),
 		);
 		const suffixNaming = {
+			resolve: (name: string) => `${name}_physical`,
+			model: (name: string) => name,
 			toDatabase: (name: string) => `${name}_physical`,
 			toModel: (name: string) => name,
 		};

@@ -25,6 +25,16 @@ import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 // ---------------------------------------------------------------------------
 
 function makeConventionFkModel(): ModelIR {
+	const base = schema({
+		posts: {
+			id: 'integer',
+			title: 'text',
+			views: 'integer',
+			user_id: 'integer',
+			author_id: 'integer',
+		},
+		users: { id: 'integer', name: 'text' },
+	}).model;
 	// posts.title, posts.views — no explicit foreignKey on the users→posts relation.
 	// columns is an array so table.columns.find() works in the handler system.
 	const postsTable = {
@@ -52,12 +62,14 @@ function makeConventionFkModel(): ModelIR {
 		foreignKeys: [],
 	};
 
+	const tables = new Map([
+		['posts', postsTable],
+		['users', usersTable],
+	]);
 	return {
-		getTable: (name: string) => {
-			if (name === 'posts') return postsTable as any;
-			if (name === 'users') return usersTable as any;
-			return undefined;
-		},
+		...base,
+		relations: new Map(),
+		getTable: base.getTable,
 		getRelation: (qualifiedName: string) => {
 			if (qualifiedName === 'users.posts') {
 				return {

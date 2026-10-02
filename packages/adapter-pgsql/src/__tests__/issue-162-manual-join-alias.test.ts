@@ -45,6 +45,30 @@ function occurrenceCount(sql: string, pattern: RegExp): number {
 }
 
 describe('FIX-162: manual join aliases reserve include-generated aliases', () => {
+	it('#762: preserves a camelCase join alias and projection ORDER BY alias', () => {
+		const sql = compact(
+			buildOrm('snake_case')
+				.select('uses')
+				.join('definitions', {
+					as: 'definitionAlias',
+					on: eq('uses.def_id', exprRef('definitionAlias.id')),
+				})
+				.columns([
+					fn(
+						'upper',
+						relationColumn('definitionAlias', 'id', 'definitionId'),
+					).as('displayName'),
+				])
+				.orderBy('displayName')
+				.dump().sql,
+		);
+
+		expect(sql).toContain('JOIN definitions AS "definitionAlias"');
+		expect(sql).toContain('uses.def_id = "definitionAlias".id');
+		expect(sql).toContain('AS "displayName"');
+		expect(sql).toContain('ORDER BY "displayName" ASC');
+	});
+
 	it('manual explicit .join() alias wins and include-generated alias skips to the next suffix', () => {
 		const orm = buildOrm();
 		const sql = compact(
@@ -87,11 +111,11 @@ describe('FIX-162: manual join aliases reserve include-generated aliases', () =>
 				.dump().sql,
 		);
 
-		expect(occurrenceCount(sql, /\bAS file_one\b/g)).toBe(1);
-		expect(sql).toMatch(/JOIN definitions AS file_one\b/);
-		expect(sql).toMatch(/JOIN files AS file_one_1\b/);
-		expect(sql).toContain('uses.file_one_id = file_one_1.id');
-		expect(sql).toContain('file_one_1.path AS file_one_path');
+		expect(sql).toContain('JOIN definitions AS "fileOne"');
+		expect(sql).toMatch(/uses\.def_id = "fileOne"\.id/);
+		expect(sql).toMatch(/JOIN files AS file_one\b/);
+		expect(sql).toContain('uses.file_one_id = file_one.id');
+		expect(sql).toContain('file_one.path AS file_one_path');
 	});
 
 	it('uses the final bumped include alias in relationColumn ORDER BY expressions', () => {

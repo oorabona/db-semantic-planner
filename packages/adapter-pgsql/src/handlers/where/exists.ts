@@ -10,25 +10,28 @@
 import { type ColumnListInput, toColumnList } from '@dbsp/types';
 import type { Node, SelectStmt, SubLink } from '@pgsql/types';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
+import { andExpr, eqExpr, joinExpr, sqlRangeVar } from '../../ast-helpers.js';
 import {
-	andExpr,
-	columnRef,
-	eqExpr,
-	joinExpr,
-	rangeVar,
-} from '../../ast-helpers.js';
-import { schemaForFromName } from '../../binding-registry.js';
+	queryScope,
+	relationBinding,
+	relationBindingFor,
+} from '../../binding-registry.js';
 import {
 	bindAliasAuthority,
 	requireRelationTargetColumns,
 	resolveRelationTarget,
 } from '../../relation-target-projection.js';
+import { queryLocal, resolveDeclaredIdentifier } from '../../sql-identifier.js';
 import type {
 	CompilerContext,
 	CompilerState,
 	Decision,
 	WhereDispatcher,
 	WhereHandler,
+} from '../types.js';
+import {
+	currentExpressionBinding,
+	expressionQualifiedColumnRef,
 } from '../types.js';
 
 /**
@@ -77,19 +80,11 @@ export function buildKeyCorrelation(
 
 	const comparisons = normalizedSourceCols.map((sourceColumn, index) =>
 		eqExpr(
-			columnRef(
-				sourceColumn,
-				sourceAlias,
-				undefined,
-				ctx.naming,
-				ctx.aliasColumnAuthorities,
-			),
-			columnRef(
+			expressionQualifiedColumnRef(sourceColumn, sourceAlias, ctx),
+			expressionQualifiedColumnRef(
 				normalizedTargetCols[index]!,
 				targetAlias,
-				undefined,
-				ctx.naming,
-				ctx.aliasColumnAuthorities,
+				ctx,
 			),
 		),
 	);
@@ -116,13 +111,6 @@ function _buildCorrelation(
 	);
 }
 
-function schemaForExistsFromName(
-	ctx: CompilerContext,
-	fromName: string,
-): string | undefined {
-	return schemaForFromName(ctx.schema, fromName, ctx.bindingNames, ctx.naming);
-}
-
 /**
  * Build a basic EXISTS subquery
  *
@@ -136,27 +124,47 @@ function buildExistsSubquery(
 	dispatch: WhereDispatcher,
 ): Node {
 	const relation = decision.relation;
-	const targetTable = decision.targetTable ?? relation;
+	const relationMetadata =
+		relation === undefined
+			? undefined
+			: ctx.model?.getRelation(`${ctx.rootTable}.${relation}`);
+	const targetTable =
+		decision.targetTable ?? relationMetadata?.target ?? relation;
 	// sourceColumn: prefer explicit value from decision (set by planner's mapToHandlerDecision).
 	// When called directly from mutation WHERE (DELETE/UPDATE), the planner is bypassed and
 	// sourceColumn is absent — fall back to the PK convention (typically 'id' for hasMany).
-	const sourceColumn = decision.sourceColumn ?? [
-		ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
-	];
-	const targetColumn = decision.targetColumn ?? [
-		(ctx.deriveFkColumnName ?? defaultFkDerivation)(
-			ctx.rootTable,
-			ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
-		),
-	];
+	const primaryKey =
+		ctx.model?.getTable(ctx.rootTable)?.primaryKey ??
+		ctx.defaultPkColumnName ??
+		DEFAULT_PK_COLUMN;
+	const sourceColumn =
+		relationMetadata === undefined
+			? (decision.sourceColumn ?? primaryKey)
+			: relationMetadata.type === 'belongsTo'
+				? (relationMetadata.foreignKey ?? decision.sourceColumn ?? primaryKey)
+				: (relationMetadata.sourceKey ?? decision.sourceColumn ?? primaryKey);
+	const targetColumn =
+		relationMetadata === undefined
+			? (decision.targetColumn ??
+				(ctx.deriveFkColumnName ?? defaultFkDerivation)(
+					ctx.rootTable,
+					ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
+				))
+			: relationMetadata.type === 'belongsTo'
+				? (relationMetadata.targetKey ?? decision.targetColumn ?? primaryKey)
+				: (relationMetadata.foreignKey ??
+					decision.targetColumn ??
+					(ctx.deriveFkColumnName ?? defaultFkDerivation)(
+						ctx.rootTable,
+						ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
+					));
 
 	if (!targetTable) {
 		throw new Error('EXISTS handler requires targetTable or relation');
 	}
 	requireRelationTargetColumns(
-		resolveRelationTarget(targetTable, ctx),
-		toColumnList(targetColumn),
-		ctx,
+		resolveRelationTarget(queryLocal(targetTable), ctx),
+		toColumnList(targetColumn).map(queryLocal),
 		'join key',
 		relation,
 	);
@@ -174,25 +182,24 @@ function buildExistsSubquery(
 	// genuinely fresh alias for every EXISTS (exists / notExists / every). The loop
 	// also excludes the outer aliases already in SQL scope (currentAlias, rootTable,
 	// outerAlias): a generated alias equal to one of those would shadow the outer
-	// reference and degenerate the correlation into a self-comparison. Collisions
-	// are compared in the DATABASE-name space the aliases actually emit in, so a
-	// naming plugin (e.g. dbCasing: 'snake_case') cannot fold two distinct model
-	// names onto the same emitted alias (`tExists_0` and `t_exists_0` both emit as
-	// `t_exists_0`).
-	const toDb = (identifier: string): string =>
-		ctx.naming ? ctx.naming.toDatabase(identifier) : identifier;
+	// reference and degenerate the correlation into a self-comparison. Aliases
+	// are query-local, so collision checks deliberately compare their verbatim
+	// spelling.
+	const scopeName = (identifier: string): string => identifier;
 	const outerAliases = new Set<string>();
-	if (ctx.currentAlias) outerAliases.add(toDb(ctx.currentAlias));
-	if (ctx.rootTable) outerAliases.add(toDb(ctx.rootTable));
-	if (ctx.outerAlias) outerAliases.add(toDb(ctx.outerAlias));
+	if (ctx.currentAlias) outerAliases.add(scopeName(ctx.currentAlias));
+	if (ctx.rootTable) outerAliases.add(scopeName(ctx.rootTable));
+	if (ctx.outerAlias) outerAliases.add(scopeName(ctx.outerAlias));
+	for (const binding of ctx.scope?.bindings.values() ?? []) {
+		outerAliases.add(scopeName(binding.qualifier));
+	}
 	const aliasInUse = (candidate: string): boolean => {
-		const emitted = toDb(candidate);
-		if (outerAliases.has(emitted)) return true;
+		if (outerAliases.has(candidate)) return true;
 		for (const key of state.aliases.keys()) {
-			if (toDb(key) === emitted) return true;
+			if (key === candidate) return true;
 		}
 		for (const value of state.aliases.values()) {
-			if (toDb(value) === emitted) return true;
+			if (value === candidate) return true;
 		}
 		return false;
 	};
@@ -205,13 +212,61 @@ function buildExistsSubquery(
 	state.aliases.set(targetAlias, targetAlias);
 
 	const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
-	const targetAuthority = resolveRelationTarget(targetTable, ctx);
+	const targetAuthority = resolveRelationTarget(queryLocal(targetTable), ctx);
 	const aliasColumnAuthorities = bindAliasAuthority(
 		ctx.aliasColumnAuthorities,
-		targetAlias,
+		queryLocal(targetAlias),
 		targetAuthority,
-		ctx,
 	);
+	const scopedCtx: CompilerContext = { ...ctx, aliasColumnAuthorities };
+	const targetBinding = relationBinding({
+		qualifier: queryLocal(targetAlias),
+		kind: 'declared-table',
+		logicalTable: targetTable,
+	});
+	const sourceBinding = currentExpressionBinding(ctx);
+	const scopedWithTarget: CompilerContext = {
+		...scopedCtx,
+		scope: queryScope([
+			...(ctx.scope?.bindings.values() ?? []),
+			...(relationBindingFor(ctx.scope, sourceBinding.qualifier) === undefined
+				? [sourceBinding]
+				: []),
+			targetBinding,
+		]),
+	};
+	// Includes contribute range variables to this EXISTS query. Register all of
+	// their aliases before compiling the predicate: a WHERE condition is allowed
+	// to address an include alias even though FROM/JOIN AST assembly follows it.
+	const includeDecisions = decision.include as
+		| readonly { relation?: string; joinType?: string }[]
+		| undefined;
+	let predicateScope = scopedWithTarget.scope;
+	let includeSourceTable = targetTable;
+	for (const include of includeDecisions ?? []) {
+		if (!include.relation) continue;
+		const includeTarget =
+			ctx.model?.getRelation(`${includeSourceTable}.${include.relation}`)
+				?.target ?? include.relation;
+		const includeBinding = relationBinding({
+			qualifier: queryLocal(include.relation),
+			kind: 'declared-table',
+			logicalTable: includeTarget,
+		});
+		if (
+			relationBindingFor(predicateScope, includeBinding.qualifier) === undefined
+		) {
+			predicateScope = queryScope([
+				...(predicateScope?.bindings.values() ?? []),
+				includeBinding,
+			]);
+		}
+		includeSourceTable = includeTarget;
+	}
+	const predicateCtx: CompilerContext = {
+		...scopedWithTarget,
+		...(predicateScope !== undefined && { scope: predicateScope }),
+	};
 
 	// Build correlation condition
 	const correlation = buildKeyCorrelation(
@@ -219,7 +274,7 @@ function buildExistsSubquery(
 		sourceColumn,
 		targetAlias,
 		targetColumn,
-		ctx,
+		predicateCtx,
 	);
 
 	// Build WHERE clause (correlation + nested conditions)
@@ -234,7 +289,7 @@ function buildExistsSubquery(
 		// the nested-exists schema-scoping bug: the inner rangeVar would receive
 		// undefined as schema and emit an unqualified table name.
 		const subCtx: CompilerContext = {
-			...ctx,
+			...predicateCtx,
 			rootTable: targetTable,
 			currentAlias: targetAlias,
 			outerAlias: sourceAlias,
@@ -256,25 +311,25 @@ function buildExistsSubquery(
 	}
 
 	// Build SELECT 1 FROM targetTable AS targetAlias [JOIN ...] WHERE ...
-	let fromNode: Node = rangeVar(
-		targetTable,
-		targetAlias,
-		schemaForExistsFromName(ctx, targetTable),
-		ctx.naming,
+	let fromNode: Node = sqlRangeVar(
+		resolveDeclaredIdentifier(ctx.declaredNames, ctx.dbCasing ?? 'preserve', {
+			kind: 'table',
+			table: targetTable,
+		}),
+		queryLocal(targetAlias),
+		ctx.schema === undefined ? undefined : queryLocal(ctx.schema),
 	);
 
 	// Add JOIN clauses for each include entry.
 	// Each include entry in decision.include has shape: { type:'existsInclude', relation, joinType }
 	// The relation is used as the join alias so dotted WHERE references (e.g. callerFile.project_id) resolve.
-	const includeDecisions = decision.include as
-		| readonly { relation?: string; joinType?: string }[]
-		| undefined;
 	if (includeDecisions && includeDecisions.length > 0) {
 		// Track alias → realTableName for multi-hop FK resolution.
 		// When the 2nd+ include is a relation on an intermediate joined table
 		// (not the root targetTable), we find the correct FK by scanning
 		// previously joined tables first, then falling back to root.
 		const joinedTables = new Map<string, string>(); // alias → realTableName
+		let joinCtx = scopedCtx;
 
 		for (const inc of includeDecisions) {
 			const joinRelation = inc.relation;
@@ -354,17 +409,40 @@ function buildExistsSubquery(
 			}
 
 			const joinAlias = joinRelation; // e.g. 'callerFile'
+			const joinTarget = resolveRelationTarget(
+				queryLocal(joinTargetTable),
+				joinCtx,
+			);
+			const joinBinding = relationBinding({
+				qualifier: queryLocal(joinAlias),
+				kind: 'declared-table',
+				logicalTable: joinTargetTable,
+			});
+			joinCtx = {
+				...joinCtx,
+				...(relationBindingFor(joinCtx.scope, joinBinding.qualifier) ===
+					undefined && {
+					scope: queryScope([
+						...(joinCtx.scope?.bindings.values() ?? []),
+						joinBinding,
+					]),
+				}),
+				aliasColumnAuthorities: bindAliasAuthority(
+					joinCtx.aliasColumnAuthorities,
+					queryLocal(joinAlias),
+					joinTarget,
+				),
+			};
 			const joinQuals = buildKeyCorrelation(
 				sourceAliasForJoin, // resolved source alias (root or intermediate)
 				joinSourceCols,
 				joinAlias,
-				joinTargetCols ?? [],
-				ctx,
+				(joinTargetCols ?? []).map(queryLocal),
+				joinCtx,
 			);
 			requireRelationTargetColumns(
-				resolveRelationTarget(joinTargetTable, ctx),
-				joinTargetCols ?? [],
-				ctx,
+				joinTarget,
+				(joinTargetCols ?? []).map(queryLocal),
 				'join key',
 				joinRelation,
 			);
@@ -374,11 +452,17 @@ function buildExistsSubquery(
 					? 'JOIN_LEFT'
 					: 'JOIN_INNER';
 
-			const joinRangeVar = rangeVar(
-				joinTargetTable,
-				joinAlias,
-				schemaForExistsFromName(ctx, joinTargetTable),
-				ctx.naming,
+			const joinRangeVar = sqlRangeVar(
+				resolveDeclaredIdentifier(
+					ctx.declaredNames,
+					ctx.dbCasing ?? 'preserve',
+					{
+						kind: 'table',
+						table: joinTargetTable,
+					},
+				),
+				queryLocal(joinAlias),
+				ctx.schema === undefined ? undefined : queryLocal(ctx.schema),
 			);
 
 			// Wrap current fromNode with the new join: JoinExpr { larg: fromNode, rarg: joinRangeVar }

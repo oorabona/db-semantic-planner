@@ -230,7 +230,7 @@ describe('Q2: Locale Fallback with COALESCE', () => {
 				.dump();
 
 			expect(dump.sql.toUpperCase()).toContain('COALESCE');
-			expect(dump.sql).toContain('display_name');
+			expect(dump.sql).toContain('"displayName"');
 		});
 
 		it('should generate correct parameter binding', async () => {

@@ -204,6 +204,7 @@ export async function compileNqlToSql(
 
 	// Create compile-only adapter for SQL generation (no DB connection needed)
 	const adapter = createPgsqlCompileOnlyAdapter({
+		model,
 		...(options?.schemaName !== undefined && {
 			schemaName: options.schemaName,
 		}),

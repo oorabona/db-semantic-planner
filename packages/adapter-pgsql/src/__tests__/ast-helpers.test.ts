@@ -11,12 +11,8 @@ import {
 	andExpr,
 	booleanConstNode,
 	coalesceExpr,
-	columnRef,
-	columnRefStar,
-	columnTarget,
 	countDistinct,
 	countStar,
-	deleteStmt,
 	distinctExpr,
 	eqExpr,
 	floatNode,
@@ -25,7 +21,6 @@ import {
 	gteExpr,
 	ilikeExpr,
 	innerJoin,
-	insertStmt,
 	integerNode,
 	leftJoin,
 	likeExpr,
@@ -35,20 +30,45 @@ import {
 	notExpr,
 	nullConstNode,
 	orExpr,
-	rangeVar,
-	resTarget,
 	selectStmt,
 	sortBy,
-	starTarget,
+	sqlJsonAggSubquery,
 	stringConstNode,
 	stringNode,
 	typeCast,
-	updateStmt,
 } from '../ast-helpers.js';
-import { CamelCaseNamingPlugin } from '../naming-plugin.js';
 import { createParamRef } from '../param-ref.js';
+import { queryLocal } from '../sql-identifier.js';
+import {
+	columnRef,
+	columnRefStar,
+	columnTarget,
+	deleteStmt,
+	insertStmt,
+	rangeVar,
+	resTarget,
+	snakeColumnRef,
+	snakeDeleteStmt,
+	snakeInsertStmt,
+	snakeUpdateStmt,
+	starTarget,
+	updateStmt,
+} from './typed-ast-test-helpers.js';
 
 describe('Basic Value Nodes', () => {
+	it('uses to_jsonb for an explicitly empty JSON aggregate projection', () => {
+		const aggregate = sqlJsonAggSubquery(
+			queryLocal('users'),
+			{ A_Const: { boolval: { boolval: true } } } as never,
+			queryLocal('user_row'),
+			undefined,
+			{ columns: [] },
+		);
+		const encoded = JSON.stringify(aggregate);
+		expect(encoded).toContain('to_jsonb');
+		expect(encoded).not.toContain('jsonb_build_object');
+	});
+
 	it('creates String node', () => {
 		const node = stringNode('test');
 		expect(node).toEqual({ String: { sval: 'test' } });
@@ -103,8 +123,7 @@ describe('Column and Table References', () => {
 	});
 
 	it('applies naming plugin to ColumnRef', () => {
-		const naming = new CamelCaseNamingPlugin();
-		const node = columnRef('createdAt', 'userProfiles', undefined, naming);
+		const node = snakeColumnRef('userProfiles', 'createdAt');
 		const fields = (
 			node as { ColumnRef: { fields: Array<{ String: { sval: string } }> } }
 		).ColumnRef.fields;
@@ -419,13 +438,11 @@ describe('INSERT Statement', () => {
 	});
 
 	it('applies naming plugin to INSERT', () => {
-		const naming = new CamelCaseNamingPlugin();
-		const node = insertStmt({
-			table: 'userProfiles',
-			columns: ['firstName', 'lastName'],
-			values: [[createParamRef(1), createParamRef(2)]],
-			naming,
-		});
+		const node = snakeInsertStmt(
+			'userProfiles',
+			['firstName', 'lastName'],
+			[[createParamRef(1), createParamRef(2)]],
+		);
 
 		const sql = deparseSync(node);
 		expect(sql.toLowerCase()).toContain('user_profiles');
@@ -461,13 +478,11 @@ describe('UPDATE Statement', () => {
 	});
 
 	it('applies naming plugin to UPDATE', () => {
-		const naming = new CamelCaseNamingPlugin();
-		const node = updateStmt({
-			table: 'userProfiles',
-			set: [{ column: 'updatedAt', value: funcCall('now') }],
-			where: eqExpr(columnRef('userId'), createParamRef(1)),
-			naming,
-		});
+		const node = snakeUpdateStmt(
+			'userProfiles',
+			[{ column: 'updatedAt', value: funcCall('now') }],
+			eqExpr(snakeColumnRef('userProfiles', 'userId'), createParamRef(1)),
+		);
 
 		const sql = deparseSync(node);
 		expect(sql.toLowerCase()).toContain('user_profiles');
@@ -503,12 +518,10 @@ describe('DELETE Statement', () => {
 	});
 
 	it('applies naming plugin to DELETE', () => {
-		const naming = new CamelCaseNamingPlugin();
-		const node = deleteStmt({
-			table: 'userSessions',
-			where: eqExpr(columnRef('userId'), createParamRef(1)),
-			naming,
-		});
+		const node = snakeDeleteStmt(
+			'userSessions',
+			eqExpr(snakeColumnRef('userSessions', 'userId'), createParamRef(1)),
+		);
 
 		const sql = deparseSync(node);
 		expect(sql.toLowerCase()).toContain('user_sessions');

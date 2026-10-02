@@ -4,15 +4,30 @@
  * Verifies that sql() marker values are compiled to verbatim SQL expressions
  * in ON CONFLICT DO UPDATE SET and UPDATE SET clauses, without parameterization.
  *
- * SQL format note: createPgsqlCompileOnlyAdapter() uses no naming plugin so
+ * SQL format note: createRawMutationAdapter() uses no naming plugin so
  * identifiers are unquoted. The deparser may produce multi-line formatted SQL.
  * Tests use normalizeSQL() for whitespace-insensitive comparison where needed,
  * and exact string matching for UPDATE (which is single-line).
  */
 
-import { sql } from '@dbsp/core';
+import { schema, sql } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+
+const rawMutationModel = schema({
+	files: {
+		id: 'integer',
+		name: 'text',
+		count: 'integer',
+		last_parsed: 'timestamp',
+		updated_at: 'timestamp',
+		content: 'text',
+	},
+}).model;
+
+function createRawMutationAdapter() {
+	return createPgsqlCompileOnlyAdapter({ model: rawMutationModel });
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -68,7 +83,7 @@ function normalizeSQL(s: string): string {
 
 describe('UPSERT-RAW: raw SQL in doUpdate() set', () => {
 	it('AC-1: emits raw SQL function call — now() — in ON CONFLICT DO UPDATE SET', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createRawMutationAdapter();
 		const intent = makeUpsertIntent([{ id: 1, name: 'test.ts' }], ['id'], {
 			last_parsed: sql('now()'),
 		});
@@ -89,7 +104,7 @@ describe('UPSERT-RAW: raw SQL in doUpdate() set', () => {
 	// ---------------------------------------------------------------------------
 
 	it('AC-2: emits excluded column reference arithmetic in ON CONFLICT DO UPDATE SET', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createRawMutationAdapter();
 		const intent = makeUpsertIntent([{ id: 1, count: 0 }], ['id'], {
 			count: sql('excluded.count + 1'),
 		});
@@ -109,7 +124,7 @@ describe('UPSERT-RAW: raw SQL in doUpdate() set', () => {
 	// ---------------------------------------------------------------------------
 
 	it('AC-3: handles mixed raw and scalar values in doUpdate set', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createRawMutationAdapter();
 		const intent = makeUpsertIntent([{ id: 1, name: 'original.ts' }], ['id'], {
 			name: 'updated.ts',
 			last_parsed: sql('now()'),
@@ -134,7 +149,7 @@ describe('UPSERT-RAW: raw SQL in doUpdate() set', () => {
 	// ---------------------------------------------------------------------------
 
 	it('AC-4: existing scalar doUpdate still uses EXCLUDED.column', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createRawMutationAdapter();
 		const intent = makeUpsertIntent([{ id: 1, name: 'test.ts' }], ['id'], {
 			name: 'updated.ts',
 		});
@@ -153,7 +168,7 @@ describe('UPSERT-RAW: raw SQL in doUpdate() set', () => {
 	// ---------------------------------------------------------------------------
 
 	it('AC-5: raw-only set does not add extra INSERT columns', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createRawMutationAdapter();
 		const intent = makeUpsertIntent([{ id: 1, name: 'test.ts' }], ['id'], {
 			last_parsed: sql('now()'),
 		});
@@ -173,7 +188,7 @@ describe('UPSERT-RAW: raw SQL in doUpdate() set', () => {
 	// ---------------------------------------------------------------------------
 
 	it('AC-6: handles multiple raw expressions in doUpdate set', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createRawMutationAdapter();
 		const intent = makeUpsertIntent([{ id: 1 }], ['id'], {
 			last_parsed: sql('now()'),
 			updated_at: sql('now()'),
@@ -192,7 +207,7 @@ describe('UPSERT-RAW: raw SQL in doUpdate() set', () => {
 	// ---------------------------------------------------------------------------
 
 	it('AC-4b: doUpdate without set auto-updates all non-conflict columns via EXCLUDED', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createRawMutationAdapter();
 		const intent = makeUpsertIntent(
 			[{ id: 1, name: 'test.ts', content: 'hello' }],
 			['id'],
@@ -214,7 +229,7 @@ describe('UPSERT-RAW: raw SQL in doUpdate() set', () => {
 
 describe('UPSERT-RAW: raw SQL in compileUpdate set()', () => {
 	it('AC-7: emits raw SQL function call — now() — in UPDATE SET', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createRawMutationAdapter();
 		const intent = makeUpdateIntent({ last_parsed: sql('now()') }, 'id', 1);
 
 		const result = adapter.compileUpdate(intent as any);
@@ -228,7 +243,7 @@ describe('UPSERT-RAW: raw SQL in compileUpdate set()', () => {
 	});
 
 	it('AC-8: handles mixed raw and scalar in UPDATE SET', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createRawMutationAdapter();
 		const intent = makeUpdateIntent(
 			{ name: 'updated.ts', last_parsed: sql('now()') },
 			'id',
@@ -244,7 +259,7 @@ describe('UPSERT-RAW: raw SQL in compileUpdate set()', () => {
 	});
 
 	it('AC-9: raw SQL without WHERE clause', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createRawMutationAdapter();
 		const intent = makeUpdateIntent({ last_parsed: sql('now()') });
 
 		const result = adapter.compileUpdate(intent as any);
@@ -254,7 +269,7 @@ describe('UPSERT-RAW: raw SQL in compileUpdate set()', () => {
 	});
 
 	it('AC-10: multiple raw expressions in UPDATE SET', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createRawMutationAdapter();
 		const intent = makeUpdateIntent({
 			last_parsed: sql('now()'),
 			updated_at: sql('now()'),

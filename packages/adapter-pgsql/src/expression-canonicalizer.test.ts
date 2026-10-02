@@ -3553,6 +3553,8 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 
 	it('stages a sequence exactly once for a non-idempotent naming plugin', async () => {
 		const suffixNaming = {
+			resolve: (name: string) => `${name}_physical`,
+			model: (name: string) => name,
 			toDatabase: (name: string) => `${name}_physical`,
 			toModel: (name: string) => name,
 		};

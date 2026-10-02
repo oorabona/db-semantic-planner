@@ -2,7 +2,8 @@ import { schema } from '@dbsp/core';
 import { resolveOutputReadHandling } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import { describe, expect, it } from 'vitest';
-import { identityNaming } from '../naming-plugin.js';
+import { createDeclaredNameResolver } from '../declared-name-resolver.js';
+import { createPgPhysicalModel } from '../physical-model/index.js';
 import {
 	dropPositionalUnion,
 	expressionColumn,
@@ -23,6 +24,17 @@ const testSchema = schema({
 		label: 'text',
 	},
 });
+
+function resolverFor(model: typeof testSchema.model) {
+	return createDeclaredNameResolver(
+		createPgPhysicalModel({
+			mode: 'logical',
+			model,
+			schema: 'public',
+			dbCasing: 'preserve',
+		}),
+	);
+}
 
 function columnTarget(column: string, alias?: string): unknown {
 	return {
@@ -55,6 +67,194 @@ function selectAst(targetList: readonly unknown[]): Node {
 }
 
 describe('projection envelope', () => {
+	it('keeps a declared snake_case projection at its declared logical key', () => {
+		const snakeSchema = schema({ events: { event_id: 'integer' } });
+		const env = fromAstProjection({
+			sql: 'SELECT event_id FROM events',
+			parameters: [],
+			ast: selectAst([columnTarget('event_id')]),
+			rootTable: 'events',
+			model: snakeSchema.model,
+			declaredNames: resolverFor(snakeSchema.model),
+		});
+
+		const compiled = finalizeEnvelope(env);
+
+		expect(compiled.outputKeyMap?.get('event_id')).toBe('event_id');
+	});
+
+	it('maps physical result labels through the declared output projection', () => {
+		const model = schema({ posts: { id: 'integer', userId: 'integer' } }).model;
+		const physical = createPgPhysicalModel({
+			mode: 'logical',
+			model,
+			schema: 'public',
+			dbCasing: 'snake_case',
+		});
+		const env = fromAstProjection({
+			sql: 'SELECT posts.user_id FROM posts',
+			parameters: [],
+			ast: {
+				SelectStmt: {
+					targetList: [columnTarget('user_id')],
+					fromClause: [
+						{ RangeVar: { relname: 'posts', inh: true, relpersistence: 'p' } },
+					],
+				},
+			} as Node,
+			rootTable: 'posts',
+			model,
+			declaredNames: createDeclaredNameResolver(physical),
+		});
+
+		expect(finalizeEnvelope(env).outputKeyMap?.get('user_id')).toBe('userId');
+	});
+
+	it('leaves duplicate star labels unmapped while refusing distinct truncation collisions', () => {
+		const model = schema({
+			leftRows: { id: 'integer', leftValue: 'text' },
+			rightRows: { id: 'integer', rightValue: 'text' },
+		}).model;
+		const physical = createPgPhysicalModel({
+			mode: 'logical',
+			model,
+			schema: 'public',
+			dbCasing: 'preserve',
+		});
+		const duplicatedStars = fromAstProjection({
+			sql: 'SELECT leftRows.*, rightRows.* FROM leftRows JOIN rightRows ON true',
+			parameters: [],
+			ast: {
+				SelectStmt: {
+					targetList: [
+						{
+							ResTarget: {
+								val: {
+									ColumnRef: {
+										fields: [{ String: { sval: 'leftRows' } }, { A_Star: {} }],
+									},
+								},
+							},
+						},
+						{
+							ResTarget: {
+								val: {
+									ColumnRef: {
+										fields: [{ String: { sval: 'rightRows' } }, { A_Star: {} }],
+									},
+								},
+							},
+						},
+					],
+					fromClause: [
+						{
+							RangeVar: { relname: 'leftRows', inh: true, relpersistence: 'p' },
+						},
+						{
+							RangeVar: {
+								relname: 'rightRows',
+								inh: true,
+								relpersistence: 'p',
+							},
+						},
+					],
+				},
+			} as Node,
+			rootTable: 'leftRows',
+			model,
+			declaredNames: createDeclaredNameResolver(physical),
+		});
+		const compiled = finalizeEnvelope(duplicatedStars);
+		expect(compiled.outputKeyMap?.has('id')).toBe(false);
+		expect(compiled.outputKeyMap?.get('leftValue')).toBe('leftValue');
+		expect(compiled.outputKeyMap?.get('rightValue')).toBe('rightValue');
+
+		const prefix = 'x'.repeat(63);
+		expect(() =>
+			fromAstProjection({
+				sql: 'SELECT id AS first, id AS second FROM events',
+				parameters: [],
+				ast: selectAst([
+					columnTarget('id', `${prefix}first`),
+					columnTarget('id', `${prefix}second`),
+				]),
+				rootTable: 'events',
+				model: testSchema.model,
+				declaredNames: resolverFor(testSchema.model),
+			}),
+		).toThrow(/63-byte identifier truncation/);
+	});
+
+	it('refuses explicit outputs that collide with a star expansion in either order', () => {
+		const astFor = (targetList: readonly unknown[]): Node =>
+			({
+				SelectStmt: {
+					targetList,
+					fromClause: [
+						{ RangeVar: { relname: 'events', inh: true, relpersistence: 'p' } },
+					],
+				},
+			}) as Node;
+		const starTarget = {
+			ResTarget: {
+				val: { ColumnRef: { fields: [{ A_Star: {} }] } },
+			},
+		};
+
+		for (const targetList of [
+			[columnTarget('id'), starTarget],
+			[starTarget, columnTarget('id')],
+		]) {
+			expect(() =>
+				fromAstProjection({
+					sql: 'SELECT id, events.* FROM events',
+					parameters: [],
+					ast: astFor(targetList),
+					rootTable: 'events',
+					model: testSchema.model,
+					declaredNames: resolverFor(testSchema.model),
+				}),
+			).toThrow(
+				"Projection output label 'id' is produced by multiple candidates and cannot be returned losslessly.",
+			);
+		}
+	});
+
+	it('preserves a source logical key through an unchanged CTE output label', () => {
+		const source = supplementOutputDescriptors(
+			fromModelColumns({
+				sql: 'SELECT sequence FROM events',
+				parameters: [],
+				table: 'events',
+				columns: ['sequence'],
+				model: testSchema.model,
+				declaredNames: resolverFor(testSchema.model),
+			}),
+			[
+				{
+					outputKey: 'sequence',
+					logicalKey: 'logicalSequence',
+					source: {
+						kind: 'modelColumn',
+						table: 'events',
+						column: 'sequence',
+						js: 'bigint',
+					},
+					shape: { kind: 'scalar', cardinality: 'one' },
+				},
+			],
+		);
+		const projected = projectNamedFields(source, {
+			sql: 'SELECT sequence FROM bound_events',
+			parameters: [],
+			selections: [{ inputKey: 'sequence', outputKey: 'sequence' }],
+		});
+
+		expect(finalizeEnvelope(projected).outputKeyMap?.get('sequence')).toBe(
+			'logicalSequence',
+		);
+	});
+
 	it('finalizeEnvelope emits metadata only for modelColumn outputs with js', () => {
 		const env = fromAstProjection({
 			sql: 'SELECT sequence AS seq, safeSequence, legacySequence, label FROM events',
@@ -67,7 +267,7 @@ describe('projection envelope', () => {
 			]),
 			rootTable: 'events',
 			model: testSchema.model,
-			naming: identityNaming,
+			declaredNames: resolverFor(testSchema.model),
 		});
 
 		const compiled = finalizeEnvelope(env);
@@ -86,6 +286,54 @@ describe('projection envelope', () => {
 		expect(compiled.columnMetadata?.has('label') ?? false).toBe(false);
 	});
 
+	it('refuses projected aliases that collide after PostgreSQL truncation', () => {
+		const prefix = 'a'.repeat(63);
+		const source = fromModelColumns({
+			sql: 'SELECT id FROM events',
+			parameters: [],
+			table: 'events',
+			columns: ['id'],
+			model: testSchema.model,
+			declaredNames: resolverFor(testSchema.model),
+		});
+		const projected = projectNamedFields(source, {
+			sql: 'SELECT id AS first, id AS second FROM events',
+			parameters: [],
+			selections: [
+				{ inputKey: 'id', outputKey: `${prefix}one` },
+				{ inputKey: 'id', outputKey: `${prefix}two` },
+			],
+		});
+
+		expect(() => finalizeEnvelope(projected)).toThrow(
+			`PostgreSQL projection outputs '${prefix}one' and '${prefix}two' both return label '${prefix}'`,
+		);
+	});
+
+	it('refuses exact duplicate returned projection labels', () => {
+		const source = fromModelColumns({
+			sql: 'SELECT sequence, label FROM events',
+			parameters: [],
+			table: 'events',
+			columns: ['sequence', 'label'],
+			model: testSchema.model,
+			declaredNames: resolverFor(testSchema.model),
+		});
+
+		expect(() =>
+			projectNamedFields(source, {
+				sql: 'SELECT sequence AS display_name, label AS display_name FROM events',
+				parameters: [],
+				selections: [
+					{ inputKey: 'sequence', outputKey: 'display_name' },
+					{ inputKey: 'label', outputKey: 'display_name' },
+				],
+			}),
+		).toThrow(
+			"Duplicate projected output 'display_name': 'events.sequence' and 'events.label' both return that label.",
+		);
+	});
+
 	it('finalizeEnvelope routes descriptor handling through the neutral resolver', () => {
 		const source = fromModelColumns({
 			sql: 'SELECT sequence FROM events',
@@ -93,7 +341,7 @@ describe('projection envelope', () => {
 			table: 'events',
 			columns: ['sequence'],
 			model: testSchema.model,
-			naming: identityNaming,
+			declaredNames: resolverFor(testSchema.model),
 		});
 		expect(source.projection.kind).toBe('known');
 		if (source.projection.kind !== 'known') return;
@@ -101,6 +349,7 @@ describe('projection envelope', () => {
 		const scalarDescriptor = source.projection.outputs.get('sequence');
 		expect(scalarDescriptor).toEqual({
 			outputKey: 'sequence',
+			logicalKey: 'sequence',
 			source: {
 				kind: 'modelColumn',
 				table: 'events',
@@ -135,7 +384,7 @@ describe('projection envelope', () => {
 				table: 'events',
 				columns: ['legacySequence'],
 				model: testSchema.model,
-				naming: identityNaming,
+				declaredNames: resolverFor(testSchema.model),
 			}),
 			[expressionOutput],
 		);
@@ -157,7 +406,7 @@ describe('projection envelope', () => {
 			table: 'events',
 			columns: ['sequence', 'legacySequence'],
 			model: testSchema.model,
-			naming: identityNaming,
+			declaredNames: resolverFor(testSchema.model),
 		});
 
 		const projected = projectNamedFields(source, {
@@ -190,7 +439,7 @@ describe('projection envelope', () => {
 				table: 'events',
 				columns: ['legacySequence'],
 				model: testSchema.model,
-				naming: identityNaming,
+				declaredNames: resolverFor(testSchema.model),
 			}),
 			[
 				{
@@ -238,7 +487,7 @@ describe('projection envelope', () => {
 			table: 'events',
 			columns: ['sequence'],
 			model: testSchema.model,
-			naming: identityNaming,
+			declaredNames: resolverFor(testSchema.model),
 		});
 		const nonConvertible = fromModelColumns({
 			sql: 'SELECT legacySequence, label FROM events',
@@ -246,7 +495,7 @@ describe('projection envelope', () => {
 			table: 'events',
 			columns: ['legacySequence', 'label'],
 			model: testSchema.model,
-			naming: identityNaming,
+			declaredNames: resolverFor(testSchema.model),
 		});
 
 		expect(() =>
@@ -276,6 +525,7 @@ describe('projection envelope', () => {
 		expect(outputKey).toBe('total');
 		expect(output).toEqual({
 			outputKey: 'total',
+			logicalKey: 'total',
 			source: {
 				kind: 'expression',
 				reason: 'aggregate result',
@@ -304,7 +554,7 @@ describe('projection envelope', () => {
 			]),
 			rootTable: 'events',
 			model: testSchema.model,
-			naming: identityNaming,
+			declaredNames: resolverFor(testSchema.model),
 		});
 
 		expect(finalizeEnvelope(env).columnMetadata?.size).toBe(0);
@@ -317,7 +567,7 @@ describe('projection envelope', () => {
 			table: 'events',
 			columns: ['sequence'],
 			model: testSchema.model,
-			naming: identityNaming,
+			declaredNames: resolverFor(testSchema.model),
 		});
 
 		const preserved = preserveOneToOne(source, {
@@ -341,7 +591,7 @@ describe('projection envelope', () => {
 			table: 'events',
 			columns: ['sequence'],
 			model: testSchema.model,
-			naming: identityNaming,
+			declaredNames: resolverFor(testSchema.model),
 		});
 
 		const supplemented = supplementOutputDescriptors(source, [

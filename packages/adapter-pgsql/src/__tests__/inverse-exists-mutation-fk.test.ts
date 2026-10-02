@@ -13,6 +13,10 @@ const inverseFkSchema = schema({
 		id: { type: 'integer', primaryKey: true },
 		name: { type: 'text' },
 	},
+	symbols_archive: {
+		id: { type: 'integer', primaryKey: true },
+		name: { type: 'text' },
+	},
 	calls: {
 		id: { type: 'integer', primaryKey: true },
 		callee_ref: ref('symbols', {
@@ -74,10 +78,36 @@ const compositeFkRelations = new Map([
 	],
 ] as const);
 
+const compositeFkBase = schema({
+	customers: { id: 'integer', name: 'text' },
+	orders: {
+		id: 'integer',
+		name: 'text',
+		order_id: 'integer',
+		tenant_id: 'integer',
+		customer_id: 'integer',
+		status: 'text',
+	},
+	orders_archive: {
+		id: 'integer',
+		name: 'text',
+		order_id: 'integer',
+		tenant_id: 'integer',
+		customer_id: 'integer',
+		status: 'text',
+	},
+	order_items: {
+		id: 'integer',
+		name: 'text',
+		order_id: 'integer',
+		tenant_id: 'integer',
+	},
+}).model;
+
 const compositeFkModel = {
+	...compositeFkBase,
 	relations: compositeFkRelations,
-	tables: new Map(),
-	getTable: () => undefined,
+	getTable: (tableName: string) => compositeFkBase.tables.get(tableName),
 	getRelation: (qualifiedName: 'customers.orders' | 'orders.items') =>
 		compositeFkRelations.get(qualifiedName),
 	getRelationsFrom: (source: string) =>

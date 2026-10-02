@@ -19,7 +19,6 @@ import {
 	type WhereCompilerCtx,
 } from '../compile-where.js';
 import { createCompilerState } from '../handlers/types.js';
-import { identityNaming } from '../naming-plugin.js';
 
 /** Deparse a WHERE AST node to a normalised SQL string for assertion. */
 function nodeToSql(node: Node): string {
@@ -62,10 +61,9 @@ function makeCtx(overrides?: WhereCompilerCtxOverrides): WhereCompilerCtx {
 		rootTable: 'users',
 		aliases: new Map(),
 		paramState,
-		naming: identityNaming,
 		...(!withoutModel ? { model: testSchema.model as any } : {}),
 		compileSubquery: (subIntent, paramOffset) =>
-			buildSubqueryFromIntent(subIntent, paramOffset, identityNaming),
+			buildSubqueryFromIntent(subIntent, paramOffset),
 		...rest,
 	};
 }
@@ -361,10 +359,9 @@ describe('DEFECT-2: multi-hop relationFilter emits correct FK correlation column
 			rootTable: 'posts',
 			aliases: new Map(),
 			paramState,
-			naming: identityNaming,
 			model: testSchema.model as any,
 			compileSubquery: (subIntent, paramOffset) =>
-				buildSubqueryFromIntent(subIntent, paramOffset, identityNaming),
+				buildSubqueryFromIntent(subIntent, paramOffset),
 		};
 		const intent = {
 			kind: 'relationFilter' as const,

@@ -4,7 +4,7 @@
  * Tests adapter interface implementation without database connection.
  */
 
-import { type PlanReport, supportsExecution } from '@dbsp/core';
+import { type PlanReport, schema, supportsExecution } from '@dbsp/core';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import type { Pool, PoolClient } from 'pg';
 import { describe, expect, expectTypeOf, it, vi } from 'vitest';
@@ -33,6 +33,14 @@ function createMockPool(): Pool {
 		// Add other Pool methods as needed
 	} as unknown as Pool;
 }
+
+const mutationTestModel = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'text',
+		email: 'text',
+	},
+}).model;
 
 function testQuery<T = unknown>(
 	sql: string,
@@ -508,7 +516,7 @@ describe('PgsqlAdapter', () => {
 	describe('mutations', () => {
 		it('should compile insert intent', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgsqlAdapter(pool, { model: mutationTestModel });
 
 			const intent = {
 				table: 'users',
@@ -523,11 +531,11 @@ describe('PgsqlAdapter', () => {
 
 		it('should compile update intent', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgsqlAdapter(pool, { model: mutationTestModel });
 
 			const intent = {
 				table: 'users',
-				set: [{ column: 'name', value: 'Bob' }],
+				set: { name: 'Bob' },
 			} as any;
 
 			const compiled = adapter.compileUpdate(intent);
@@ -538,7 +546,7 @@ describe('PgsqlAdapter', () => {
 
 		it('should compile delete intent', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgsqlAdapter(pool, { model: mutationTestModel });
 
 			const intent = {
 				table: 'users',
@@ -552,7 +560,7 @@ describe('PgsqlAdapter', () => {
 
 		it('should compile upsert intent', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgsqlAdapter(pool, { model: mutationTestModel });
 
 			const intent = {
 				type: 'upsert' as const,
@@ -571,42 +579,9 @@ describe('PgsqlAdapter', () => {
 
 		it('should emit type-cast for range columns in INSERT', () => {
 			const pool = createMockPool();
-			const model = {
-				tables: new Map([
-					[
-						'priceTiers',
-						{
-							name: 'price_tiers',
-							columns: [
-								{ name: 'name', type: 'string', nullable: false },
-								{
-									name: 'quantityRange',
-									type: 'int4range',
-									nullable: false,
-								},
-							],
-							foreignKeys: [],
-							indexes: [],
-						},
-					],
-				]),
-				relations: new Map(),
-				getTable(name: string) {
-					return this.tables.get(name);
-				},
-				getRelation() {
-					return undefined;
-				},
-				getRelationsFrom() {
-					return [];
-				},
-				getRelationsTo() {
-					return [];
-				},
-				isAmbiguous() {
-					return { ambiguous: false as const };
-				},
-			} as any;
+			const model = schema({
+				priceTiers: { name: 'string', quantityRange: 'int4range' },
+			}).model;
 
 			const adapter = createPgsqlAdapter(pool, { model });
 
@@ -624,42 +599,9 @@ describe('PgsqlAdapter', () => {
 
 		it('should emit type-cast for range columns in UPDATE', () => {
 			const pool = createMockPool();
-			const model = {
-				tables: new Map([
-					[
-						'priceTiers',
-						{
-							name: 'price_tiers',
-							columns: [
-								{ name: 'name', type: 'string', nullable: false },
-								{
-									name: 'quantityRange',
-									type: 'int4range',
-									nullable: false,
-								},
-							],
-							foreignKeys: [],
-							indexes: [],
-						},
-					],
-				]),
-				relations: new Map(),
-				getTable(name: string) {
-					return this.tables.get(name);
-				},
-				getRelation() {
-					return undefined;
-				},
-				getRelationsFrom() {
-					return [];
-				},
-				getRelationsTo() {
-					return [];
-				},
-				isAmbiguous() {
-					return { ambiguous: false as const };
-				},
-			} as any;
+			const model = schema({
+				priceTiers: { name: 'string', quantityRange: 'int4range' },
+			}).model;
 
 			const adapter = createPgsqlAdapter(pool, { model });
 
@@ -2641,7 +2583,7 @@ describe('PgsqlAdapter', () => {
 			const result = await adapter.executeWithMeta(query);
 
 			expect(result).toEqual({
-				rows: [{ id: 1, fullName: 'Alice' }],
+				rows: [{ id: 1, full_name: 'Alice' }],
 				rowCount: 1,
 				command: 'UPDATE',
 			});
@@ -2934,7 +2876,11 @@ describe('PgsqlAdapter', () => {
 
 		it('compileInsertFrom generates INSERT ... SELECT', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool);
+			const model = schema({
+				users: { id: 'integer', name: 'text' },
+				archivedUsers: { id: 'integer', name: 'text' },
+			}).model;
+			const adapter = createPgsqlAdapter(pool, { model });
 
 			const intent = {
 				type: 'insert_from' as const,
@@ -3193,33 +3139,10 @@ describe('PgsqlAdapter', () => {
 		});
 
 		it('validates columns against model schema', () => {
-			const model = {
-				getTable: (name: string) => {
-					if (name === 'orders') {
-						return {
-							name: 'orders',
-							columns: [
-								{ name: 'id', type: 'integer', nullable: false },
-								{
-									name: 'name',
-									type: 'string',
-									nullable: false,
-								},
-								{
-									name: 'total',
-									type: 'numeric',
-									nullable: false,
-								},
-							],
-							primaryKey: 'id',
-							foreignKeys: [],
-							indexes: [],
-						};
-					}
-					return undefined;
-				},
-				getRelation: () => undefined,
-			};
+			const model = schema({
+				customers: { id: 'integer' },
+				orders: { id: 'integer', name: 'string', total: 'decimal' },
+			}).model;
 
 			const adapter = new PgsqlAdapter(undefined, {});
 			const plan = buildPlanWithRelationColumns(
@@ -3260,11 +3183,11 @@ describe('PgsqlAdapter', () => {
 			expect(compiled.sql).toContain('orders_lat_0.anything');
 		});
 
-		it('skips validation when target table not found in model', () => {
-			const model = {
-				getTable: () => undefined, // No tables known
-				getRelation: () => undefined,
-			};
+		it('propagates relation columns with a complete model', () => {
+			const model = schema({
+				customers: { id: 'integer' },
+				orders: { id: 'integer', anything: 'string' },
+			}).model;
 
 			const adapter = new PgsqlAdapter(undefined, {});
 			const plan = buildPlanWithRelationColumns(
@@ -3280,7 +3203,7 @@ describe('PgsqlAdapter', () => {
 				[lateralInclude('orders', 'orders')],
 			);
 
-			// Should not throw — table not in model = fail open
+			// The complete fixture still exercises relation-column propagation.
 			const compiled = adapter.compile(plan, { model } as any);
 			expect(compiled.sql).toContain('orders_lat_0.anything');
 		});

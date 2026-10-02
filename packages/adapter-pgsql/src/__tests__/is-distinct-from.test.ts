@@ -29,6 +29,7 @@ import {
 	type WhereCompilerCtx,
 } from '../compile-where.js';
 import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
+import { createDeclaredNameResolver } from '../declared-name-resolver.js';
 import {
 	createCompilerState,
 	createWhereDispatcher,
@@ -39,9 +40,9 @@ import { customExpressionWhereHandler } from '../handlers/where/custom-expressio
 import { jsonComparisonHandler } from '../handlers/where/json.js';
 import { scalarSubqueryHandler } from '../handlers/where/subquery.js';
 import { convertWhereCondition } from '../intent-to-decisions.js';
-import { identityNaming } from '../naming-plugin.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { deparse } from '../pgsql-deparser.js';
+import { createPgPhysicalModel } from '../physical-model/index.js';
 import { mapComparisonOperator } from '../plan-decision-extractor.js';
 
 const testSchema = schema({
@@ -51,7 +52,22 @@ const testSchema = schema({
 		c: { type: 'integer', nullable: true },
 		updated: { type: 'boolean' },
 	},
+	edges: {
+		from_id: { type: 'integer' },
+		to_id: { type: 'integer' },
+	},
 } as const);
+
+function resolverFor(model: typeof testSchema.model) {
+	return createDeclaredNameResolver(
+		createPgPhysicalModel({
+			mode: 'logical',
+			model,
+			schema: 'public',
+			dbCasing: 'preserve',
+		}),
+	);
+}
 
 function buildOrm() {
 	const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
@@ -63,9 +79,8 @@ function whereCtx(): WhereCompilerCtx {
 		rootTable: 't',
 		aliases: new Map(),
 		paramState: createCompilerState(),
-		naming: identityNaming,
 		compileSubquery: (intent: QueryIntent, paramOffset: number) =>
-			buildSubqueryFromIntent(intent, paramOffset, identityNaming),
+			buildSubqueryFromIntent(intent, paramOffset),
 	};
 }
 
@@ -305,7 +320,6 @@ describe('#462 isDistinctFrom', () => {
 						value: 6,
 					} as Decision,
 					{
-						naming: identityNaming,
 						rootTable: 't',
 						maxRecursiveDepth: 100,
 					},
@@ -324,7 +338,6 @@ describe('#462 isDistinctFrom', () => {
 						value: 2,
 					} as Decision,
 					{
-						naming: identityNaming,
 						rootTable: 't',
 						maxRecursiveDepth: 100,
 					},
@@ -344,7 +357,6 @@ describe('#462 isDistinctFrom', () => {
 						value: 2,
 					} as Decision,
 					{
-						naming: identityNaming,
 						rootTable: 't',
 						maxRecursiveDepth: 100,
 					},
@@ -362,7 +374,6 @@ describe('#462 isDistinctFrom', () => {
 			comparisonHandler.compile(
 				{ type: 'where', column: 'c', value: 6 } as Decision,
 				{
-					naming: identityNaming,
 					rootTable: 't',
 					maxRecursiveDepth: 100,
 				},
@@ -439,7 +450,6 @@ describe('#462 isDistinctFrom', () => {
 
 	it('refuses absent and empty comparison operators in direct handlers', () => {
 		const handlerCtx = {
-			naming: identityNaming,
 			rootTable: 't',
 			maxRecursiveDepth: 100,
 		};
@@ -741,9 +751,9 @@ describe('#462 isDistinctFrom', () => {
 				testSchema.model,
 				undefined,
 				{
-					naming: identityNaming,
 					schemaName: undefined,
-					model: undefined,
+					model: testSchema.model,
+					declaredNames: resolverFor(testSchema.model),
 					defaultPk: 'id',
 					deriveFk: (relation: string) => `${relation}_id`,
 				},
@@ -760,12 +770,7 @@ describe('#462 isDistinctFrom', () => {
 		);
 	});
 
-	it('refuses a recursive-anchor operator before naming the field', () => {
-		const naming = Object.assign(Object.create(identityNaming), {
-			toDatabase: () => {
-				throw new Error('naming plugin should not run');
-			},
-		}) as typeof identityNaming;
+	it('refuses a recursive-anchor operator before emitting identifiers', () => {
 		expect(() =>
 			compileRecursive(
 				{
@@ -811,9 +816,9 @@ describe('#462 isDistinctFrom', () => {
 				testSchema.model,
 				undefined,
 				{
-					naming,
 					schemaName: undefined,
-					model: undefined,
+					model: testSchema.model,
+					declaredNames: resolverFor(testSchema.model),
 					defaultPk: 'id',
 					deriveFk: (relation: string) => `${relation}_id`,
 				},

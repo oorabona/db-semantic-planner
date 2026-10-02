@@ -31,7 +31,6 @@ import {
 	jsonContainsHandler,
 	jsonExistsHandler,
 } from '../handlers/where/json.js';
-import { identityNaming } from '../naming-plugin.js';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -43,7 +42,6 @@ function makeCtx(overrides?: Partial<WhereCompilerCtx>): WhereCompilerCtx {
 		rootTable: 'items',
 		aliases: new Map(),
 		paramState,
-		naming: identityNaming,
 		compileSubquery: () => {
 			throw new Error('compileSubquery not expected in this test');
 		},
@@ -76,7 +74,6 @@ function compileNode(
 /** Build a minimal CompilerContext for direct handler tests */
 function makeHandlerCtx(overrides?: Partial<CompilerContext>): CompilerContext {
 	return {
-		naming: identityNaming,
 		rootTable: 'items',
 		currentAlias: 'items',
 		maxRecursiveDepth: 100,

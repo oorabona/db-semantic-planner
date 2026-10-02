@@ -8,13 +8,12 @@
 import type { Node } from '@pgsql/types';
 import {
 	booleanConstNode,
-	columnRef,
 	floatNode,
 	integerNode,
 	nullConstNode,
+	sqlColumnRef,
 } from '../../ast-helpers.js';
-import type { NamingPlugin } from '../../naming-plugin.js';
-import type { AliasColumnAuthority } from '../../relation-target-projection.js';
+import { queryLocal } from '../../sql-identifier.js';
 import type { CompilerState } from '../types.js';
 import { bindParameter } from './param-value.js';
 
@@ -25,6 +24,7 @@ import { bindParameter } from './param-value.js';
  */
 type NestedCaseHandler = (expr: Record<string, unknown>) => Node;
 type CaseExpressionHandler = (expr: Record<string, unknown>) => Node;
+type CaseColumnHandler = (column: string) => Node;
 
 /**
  * Expression-intent kinds that compileExpressionIntent renders and that are
@@ -55,19 +55,21 @@ const EXPRESSION_HANDLER_KINDS = new Set<string>([
 export function resolveCaseValue(
 	value: unknown,
 	alias: string,
-	schema: string | undefined,
-	naming: NamingPlugin | undefined,
+	_schema: string | undefined,
+	resolveColumn: CaseColumnHandler | undefined,
 	state: CompilerState,
 	nestedCaseHandler?: NestedCaseHandler,
 	expressionHandler?: CaseExpressionHandler,
-	authorities?: AliasColumnAuthority,
 ): Node {
 	if (value === null || value === undefined) {
 		return nullConstNode();
 	}
 
 	if (typeof value === 'string') {
-		return columnRef(value, alias, schema, naming, authorities);
+		return (
+			resolveColumn?.(value) ??
+			sqlColumnRef(queryLocal(value), queryLocal(alias))
+		);
 	}
 
 	if (typeof value !== 'object') {
@@ -92,34 +94,29 @@ export function resolveCaseValue(
 			return bindParameter(expr.value, state);
 
 		case 'column':
-			return columnRef(
-				expr.column as string,
-				alias,
-				schema,
-				naming,
-				authorities,
+			return (
+				resolveColumn?.(expr.column as string) ??
+				sqlColumnRef(queryLocal(expr.column as string), queryLocal(alias))
 			);
 
 		case 'arithmetic': {
 			const left = resolveCaseValue(
 				expr.left,
 				alias,
-				schema,
-				naming,
+				_schema,
+				resolveColumn,
 				state,
 				nestedCaseHandler,
 				expressionHandler,
-				authorities,
 			);
 			const right = resolveCaseValue(
 				expr.right,
 				alias,
-				schema,
-				naming,
+				_schema,
+				resolveColumn,
 				state,
 				nestedCaseHandler,
 				expressionHandler,
-				authorities,
 			);
 			return {
 				A_Expr: {

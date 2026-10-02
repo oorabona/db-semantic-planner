@@ -8,6 +8,7 @@ import type { Node } from '@pgsql/types';
 import {
 	distinctExpr,
 	eqExpr,
+	funcCall,
 	gtExpr,
 	gteExpr,
 	ltExpr,
@@ -71,8 +72,23 @@ export const comparisonHandler: WhereHandler = {
 			throw new Error('Comparison handler requires a column');
 		}
 
-		const left = buildColumnRef(column, ctx);
-		const columnType = resolveColumnPgType(column, ctx);
+		const left =
+			decision.type === 'having' && decision.function
+				? funcCall(
+						decision.function,
+						column === '*' ? [] : [buildColumnRef(column, ctx)],
+						{
+							...(column === '*' && { star: true }),
+							...(decision.distinct !== undefined && {
+								distinct: decision.distinct,
+							}),
+						},
+					)
+				: buildColumnRef(column, ctx);
+		const columnType =
+			decision.type === 'having' && decision.function
+				? resolveHavingAggregatePgType(decision.function, column, ctx)
+				: resolveColumnPgType(column, ctx);
 		const right = compileValueOrFieldRef(value, ctx, state, columnType);
 
 		switch (resolvedOperator) {
@@ -104,3 +120,45 @@ export const comparisonHandler: WhereHandler = {
 		}
 	},
 };
+
+/**
+ * Resolve a HAVING parameter cast from the aggregate result, not its argument.
+ * Unknown aggregate result types deliberately remain uncast so PostgreSQL can
+ * infer them from the expression.
+ */
+function resolveHavingAggregatePgType(
+	functionName: string,
+	column: string,
+	ctx: CompilerContext,
+): string | undefined {
+	const aggregate = functionName.toLowerCase();
+	if (aggregate === 'count') return 'bigint';
+	const argumentType = resolveColumnPgType(column, ctx);
+	if (aggregate === 'min' || aggregate === 'max') return argumentType;
+	if (argumentType === undefined) return undefined;
+	const normalized = argumentType.toLowerCase().replace(/\s+/g, ' ').trim();
+	if (aggregate === 'sum') {
+		if (/^(smallint|int2|integer|int|int4)$/.test(normalized)) return 'bigint';
+		if (/^(bigint|int8|numeric|decimal)$/.test(normalized)) return 'numeric';
+		if (/^(real|float4)$/.test(normalized)) return 'real';
+		if (/^(double precision|float8)$/.test(normalized)) {
+			return 'double precision';
+		}
+		if (normalized === 'money') return 'money';
+		return undefined;
+	}
+	if (aggregate === 'avg') {
+		if (
+			/^(smallint|int2|integer|int|int4|bigint|int8|numeric|decimal)$/.test(
+				normalized,
+			)
+		) {
+			return 'numeric';
+		}
+		if (/^(real|float4|double precision|float8)$/.test(normalized)) {
+			return 'double precision';
+		}
+		if (normalized === 'interval') return 'interval';
+	}
+	return undefined;
+}

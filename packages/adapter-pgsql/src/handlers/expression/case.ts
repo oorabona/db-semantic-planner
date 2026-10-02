@@ -8,14 +8,14 @@
 
 import type { ExpressionIntent } from '@dbsp/types';
 import type { CaseExpr, CaseWhen, Node } from '@pgsql/types';
-import { columnRef } from '../../ast-helpers.js';
 import { unwrapParamIntent } from '../../param-intent.js';
 import type {
-	CompilerContext,
 	CompilerState,
 	Decision,
+	ExpressionCompilerContext,
 	ExpressionHandler,
 } from '../types.js';
+import { expressionColumnRef } from '../types.js';
 import { resolveCaseValue as resolveCaseValueShared } from './case-value.js';
 import { compileExpressionIntent } from './custom.js';
 import { bindParameter } from './param-value.js';
@@ -28,10 +28,10 @@ interface CaseCondition {
 	then: unknown;
 }
 
-/** Adapter: route CompilerContext fields to the shared resolveCaseValue signature. */
+/** Adapter: route expression context fields to the shared resolveCaseValue signature. */
 function resolveCaseValue(
 	value: unknown,
-	ctx: CompilerContext,
+	ctx: ExpressionCompilerContext,
 	state: CompilerState,
 ): Node {
 	const alias = ctx.currentAlias ?? ctx.rootTable;
@@ -39,7 +39,7 @@ function resolveCaseValue(
 		value,
 		alias,
 		undefined,
-		ctx.naming,
+		(column) => expressionColumnRef(column, ctx),
 		state,
 		undefined,
 		// Handler-level path: renders every expression kind via the shared
@@ -47,7 +47,6 @@ function resolveCaseValue(
 		// caller-provided CompilerContext supplies compileCustomFnFilter.
 		(expr) =>
 			compileExpressionIntent(expr as unknown as ExpressionIntent, ctx, state),
-		ctx.aliasColumnAuthorities,
 	);
 }
 
@@ -56,7 +55,7 @@ export const caseHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		ctx: ExpressionCompilerContext,
 		state: CompilerState,
 	): Node {
 		// CASE decisions carry { when: Decision; then: unknown } tuples in `conditions`,
@@ -116,7 +115,7 @@ export const simpleCaseHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		ctx: ExpressionCompilerContext,
 		state: CompilerState,
 	): Node {
 		const column = decision.column;
@@ -134,14 +133,7 @@ export const simpleCaseHandler: ExpressionHandler = {
 			throw new Error('Simple CASE requires at least one WHEN condition');
 		}
 
-		const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-		const testExpr = columnRef(
-			column,
-			tableAlias,
-			undefined,
-			ctx.naming,
-			ctx.aliasColumnAuthorities,
-		);
+		const testExpr = expressionColumnRef(column, ctx);
 
 		const args: Node[] = conditions.map((cond) => {
 			// Build the comparison value — `when` may be a Decision with .value

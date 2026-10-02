@@ -24,8 +24,13 @@ import { getTrustedNqlRelationFilterFields } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { defaultFkDerivation } from './assert-field.js';
-import { funcCall, rangeVar } from './ast-helpers.js';
-import { schemaForFromName } from './binding-registry.js';
+import { funcCall, sqlRangeVar } from './ast-helpers.js';
+import {
+	declaredRelationBindingFor,
+	queryScope,
+	relationBinding,
+	relationBindingFor,
+} from './binding-registry.js';
 import { compileWhereIntent, type WhereCompilerCtx } from './compile-where.js';
 import {
 	type CompilerOptions,
@@ -36,6 +41,7 @@ import {
 } from './compiler.js';
 import { inferPgArrayType, stripArraySuffix } from './compiler-utils.js';
 import { validateDbType } from './db-type.js';
+import { declaredColumnName } from './declared-name-resolver.js';
 import { createCompilerState } from './handlers/types.js';
 import { intentToDecisions } from './intent-to-decisions.js';
 import {
@@ -61,6 +67,59 @@ import {
 	assertProjectedJsonContainerCanBeAggregated,
 	resolveRelationTarget,
 } from './relation-target-projection.js';
+import { queryLocal, resolveDeclaredIdentifier } from './sql-identifier.js';
+
+/** Establish the output authority of an unnest() range at the point it enters. */
+function batchValuesBinding(
+	alias: string,
+	columns: readonly string[],
+): ReturnType<typeof relationBinding> {
+	return relationBinding({
+		qualifier: queryLocal(alias),
+		kind: 'batch-values',
+		outputs: new Map(
+			columns.map((column) => [
+				queryLocal(column),
+				{
+					outputKey: queryLocal(column),
+					logicalKey: column,
+					source: { kind: 'expression', reason: 'BatchValues output' },
+					shape: { kind: 'scalar', cardinality: 'one' },
+				},
+			]),
+		),
+	});
+}
+
+/** Root relations enter every SELECT scope before any JOIN/WHERE reference. */
+function sourceBinding(
+	rootTable: string,
+	deps: AdapterCompilerDeps,
+): ReturnType<typeof relationBinding> {
+	const existing =
+		relationBindingFor(deps.scope, queryLocal(rootTable)) ??
+		declaredRelationBindingFor(deps.scope, rootTable);
+	if (existing !== undefined) return existing;
+	return relationBinding({
+		qualifier: resolveDeclaredIdentifier(
+			deps.declaredNames,
+			deps.dbCasing ?? 'preserve',
+			{ kind: 'table', table: rootTable },
+		),
+		kind: 'declared-table',
+		logicalTable: rootTable,
+	});
+}
+
+function hasSourceBinding(
+	rootTable: string,
+	deps: AdapterCompilerDeps,
+): boolean {
+	return (
+		relationBindingFor(deps.scope, queryLocal(rootTable)) !== undefined ||
+		declaredRelationBindingFor(deps.scope, rootTable) !== undefined
+	);
+}
 
 // ============================================================================
 // Compile-time type-name safety guard (covers forged BatchValuesRef vector)
@@ -183,7 +242,6 @@ function compileJoinIntents(
 	if (joins.length === 0) return [];
 
 	const model = deps.model;
-	const naming = deps.naming;
 	const deriveFk = deps.deriveFk ?? defaultFkDerivation;
 	const defaultPk = deps.defaultPk;
 	const results: PlanDecision[] = [];
@@ -269,11 +327,21 @@ function compileJoinIntents(
 				rootTable,
 				aliases: new Map<string, string>(),
 				paramState: bvOnParamState,
-				naming,
 				outerTable: alias,
 				...(schemaName !== undefined && { schemaName }),
-				...(deps.bindingNames !== undefined && {
-					bindingNames: deps.bindingNames,
+				scope: queryScope([
+					...(deps.scope?.bindings.values() ?? []),
+					...(!hasSourceBinding(rootTable, deps)
+						? [sourceBinding(rootTable, deps)]
+						: []),
+					batchValuesBinding(alias, [
+						...bv.columns,
+						...(bv.ordinality ? ['ord'] : []),
+					]),
+				]),
+				dbCasing: deps.dbCasing ?? 'preserve',
+				...(deps.declaredNames !== undefined && {
+					declaredNames: deps.declaredNames,
 				}),
 				...(deps.relationTargetProjections !== undefined && {
 					relationTargetProjections: deps.relationTargetProjections,
@@ -325,20 +393,56 @@ function compileJoinIntents(
 			const tableAliasMap = new Map<string, string>();
 			tableAliasMap.set(rootTable, rootTable);
 			if (tableAlias !== rootTable) {
-				tableAliasMap.set(tableAlias, intent.table);
+				// A manual join alias is query-local. Preserve it in ON references;
+				// rangeVar() emits the same spelling rather than a physical table name.
+				tableAliasMap.set(tableAlias, tableAlias);
 			}
-
+			const joinedSource = relationBindingFor(
+				deps.scope,
+				queryLocal(intent.table),
+			);
+			const joinedBinding =
+				joinedSource?.kind === 'declared-table'
+					? relationBinding({
+							qualifier: queryLocal(tableAlias),
+							kind: 'declared-table',
+							logicalTable: joinedSource.logicalTable ?? intent.table,
+						})
+					: joinedSource !== undefined
+						? relationBinding({
+								qualifier: queryLocal(tableAlias),
+								kind: 'join-alias',
+								...(joinedSource.outputs !== undefined && {
+									outputs: joinedSource.outputs,
+								}),
+							})
+						: relationBinding({
+								qualifier: queryLocal(tableAlias),
+								kind: 'declared-table',
+								logicalTable: intent.table,
+							});
+			const scopeBindings = [
+				...(deps.scope?.bindings.values() ?? []),
+				...(!hasSourceBinding(rootTable, deps)
+					? [sourceBinding(rootTable, deps)]
+					: []),
+				...(relationBindingFor(deps.scope, joinedBinding.qualifier) ===
+					undefined && tableAlias !== rootTable
+					? [joinedBinding]
+					: []),
+			];
 			const ctx: WhereCompilerCtx = {
 				rootTable,
 				aliases: tableAliasMap,
 				paramState,
-				naming,
 				// outerTable = tableAlias so FieldRef(scope:'outer') resolves to the
 				// joined alias (e.g. 'e2' in self-join ON conditions).
 				outerTable: tableAlias,
 				...(schemaName !== undefined && { schemaName }),
-				...(deps.bindingNames !== undefined && {
-					bindingNames: deps.bindingNames,
+				scope: queryScope([...scopeBindings]),
+				dbCasing: deps.dbCasing ?? 'preserve',
+				...(deps.declaredNames !== undefined && {
+					declaredNames: deps.declaredNames,
 				}),
 				...(deps.relationTargetProjections !== undefined && {
 					relationTargetProjections: deps.relationTargetProjections,
@@ -356,11 +460,20 @@ function compileJoinIntents(
 
 			// Store rarg + onNode separately — the 'join' case in compiler.ts wraps
 			// from[0] as larg so multiple .join() calls chain correctly.
-			const joinedRangeVar = rangeVar(
-				intent.table,
-				tableAlias,
-				schemaForFromName(schemaName, intent.table, deps.bindingNames, naming),
-				naming,
+			const joinedRangeVar = sqlRangeVar(
+				joinedSource?.qualifier ??
+					resolveDeclaredIdentifier(
+						deps.declaredNames,
+						deps.dbCasing ?? 'preserve',
+						{ kind: 'table', table: intent.table },
+					),
+				queryLocal(tableAlias),
+				joinedSource?.kind === 'cte-bind' ||
+					joinedSource?.kind === 'batch-values'
+					? undefined
+					: schemaName === undefined
+						? undefined
+						: queryLocal(schemaName),
 			);
 
 			const joinDecision: PrecompiledJoinDecision = {
@@ -630,7 +743,7 @@ function jsonAggProjectedColumns(
 		!(requested.length === 1 && requested[0] === '*');
 	if (hasExplicitProjection) return requested;
 	const projected = deps
-		? resolveRelationTarget(targetTable, deps).outputs
+		? resolveRelationTarget(queryLocal(targetTable), deps).outputs
 		: undefined;
 	if (projected !== undefined) return [...projected.keys()];
 
@@ -642,23 +755,26 @@ function buildJsonAggColumnKeyMap(
 	decision: PlanDecision,
 	targetTable: string,
 	model: ModelIR | undefined,
-	naming: AdapterCompilerDeps['naming'],
 	deps?: AdapterCompilerDeps,
 ): Record<string, string> | undefined {
 	const columns = jsonAggProjectedColumns(decision, targetTable, model, deps);
 	if (!columns || columns.length === 0) return undefined;
 	const projected = deps
-		? resolveRelationTarget(targetTable, deps).outputs
+		? resolveRelationTarget(queryLocal(targetTable), deps).outputs
 		: undefined;
 	if (projected !== undefined) {
 		const map: Record<string, string> = {};
 		for (const outputKey of columns) {
 			const descriptor = projected.get(outputKey);
-			if (
-				descriptor?.source.kind === 'modelColumn' &&
-				outputKey === naming.toDatabase(descriptor.source.column)
-			) {
-				map[outputKey] = descriptor.source.column;
+			if (descriptor) {
+				const logicalKey = (
+					descriptor as OutputDescriptor & { logicalKey?: string }
+				).logicalKey;
+				map[outputKey] =
+					logicalKey ??
+					(descriptor.source.kind === 'modelColumn'
+						? descriptor.source.column
+						: outputKey);
 			}
 		}
 		return Object.keys(map).length > 0 ? map : undefined;
@@ -670,7 +786,8 @@ function buildJsonAggColumnKeyMap(
 		const modelColumn =
 			table?.columns.find((column) => column.name === columnName)?.name ??
 			columnName;
-		map[naming.toDatabase(modelColumn)] = modelColumn;
+		map[declaredColumnName(deps?.declaredNames, targetTable, modelColumn)] =
+			modelColumn;
 	}
 	return Object.keys(map).length > 0 ? map : undefined;
 }
@@ -684,7 +801,7 @@ function buildJsonAggNestedReadTransforms(
 	const columns = jsonAggProjectedColumns(decision, targetTable, model, deps);
 	if (!columns || columns.length === 0) return undefined;
 	const projected = deps
-		? resolveRelationTarget(targetTable, deps).outputs
+		? resolveRelationTarget(queryLocal(targetTable), deps).outputs
 		: undefined;
 	if (projected !== undefined) {
 		const shape = jsonAggContainerShape(decision.relationType);
@@ -693,7 +810,7 @@ function buildJsonAggNestedReadTransforms(
 			const descriptor = projected.get(columnName);
 			if (!descriptor) continue;
 			assertProjectedJsonContainerCanBeAggregated(
-				resolveRelationTarget(targetTable, deps!),
+				resolveRelationTarget(queryLocal(targetTable), deps!),
 				descriptor,
 			);
 			const handling = resolveOutputReadHandling({ ...descriptor, shape });
@@ -750,14 +867,14 @@ function buildJsonAggOutputDescriptor(
 	const columns = jsonAggProjectedColumns(decision, targetTable, model, deps);
 	if (!columns || columns.length === 0) return undefined;
 	const projected = deps
-		? resolveRelationTarget(targetTable, deps).outputs
+		? resolveRelationTarget(queryLocal(targetTable), deps).outputs
 		: undefined;
 	if (projected !== undefined) {
 		for (const columnName of columns) {
 			const descriptor = projected.get(columnName);
 			if (!descriptor) continue;
 			assertProjectedJsonContainerCanBeAggregated(
-				resolveRelationTarget(targetTable, deps!),
+				resolveRelationTarget(queryLocal(targetTable), deps!),
 				descriptor,
 			);
 			if (resolveOutputReadHandling({ ...descriptor, shape }).kind !== 'none') {
@@ -820,7 +937,7 @@ function trustedRelationColumnShape(
 function buildTrustedRelationColumnOutputDescriptor(
 	decision: PlanDecision,
 	model: ModelIR | undefined,
-	naming: AdapterCompilerDeps['naming'],
+	deps: AdapterCompilerDeps,
 ): OutputDescriptor | undefined {
 	if (decision.type !== 'selectRelationColumn') return undefined;
 	const trusted = getTrustedNqlRelationFilterFields(decision);
@@ -832,14 +949,16 @@ function buildTrustedRelationColumnOutputDescriptor(
 	const column = table?.columns.find(
 		(candidate) =>
 			candidate.name === trusted.selectedColumn ||
-			naming.toDatabase(candidate.name) === trusted.selectedColumn,
+			declaredColumnName(deps.declaredNames, sourceTable, candidate.name) ===
+				trusted.selectedColumn,
 	);
 	if (table === undefined || column === undefined) return undefined;
-	const outputColumn =
-		decision.alias ?? decision.column ?? trusted.selectedColumn;
 	const js = column.type === 'bigint' ? column.js : undefined;
 	return {
-		outputKey: naming.toDatabase(outputColumn),
+		outputKey:
+			decision.alias ??
+			declaredColumnName(deps.declaredNames, table.name, column.name),
+		logicalKey: decision.alias ?? column.name,
 		source: {
 			kind: 'modelColumn',
 			table: table.name,
@@ -853,14 +972,14 @@ function buildTrustedRelationColumnOutputDescriptor(
 function buildTrustedRelationColumnOutputDescriptors(
 	decisions: readonly PlanDecision[],
 	model: ModelIR | undefined,
-	naming: AdapterCompilerDeps['naming'],
+	deps: AdapterCompilerDeps,
 ): readonly OutputDescriptor[] {
 	const descriptors: OutputDescriptor[] = [];
 	for (const decision of decisions) {
 		const descriptor = buildTrustedRelationColumnOutputDescriptor(
 			decision,
 			model,
-			naming,
+			deps,
 		);
 		if (descriptor) descriptors.push(descriptor);
 	}
@@ -896,7 +1015,6 @@ function buildPhysicalRelationColumnOutputDescriptor(
 	decision: PlanDecision,
 	rootTable: string,
 	model: ModelIR | undefined,
-	naming: AdapterCompilerDeps['naming'],
 	deps: AdapterCompilerDeps,
 ): OutputDescriptor | undefined {
 	if (
@@ -915,12 +1033,19 @@ function buildPhysicalRelationColumnOutputDescriptor(
 		model,
 	);
 	if (targetTable) {
-		const target = resolveRelationTarget(targetTable, deps);
-		const descriptor = target.outputs?.get(naming.toDatabase(decision.column));
+		const target = resolveRelationTarget(queryLocal(targetTable), deps);
+		const descriptor =
+			target.outputs?.get(decision.column) ??
+			target.outputsByLogicalKey?.get(decision.column);
 		if (descriptor) {
 			return {
 				...descriptor,
-				outputKey: naming.toDatabase(decision.alias ?? decision.column),
+				outputKey: decision.alias ?? descriptor.outputKey,
+				logicalKey:
+					decision.alias ??
+					(descriptor.source.kind === 'modelColumn'
+						? descriptor.source.column
+						: decision.column),
 				shape: { kind: 'scalar', cardinality: 'one' },
 			};
 		}
@@ -929,13 +1054,16 @@ function buildPhysicalRelationColumnOutputDescriptor(
 	const column = table?.columns.find(
 		(candidate) =>
 			candidate.name === decision.column ||
-			naming.toDatabase(candidate.name) === decision.column,
+			declaredColumnName(deps.declaredNames, targetTable!, candidate.name) ===
+				decision.column,
 	);
 	if (table === undefined || column === undefined) return undefined;
 
-	const outputColumn = decision.alias ?? decision.column;
 	return {
-		outputKey: naming.toDatabase(outputColumn),
+		outputKey:
+			decision.alias ??
+			declaredColumnName(deps.declaredNames, table.name, column.name),
+		logicalKey: decision.alias ?? column.name,
 		source: {
 			kind: 'modelColumn',
 			table: table.name,
@@ -950,7 +1078,6 @@ function buildPhysicalRelationColumnOutputDescriptors(
 	decisions: readonly PlanDecision[],
 	rootTable: string,
 	model: ModelIR | undefined,
-	naming: AdapterCompilerDeps['naming'],
 	deps: AdapterCompilerDeps,
 ): readonly OutputDescriptor[] {
 	const descriptors: OutputDescriptor[] = [];
@@ -959,7 +1086,6 @@ function buildPhysicalRelationColumnOutputDescriptors(
 			decision,
 			rootTable,
 			model,
-			naming,
 			deps,
 		);
 		if (descriptor) descriptors.push(descriptor);
@@ -996,7 +1122,6 @@ function annotateJsonAggColumnKeyMaps(
 	plan: PlanReport,
 	decisions: readonly PlanDecision[],
 	model: ModelIR | undefined,
-	naming: AdapterCompilerDeps['naming'],
 	deps?: AdapterCompilerDeps,
 ): boolean {
 	let annotated = false;
@@ -1008,7 +1133,7 @@ function annotateJsonAggColumnKeyMaps(
 				: undefined;
 			const keyMap =
 				targetTable && planDecision
-					? buildJsonAggColumnKeyMap(decision, targetTable, model, naming, deps)
+					? buildJsonAggColumnKeyMap(decision, targetTable, model, deps)
 					: undefined;
 			const nestedReadTransforms =
 				targetTable && planDecision
@@ -1029,13 +1154,8 @@ function annotateJsonAggColumnKeyMaps(
 		}
 		if (decision.children && decision.children.length > 0) {
 			annotated =
-				annotateJsonAggColumnKeyMaps(
-					plan,
-					decision.children,
-					model,
-					naming,
-					deps,
-				) || annotated;
+				annotateJsonAggColumnKeyMaps(plan, decision.children, model, deps) ||
+				annotated;
 		}
 	}
 	return annotated;
@@ -1077,6 +1197,7 @@ function buildSimplifiedPlanReport(
 				return {
 					batchValuesFromNode: rangeFunction,
 					batchValuesFromParams: params,
+					batchValuesFromAlias: bvFromSource.alias,
 				};
 			})()
 		: {};
@@ -1108,14 +1229,29 @@ export function compileSelectEnvelope<T = unknown>(
 	const schemaName = deps.schemaName;
 
 	const resolvedModelForCompiler = options?.model ?? deps.model;
+	const batchValuesSource = plan.intent?.batchValuesSource;
+	const compilerScope =
+		batchValuesSource === undefined
+			? deps.scope
+			: queryScope([
+					...(deps.scope?.bindings.values() ?? []),
+					batchValuesBinding(batchValuesSource.alias, [
+						...batchValuesSource.columns,
+						...(batchValuesSource.ordinality ? ['ord'] : []),
+					]),
+				]);
 	const compilerOptions: CompilerOptions = {
-		naming: deps.naming,
+		dbCasing: deps.dbCasing ?? 'preserve',
+		...(deps.declaredNames !== undefined && {
+			declaredNames: deps.declaredNames,
+		}),
 		...(schemaName && { schema: schemaName }),
 		defaultPkColumnName: deps.defaultPk,
 		deriveFkColumnName: deps.deriveFk,
 		...(deps.bindingNames !== undefined && {
 			bindingNames: deps.bindingNames,
 		}),
+		...(compilerScope !== undefined && { scope: compilerScope }),
 		...(deps.relationTargetProjections !== undefined && {
 			relationTargetProjections: deps.relationTargetProjections,
 		}),
@@ -1302,7 +1438,6 @@ export function compileSelectEnvelope<T = unknown>(
 			candidateHydrationPlan,
 			allDecisions,
 			resolvedModelForCompiler,
-			deps.naming,
 			deps,
 		);
 		if (hasJsonAggColumnKeyMaps) {
@@ -1335,7 +1470,9 @@ export function compileSelectEnvelope<T = unknown>(
 		ast: result.ast,
 		rootTable: plan.rootTable,
 		model: resolvedModelForCompiler,
-		naming: deps.naming,
+		...(deps.declaredNames !== undefined && {
+			declaredNames: deps.declaredNames,
+		}),
 		...(hydrationPlan ? { hydrationPlan } : {}),
 	});
 	return supplementOutputDescriptors(baseEnv, [
@@ -1348,13 +1485,12 @@ export function compileSelectEnvelope<T = unknown>(
 			simplifiedPlan.decisions,
 			plan.rootTable,
 			resolvedModelForCompiler,
-			deps.naming,
 			deps,
 		),
 		...buildTrustedRelationColumnOutputDescriptors(
 			simplifiedPlan.decisions,
 			resolvedModelForCompiler,
-			deps.naming,
+			deps,
 		),
 	]);
 }

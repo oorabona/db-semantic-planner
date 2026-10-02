@@ -294,7 +294,7 @@ sql.equals: UPDATE ch3_blog_extended.posts SET featured = $1 WHERE posts.id = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 23 update posts set view_count = 5000 where id = 1
+# Query 23 update posts set viewCount = 5000 where id = 1
 # ─────────────────────────────────────────
 --- query: 23
 success: true

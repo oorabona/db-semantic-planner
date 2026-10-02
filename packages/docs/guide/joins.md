@@ -369,7 +369,7 @@ const orm = createOrm({ schema: __joinsDb, adapter: createPgsqlCompileOnlyAdapte
 const results = await orm.select('calls')
   .join('symbols', {
     on: and(
-      eq('calls.caller_id', 'symbols.id'),
+      eq('calls.callerId', 'symbols.id'),
       gt('symbols.score', 0),
     ),
     as: 'caller',

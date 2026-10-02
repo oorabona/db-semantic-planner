@@ -4,15 +4,15 @@
  */
 
 import type { Node } from '@pgsql/types';
-import { columnRef } from '../../ast-helpers.js';
 import { assertDialectCapability } from '../../dialect-capabilities.js';
 import { unwrapParamIntent } from '../../param-intent.js';
 import type {
-	CompilerContext,
 	CompilerState,
 	Decision,
+	ExpressionCompilerContext,
 	ExpressionHandler,
 } from '../types.js';
+import { expressionColumnRef } from '../types.js';
 import { compileValue } from '../where/utils.js';
 
 /**
@@ -24,7 +24,7 @@ export const jsonExtractHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		ctx: ExpressionCompilerContext,
 		state: CompilerState,
 	): Node {
 		assertDialectCapability(
@@ -40,14 +40,7 @@ export const jsonExtractHandler: ExpressionHandler = {
 		const path = (decision.args ?? []) as readonly unknown[];
 		const mode = decision.jsonMode ?? 'text';
 
-		const alias = ctx.currentAlias ?? ctx.rootTable;
-		let node: Node = columnRef(
-			column,
-			alias,
-			undefined,
-			ctx.naming,
-			ctx.aliasColumnAuthorities,
-		);
+		let node: Node = expressionColumnRef(column, ctx);
 
 		for (let i = 0; i < path.length; i++) {
 			const isLast = i === path.length - 1;
@@ -99,7 +92,7 @@ export const jsonPathExtractHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		ctx: ExpressionCompilerContext,
 		state: CompilerState,
 	): Node {
 		assertDialectCapability(
@@ -115,14 +108,7 @@ export const jsonPathExtractHandler: ExpressionHandler = {
 		const mode = decision.jsonMode ?? 'text';
 		const path = normalizeJsonPathArgs(decision.args);
 
-		const alias = ctx.currentAlias ?? ctx.rootTable;
-		const left: Node = columnRef(
-			column,
-			alias,
-			undefined,
-			ctx.naming,
-			ctx.aliasColumnAuthorities,
-		);
+		const left: Node = expressionColumnRef(column, ctx);
 		const right = compileValue(path, state);
 		const op = mode === 'text' ? '#>>' : '#>';
 

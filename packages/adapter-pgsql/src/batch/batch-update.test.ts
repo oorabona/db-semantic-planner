@@ -31,11 +31,15 @@ const batchSchema = schema({
 	},
 } as const);
 
+function createBatchAdapter() {
+	return createPgsqlCompileOnlyAdapter({ model: batchSchema.model });
+}
+
 function makeOrm() {
 	return stringMutationOrm(
 		createOrm({
 			schema: batchSchema,
-			adapter: createPgsqlCompileOnlyAdapter(),
+			adapter: createBatchAdapter(),
 		}),
 	);
 }
@@ -45,7 +49,7 @@ function makeOrm() {
 // ---------------------------------------------------------------------------
 describe('SC-05: basic batch update', () => {
 	it('generates correct SQL for two rows', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createBatchAdapter();
 		const result = adapter.compileBatchUpdate({
 			type: 'batchUpdate',
 			table: 'calls',
@@ -66,7 +70,7 @@ describe('SC-05: basic batch update', () => {
 	});
 
 	it('transposes values correctly to column arrays', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createBatchAdapter();
 		const result = adapter.compileBatchUpdate({
 			type: 'batchUpdate',
 			table: 'calls',
@@ -84,7 +88,7 @@ describe('SC-05: basic batch update', () => {
 	});
 
 	it('keeps wrapper-shaped row values opaque in unnest column arrays', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createBatchAdapter();
 		const paramShaped = { kind: 'param', value: 7 };
 		const literalShaped = { kind: 'literal', value: 'x' };
 		const result = adapter.compileBatchUpdate({
@@ -107,7 +111,7 @@ describe('SC-05: basic batch update', () => {
 // ---------------------------------------------------------------------------
 describe('SC-06: mixed scalar + array SET', () => {
 	it('includes both t."col" refs and scalar params', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createBatchAdapter();
 		const result = adapter.compileBatchUpdate({
 			type: 'batchUpdate',
 			table: 'calls',
@@ -152,7 +156,7 @@ describe('SC-06: mixed scalar + array SET', () => {
 // ---------------------------------------------------------------------------
 describe('SC-07: batch update with RETURNING', () => {
 	it('appends RETURNING clause', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createBatchAdapter();
 		const result = adapter.compileBatchUpdate({
 			type: 'batchUpdate',
 			table: 'calls',
@@ -165,7 +169,7 @@ describe('SC-07: batch update with RETURNING', () => {
 	});
 
 	it('supports multiple RETURNING columns', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createBatchAdapter();
 		const result = adapter.compileBatchUpdate({
 			type: 'batchUpdate',
 			table: 'calls',
@@ -197,7 +201,7 @@ describe('SC-07: batch update with RETURNING', () => {
 // ---------------------------------------------------------------------------
 describe('SC-08: composite match columns', () => {
 	it('generates AND condition in WHERE for composite key', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createBatchAdapter();
 		const result = adapter.compileBatchUpdate({
 			type: 'batchUpdate',
 			table: 'org_memberships',
@@ -238,7 +242,7 @@ describe('SC-08: composite match columns', () => {
 // ---------------------------------------------------------------------------
 describe('error cases', () => {
 	it('throws on empty data array', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createBatchAdapter();
 		expect(() =>
 			adapter.compileBatchUpdate({
 				type: 'batchUpdate',
@@ -250,7 +254,7 @@ describe('error cases', () => {
 	});
 
 	it('throws when match column is missing from data', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createBatchAdapter();
 		expect(() =>
 			adapter.compileBatchUpdate({
 				type: 'batchUpdate',

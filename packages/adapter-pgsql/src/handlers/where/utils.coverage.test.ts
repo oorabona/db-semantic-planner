@@ -58,7 +58,7 @@ describe('buildColumnRef', () => {
 		expect(node.ColumnRef?.fields).toHaveLength(2);
 	});
 
-	it('applies naming plugin transformation', () => {
+	it('does not consult a naming plugin at the typed WHERE boundary', () => {
 		const ctx = makeCtx({
 			naming: {
 				toDatabase: (name) => name.toUpperCase(),
@@ -67,8 +67,8 @@ describe('buildColumnRef', () => {
 		});
 		const node = buildColumnRef('title', ctx);
 
-		expect(node.ColumnRef?.fields?.[0]?.String?.sval).toBe('POSTS');
-		expect(node.ColumnRef?.fields?.[1]?.String?.sval).toBe('TITLE');
+		expect(node.ColumnRef?.fields?.[0]?.String?.sval).toBe('posts');
+		expect(node.ColumnRef?.fields?.[1]?.String?.sval).toBe('title');
 	});
 });
 
@@ -315,7 +315,7 @@ describe('compileValueOrFieldRef', () => {
 		expect(state.parameters).toEqual([obj]);
 	});
 
-	it('applies naming plugin to FieldRef columns', () => {
+	it('does not consult a naming plugin for FieldRef columns', () => {
 		const state = createCompilerState();
 		const ctxWithNaming = makeCtx({
 			naming: {
@@ -331,7 +331,7 @@ describe('compileValueOrFieldRef', () => {
 
 		const node = compileValueOrFieldRef(fieldRef, ctxWithNaming, state);
 
-		expect(node.ColumnRef?.fields?.[0]?.String?.sval).toBe('POSTS');
-		expect(node.ColumnRef?.fields?.[1]?.String?.sval).toBe('AUTHOR_ID');
+		expect(node.ColumnRef?.fields?.[0]?.String?.sval).toBe('posts');
+		expect(node.ColumnRef?.fields?.[1]?.String?.sval).toBe('author_id');
 	});
 });

@@ -27,12 +27,13 @@ import {
 } from '../mutations/upsert.js';
 import { CamelCaseNamingPlugin } from '../naming-plugin.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { queryLocal } from '../sql-identifier.js';
 import { validateSqlExpression } from '../validate.js';
 
 const naming = new CamelCaseNamingPlugin();
 
 function makeCtx(table: string): CompilerContext {
-	return { naming, rootTable: table, maxRecursiveDepth: 100 };
+	return { rootTable: table, maxRecursiveDepth: 100 };
 }
 
 function makeState(): CompilerState {
@@ -117,11 +118,11 @@ describe('C1: Upsert conflictTarget.where partial-index', () => {
 		const state = makeState();
 
 		const config: UpsertConfig = {
-			table: 'users',
-			columns: ['email', 'name'],
+			table: queryLocal('users'),
+			columns: ['email', 'name'].map(queryLocal),
 			values: [],
 			conflictTarget: {
-				columns: ['email'],
+				columns: ['email'].map(queryLocal),
 				where: [
 					{
 						type: 'where',
@@ -149,10 +150,10 @@ describe('C1: Upsert conflictTarget.where partial-index', () => {
 		const state = makeState();
 
 		const config: UpsertConfig = {
-			table: 'users',
-			columns: ['email'],
+			table: queryLocal('users'),
+			columns: ['email'].map(queryLocal),
 			values: [],
-			conflictTarget: { columns: ['email'] },
+			conflictTarget: { columns: ['email'].map(queryLocal) },
 			conflictAction: 'nothing',
 		};
 
@@ -364,11 +365,11 @@ describe('C1 (round-2): internal deparser — partial-index ON CONFLICT WHERE', 
 		const state = makeState();
 
 		const config: UpsertConfig = {
-			table: 'users',
-			columns: ['email', 'name'],
+			table: queryLocal('users'),
+			columns: ['email', 'name'].map(queryLocal),
 			values: [],
 			conflictTarget: {
-				columns: ['email'],
+				columns: ['email'].map(queryLocal),
 				where: [
 					{
 						type: 'where',

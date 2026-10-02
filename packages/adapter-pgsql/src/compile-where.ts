@@ -9,6 +9,7 @@
  */
 
 import type {
+	DbCasing,
 	DialectCapabilities,
 	ExpressionIntent,
 	ModelIR,
@@ -31,12 +32,12 @@ import type { Node, SelectStmt, SubLink } from '@pgsql/types';
 import {
 	andExpr,
 	binaryExpr,
-	columnRef,
 	distinctExpr,
 	funcCall,
 	notExpr,
 	orExpr,
-	rangeVar,
+	sqlColumnRef,
+	sqlRangeVar,
 } from './ast-helpers.js';
 import {
 	compileExpressionIntent,
@@ -52,16 +53,23 @@ registerWhereDispatcherFactory(createWhereDispatcher);
 
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from './assert-field.js';
 import {
-	type BindingNameRegistry,
-	schemaForFromName,
+	type QueryScope,
+	queryScope,
+	type RelationBinding,
+	relationBinding,
+	relationBindingFor,
 } from './binding-registry.js';
 import { buildCustomFnFilter } from './compiler.js';
+import type { DeclaredNameResolver } from './declared-name-resolver.js';
 import type {
 	CompilerContext,
 	CompilerState,
 	Decision,
 } from './handlers/types.js';
-import { createCompilerState } from './handlers/types.js';
+import {
+	createCompilerState,
+	expressionColumnIdentifier,
+} from './handlers/types.js';
 import { resolveWhereOperator } from './handlers/where/operator-resolver.js';
 import { buildColumnRef } from './handlers/where/utils.js';
 // Modifier guard and outerRef check used by buildSubqueryFromIntent (direct-path
@@ -70,8 +78,6 @@ import {
 	assertNoUnsupportedSubqueryModifiers,
 	containsOuterRef,
 } from './intent-to-decisions.js';
-import type { NamingPlugin } from './naming-plugin.js';
-import { identityNaming } from './naming-plugin.js';
 import { unwrapParamIntent } from './param-intent.js';
 import { createParamRef } from './param-ref.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
@@ -79,6 +85,7 @@ import type {
 	AliasColumnAuthority,
 	RelationTargetProjectionRegistry,
 } from './relation-target-projection.js';
+import { queryLocal, resolveDeclaredIdentifier } from './sql-identifier.js';
 
 // ============================================================================
 // Module-level constants
@@ -131,12 +138,15 @@ export type WhereCompilerCtx = {
 	readonly dialectCapabilities?: DialectCapabilities;
 	/** Schema name for table qualification */
 	readonly schemaName?: string;
-	/** Query-local CTE/binding names that must not be schema-qualified. */
-	readonly bindingNames?: BindingNameRegistry;
 	readonly relationTargetProjections?: RelationTargetProjectionRegistry;
 	readonly aliasColumnAuthorities?: AliasColumnAuthority;
-	/** Naming convention plugin */
-	readonly naming: NamingPlugin;
+	/** Addressed authority for all declared relation and column references. */
+	readonly declaredNames?: DeclaredNameResolver;
+	readonly dbCasing?: DbCasing;
+	/** Lexically visible relation bindings. */
+	readonly scope?: QueryScope;
+	/** Binding that owns unqualified columns in this WHERE expression. */
+	readonly currentBinding?: RelationBinding;
 	/**
 	 * Callback to compile a QueryIntent subquery into an AST node.
 	 * Used by EXISTS/NOT EXISTS handlers that need correlated subqueries.
@@ -171,7 +181,6 @@ export type WhereCompilerCtx = {
 
 function toHandlerContext(ctx: WhereCompilerCtx): CompilerContext {
 	return {
-		naming: ctx.naming,
 		rootTable: ctx.rootTable,
 		currentAlias: ctx.currentAlias ?? ctx.rootTable,
 		maxRecursiveDepth: MAX_DEPTH_LIMIT,
@@ -179,7 +188,14 @@ function toHandlerContext(ctx: WhereCompilerCtx): CompilerContext {
 		...(ctx.dialectCapabilities !== undefined && {
 			dialectCapabilities: ctx.dialectCapabilities,
 		}),
-		...(ctx.bindingNames !== undefined && { bindingNames: ctx.bindingNames }),
+		...(ctx.scope !== undefined && { scope: ctx.scope }),
+		...(ctx.currentBinding !== undefined && {
+			currentBinding: ctx.currentBinding,
+		}),
+		...(ctx.declaredNames !== undefined && {
+			declaredNames: ctx.declaredNames,
+		}),
+		dbCasing: ctx.dbCasing,
 		...(ctx.relationTargetProjections !== undefined && {
 			relationTargetProjections: ctx.relationTargetProjections,
 		}),
@@ -189,7 +205,7 @@ function toHandlerContext(ctx: WhereCompilerCtx): CompilerContext {
 		...(ctx.model !== undefined && { model: ctx.model }),
 		...(ctx.outerTable !== undefined && { outerAlias: ctx.outerTable }),
 		compileCustomFnFilter: buildCustomFnFilter,
-	};
+	} as CompilerContext;
 }
 
 // ============================================================================
@@ -205,17 +221,18 @@ function toHandlerContext(ctx: WhereCompilerCtx): CompilerContext {
  *
  * @param intent      - The inner QueryIntent describing the subquery
  * @param paramOffset - Current outer $N offset; inner WHERE params start at offset+1
- * @param naming      - Naming plugin (optional, defaults to identityNaming)
+ * @param declaredNames - Addressed declared-name resolver for the child query
  * @returns The compiled SelectStmt node and the count of parameters consumed
  */
 export function buildSubqueryFromIntent(
 	intent: QueryIntent,
 	paramOffset: number,
-	naming: NamingPlugin = identityNaming,
+	declaredNames: DeclaredNameResolver | undefined = undefined,
 	schemaName?: string,
 	use: 'rawExists' | 'scalar-direct' = 'rawExists',
-	bindingNames?: BindingNameRegistry,
+	scope?: QueryScope,
 	dialectCapabilities?: DialectCapabilities,
+	dbCasing: DbCasing = 'preserve',
 ): { sql: Node; paramCount: number; parameters?: unknown[] } {
 	// CHOKEPOINT GUARD: buildSubqueryFromIntent emits ONLY SELECT/FROM/WHERE —
 	// it never emits LIMIT, ORDER BY, OFFSET, GROUP BY, HAVING, DISTINCT, DISTINCT ON,
@@ -244,6 +261,31 @@ export function buildSubqueryFromIntent(
 	}
 	const targetTable = intent.from;
 	const innerAlias = `${targetTable}_sq`;
+	const sourceBinding =
+		relationBindingFor(scope, queryLocal(targetTable)) ??
+		relationBinding({
+			qualifier: resolveDeclaredIdentifier(declaredNames, dbCasing, {
+				kind: 'table',
+				table: targetTable,
+			}),
+			kind: 'declared-table',
+			logicalTable: targetTable,
+		});
+	const innerBinding = relationBinding(
+		sourceBinding.kind === 'declared-table'
+			? {
+					qualifier: queryLocal(innerAlias),
+					kind: 'declared-table',
+					logicalTable: sourceBinding.logicalTable ?? targetTable,
+				}
+			: {
+					qualifier: queryLocal(innerAlias),
+					kind: 'join-alias',
+					...(sourceBinding.outputs !== undefined && {
+						outputs: sourceBinding.outputs,
+					}),
+				},
+	);
 
 	// Build target list: SELECT col or SELECT agg(col)... or SELECT 1
 	const select = intent.select as
@@ -279,7 +321,10 @@ export function buildSubqueryFromIntent(
 				}
 				aggNode = funcCall(agg.function.toLowerCase(), [], { star: true });
 			} else {
-				const aggArg = columnRef(field, innerAlias, undefined, naming);
+				const aggArg = sqlColumnRef(
+					expressionColumnIdentifier(field, innerBinding, declaredNames),
+					innerBinding.qualifier,
+				);
 				aggNode = funcCall(agg.function.toLowerCase(), [aggArg], {
 					distinct: agg.distinct === true,
 				});
@@ -290,7 +335,14 @@ export function buildSubqueryFromIntent(
 		targetList = [
 			{
 				ResTarget: {
-					val: columnRef(select.fields[0], innerAlias, undefined, naming),
+					val: sqlColumnRef(
+						expressionColumnIdentifier(
+							select.fields[0],
+							innerBinding,
+							declaredNames,
+						),
+						innerBinding.qualifier,
+					),
 				},
 			},
 		];
@@ -301,11 +353,12 @@ export function buildSubqueryFromIntent(
 	const stmt: SelectStmt = {
 		targetList,
 		fromClause: [
-			rangeVar(
-				targetTable,
-				innerAlias,
-				schemaForFromName(schemaName, targetTable, bindingNames, naming),
-				naming,
+			sqlRangeVar(
+				sourceBinding.qualifier,
+				innerBinding.qualifier,
+				sourceBinding.kind === 'declared-table' && schemaName !== undefined
+					? queryLocal(schemaName)
+					: undefined,
 			),
 		],
 	};
@@ -322,12 +375,14 @@ export function buildSubqueryFromIntent(
 			// Bug 2 fix: use the alias name as rootTable so WHERE handlers emit
 			// "posts_sq"."col" = $N instead of "posts"."col" = $N (table is aliased).
 			rootTable: innerAlias,
+			dbCasing,
 			aliases: new Map(),
 			paramState: innerState,
-			naming,
 			...(schemaName !== undefined && { schemaName }),
 			...(dialectCapabilities !== undefined && { dialectCapabilities }),
-			...(bindingNames !== undefined && { bindingNames }),
+			...(declaredNames !== undefined && { declaredNames }),
+			scope: queryScope([...(scope?.bindings.values() ?? []), innerBinding]),
+			currentBinding: innerBinding,
 			compileSubquery: (_nestedIntent, _nestedOffset) => {
 				throw new Error(
 					'buildSubqueryFromIntent: nested subquery not supported',
@@ -525,7 +580,7 @@ function handleSubqueryIntent(
 	}
 	ctx.paramState.paramIndex += paramCount;
 
-	const leftOperand = columnRef(field, ctx.rootTable, undefined, ctx.naming);
+	const leftOperand = buildColumnRef(field, _handlerCtx);
 
 	const subLink: SubLink = {
 		subLinkType: 'EXPR_SUBLINK',

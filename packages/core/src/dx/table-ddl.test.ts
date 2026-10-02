@@ -239,6 +239,8 @@ describe('orm.tables.X.truncate()', () => {
 
 	it('passes schema to adapter.generateTruncate', async () => {
 		const { adapter, generateTruncate } = makeDDLAdapter();
+		(adapter as Adapter & { getSchemaName(): string }).getSchemaName = () =>
+			'adapter_schema';
 		const proxy = wrapTablesProxyWithDDL(
 			{ users: {} },
 			adapter,
@@ -248,6 +250,23 @@ describe('orm.tables.X.truncate()', () => {
 		expect(generateTruncate).toHaveBeenCalledWith(
 			'users',
 			'tenant_42',
+			undefined,
+		);
+	});
+
+	it('uses the adapter schema when the ORM is not schema-scoped', async () => {
+		const { adapter, generateTruncate } = makeDDLAdapter();
+		(adapter as Adapter & { getSchemaName(): string }).getSchemaName = () =>
+			'adapter_schema';
+		const proxy = wrapTablesProxyWithDDL(
+			{ users: {} },
+			adapter,
+			undefined,
+		) as TableProxy;
+		await proxy.users.truncate();
+		expect(generateTruncate).toHaveBeenCalledWith(
+			'users',
+			'adapter_schema',
 			undefined,
 		);
 	});
@@ -627,7 +646,7 @@ describe('orm.tables.X.indexes.list()', () => {
 	it('delegates to adapter.listIndexes', async () => {
 		const { adapter, listIndexes } = makeDDLAdapter();
 		const result = await getIndexes(adapter).list();
-		expect(listIndexes).toHaveBeenCalledWith('users', undefined, undefined);
+		expect(listIndexes).toHaveBeenCalledWith('users', 'public', undefined);
 		expect(result).toEqual([
 			{
 				name: 'idx_a',
@@ -647,7 +666,7 @@ describe('orm.tables.X.indexes.list()', () => {
 	it('passes namePattern option to adapter.listIndexes', async () => {
 		const { adapter, listIndexes } = makeDDLAdapter();
 		await getIndexes(adapter).list({ namePattern: 'idx_vec%' });
-		expect(listIndexes).toHaveBeenCalledWith('users', undefined, {
+		expect(listIndexes).toHaveBeenCalledWith('users', 'public', {
 			namePattern: 'idx_vec%',
 		});
 	});
@@ -691,7 +710,7 @@ describe('orm.tables.X.indexes.exists()', () => {
 		expect(indexExists).toHaveBeenCalledWith(
 			'idx_users_email',
 			'users',
-			undefined,
+			'public',
 		);
 		expect(result).toBe(true);
 	});
@@ -855,7 +874,7 @@ describe('orm.tables.X.storageSize()', () => {
 	it('delegates to adapter.storageSize with correct args', async () => {
 		const { adapter, storageSize } = makeDDLAdapter();
 		const result = await getTable(adapter).storageSize();
-		expect(storageSize).toHaveBeenCalledWith('users', undefined);
+		expect(storageSize).toHaveBeenCalledWith('users', 'public');
 		expect(result).toBe(4096);
 	});
 

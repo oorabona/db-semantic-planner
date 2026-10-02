@@ -16,9 +16,9 @@ import { stringConstNode } from '../../ast-helpers.js';
 import { unwrapParamIntent } from '../../param-intent.js';
 import { escapeDiagnosticText } from '../../validate.js';
 import type {
-	CompilerContext,
 	CompilerState,
 	Decision,
+	ExpressionCompilerContext,
 	ExpressionHandler,
 } from '../types.js';
 import { bindParameter } from './param-value.js';
@@ -55,7 +55,7 @@ export const rawHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		ctx: CompilerContext,
+		ctx: ExpressionCompilerContext,
 		_state: CompilerState,
 	): Node {
 		// SQL may arrive via args[0] (from handleRawExpression / selectFunction path)
@@ -99,7 +99,7 @@ export const sqlFunctionHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		_ctx: CompilerContext,
+		_ctx: ExpressionCompilerContext,
 		state: CompilerState,
 	): Node {
 		const funcName = decision.function;
@@ -149,7 +149,7 @@ export const literalHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		_ctx: CompilerContext,
+		_ctx: ExpressionCompilerContext,
 		_state: CompilerState,
 	): Node {
 		const value = decision.value;

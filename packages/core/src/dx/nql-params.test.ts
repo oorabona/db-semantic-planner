@@ -489,7 +489,7 @@ describe('FEAT-134 NQL tag params', () => {
 		const dump = expectQueryDump(nql<unknown>`users | where id = ${5}`.dump());
 
 		expect(compileValue).toEqual({ kind: 'param', value: 5 });
-		expect(compileOptions).toBeUndefined();
+		expect(compileOptions).toEqual({ model: db.model });
 		expect(dump.params).toEqual([5]);
 		expect(
 			findFirstObject(

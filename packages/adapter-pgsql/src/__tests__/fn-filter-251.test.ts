@@ -23,7 +23,6 @@ import {
 	type CompilerContext,
 	createCompilerState,
 } from '../handlers/types.js';
-import { identityNaming } from '../naming-plugin.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const testSchema = schema({
@@ -162,7 +161,6 @@ describe('#251 fn().filter() in expression positions', () => {
 		// before the fail-loud check — the throw must fire first, leaving state clean.
 		const intent = fn('sum', param(42)).filter(constantFilter).intent;
 		const ctx: CompilerContext = {
-			naming: identityNaming,
 			rootTable: 'tool_metrics',
 			maxRecursiveDepth: 100,
 		};
@@ -198,7 +196,6 @@ describe('#251 fn().filter() in expression positions', () => {
 		} satisfies WhereIntent;
 		const intent = fn('count', star()).filter(constantFilter).intent;
 		const ctx: CompilerContext = {
-			naming: identityNaming,
 			rootTable: 'tool_metrics',
 			maxRecursiveDepth: 100,
 			compileCustomFnFilter: () => undefined,

@@ -232,13 +232,12 @@ describe('SC-05: No include — plain NOT EXISTS', () => {
 });
 
 // ---------------------------------------------------------------------------
-// SC-06: FK fallback without ModelIR (no model in ctx)
+// SC-06: declared FK addresses resolve through the complete model
 // ---------------------------------------------------------------------------
 
-describe('SC-06: FK fallback without ModelIR', () => {
-	it('multi-join without ModelIR falls back to convention and still emits JOINs', () => {
-		// No model passed → FK derivation convention applies (relation_id)
-		const adapter = createPgsqlCompileOnlyAdapter();
+describe('SC-06: declared FK addresses', () => {
+	it('multi-join resolves the declared FK addresses and emits JOINs', () => {
+		const adapter = buildAdapter();
 
 		const { sql } = adapter.compileDelete({
 			type: 'delete' as const,
@@ -253,7 +252,30 @@ describe('SC-06: FK fallback without ModelIR', () => {
 
 		const normalized = ws(sql);
 
-		// Both JOINs present even without ModelIR
+		// Both declared JOINs are present.
+		expect(normalized).toMatch(/NOT\s*\(?\s*EXISTS/i);
+		expect(normalized).toMatch(/JOIN/i);
+		const joinMatches = normalized.match(/\bJOIN\b/gi) ?? [];
+		expect(joinMatches.length).toBe(2);
+	});
+});
+
+describe('SC-06: FK fallback without ModelIR', () => {
+	it('multi-join without ModelIR falls back to convention and still emits JOINs', () => {
+		const adapter = createPgsqlCompileOnlyAdapter();
+
+		const { sql } = adapter.compileDelete({
+			type: 'delete' as const,
+			table: 'symbols',
+			where: notExists('callee_calls', {
+				include: {
+					calleeFile: { join: 'inner' },
+					calleeProject: { join: 'inner' },
+				},
+			}),
+		});
+
+		const normalized = ws(sql);
 		expect(normalized).toMatch(/NOT\s*\(?\s*EXISTS/i);
 		expect(normalized).toMatch(/JOIN/i);
 		const joinMatches = normalized.match(/\bJOIN\b/gi) ?? [];

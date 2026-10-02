@@ -42,6 +42,30 @@ function makePlanReport(
 // ---------------------------------------------------------------------------
 
 describe('hydrateJsonAggIncludes', () => {
+	it('defines a __proto__ relation label as an own data property', () => {
+		const row: Record<string, unknown> = { safe_json: '[]' };
+		const prototype = Object.getPrototypeOf(row);
+		const report = makePlanReport([
+			{
+				type: 'include-strategy',
+				choice: 'json_agg',
+				context: {
+					relation: 'safe',
+					includeAlias: '__proto__',
+					relationType: 'hasMany',
+				},
+			},
+		]);
+
+		hydrateJsonAggIncludes([row], report);
+
+		expect(Object.getPrototypeOf(row)).toBe(prototype);
+		expect(Object.hasOwn(row, '__proto__')).toBe(true);
+		expect(Object.getOwnPropertyDescriptor(row, '__proto__')?.value).toEqual(
+			[],
+		);
+	});
+
 	it('returns early when no json_agg decisions exist', () => {
 		const results = [{ id: 1, name: 'Alice' }];
 		const report = makePlanReport([
@@ -317,8 +341,8 @@ describe('hydrateJsonAggIncludes', () => {
 		expect(results[0]).toEqual({ id: 1, author: null });
 	});
 
-	it('matches camelCase column name (snake_case → camelCase transform)', () => {
-		const results = [{ id: 1, authorPostsJson: '[{"id":10}]' }];
+	it('uses the exact query-local json aggregation label', () => {
+		const results = [{ id: 1, author_posts_json: '[{"id":10}]' }];
 		const report = makePlanReport([
 			{
 				type: 'include-strategy',

@@ -83,6 +83,16 @@ describe('PgsqlAdapter.compileSelectExpression()', () => {
 // ============================================================================
 
 describe('orm.selectExpression()', () => {
+	it('accepts the caller model through a snake_case adapter boundary', () => {
+		const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' });
+
+		expect(
+			adapter.compileSelectExpression(fn('now').intent, {
+				model: minimalSchema.model,
+			}).sql,
+		).toBe('SELECT now()');
+	});
+
 	it('returns { sql, parameters } for a scalar fn() expression', () => {
 		const adapter = createPgsqlCompileOnlyAdapter();
 		const orm = createOrm({ schema: minimalSchema, adapter });

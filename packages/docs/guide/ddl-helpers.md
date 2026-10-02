@@ -10,7 +10,16 @@ The DDL helpers give you a type-safe API for table maintenance and index managem
 
 When you need to run DDL operations (TRUNCATE, VACUUM, CREATE/DROP INDEX, ALTER COLUMN) or check
 table storage size without writing raw SQL. All helpers are available via `orm.tables.<name>` and
-respect `orm.withSchema()` for multi-tenant isolation.
+use the adapter's configured schema, unless `orm.withSchema()` supplies an explicit multi-tenant
+override.
+
+Helper arguments use the names declared by your schema. With PostgreSQL
+`dbCasing: 'snake_case'`, for example, `orm.tables.userProfiles` and
+`alterColumn('displayName', ...)` address `user_profiles.display_name`. A
+table-scoped index name is resolved when it is declared on that table; an
+undeclared index name is treated as an already-physical catalog name (useful
+for runtime-managed indexes). `orm.ddl.dropIndex()` resolves a declared name
+only when it is unique in the schema and otherwise also uses it as given.
 
 ## API
 
@@ -94,9 +103,9 @@ orm.ddl.dropIndex(name, options)  // name: string, options?: DropIndexOptions â†
 
 ### Schema Scoping
 
-All DDL methods are schema-scoped. Scope DDL with `orm.withSchema('public')` or
-a tenant schema; there is no bare schema-scoped DDL that relies on PostgreSQL
-`search_path`. If you do not scope an ORM explicitly, DDL uses `public`.
+All DDL methods are schema-scoped. They use the PostgreSQL adapter's configured
+schema; `orm.withSchema('public')` or a tenant schema overrides it. If neither
+supplies a schema, DDL uses `public`; it never relies on PostgreSQL `search_path`.
 
 ```typescript
 // doctest: skip â€” exec-only DDL operation; requires a real PostgreSQL connection and table bootstrap

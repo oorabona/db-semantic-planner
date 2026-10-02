@@ -6,9 +6,25 @@
  * - rows > batchThreshold OR batchThreshold === 0 → SELECT unnest($1::type[]),...
  */
 
-import { InvalidOperationError } from '@dbsp/core';
+import { InvalidOperationError, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+
+const insertFixtureModel = schema({
+	embeddings: {
+		id: 'integer',
+		symbol_id: 'integer',
+		vector: 'text',
+		chunk_text: 'text',
+		chunk_index: 'integer',
+	},
+	flags: { id: 'integer', active: 'boolean' },
+	metrics: { id: 'integer', score: 'number' },
+}).model;
+
+function createInsertTestAdapter() {
+	return createPgsqlCompileOnlyAdapter({ model: insertFixtureModel });
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -36,7 +52,7 @@ function makeEmbeddingRows3Col(n: number): Record<string, unknown>[] {
 // ---------------------------------------------------------------------------
 describe('SC-01: large batch (100 rows) uses unnest', () => {
 	it('generates INSERT ... SELECT unnest() for 100 rows', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createInsertTestAdapter();
 		const intent = {
 			type: 'insert' as const,
 			table: 'embeddings',
@@ -58,7 +74,7 @@ describe('SC-01: large batch (100 rows) uses unnest', () => {
 	});
 
 	it('column arrays contain the correct values', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createInsertTestAdapter();
 		const rows = makeEmbeddingRows3Col(3).concat(
 			makeEmbeddingRows3Col(97).map((r, _i) => ({
 				...r,
@@ -90,7 +106,7 @@ describe('SC-01: large batch (100 rows) uses unnest', () => {
 	});
 
 	it('keeps wrapper-shaped row values opaque in unnest column arrays', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createInsertTestAdapter();
 		const paramShaped = { kind: 'param', value: 7 };
 		const literalShaped = { kind: 'literal', value: 'x' };
 		const values = Array.from({ length: 100 }, (_, i) => ({
@@ -122,7 +138,7 @@ describe('SC-01: large batch (100 rows) uses unnest', () => {
 // ---------------------------------------------------------------------------
 describe('SC-02: small batch (3 rows) uses VALUES', () => {
 	it('generates INSERT ... VALUES for 3 rows', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createInsertTestAdapter();
 		const intent = {
 			type: 'insert' as const,
 			table: 'embeddings',
@@ -137,7 +153,7 @@ describe('SC-02: small batch (3 rows) uses VALUES', () => {
 	});
 
 	it('exactly at threshold (50 rows) still uses VALUES', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createInsertTestAdapter();
 		const intent = {
 			type: 'insert' as const,
 			table: 'embeddings',
@@ -152,7 +168,7 @@ describe('SC-02: small batch (3 rows) uses VALUES', () => {
 	});
 
 	it('one row above threshold (51 rows) uses unnest', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createInsertTestAdapter();
 		const intent = {
 			type: 'insert' as const,
 			table: 'embeddings',
@@ -172,7 +188,7 @@ describe('SC-02: small batch (3 rows) uses VALUES', () => {
 // ---------------------------------------------------------------------------
 describe('SC-03: unnest batch with RETURNING clause', () => {
 	it('includes RETURNING in unnest SQL', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createInsertTestAdapter();
 		const intent = {
 			type: 'insert' as const,
 			table: 'embeddings',
@@ -189,7 +205,7 @@ describe('SC-03: unnest batch with RETURNING clause', () => {
 	});
 
 	it('returns correct parameter count with RETURNING', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createInsertTestAdapter();
 		const intent = {
 			type: 'insert' as const,
 			table: 'embeddings',
@@ -211,7 +227,7 @@ describe('SC-04: empty values array is rejected', () => {
 		// Note: InsertBuilder.buildIntent() rejects empty via InvalidOperationError.
 		// At the adapter level (compileInsert), empty values returns a no-op INSERT.
 		// The guard is in the builder, not the adapter.
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createInsertTestAdapter();
 		const intent = {
 			type: 'insert' as const,
 			table: 'embeddings',
@@ -228,7 +244,7 @@ describe('SC-04: empty values array is rejected', () => {
 // ---------------------------------------------------------------------------
 describe('SC-19: batchThreshold=0 forces unnest', () => {
 	it('uses unnest for 2 rows when batchThreshold=0', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createInsertTestAdapter();
 		const intent = {
 			type: 'insert' as const,
 			table: 'embeddings',
@@ -244,7 +260,7 @@ describe('SC-19: batchThreshold=0 forces unnest', () => {
 	});
 
 	it('uses unnest for 1 row when batchThreshold=0', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createInsertTestAdapter();
 		const intent = {
 			type: 'insert' as const,
 			table: 'embeddings',
@@ -267,7 +283,7 @@ describe('SC-19: batchThreshold=0 forces unnest', () => {
 // ---------------------------------------------------------------------------
 describe('maxBatchSize guard', () => {
 	it('throws when rows exceed maxBatchSize', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createInsertTestAdapter();
 		const intent = {
 			type: 'insert' as const,
 			table: 'embeddings',
@@ -280,7 +296,7 @@ describe('maxBatchSize guard', () => {
 	});
 
 	it('error message includes batch size and limit', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createInsertTestAdapter();
 		const intent = {
 			type: 'insert' as const,
 			table: 'embeddings',
@@ -293,7 +309,7 @@ describe('maxBatchSize guard', () => {
 	});
 
 	it('does not throw when rows equal maxBatchSize', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createInsertTestAdapter();
 		const intent = {
 			type: 'insert' as const,
 			table: 'embeddings',
@@ -306,7 +322,7 @@ describe('maxBatchSize guard', () => {
 	});
 
 	it('does not throw when rows are below maxBatchSize', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createInsertTestAdapter();
 		const intent = {
 			type: 'insert' as const,
 			table: 'embeddings',
@@ -324,7 +340,7 @@ describe('maxBatchSize guard', () => {
 // ---------------------------------------------------------------------------
 describe('custom batchThreshold option', () => {
 	it('uses unnest when rows exceed custom threshold', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createInsertTestAdapter();
 		const intent = {
 			type: 'insert' as const,
 			table: 'embeddings',
@@ -339,7 +355,7 @@ describe('custom batchThreshold option', () => {
 	});
 
 	it('uses VALUES when rows are at custom threshold', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createInsertTestAdapter();
 		const intent = {
 			type: 'insert' as const,
 			table: 'embeddings',
@@ -360,7 +376,7 @@ describe('custom batchThreshold option', () => {
 // ---------------------------------------------------------------------------
 describe('type casting in unnest SQL', () => {
 	it('integer column is cast to int4[]', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createInsertTestAdapter();
 		const intent = {
 			type: 'insert' as const,
 			table: 'embeddings',
@@ -373,7 +389,7 @@ describe('type casting in unnest SQL', () => {
 	});
 
 	it('string column is cast to text[]', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createInsertTestAdapter();
 		const intent = {
 			type: 'insert' as const,
 			table: 'embeddings',
@@ -386,7 +402,7 @@ describe('type casting in unnest SQL', () => {
 	});
 
 	it('boolean column is cast to bool[]', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createInsertTestAdapter();
 		const intent = {
 			type: 'insert' as const,
 			table: 'flags',
@@ -402,7 +418,7 @@ describe('type casting in unnest SQL', () => {
 	});
 
 	it('float column is cast to float8[]', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createInsertTestAdapter();
 		// Use 0.1 as the base to ensure non-integer samples (i * 0.5 = 0 when i=0)
 		const intent = {
 			type: 'insert' as const,
@@ -425,7 +441,7 @@ describe('type casting in unnest SQL', () => {
 // ---------------------------------------------------------------------------
 describe('SQL structure', () => {
 	it('contains table and column names in SQL', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createInsertTestAdapter();
 		const intent = {
 			type: 'insert' as const,
 			table: 'embeddings',
@@ -440,6 +456,7 @@ describe('SQL structure', () => {
 
 	it('schema-scoped table uses schema prefix', () => {
 		const adapter = createPgsqlCompileOnlyAdapter({
+			model: insertFixtureModel,
 			schemaName: 'tenant_xyz',
 		});
 		const intent = {
@@ -455,7 +472,7 @@ describe('SQL structure', () => {
 	});
 
 	it('schema from compile options is used', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createInsertTestAdapter();
 		const intent = {
 			type: 'insert' as const,
 			table: 'embeddings',

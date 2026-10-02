@@ -166,13 +166,13 @@ describe('Performance Benchmarks', () => {
 					orm
 						.withSchema('acme')
 						.select('products')
-						.columns(['id', 'sku', 'title', 'active', 'category_id'])
+						.columns(['id', 'sku', 'title', 'active', 'categoryId'])
 						.dump(),
 				async () =>
 					orm
 						.withSchema('acme')
 						.select('products')
-						.columns(['id', 'sku', 'title', 'active', 'category_id'])
+						.columns(['id', 'sku', 'title', 'active', 'categoryId'])
 						.execute(),
 			);
 

@@ -9,7 +9,7 @@
  * targetTable over the fallback relation name.
  */
 
-import { exists, notExists } from '@dbsp/core';
+import { exists, notExists, schema } from '@dbsp/core';
 import type { ModelIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -20,6 +20,11 @@ function buildModel(
 	target: string,
 	foreignKey?: string,
 ): ModelIR {
+	const effectiveForeignKey = foreignKey ?? `${name}_id`;
+	const base = schema({
+		[source]: { id: 'integer', [effectiveForeignKey]: 'integer' },
+		[target]: { id: 'integer' },
+	} as any).model;
 	const rel = {
 		name,
 		type: 'belongsTo' as const,
@@ -34,10 +39,10 @@ function buildModel(
 	};
 	const relations = new Map([[`${source}.${name}`, rel]]);
 	return {
-		tables: new Map(),
+		...base,
 		relations,
-		getTable: () => undefined,
-		getRelation: (qname: string) => relations.get(qname),
+		getTable: (tableName: string) => base.tables.get(tableName),
+		getRelation: (qualifiedName: string) => relations.get(qualifiedName),
 		getRelationsFrom: () => [],
 		getRelationsTo: () => [],
 		isAmbiguous: () => ({ ambiguous: false }),
@@ -99,6 +104,20 @@ describe('DELETE-NOTEXISTS-ALIAS: relation resolved to real table via ModelIR', 
 			type: 'delete' as const,
 			table: 'embeddings',
 			where: notExists('symbols'),
+		});
+
+		expect(sql).toMatch(/NOT.*EXISTS/i);
+		expect(sql).toMatch(/symbols/i);
+	});
+
+	it('resolves caller-supplied relation names through the declared model', () => {
+		const model = buildModel('embeddings', 'symbol', 'symbols');
+		const adapter = createPgsqlCompileOnlyAdapter({ model });
+
+		const { sql } = adapter.compileDelete({
+			type: 'delete' as const,
+			table: 'embeddings',
+			where: notExists('symbol'),
 		});
 
 		expect(sql).toMatch(/NOT.*EXISTS/i);
