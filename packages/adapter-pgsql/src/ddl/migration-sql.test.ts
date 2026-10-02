@@ -15,11 +15,11 @@ import type {
 	EnumIR,
 	ForeignKeyIR,
 	IndexIR,
-	PartitionIR,
 	PolicyIR,
 	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
+import type { PartitionIR } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import { createPgPhysicalModel } from '../physical-model/index.js';
 import { generateDDL } from './ddl-generator.js';

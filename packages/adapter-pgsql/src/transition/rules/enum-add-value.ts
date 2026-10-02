@@ -1,4 +1,7 @@
-import { enumAddDelta, resolveEnumSchemaForComparison } from '@dbsp/core';
+import {
+	enumAddDelta,
+	resolveEnumSchemaForComparison,
+} from '@dbsp/core/internal';
 import type {
 	ApplicableEvaluation,
 	Assumption,
@@ -9,7 +12,6 @@ import type {
 	ObservationRequest,
 	PhysicalOperation,
 	ProofObligation,
-	RecognitionContext,
 	RecognitionResult,
 	ResourceAddress,
 	RuleEvaluation,
@@ -18,6 +20,7 @@ import type {
 	TransitionFragmentComposition,
 	TransitionRule,
 } from '@dbsp/types';
+import type { RecognitionContext } from '@dbsp/types/internal';
 import type { NamingPlugin } from '../../naming-plugin.js';
 import { pgEnumLabelVisibleFact } from '../composition-facts.js';
 import {

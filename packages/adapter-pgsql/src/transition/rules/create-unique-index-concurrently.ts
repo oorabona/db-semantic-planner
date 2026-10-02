@@ -1,4 +1,4 @@
-import { defaultIndexName, indexDelta } from '@dbsp/core';
+import { defaultIndexName, indexDelta } from '@dbsp/core/internal';
 import type {
 	ApplicableEvaluation,
 	Assumption,
@@ -8,13 +8,13 @@ import type {
 	ObservationRequest,
 	PhysicalOperation,
 	ProofObligation,
-	RecognitionContext,
 	RecognitionResult,
 	ResourceAddress,
 	RuleEvaluation,
 	TransitionFragment,
 	TransitionRule,
 } from '@dbsp/types';
+import type { RecognitionContext } from '@dbsp/types/internal';
 import { validateIdentifier } from '../../validate.js';
 import {
 	ALTER_AUTHORITY_OBSERVATION,

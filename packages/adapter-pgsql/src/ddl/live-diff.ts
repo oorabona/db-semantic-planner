@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
-import { defaultIndexName, emitWarning } from '@dbsp/core';
-import { assertDeclaredEnumMapIdentity } from '@dbsp/core/internal';
+import { emitWarning } from '@dbsp/core';
+import {
+	assertDeclaredEnumMapIdentity,
+	defaultIndexName,
+} from '@dbsp/core/internal';
 import type {
 	CheckConstraintIR,
 	DbCasing,

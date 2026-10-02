@@ -1,12 +1,12 @@
-import type { createApplier } from '@dbsp/core';
+import type { createApplier } from '@dbsp/core/internal';
 import type {
 	ApplyPolicy,
 	PlanAssessment,
 	ProvenPlanShape,
-	TransitionRunAuthorization,
 	TransitionRunJournal,
 	TransitionRunMetadata,
 } from '@dbsp/types';
+import type { TransitionRunAuthorization } from '@dbsp/types/internal';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -20,8 +20,8 @@ const mocks = vi.hoisted(() => ({
 	transaction: vi.fn(),
 }));
 
-vi.mock('@dbsp/core', async (importOriginal) => ({
-	...(await importOriginal<typeof import('@dbsp/core')>()),
+vi.mock('@dbsp/core/internal', async (importOriginal) => ({
+	...(await importOriginal<typeof import('@dbsp/core/internal')>()),
 	acquireExclusiveTransitionLease: vi.fn(async () => ({
 		session: mocks.session,
 		release: mocks.leaseRelease,

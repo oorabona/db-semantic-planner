@@ -9,7 +9,7 @@
  */
 
 import { eq, literal, op, subquery } from '@dbsp/core';
-import type { SubqueryExpressionIntent } from '@dbsp/types';
+import type { SubqueryExpressionIntent } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';

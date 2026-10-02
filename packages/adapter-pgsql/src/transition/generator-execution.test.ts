@@ -2,7 +2,7 @@ import {
 	canonicalJsonDigest,
 	type ValidatedManagedStepManifest,
 	validateNormalizedManagedStepManifest,
-} from '@dbsp/core';
+} from '@dbsp/core/internal';
 import type { LedgerAddress, NormalizedManagedStep } from '@dbsp/types';
 import type { PoolClient } from 'pg';
 import { beforeEach, describe, expect, it, vi } from 'vitest';

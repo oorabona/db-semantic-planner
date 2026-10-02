@@ -3,9 +3,12 @@ import type {
 	LedgerChainMember,
 	LedgerHome,
 	LedgerPayload,
-	RefusalCode,
 } from '@dbsp/types';
-import { ledgerAddressParentJson, REFUSAL_VOCABULARY } from '@dbsp/types';
+import type { RefusalCode } from '@dbsp/types/internal';
+import {
+	ledgerAddressParentJson,
+	REFUSAL_VOCABULARY,
+} from '@dbsp/types/internal';
 import { validateIdentifier } from '../validate.js';
 import { DBSP_LEDGER_EVENT_TABLE, DBSP_META_SCHEMA } from './constants.js';
 import type { TransitionJournalQueryable } from './journal.js';

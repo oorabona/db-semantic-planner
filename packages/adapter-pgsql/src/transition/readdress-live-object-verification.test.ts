@@ -1,4 +1,4 @@
-import { canonicalJsonDigest } from '@dbsp/core';
+import { canonicalJsonDigest } from '@dbsp/core/internal';
 import type { LedgerPayload } from '@dbsp/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -15,8 +15,8 @@ const mocks = vi.hoisted(() => ({
 	lockTimeout: vi.fn(),
 }));
 
-vi.mock('@dbsp/core', async (importOriginal) => ({
-	...(await importOriginal<typeof import('@dbsp/core')>()),
+vi.mock('@dbsp/core/internal', async (importOriginal) => ({
+	...(await importOriginal<typeof import('@dbsp/core/internal')>()),
 	projectLedgerChain: mocks.project,
 }));
 vi.mock('./chain-reader.js', () => ({

@@ -1,4 +1,5 @@
-import { ModelIRImpl, type RelationIR, type TableIR } from '@dbsp/core';
+import { ModelIRImpl, type TableIR } from '@dbsp/core';
+import type { RelationIR } from '@dbsp/core/internal';
 
 const tables = new Map<string, TableIR>([
 	[

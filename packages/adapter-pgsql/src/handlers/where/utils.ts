@@ -3,7 +3,8 @@
  * @internal Extracted from comparison, in, like, null handlers (PGSQL-008, PGSQL-009).
  */
 
-import { isFieldRef, isParamIntent } from '@dbsp/types';
+import { isParamIntent } from '@dbsp/types';
+import { isFieldRef } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import { nullConstNode } from '../../ast-helpers.js';
 import type { RelationBinding } from '../../binding-registry.js';

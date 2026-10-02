@@ -1,4 +1,5 @@
-import { createOrm, type RecursivePlanReport, ref, schema } from '@dbsp/core';
+import { createOrm, ref, schema } from '@dbsp/core';
+import type { RecursivePlanReport } from '@dbsp/core/internal';
 import { compile as compileNql } from '@dbsp/nql';
 import { type CompiledNqlQuery, convertBigintJsReadValue } from '@dbsp/types';
 import { compiledQueryFromProjection } from '@dbsp/types/adapter-sdk';

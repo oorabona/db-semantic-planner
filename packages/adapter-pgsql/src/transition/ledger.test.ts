@@ -1,4 +1,5 @@
-import type { LedgerChainMember, LedgerReservationRow } from '@dbsp/types';
+import type { LedgerChainMember } from '@dbsp/types';
+import type { LedgerReservationRow } from '@dbsp/types/internal';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	acquirePgLedgerLocks,

@@ -1,4 +1,5 @@
-import { POSTGRESQL_CAPABILITIES, serverVersionNum } from '@dbsp/core';
+import { POSTGRESQL_CAPABILITIES } from '@dbsp/core';
+import { serverVersionNum } from '@dbsp/core/internal';
 import type { DialectCapabilities } from '@dbsp/types';
 import {
 	INDEX_INCLUDE_CAPABILITY,

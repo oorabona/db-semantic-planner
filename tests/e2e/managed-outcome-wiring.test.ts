@@ -18,20 +18,17 @@ import {
 	lockPgJournalRun,
 	openPgOutcomeClaim,
 } from '@dbsp/adapter-pgsql/internal';
+import type { ModelIR } from '@dbsp/core';
 import {
 	acquireExclusiveTransitionLease,
-	type ModelIR,
+	mintDurablyLoadedRun,
 	outcomeClaimEventId,
 	outcomeClaimId,
 	transitionPlanDigest,
 	validateNormalizedManagedStepManifest,
-} from '@dbsp/core';
-import { mintDurablyLoadedRun } from '@dbsp/core/internal';
-import type {
-	LedgerReservationRow,
-	ManagedStepClaimMaterial,
-	OutcomeClaimPlan,
-} from '@dbsp/types';
+} from '@dbsp/core/internal';
+import type { ManagedStepClaimMaterial, OutcomeClaimPlan } from '@dbsp/types';
+import type { LedgerReservationRow } from '@dbsp/types/internal';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runApply } from '../../packages/cli/src/commands/apply.js';
 import { runInspect } from '../../packages/cli/src/commands/inspect.js';

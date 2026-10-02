@@ -7,8 +7,10 @@
  * @module schema-diff
  */
 
-import { validateSchemaIndexOptions } from '@dbsp/core';
-import { assertDeclaredEnumMapIdentity } from '@dbsp/core/internal';
+import {
+	assertDeclaredEnumMapIdentity,
+	validateSchemaIndexOptions,
+} from '@dbsp/core/internal';
 import type {
 	CheckConstraintIR,
 	ColumnIR,
@@ -18,11 +20,11 @@ import type {
 	ForeignKeyIR,
 	IndexIR,
 	ModelIR,
-	PartitionIR,
 	PolicyIR,
 	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
+import type { PartitionIR } from '@dbsp/types/internal';
 import { assertNoCheckConstraintNameCollisions } from '../check-constraint-name.js';
 import { splitCheckConstraintState } from '../check-expression.js';
 import {

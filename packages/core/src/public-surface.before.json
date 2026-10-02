@@ -1,0 +1,3217 @@
+{
+	"main": "866014b8f57d4a6c60ce523db0da36ba612f848c",
+	"root": {
+		"declarations": [
+			{
+				"name": "acquireExclusiveTransitionLease",
+				"kind": "value"
+			},
+			{
+				"name": "acquireTransitionLease",
+				"kind": "value"
+			},
+			{
+				"name": "acquireTransitionTargetLease",
+				"kind": "value"
+			},
+			{
+				"name": "Adapter",
+				"kind": "type"
+			},
+			{
+				"name": "AdapterCapabilities",
+				"kind": "type"
+			},
+			{
+				"name": "AdapterLogger",
+				"kind": "type"
+			},
+			{
+				"name": "AdapterRequiredError",
+				"kind": "value"
+			},
+			{
+				"name": "AdapterStreamOptions",
+				"kind": "type"
+			},
+			{
+				"name": "AdjacencyOptions",
+				"kind": "type"
+			},
+			{
+				"name": "AdjacencyTraversal",
+				"kind": "type"
+			},
+			{
+				"name": "admitRecordedIdentity",
+				"kind": "value"
+			},
+			{
+				"name": "AdmittedDestructiveOutcomeClaim",
+				"kind": "type"
+			},
+			{
+				"name": "advisoryObservationId",
+				"kind": "value"
+			},
+			{
+				"name": "AfterMutationHook",
+				"kind": "type"
+			},
+			{
+				"name": "AfterMutationObserver",
+				"kind": "type"
+			},
+			{
+				"name": "AfterQueryHook",
+				"kind": "type"
+			},
+			{
+				"name": "AfterQueryObserver",
+				"kind": "type"
+			},
+			{
+				"name": "aggOrderBy",
+				"kind": "value"
+			},
+			{
+				"name": "AggregateExpressionIntent",
+				"kind": "type"
+			},
+			{
+				"name": "AggregateFunction",
+				"kind": "type"
+			},
+			{
+				"name": "AggregateIntent",
+				"kind": "type"
+			},
+			{
+				"name": "AggregateOptions",
+				"kind": "type"
+			},
+			{
+				"name": "AggregateWindowFunction",
+				"kind": "type"
+			},
+			{
+				"name": "AliasedColumn",
+				"kind": "type"
+			},
+			{
+				"name": "AliasedExprColumn",
+				"kind": "type"
+			},
+			{
+				"name": "AliasIncludedColumnsMode",
+				"kind": "type"
+			},
+			{
+				"name": "AllColumns",
+				"kind": "type"
+			},
+			{
+				"name": "AlterColumnOptions",
+				"kind": "type"
+			},
+			{
+				"name": "AmbiguityCheckResult",
+				"kind": "type"
+			},
+			{
+				"name": "AmbiguousPlanError",
+				"kind": "value"
+			},
+			{
+				"name": "AmbiguousRelationError",
+				"kind": "value"
+			},
+			{
+				"name": "and",
+				"kind": "value"
+			},
+			{
+				"name": "any",
+				"kind": "value"
+			},
+			{
+				"name": "ApplicableAssessment",
+				"kind": "type"
+			},
+			{
+				"name": "ApplicableEvaluation",
+				"kind": "type"
+			},
+			{
+				"name": "Applier",
+				"kind": "type"
+			},
+			{
+				"name": "ApplyPolicy",
+				"kind": "type"
+			},
+			{
+				"name": "array",
+				"kind": "value"
+			},
+			{
+				"name": "arrayAgg",
+				"kind": "value"
+			},
+			{
+				"name": "ArrayOperator",
+				"kind": "type"
+			},
+			{
+				"name": "assertCanonicalizableJson",
+				"kind": "value"
+			},
+			{
+				"name": "assertCapability",
+				"kind": "value"
+			},
+			{
+				"name": "assertConnectionAvailable",
+				"kind": "value"
+			},
+			{
+				"name": "assertContains",
+				"kind": "value"
+			},
+			{
+				"name": "assertDbColumnExists",
+				"kind": "value"
+			},
+			{
+				"name": "assertDbOutput",
+				"kind": "value"
+			},
+			{
+				"name": "assertDbRowsEquals",
+				"kind": "value"
+			},
+			{
+				"name": "assertDbRowsMax",
+				"kind": "value"
+			},
+			{
+				"name": "assertDbRowsMin",
+				"kind": "value"
+			},
+			{
+				"name": "assertDbValueEquals",
+				"kind": "value"
+			},
+			{
+				"name": "assertEquals",
+				"kind": "value"
+			},
+			{
+				"name": "assertIntentHasGroupBy",
+				"kind": "value"
+			},
+			{
+				"name": "assertIntentHasOrderBy",
+				"kind": "value"
+			},
+			{
+				"name": "assertIntentHasWhere",
+				"kind": "value"
+			},
+			{
+				"name": "assertIntentTable",
+				"kind": "value"
+			},
+			{
+				"name": "assertIntentType",
+				"kind": "value"
+			},
+			{
+				"name": "assertIntentWith",
+				"kind": "value"
+			},
+			{
+				"name": "Assertion",
+				"kind": "type"
+			},
+			{
+				"name": "ASSERTION_TYPES",
+				"kind": "value"
+			},
+			{
+				"name": "AssertionBlock",
+				"kind": "type"
+			},
+			{
+				"name": "AssertionOutcome",
+				"kind": "type"
+			},
+			{
+				"name": "AssertionQueryResult",
+				"kind": "type"
+			},
+			{
+				"name": "AssertionSummary",
+				"kind": "type"
+			},
+			{
+				"name": "AssertionType",
+				"kind": "type"
+			},
+			{
+				"name": "assertMatches",
+				"kind": "value"
+			},
+			{
+				"name": "assertParamsEquals",
+				"kind": "value"
+			},
+			{
+				"name": "assertParamsLength",
+				"kind": "value"
+			},
+			{
+				"name": "assertParamsType",
+				"kind": "value"
+			},
+			{
+				"name": "assertParamsValue",
+				"kind": "value"
+			},
+			{
+				"name": "assertSQLColumn",
+				"kind": "value"
+			},
+			{
+				"name": "assertSQLEquals",
+				"kind": "value"
+			},
+			{
+				"name": "assertSQLJoin",
+				"kind": "value"
+			},
+			{
+				"name": "assertSQLTable",
+				"kind": "value"
+			},
+			{
+				"name": "assertSuccess",
+				"kind": "value"
+			},
+			{
+				"name": "assertTypeSupported",
+				"kind": "value"
+			},
+			{
+				"name": "Assumption",
+				"kind": "type"
+			},
+			{
+				"name": "assumptionAccepted",
+				"kind": "value"
+			},
+			{
+				"name": "assumptionId",
+				"kind": "value"
+			},
+			{
+				"name": "BaseAdapter",
+				"kind": "type"
+			},
+			{
+				"name": "batchValues",
+				"kind": "value"
+			},
+			{
+				"name": "BatchValuesOptions",
+				"kind": "type"
+			},
+			{
+				"name": "BatchValuesRef",
+				"kind": "type"
+			},
+			{
+				"name": "BeforeMutationHook",
+				"kind": "type"
+			},
+			{
+				"name": "BeforeQueryHook",
+				"kind": "type"
+			},
+			{
+				"name": "bindDeclarationSet",
+				"kind": "value"
+			},
+			{
+				"name": "bindExecutionContract",
+				"kind": "value"
+			},
+			{
+				"name": "boolFn",
+				"kind": "value"
+			},
+			{
+				"name": "BRAND",
+				"kind": "value"
+			},
+			{
+				"name": "BrandKey",
+				"kind": "type"
+			},
+			{
+				"name": "canonicalJson",
+				"kind": "value"
+			},
+			{
+				"name": "canonicalJsonDigest",
+				"kind": "value"
+			},
+			{
+				"name": "CanonicalJsonError",
+				"kind": "value"
+			},
+			{
+				"name": "CapabilityDescriptor",
+				"kind": "type"
+			},
+			{
+				"name": "capitalize",
+				"kind": "value"
+			},
+			{
+				"name": "Cardinality",
+				"kind": "type"
+			},
+			{
+				"name": "CardinalityShorthand",
+				"kind": "type"
+			},
+			{
+				"name": "CaseBuilder",
+				"kind": "value"
+			},
+			{
+				"name": "CaseExpressionIntent",
+				"kind": "type"
+			},
+			{
+				"name": "CaseValue",
+				"kind": "type"
+			},
+			{
+				"name": "caseWhen",
+				"kind": "value"
+			},
+			{
+				"name": "cast",
+				"kind": "value"
+			},
+			{
+				"name": "checkDelta",
+				"kind": "value"
+			},
+			{
+				"name": "CheckDelta",
+				"kind": "type"
+			},
+			{
+				"name": "chooseReadyCandidate",
+				"kind": "value"
+			},
+			{
+				"name": "claimId",
+				"kind": "value"
+			},
+			{
+				"name": "classifyOutcomeRecovery",
+				"kind": "value"
+			},
+			{
+				"name": "coalesce",
+				"kind": "value"
+			},
+			{
+				"name": "CoalesceExpressionIntent",
+				"kind": "type"
+			},
+			{
+				"name": "col",
+				"kind": "value"
+			},
+			{
+				"name": "COLUMN_META",
+				"kind": "value"
+			},
+			{
+				"name": "ColumnAliasIntent",
+				"kind": "type"
+			},
+			{
+				"name": "ColumnDef",
+				"kind": "type"
+			},
+			{
+				"name": "ColumnExpressionIntent",
+				"kind": "type"
+			},
+			{
+				"name": "ColumnIR",
+				"kind": "type"
+			},
+			{
+				"name": "ColumnJsReadType",
+				"kind": "type"
+			},
+			{
+				"name": "ColumnMetaKey",
+				"kind": "type"
+			},
+			{
+				"name": "ColumnNotFoundError",
+				"kind": "value"
+			},
+			{
+				"name": "ColumnRef",
+				"kind": "type"
+			},
+			{
+				"name": "ColumnSpec",
+				"kind": "type"
+			},
+			{
+				"name": "ColumnType",
+				"kind": "type"
+			},
+			{
+				"name": "CommonColumnType",
+				"kind": "type"
+			},
+			{
+				"name": "Comparator",
+				"kind": "type"
+			},
+			{
+				"name": "CompareOutcome",
+				"kind": "type"
+			},
+			{
+				"name": "ComparisonExpressionIntent",
+				"kind": "type"
+			},
+			{
+				"name": "ComparisonOperator",
+				"kind": "type"
+			},
+			{
+				"name": "CompiledQuery",
+				"kind": "type"
+			},
+			{
+				"name": "CompileOnlyAdapter",
+				"kind": "type"
+			},
+			{
+				"name": "CompileOptions",
+				"kind": "type"
+			},
+			{
+				"name": "CompileResultWithIncludes",
+				"kind": "type"
+			},
+			{
+				"name": "CompilingAdapter",
+				"kind": "type"
+			},
+			{
+				"name": "composeAfterMutationHooks",
+				"kind": "value"
+			},
+			{
+				"name": "composeAfterQueryHooks",
+				"kind": "value"
+			},
+			{
+				"name": "composeBeforeMutationHooks",
+				"kind": "value"
+			},
+			{
+				"name": "composeBeforeQueryHooks",
+				"kind": "value"
+			},
+			{
+				"name": "composeOnErrorHooks",
+				"kind": "value"
+			},
+			{
+				"name": "concludeEvidenceForObligation",
+				"kind": "value"
+			},
+			{
+				"name": "ConnectionAvailability",
+				"kind": "type"
+			},
+			{
+				"name": "countDistinctRelationPathsByName",
+				"kind": "value"
+			},
+			{
+				"name": "createApplier",
+				"kind": "value"
+			},
+			{
+				"name": "createComparator",
+				"kind": "value"
+			},
+			{
+				"name": "createDialectCapabilities",
+				"kind": "value"
+			},
+			{
+				"name": "createEvidenceView",
+				"kind": "value"
+			},
+			{
+				"name": "createExclusiveTransitionTarget",
+				"kind": "value"
+			},
+			{
+				"name": "createExecutionContract",
+				"kind": "value"
+			},
+			{
+				"name": "createHookManager",
+				"kind": "value"
+			},
+			{
+				"name": "CreateIndexOptions",
+				"kind": "type"
+			},
+			{
+				"name": "createNqlTag",
+				"kind": "value"
+			},
+			{
+				"name": "createOrm",
+				"kind": "value"
+			},
+			{
+				"name": "createPackRegistry",
+				"kind": "value"
+			},
+			{
+				"name": "createProver",
+				"kind": "value"
+			},
+			{
+				"name": "createPseudoColumnMetadata",
+				"kind": "value"
+			},
+			{
+				"name": "createRawCteBuilder",
+				"kind": "value"
+			},
+			{
+				"name": "createRecursiveMetadata",
+				"kind": "value"
+			},
+			{
+				"name": "createStagedTransitionOrchestrator",
+				"kind": "value"
+			},
+			{
+				"name": "createTransitionLessor",
+				"kind": "value"
+			},
+			{
+				"name": "createTransitionRunMetadata",
+				"kind": "value"
+			},
+			{
+				"name": "CteBuilder",
+				"kind": "value"
+			},
+			{
+				"name": "CTEDefinition",
+				"kind": "type"
+			},
+			{
+				"name": "CteDump",
+				"kind": "type"
+			},
+			{
+				"name": "CteQueryBuilder",
+				"kind": "value"
+			},
+			{
+				"name": "CursorPaginatedResult",
+				"kind": "type"
+			},
+			{
+				"name": "CursorPaginateOptions",
+				"kind": "type"
+			},
+			{
+				"name": "CustomTraversal",
+				"kind": "type"
+			},
+			{
+				"name": "DbCasing",
+				"kind": "type"
+			},
+			{
+				"name": "decapitalize",
+				"kind": "value"
+			},
+			{
+				"name": "DecisionType",
+				"kind": "type"
+			},
+			{
+				"name": "declarationSetFromModel",
+				"kind": "value"
+			},
+			{
+				"name": "DEFAULT_FEATURE_CHECKERS",
+				"kind": "value"
+			},
+			{
+				"name": "DefaultFilters",
+				"kind": "type"
+			},
+			{
+				"name": "defaultIndexName",
+				"kind": "value"
+			},
+			{
+				"name": "defaultLogger",
+				"kind": "value"
+			},
+			{
+				"name": "defineModel",
+				"kind": "value"
+			},
+			{
+				"name": "DefineModelOptions",
+				"kind": "type"
+			},
+			{
+				"name": "DeleteBuilder",
+				"kind": "value"
+			},
+			{
+				"name": "DeleteIntent",
+				"kind": "type"
+			},
+			{
+				"name": "denseRank",
+				"kind": "value"
+			},
+			{
+				"name": "deriveRelationPathFromIntentPath",
+				"kind": "value"
+			},
+			{
+				"name": "DialectCapabilities",
+				"kind": "type"
+			},
+			{
+				"name": "DialectName",
+				"kind": "type"
+			},
+			{
+				"name": "distinct",
+				"kind": "value"
+			},
+			{
+				"name": "DistinctField",
+				"kind": "type"
+			},
+			{
+				"name": "DropIndexOptions",
+				"kind": "type"
+			},
+			{
+				"name": "DUCKDB_CAPABILITIES",
+				"kind": "value"
+			},
+			{
+				"name": "DuckDBColumnType",
+				"kind": "type"
+			},
+			{
+				"name": "Dump",
+				"kind": "type"
+			},
+			{
+				"name": "DumpMeta",
+				"kind": "type"
+			},
+			{
+				"name": "DumpMetaInput",
+				"kind": "type"
+			},
+			{
+				"name": "DurableIntentRecord",
+				"kind": "type"
+			},
+			{
+				"name": "EdgeTableOptions",
+				"kind": "type"
+			},
+			{
+				"name": "EdgeTableTraversal",
+				"kind": "type"
+			},
+			{
+				"name": "EmitJoinClause",
+				"kind": "type"
+			},
+			{
+				"name": "emitWarning",
+				"kind": "value"
+			},
+			{
+				"name": "EmitWarningOptions",
+				"kind": "type"
+			},
+			{
+				"name": "enumAddDelta",
+				"kind": "value"
+			},
+			{
+				"name": "EnumAddDelta",
+				"kind": "type"
+			},
+			{
+				"name": "eq",
+				"kind": "value"
+			},
+			{
+				"name": "ErrorCode",
+				"kind": "value"
+			},
+			{
+				"name": "ErrorHookContext",
+				"kind": "type"
+			},
+			{
+				"name": "Errors",
+				"kind": "value"
+			},
+			{
+				"name": "EstablishedProofClaim",
+				"kind": "type"
+			},
+			{
+				"name": "every",
+				"kind": "value"
+			},
+			{
+				"name": "evidenceId",
+				"kind": "value"
+			},
+			{
+				"name": "ExclusiveTransitionTarget",
+				"kind": "type"
+			},
+			{
+				"name": "ExecutingAdapter",
+				"kind": "type"
+			},
+			{
+				"name": "ExecutionCoordinator",
+				"kind": "type"
+			},
+			{
+				"name": "ExecutionError",
+				"kind": "value"
+			},
+			{
+				"name": "exists",
+				"kind": "value"
+			},
+			{
+				"name": "ExpressionIntent",
+				"kind": "type"
+			},
+			{
+				"name": "ExpressionRef",
+				"kind": "value"
+			},
+			{
+				"name": "ExpressionSpec",
+				"kind": "type"
+			},
+			{
+				"name": "ExprInput",
+				"kind": "type"
+			},
+			{
+				"name": "exprRef",
+				"kind": "value"
+			},
+			{
+				"name": "extendDialect",
+				"kind": "value"
+			},
+			{
+				"name": "extractPseudoColumnKeywords",
+				"kind": "value"
+			},
+			{
+				"name": "FeatureChecker",
+				"kind": "type"
+			},
+			{
+				"name": "FeatureUsage",
+				"kind": "type"
+			},
+			{
+				"name": "FilterOperators",
+				"kind": "type"
+			},
+			{
+				"name": "FilterStrategy",
+				"kind": "type"
+			},
+			{
+				"name": "FilterValue",
+				"kind": "type"
+			},
+			{
+				"name": "findClosestMatch",
+				"kind": "value"
+			},
+			{
+				"name": "findUniqueLedgerTerminal",
+				"kind": "value"
+			},
+			{
+				"name": "FingerprintManifest",
+				"kind": "type"
+			},
+			{
+				"name": "fn",
+				"kind": "value"
+			},
+			{
+				"name": "ForeignKeyIR",
+				"kind": "type"
+			},
+			{
+				"name": "fullTextSearch",
+				"kind": "value"
+			},
+			{
+				"name": "FullTextSearchField",
+				"kind": "type"
+			},
+			{
+				"name": "FullTextSearchOptions",
+				"kind": "type"
+			},
+			{
+				"name": "getAvailableDialects",
+				"kind": "value"
+			},
+			{
+				"name": "getDialectCapabilities",
+				"kind": "value"
+			},
+			{
+				"name": "getLogger",
+				"kind": "value"
+			},
+			{
+				"name": "getNodeIdAlias",
+				"kind": "value"
+			},
+			{
+				"name": "getRelationKind",
+				"kind": "value"
+			},
+			{
+				"name": "getSchemaFromDb",
+				"kind": "value"
+			},
+			{
+				"name": "GetSchemaFromDbOptions",
+				"kind": "type"
+			},
+			{
+				"name": "gt",
+				"kind": "value"
+			},
+			{
+				"name": "gte",
+				"kind": "value"
+			},
+			{
+				"name": "GuardExecutionResult",
+				"kind": "type"
+			},
+			{
+				"name": "HierarchyOptions",
+				"kind": "type"
+			},
+			{
+				"name": "HookErrorHandler",
+				"kind": "type"
+			},
+			{
+				"name": "HookManager",
+				"kind": "type"
+			},
+			{
+				"name": "HookPriority",
+				"kind": "type"
+			},
+			{
+				"name": "HydrateOptions",
+				"kind": "type"
+			},
+			{
+				"name": "InapplicableAssessment",
+				"kind": "type"
+			},
+			{
+				"name": "inArray",
+				"kind": "value"
+			},
+			{
+				"name": "IncludeIntent",
+				"kind": "type"
+			},
+			{
+				"name": "IncludeOptions",
+				"kind": "type"
+			},
+			{
+				"name": "IncludeOptionsWithRecursive",
+				"kind": "type"
+			},
+			{
+				"name": "IncludeStrategy",
+				"kind": "type"
+			},
+			{
+				"name": "IndexColumnDef",
+				"kind": "type"
+			},
+			{
+				"name": "indexDelta",
+				"kind": "value"
+			},
+			{
+				"name": "IndexDelta",
+				"kind": "type"
+			},
+			{
+				"name": "IndexInfo",
+				"kind": "type"
+			},
+			{
+				"name": "IndexIR",
+				"kind": "type"
+			},
+			{
+				"name": "IndexMethod",
+				"kind": "type"
+			},
+			{
+				"name": "IndexSetEntry",
+				"kind": "type"
+			},
+			{
+				"name": "InferColumn",
+				"kind": "type"
+			},
+			{
+				"name": "InferColumnNonNull",
+				"kind": "type"
+			},
+			{
+				"name": "InferColumnType",
+				"kind": "type"
+			},
+			{
+				"name": "InferColumnTypes",
+				"kind": "type"
+			},
+			{
+				"name": "InferDB",
+				"kind": "type"
+			},
+			{
+				"name": "inferForeignKey",
+				"kind": "value"
+			},
+			{
+				"name": "InferredRangeValue",
+				"kind": "type"
+			},
+			{
+				"name": "InferRefColumn",
+				"kind": "type"
+			},
+			{
+				"name": "InferRow",
+				"kind": "type"
+			},
+			{
+				"name": "InferSchemaDB",
+				"kind": "type"
+			},
+			{
+				"name": "InferTableRow",
+				"kind": "type"
+			},
+			{
+				"name": "InferTables",
+				"kind": "type"
+			},
+			{
+				"name": "InProcessProvenPlan",
+				"kind": "type"
+			},
+			{
+				"name": "Insertable",
+				"kind": "type"
+			},
+			{
+				"name": "InsertBuilder",
+				"kind": "value"
+			},
+			{
+				"name": "InsertFromIntent",
+				"kind": "type"
+			},
+			{
+				"name": "InsertIntent",
+				"kind": "type"
+			},
+			{
+				"name": "inSubquery",
+				"kind": "value"
+			},
+			{
+				"name": "IntentBuilder",
+				"kind": "value"
+			},
+			{
+				"name": "IntentBuilderState",
+				"kind": "type"
+			},
+			{
+				"name": "IntentSummary",
+				"kind": "type"
+			},
+			{
+				"name": "interpretLedgerLifecycle",
+				"kind": "value"
+			},
+			{
+				"name": "IntrospectingAdapter",
+				"kind": "type"
+			},
+			{
+				"name": "InvalidOperationError",
+				"kind": "value"
+			},
+			{
+				"name": "InvalidRelationDefinitionError",
+				"kind": "value"
+			},
+			{
+				"name": "IRREGULAR_PLURALS",
+				"kind": "value"
+			},
+			{
+				"name": "isAdjacencyTraversal",
+				"kind": "value"
+			},
+			{
+				"name": "isAggregateWindowFunction",
+				"kind": "value"
+			},
+			{
+				"name": "isAliasedColumn",
+				"kind": "value"
+			},
+			{
+				"name": "isAllColumns",
+				"kind": "value"
+			},
+			{
+				"name": "isBatchValuesRef",
+				"kind": "value"
+			},
+			{
+				"name": "isCardinalityShorthand",
+				"kind": "value"
+			},
+			{
+				"name": "isCoalesceExpression",
+				"kind": "value"
+			},
+			{
+				"name": "isColumnAliasExpression",
+				"kind": "value"
+			},
+			{
+				"name": "isColumnRef",
+				"kind": "value"
+			},
+			{
+				"name": "isCustomTraversal",
+				"kind": "value"
+			},
+			{
+				"name": "isDeleteIntent",
+				"kind": "value"
+			},
+			{
+				"name": "isDistinctField",
+				"kind": "value"
+			},
+			{
+				"name": "isDistinctFrom",
+				"kind": "value"
+			},
+			{
+				"name": "isEdgeTableTraversal",
+				"kind": "value"
+			},
+			{
+				"name": "isExclusiveTransitionTarget",
+				"kind": "value"
+			},
+			{
+				"name": "isExpressionSpec",
+				"kind": "value"
+			},
+			{
+				"name": "isInsertIntent",
+				"kind": "value"
+			},
+			{
+				"name": "isKnownDialect",
+				"kind": "value"
+			},
+			{
+				"name": "isMutationIntent",
+				"kind": "value"
+			},
+			{
+				"name": "isNotNull",
+				"kind": "value"
+			},
+			{
+				"name": "isNull",
+				"kind": "value"
+			},
+			{
+				"name": "isOperationRuntime",
+				"kind": "value"
+			},
+			{
+				"name": "isOverallSuccess",
+				"kind": "value"
+			},
+			{
+				"name": "isPredicateRef",
+				"kind": "value"
+			},
+			{
+				"name": "isRankingWindowFunction",
+				"kind": "value"
+			},
+			{
+				"name": "isRawExpression",
+				"kind": "value"
+			},
+			{
+				"name": "isRecursiveIncludeOptions",
+				"kind": "value"
+			},
+			{
+				"name": "isRecursiveIntent",
+				"kind": "value"
+			},
+			{
+				"name": "isRecursiveRelation",
+				"kind": "value"
+			},
+			{
+				"name": "isRef",
+				"kind": "value"
+			},
+			{
+				"name": "isRelationColumnExpression",
+				"kind": "value"
+			},
+			{
+				"name": "isRelationObjectDef",
+				"kind": "value"
+			},
+			{
+				"name": "isRelationRef",
+				"kind": "value"
+			},
+			{
+				"name": "isRelationTupleDef",
+				"kind": "value"
+			},
+			{
+				"name": "isSelectAggregate",
+				"kind": "value"
+			},
+			{
+				"name": "isSelectAll",
+				"kind": "value"
+			},
+			{
+				"name": "isSelectFields",
+				"kind": "value"
+			},
+			{
+				"name": "isSelectWithExpressions",
+				"kind": "value"
+			},
+			{
+				"name": "isSelfReferential",
+				"kind": "value"
+			},
+			{
+				"name": "isSqlRaw",
+				"kind": "value"
+			},
+			{
+				"name": "isSubqueryExpression",
+				"kind": "value"
+			},
+			{
+				"name": "isSubqueryRef",
+				"kind": "value"
+			},
+			{
+				"name": "isTableRef",
+				"kind": "value"
+			},
+			{
+				"name": "isTransitionLessor",
+				"kind": "value"
+			},
+			{
+				"name": "IsTypeSupported",
+				"kind": "type"
+			},
+			{
+				"name": "isUpdateIntent",
+				"kind": "value"
+			},
+			{
+				"name": "isUpsertIntent",
+				"kind": "value"
+			},
+			{
+				"name": "isWhereAnd",
+				"kind": "value"
+			},
+			{
+				"name": "isWhereAny",
+				"kind": "value"
+			},
+			{
+				"name": "isWhereComparison",
+				"kind": "value"
+			},
+			{
+				"name": "isWhereExists",
+				"kind": "value"
+			},
+			{
+				"name": "isWhereIn",
+				"kind": "value"
+			},
+			{
+				"name": "isWhereIntent",
+				"kind": "value"
+			},
+			{
+				"name": "isWhereLike",
+				"kind": "value"
+			},
+			{
+				"name": "isWhereLogical",
+				"kind": "value"
+			},
+			{
+				"name": "isWhereNot",
+				"kind": "value"
+			},
+			{
+				"name": "isWhereNotExists",
+				"kind": "value"
+			},
+			{
+				"name": "isWhereNull",
+				"kind": "value"
+			},
+			{
+				"name": "isWhereOr",
+				"kind": "value"
+			},
+			{
+				"name": "isWhereRange",
+				"kind": "value"
+			},
+			{
+				"name": "isWhereRelationBased",
+				"kind": "value"
+			},
+			{
+				"name": "isWhereRelationFilter",
+				"kind": "value"
+			},
+			{
+				"name": "isWhereSubquery",
+				"kind": "value"
+			},
+			{
+				"name": "isWindowIntent",
+				"kind": "value"
+			},
+			{
+				"name": "JoinDefault",
+				"kind": "type"
+			},
+			{
+				"name": "JoinIntent",
+				"kind": "type"
+			},
+			{
+				"name": "JoinOptions",
+				"kind": "type"
+			},
+			{
+				"name": "JsonValue",
+				"kind": "type"
+			},
+			{
+				"name": "lag",
+				"kind": "value"
+			},
+			{
+				"name": "lead",
+				"kind": "value"
+			},
+			{
+				"name": "LEDGER_LIFECYCLE_GRAMMAR",
+				"kind": "value"
+			},
+			{
+				"name": "LEDGER_PROJECTION_CODE_VERSION",
+				"kind": "value"
+			},
+			{
+				"name": "LedgerChainProjectionInput",
+				"kind": "type"
+			},
+			{
+				"name": "LightweightRelationsDef",
+				"kind": "type"
+			},
+			{
+				"name": "like",
+				"kind": "value"
+			},
+			{
+				"name": "ListHierarchyOptions",
+				"kind": "type"
+			},
+			{
+				"name": "ListIndexOptions",
+				"kind": "type"
+			},
+			{
+				"name": "literal",
+				"kind": "value"
+			},
+			{
+				"name": "LiteralExpressionIntent",
+				"kind": "type"
+			},
+			{
+				"name": "loadVerifiedRecoveryJournal",
+				"kind": "value"
+			},
+			{
+				"name": "Logger",
+				"kind": "type"
+			},
+			{
+				"name": "LogicalIdentity",
+				"kind": "type"
+			},
+			{
+				"name": "LogicalIdentityCarrier",
+				"kind": "type"
+			},
+			{
+				"name": "LogicalOperator",
+				"kind": "type"
+			},
+			{
+				"name": "lt",
+				"kind": "value"
+			},
+			{
+				"name": "lte",
+				"kind": "value"
+			},
+			{
+				"name": "ManagedOutcomeExecutionRequest",
+				"kind": "type"
+			},
+			{
+				"name": "ManagedOutcomePreflightRequest",
+				"kind": "type"
+			},
+			{
+				"name": "markGeneratorRemovalNonReplayable",
+				"kind": "value"
+			},
+			{
+				"name": "ModelIR",
+				"kind": "type"
+			},
+			{
+				"name": "ModelIRImpl",
+				"kind": "value"
+			},
+			{
+				"name": "MSSQL_CAPABILITIES",
+				"kind": "value"
+			},
+			{
+				"name": "MSSQLColumnType",
+				"kind": "type"
+			},
+			{
+				"name": "MutationDump",
+				"kind": "type"
+			},
+			{
+				"name": "MutationHookContext",
+				"kind": "type"
+			},
+			{
+				"name": "MutationIntent",
+				"kind": "type"
+			},
+			{
+				"name": "MutationOperation",
+				"kind": "type"
+			},
+			{
+				"name": "MYSQL_CAPABILITIES",
+				"kind": "value"
+			},
+			{
+				"name": "MySQLColumnType",
+				"kind": "type"
+			},
+			{
+				"name": "namedArg",
+				"kind": "value"
+			},
+			{
+				"name": "NamingConventionMismatchError",
+				"kind": "value"
+			},
+			{
+				"name": "negotiateFeatures",
+				"kind": "value"
+			},
+			{
+				"name": "NegotiationResult",
+				"kind": "type"
+			},
+			{
+				"name": "neq",
+				"kind": "value"
+			},
+			{
+				"name": "NestedInclude",
+				"kind": "type"
+			},
+			{
+				"name": "NewSchemaColumnType",
+				"kind": "type"
+			},
+			{
+				"name": "none",
+				"kind": "value"
+			},
+			{
+				"name": "NonRollbackableExecutionTracker",
+				"kind": "type"
+			},
+			{
+				"name": "normalizedIndex",
+				"kind": "value"
+			},
+			{
+				"name": "normalizeSQL",
+				"kind": "value"
+			},
+			{
+				"name": "not",
+				"kind": "value"
+			},
+			{
+				"name": "notExists",
+				"kind": "value"
+			},
+			{
+				"name": "NotFoundError",
+				"kind": "value"
+			},
+			{
+				"name": "NqlBuilder",
+				"kind": "type"
+			},
+			{
+				"name": "nqlRaw",
+				"kind": "value"
+			},
+			{
+				"name": "NqlRawFragment",
+				"kind": "type"
+			},
+			{
+				"name": "NqlTag",
+				"kind": "type"
+			},
+			{
+				"name": "NullOperator",
+				"kind": "type"
+			},
+			{
+				"name": "NullsPosition",
+				"kind": "type"
+			},
+			{
+				"name": "objectToWhereIntent",
+				"kind": "value"
+			},
+			{
+				"name": "ObservationContext",
+				"kind": "type"
+			},
+			{
+				"name": "observationContextDigest",
+				"kind": "value"
+			},
+			{
+				"name": "ObservationIssuer",
+				"kind": "type"
+			},
+			{
+				"name": "ObservationRequest",
+				"kind": "type"
+			},
+			{
+				"name": "ObserverErrorHandler",
+				"kind": "type"
+			},
+			{
+				"name": "OffsetWindowFunction",
+				"kind": "type"
+			},
+			{
+				"name": "OnDeleteAction",
+				"kind": "type"
+			},
+			{
+				"name": "OnErrorHook",
+				"kind": "type"
+			},
+			{
+				"name": "op",
+				"kind": "value"
+			},
+			{
+				"name": "OperationEffectAssessment",
+				"kind": "type"
+			},
+			{
+				"name": "OperationFingerprints",
+				"kind": "type"
+			},
+			{
+				"name": "OperationObservation",
+				"kind": "type"
+			},
+			{
+				"name": "OperationRuntime",
+				"kind": "type"
+			},
+			{
+				"name": "OperationSemantics",
+				"kind": "type"
+			},
+			{
+				"name": "Optionality",
+				"kind": "type"
+			},
+			{
+				"name": "or",
+				"kind": "value"
+			},
+			{
+				"name": "OrderByInput",
+				"kind": "type"
+			},
+			{
+				"name": "OrderByIntent",
+				"kind": "type"
+			},
+			{
+				"name": "OrderByRecord",
+				"kind": "type"
+			},
+			{
+				"name": "OrderBySpec",
+				"kind": "type"
+			},
+			{
+				"name": "OrmInstance",
+				"kind": "type"
+			},
+			{
+				"name": "OrmOf",
+				"kind": "type"
+			},
+			{
+				"name": "OrmOptions",
+				"kind": "type"
+			},
+			{
+				"name": "OrmOptionsWithAdapter",
+				"kind": "type"
+			},
+			{
+				"name": "OrmOptionsWithModel",
+				"kind": "type"
+			},
+			{
+				"name": "outcomeClaimEventId",
+				"kind": "value"
+			},
+			{
+				"name": "outcomeClaimId",
+				"kind": "value"
+			},
+			{
+				"name": "outerRef",
+				"kind": "value"
+			},
+			{
+				"name": "PackRegistry",
+				"kind": "value"
+			},
+			{
+				"name": "PaginatedResult",
+				"kind": "type"
+			},
+			{
+				"name": "PaginateOptions",
+				"kind": "type"
+			},
+			{
+				"name": "param",
+				"kind": "value"
+			},
+			{
+				"name": "parseAssertionFile",
+				"kind": "value"
+			},
+			{
+				"name": "ParsedRelationDef",
+				"kind": "type"
+			},
+			{
+				"name": "ParsedRelationKey",
+				"kind": "type"
+			},
+			{
+				"name": "ParseError",
+				"kind": "type"
+			},
+			{
+				"name": "parseRelationDef",
+				"kind": "value"
+			},
+			{
+				"name": "parseRelationKey",
+				"kind": "value"
+			},
+			{
+				"name": "ParseResult",
+				"kind": "type"
+			},
+			{
+				"name": "PartitionIR",
+				"kind": "type"
+			},
+			{
+				"name": "PathOptions",
+				"kind": "type"
+			},
+			{
+				"name": "PhysicalOperation",
+				"kind": "type"
+			},
+			{
+				"name": "pipeAfterMutationHooks",
+				"kind": "value"
+			},
+			{
+				"name": "pipeAfterQueryHooks",
+				"kind": "value"
+			},
+			{
+				"name": "pipeBeforeMutationHooks",
+				"kind": "value"
+			},
+			{
+				"name": "pipeBeforeQueryHooks",
+				"kind": "value"
+			},
+			{
+				"name": "pipeOnErrorHooks",
+				"kind": "value"
+			},
+			{
+				"name": "plan",
+				"kind": "value"
+			},
+			{
+				"name": "PlanDecision",
+				"kind": "type"
+			},
+			{
+				"name": "planOperationSession",
+				"kind": "value"
+			},
+			{
+				"name": "PlanOptions",
+				"kind": "type"
+			},
+			{
+				"name": "planRecursive",
+				"kind": "value"
+			},
+			{
+				"name": "PlanReport",
+				"kind": "type"
+			},
+			{
+				"name": "PlanWarning",
+				"kind": "type"
+			},
+			{
+				"name": "PlanWarningCode",
+				"kind": "type"
+			},
+			{
+				"name": "pluralize",
+				"kind": "value"
+			},
+			{
+				"name": "PostgresColumnType",
+				"kind": "type"
+			},
+			{
+				"name": "PostgresOnlyColumnType",
+				"kind": "type"
+			},
+			{
+				"name": "POSTGRESQL_CAPABILITIES",
+				"kind": "value"
+			},
+			{
+				"name": "PREDICATE_REF_DISCRIMINATOR",
+				"kind": "value"
+			},
+			{
+				"name": "PredicateExpressionRef",
+				"kind": "type"
+			},
+			{
+				"name": "PredicateOperator",
+				"kind": "type"
+			},
+			{
+				"name": "PredicateRef",
+				"kind": "type"
+			},
+			{
+				"name": "preflightStagedComposition",
+				"kind": "value"
+			},
+			{
+				"name": "PrioritizedHook",
+				"kind": "type"
+			},
+			{
+				"name": "projectCompareToSingleCandidate",
+				"kind": "value"
+			},
+			{
+				"name": "projectLedgerChain",
+				"kind": "value"
+			},
+			{
+				"name": "ProvenApplyGuard",
+				"kind": "type"
+			},
+			{
+				"name": "ProvenGuardProtocol",
+				"kind": "type"
+			},
+			{
+				"name": "ProvenPlanShape",
+				"kind": "type"
+			},
+			{
+				"name": "ProvenPlanStep",
+				"kind": "type"
+			},
+			{
+				"name": "ProveOutcome",
+				"kind": "type"
+			},
+			{
+				"name": "Prover",
+				"kind": "type"
+			},
+			{
+				"name": "PseudoColumnExpressionIntent",
+				"kind": "type"
+			},
+			{
+				"name": "PseudoColumnMetadata",
+				"kind": "type"
+			},
+			{
+				"name": "PseudoColumnTraversal",
+				"kind": "type"
+			},
+			{
+				"name": "QueryAssertionResult",
+				"kind": "type"
+			},
+			{
+				"name": "QueryBuilder",
+				"kind": "type"
+			},
+			{
+				"name": "QueryHookContext",
+				"kind": "type"
+			},
+			{
+				"name": "QueryIntent",
+				"kind": "type"
+			},
+			{
+				"name": "QueryResultType",
+				"kind": "type"
+			},
+			{
+				"name": "rangeContainedBy",
+				"kind": "value"
+			},
+			{
+				"name": "rangeContains",
+				"kind": "value"
+			},
+			{
+				"name": "RangeOperator",
+				"kind": "type"
+			},
+			{
+				"name": "rangeOverlaps",
+				"kind": "value"
+			},
+			{
+				"name": "RangeType",
+				"kind": "type"
+			},
+			{
+				"name": "RangeValue",
+				"kind": "type"
+			},
+			{
+				"name": "rank",
+				"kind": "value"
+			},
+			{
+				"name": "RankingWindowFunction",
+				"kind": "type"
+			},
+			{
+				"name": "raw",
+				"kind": "value"
+			},
+			{
+				"name": "RawCteQueryBuilder",
+				"kind": "value"
+			},
+			{
+				"name": "rawExists",
+				"kind": "value"
+			},
+			{
+				"name": "RawExpressionIntent",
+				"kind": "type"
+			},
+			{
+				"name": "rawNotExists",
+				"kind": "value"
+			},
+			{
+				"name": "RawSqlAdapter",
+				"kind": "type"
+			},
+			{
+				"name": "RecognitionResult",
+				"kind": "type"
+			},
+			{
+				"name": "RecursiveAdvancedOptions",
+				"kind": "type"
+			},
+			{
+				"name": "RecursiveDedupe",
+				"kind": "type"
+			},
+			{
+				"name": "RecursiveDirection",
+				"kind": "type"
+			},
+			{
+				"name": "RecursiveDump",
+				"kind": "type"
+			},
+			{
+				"name": "RecursiveEmitOptions",
+				"kind": "type"
+			},
+			{
+				"name": "RecursiveExistsOptions",
+				"kind": "type"
+			},
+			{
+				"name": "RecursiveIncludeConfig",
+				"kind": "type"
+			},
+			{
+				"name": "RecursiveIntent",
+				"kind": "type"
+			},
+			{
+				"name": "RecursiveMetadata",
+				"kind": "type"
+			},
+			{
+				"name": "RecursiveNodeIdExpr",
+				"kind": "type"
+			},
+			{
+				"name": "RecursiveOptions",
+				"kind": "type"
+			},
+			{
+				"name": "RecursivePlanOptions",
+				"kind": "type"
+			},
+			{
+				"name": "RecursivePlanReport",
+				"kind": "type"
+			},
+			{
+				"name": "RecursiveShapeMismatchError",
+				"kind": "value"
+			},
+			{
+				"name": "RecursiveTrackOptions",
+				"kind": "type"
+			},
+			{
+				"name": "RecursiveTraversal",
+				"kind": "type"
+			},
+			{
+				"name": "ref",
+				"kind": "value"
+			},
+			{
+				"name": "RefDefinition",
+				"kind": "type"
+			},
+			{
+				"name": "RefOptions",
+				"kind": "type"
+			},
+			{
+				"name": "registerDialect",
+				"kind": "value"
+			},
+			{
+				"name": "RegisteredOperationSemantics",
+				"kind": "type"
+			},
+			{
+				"name": "RELATION_META",
+				"kind": "value"
+			},
+			{
+				"name": "relationColumn",
+				"kind": "value"
+			},
+			{
+				"name": "RelationColumnIntent",
+				"kind": "type"
+			},
+			{
+				"name": "RelationHints",
+				"kind": "type"
+			},
+			{
+				"name": "RelationIR",
+				"kind": "type"
+			},
+			{
+				"name": "RelationKey",
+				"kind": "type"
+			},
+			{
+				"name": "RelationKind",
+				"kind": "type"
+			},
+			{
+				"name": "RelationMetaKey",
+				"kind": "type"
+			},
+			{
+				"name": "RelationNotFoundError",
+				"kind": "value"
+			},
+			{
+				"name": "RelationObjectDef",
+				"kind": "type"
+			},
+			{
+				"name": "RelationOperator",
+				"kind": "type"
+			},
+			{
+				"name": "RelationPathIncludeNode",
+				"kind": "type"
+			},
+			{
+				"name": "RelationPathUsage",
+				"kind": "type"
+			},
+			{
+				"name": "RelationRef",
+				"kind": "type"
+			},
+			{
+				"name": "RelationShorthand",
+				"kind": "type"
+			},
+			{
+				"name": "RelationTupleDef",
+				"kind": "type"
+			},
+			{
+				"name": "RelationType",
+				"kind": "type"
+			},
+			{
+				"name": "RequiredEnumLabelIR",
+				"kind": "type"
+			},
+			{
+				"name": "requiresDatabase",
+				"kind": "value"
+			},
+			{
+				"name": "resetLogger",
+				"kind": "value"
+			},
+			{
+				"name": "ResolvedIncludeStrategy",
+				"kind": "type"
+			},
+			{
+				"name": "resolveEnumSchemaForComparison",
+				"kind": "value"
+			},
+			{
+				"name": "resolveQueryIndex",
+				"kind": "value"
+			},
+			{
+				"name": "ResourceAddress",
+				"kind": "type"
+			},
+			{
+				"name": "resourceIsWithin",
+				"kind": "value"
+			},
+			{
+				"name": "resourceScopeCovers",
+				"kind": "value"
+			},
+			{
+				"name": "ResultHydrator",
+				"kind": "value"
+			},
+			{
+				"name": "rowNumber",
+				"kind": "value"
+			},
+			{
+				"name": "RuleEvaluation",
+				"kind": "type"
+			},
+			{
+				"name": "RulePrecedenceFact",
+				"kind": "type"
+			},
+			{
+				"name": "RuleSupport",
+				"kind": "type"
+			},
+			{
+				"name": "runAssertions",
+				"kind": "value"
+			},
+			{
+				"name": "schema",
+				"kind": "value"
+			},
+			{
+				"name": "Schema",
+				"kind": "type"
+			},
+			{
+				"name": "SchemaColumnType",
+				"kind": "type"
+			},
+			{
+				"name": "SchemaConstraints",
+				"kind": "type"
+			},
+			{
+				"name": "SchemaDefinition",
+				"kind": "type"
+			},
+			{
+				"name": "SchemaError",
+				"kind": "value"
+			},
+			{
+				"name": "SchemaExtras",
+				"kind": "type"
+			},
+			{
+				"name": "SchemaIndexOptions",
+				"kind": "type"
+			},
+			{
+				"name": "SchemaIndexValidationInput",
+				"kind": "type"
+			},
+			{
+				"name": "SchemaOptions",
+				"kind": "type"
+			},
+			{
+				"name": "SchemaTableOptions",
+				"kind": "type"
+			},
+			{
+				"name": "schemaToModelIR",
+				"kind": "value"
+			},
+			{
+				"name": "SchemaValidationError",
+				"kind": "value"
+			},
+			{
+				"name": "SelectAggregateIntent",
+				"kind": "type"
+			},
+			{
+				"name": "SelectAllIntent",
+				"kind": "type"
+			},
+			{
+				"name": "SelectField",
+				"kind": "type"
+			},
+			{
+				"name": "SelectFieldsIntent",
+				"kind": "type"
+			},
+			{
+				"name": "SelectIntent",
+				"kind": "type"
+			},
+			{
+				"name": "selectorMatchesResource",
+				"kind": "value"
+			},
+			{
+				"name": "SelectWithExpressionsIntent",
+				"kind": "type"
+			},
+			{
+				"name": "SelfRefRoles",
+				"kind": "type"
+			},
+			{
+				"name": "semanticArtifactId",
+				"kind": "value"
+			},
+			{
+				"name": "SerializedProvenPlan",
+				"kind": "type"
+			},
+			{
+				"name": "serverVersionNum",
+				"kind": "value"
+			},
+			{
+				"name": "setLogger",
+				"kind": "value"
+			},
+			{
+				"name": "SetOperationBuilder",
+				"kind": "type"
+			},
+			{
+				"name": "silentLogger",
+				"kind": "value"
+			},
+			{
+				"name": "SimplifiedOrmOptions",
+				"kind": "type"
+			},
+			{
+				"name": "singularize",
+				"kind": "value"
+			},
+			{
+				"name": "some",
+				"kind": "value"
+			},
+			{
+				"name": "sortByPriority",
+				"kind": "value"
+			},
+			{
+				"name": "SortDirection",
+				"kind": "type"
+			},
+			{
+				"name": "sql",
+				"kind": "value"
+			},
+			{
+				"name": "SQL_RAW_MARKER",
+				"kind": "value"
+			},
+			{
+				"name": "SQLITE_CAPABILITIES",
+				"kind": "value"
+			},
+			{
+				"name": "SQLiteColumnType",
+				"kind": "type"
+			},
+			{
+				"name": "SqlRawExpression",
+				"kind": "type"
+			},
+			{
+				"name": "StagedCompositionCandidate",
+				"kind": "type"
+			},
+			{
+				"name": "StagedCompositionPreflight",
+				"kind": "type"
+			},
+			{
+				"name": "StagedCompositionPreflightInput",
+				"kind": "type"
+			},
+			{
+				"name": "StagedTransitionInput",
+				"kind": "type"
+			},
+			{
+				"name": "StagedTransitionOrchestrator",
+				"kind": "type"
+			},
+			{
+				"name": "star",
+				"kind": "value"
+			},
+			{
+				"name": "StepJournal",
+				"kind": "type"
+			},
+			{
+				"name": "StreamingAdapter",
+				"kind": "type"
+			},
+			{
+				"name": "StreamOptions",
+				"kind": "type"
+			},
+			{
+				"name": "stringAgg",
+				"kind": "value"
+			},
+			{
+				"name": "StringOperator",
+				"kind": "type"
+			},
+			{
+				"name": "subquery",
+				"kind": "value"
+			},
+			{
+				"name": "SubqueryBuilder",
+				"kind": "value"
+			},
+			{
+				"name": "SubqueryExpression",
+				"kind": "value"
+			},
+			{
+				"name": "SubqueryIncludeInfo",
+				"kind": "type"
+			},
+			{
+				"name": "SubqueryRefIntent",
+				"kind": "type"
+			},
+			{
+				"name": "SupportedColumnTypes",
+				"kind": "type"
+			},
+			{
+				"name": "supportsExecution",
+				"kind": "value"
+			},
+			{
+				"name": "supportsIntrospection",
+				"kind": "value"
+			},
+			{
+				"name": "supportsRawSql",
+				"kind": "value"
+			},
+			{
+				"name": "supportsStreaming",
+				"kind": "value"
+			},
+			{
+				"name": "supportsTransactions",
+				"kind": "value"
+			},
+			{
+				"name": "TABLE_META",
+				"kind": "value"
+			},
+			{
+				"name": "TableAssertionData",
+				"kind": "type"
+			},
+			{
+				"name": "TableDDL",
+				"kind": "type"
+			},
+			{
+				"name": "TableDef",
+				"kind": "type"
+			},
+			{
+				"name": "TableIndexes",
+				"kind": "type"
+			},
+			{
+				"name": "TableIR",
+				"kind": "type"
+			},
+			{
+				"name": "TableMetaKey",
+				"kind": "type"
+			},
+			{
+				"name": "TableNotFoundError",
+				"kind": "value"
+			},
+			{
+				"name": "TableReaddressAddress",
+				"kind": "type"
+			},
+			{
+				"name": "TableReaddressDeclaration",
+				"kind": "type"
+			},
+			{
+				"name": "TableRef",
+				"kind": "type"
+			},
+			{
+				"name": "textScore",
+				"kind": "value"
+			},
+			{
+				"name": "TransactionalAdapter",
+				"kind": "type"
+			},
+			{
+				"name": "TransactionalCompletionRecord",
+				"kind": "type"
+			},
+			{
+				"name": "TransactionCoordinatorBinding",
+				"kind": "type"
+			},
+			{
+				"name": "TransactionOptions",
+				"kind": "type"
+			},
+			{
+				"name": "TRANSITION_LESSOR_REJECTION",
+				"kind": "value"
+			},
+			{
+				"name": "TransitionCandidate",
+				"kind": "type"
+			},
+			{
+				"name": "TransitionExecutionClient",
+				"kind": "type"
+			},
+			{
+				"name": "TransitionLeaseFailure",
+				"kind": "type"
+			},
+			{
+				"name": "TransitionLessor",
+				"kind": "type"
+			},
+			{
+				"name": "TransitionPack",
+				"kind": "type"
+			},
+			{
+				"name": "transitionPlanDigest",
+				"kind": "value"
+			},
+			{
+				"name": "TransitionQueryClient",
+				"kind": "type"
+			},
+			{
+				"name": "TransitionReadTarget",
+				"kind": "type"
+			},
+			{
+				"name": "TransitionRelationalValidationInput",
+				"kind": "type"
+			},
+			{
+				"name": "TransitionRelationalValidationResult",
+				"kind": "type"
+			},
+			{
+				"name": "TransitionRule",
+				"kind": "type"
+			},
+			{
+				"name": "TransitionRunMetadata",
+				"kind": "type"
+			},
+			{
+				"name": "TransitionRunPersister",
+				"kind": "type"
+			},
+			{
+				"name": "TransitionSessionClient",
+				"kind": "type"
+			},
+			{
+				"name": "TraversalDirection",
+				"kind": "type"
+			},
+			{
+				"name": "TruncateOptions",
+				"kind": "type"
+			},
+			{
+				"name": "unary",
+				"kind": "value"
+			},
+			{
+				"name": "UnhandledTypeInDialect",
+				"kind": "value"
+			},
+			{
+				"name": "UnknownDialectError",
+				"kind": "value"
+			},
+			{
+				"name": "unsafeAsPredicate",
+				"kind": "value"
+			},
+			{
+				"name": "UnsafeOperationError",
+				"kind": "value"
+			},
+			{
+				"name": "UnsupportedCapabilityError",
+				"kind": "value"
+			},
+			{
+				"name": "UnsupportedFeatureError",
+				"kind": "value"
+			},
+			{
+				"name": "UnsupportedStrategyError",
+				"kind": "value"
+			},
+			{
+				"name": "Updateable",
+				"kind": "type"
+			},
+			{
+				"name": "UpdateBuilder",
+				"kind": "value"
+			},
+			{
+				"name": "UpdateIntent",
+				"kind": "type"
+			},
+			{
+				"name": "UpsertBuilder",
+				"kind": "value"
+			},
+			{
+				"name": "UpsertConflictAction",
+				"kind": "type"
+			},
+			{
+				"name": "UpsertConflictTarget",
+				"kind": "type"
+			},
+			{
+				"name": "UpsertFromIntent",
+				"kind": "type"
+			},
+			{
+				"name": "UpsertIntent",
+				"kind": "type"
+			},
+			{
+				"name": "VacuumOptions",
+				"kind": "type"
+			},
+			{
+				"name": "validateAssertionBlocks",
+				"kind": "value"
+			},
+			{
+				"name": "validateDeclarationModel",
+				"kind": "value"
+			},
+			{
+				"name": "ValidatedManagedStepManifest",
+				"kind": "type"
+			},
+			{
+				"name": "ValidatedManagedStepManifestResult",
+				"kind": "type"
+			},
+			{
+				"name": "validateExecutionContract",
+				"kind": "value"
+			},
+			{
+				"name": "validateNormalizedManagedStepManifest",
+				"kind": "value"
+			},
+			{
+				"name": "validateRecursiveInclude",
+				"kind": "value"
+			},
+			{
+				"name": "validateRecursiveShape",
+				"kind": "value"
+			},
+			{
+				"name": "validateSchemaIndexOptions",
+				"kind": "value"
+			},
+			{
+				"name": "validateTransitionRelationalInvariants",
+				"kind": "value"
+			},
+			{
+				"name": "validateTypeName",
+				"kind": "value"
+			},
+			{
+				"name": "WarningCategory",
+				"kind": "type"
+			},
+			{
+				"name": "wAvg",
+				"kind": "value"
+			},
+			{
+				"name": "wCount",
+				"kind": "value"
+			},
+			{
+				"name": "WhereAndIntent",
+				"kind": "type"
+			},
+			{
+				"name": "WhereAnyIntent",
+				"kind": "type"
+			},
+			{
+				"name": "WhereComparisonIntent",
+				"kind": "type"
+			},
+			{
+				"name": "WhereExistsIntent",
+				"kind": "type"
+			},
+			{
+				"name": "WhereFilter",
+				"kind": "type"
+			},
+			{
+				"name": "WhereInIntent",
+				"kind": "type"
+			},
+			{
+				"name": "WhereIntent",
+				"kind": "type"
+			},
+			{
+				"name": "WhereLikeIntent",
+				"kind": "type"
+			},
+			{
+				"name": "WhereNotExistsIntent",
+				"kind": "type"
+			},
+			{
+				"name": "WhereNotIntent",
+				"kind": "type"
+			},
+			{
+				"name": "WhereNullIntent",
+				"kind": "type"
+			},
+			{
+				"name": "WhereOrIntent",
+				"kind": "type"
+			},
+			{
+				"name": "WhereRangeIntent",
+				"kind": "type"
+			},
+			{
+				"name": "WhereRelationFilterIntent",
+				"kind": "type"
+			},
+			{
+				"name": "WhereSubqueryIntent",
+				"kind": "type"
+			},
+			{
+				"name": "WindowBuilder",
+				"kind": "value"
+			},
+			{
+				"name": "WindowFunction",
+				"kind": "type"
+			},
+			{
+				"name": "WindowIntent",
+				"kind": "type"
+			},
+			{
+				"name": "WindowOrderBy",
+				"kind": "type"
+			},
+			{
+				"name": "withPriority",
+				"kind": "value"
+			},
+			{
+				"name": "wMax",
+				"kind": "value"
+			},
+			{
+				"name": "wMin",
+				"kind": "value"
+			},
+			{
+				"name": "wSum",
+				"kind": "value"
+			}
+		],
+		"runtime": [
+			"ASSERTION_TYPES",
+			"AdapterRequiredError",
+			"AmbiguousPlanError",
+			"AmbiguousRelationError",
+			"BRAND",
+			"COLUMN_META",
+			"CanonicalJsonError",
+			"CaseBuilder",
+			"ColumnNotFoundError",
+			"CteBuilder",
+			"CteQueryBuilder",
+			"DEFAULT_FEATURE_CHECKERS",
+			"DUCKDB_CAPABILITIES",
+			"DeleteBuilder",
+			"ErrorCode",
+			"Errors",
+			"ExecutionError",
+			"ExpressionRef",
+			"IRREGULAR_PLURALS",
+			"InsertBuilder",
+			"IntentBuilder",
+			"InvalidOperationError",
+			"InvalidRelationDefinitionError",
+			"LEDGER_LIFECYCLE_GRAMMAR",
+			"LEDGER_PROJECTION_CODE_VERSION",
+			"MSSQL_CAPABILITIES",
+			"MYSQL_CAPABILITIES",
+			"ModelIRImpl",
+			"NamingConventionMismatchError",
+			"NotFoundError",
+			"POSTGRESQL_CAPABILITIES",
+			"PREDICATE_REF_DISCRIMINATOR",
+			"PackRegistry",
+			"RELATION_META",
+			"RawCteQueryBuilder",
+			"RecursiveShapeMismatchError",
+			"RelationNotFoundError",
+			"ResultHydrator",
+			"SQLITE_CAPABILITIES",
+			"SQL_RAW_MARKER",
+			"SchemaError",
+			"SchemaValidationError",
+			"SubqueryBuilder",
+			"SubqueryExpression",
+			"TABLE_META",
+			"TRANSITION_LESSOR_REJECTION",
+			"TableNotFoundError",
+			"UnhandledTypeInDialect",
+			"UnknownDialectError",
+			"UnsafeOperationError",
+			"UnsupportedCapabilityError",
+			"UnsupportedFeatureError",
+			"UnsupportedStrategyError",
+			"UpdateBuilder",
+			"UpsertBuilder",
+			"WindowBuilder",
+			"acquireExclusiveTransitionLease",
+			"acquireTransitionLease",
+			"acquireTransitionTargetLease",
+			"admitRecordedIdentity",
+			"advisoryObservationId",
+			"aggOrderBy",
+			"and",
+			"any",
+			"array",
+			"arrayAgg",
+			"assertCanonicalizableJson",
+			"assertCapability",
+			"assertConnectionAvailable",
+			"assertContains",
+			"assertDbColumnExists",
+			"assertDbOutput",
+			"assertDbRowsEquals",
+			"assertDbRowsMax",
+			"assertDbRowsMin",
+			"assertDbValueEquals",
+			"assertEquals",
+			"assertIntentHasGroupBy",
+			"assertIntentHasOrderBy",
+			"assertIntentHasWhere",
+			"assertIntentTable",
+			"assertIntentType",
+			"assertIntentWith",
+			"assertMatches",
+			"assertParamsEquals",
+			"assertParamsLength",
+			"assertParamsType",
+			"assertParamsValue",
+			"assertSQLColumn",
+			"assertSQLEquals",
+			"assertSQLJoin",
+			"assertSQLTable",
+			"assertSuccess",
+			"assertTypeSupported",
+			"assumptionAccepted",
+			"assumptionId",
+			"batchValues",
+			"bindDeclarationSet",
+			"bindExecutionContract",
+			"boolFn",
+			"canonicalJson",
+			"canonicalJsonDigest",
+			"capitalize",
+			"caseWhen",
+			"cast",
+			"checkDelta",
+			"chooseReadyCandidate",
+			"claimId",
+			"classifyOutcomeRecovery",
+			"coalesce",
+			"col",
+			"composeAfterMutationHooks",
+			"composeAfterQueryHooks",
+			"composeBeforeMutationHooks",
+			"composeBeforeQueryHooks",
+			"composeOnErrorHooks",
+			"concludeEvidenceForObligation",
+			"countDistinctRelationPathsByName",
+			"createApplier",
+			"createComparator",
+			"createDialectCapabilities",
+			"createEvidenceView",
+			"createExclusiveTransitionTarget",
+			"createExecutionContract",
+			"createHookManager",
+			"createNqlTag",
+			"createOrm",
+			"createPackRegistry",
+			"createProver",
+			"createPseudoColumnMetadata",
+			"createRawCteBuilder",
+			"createRecursiveMetadata",
+			"createStagedTransitionOrchestrator",
+			"createTransitionLessor",
+			"createTransitionRunMetadata",
+			"decapitalize",
+			"declarationSetFromModel",
+			"defaultIndexName",
+			"defaultLogger",
+			"defineModel",
+			"denseRank",
+			"deriveRelationPathFromIntentPath",
+			"distinct",
+			"emitWarning",
+			"enumAddDelta",
+			"eq",
+			"every",
+			"evidenceId",
+			"exists",
+			"exprRef",
+			"extendDialect",
+			"extractPseudoColumnKeywords",
+			"findClosestMatch",
+			"findUniqueLedgerTerminal",
+			"fn",
+			"fullTextSearch",
+			"getAvailableDialects",
+			"getDialectCapabilities",
+			"getLogger",
+			"getNodeIdAlias",
+			"getRelationKind",
+			"getSchemaFromDb",
+			"gt",
+			"gte",
+			"inArray",
+			"inSubquery",
+			"indexDelta",
+			"inferForeignKey",
+			"interpretLedgerLifecycle",
+			"isAdjacencyTraversal",
+			"isAggregateWindowFunction",
+			"isAliasedColumn",
+			"isAllColumns",
+			"isBatchValuesRef",
+			"isCardinalityShorthand",
+			"isCoalesceExpression",
+			"isColumnAliasExpression",
+			"isColumnRef",
+			"isCustomTraversal",
+			"isDeleteIntent",
+			"isDistinctField",
+			"isDistinctFrom",
+			"isEdgeTableTraversal",
+			"isExclusiveTransitionTarget",
+			"isExpressionSpec",
+			"isInsertIntent",
+			"isKnownDialect",
+			"isMutationIntent",
+			"isNotNull",
+			"isNull",
+			"isOperationRuntime",
+			"isOverallSuccess",
+			"isPredicateRef",
+			"isRankingWindowFunction",
+			"isRawExpression",
+			"isRecursiveIncludeOptions",
+			"isRecursiveIntent",
+			"isRecursiveRelation",
+			"isRef",
+			"isRelationColumnExpression",
+			"isRelationObjectDef",
+			"isRelationRef",
+			"isRelationTupleDef",
+			"isSelectAggregate",
+			"isSelectAll",
+			"isSelectFields",
+			"isSelectWithExpressions",
+			"isSelfReferential",
+			"isSqlRaw",
+			"isSubqueryExpression",
+			"isSubqueryRef",
+			"isTableRef",
+			"isTransitionLessor",
+			"isUpdateIntent",
+			"isUpsertIntent",
+			"isWhereAnd",
+			"isWhereAny",
+			"isWhereComparison",
+			"isWhereExists",
+			"isWhereIn",
+			"isWhereIntent",
+			"isWhereLike",
+			"isWhereLogical",
+			"isWhereNot",
+			"isWhereNotExists",
+			"isWhereNull",
+			"isWhereOr",
+			"isWhereRange",
+			"isWhereRelationBased",
+			"isWhereRelationFilter",
+			"isWhereSubquery",
+			"isWindowIntent",
+			"lag",
+			"lead",
+			"like",
+			"literal",
+			"loadVerifiedRecoveryJournal",
+			"lt",
+			"lte",
+			"markGeneratorRemovalNonReplayable",
+			"namedArg",
+			"negotiateFeatures",
+			"neq",
+			"none",
+			"normalizeSQL",
+			"normalizedIndex",
+			"not",
+			"notExists",
+			"nqlRaw",
+			"objectToWhereIntent",
+			"observationContextDigest",
+			"op",
+			"or",
+			"outcomeClaimEventId",
+			"outcomeClaimId",
+			"outerRef",
+			"param",
+			"parseAssertionFile",
+			"parseRelationDef",
+			"parseRelationKey",
+			"pipeAfterMutationHooks",
+			"pipeAfterQueryHooks",
+			"pipeBeforeMutationHooks",
+			"pipeBeforeQueryHooks",
+			"pipeOnErrorHooks",
+			"plan",
+			"planOperationSession",
+			"planRecursive",
+			"pluralize",
+			"preflightStagedComposition",
+			"projectCompareToSingleCandidate",
+			"projectLedgerChain",
+			"rangeContainedBy",
+			"rangeContains",
+			"rangeOverlaps",
+			"rank",
+			"raw",
+			"rawExists",
+			"rawNotExists",
+			"ref",
+			"registerDialect",
+			"relationColumn",
+			"requiresDatabase",
+			"resetLogger",
+			"resolveEnumSchemaForComparison",
+			"resolveQueryIndex",
+			"resourceIsWithin",
+			"resourceScopeCovers",
+			"rowNumber",
+			"runAssertions",
+			"schema",
+			"schemaToModelIR",
+			"selectorMatchesResource",
+			"semanticArtifactId",
+			"serverVersionNum",
+			"setLogger",
+			"silentLogger",
+			"singularize",
+			"some",
+			"sortByPriority",
+			"sql",
+			"star",
+			"stringAgg",
+			"subquery",
+			"supportsExecution",
+			"supportsIntrospection",
+			"supportsRawSql",
+			"supportsStreaming",
+			"supportsTransactions",
+			"textScore",
+			"transitionPlanDigest",
+			"unary",
+			"unsafeAsPredicate",
+			"validateAssertionBlocks",
+			"validateDeclarationModel",
+			"validateExecutionContract",
+			"validateNormalizedManagedStepManifest",
+			"validateRecursiveInclude",
+			"validateRecursiveShape",
+			"validateSchemaIndexOptions",
+			"validateTransitionRelationalInvariants",
+			"validateTypeName",
+			"wAvg",
+			"wCount",
+			"wMax",
+			"wMin",
+			"wSum",
+			"withPriority"
+		],
+		"built": true
+	},
+	"internal": {
+		"declarations": [
+			{
+				"name": "admitDestructiveOutcomeClaim",
+				"kind": "value"
+			},
+			{
+				"name": "admitOutcomeClaim",
+				"kind": "value"
+			},
+			{
+				"name": "AdmittedDestructiveOutcomeClaim",
+				"kind": "type"
+			},
+			{
+				"name": "assertDeclaredEnumMapIdentity",
+				"kind": "value"
+			},
+			{
+				"name": "attachDestructiveAuthorityPermit",
+				"kind": "value"
+			},
+			{
+				"name": "claimIdForToken",
+				"kind": "value"
+			},
+			{
+				"name": "consumeClaimToken",
+				"kind": "value"
+			},
+			{
+				"name": "decideDestructiveDecision",
+				"kind": "value"
+			},
+			{
+				"name": "DurablyLoadedRun",
+				"kind": "type"
+			},
+			{
+				"name": "EnumNameMapKeyMismatchError",
+				"kind": "value"
+			},
+			{
+				"name": "escapeDiagnosticText",
+				"kind": "value"
+			},
+			{
+				"name": "inspectMutationRows",
+				"kind": "value"
+			},
+			{
+				"name": "isDestructiveAuthorityPermit",
+				"kind": "value"
+			},
+			{
+				"name": "isDurablyLoadedRun",
+				"kind": "value"
+			},
+			{
+				"name": "markTransitionClientCompromised",
+				"kind": "value"
+			},
+			{
+				"name": "mintClaimToken",
+				"kind": "value"
+			},
+			{
+				"name": "mintDurablyLoadedRun",
+				"kind": "value"
+			},
+			{
+				"name": "transitionPhysicalSessionIsCompromised",
+				"kind": "value"
+			}
+		],
+		"runtime": [
+			"EnumNameMapKeyMismatchError",
+			"admitDestructiveOutcomeClaim",
+			"admitOutcomeClaim",
+			"assertDeclaredEnumMapIdentity",
+			"attachDestructiveAuthorityPermit",
+			"claimIdForToken",
+			"consumeClaimToken",
+			"decideDestructiveDecision",
+			"escapeDiagnosticText",
+			"inspectMutationRows",
+			"isDestructiveAuthorityPermit",
+			"isDurablyLoadedRun",
+			"markTransitionClientCompromised",
+			"mintClaimToken",
+			"mintDurablyLoadedRun",
+			"transitionPhysicalSessionIsCompromised"
+		],
+		"built": true
+	}
+}

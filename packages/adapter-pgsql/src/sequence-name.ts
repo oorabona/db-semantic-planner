@@ -1,4 +1,5 @@
-import type { PhysicalNameInventory, SequenceIR } from '@dbsp/types';
+import type { SequenceIR } from '@dbsp/types';
+import type { PhysicalNameInventory } from '@dbsp/types/internal';
 import { quoteIdent } from './ddl/phases/utils.js';
 import type { NamingPlugin } from './naming-plugin.js';
 import { escapeDiagnosticText } from './validate.js';

@@ -1,8 +1,6 @@
 import { randomBytes } from 'node:crypto';
+import type { DeclarationSet, LedgerAddress, LedgerHome } from '@dbsp/types';
 import type {
-	DeclarationSet,
-	LedgerAddress,
-	LedgerHome,
 	LedgerIdentity,
 	LedgerMarkerState,
 	ReinitializePreflightAdoptionCandidate,
@@ -10,7 +8,7 @@ import type {
 	ReinitializePreflightRefusalCode,
 	ReinitializePreflightReport,
 	ReinitializePreflightScopeReport,
-} from '@dbsp/types';
+} from '@dbsp/types/internal';
 import { validateIdentifier } from '../validate.js';
 import {
 	DBSP_LEDGER_EVENT_TABLE,

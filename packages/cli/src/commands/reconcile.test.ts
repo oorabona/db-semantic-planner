@@ -40,8 +40,8 @@ vi.mock('@dbsp/adapter-pgsql', () => ({
 	reconcilePgTransitionRun: fixture.reconcile,
 }));
 
-vi.mock('@dbsp/core', async (importOriginal) => ({
-	...(await importOriginal<typeof import('@dbsp/core')>()),
+vi.mock('@dbsp/core/internal', async (importOriginal) => ({
+	...(await importOriginal<typeof import('@dbsp/core/internal')>()),
 	acquireTransitionTargetLease: vi.fn(async () => ({
 		session: fixture.lockSession,
 		release: vi.fn(),

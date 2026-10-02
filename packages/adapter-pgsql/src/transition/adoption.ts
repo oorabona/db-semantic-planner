@@ -5,14 +5,14 @@ import {
 	outcomeClaimId,
 	projectLedgerChain,
 	type ValidatedManagedStepManifest,
-} from '@dbsp/core';
+} from '@dbsp/core/internal';
 import type {
 	LedgerAddress,
 	LedgerHome,
 	LedgerPayload,
 	NormalizedManagedStep,
-	ScopedApprovalSet,
 } from '@dbsp/types';
+import type { ScopedApprovalSet } from '@dbsp/types/internal';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
 import { readPgLedgerAddressChain } from './chain-reader.js';
 import type { TransitionJournalQueryable } from './journal.js';

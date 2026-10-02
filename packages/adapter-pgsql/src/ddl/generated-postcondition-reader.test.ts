@@ -1,4 +1,4 @@
-import { canonicalJsonDigest } from '@dbsp/core';
+import { canonicalJsonDigest } from '@dbsp/core/internal';
 import type { LedgerAddress, NormalizedManagedStep } from '@dbsp/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as generatedPostconditionReader from './generated-postcondition-reader.js';

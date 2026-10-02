@@ -25,26 +25,28 @@ import {
 import {
 	acquireExclusiveTransitionLease,
 	acquireTransitionLease,
+	mintDurablyLoadedRun,
 	selectorMatchesResource,
 	transitionPlanDigest,
 	validateNormalizedManagedStepManifest,
-} from '@dbsp/core';
-import { mintDurablyLoadedRun } from '@dbsp/core/internal';
+} from '@dbsp/core/internal';
 import type {
 	ApplyPolicy,
 	ApplyResult,
-	AssumptionAcceptance,
 	LedgerAddress,
 	LedgerHome,
 	NormalizedManagedStep,
 	PhysicalOperation,
 	ResourceAddress,
 	ResourceSelector,
-	TransitionRunAuthorization,
 	TransitionRunJournal,
 	TrustRoot,
 } from '@dbsp/types';
-import { ledgerAddressKey, REFUSAL_VOCABULARY } from '@dbsp/types';
+import type {
+	AssumptionAcceptance,
+	TransitionRunAuthorization,
+} from '@dbsp/types/internal';
+import { ledgerAddressKey, REFUSAL_VOCABULARY } from '@dbsp/types/internal';
 import { Command } from 'commander';
 import type { Pool } from 'pg';
 import { createDbConnection } from '../utils/db-utils.js';

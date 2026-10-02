@@ -424,5 +424,88 @@ export function getTrustedNqlRelationFilterFields(
 	return isTrustedRelationFilterPayload(payload) ? payload : undefined;
 }
 
+export type {
+	CompiledColumnMetadata,
+	CompileOnlyAdapter,
+	CompileResultWithIncludes,
+	ConnectionAvailability,
+	IntrospectionOptions,
+} from './adapter.js';
 // Re-export all public types for convenience
 export * from './index.js';
+export type { SubqueryExpressionIntent } from './intent/expression-intent.js';
+export type { OrderByExpressionIntent } from './intent/include-intent.js';
+export {
+	NQL_SELECT_SCALAR_FUNCTION_ALLOWLIST,
+	NQL_SELECT_WINDOW_FUNCTION_ALLOWLIST,
+	NQL_SELECT_WINDOW_FUNCTIONS,
+} from './intent/select-function-allowlist.js';
+export { isSubqueryRef } from './intent/type-guards.js';
+export { isFieldRef } from './intent/where-intent.js';
+export type {
+	AuthorAttestedNativeDefault,
+	HierarchyIR,
+	PartitionIR,
+	RequiredEnumLabelIR,
+} from './model-ir.js';
+export type { OutputSource } from './output-provenance.js';
+export {
+	createPhysicalNameInventory,
+	type PhysicalNameEntry,
+	type PhysicalNameInventory,
+} from './physical-name-inventory.js';
+export type { JsonAggOrderByEntry } from './planner.js';
+export { buildRelationKeyFields } from './relation-key-fields.js';
+export type { RecognitionContext } from './transition/contracts.js';
+export type { ContainmentClosureDestructiveOutcome } from './transition/destructive-authority.js';
+export type {
+	CollationRef,
+	EquivalenceResult,
+	ExpressionEquivalenceCategory,
+	TypeRef,
+} from './transition/equivalence.js';
+export type {
+	UnsafeNativeFragment,
+	VendorValidatedExpression,
+} from './transition/expression.js';
+export type { TargetBinding } from './transition/guard.js';
+export {
+	type LedgerIdentity,
+	type LedgerMarkerState,
+	type LedgerRefusal,
+	type LedgerReservationRow,
+	ledgerAddressKey,
+	ledgerAddressParentJson,
+	type ReinitializePreflightAdoptionCandidate,
+	type ReinitializePreflightFailureStep,
+	type ReinitializePreflightRefusalCode,
+	type ReinitializePreflightReport,
+	type ReinitializePreflightScopeReport,
+} from './transition/ledger.js';
+export type {
+	ObservationBooleanClaim,
+	ObservationStability,
+	PostgreSqlObservationTargetIdentity,
+} from './transition/observation.js';
+// Adapter and CLI implementation surface (issue #860).
+export type {
+	AdmittedPermit,
+	CascadeCoveredOutcomeClaimPlan,
+	OutcomeIndeterminateRecoveryEvidence,
+	OutcomeRecoveryEffect,
+	OutcomeVacancy,
+} from './transition/outcome-protocol.js';
+export type {
+	ExecutableAssertion,
+	ManagedStepClassification,
+	TransitionJournalEventName,
+	TransitionRunAuthorization,
+} from './transition/plan.js';
+export type {
+	AssumptionAcceptance,
+	ScopedApprovalSet,
+} from './transition/policy.js';
+export {
+	REFUSAL_VOCABULARY,
+	type RefusalCode,
+} from './transition/refusal.js';

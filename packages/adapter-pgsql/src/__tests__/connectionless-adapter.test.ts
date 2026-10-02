@@ -5,15 +5,10 @@
  * guard lets that operation reach compilation or a distinct legacy failure.
  */
 
-import {
-	createHookManager,
-	createOrm,
-	eq,
-	schema,
-	supportsExecution,
-} from '@dbsp/core';
-import type { CompileOnlyAdapter } from '@dbsp/types';
+import { createHookManager, createOrm, eq, schema } from '@dbsp/core';
+import { supportsExecution } from '@dbsp/core/internal';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
+import type { CompileOnlyAdapter } from '@dbsp/types/internal';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
 	createPgCompileOnlyAdapter,

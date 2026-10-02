@@ -13,9 +13,6 @@ import {
 	type DialectCapabilities,
 	type ExpressionIntent,
 	isParamIntent,
-	type JsonAggOrderByEntry,
-	NQL_SELECT_SCALAR_FUNCTION_ALLOWLIST,
-	NQL_SELECT_WINDOW_FUNCTION_ALLOWLIST,
 	type ParamIntent,
 	type QueryIntent,
 	toColumnList,
@@ -24,6 +21,9 @@ import {
 	getNqlBindingRefName,
 	getTrustedNqlRelationFilterFields,
 	isNqlBindingRef,
+	type JsonAggOrderByEntry,
+	NQL_SELECT_SCALAR_FUNCTION_ALLOWLIST,
+	NQL_SELECT_WINDOW_FUNCTION_ALLOWLIST,
 } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import {

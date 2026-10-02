@@ -2,18 +2,18 @@ import type {
 	ManagedOutcomeExecutionRequest,
 	ManagedOutcomePreflightRequest,
 	TransitionExecutionClient,
-} from '@dbsp/core';
+} from '@dbsp/core/internal';
 import {
 	outcomeClaimEventId,
 	outcomeClaimId,
 	validateNormalizedManagedStepManifest,
-} from '@dbsp/core';
+} from '@dbsp/core/internal';
 import type {
-	LedgerReservationRow,
 	OperationExecutionOutcome,
 	OutcomeClaimPlan,
 	ProvenPlanShape,
 } from '@dbsp/types';
+import type { LedgerReservationRow } from '@dbsp/types/internal';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
 import {
 	executePgAdmittedOperation,

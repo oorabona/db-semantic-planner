@@ -5,11 +5,10 @@
  * @internal
  */
 
-import { countDistinctRelationPathsByName } from '@dbsp/core';
+import { countDistinctRelationPathsByName } from '@dbsp/core/internal';
 import type {
 	CompiledQuery,
 	CompileOptions,
-	CompileResultWithIncludes,
 	IncludeIntent,
 	JoinIntent,
 	ModelIR,
@@ -20,7 +19,7 @@ import type {
 	SubqueryIncludeInfo,
 } from '@dbsp/types';
 import { resolveOutputReadHandling, toColumnList } from '@dbsp/types';
-import type { Mutable } from '@dbsp/types/internal';
+import type { CompileResultWithIncludes, Mutable } from '@dbsp/types/internal';
 import { getTrustedNqlRelationFilterFields } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';

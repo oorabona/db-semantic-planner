@@ -1,9 +1,6 @@
 import { ModelIRImpl } from '@dbsp/core';
-import {
-	canonicalResourceParent,
-	ledgerAddressKey,
-	type TableIR,
-} from '@dbsp/types';
+import { canonicalResourceParent, type TableIR } from '@dbsp/types';
+import { ledgerAddressKey } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import { createPgPhysicalModel } from '../physical-model/index.js';
 import {

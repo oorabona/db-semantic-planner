@@ -14,7 +14,8 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ModelIR, RelationIR, TableIR } from '@dbsp/core';
+import type { ModelIR, TableIR } from '@dbsp/core';
+import type { RelationIR } from '@dbsp/core/internal';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { LoadedSchema } from '../utils/schema-loader.js';
 import type { DbConnection } from './db-connection.js';

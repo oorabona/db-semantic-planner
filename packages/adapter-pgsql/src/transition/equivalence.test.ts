@@ -1,15 +1,14 @@
-import { createEvidenceView } from '@dbsp/core';
+import { createEvidenceView } from '@dbsp/core/internal';
 import type {
 	Assumption,
-	CollationRef,
 	EquivalenceContext,
 	EvidenceObservation,
 	ExpressionValue,
 	ObservationContext,
 	ObservationRequest,
 	ResourceAddress,
-	TypeRef,
 } from '@dbsp/types';
+import type { CollationRef, TypeRef } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import { withDeparseRequest } from '../test-compat/equivalence-deparse-request.js';
 import {

@@ -2,11 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import {
 	canonicalJsonDigest,
+	mintDurablyLoadedRun,
 	projectLedgerChain,
 	validateDeclarationModel,
 	validateNormalizedManagedStepManifest,
-} from '@dbsp/core';
-import { mintDurablyLoadedRun } from '@dbsp/core/internal';
+} from '@dbsp/core/internal';
 import type {
 	ColumnIR,
 	DbCasing,

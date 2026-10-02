@@ -3,8 +3,8 @@ import type {
 	DeclarationSet,
 	LedgerAddress,
 	LedgerHome,
-	ReinitializePreflightScopeReport,
 } from '@dbsp/types';
+import type { ReinitializePreflightScopeReport } from '@dbsp/types/internal';
 import { describe, expect, it, vi } from 'vitest';
 
 const ledger = vi.hoisted(() => ({

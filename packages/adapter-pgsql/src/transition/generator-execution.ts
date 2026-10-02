@@ -3,16 +3,14 @@ import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import {
 	canonicalJsonDigest,
+	decideDestructiveDecision,
 	outcomeClaimEventId,
 	outcomeClaimId,
 	projectLedgerChain,
 	type ValidatedManagedStepManifest,
 	validateNormalizedManagedStepManifest,
-} from '@dbsp/core';
-import { decideDestructiveDecision } from '@dbsp/core/internal';
+} from '@dbsp/core/internal';
 import type {
-	CascadeCoveredOutcomeClaimPlan,
-	ContainmentClosureDestructiveOutcome,
 	DestructiveAuthorityEvidence,
 	LedgerAddress,
 	LedgerChainMember,
@@ -20,10 +18,14 @@ import type {
 	LedgerHome,
 	LedgerPayload,
 	NormalizedManagedStep,
-	ScopedApprovalSet,
 	TableIR,
 } from '@dbsp/types';
-import { ledgerAddressKey } from '@dbsp/types';
+import type {
+	CascadeCoveredOutcomeClaimPlan,
+	ContainmentClosureDestructiveOutcome,
+	ScopedApprovalSet,
+} from '@dbsp/types/internal';
+import { ledgerAddressKey } from '@dbsp/types/internal';
 import type { Pool, PoolClient } from 'pg';
 import {
 	readGeneratedPostcondition,
@@ -335,7 +337,7 @@ function containedBy(root: LedgerAddress, candidate: LedgerAddress): boolean {
 async function destructiveEvidence(input: {
 	readonly executor: LedgerQueryable;
 	readonly address: LedgerAddress;
-	readonly classification: import('@dbsp/types').ManagedStepClassification;
+	readonly classification: import('@dbsp/types/internal').ManagedStepClassification;
 	readonly selection?: NormalizedManagedStep['selection'];
 	readonly planDigest: string;
 	readonly approval: ScopedApprovalSet;

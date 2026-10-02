@@ -19,8 +19,8 @@ import {
 	literal,
 	schema,
 	star,
-	stringAgg,
 } from '@dbsp/core';
+import { stringAgg } from '@dbsp/core/internal';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { buildSubqueryFromIntent } from '../compile-where.js';

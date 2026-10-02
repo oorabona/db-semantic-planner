@@ -1,11 +1,8 @@
 import type {
 	Assumption,
-	AuthorAttestedNativeDefault,
-	CollationRef,
 	ColumnIR,
 	EquivalenceCapability,
 	EquivalenceContext,
-	EquivalenceResult,
 	EvidenceView,
 	ExpressionValue,
 	JsonValue,
@@ -14,8 +11,13 @@ import type {
 	ProofClaimDraft,
 	ProofObligation,
 	ResourceAddress,
-	TypeRef,
 } from '@dbsp/types';
+import type {
+	AuthorAttestedNativeDefault,
+	CollationRef,
+	EquivalenceResult,
+	TypeRef,
+} from '@dbsp/types/internal';
 import {
 	EXPRESSION_DEPARSE_OBSERVATION,
 	PG_DEPARSE_ARTIFACT,

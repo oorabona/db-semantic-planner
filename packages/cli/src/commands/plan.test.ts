@@ -2,12 +2,12 @@ import {
 	ATTACH_LOGICAL_IDENTITY_OPERATION_KIND,
 	MANUAL_SQL_OPERATION_KIND,
 } from '@dbsp/adapter-pgsql';
-import type { InProcessProvenPlan, TransitionPack } from '@dbsp/core';
+import type { InProcessProvenPlan, TransitionPack } from '@dbsp/core/internal';
 import {
 	createPackRegistry,
 	observationContextDigest,
 	transitionPlanDigest,
-} from '@dbsp/core';
+} from '@dbsp/core/internal';
 import type {
 	CompareOutcome,
 	ModelIR,

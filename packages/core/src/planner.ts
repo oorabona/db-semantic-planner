@@ -44,7 +44,6 @@ export type {
 	PlanOptions,
 	PlanReport,
 	PlanWarning,
-	PlanWarningCode,
 	RecursivePlanOptions,
 	RecursivePlanReport,
 	ResolvedIncludeStrategy,

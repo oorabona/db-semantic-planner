@@ -1,7 +1,7 @@
 import {
 	createTransitionLessor,
 	TRANSITION_LESSOR_REJECTION,
-} from '@dbsp/core';
+} from '@dbsp/core/internal';
 import type {
 	JsonValue,
 	ObservationContext,

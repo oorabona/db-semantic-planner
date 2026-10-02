@@ -1,8 +1,11 @@
 import { executePgAdmittedOperation } from '@dbsp/adapter-pgsql';
 import { lockPgJournalRun } from '@dbsp/adapter-pgsql/internal';
-import { validateNormalizedManagedStepManifest } from '@dbsp/core';
-import { mintDurablyLoadedRun } from '@dbsp/core/internal';
-import type { LedgerReservationRow, OutcomeClaimPlan } from '@dbsp/types';
+import {
+	mintDurablyLoadedRun,
+	validateNormalizedManagedStepManifest,
+} from '@dbsp/core/internal';
+import type { OutcomeClaimPlan } from '@dbsp/types';
+import type { LedgerReservationRow } from '@dbsp/types/internal';
 import pg from 'pg';
 import { checkpoint } from './harness/index.js';
 

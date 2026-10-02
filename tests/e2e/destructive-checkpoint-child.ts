@@ -3,8 +3,10 @@ import {
 	executeGeneratorPlan,
 	lockPgJournalRun,
 } from '@dbsp/adapter-pgsql/internal';
-import { transitionPlanDigest } from '@dbsp/core';
-import { mintDurablyLoadedRun } from '@dbsp/core/internal';
+import {
+	mintDurablyLoadedRun,
+	transitionPlanDigest,
+} from '@dbsp/core/internal';
 import pg from 'pg';
 import { checkpoint } from './harness/index.js';
 

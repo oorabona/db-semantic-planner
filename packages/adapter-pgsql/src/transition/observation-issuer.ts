@@ -5,7 +5,7 @@ import {
 	isTransitionLessor,
 	TRANSITION_LESSOR_REJECTION,
 	type TransitionLeaseFailure,
-} from '@dbsp/core';
+} from '@dbsp/core/internal';
 import type {
 	EvidenceObservation,
 	ExclusiveTransitionTarget,
@@ -13,12 +13,14 @@ import type {
 	ObservationContext,
 	ObservationIssuer,
 	ObservationRequest,
-	ObservationStability,
 	ResourceAddress,
 	TransitionLessor,
 	TransitionSessionClient,
-	VendorValidatedExpression,
 } from '@dbsp/types';
+import type {
+	ObservationStability,
+	VendorValidatedExpression,
+} from '@dbsp/types/internal';
 import {
 	renderCheckConstraintClause,
 	splitCheckConstraintState,

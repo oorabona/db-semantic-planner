@@ -15,20 +15,7 @@ import type {
 } from '@dbsp/types';
 
 // Re-export all dialect types from @dbsp/types for backward compatibility
-export type {
-	CommonColumnType,
-	DDLFeatureVersionRange,
-	DialectCapabilities,
-	DialectName,
-	DuckDBColumnType,
-	IsTypeSupported,
-	MSSQLColumnType,
-	MySQLColumnType,
-	PostgresColumnType,
-	PostgresOnlyColumnType,
-	SQLiteColumnType,
-	SupportedColumnTypes,
-} from '@dbsp/types';
+export type { DDLFeatureVersionRange, DialectCapabilities } from '@dbsp/types';
 
 import type { DialectCapabilities } from '@dbsp/types';
 

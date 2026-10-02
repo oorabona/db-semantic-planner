@@ -24,18 +24,20 @@ import {
 	resolvePgOutcomeClaimGroup,
 } from '@dbsp/adapter-pgsql/internal';
 import {
+	mintDurablyLoadedRun,
 	outcomeClaimId,
 	semanticArtifactId,
 	transitionPlanDigest,
-} from '@dbsp/core';
-import { mintDurablyLoadedRun } from '@dbsp/core/internal';
+} from '@dbsp/core/internal';
 import type {
-	CascadeCoveredOutcomeClaimPlan,
 	LedgerAddress,
-	LedgerReservationRow,
 	NormalizedManagedStep,
 	ProvenPlanStep,
 } from '@dbsp/types';
+import type {
+	CascadeCoveredOutcomeClaimPlan,
+	LedgerReservationRow,
+} from '@dbsp/types/internal';
 import pg from 'pg';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import {

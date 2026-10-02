@@ -1,9 +1,4 @@
-import type {
-	GuardExecutionResult,
-	OperationObservation,
-	OperationRuntime,
-	TransitionPack,
-} from '@dbsp/core';
+import type { TransitionPack } from '@dbsp/core/internal';
 import type {
 	ApplicableEvaluation,
 	Assumption,
@@ -32,6 +27,11 @@ import type {
 	TransitionFragmentComposition,
 	TransitionRule,
 } from '@dbsp/types';
+import type {
+	GuardExecutionResult,
+	OperationObservation,
+	OperationRuntime,
+} from '../registry.js';
 
 const TOY_RULE_ARTIFACT: SemanticArtifactRef = {
 	id: semanticArtifactId('dbsp.toy.rules.toydb1'),

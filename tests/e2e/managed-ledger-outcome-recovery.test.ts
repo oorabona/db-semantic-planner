@@ -18,10 +18,10 @@ import {
 	recoverPgOutcomeClaim,
 } from '@dbsp/adapter-pgsql/internal';
 import {
+	mintDurablyLoadedRun,
 	transitionPlanDigest,
 	validateNormalizedManagedStepManifest,
-} from '@dbsp/core';
-import { mintDurablyLoadedRun } from '@dbsp/core/internal';
+} from '@dbsp/core/internal';
 import type { LedgerAddress, ProvenPlanShape } from '@dbsp/types';
 import pg from 'pg';
 import { afterEach, describe, expect, it } from 'vitest';

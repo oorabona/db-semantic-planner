@@ -1,12 +1,12 @@
-import { concludeEvidenceForObligation } from '@dbsp/core';
+import { concludeEvidenceForObligation } from '@dbsp/core/internal';
 import type {
 	EvidenceObservation,
-	ObservationBooleanClaim,
 	ObservationContext,
 	ObservationRequest,
 	ProofObligation,
 	ResourceAddress,
 } from '@dbsp/types';
+import type { ObservationBooleanClaim } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import { claimPayload } from '../test-compat/claim-payload-json.js';
 import { stampedClaim, stampedClaimForRequest } from './claim-stamping.js';

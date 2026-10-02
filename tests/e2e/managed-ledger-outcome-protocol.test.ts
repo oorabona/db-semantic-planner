@@ -12,18 +12,18 @@ import {
 	openPgOutcomeClaim,
 } from '@dbsp/adapter-pgsql/internal';
 import {
+	mintDurablyLoadedRun,
 	outcomeClaimEventId,
 	outcomeClaimId,
 	transitionPlanDigest,
 	validateNormalizedManagedStepManifest,
-} from '@dbsp/core';
-import { mintDurablyLoadedRun } from '@dbsp/core/internal';
+} from '@dbsp/core/internal';
 import type {
 	LedgerAddress,
-	LedgerReservationRow,
 	OutcomeClaimPlan,
 	ProvenPlanShape,
 } from '@dbsp/types';
+import type { LedgerReservationRow } from '@dbsp/types/internal';
 import pg from 'pg';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fixtureOutcomeClaim } from './outcome-claim-fixture.js';

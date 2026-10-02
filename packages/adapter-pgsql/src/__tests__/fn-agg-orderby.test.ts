@@ -9,14 +9,8 @@
  * - aggOrderBy() intent structure (unit level)
  */
 
-import {
-	aggOrderBy,
-	arrayAgg,
-	exprRef,
-	fn,
-	literal,
-	stringAgg,
-} from '@dbsp/core';
+import { aggOrderBy, arrayAgg, exprRef, fn, literal } from '@dbsp/core';
+import { stringAgg } from '@dbsp/core/internal';
 
 // exprRef is the correct alias for expressions.ref from @dbsp/core
 // ('ref' from @dbsp/core resolves to the schema ref(), not the expression ref())

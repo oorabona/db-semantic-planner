@@ -1,12 +1,11 @@
 import { createHash } from 'node:crypto';
+import type { LedgerAddress, LedgerClaimKind, LedgerHome } from '@dbsp/types';
+import { sameLedgerAddress } from '@dbsp/types';
 import type {
 	ContainmentClosureDestructiveOutcome,
-	LedgerAddress,
-	LedgerClaimKind,
-	LedgerHome,
 	LedgerReservationRow,
-} from '@dbsp/types';
-import { ledgerAddressKey, sameLedgerAddress } from '@dbsp/types';
+} from '@dbsp/types/internal';
+import { ledgerAddressKey } from '@dbsp/types/internal';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
 
 type Queryable = {

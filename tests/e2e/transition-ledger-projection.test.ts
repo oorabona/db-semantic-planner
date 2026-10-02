@@ -8,12 +8,9 @@ import {
 	appendPgLedgerResolution,
 	compareSchemata,
 } from '@dbsp/adapter-pgsql/internal';
-import { projectLedgerChain } from '@dbsp/core';
-import type {
-	LedgerAddress,
-	LedgerChainMember,
-	LedgerReservationRow,
-} from '@dbsp/types';
+import { projectLedgerChain } from '@dbsp/core/internal';
+import type { LedgerAddress, LedgerChainMember } from '@dbsp/types';
+import type { LedgerReservationRow } from '@dbsp/types/internal';
 import { afterEach, describe, expect, it } from 'vitest';
 import { dropSchema, getTestPool } from './testkit/index.js';
 

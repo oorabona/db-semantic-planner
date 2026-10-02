@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { semanticArtifactId } from '@dbsp/core';
+import { semanticArtifactId } from '@dbsp/core/internal';
 import type { ApplyResult, TransitionRunJournal } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -34,8 +34,8 @@ vi.mock('@dbsp/adapter-pgsql/internal', async (importOriginal) => {
 	};
 });
 
-vi.mock('@dbsp/core', async (importOriginal) => {
-	const actual = await importOriginal<typeof import('@dbsp/core')>();
+vi.mock('@dbsp/core/internal', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('@dbsp/core/internal')>();
 	return {
 		...actual,
 		acquireTransitionLease: vi.fn(async () => lifecycleFixture.lease),

@@ -1,14 +1,14 @@
 import {
 	createExecutionContract,
 	type RegisteredOperationSemantics,
-} from '@dbsp/core';
+} from '@dbsp/core/internal';
 import type {
 	ExecutionContract,
 	ExecutionRequirement,
-	PostgreSqlObservationTargetIdentity,
 	ProvenPlanShape,
 	TransitionSessionClient,
 } from '@dbsp/types';
+import type { PostgreSqlObservationTargetIdentity } from '@dbsp/types/internal';
 import {
 	ALTER_COLUMN_SET_NOT_NULL_MIN_SERVER_VERSION_NUM,
 	ALTER_COLUMN_SET_NOT_NULL_OPERATION_KIND,

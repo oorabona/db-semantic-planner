@@ -12,8 +12,8 @@ const mocks = vi.hoisted(() => ({
 	readIdentity: vi.fn(),
 }));
 
-vi.mock('@dbsp/core', async (importOriginal) => ({
-	...(await importOriginal<typeof import('@dbsp/core')>()),
+vi.mock('@dbsp/core/internal', async (importOriginal) => ({
+	...(await importOriginal<typeof import('@dbsp/core/internal')>()),
 	projectLedgerChain: mocks.project,
 }));
 vi.mock('./ledger.js', () => ({

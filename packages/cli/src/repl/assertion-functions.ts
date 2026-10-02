@@ -6,6 +6,13 @@
  */
 
 export {
+	assertEquals,
+	assertParamsEquals,
+	assertParamsType,
+	assertSQLEquals,
+	normalizeSQL,
+} from '@dbsp/core';
+export {
 	assertContains,
 	assertDbColumnExists,
 	assertDbOutput,
@@ -13,7 +20,6 @@ export {
 	assertDbRowsMax,
 	assertDbRowsMin,
 	assertDbValueEquals,
-	assertEquals,
 	assertIntentHasGroupBy,
 	assertIntentHasOrderBy,
 	assertIntentHasWhere,
@@ -21,14 +27,10 @@ export {
 	assertIntentType,
 	assertIntentWith,
 	assertMatches,
-	assertParamsEquals,
 	assertParamsLength,
-	assertParamsType,
 	assertParamsValue,
 	assertSQLColumn,
-	assertSQLEquals,
 	assertSQLJoin,
 	assertSQLTable,
 	assertSuccess,
-	normalizeSQL,
-} from '@dbsp/core';
+} from '@dbsp/core/internal';

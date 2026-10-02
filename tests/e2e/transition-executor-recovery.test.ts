@@ -19,9 +19,16 @@ import {
 	readTransitionJournal,
 } from '@dbsp/adapter-pgsql';
 import {
+	type Assumption,
+	createStagedTransitionOrchestrator,
+	isOperationRuntime,
+	type ModelIR,
+	type ProvenPlanStep,
+	type TableIR,
+} from '@dbsp/core';
+import {
 	type ApplicableEvaluation,
 	type ApplyPolicy,
-	type Assumption,
 	acquireTransitionLease,
 	assumptionId,
 	type CompareOutcome,
@@ -29,24 +36,19 @@ import {
 	createComparator,
 	createPackRegistry,
 	createProver,
-	createStagedTransitionOrchestrator,
-	isOperationRuntime,
 	loadVerifiedRecoveryJournal,
-	type ModelIR,
 	type ObservationContext,
 	type ObservationRequest,
 	type PhysicalOperation,
 	type ProvenPlanShape,
-	type ProvenPlanStep,
 	type RecognitionResult,
 	type ResourceAddress,
-	type TableIR,
 	type TransitionLeaseFailure,
 	type TransitionRule,
 	type TransitionRunMetadata,
 	type TransitionRunPersister,
 	transitionPlanDigest,
-} from '@dbsp/core';
+} from '@dbsp/core/internal';
 import type { CheckConstraintIR, EnumIR } from '@dbsp/types';
 import type { Pool } from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';

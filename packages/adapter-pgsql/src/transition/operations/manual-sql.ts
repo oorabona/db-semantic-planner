@@ -1,10 +1,9 @@
 import { createHash } from 'node:crypto';
-import { resourceScopeCovers } from '@dbsp/core';
+import { resourceScopeCovers } from '@dbsp/core/internal';
 import type {
 	Assumption,
 	DurableIntentRecord,
 	EvidenceObservation,
-	ExecutableAssertion,
 	FingerprintManifest,
 	ObservationContext,
 	OperationEffectAssessment,
@@ -15,8 +14,11 @@ import type {
 	StepJournal,
 	TransactionalCompletionRecord,
 	TransitionSessionClient,
-	UnsafeNativeFragment,
 } from '@dbsp/types';
+import type {
+	ExecutableAssertion,
+	UnsafeNativeFragment,
+} from '@dbsp/types/internal';
 import {
 	DBSP_META_SCHEMA,
 	MANUAL_SQL_OPERATION_KIND,

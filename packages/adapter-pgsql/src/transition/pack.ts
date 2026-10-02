@@ -2,7 +2,7 @@ import type {
 	CapabilityDescriptor,
 	ExecutionCoordinator,
 	TransitionExecutionClient,
-} from '@dbsp/core';
+} from '@dbsp/core/internal';
 import { setLocalTransactionTimeoutSql } from '../transaction-timeouts.js';
 import {
 	ALTER_COLUMN_SET_NOT_NULL_CAPABILITY,

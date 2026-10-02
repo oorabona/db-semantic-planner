@@ -10,7 +10,6 @@ import type {
 	PhysicalOperation,
 	ProofClaimDraft,
 	ProofObligation,
-	RecognitionContext,
 	RecognitionResult,
 	ResourceAddress,
 	RuleEvaluation,
@@ -19,6 +18,7 @@ import type {
 	TransitionRule,
 	TrustRoot,
 } from '@dbsp/types';
+import type { RecognitionContext } from '@dbsp/types/internal';
 import {
 	ATTACH_LOGICAL_IDENTITY_OPERATION_KIND,
 	LOGICAL_IDENTITY_ADOPTION_RULE_ID,

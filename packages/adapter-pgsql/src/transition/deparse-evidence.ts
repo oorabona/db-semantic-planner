@@ -2,12 +2,14 @@ import type {
 	EquivalenceContext,
 	EvidenceObservation,
 	EvidenceView,
-	ExpressionEquivalenceCategory,
 	ExpressionValue,
 	ObservationContext,
 	ObservationRequest,
-	VendorValidatedExpression,
 } from '@dbsp/types';
+import type {
+	ExpressionEquivalenceCategory,
+	VendorValidatedExpression,
+} from '@dbsp/types/internal';
 import {
 	EXPRESSION_DEPARSE_OBSERVATION,
 	PG_DEPARSE_ARTIFACT,

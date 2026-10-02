@@ -1,4 +1,4 @@
-import { canonicalJson, canonicalJsonDigest } from '@dbsp/core';
+import { canonicalJson, canonicalJsonDigest } from '@dbsp/core/internal';
 import type {
 	LedgerAddress,
 	LedgerPayload,

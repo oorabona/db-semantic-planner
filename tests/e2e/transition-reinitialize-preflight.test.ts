@@ -17,7 +17,8 @@ import {
 	PG_LEDGER_SHAPE_VERSION,
 } from '@dbsp/adapter-pgsql';
 import { convergePg } from '@dbsp/adapter-pgsql/internal';
-import type { ModelIR, ReinitializePreflightReport } from '@dbsp/types';
+import type { ModelIR } from '@dbsp/types';
+import type { ReinitializePreflightReport } from '@dbsp/types/internal';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { writeAdoptionFileAtomically } from '../../packages/cli/src/commands/preflight.js';
 import {

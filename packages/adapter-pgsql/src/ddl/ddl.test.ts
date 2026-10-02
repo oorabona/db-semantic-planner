@@ -4,13 +4,12 @@
 
 import type {
 	DialectCapabilities,
-	ForeignKeyIR,
 	IndexIR,
 	ModelIR,
-	PartitionIR,
 	TableIR,
 } from '@dbsp/core';
 import { ModelIRImpl, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
+import type { ForeignKeyIR, PartitionIR } from '@dbsp/core/internal';
 import { EnumNameMapKeyMismatchError } from '@dbsp/core/internal';
 import type { SequenceIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';

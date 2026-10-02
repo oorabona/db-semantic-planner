@@ -5,7 +5,7 @@ import {
 	classifyPgLedgerPhysicalShape,
 	readPgLedgerReservationsForPair,
 } from '@dbsp/adapter-pgsql/internal';
-import type { LedgerReservationRow } from '@dbsp/types';
+import type { LedgerReservationRow } from '@dbsp/types/internal';
 import { afterEach, describe, expect, it } from 'vitest';
 import { dropSchema, getTestPool } from './testkit/index.js';
 import { rolePool } from './transition-reinitialize-preflight-testkit.js';
