@@ -20,3 +20,6 @@
 *.woff binary
 *.woff2 binary
 
+# Generated test baseline (CONDITION_MATRIX_REWRITE=1); review its generator, not its 5,000+ entries.
+packages/adapter-pgsql/src/__tests__/condition-matrix.baseline.json -diff linguist-generated=true
+
