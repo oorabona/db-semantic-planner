@@ -121,6 +121,8 @@ For schema setup with self-referential `ref()` and `roles`, see [Getting Started
 
 ## How the Planner Chooses a Strategy
 
+Nested includes keep their parent's resolved strategy; mixed strategies and includes nested under a CTE are refused (#894).
+
 The planner picks the SQL strategy from the query shape by default:
 
 | Strategy | When used | Notes |

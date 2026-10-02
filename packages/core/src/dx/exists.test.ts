@@ -535,37 +535,28 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 			expect(dump.params).toEqual([true, 'flagged']);
 		});
 
-		it('keeps a recursive self-referential include that ALSO carries an explicit join — recursion wins the strategy (CTE), and existsWrap keeps that CTE + LEFT JOIN', () => {
-			// A recursive self-referential relation resolves to the CTE strategy
-			// regardless of an explicit `join` option (recursion takes priority in
-			// processInclude), so the include compiles to `WITH ... LEFT JOIN cte`
-			// — a FROM join that survives existsWrap. Cover BOTH the include-level
-			// `recursive` flag AND a relation that is recursive on its own.
+		it('refuses recursive self-referential includes with explicit join (#894)', () => {
 			const adapter = createPgCompileOnlyAdapter();
 			const orm = createOrm({ adapter, schema: categorySchema });
-
-			// (a) include-level `recursive` flag + explicit join on the same entry
-			const flagged = orm
-				.select('categories')
-				.include('children', {
-					recursive: true,
-					direction: 'descendants',
-					join: 'inner',
-				} as never)
-				.existsDump();
-			expect(flagged.sql).toBe(
-				'SELECT EXISTS (WITH children_cte AS (SELECT categories_inner_0.* FROM categories AS categories_inner_0) SELECT 1 FROM categories LEFT JOIN children_cte AS children_ref_0 ON categories.id = children_ref_0."parentId" LIMIT 1) AS "exists"',
+			expect(() =>
+				orm
+					.select('categories')
+					.include('children', {
+						recursive: true,
+						direction: 'descendants',
+						join: 'inner',
+					})
+					.existsDump(),
+			).toThrow(
+				/include\[0\]\(children\).*recursive includes compile as a CTE.*#894/,
 			);
-			expect(flagged.params).toEqual([]);
-
-			// (b) relation-level recursive (`descendants` carries recursive
-			// metadata; the entry has no `recursive` flag) + explicit join
-			const relational = orm
-				.select('categories')
-				.include('descendants', { join: 'inner' } as never)
-				.existsDump();
-			expect(relational.sql).toBe(
-				'SELECT EXISTS (WITH descendants_cte AS (SELECT categories_inner_0.* FROM categories AS categories_inner_0) SELECT 1 FROM categories LEFT JOIN descendants_cte AS descendants_ref_0 ON categories.id = descendants_ref_0."parentId" LIMIT 1) AS "exists"',
+			expect(() =>
+				orm
+					.select('categories')
+					.include('descendants', { join: 'inner' })
+					.existsDump(),
+			).toThrow(
+				/include\[0\]\(descendants\).*recursive includes compile as a CTE.*#894/,
 			);
 		});
 
@@ -630,7 +621,7 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 
 			// #230: preserve nested hydration inputs so preflight can refuse them.
 			const refusal =
-				/Include where is not supported for strategy json_agg.*include\[0\]\(posts\)\.include\[0\]\(comments\)\.where.*#892/;
+				/include\[0\]\(posts\)\.include\[0\]\(comments\).*parent strategy json_agg.*child strategy join.*#894/;
 			expect(() => query.existsDump()).toThrow(refusal);
 			await expect(query.exists()).rejects.toThrow(refusal);
 		});

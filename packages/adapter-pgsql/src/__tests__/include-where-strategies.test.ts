@@ -65,10 +65,6 @@ const fixtures: Record<string, { sql: string; params: unknown[] }> = {
 		sql: 'SELECT users.*, posts.id AS "posts.id" FROM users JOIN posts AS posts ON users.id = posts."authorId" WHERE posts.published = $1',
 		params: [true],
 	},
-	'inner score with root parameter': {
-		sql: 'SELECT users.*, posts.id AS "posts.id" FROM users JOIN posts AS posts ON users.id = posts."authorId" WHERE users."tenantId" = $1 AND posts.score > $2',
-		params: [1, 3],
-	},
 	'inner empty and': {
 		sql: 'SELECT users.*, posts.id AS "posts.id" FROM users JOIN posts AS posts ON users.id = posts."authorId" WHERE true',
 		params: [],
@@ -77,17 +73,9 @@ const fixtures: Record<string, { sql: string; params: unknown[] }> = {
 		sql: 'SELECT users.*, posts.id AS "posts.id" FROM users JOIN posts AS posts ON users.id = posts."authorId" WHERE false',
 		params: [],
 	},
-	'inner nested': {
-		sql: 'SELECT users.*, posts.id AS "posts.id", comments.id AS "comments.id" FROM users JOIN posts AS posts ON users.id = posts."authorId" JOIN comments AS comments ON posts.id = comments."postId" WHERE comments.published = $1',
-		params: [true],
-	},
 	'left published': {
 		sql: 'SELECT users.*, posts.id AS "posts.id" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId" WHERE posts.published = $1',
 		params: [true],
-	},
-	'left score with root parameter': {
-		sql: 'SELECT users.*, posts.id AS "posts.id" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId" WHERE users."tenantId" = $1 AND posts.score > $2',
-		params: [1, 3],
 	},
 	'left empty and': {
 		sql: 'SELECT users.*, posts.id AS "posts.id" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId" WHERE true',
@@ -96,10 +84,6 @@ const fixtures: Record<string, { sql: string; params: unknown[] }> = {
 	'left empty or': {
 		sql: 'SELECT users.*, posts.id AS "posts.id" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId" WHERE false',
 		params: [],
-	},
-	'left nested': {
-		sql: 'SELECT users.*, posts.id AS "posts.id", comments.id AS "comments.id" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId" LEFT JOIN comments AS comments ON posts.id = comments."postId" WHERE comments.published = $1',
-		params: [true],
 	},
 };
 
@@ -133,7 +117,9 @@ describe('#888 non-join include refusal', () => {
 					})
 					.dump(),
 			).toThrow(
-				/strategy json_agg.*include\[0\]\(posts\).*include\[0\]\(comments\).*#892/,
+				join
+					? /include\[0\]\(posts\).*include\[0\]\(comments\).*parent strategy join.*child strategy json_agg.*#894/
+					: /strategy json_agg.*include\[0\]\(posts\).*include\[0\]\(comments\).*#892/,
 			);
 		});
 	}

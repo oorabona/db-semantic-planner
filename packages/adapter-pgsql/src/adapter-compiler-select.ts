@@ -1219,23 +1219,25 @@ function buildSimplifiedPlanReport(
 /** Validate include predicates before lowering or allocating bindings. */
 function assertSupportedIncludeWhere(
 	includes: readonly IncludeIntent[] | undefined,
-	plan: PlanReport,
+	strategies: ReadonlyMap<string, string>,
 	parent = '',
 	intentParent = '',
+	parentStrategy?: string,
 ): void {
 	for (const [index, include] of (includes ?? []).entries()) {
 		const path = `${parent}include[${index}](${include.relation})`;
 		const intentPath = `${intentParent}include[${index}]`;
-		if (include.where) {
-			const decision = plan.decisions.find(
-				(d) =>
-					d.type === 'include-strategy' &&
-					(d.context.intentPath === intentPath ||
-						(!d.context.intentPath &&
-							(d.context.relation === include.relation ||
-								d.context.includeAlias === include.relation))),
+		const strategy =
+			strategies.get(intentPath) ?? (include.join ? 'join' : 'json_agg');
+		if (
+			parentStrategy &&
+			(parentStrategy === 'cte' || strategy !== parentStrategy)
+		) {
+			throw new Error(
+				`Nested include at ${path} has parent strategy ${parentStrategy} and child strategy ${strategy}; mixed strategies and includes under cte are refused (oorabona/db-semantic-planner#894).`,
 			);
-			const strategy = decision?.choice ?? (include.join ? 'join' : 'json_agg');
+		}
+		if (include.where) {
 			// Walk the complete predicate intent, including query and expression bodies.
 			const visit = (node: unknown): void => {
 				if (!node || typeof node !== 'object') return;
@@ -1273,9 +1275,10 @@ function assertSupportedIncludeWhere(
 		}
 		assertSupportedIncludeWhere(
 			include.include,
-			plan,
+			strategies,
 			`${path}.`,
 			`${intentPath}.`,
+			strategy,
 		);
 	}
 }
@@ -1350,7 +1353,39 @@ export function compileSelectEnvelope<T = unknown>(
 	let simplifiedPlan: SimplifiedPlanReport;
 
 	if (execIntent) {
-		assertSupportedIncludeWhere(execIntent.include, planForCompilation);
+		const strategies = new Map<string, string>();
+		// Older externally constructed plans may omit intentPath. Index their
+		// aliases once, preserving the previous first matching decision fallback.
+		const legacyStrategies = new Map<string, string>();
+		for (const decision of planForCompilation.decisions) {
+			if (decision.type !== 'include-strategy') continue;
+			if (decision.context.intentPath) {
+				strategies.set(decision.context.intentPath, decision.choice);
+			} else {
+				for (const alias of [
+					decision.context.relation,
+					decision.context.includeAlias,
+				]) {
+					if (alias && !legacyStrategies.has(alias))
+						legacyStrategies.set(alias, decision.choice);
+				}
+			}
+		}
+		if (legacyStrategies.size > 0) {
+			const indexLegacy = (
+				includes: readonly IncludeIntent[] | undefined,
+				parent = '',
+			): void => {
+				for (const [index, include] of (includes ?? []).entries()) {
+					const path = `${parent}include[${index}]`;
+					const strategy = legacyStrategies.get(include.relation);
+					if (!strategies.has(path) && strategy) strategies.set(path, strategy);
+					indexLegacy(include.include, `${path}.`);
+				}
+			};
+			indexLegacy(execIntent.include);
+		}
+		assertSupportedIncludeWhere(execIntent.include, strategies);
 		// Real usage: convert intent to decisions
 		let decisions = intentToDecisions(execIntent, plan.rootTable);
 		const resolvedModel = options?.model ?? deps.model;
@@ -1583,6 +1618,24 @@ export function compileWithIncludes<T = unknown>(
 	// 'subquery', planner decisions carry choice === 'subquery', so hydration
 	// must happen via the subquery path (separate query + hydrateIncludes).
 	const subqueryIncludes: SubqueryIncludeInfo[] = [];
+	const intentsByPath = new Map<string, IncludeIntent>();
+	const rootIntentsByRelation = new Map<string, IncludeIntent>();
+	for (const include of (plan.executableIntent ?? plan.intent)?.include ?? []) {
+		if (!rootIntentsByRelation.has(include.relation))
+			rootIntentsByRelation.set(include.relation, include);
+	}
+	const collectIntents = (
+		includes: readonly IncludeIntent[] | undefined,
+		parent = '',
+	): void => {
+		for (const [index, include] of (includes ?? []).entries()) {
+			const path = `${parent}include[${index}]`;
+			intentsByPath.set(path, include);
+			collectIntents(include.include, `${path}.`);
+		}
+	};
+	collectIntents((plan.executableIntent ?? plan.intent)?.include);
+	const entriesByPath = new Map<string, Mutable<SubqueryIncludeInfo>>();
 
 	for (const d of plan.decisions) {
 		if (d.type !== 'include-strategy' || d.choice !== 'subquery') continue;
@@ -1623,11 +1676,9 @@ export function compileWithIncludes<T = unknown>(
 			: fk;
 
 		// Find matching include intent for select/where passthrough
-		const includeIntent = (
-			plan.intent?.include as Array<Record<string, unknown>> | undefined
-		)?.find(
-			(i) => i.relation === relationName || i.relation === ctx.includeAlias,
-		);
+		const includeIntent = ctx.intentPath
+			? intentsByPath.get(ctx.intentPath)
+			: rootIntentsByRelation.get(relationName);
 
 		const entry: Mutable<SubqueryIncludeInfo> = {
 			relationName,
@@ -1649,8 +1700,20 @@ export function compileWithIncludes<T = unknown>(
 				SubqueryIncludeInfo['where']
 			>;
 		}
-		subqueryIncludes.push(entry);
+		if (ctx.intentPath) entriesByPath.set(ctx.intentPath, entry);
+		else subqueryIncludes.push(entry);
 	}
 
+	for (const [path, entry] of entriesByPath) {
+		const parentPath = path.slice(0, path.lastIndexOf('.include['));
+		const parent = path.includes('.include[')
+			? entriesByPath.get(parentPath)
+			: undefined;
+		if (parent) {
+			parent.nestedIncludes = [...(parent.nestedIncludes ?? []), entry];
+		} else {
+			subqueryIncludes.push(entry);
+		}
+	}
 	return { main, subqueryIncludes };
 }

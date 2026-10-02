@@ -1105,6 +1105,11 @@ function processInclude(
 	// Priority: 1) recursive → cte (if dialect supports it), 2) include.join → forces join strategy, 3) include.strategy override, 4) auto-detect
 	let includeStrategy: ResolvedIncludeStrategy;
 	if (isRecursiveInclude) {
+		if (include.join !== undefined) {
+			throw new UnsupportedStrategyError(
+				`Recursive include at ${intentPath}(${include.relation}) cannot use join: recursive includes compile as a CTE (oorabona/db-semantic-planner#894).`,
+			);
+		}
 		// FIND-013: Guard recursive → cte against dialect capability.
 		// selectSmartStrategy handles the general case, but processInclude has
 		// an early-exit path that forces 'cte' before reaching it.  A dialect
