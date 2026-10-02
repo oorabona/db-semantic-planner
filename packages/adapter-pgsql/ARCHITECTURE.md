@@ -5,7 +5,7 @@
 `@dbsp/adapter-pgsql` is a native PostgreSQL adapter that uses **tree-to-tree transformation** to compile query plans into SQL. Unlike the Kysely-based adapter that builds SQL through a query builder API, this adapter operates directly on the PostgreSQL AST.
 
 ```
-PlanReport → PostgreSQL AST → SQL (via pgsql-deparser)
+PlanReport → PostgreSQL AST → SQL (via the internal synchronous deparser)
 ```
 
 ## Key Benefits
@@ -50,9 +50,9 @@ PlanReport → PostgreSQL AST → SQL (via pgsql-deparser)
                                   │
                                   ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                        pgsql-deparser                            │
+│                    Internal deparser                             │
 │                                                                  │
-│  deparse(ast: Node) → Promise<string>                            │
+│  deparse(ast: Node) → string                                     │
 └─────────────────────────────────┬───────────────────────────────┘
                                   │
                                   ▼
@@ -68,7 +68,6 @@ PlanReport → PostgreSQL AST → SQL (via pgsql-deparser)
 packages/adapter-pgsql/src/
 ├── index.ts                    # Public exports
 ├── compiler.ts                 # Main PlanCompiler
-├── comparison-adapter.ts       # Dual-adapter validation
 ├── validate.ts                 # Identifier validation (security)
 ├── naming-plugin.ts            # camelCase ↔ snake_case
 ├── param-ref.ts                # Parameter reference ($1, $2, ...)
@@ -185,12 +184,38 @@ interface IncludeHandler {
 
 ```typescript
 interface CompilerContext {
-  declaredNames: DeclaredNameResolver; // Logical declared address → physical model name
-  scope: QueryScope;                   // Query-local and declared relation bindings
-  rootTable: string;                   // Logical root entity table
-  schema?: string;                     // PostgreSQL schema
-  maxRecursiveDepth: number;           // CTE depth limit (default: 100)
-  currentAlias?: SqlIdentifier;        // Resolved relation qualifier
+  readonly declaredNames?: DeclaredNameResolver;
+  readonly dbCasing?: DbCasing;
+  readonly schema?: string;
+  readonly dialectCapabilities?: DialectCapabilities;
+  readonly rootTable: string;
+  readonly currentAlias?: string;
+  readonly aliases?: ReadonlyMap<string, string>;
+  readonly maxRecursiveDepth: number;
+  readonly onRawSQL?: (sql: string) => void;
+  readonly defaultPkColumnName?: string;
+  readonly deriveFkColumnName?: FkColumnDerivation;
+  readonly outerAlias?: string;
+  readonly bindingNames?: BindingNameRegistry;
+  readonly scope?: QueryScope;
+  readonly currentBinding?: RelationBinding;
+  readonly relationTargetProjections?: RelationTargetProjectionRegistry;
+  readonly aliasColumnAuthorities?: AliasColumnAuthority;
+  readonly compileSubquery?: (
+    query: QueryIntent,
+    paramOffset: number,
+  ) => { ast: Node; parameters: readonly unknown[] };
+  readonly compileNqlSelectExpression?: (
+    value: unknown,
+    ctx: CompilerContext,
+    state: CompilerState,
+  ) => Node;
+  readonly compileCustomFnFilter?: (
+    filterIntent: WhereIntent,
+    ctx: CompilerContext,
+    state: CompilerState,
+  ) => Node | undefined;
+  readonly model?: ModelIR;
 }
 ```
 
@@ -227,19 +252,6 @@ All values are parameterized using `$1`, `$2`, etc.:
 `WHERE id = $1` + parameters: [id]
 ```
 
-## ComparisonAdapter (Validation)
-
-For migration safety, the `ComparisonAdapter` can run both adapters and compare output:
-
-```typescript
-const mode = getComparisonMode(); // 'pgsql' | 'kysely' | 'compare' | 'strict'
-
-// 'compare': Log differences
-// 'strict': Throw on mismatch
-```
-
-Environment variable: `DBSP_COMPARISON_MODE`
-
 ## Test Strategy
 
 | Category | Tests | Coverage |
@@ -249,9 +261,8 @@ Environment variable: `DBSP_COMPARISON_MODE`
 | INCLUDE strategies | 23 | All 4 strategies |
 | Recursive CTE | 13 | Depth, cycle, path |
 | Mutations | 26 | INSERT/UPDATE/DELETE/UPSERT |
-| ComparisonAdapter | 36 | SQL diff, metrics |
 | Supporting | 233+ | AST, validation, params |
-| **Total** | **413** | Comprehensive |
+| **Total** | **377+** | Comprehensive |
 
 ## Dependencies
 
@@ -260,20 +271,22 @@ Environment variable: `DBSP_COMPARISON_MODE`
 | `@dbsp/core` | PlanReport, IntentAST types |
 | `@dbsp/types` | Shared type definitions |
 | `@pgsql/types` | PostgreSQL AST node types |
-| `pgsql-deparser` | AST → SQL conversion |
+| Internal deparser | Synchronous AST → SQL conversion in production |
+| `pgsql-deparser` | Development-only deparser comparison tests |
 
 ## Usage
 
 ```typescript
-import { compilePlan, PlanCompiler } from '@dbsp/adapter-pgsql';
+import {
+  PlanCompiler,
+  type CompilerOptions,
+  type CompiledResult,
+  type SimplifiedPlanReport,
+} from '@dbsp/adapter-pgsql';
 
-// Simple compilation
-const { sql, params } = await compilePlan(planReport, {
-  naming: camelCaseNaming(),
-  schema: 'public'
-});
-
-// With compiler instance
+const options: CompilerOptions = { schema: 'public' };
+const report: SimplifiedPlanReport = { rootTable: 'users', decisions: [] };
 const compiler = new PlanCompiler(options);
-const result = await compiler.compile(planReport);
+const result: CompiledResult = compiler.compile(report);
+console.log(result.sql, result.parameters);
 ```

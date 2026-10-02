@@ -437,14 +437,18 @@ function getColumnTypes(
 	tableName: string,
 	columns: string[],
 	deps: AdapterCompilerDeps,
+	unnestedColumns: ReadonlySet<string> = new Set(),
 ): Record<string, MutationColumnMetadata> | undefined {
 	if (!deps.model) return undefined;
 	const table = deps.model.getTable(tableName);
 	if (!table) return undefined;
+	const columnsByName = new Map(
+		table.columns.map((column) => [column.name, column]),
+	);
 	let result: Record<string, MutationColumnMetadata> | undefined;
 	const targetSchema = deps.schemaName;
 	for (const col of columns) {
-		const columnIR = table.columns.find((c) => c.name === col);
+		const columnIR = columnsByName.get(col);
 		if (columnIR) {
 			result ??= {};
 			// Prefer originalDbType over ColumnType, resolved to a safe cast target.
@@ -464,7 +468,7 @@ function getColumnTypes(
 			// unnest FLATTENS a multi-dimensional array, so a column whose type is
 			// itself an array cannot be batch-inserted via unnest — fail loud with a
 			// clear message instead of emitting SQL PostgreSQL rejects at runtime.
-			if (castTarget.trim().endsWith('[]')) {
+			if (unnestedColumns.has(col) && castTarget.trim().endsWith('[]')) {
 				throw new Error(
 					`Batch mutation of array-typed column '${col}' (${castTarget}) is not supported: unnest flattens multi-dimensional arrays. Use single-row mutations for array columns.`,
 				);
@@ -549,8 +553,16 @@ export function compileInsert(
 	const columns = Object.keys(firstRow);
 	const rows = intent.values ?? [];
 	const values = rows.map((row) => columns.map((col) => row[col]));
-
-	const columnTypes = getColumnTypes(intent.table, columns, deps);
+	const batchThreshold = options?.batchThreshold ?? 50;
+	const useUnnest =
+		values.length > 0 &&
+		(batchThreshold === 0 || values.length > batchThreshold);
+	const columnTypes = getColumnTypes(
+		intent.table,
+		columns,
+		deps,
+		useUnnest ? new Set(columns) : undefined,
+	);
 
 	const config: InsertConfig = {
 		table: declaredMutationTable(deps, intent.table),
@@ -582,11 +594,6 @@ export function compileInsert(
 	}
 
 	// Strategy switch: unnest for large batches, VALUES for small (INV-03)
-	const batchThreshold = options?.batchThreshold ?? 50;
-	const useUnnest =
-		values.length > 0 &&
-		(batchThreshold === 0 || values.length > batchThreshold);
-
 	const ast = useUnnest
 		? compileUnnestInsertMutation(config, ctx, state)
 		: compileInsertMutation(config, ctx, state);
@@ -794,6 +801,7 @@ export function compileBatchUpdate(
 		intent.table,
 		[...allColumns, ...Object.keys(intent.scalarSet ?? {})],
 		deps,
+		new Set(allColumns),
 	);
 
 	// Build scalar SET entries from scalarSet
@@ -966,6 +974,10 @@ export function compileUpsert(
 		const mergedRow = hasScalarSet ? { ...row, ...scalarSet } : row;
 		return columns.map((col) => mergedRow[col]);
 	});
+	const batchThreshold = options?.batchThreshold ?? 50;
+	const useUnnest =
+		values.length > 0 &&
+		(batchThreshold === 0 || values.length > batchThreshold);
 
 	// Build conflict target
 	const conflictTarget: {
@@ -1033,7 +1045,12 @@ export function compileUpsert(
 		}
 	}
 
-	const columnTypes = getColumnTypes(intent.table, columns, deps);
+	const columnTypes = getColumnTypes(
+		intent.table,
+		columns,
+		deps,
+		useUnnest ? new Set(columns) : undefined,
+	);
 	const hasRawExprs = Object.keys(rawExprs).length > 0;
 	const actionWhere =
 		intent.action.type === 'doUpdate' && intent.action.where
@@ -1100,11 +1117,6 @@ export function compileUpsert(
 	}
 
 	// Strategy switch: unnest for large batches, VALUES for small (INV-03)
-	const batchThreshold = options?.batchThreshold ?? 50;
-	const useUnnest =
-		values.length > 0 &&
-		(batchThreshold === 0 || values.length > batchThreshold);
-
 	const ast = useUnnest
 		? compileUnnestUpsertMutation(config, ctx, state)
 		: compileUpsertMutation(config, ctx, state);
