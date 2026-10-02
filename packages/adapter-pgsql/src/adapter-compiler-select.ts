@@ -1,6 +1,6 @@
 /**
  * SELECT compilation: converts PlanReport to CompiledQuery.
- * Extracted from PgsqlAdapter.compile() and PgsqlAdapter.compileWithIncludes().
+ * Extracted from PgAdapter.compile() and PgAdapter.compileWithIncludes().
  *
  * @internal
  */
@@ -1283,14 +1283,14 @@ function assertSupportedIncludeWhere(
 
 /**
  * Compile a PlanReport to a parameterised SELECT query.
- * Extracted body of PgsqlAdapter.compile().
+ * Extracted body of PgAdapter.compile().
  */
 export function compileSelectEnvelope<T = unknown>(
 	plan: PlanReport,
 	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): ProjectionEnvelope<T> {
-	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
+	// schemaName precedence (options > adapter ctor) is resolved in PgAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const schemaName = deps.schemaName;
 
 	const resolvedModelForCompiler = options?.model ?? deps.model;

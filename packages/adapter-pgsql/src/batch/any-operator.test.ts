@@ -12,7 +12,7 @@ import { any, POSTGRESQL_CAPABILITIES, plan, schema } from '@dbsp/core';
 import { compile } from '@dbsp/nql';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Test schema
@@ -40,7 +40,7 @@ function intentToSQL(
 	const planReport = plan(queryIntent, testSchema.model, {
 		dialectCapabilities: POSTGRESQL_CAPABILITIES,
 	});
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	const result = adapter.compile(planReport, { model: testSchema.model });
 	return { sql: normalizeSQL(result.sql), params: result.parameters };
 }
@@ -66,7 +66,7 @@ function nqlToSQLWithParams(
 	const planReport = plan(compiled.ast.query, testSchema.model, {
 		dialectCapabilities: POSTGRESQL_CAPABILITIES,
 	});
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	const result = adapter.compile(planReport, { model: testSchema.model });
 	return { sql: normalizeSQL(result.sql), params: result.parameters };
 }

@@ -40,7 +40,7 @@ import { customExpressionWhereHandler } from '../handlers/where/custom-expressio
 import { jsonComparisonHandler } from '../handlers/where/json.js';
 import { scalarSubqueryHandler } from '../handlers/where/subquery.js';
 import { convertWhereCondition } from '../intent-to-decisions.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { deparse } from '../pgsql-deparser.js';
 import { createPgPhysicalModel } from '../physical-model/index.js';
 import { mapComparisonOperator } from '../plan-decision-extractor.js';
@@ -70,7 +70,7 @@ function resolverFor(model: typeof testSchema.model) {
 }
 
 function buildOrm() {
-	const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+	const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 	return createOrm({ model: testSchema.model, adapter });
 }
 

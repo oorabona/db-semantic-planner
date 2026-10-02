@@ -11,7 +11,7 @@
  *
  */
 
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { describe, expect, it } from 'vitest';
 import { createOrm } from '../orm.js';
 import { ref, schema } from '../schema.js';
@@ -49,7 +49,7 @@ const singleFkSchema = schema({
 });
 
 function buildOrm(db: typeof callGraphSchema) {
-	const adapter = createPgsqlCompileOnlyAdapter({ model: db.model });
+	const adapter = createPgCompileOnlyAdapter({ model: db.model });
 	return createOrm({ model: db.model, adapter });
 }
 

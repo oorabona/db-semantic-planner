@@ -9,7 +9,7 @@
 
 import { createOrm, fn, literal, op, param, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // Minimal schema for ORM integration tests (createOrm requires a schema)
 const minimalSchema = schema({
@@ -17,12 +17,12 @@ const minimalSchema = schema({
 } as const);
 
 // ============================================================================
-// PgsqlAdapter.compileSelectExpression() — unit tests
+// PgAdapter.compileSelectExpression() — unit tests
 // ============================================================================
 
-describe('PgsqlAdapter.compileSelectExpression()', () => {
+describe('PgAdapter.compileSelectExpression()', () => {
 	it('compiles nextval() to SELECT nextval(...)', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const expr = fn('nextval', literal('my_seq'));
 		const { sql, parameters } = adapter.compileSelectExpression(expr.intent);
 
@@ -31,7 +31,7 @@ describe('PgsqlAdapter.compileSelectExpression()', () => {
 	});
 
 	it('compiles now() to SELECT now()', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const expr = fn('now');
 		const { sql, parameters } = adapter.compileSelectExpression(expr.intent);
 
@@ -40,7 +40,7 @@ describe('PgsqlAdapter.compileSelectExpression()', () => {
 	});
 
 	it('compiles parameterized expression: $1 + $2', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const expr = op('+', param(1), param(2));
 		const { sql, parameters } = adapter.compileSelectExpression(expr.intent);
 
@@ -49,7 +49,7 @@ describe('PgsqlAdapter.compileSelectExpression()', () => {
 	});
 
 	it('compiles literal integer: SELECT 42', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const expr = literal(42);
 		const { sql, parameters } = adapter.compileSelectExpression(expr.intent);
 
@@ -59,7 +59,7 @@ describe('PgsqlAdapter.compileSelectExpression()', () => {
 
 	it('compiles literal string: SELECT $1', () => {
 		// literal('hello') is a SQL string literal — inlined as 'hello'
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const expr = literal('hello');
 		const { sql, parameters } = adapter.compileSelectExpression(expr.intent);
 
@@ -69,7 +69,7 @@ describe('PgsqlAdapter.compileSelectExpression()', () => {
 	});
 
 	it('compiles nested function call: pg_catalog.version()', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const expr = fn('version');
 		const { sql, parameters } = adapter.compileSelectExpression(expr.intent);
 
@@ -84,7 +84,7 @@ describe('PgsqlAdapter.compileSelectExpression()', () => {
 
 describe('orm.selectExpression()', () => {
 	it('accepts the caller model through a snake_case adapter boundary', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' });
+		const adapter = createPgCompileOnlyAdapter({ dbCasing: 'snake_case' });
 
 		expect(
 			adapter.compileSelectExpression(fn('now').intent, {
@@ -94,7 +94,7 @@ describe('orm.selectExpression()', () => {
 	});
 
 	it('returns { sql, parameters } for a scalar fn() expression', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const orm = createOrm({ schema: minimalSchema, adapter });
 
 		const result = orm.selectExpression(fn('nextval', literal('my_seq')));
@@ -106,7 +106,7 @@ describe('orm.selectExpression()', () => {
 	});
 
 	it('returns { sql, parameters } for a parameterized expression', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const orm = createOrm({ schema: minimalSchema, adapter });
 
 		const result = orm.selectExpression(op('+', param(10), param(20)));
@@ -116,7 +116,7 @@ describe('orm.selectExpression()', () => {
 	});
 
 	it('exposes execute() method on the result object', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const orm = createOrm({ schema: minimalSchema, adapter });
 
 		const result = orm.selectExpression(fn('now'));

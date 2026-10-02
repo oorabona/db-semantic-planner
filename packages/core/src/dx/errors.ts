@@ -536,7 +536,7 @@ export class ColumnNotFoundError extends TableScopedError {
  * const schema = await getSchemaFromDb(adapter); // dbCasing: 'snake_case'
  * const orm = createOrm({
  *   schema,
- *   adapter: createPgsqlAdapter(pool, { dbCasing: 'preserve' }),
+ *   adapter: createPgAdapter(pool, { dbCasing: 'preserve' }),
  * });
  * // Throws NamingConventionMismatchError
  * ```

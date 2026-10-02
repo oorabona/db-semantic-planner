@@ -2,7 +2,7 @@
  * @fileoverview FEAT-134: NQL tag interpolation binds values as compiler params.
  */
 
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { type NqlCompilerOptions, compile as nqlCompile } from '@dbsp/nql';
 import type { CompiledNqlQuery } from '@dbsp/types';
 import { NQL_INTERNAL_COMPILER_OPTIONS } from '@dbsp/types/internal';
@@ -32,7 +32,7 @@ function createParamTestTag() {
 		},
 	} as const);
 
-	return createNqlTag(db.definition, db.model, createPgsqlCompileOnlyAdapter());
+	return createNqlTag(db.definition, db.model, createPgCompileOnlyAdapter());
 }
 
 function createParamTestSchema() {
@@ -190,7 +190,7 @@ describe('FEAT-134 NQL tag params', () => {
 		const db = createParamTestSchema();
 		const orm = createOrm({
 			schema: db,
-			adapter: createPgsqlCompileOnlyAdapter(),
+			adapter: createPgCompileOnlyAdapter(),
 		});
 
 		const dump = expectQueryDump(
@@ -460,7 +460,7 @@ describe('FEAT-134 NQL tag params', () => {
 
 	it('passes explicit param nodes to the adapter without sidecar options', () => {
 		const db = createParamTestSchema();
-		const base = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
+		const base = createPgCompileOnlyAdapter() as unknown as Adapter;
 		let compileValue: unknown;
 		let compileOptions: unknown;
 		const adapter: Adapter = {
@@ -549,7 +549,7 @@ describe('FEAT-134 NQL tag params', () => {
 
 	it('compiles bound mutation pipelines through the full NQL bundle', () => {
 		const db = createMutationPipelineTestSchema();
-		const base = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
+		const base = createPgCompileOnlyAdapter() as unknown as Adapter;
 		let compileInput: PlanReport | CompiledNqlQuery | undefined;
 		let compileOptions: CompileOptions | undefined;
 		const adapter: Adapter = {
@@ -587,7 +587,7 @@ insert into archivedUsers from active_users`.dump() as MutationDump;
 describe('NQL mutation hook lifecycle', () => {
 	it('runs beforeMutation and afterMutation hooks around NQL tag mutations', async () => {
 		const db = createParamTestSchema();
-		const base = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
+		const base = createPgCompileOnlyAdapter() as unknown as Adapter;
 		const events: string[] = [];
 		const adapter: Adapter = {
 			...base,
@@ -635,7 +635,7 @@ describe('NQL mutation hook lifecycle', () => {
 
 	it('runs onError hooks when NQL tag mutation execution fails', async () => {
 		const db = createParamTestSchema();
-		const base = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
+		const base = createPgCompileOnlyAdapter() as unknown as Adapter;
 		const transformed = new Error('transformed NQL mutation error');
 		let errorTable: string | undefined;
 		let errorOperation: string | undefined;
@@ -725,7 +725,7 @@ describe('NQL CTE and set-operation bundles', () => {
 		'%s dumps the original bundle without a semantic plan',
 		(shape, source) => {
 			const db = createParamTestSchema();
-			const adapter = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
+			const adapter = createPgCompileOnlyAdapter() as unknown as Adapter;
 			const expectedBundle = compileNqlBundle(source, db.model, {
 				__p0: true,
 				__p1: 'Ada',
@@ -765,7 +765,7 @@ active_users | where name = ${'Ada'} | select id, name`.dump({
 		const db = createParamTestSchema();
 		const orm = createOrm({
 			schema: db,
-			adapter: createPgsqlCompileOnlyAdapter(),
+			adapter: createPgCompileOnlyAdapter(),
 		});
 		const builder =
 			shape === 'CTE'
@@ -783,7 +783,7 @@ active_users | where name = ${'Ada'} | select id, name`
 
 	it('compiles and executes the original CTE bundle through all()', async () => {
 		const db = createParamTestSchema();
-		const adapter = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
+		const adapter = createPgCompileOnlyAdapter() as unknown as Adapter;
 		const expectedBundle = compileNqlBundle(cteSource, db.model, {
 			__p0: true,
 			__p1: 'Ada',
@@ -810,7 +810,7 @@ active_users | where name = ${'Ada'} | select id, name`.all();
 
 	it('compiles a final set operation over a prior read binding as one bundle', () => {
 		const db = createParamTestSchema();
-		const adapter = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
+		const adapter = createPgCompileOnlyAdapter() as unknown as Adapter;
 		const source = [
 			'users | where active = :__p0 | select id, name | bind active_users',
 			'active_users | select id, name | union (users | where name = :__p1 | select id, name)',
@@ -834,7 +834,7 @@ active_users | select id, name | union (users | where name = ${'Ada'} | select i
 
 	it('refuses a CTE after a mutation binding before execution', async () => {
 		const db = createMutationPipelineTestSchema();
-		const adapter = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
+		const adapter = createPgCompileOnlyAdapter() as unknown as Adapter;
 		const execute = vi.fn<NonNullable<Adapter['execute']>>(
 			async <T>() => [] as T[],
 		);
@@ -855,7 +855,7 @@ with active_users as (users | select id, name) active_users | select id, name`.a
 		const db = createMutationPipelineTestSchema();
 		const orm = createOrm({
 			schema: db,
-			adapter: createPgsqlCompileOnlyAdapter(),
+			adapter: createPgCompileOnlyAdapter(),
 		});
 
 		expect(() =>

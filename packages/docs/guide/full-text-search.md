@@ -100,7 +100,7 @@ Binds no parameters — the key field is a column reference, not a value.
 
 ```typescript
 import { schema, createOrm, fullTextSearch } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const __ftsArticlesDb = schema({
   articles: {
@@ -111,7 +111,7 @@ const __ftsArticlesDb = schema({
     searchVector: { type: 'text', dbType: 'tsvector', nullable: true },
   },
 } as const);
-const __ftsArticlesOrm = createOrm({ schema: __ftsArticlesDb, adapter: createPgsqlCompileOnlyAdapter() });
+const __ftsArticlesOrm = createOrm({ schema: __ftsArticlesDb, adapter: createPgCompileOnlyAdapter() });
 const searchTerm = 'database internals';
 
 const results = await __ftsArticlesOrm
@@ -139,7 +139,7 @@ lower-priority fields.
 
 ```typescript
 import { schema, createOrm, fullTextSearch } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const __ftsSymbolsDb = schema({
   symbols: {
@@ -149,7 +149,7 @@ const __ftsSymbolsDb = schema({
     doc_comment: { type: 'text', nullable: true },
   },
 } as const);
-const __ftsSymbolsOrm = createOrm({ schema: __ftsSymbolsDb, adapter: createPgsqlCompileOnlyAdapter() });
+const __ftsSymbolsOrm = createOrm({ schema: __ftsSymbolsDb, adapter: createPgCompileOnlyAdapter() });
 const searchTerm = 'database internals';
 
 const results = await __ftsSymbolsOrm
@@ -177,7 +177,7 @@ Use `textScore()` in both `.columns()` (to surface the score) and `.orderBy()` (
 
 ```typescript
 import { schema, createOrm, fullTextSearch, textScore } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const __ftsSymbolsScoreDb = schema({
   symbols: {
@@ -186,7 +186,7 @@ const __ftsSymbolsScoreDb = schema({
     doc_comment: { type: 'text', nullable: true },
   },
 } as const);
-const __ftsSymbolsScoreOrm = createOrm({ schema: __ftsSymbolsScoreDb, adapter: createPgsqlCompileOnlyAdapter() });
+const __ftsSymbolsScoreOrm = createOrm({ schema: __ftsSymbolsScoreDb, adapter: createPgCompileOnlyAdapter() });
 const searchTerm = 'database internals';
 
 const results = await __ftsSymbolsScoreOrm
@@ -217,7 +217,7 @@ Chain `fullTextSearch()` alongside other filter helpers using `.where()`. Multip
 
 ```typescript
 import { schema, createOrm, fullTextSearch, eq } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const __ftsArticlesWhereDb = schema({
   articles: {
@@ -227,7 +227,7 @@ const __ftsArticlesWhereDb = schema({
     status: 'string',
   },
 } as const);
-const __ftsArticlesWhereOrm = createOrm({ schema: __ftsArticlesWhereDb, adapter: createPgsqlCompileOnlyAdapter() });
+const __ftsArticlesWhereOrm = createOrm({ schema: __ftsArticlesWhereDb, adapter: createPgCompileOnlyAdapter() });
 const searchTerm = 'database internals';
 
 const results = await __ftsArticlesWhereOrm
@@ -255,10 +255,10 @@ When the BM25 index uses a key field other than `id`, pass the field name explic
 
 ```typescript
 import { createOrm, schema, textScore } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const __ftsUsersDb = schema({ users: { id: 'uuid' } } as const);
-const __ftsUsersOrm = createOrm({ schema: __ftsUsersDb, adapter: createPgsqlCompileOnlyAdapter() });
+const __ftsUsersOrm = createOrm({ schema: __ftsUsersDb, adapter: createPgCompileOnlyAdapter() });
 
 __ftsUsersOrm.select('users')
   .columns(['*', textScore('id').as('relevance')])

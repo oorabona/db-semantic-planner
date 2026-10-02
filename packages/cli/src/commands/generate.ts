@@ -74,11 +74,11 @@ export const generateCommand = new Command('generate')
 
 				let targetDialectCapabilities: DialectCapabilities | undefined;
 				if (options.postgresqlVersion !== undefined) {
-					const { derivePostgresqlCapabilitiesForVersion } = await import(
+					const { derivePgCapabilitiesForVersion } = await import(
 						'@dbsp/adapter-pgsql'
 					);
 					try {
-						targetDialectCapabilities = derivePostgresqlCapabilitiesForVersion(
+						targetDialectCapabilities = derivePgCapabilitiesForVersion(
 							options.postgresqlVersion,
 						);
 					} catch (error) {
@@ -128,10 +128,10 @@ export const generateCommand = new Command('generate')
 						const casingLabel = formatGenerateCasingLabel(dbCasing);
 
 						// Import adapter from adapter-pgsql (compile-only, no DB connection needed)
-						const { createPgPhysicalModel, createPgsqlCompileOnlyAdapter } =
+						const { createPgPhysicalModel, createPgCompileOnlyAdapter } =
 							await import('@dbsp/adapter-pgsql');
 
-						const adapter = createPgsqlCompileOnlyAdapter({
+						const adapter = createPgCompileOnlyAdapter({
 							dbCasing,
 							...(options.schemaName ? { schemaName: options.schemaName } : {}),
 						});

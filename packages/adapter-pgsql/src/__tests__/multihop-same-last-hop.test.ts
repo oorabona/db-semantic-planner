@@ -21,7 +21,7 @@
 
 import { POSTGRESQL_CAPABILITIES, plan, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Schema: users → posts/articles → comments (two paths to the same table)
@@ -56,7 +56,7 @@ const testSchema = schema({
 	},
 } as const);
 
-const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 
 function ws(sql: string): string {
 	return sql.replace(/\s+/g, ' ').trim();

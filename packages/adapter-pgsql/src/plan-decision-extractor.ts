@@ -1,7 +1,7 @@
 /**
  * Plan Decision Extractor
  *
- * Extracted from PgsqlAdapter — converts PlanReport decisions into
+ * Extracted from PgAdapter — converts PlanReport decisions into
  * PlanDecision arrays for the compiler. Handles EXISTS, LEFT JOIN,
  * JSON_AGG, and dotted-field → EXISTS conversion.
  *

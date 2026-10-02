@@ -41,13 +41,13 @@ export {
 	assertNoRepeatedExpressionSurfaceDrift,
 	type ChangeKind,
 	CheckConstraintNewEnumValueError,
-	type ComparePgsqlDatabaseSchemaOptions,
+	type ComparePgDatabaseSchemaOptions,
 	type CompareSchemataOptions,
 	canGenerateCreateIndex,
 	classifyGeneratedMutation,
-	comparePgsqlDatabaseSchema,
+	comparePgDatabaseSchema,
 	compareSchemata,
-	createPgsqlGeneratedManagedStep,
+	createPgGeneratedManagedStep,
 	type DiffSummary,
 	decodeGeneratedPostcondition,
 	decodeGeneratedPostconditionPayload,
@@ -197,26 +197,26 @@ export {
 } from './param-ref.js';
 // Adapter
 export {
-	createPgsqlAdapter,
-	createPgsqlCompileOnlyAdapter,
+	createPgAdapter,
+	createPgCompileOnlyAdapter,
+	PgAdapter,
+	type PgAdapterOptions,
 	type PgAdvisoryLockKey,
+	PgAdvisoryLockOptionsError,
 	type PgAdvisoryLockResult,
-	PgsqlAdapter,
-	type PgsqlAdapterOptions,
-	PgsqlAdvisoryLockOptionsError,
-	type PgsqlBorrowedClientAdapterOptions,
-	type PgsqlCompileOnlyAdapterOptions,
-	PgsqlPinnedConnectionAbortSignalError,
-	type PgsqlPoolAdapterOptions,
-	PgsqlPreparedStatementReplayError,
-	type PgsqlPreparedStatementsOptions,
-	PgsqlRawSqlTransactionControlError,
-	PgsqlTransactionAbortedCommitError,
-	PgsqlTransactionAbortedError,
-	PgsqlTransactionAbortSignalError,
-	PgsqlTransactionOptionsError,
-	PgsqlTransactionTimeoutError,
-	type RollbackOnlyPgsqlScope,
+	type PgBorrowedClientAdapterOptions,
+	type PgCompileOnlyAdapterOptions,
+	PgPinnedConnectionAbortSignalError,
+	type PgPoolAdapterOptions,
+	PgPreparedStatementReplayError,
+	type PgPreparedStatementsOptions,
+	PgRawSqlTransactionControlError,
+	type PgRollbackOnlyScope,
+	PgTransactionAbortedCommitError,
+	PgTransactionAbortedError,
+	PgTransactionAbortSignalError,
+	PgTransactionOptionsError,
+	PgTransactionTimeoutError,
 } from './pgsql-adapter.js';
 // PostgreSQL physical-name authority
 export {
@@ -229,7 +229,7 @@ export {
 	PgPhysicalNameCollisionError,
 	type PgPhysicalNamespace,
 } from './physical-model/index.js';
-export { derivePostgresqlCapabilitiesForVersion } from './postgresql-capabilities.js';
+export { derivePgCapabilitiesForVersion } from './postgresql-capabilities.js';
 // Redaction (params logging safety)
 export {
 	DEFAULT_REDACTION_PATTERNS,

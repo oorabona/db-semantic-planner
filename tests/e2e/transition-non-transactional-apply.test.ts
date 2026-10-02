@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 import type { ModelIR } from '@dbsp/core';
 import type { PoolClient } from 'pg';
 import { describe, expect, it } from 'vitest';
@@ -533,7 +533,7 @@ async function planConcurrentIndex(schema: string, scenario?: Scenario) {
 	const pool = await getTestPool();
 	const db = process.env.DATABASE_URL;
 	if (!db) throw new Error('e2e DATABASE_URL is required');
-	const adapter = createPgsqlAdapter(pool, { schemaName: schema });
+	const adapter = createPgAdapter(pool, { schemaName: schema });
 	const current = await adapter.introspect({ schema });
 	const desired = desiredWithConcurrentUniqueIndex(current);
 	const planned = await runPlan(

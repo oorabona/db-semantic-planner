@@ -10,10 +10,10 @@ import { randomUUID } from 'node:crypto';
 import {
 	assertDeclarableChangeKind,
 	classifyGeneratedMutation,
-	comparePgsqlDatabaseSchema,
+	comparePgDatabaseSchema,
+	createPgAdapter,
+	createPgGeneratedManagedStep,
 	createPgPhysicalModel,
-	createPgsqlAdapter,
-	createPgsqlGeneratedManagedStep,
 	createPgTransitionLessor,
 	createPgTransitionRunPersister,
 	generatedPostconditionForChange,
@@ -25,11 +25,11 @@ import {
 } from '@dbsp/adapter-pgsql';
 import {
 	collectReferencedKeyRemovalConflicts,
-	comparePgsqlDeclaredAdoptionSchema,
-	createPgsqlDeclaredAdoptionStep,
+	comparePgDeclaredAdoptionSchema,
+	createPgDeclaredAdoptionStep,
 	generateMigrationSQL as generateMigrationSQLForPhysicalDiff,
 	modelForDeclaredAdoption,
-	pgsqlDeclaredAdoptionDeclaration,
+	pgDeclaredAdoptionDeclaration,
 } from '@dbsp/adapter-pgsql/internal';
 import type { InProcessProvenPlan } from '@dbsp/core';
 import {
@@ -494,8 +494,8 @@ export async function runGeneratorPlan(input: {
 	}
 	const { pool } = await createDbConnection(input.db);
 	try {
-		const diff = await comparePgsqlDatabaseSchema(
-			createPgsqlAdapter(pool),
+		const diff = await comparePgDatabaseSchema(
+			createPgAdapter(pool),
 			physical,
 			{
 				// `apply --schema` owns one schema. Extensions are database-scoped,
@@ -544,7 +544,7 @@ export async function runGeneratorPlan(input: {
 			if (table.adopt !== true) continue;
 			const physicalName = physicalTable(table.name);
 			adoptionPhysicalNames.set(table.name, physicalName);
-			const compared = await comparePgsqlDeclaredAdoptionSchema({
+			const compared = await comparePgDeclaredAdoptionSchema({
 				executor: pool,
 				model: modelForDeclaredAdoption(table),
 				schema,
@@ -663,7 +663,7 @@ export async function runGeneratorPlan(input: {
 							details: `Adopt existing table "${physicalName}" after live shape match`,
 							statements: [],
 							adoption: {
-								declaration: pgsqlDeclaredAdoptionDeclaration(table),
+								declaration: pgDeclaredAdoptionDeclaration(table),
 								shape: table,
 								catalogueIdentity: requiredAdoptionIdentity(
 									adoptionIdentities,
@@ -713,7 +713,7 @@ export async function runGeneratorPlan(input: {
 					);
 				ordinaryStepSources.push({
 					change,
-					step: createPgsqlGeneratedManagedStep({
+					step: createPgGeneratedManagedStep({
 						change: {
 							...change,
 							kind: 'drop_foreign_key',
@@ -730,7 +730,7 @@ export async function runGeneratorPlan(input: {
 				});
 				ordinaryStepSources.push({
 					change,
-					step: createPgsqlGeneratedManagedStep({
+					step: createPgGeneratedManagedStep({
 						change: { ...change, kind: 'add_foreign_key', destructive: false },
 						database,
 						schema,
@@ -744,7 +744,7 @@ export async function runGeneratorPlan(input: {
 			}
 			ordinaryStepSources.push({
 				change,
-				step: createPgsqlGeneratedManagedStep({
+				step: createPgGeneratedManagedStep({
 					change,
 					database,
 					schema,
@@ -810,7 +810,7 @@ export async function runGeneratorPlan(input: {
 				continue;
 			}
 			if (change.kind === 'adopt_table' && change.adoption) {
-				const adoptionStep = createPgsqlDeclaredAdoptionStep({
+				const adoptionStep = createPgDeclaredAdoptionStep({
 					address: {
 						scope: 'schema',
 						engine: 'postgresql',

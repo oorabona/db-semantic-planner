@@ -4,7 +4,7 @@
  * Tracks: https://github.com/oorabona/db-semantic-planner/issues/113
  */
 
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { describe, expect, it, vi } from 'vitest';
 import type { Adapter } from '../../adapter.js';
 import type { MutationDump } from '../mutation-builders.js';
@@ -26,7 +26,7 @@ function createMutationTag(executeResult: readonly unknown[] = []) {
 			active: 'boolean',
 		},
 	} as const);
-	const adapter = createPgsqlCompileOnlyAdapter({
+	const adapter = createPgCompileOnlyAdapter({
 		model: db.model,
 	}) as unknown as Adapter;
 
@@ -57,7 +57,7 @@ function createExecuteOnlyMutationTag(executeResult: readonly unknown[] = []) {
 			active: 'boolean',
 		},
 	} as const);
-	const adapter = createPgsqlCompileOnlyAdapter({
+	const adapter = createPgCompileOnlyAdapter({
 		model: db.model,
 	}) as unknown as Adapter;
 

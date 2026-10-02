@@ -15,7 +15,7 @@ pnpm add @dbsp/nql
 
 ```typescript
 // doctest: skip — exec-only operation; orm.from(intent).all() requires a real PostgreSQL connection
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { compile } from '@dbsp/nql';
 
 // Compile an NQL query to a public intent bundle
@@ -29,7 +29,7 @@ if (!compiled.success || !compiled.ast?.query) {
 }
 
 // Pass the whole bundle to the adapter; bound params are explicit public IR nodes
-const adapter = createPgsqlCompileOnlyAdapter();
+const adapter = createPgCompileOnlyAdapter();
 const query = adapter.compile(compiled.ast, { model: db.model });
 ```
 
@@ -71,7 +71,7 @@ Use `:name` placeholders for runtime values and pass a `params` map to the compi
 
 ```typescript
 // doctest: skip — illustrative direct compiler params example
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { compile } from '@dbsp/nql';
 
 const compiled = compile(
@@ -85,7 +85,7 @@ if (!compiled.success || !compiled.ast?.query) {
   throw new Error(compiled.errors.map((e) => e.message).join(', '));
 }
 
-const adapter = createPgsqlCompileOnlyAdapter();
+const adapter = createPgCompileOnlyAdapter();
 const query = adapter.compile(compiled.ast, { model: db.model });
 ```
 

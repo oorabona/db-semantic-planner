@@ -10,7 +10,7 @@
 import {
 	compileSetOperation,
 	createLeafCompileFn,
-	createPgsqlCompileOnlyAdapter,
+	createPgCompileOnlyAdapter,
 } from '@dbsp/adapter-pgsql';
 import {
 	type AssertionQueryResult,
@@ -192,7 +192,7 @@ function compileQuery(
 	}
 
 	const compiled = result.ast;
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 
 	try {
 		if (compiled.query) {

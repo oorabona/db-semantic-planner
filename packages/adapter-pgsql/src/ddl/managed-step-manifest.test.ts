@@ -20,8 +20,8 @@ import { normalizeSequenceInteger } from './generated-source-normalizers.js';
 import {
 	addressForChange,
 	assertDeclarableChangeKind,
-	createPgsqlDeclaredSequenceAdoptionStep,
-	createPgsqlGeneratedManagedStep,
+	createPgDeclaredSequenceAdoptionStep,
+	createPgGeneratedManagedStep,
 	generatedPostconditionDigest,
 	generatedPostconditionForChange,
 } from './managed-step-manifest.js';
@@ -161,7 +161,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 	});
 
 	it('persists physical sequence adoption material without the adopt directive', () => {
-		const step = createPgsqlDeclaredSequenceAdoptionStep({
+		const step = createPgDeclaredSequenceAdoptionStep({
 			address: {
 				scope: 'schema',
 				engine: 'postgresql',
@@ -192,7 +192,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 
 	it('refuses sequence adoption whose declared schema differs from its address', () => {
 		expect(() =>
-			createPgsqlDeclaredSequenceAdoptionStep({
+			createPgDeclaredSequenceAdoptionStep({
 				address: {
 					scope: 'schema',
 					engine: 'postgresql',
@@ -277,7 +277,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 			'sequence creation, ownership, and default DDL must be written by hand',
 		);
 		expect(() =>
-			createPgsqlGeneratedManagedStep({
+			createPgGeneratedManagedStep({
 				change: {
 					kind: 'alter_column_auto_increment',
 					table: 'orders',
@@ -714,7 +714,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 	});
 
 	it('carries a typed target table postcondition for a re-address step', () => {
-		const step = createPgsqlGeneratedManagedStep({
+		const step = createPgGeneratedManagedStep({
 			change: {
 				kind: 'readdress_table',
 				table: 'accounts',
@@ -754,7 +754,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 
 	it('refuses a re-address step without its typed target table postcondition', () => {
 		expect(() =>
-			createPgsqlGeneratedManagedStep({
+			createPgGeneratedManagedStep({
 				change: {
 					kind: 'readdress_table',
 					table: 'accounts',
@@ -773,7 +773,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 	});
 
 	it('maps a foreign key to its named constraint address at planning time', () => {
-		const step = createPgsqlGeneratedManagedStep({
+		const step = createPgGeneratedManagedStep({
 			change: {
 				kind: 'add_foreign_key',
 				table: 'orders',
@@ -804,7 +804,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 	});
 
 	it('maps a generated index to its named index address at planning time', () => {
-		const step = createPgsqlGeneratedManagedStep({
+		const step = createPgGeneratedManagedStep({
 			change: {
 				kind: 'create_index',
 				table: 'orders',
@@ -830,7 +830,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 	});
 
 	it('C10 gives a generated child the inspect-side canonical ledger key', () => {
-		const step = createPgsqlGeneratedManagedStep({
+		const step = createPgGeneratedManagedStep({
 			change: {
 				kind: 'create_index',
 				table: 'orders',
@@ -868,7 +868,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 		'E01 refuses an empty generated column list: %j',
 		({ columns }) => {
 			expect(() =>
-				createPgsqlGeneratedManagedStep({
+				createPgGeneratedManagedStep({
 					change: {
 						kind: 'create_index',
 						table: 'orders',
@@ -986,7 +986,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 		({ change }) => {
 			for (const columns of [[], ['   ']] as const) {
 				expect(() =>
-					createPgsqlGeneratedManagedStep({
+					createPgGeneratedManagedStep({
 						change: change(columns),
 						database: 'app',
 						schema: 'public',
@@ -1263,7 +1263,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				'diagnostic-only and non-declarable',
 			);
 			expect(() =>
-				createPgsqlGeneratedManagedStep({
+				createPgGeneratedManagedStep({
 					change: {
 						kind,
 						table: 'orders',
@@ -1281,7 +1281,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 	);
 
 	it('models a unique addition as constraint creation with a vacancy claim', () => {
-		const step = createPgsqlGeneratedManagedStep({
+		const step = createPgGeneratedManagedStep({
 			change: {
 				kind: 'alter_column_unique',
 				table: 'orders',
@@ -1306,7 +1306,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 	});
 
 	it('carries ModelIR table postconditions without deriving them from rendered SQL', () => {
-		const step = createPgsqlGeneratedManagedStep({
+		const step = createPgGeneratedManagedStep({
 			change: {
 				kind: 'create_table',
 				table: 'ledger',

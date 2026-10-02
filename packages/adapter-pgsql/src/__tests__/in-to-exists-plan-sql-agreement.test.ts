@@ -25,7 +25,7 @@ import {
 } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Schema: products --(hasMany productImages via productId FK)
@@ -88,7 +88,7 @@ function compileIntent(
 	const planReport = plan(intent, model, {
 		dialectCapabilities: POSTGRESQL_CAPABILITIES,
 	});
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	const result = adapter.compile(planReport, { model });
 	return { sql: normalizeSQL(result.sql), params: result.parameters };
 }
@@ -795,7 +795,7 @@ describe('enrichExistsDecisionsInPlace: constructor model used when compile opti
 		expect(filterDecision).toBeDefined();
 
 		// Reference: compile with model in OPTIONS (the currently-working path)
-		const adapterNoCtorModel = createPgsqlCompileOnlyAdapter();
+		const adapterNoCtorModel = createPgCompileOnlyAdapter();
 		const sqlWithOptionsModel = normalizeSQL(
 			adapterNoCtorModel.compile(planReport, { model: belongsToSchema.model })
 				.sql,
@@ -806,7 +806,7 @@ describe('enrichExistsDecisionsInPlace: constructor model used when compile opti
 		//   relationType not resolved → hasMany fallback → wrong FK direction.
 		// After FIX 2: deps.model (= constructor model) is used → belongsTo resolved →
 		//   correct FK direction.
-		const adapterWithCtorModel = createPgsqlCompileOnlyAdapter({
+		const adapterWithCtorModel = createPgCompileOnlyAdapter({
 			model: belongsToSchema.model,
 		});
 		const sqlWithCtorModel = normalizeSQL(

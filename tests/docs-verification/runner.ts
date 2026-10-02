@@ -75,8 +75,8 @@ const CORE_AMBIENT_NAMES = [
 	'exprRef',
 ] as const;
 const ADAPTER_AMBIENT_NAMES = [
-	'createPgsqlCompileOnlyAdapter',
-	'createPgsqlAdapter',
+	'createPgCompileOnlyAdapter',
+	'createPgAdapter',
 	'bm25Search',
 	'booleanSearch',
 	'boost',
@@ -255,12 +255,12 @@ function renderPreamble(
 		.join('\n');
 	const privateImports = realDb
 		? `import { schema as __doctestSchema, ref as __doctestRef, createOrm as __doctestCreateOrm } from '@dbsp/core';
-import { createPgPhysicalModel as __doctestCreatePgPhysicalModel, createPgsqlAdapter as __doctestCreatePgsqlAdapter, generateDDL as __doctestGenerateDDL } from '@dbsp/adapter-pgsql';
+import { createPgPhysicalModel as __doctestCreatePgPhysicalModel, createPgAdapter as __doctestCreatePgsqlAdapter, generateDDL as __doctestGenerateDDL } from '@dbsp/adapter-pgsql';
 import { Pool as __doctestPgPool } from 'pg';
 import { env as __doctestEnv } from 'node:process';
 `
 		: `import { schema as __doctestSchema, ref as __doctestRef, createOrm as __doctestCreateOrm } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter as __doctestCreatePgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter as __doctestCreatePgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { env as __doctestEnv } from 'node:process';
 `;
 	const fixture = (name: string, declaration: string) =>

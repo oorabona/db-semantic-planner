@@ -12,7 +12,7 @@
 
 import type { ModelIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Test schema: variable_uses table with nullable integer FK
@@ -123,7 +123,7 @@ const UNNEST_OPTIONS = { batchThreshold: 0 } as const;
 describe('BATCH-INSERT-NULLABLE-INT: schema-driven int4[] for nullable integer columns', () => {
 	it('uses int4[] (not text[]) when enclosing_symbol_id has mixed null/non-null values', () => {
 		const model = buildModel();
-		const adapter = createPgsqlCompileOnlyAdapter({ model });
+		const adapter = createPgCompileOnlyAdapter({ model });
 
 		const intent = {
 			type: 'insert' as const,
@@ -143,7 +143,7 @@ describe('BATCH-INSERT-NULLABLE-INT: schema-driven int4[] for nullable integer c
 
 	it('uses int4[] (not text[]) when enclosing_symbol_id is ALL null (schema-driven, not sample-driven)', () => {
 		const model = buildModel();
-		const adapter = createPgsqlCompileOnlyAdapter({ model });
+		const adapter = createPgCompileOnlyAdapter({ model });
 
 		const intent = {
 			type: 'insert' as const,
@@ -164,7 +164,7 @@ describe('BATCH-INSERT-NULLABLE-INT: schema-driven int4[] for nullable integer c
 
 	it('uses int4[] for non-nullable integer column (regression guard)', () => {
 		const model = buildModel();
-		const adapter = createPgsqlCompileOnlyAdapter({ model });
+		const adapter = createPgCompileOnlyAdapter({ model });
 
 		const intent = {
 			type: 'insert' as const,
@@ -184,7 +184,7 @@ describe('BATCH-INSERT-NULLABLE-INT: schema-driven int4[] for nullable integer c
 
 	it('prefers originalDbType over ColumnType when both are set', () => {
 		const model = buildModelWithOriginalDbType();
-		const adapter = createPgsqlCompileOnlyAdapter({ model });
+		const adapter = createPgCompileOnlyAdapter({ model });
 
 		const intent = {
 			type: 'insert' as const,
@@ -233,7 +233,7 @@ describe('BATCH-INSERT-NULLABLE-INT: schema-driven int4[] for nullable integer c
 			getRelationsTo: () => [],
 			isAmbiguous: () => ({ ambiguous: false }),
 		} as unknown as ModelIR;
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model,
 			schemaName: 'tenantOne',
 			dbCasing: 'snake_case',
@@ -282,7 +282,7 @@ describe('BATCH-INSERT-NULLABLE-INT: schema-driven int4[] for nullable integer c
 			getRelationsTo: () => [],
 			isAmbiguous: () => ({ ambiguous: false }),
 		} as unknown as ModelIR;
-		const adapter = createPgsqlCompileOnlyAdapter({ model });
+		const adapter = createPgCompileOnlyAdapter({ model });
 
 		const result = adapter.compileInsert(
 			{
@@ -318,7 +318,7 @@ describe('BATCH-INSERT-NULLABLE-INT: schema-driven int4[] for nullable integer c
 			rlsEnabled: false,
 			policies: [],
 		} as unknown as TableIR;
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: buildSingleTableModel(table),
 		});
 
@@ -368,7 +368,7 @@ describe('BATCH-INSERT-NULLABLE-INT: schema-driven int4[] for nullable integer c
 			rlsEnabled: false,
 			policies: [],
 		} as unknown as TableIR;
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: buildSingleTableModel(table),
 		});
 
@@ -429,7 +429,7 @@ describe('BATCH-INSERT-NULLABLE-INT: schema-driven int4[] for nullable integer c
 			rlsEnabled: false,
 			policies: [],
 		} as unknown as TableIR;
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: buildSingleTableModel(table),
 		});
 
@@ -474,7 +474,7 @@ describe('BATCH-INSERT-NULLABLE-INT: schema-driven int4[] for nullable integer c
 			rlsEnabled: false,
 			policies: [],
 		} as unknown as TableIR;
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: buildSingleTableModel(table),
 		});
 
@@ -514,7 +514,7 @@ describe('BATCH-INSERT-NULLABLE-INT: schema-driven int4[] for nullable integer c
 			rlsEnabled: false,
 			policies: [],
 		} as unknown as TableIR;
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: buildSingleTableModel(table),
 		});
 

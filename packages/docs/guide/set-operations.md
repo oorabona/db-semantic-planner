@@ -36,12 +36,12 @@ Combine active users and recently-activated accounts into a single deduped list:
 
 ```typescript
 import { schema, createOrm, eq, gt } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({
   users: { id: 'integer', name: 'string', active: 'boolean', activatedAt: 'timestamp' },
 } as const);
-const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter() });
 
 const active = orm.select('users').where(eq('active', true)).columns(['id', 'name']);
 const recentlyActivated = orm.select('users')
@@ -67,13 +67,13 @@ Collect all "notable entity" IDs from two unrelated tables â€” users and organiz
 
 ```typescript
 import { schema, createOrm, eq } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({
   users: { id: 'integer', name: 'string', notificationsEnabled: 'boolean' },
   organizations: { id: 'integer', name: 'string', notificationsEnabled: 'boolean' },
 } as const);
-const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter() });
 
 const notifiableUsers = orm.select('users')
   .where(eq('notificationsEnabled', true))
@@ -99,13 +99,13 @@ Find rows present in a snapshot table but missing from the current live table â€
 
 ```typescript
 import { schema, createOrm } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({
   products: { id: 'integer', sku: 'string', price: 'decimal' },
   products_snapshot: { id: 'integer', sku: 'string', price: 'decimal' },
 } as const);
-const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter() });
 
 const snapshot = orm.select('products_snapshot').columns(['id', 'sku', 'price']);
 const live = orm.select('products').columns(['id', 'sku', 'price']);

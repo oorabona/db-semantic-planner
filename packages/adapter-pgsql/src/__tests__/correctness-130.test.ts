@@ -34,7 +34,7 @@ import {
 } from '../compile-where.js';
 import { createCompilerState } from '../handlers/types.js';
 import { convertWhereCondition, isOuterRef } from '../intent-to-decisions.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { convertWhereToDecisions } from '../plan-decision-extractor.js';
 
 // ---------------------------------------------------------------------------
@@ -245,7 +245,7 @@ describe('DEFECT 1: single-hop relationFilter threads declared FK columns', () =
 		// an outer SELECT context.
 		// The inner exists('comments', { include: { post: { join: 'inner' } }, where: ... })
 		// must emit the JOIN on `post` inside the comments subquery.
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: testSchema.model as any,
 		});
 		const orm = createOrm({
@@ -276,7 +276,7 @@ describe('DEFECT 1: single-hop relationFilter threads declared FK columns', () =
 	it('DEFECT-1 (nested include JOIN — no include baseline): inner exists WITHOUT include has NO JOIN', () => {
 		// Baseline: a nested exists without include must NOT add a JOIN.
 		// This validates that adding the fix does not accidentally inject joins.
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: testSchema.model as any,
 		});
 		const orm = createOrm({
@@ -662,7 +662,7 @@ const schemaScoped = schema({
 } as const);
 
 function buildScopedOrm() {
-	const adapter = createPgsqlCompileOnlyAdapter({ model: schemaScoped.model });
+	const adapter = createPgCompileOnlyAdapter({ model: schemaScoped.model });
 	return createOrm({ model: schemaScoped.model, adapter: adapter as any });
 }
 
@@ -797,7 +797,7 @@ const everySchema = schema({
 } as const);
 
 function buildEveryOrm() {
-	const adapter = createPgsqlCompileOnlyAdapter({ model: everySchema.model });
+	const adapter = createPgCompileOnlyAdapter({ model: everySchema.model });
 	return createOrm({ model: everySchema.model, adapter });
 }
 
@@ -994,7 +994,7 @@ describe('FIX 3 (nested multi-hop enrichExistsStubs): mode:every vacuous → TRU
 			everySchema.model,
 			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
 		);
-		const adapter = createPgsqlCompileOnlyAdapter({ model: everySchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: everySchema.model });
 		const { sql } = adapter.compile(planReport, { model: everySchema.model });
 		const normalized = sql.replace(/\s+/g, ' ').trim();
 
@@ -1068,7 +1068,7 @@ describe('FIX 4 (suppression key): nested multi-hop — no extra root-level EXIS
 			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
 		);
 
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: nestedMultiHopSchema.model,
 		});
 		const { sql, parameters } = adapter.compile(planReport, {
@@ -1258,7 +1258,7 @@ describe('NEW-DEFECT-2 (nested range/between delegation): nested between in exis
 			},
 		} as const);
 
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: nestedBetweenSchema.model,
 		});
 		const orm = createOrm({

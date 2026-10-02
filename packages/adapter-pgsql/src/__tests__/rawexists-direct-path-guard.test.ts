@@ -26,7 +26,7 @@ import {
 } from '../compile-where.js';
 import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
 import { createCompilerState } from '../handlers/types.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -156,7 +156,7 @@ describe('DEFECT-2: batchSet().where(rawExists with LIMIT) throws (mutation guar
 	function makeOrm() {
 		return createOrm({
 			model: testSchema.model,
-			adapter: createPgsqlCompileOnlyAdapter({
+			adapter: createPgCompileOnlyAdapter({
 				model: testSchema.model,
 			}) as any,
 		}) as any;

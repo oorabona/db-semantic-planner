@@ -1,7 +1,7 @@
 import { ModelIRImpl, POSTGRESQL_CAPABILITIES, schema } from '@dbsp/core';
 import type { ModelIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { createPgPhysicalModel } from '../physical-model/index.js';
 import { compareSchemata, generateDDL } from './public-api.js';
 
@@ -198,7 +198,7 @@ describe('physical SQL expression text', () => {
 	});
 
 	it('does not rewrite public index expression and predicate text', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: modelWith('index-expression', 'lower(userEmail)'),
 			dbCasing: 'snake_case',
 		});
@@ -214,7 +214,7 @@ describe('physical SQL expression text', () => {
 	});
 
 	it('does not rewrite public ALTER COLUMN USING text', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: modelWith('check', 'createdAt > now()'),
 			dbCasing: 'snake_case',
 		});

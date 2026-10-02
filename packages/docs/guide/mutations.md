@@ -139,7 +139,7 @@ const __mutationGuardDb = schema({
 
 const __mutationGuardOrm = createOrm({
   schema: __mutationGuardDb,
-  adapter: createPgsqlCompileOnlyAdapter({ model: __mutationGuardDb.model }),
+  adapter: createPgCompileOnlyAdapter({ model: __mutationGuardDb.model }),
 });
 
 const __mutationGuardDump = __mutationGuardOrm.update('posts')

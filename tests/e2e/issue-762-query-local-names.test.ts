@@ -7,7 +7,7 @@
 
 import { createOrm, isInsertIntent, plan, schema } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createPgsqlAdapter } from '../../packages/adapter-pgsql/src/pgsql-adapter.js';
+import { createPgAdapter } from '../../packages/adapter-pgsql/src/pgsql-adapter.js';
 import { compile } from '../../packages/nql/src/index.js';
 import {
 	closeTestDb,
@@ -36,7 +36,7 @@ const issue762Schema = schema(
 );
 
 function adapterForTest(pool: Awaited<ReturnType<typeof getTestPool>>) {
-	return createPgsqlAdapter(pool, {
+	return createPgAdapter(pool, {
 		schemaName: SCHEMA,
 		dbCasing: 'snake_case',
 		model: issue762Schema.model,
@@ -186,7 +186,7 @@ describe('Issue #762 — query-local names', () => {
 		await sql`
 			INSERT INTO ${sql.ref(SCHEMA)}.records VALUES ('long value')
 		`.execute(pool);
-		const adapter = createPgsqlAdapter(pool, {
+		const adapter = createPgAdapter(pool, {
 			schemaName: SCHEMA,
 			dbCasing: 'snake_case',
 			model: longSchema.model,

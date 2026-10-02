@@ -3,8 +3,8 @@ import { randomUUID } from 'node:crypto';
 import {
 	appendIntentJournal,
 	convergePg as convergePhysicalPg,
+	createPgAdapter,
 	createPgPhysicalModel,
-	createPgsqlAdapter,
 	createPgTransitionRunPersister,
 	DBSP_LEDGER_MARKER_TABLE,
 	PG_LEDGER_SHAPE_VERSION,
@@ -14,7 +14,7 @@ import {
 } from '@dbsp/adapter-pgsql';
 import {
 	appendPgLedgerClaim,
-	comparePgsqlDatabaseSchema,
+	comparePgDatabaseSchema,
 	convergePg,
 	PgConvergeRefusalError,
 } from '@dbsp/adapter-pgsql/internal';
@@ -1798,8 +1798,8 @@ describe('convergePg', () => {
 				kind: 'no-drift',
 				applied: [],
 			});
-			const { changes } = await comparePgsqlDatabaseSchema(
-				createPgsqlAdapter(dedicatedPool),
+			const { changes } = await comparePgDatabaseSchema(
+				createPgAdapter(dedicatedPool),
 				desired,
 				{ schema },
 			);
@@ -1832,8 +1832,8 @@ describe('convergePg', () => {
 				kind: 'no-drift',
 				applied: [],
 			});
-			const { changes } = await comparePgsqlDatabaseSchema(
-				createPgsqlAdapter(dedicatedPool),
+			const { changes } = await comparePgDatabaseSchema(
+				createPgAdapter(dedicatedPool),
 				desired,
 				{ schema },
 			);
@@ -1934,8 +1934,8 @@ describe('convergePg', () => {
 			await expect(
 				convergePg(dedicatedPool, desired, { schema: mixedSchema }),
 			).resolves.toEqual({ kind: 'no-drift', applied: [] });
-			const { changes } = await comparePgsqlDatabaseSchema(
-				createPgsqlAdapter(dedicatedPool),
+			const { changes } = await comparePgDatabaseSchema(
+				createPgAdapter(dedicatedPool),
 				desired,
 				{ schema: mixedSchema },
 			);
@@ -2658,8 +2658,8 @@ describe('convergePg', () => {
 		await pool.query(
 			`CREATE INDEX "${expressionIndex}" ON "${schema}"."${name}" ((lower("name")))`,
 		);
-		const { changes } = await comparePgsqlDatabaseSchema(
-			createPgsqlAdapter(pool),
+		const { changes } = await comparePgDatabaseSchema(
+			createPgAdapter(pool),
 			desired,
 			{ schema },
 		);

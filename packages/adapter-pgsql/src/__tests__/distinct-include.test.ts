@@ -20,7 +20,7 @@
 import { createOrm, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Test schema: symbol_parents → symbols (symbols has a vector column)
@@ -38,7 +38,7 @@ const testSchema = schema({
 });
 
 function buildOrm() {
-	const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+	const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 	return createOrm({ model: testSchema.model, adapter });
 }
 

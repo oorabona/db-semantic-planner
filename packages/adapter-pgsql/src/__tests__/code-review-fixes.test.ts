@@ -26,7 +26,7 @@ import {
 	type UpsertConfig,
 } from '../mutations/upsert.js';
 import { CamelCaseNamingPlugin } from '../naming-plugin.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { queryLocal } from '../sql-identifier.js';
 import { validateSqlExpression } from '../validate.js';
 
@@ -297,7 +297,7 @@ const c7Schema = schema({
 
 describe('C7: resolveExistsIntent recursive walk', () => {
 	it('AND(exists, exists): both branches get targetTable resolved in compiled SQL', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ model: c7Schema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: c7Schema.model });
 
 		// WHERE EXISTS(user_posts) AND EXISTS(user_comments)
 		// resolveExistsIntent must recurse into the AND and enrich both children.
@@ -319,7 +319,7 @@ describe('C7: resolveExistsIntent recursive walk', () => {
 	});
 
 	it('NOT(exists): negated exists inside NOT node gets targetTable resolved', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ model: c7Schema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: c7Schema.model });
 
 		// NOT EXISTS(user_posts) — resolveExistsIntent must walk the NOT branch.
 		const { sql } = adapter.compileDelete({

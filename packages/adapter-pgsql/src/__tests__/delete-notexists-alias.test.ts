@@ -12,7 +12,7 @@
 import { exists, notExists, schema } from '@dbsp/core';
 import type { ModelIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 function buildModel(
 	source: string,
@@ -52,7 +52,7 @@ function buildModel(
 describe('DELETE-NOTEXISTS-ALIAS: relation resolved to real table via ModelIR', () => {
 	it('resolves relation to DB table name in NOT EXISTS subquery', () => {
 		const model = buildModel('embeddings', 'symbol', 'symbols');
-		const adapter = createPgsqlCompileOnlyAdapter({ model });
+		const adapter = createPgCompileOnlyAdapter({ model });
 
 		const { sql } = adapter.compileDelete({
 			type: 'delete' as const,
@@ -68,7 +68,7 @@ describe('DELETE-NOTEXISTS-ALIAS: relation resolved to real table via ModelIR', 
 
 	it('resolves table with RETURNING clause', () => {
 		const model = buildModel('embeddings', 'symbol', 'symbols');
-		const adapter = createPgsqlCompileOnlyAdapter({ model });
+		const adapter = createPgCompileOnlyAdapter({ model });
 
 		const { sql } = adapter.compileDelete({
 			type: 'delete' as const,
@@ -84,7 +84,7 @@ describe('DELETE-NOTEXISTS-ALIAS: relation resolved to real table via ModelIR', 
 
 	it('resolves exists() (not just notExists()) via ModelIR', () => {
 		const model = buildModel('posts', 'comments', 'post_comments');
-		const adapter = createPgsqlCompileOnlyAdapter({ model });
+		const adapter = createPgCompileOnlyAdapter({ model });
 
 		const { sql } = adapter.compileDelete({
 			type: 'delete' as const,
@@ -98,7 +98,7 @@ describe('DELETE-NOTEXISTS-ALIAS: relation resolved to real table via ModelIR', 
 	});
 
 	it('falls back to relation name when no ModelIR available', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 
 		const { sql } = adapter.compileDelete({
 			type: 'delete' as const,
@@ -112,7 +112,7 @@ describe('DELETE-NOTEXISTS-ALIAS: relation resolved to real table via ModelIR', 
 
 	it('resolves caller-supplied relation names through the declared model', () => {
 		const model = buildModel('embeddings', 'symbol', 'symbols');
-		const adapter = createPgsqlCompileOnlyAdapter({ model });
+		const adapter = createPgCompileOnlyAdapter({ model });
 
 		const { sql } = adapter.compileDelete({
 			type: 'delete' as const,
@@ -130,7 +130,7 @@ describe('DELETE-NOTEXISTS-ALIAS: relation resolved to real table via ModelIR', 
 		// WHERE embeddings.id = symbols_exists_0.embedding_id (wrong).
 		// With FK resolution, it uses: WHERE embeddings.symbol_id = symbols_exists_0.id (correct).
 		const model = buildModel('embeddings', 'symbol', 'symbols', 'symbol_id');
-		const adapter = createPgsqlCompileOnlyAdapter({ model });
+		const adapter = createPgCompileOnlyAdapter({ model });
 
 		const { sql } = adapter.compileDelete({
 			type: 'delete' as const,

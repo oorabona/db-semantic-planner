@@ -101,7 +101,7 @@ export function resolveDeclaredIdentifier(
 	}
 	if (dbCasing !== 'preserve') {
 		throw new Error(
-			`PgsqlAdapter compilation with dbCasing '${dbCasing}' requires a ModelIR; declared names cannot be resolved without a model.`,
+			`PgAdapter compilation with dbCasing '${dbCasing}' requires a ModelIR; declared names cannot be resolved without a model.`,
 		);
 	}
 	return queryLocal(

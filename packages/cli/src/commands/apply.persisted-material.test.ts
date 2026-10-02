@@ -39,7 +39,7 @@ const fixture = vi.hoisted(() => {
 });
 
 const executeGeneratorPlan = vi.hoisted(() => vi.fn());
-const comparePgsqlDeclaredAdoptionSchema = vi.hoisted(() => vi.fn());
+const comparePgDeclaredAdoptionSchema = vi.hoisted(() => vi.fn());
 
 vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('@dbsp/adapter-pgsql')>();
@@ -66,7 +66,7 @@ vi.mock('@dbsp/adapter-pgsql/internal', async (importOriginal) => {
 		await importOriginal<typeof import('@dbsp/adapter-pgsql/internal')>();
 	return {
 		...actual,
-		comparePgsqlDeclaredAdoptionSchema,
+		comparePgDeclaredAdoptionSchema,
 		executeGeneratorPlan,
 	};
 });
@@ -140,7 +140,7 @@ describe('apply persisted generator material', () => {
 		};
 		prepareReplayableGeneratorJournal();
 		const claimedExecutor = { query: vi.fn() };
-		comparePgsqlDeclaredAdoptionSchema.mockResolvedValueOnce({ changes: [] });
+		comparePgDeclaredAdoptionSchema.mockResolvedValueOnce({ changes: [] });
 		executeGeneratorPlan.mockImplementationOnce(async (input) => {
 			if (!input.verifyDeclaredAdoptionShape)
 				throw new Error('expected persisted adoption verifier');
@@ -171,7 +171,7 @@ describe('apply persisted generator material', () => {
 					{} as never,
 				),
 			).resolves.toMatchObject({ outcome: 'completed' });
-			expect(comparePgsqlDeclaredAdoptionSchema).toHaveBeenCalledWith(
+			expect(comparePgDeclaredAdoptionSchema).toHaveBeenCalledWith(
 				expect.objectContaining({
 					executor: claimedExecutor,
 					dbCasing: 'preserve',
@@ -179,7 +179,7 @@ describe('apply persisted generator material', () => {
 			);
 		} finally {
 			executeGeneratorPlan.mockReset();
-			comparePgsqlDeclaredAdoptionSchema.mockReset();
+			comparePgDeclaredAdoptionSchema.mockReset();
 			fixture.journal.events = previous.events;
 			fixture.journal.plan = previous.plan;
 			fixture.journal.run.planDigest = previous.planDigest;

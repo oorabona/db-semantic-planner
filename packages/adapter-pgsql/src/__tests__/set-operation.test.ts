@@ -8,7 +8,7 @@ import { compile } from '@dbsp/nql';
 import type { CompiledNqlQuery, SetOperationIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 import {
 	compileSetOperation,
 	createLeafCompileFn,
@@ -40,7 +40,7 @@ const testSchema = schema({
 // Helper: create a leaf compile function for testing
 // ---------------------------------------------------------------------------
 function makeCompileFn(): LeafCompileFn {
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	return createLeafCompileFn(adapter, testSchema.model, plan);
 }
 
@@ -79,7 +79,7 @@ function adapterSetOpToSQLWithParams(
 		);
 	}
 
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	return adapter.compileSetOperation(
 		compiled.ast.setOperation,
 		testSchema.model,
@@ -98,7 +98,7 @@ function adapterNqlBundleToSQL(nql: string): {
 		);
 	}
 
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	const result = adapter.compile(compiled.ast, { model: testSchema.model });
 	return {
 		sql: normalizeSQL(result.sql),
@@ -151,7 +151,7 @@ function boundSetOpBundleToSQL(
 		},
 		bindings: new Map([['active_employees', bindingQuery]]),
 	};
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	return adapter.compile(bundle, { model: testSchema.model, schemaName });
 }
 
@@ -331,7 +331,7 @@ departments | select name | union (employee_names | select name | except (depart
 
 	describe('with createLeafCompileFn', () => {
 		it('creates a working compile function', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const compileFn = createLeafCompileFn(adapter, testSchema.model, plan);
 
 			// Manually build a simple set operation intent
@@ -371,7 +371,7 @@ departments | select name | union (employee_names | select name | except (depart
 					sequence: { type: 'bigint', js: 'bigint' },
 				},
 			});
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const compileFn = createLeafCompileFn(adapter, jsSchema.model, plan);
 			const setOp: SetOperationIntent = {
 				kind: 'setOperation',
@@ -395,7 +395,7 @@ departments | select name | union (employee_names | select name | except (depart
 		});
 
 		it('works with nested set operations built manually', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const compileFn = createLeafCompileFn(adapter, testSchema.model, plan);
 
 			const queryA: QueryIntent = {
@@ -467,7 +467,7 @@ departments | select name | union (employee_names | select name | except (depart
 
 	describe('edge cases', () => {
 		it('handles INTERSECT ALL', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const compileFn = createLeafCompileFn(adapter, testSchema.model, plan);
 
 			const setOp: SetOperationIntent = {
@@ -491,7 +491,7 @@ departments | select name | union (employee_names | select name | except (depart
 		});
 
 		it('handles EXCEPT ALL', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const compileFn = createLeafCompileFn(adapter, testSchema.model, plan);
 
 			const setOp: SetOperationIntent = {

@@ -316,7 +316,7 @@ Injection:
 ```typescript
 const orm = createOrm({
   model: schema,
-  adapter: createPgsqlAdapter(pool),   // <-- inject at edge
+  adapter: createPgAdapter(pool),   // <-- inject at edge
 });
 ```
 
@@ -335,8 +335,8 @@ const orm = createOrm({ model: schema, adapter });
 ### Convention
 
 - `packages/core/src/**` MUST NOT contain any import from `packages/adapter-pgsql`
-- Adapter interface is the only coupling point — core never calls `PgsqlAdapter` directly
-- connectionless mode: `createPgsqlCompileOnlyAdapter()` — no `Pool` required for CLI/tooling, planning, compilation, and dumps; database operations refuse at runtime
+- Adapter interface is the only coupling point — core never calls `PgAdapter` directly
+- connectionless mode: `createPgCompileOnlyAdapter()` — no `Pool` required for CLI/tooling, planning, compilation, and dumps; database operations refuse at runtime
 - Schema-scoping: `adapter.withSchema(name)` returns a new scoped adapter — core calls this, adapter implements it
 
 ### When to use

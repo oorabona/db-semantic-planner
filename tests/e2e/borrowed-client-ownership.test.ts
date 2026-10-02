@@ -1,6 +1,6 @@
 import {
-	createPgsqlAdapter,
-	PgsqlRawSqlTransactionControlError,
+	createPgAdapter,
+	PgRawSqlTransactionControlError,
 } from '@dbsp/adapter-pgsql';
 import { createOrm, schema } from '@dbsp/core';
 import {
@@ -87,7 +87,7 @@ function pgTransactionStatus(client: unknown): unknown {
 	return (client as { readonly _txStatus?: unknown })._txStatus;
 }
 
-describe('PgsqlAdapter borrowed client ownership', () => {
+describe('PgAdapter borrowed client ownership', () => {
 	beforeAll(async () => {
 		await dropSchema(SCHEMA);
 		await createSchema(SCHEMA);
@@ -116,7 +116,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		let rolledBack = false;
 		try {
 			expect(pgTransactionStatus(client)).toBe('I');
-			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+			const adapter = createPgAdapter(client, { borrowedClient: true });
 			expect(adapter.inTransaction).toBe(false);
 
 			await client.query('BEGIN');
@@ -143,7 +143,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		let rolledBack = false;
 		try {
 			await client.query('BEGIN');
-			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+			const adapter = createPgAdapter(client, { borrowedClient: true });
 
 			await expect(
 				adapter.executeRaw(`
@@ -190,7 +190,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		let rolledBack = false;
 		try {
 			await client.query('BEGIN');
-			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+			const adapter = createPgAdapter(client, { borrowedClient: true });
 
 			await adapter.executeRaw('SELECT 1');
 			await adapter.executeRaw('SELECT 2');
@@ -221,7 +221,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 				`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2)`,
 				[1, 'caller before dbsp'],
 			);
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				managedTransactions: true,
 			});
@@ -259,7 +259,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		let rolledBack = false;
 		try {
 			await client.query('BEGIN');
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				managedTransactions: true,
 			});
@@ -293,7 +293,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		const pool = await getTestPool();
 		const client = await pool.connect();
 		try {
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				managedTransactions: true,
 			});
@@ -323,7 +323,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 
 	it('throws when raw COMMIT ends a dbsp-owned transaction before later statements run', async () => {
 		const pool = await getTestPool();
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 
 		await expect(
 			adapter.transaction(async (tx) => {
@@ -349,7 +349,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		let transactionGone = false;
 		try {
 			await client.query('BEGIN');
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				managedTransactions: true,
 			});
@@ -364,7 +364,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 			}
 			transactionGone = true;
 
-			expect(error).toBeInstanceOf(PgsqlRawSqlTransactionControlError);
+			expect(error).toBeInstanceOf(PgRawSqlTransactionControlError);
 			expect(error).not.toBeInstanceOf(AggregateError);
 			expect((error as Error).message).not.toContain(
 				'dbsp cannot reason about a multi-command raw call',
@@ -380,7 +380,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 
 	it('serializes concurrent raw statements so raw COMMIT poisons the sibling before it is sent', async () => {
 		const pool = await getTestPool();
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		const orm = createOrm({ schema: ormSchema, adapter }).withSchema(SCHEMA);
 
 		await expect(
@@ -392,14 +392,14 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 					),
 				]);
 			}),
-		).rejects.toBeInstanceOf(PgsqlRawSqlTransactionControlError);
+		).rejects.toBeInstanceOf(PgRawSqlTransactionControlError);
 
 		expect(await itemIds()).toEqual([]);
 	});
 
 	it('rolls back an unawaited ORM insert queued before a throwing callback returns', async () => {
 		const pool = await getTestPool();
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		const orm = createOrm({ schema: ormSchema, adapter }).withSchema(SCHEMA);
 		const callbackError = new Error('rollback unawaited insert');
 		let sleeper: Promise<unknown> | undefined;
@@ -425,7 +425,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 
 	it('reports unawaited raw COMMIT over a callback error and leaves the row committed in a pool-owned transaction', async () => {
 		const pool = await getTestPool();
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		const orm = createOrm({ schema: ormSchema, adapter }).withSchema(SCHEMA);
 		const callbackError = new Error('validation failed');
 		let rawCommit: Promise<unknown> | undefined;
@@ -442,7 +442,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 			}),
 		);
 
-		expect(error).toBeInstanceOf(PgsqlRawSqlTransactionControlError);
+		expect(error).toBeInstanceOf(PgRawSqlTransactionControlError);
 		expect((error as Error).cause).toBe(callbackError);
 		await rawCommit?.catch(() => undefined);
 		expect(await itemIds()).toEqual([38]);
@@ -457,7 +457,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		let transactionGone = false;
 		try {
 			await client.query('BEGIN');
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				managedTransactions: true,
 			});
@@ -475,7 +475,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 				}),
 			);
 
-			expect(error).toBeInstanceOf(PgsqlRawSqlTransactionControlError);
+			expect(error).toBeInstanceOf(PgRawSqlTransactionControlError);
 			expect((error as Error).cause).toBe(callbackError);
 			await rawCommit?.catch(() => undefined);
 			transactionGone = true;
@@ -492,7 +492,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 
 	it('rejects after a caught raw COMMIT and never sends the post-COMMIT ORM statement', async () => {
 		const pool = await getTestPool();
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		const orm = createOrm({ schema: ormSchema, adapter }).withSchema(SCHEMA);
 		let rawCommitError: unknown;
 		let postCommitError: unknown;
@@ -523,7 +523,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 			transactionError = error;
 		}
 
-		expect(rawCommitError).toBeInstanceOf(PgsqlRawSqlTransactionControlError);
+		expect(rawCommitError).toBeInstanceOf(PgRawSqlTransactionControlError);
 		expect(postCommitError).toBe(rawCommitError);
 		expect(transactionError).toBe(rawCommitError);
 		expect(await itemIds()).toEqual([40]);
@@ -556,7 +556,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		let rolledBack = false;
 		try {
 			await client.query('BEGIN');
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				managedTransactions: true,
 			});
@@ -587,7 +587,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		let transactionGone = false;
 		try {
 			await client.query('BEGIN');
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				managedTransactions: true,
 			});
@@ -602,7 +602,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 			}
 			transactionGone = true;
 
-			expect(error).toBeInstanceOf(PgsqlRawSqlTransactionControlError);
+			expect(error).toBeInstanceOf(PgRawSqlTransactionControlError);
 		} finally {
 			if (!transactionGone) {
 				await client.query('ROLLBACK').catch(() => undefined);
@@ -616,7 +616,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 
 	it('returns a clean pooled connection after raw SAVEPOINT in orm.transaction throws', async () => {
 		const pool = await getTestPool();
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		const orm = createOrm({ schema: ormSchema, adapter }).withSchema(SCHEMA);
 
 		await expect(
@@ -647,7 +647,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		let committed = false;
 		try {
 			await client.query('BEGIN');
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				managedTransactions: true,
 			});
@@ -679,7 +679,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 
 	it('poisons a parent scope when raw COMMIT inside a nested transaction ends the physical transaction', async () => {
 		const pool = await getTestPool();
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		const orm = createOrm({ schema: ormSchema, adapter }).withSchema(SCHEMA);
 		let innerError: unknown;
 		let parentStatementError: unknown;
@@ -712,7 +712,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 			transactionError = error;
 		}
 
-		expect(innerError).toBeInstanceOf(PgsqlRawSqlTransactionControlError);
+		expect(innerError).toBeInstanceOf(PgRawSqlTransactionControlError);
 		expect(parentStatementError).toBe(innerError);
 		expect(transactionError).toBe(innerError);
 		expect(await itemIds()).toEqual([43]);
@@ -725,7 +725,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		let committed = false;
 		try {
 			await client.query('BEGIN');
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				managedTransactions: true,
 			});
@@ -777,7 +777,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 				`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2)`,
 				[25, 'caller before failing statement'],
 			);
-			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+			const adapter = createPgAdapter(client, { borrowedClient: true });
 
 			await expect(
 				adapter.executeRaw(
@@ -812,7 +812,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 				`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2)`,
 				[28, 'caller before raw savepoint'],
 			);
-			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+			const adapter = createPgAdapter(client, { borrowedClient: true });
 
 			await expect(adapter.executeRaw('SAVEPOINT s')).rejects.toThrow(
 				/Transaction control through raw SQL/,
@@ -844,7 +844,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 				`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2)`,
 				[7, 'caller before failed siblings'],
 			);
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				managedTransactions: true,
 			});
@@ -904,7 +904,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 					'stream second b',
 				],
 			);
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				managedTransactions: true,
 			});
@@ -947,7 +947,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		const pool = await getTestPool();
 		const client = await pool.connect();
 		try {
-			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+			const adapter = createPgAdapter(client, { borrowedClient: true });
 			const orm = createOrm({ schema: ormSchema, adapter }).withSchema(SCHEMA);
 			const callback = vi.fn(async () => 'should not run');
 
@@ -976,7 +976,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		let rolledBack = false;
 		try {
 			await client.query('BEGIN');
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				managedTransactions: true,
 			});
@@ -1019,7 +1019,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 				`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2)`,
 				[32, 'schema scoped select'],
 			);
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				managedTransactions: true,
 			});
@@ -1051,7 +1051,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		let rolledBack = false;
 		try {
 			await client.query('BEGIN');
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				managedTransactions: true,
 			});
@@ -1091,7 +1091,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		let rolledBack = false;
 		try {
 			await client.query('BEGIN');
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				managedTransactions: true,
 			});
@@ -1134,7 +1134,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 				`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2)`,
 				[36, 'before failing catalog read'],
 			);
-			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+			const adapter = createPgAdapter(client, { borrowedClient: true });
 
 			const error = await captureRejection(() =>
 				adapter.listIndexes('items', 'bad\u0000schema'),
@@ -1179,7 +1179,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 				[45, 'before exported introspect failure'],
 			);
 
-			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+			const adapter = createPgAdapter(client, { borrowedClient: true });
 			await expect(
 				adapter.introspect({ schema: 'bad\u0000schema' }),
 			).rejects.toThrow();
@@ -1218,7 +1218,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 			}
 			return result;
 		};
-		const adapter = createPgsqlAdapter(client, {
+		const adapter = createPgAdapter(client, {
 			borrowedClient: true,
 			managedTransactions: true,
 		});
@@ -1261,7 +1261,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 
 	it('refuses an unawaited nested transaction still running when the callback returns', async () => {
 		const pool = await getTestPool();
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		const orm = createOrm({ schema: ormSchema, adapter }).withSchema(SCHEMA);
 		const started = deferred();
 		const resume = deferred();
@@ -1292,7 +1292,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 
 	it('refuses a later unobserved child after an observed child failure', async () => {
 		const pool = await getTestPool();
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		const orm = createOrm({ schema: ormSchema, adapter }).withSchema(SCHEMA);
 		const firstError = new Error('first nested child failed');
 		const secondStarted = deferred();
@@ -1351,7 +1351,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		try {
 			await client.query('BEGIN');
 			await client.query('SAVEPOINT caller_before_release_failure');
-			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+			const adapter = createPgAdapter(client, { borrowedClient: true });
 
 			await expect(
 				adapter.executeRaw(

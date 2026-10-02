@@ -3,7 +3,7 @@
  * Verifies the compiled SQL and params match the documented API.
  */
 
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { describe, expect, it } from 'vitest';
 import { createOrm } from '../orm.js';
 import { rangeContainedBy, rangeContains, rangeOverlaps } from '../range.js';
@@ -15,7 +15,7 @@ const db = schema({
 	events: { id: 'integer', dateRange: 'string' },
 } as const);
 
-const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter() });
 
 describe('range helpers SQL output', () => {
 	it('rangeOverlaps compiles to col && daterange($1, $2)', () => {
@@ -49,7 +49,7 @@ describe('range helpers SQL output', () => {
 		const db2 = schema({ spans: { id: 'integer', span: 'string' } } as const);
 		const orm2 = createOrm({
 			schema: db2,
-			adapter: createPgsqlCompileOnlyAdapter(),
+			adapter: createPgCompileOnlyAdapter(),
 		});
 		const { sql } = whereExpression(
 			orm2.select('spans'),

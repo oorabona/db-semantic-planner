@@ -1,6 +1,6 @@
 import { createOrm, eq, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const issue256Schema = schema({
 	files: {
@@ -43,7 +43,7 @@ const issue256Schema = schema({
 } as const);
 
 function buildOrm() {
-	const adapter = createPgsqlCompileOnlyAdapter({
+	const adapter = createPgCompileOnlyAdapter({
 		model: issue256Schema.model,
 	});
 	return createOrm({ model: issue256Schema.model, adapter });
@@ -126,7 +126,7 @@ describe('issue #256: multi-hop dotted WHERE relation paths', () => {
 				name: { type: 'text' },
 			},
 		} as const);
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: casingSchema.model,
 			dbCasing: 'snake_case',
 		});
@@ -185,7 +185,7 @@ describe('issue #256: multi-hop dotted WHERE relation paths', () => {
 				name: { type: 'text' },
 			},
 		} as const);
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: collisionSchema.model,
 		});
 		const orm = createOrm({ model: collisionSchema.model, adapter });

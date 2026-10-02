@@ -1,6 +1,6 @@
 import {
 	ADD_CHECK_RULE_ID,
-	createPgsqlAdapter,
+	createPgAdapter,
 	createPgTransitionPack,
 	createPgTransitionRunPersister,
 	ENUM_ADD_VALUE_RULE_ID,
@@ -214,7 +214,7 @@ describe('ADR-0003 transition planner: staged enum ADD VALUE plus ADD CHECK', ()
 	it('commits the enum label, re-introspects, then proves and applies the CHECK', async () => {
 		await createBaseTasks(['active']);
 		const pool = await getTestPool();
-		const adapter = createPgsqlAdapter(pool, { schemaName });
+		const adapter = createPgAdapter(pool, { schemaName });
 		const registry = createPackRegistry([createPgTransitionPack()]);
 		const comparator = createComparator(registry);
 		const loadCurrent = () => adapter.introspect({ schema: schemaName });
@@ -278,7 +278,7 @@ describe('ADR-0003 transition planner: staged enum ADD VALUE plus ADD CHECK', ()
 		let client: PoolClient | undefined;
 		try {
 			client = await pool.connect();
-			const adapter = createPgsqlAdapter(pool, { schemaName });
+			const adapter = createPgAdapter(pool, { schemaName });
 			const registry = createPackRegistry([createPgTransitionPack()]);
 			const comparator = createComparator(registry);
 			const current = await adapter.introspect({ schema: schemaName });
@@ -310,7 +310,7 @@ describe('ADR-0003 transition planner: staged enum ADD VALUE plus ADD CHECK', ()
 	it('applies independent enum ADD VALUE and CHECK in one atomic commit', async () => {
 		await createBaseTasks(['active']);
 		const pool = await getTestPool();
-		const adapter = createPgsqlAdapter(pool, { schemaName });
+		const adapter = createPgAdapter(pool, { schemaName });
 		const registry = createPackRegistry([createPgTransitionPack()]);
 		const comparator = createComparator(registry);
 		const current = await adapter.introspect({ schema: schemaName });
@@ -363,7 +363,7 @@ describe('ADR-0003 transition planner: staged enum ADD VALUE plus ADD CHECK', ()
 	it('rolls back an independent enum ADD VALUE when the independent CHECK guard fails', async () => {
 		await createBaseTasks(['active']);
 		const pool = await getTestPool();
-		const adapter = createPgsqlAdapter(pool, { schemaName });
+		const adapter = createPgAdapter(pool, { schemaName });
 		const registry = createPackRegistry([createPgTransitionPack()]);
 		const comparator = createComparator(registry);
 		const current = await adapter.introspect({ schema: schemaName });
@@ -413,7 +413,7 @@ describe('ADR-0003 transition planner: staged enum ADD VALUE plus ADD CHECK', ()
 	it('fails closed before DB changes when the required enum label has no producer', async () => {
 		await createBaseTasks(['active']);
 		const pool = await getTestPool();
-		const adapter = createPgsqlAdapter(pool, { schemaName });
+		const adapter = createPgAdapter(pool, { schemaName });
 		const registry = createPackRegistry([createPgTransitionPack()]);
 		const current = await adapter.introspect({ schema: schemaName });
 		const desired = desiredFromCurrent(current, {
@@ -440,7 +440,7 @@ describe('ADR-0003 transition planner: staged enum ADD VALUE plus ADD CHECK', ()
 	it('reports partially-applied when the CHECK row guard fails after the enum commits', async () => {
 		await createBaseTasks(['active']);
 		const pool = await getTestPool();
-		const adapter = createPgsqlAdapter(pool, { schemaName });
+		const adapter = createPgAdapter(pool, { schemaName });
 		const registry = createPackRegistry([createPgTransitionPack()]);
 		const current = await adapter.introspect({ schema: schemaName });
 		const desired = desiredFromCurrent(current, {

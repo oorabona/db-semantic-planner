@@ -1,5 +1,5 @@
 import {
-	createPgsqlAdapter,
+	createPgAdapter,
 	createPgTransitionPack,
 	createPgTransitionRunPersister,
 	readPgObservationContextFromLessor,
@@ -146,7 +146,7 @@ describe('ADR-0003 transition planner: ADD CHECK', () => {
 		expect(result.journals[0]?.outcome).toBe('completed');
 		expect(await checkExists()).toBe(true);
 
-		const adapter = createPgsqlAdapter(pool, { schemaName });
+		const adapter = createPgAdapter(pool, { schemaName });
 		const introspected = await adapter.introspect({ schema: schemaName });
 		const introspectedUsers = introspected.getTable('users');
 		expect(introspectedUsers?.checkConstraints?.[0]).toMatchObject({

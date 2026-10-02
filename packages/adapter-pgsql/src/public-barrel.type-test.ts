@@ -1,11 +1,11 @@
 // These execution primitives are deliberately reachable only through the
 // internal subpath (or the admitted-operation façade), never the public API.
 import type {
+	PgCompileOnlyAdapterOptions,
 	PgConvergeRefusalChange,
-	PgsqlCompileOnlyAdapterOptions,
 } from '@dbsp/adapter-pgsql';
 
-const compileOnlyOptions: PgsqlCompileOnlyAdapterOptions = {};
+const compileOnlyOptions: PgCompileOnlyAdapterOptions = {};
 void compileOnlyOptions;
 
 const refusalChange: PgConvergeRefusalChange = {

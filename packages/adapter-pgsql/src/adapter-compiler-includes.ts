@@ -1,7 +1,7 @@
 /**
  * Subquery-include compilation: compileSubqueryInclude + M:N variant.
- * Extracted from PgsqlAdapter.compileSubqueryInclude() and
- * PgsqlAdapter.compileSubqueryIncludeManyToMany().
+ * Extracted from PgAdapter.compileSubqueryInclude() and
+ * PgAdapter.compileSubqueryIncludeManyToMany().
  *
  * @internal
  */
@@ -58,7 +58,7 @@ function compileIncludeSelectEnvelope(
 /**
  * Compile a subquery include query for given parent IDs (DX-033).
  * Generates: SELECT * FROM targetTable WHERE foreignKey IN ($1, $2, ...)
- * Extracted body of PgsqlAdapter.compileSubqueryInclude().
+ * Extracted body of PgAdapter.compileSubqueryInclude().
  */
 export function compileSubqueryInclude(
 	info: SubqueryIncludeInfo,
@@ -71,7 +71,7 @@ export function compileSubqueryInclude(
 			`Include where is not supported for strategy subquery at include(${info.relationName}).where (oorabona/db-semantic-planner#892).`,
 		);
 	}
-	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
+	// schemaName precedence (options > adapter ctor) is resolved in PgAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const schemaName = deps.schemaName;
 	const state = createCompilerState();
 
@@ -243,7 +243,7 @@ export function compileSubqueryInclude(
 
 /**
  * Compile M:N subquery include with junction table.
- * Extracted body of PgsqlAdapter.compileSubqueryIncludeManyToMany().
+ * Extracted body of PgAdapter.compileSubqueryIncludeManyToMany().
  */
 function compileSubqueryIncludeManyToMany(
 	info: SubqueryIncludeInfo,

@@ -19,7 +19,7 @@ import type { AdapterCompilerDeps } from '../adapter-compiler-deps.js';
 import { compileSelect } from '../adapter-compiler-select.js';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../assert-field.js';
 import { normalizeSQL } from '../ast-helpers.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Test schema: variable_uses → variable_defs (belongsTo via variable_def_id)
@@ -111,7 +111,7 @@ function buildOrmDump(symbolId: number): {
 	sql: string;
 	parameters: readonly unknown[];
 } {
-	const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+	const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 	const orm = createOrm({ model: testSchema.model, adapter });
 
 	const dump = orm
@@ -196,7 +196,7 @@ describe('INCLUDE-NULLABLE-FK: include with WHERE on nullable integer FK column'
 
 	describe('Strategy C: planner round-trip (plan() + adapter.compile())', () => {
 		it('full pipeline from QueryIntent to SQL does not throw', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				model: testSchema.model,
 			});
 
@@ -221,7 +221,7 @@ describe('INCLUDE-NULLABLE-FK: include with WHERE on nullable integer FK column'
 		});
 
 		it('planner round-trip: SQL contains JOIN, WHERE, and integer parameter', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				model: testSchema.model,
 			});
 

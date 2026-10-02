@@ -24,7 +24,7 @@ import type {
 	IntrospectionOptions,
 	SchemaScopeOptions,
 } from '../introspection.js';
-import { createPgsqlAdapter, type PgsqlAdapter } from '../pgsql-adapter.js';
+import { createPgAdapter, type PgAdapter } from '../pgsql-adapter.js';
 import {
 	createPgPhysicalModel,
 	type PgPhysicalModel,
@@ -44,7 +44,7 @@ import {
 	type SchemaDiff,
 } from './schema-diff.js';
 
-export interface ComparePgsqlDatabaseSchemaOptions
+export interface ComparePgDatabaseSchemaOptions
 	extends CompareSchemataOptions,
 		SchemaScopeOptions {
 	/**
@@ -85,8 +85,8 @@ export interface ComparePgsqlDatabaseSchemaOptions
  * seen, and the comparison then keeps only the declared physical tables (with
  * the relations between them), so drift on other tables is not reported.
  */
-export interface ComparePgsqlDeclaredAdoptionSchemaInput {
-	readonly executor: PgsqlAdoptionComparisonExecutor;
+export interface ComparePgDeclaredAdoptionSchemaInput {
+	readonly executor: PgAdoptionComparisonExecutor;
 	readonly model: ModelIR;
 	readonly schema: string;
 	readonly dbCasing: DbCasing;
@@ -111,7 +111,7 @@ export interface PgsqlDeclaredAdoptionOwnershipMask {
 }
 
 /** Minimal pool surface retained so callers can keep their executor opaque. */
-export interface PgsqlAdoptionComparisonExecutor {
+export interface PgAdoptionComparisonExecutor {
 	query(
 		sql: string,
 		parameters?: readonly unknown[],
@@ -140,12 +140,12 @@ export function modelForDeclaredAdoption(table: TableIR): ModelIR {
 }
 
 function isPoolClient(
-	executor: PgsqlAdoptionComparisonExecutor,
+	executor: PgAdoptionComparisonExecutor,
 ): executor is PoolClient {
 	return 'release' in executor && typeof executor.release === 'function';
 }
 
-function isPool(executor: PgsqlAdoptionComparisonExecutor): executor is Pool {
+function isPool(executor: PgAdoptionComparisonExecutor): executor is Pool {
 	return (
 		'connect' in executor &&
 		typeof executor.connect === 'function' &&
@@ -300,22 +300,22 @@ function applyOwnedColumnTypeMask(
  * claimed session remains pinned by constructing a borrowed, transaction-aware
  * adapter from that exact executor.
  */
-export async function comparePgsqlDeclaredAdoptionSchema(
-	input: ComparePgsqlDeclaredAdoptionSchemaInput,
+export async function comparePgDeclaredAdoptionSchema(
+	input: ComparePgDeclaredAdoptionSchemaInput,
 ): Promise<SchemaDiff> {
 	const adapter = isPoolClient(input.executor)
-		? createPgsqlAdapter(input.executor, {
+		? createPgAdapter(input.executor, {
 				borrowedClient: true,
 				managedTransactions: true,
 				dbCasing: input.dbCasing,
 			})
 		: isPool(input.executor)
-			? createPgsqlAdapter(input.executor, {
+			? createPgAdapter(input.executor, {
 					dbCasing: input.dbCasing,
 				})
 			: (() => {
 					throw new Error(
-						'comparePgsqlDeclaredAdoptionSchema() requires a pg Pool or checked-out PoolClient executor',
+						'comparePgDeclaredAdoptionSchema() requires a pg Pool or checked-out PoolClient executor',
 					);
 				})();
 	const ownershipMask =
@@ -408,7 +408,7 @@ export async function comparePgsqlDeclaredAdoptionSchema(
 			return Reflect.get(target, property, receiver);
 		},
 	});
-	const compared = await comparePgsqlDatabaseSchema(
+	const compared = await comparePgDatabaseSchema(
 		declarationScopedAdapter,
 		desired,
 		{
@@ -586,10 +586,10 @@ export class IndexPredicateCanonicalizationError extends Error {
  * predicates on expression-keyed indexes are reported as unavailable and are
  * therefore rejected by strict mode. They need their own key-shape substrate.
  */
-export async function comparePgsqlDatabaseSchema(
-	adapter: PgsqlAdapter,
+export async function comparePgDatabaseSchema(
+	adapter: PgAdapter,
 	desired: ModelIR,
-	options?: ComparePgsqlDatabaseSchemaOptions,
+	options?: ComparePgDatabaseSchemaOptions,
 ): Promise<SchemaDiff> {
 	const physicalDesired =
 		options?.dbCasing === undefined
@@ -636,7 +636,7 @@ export async function comparePgsqlDatabaseSchema(
 	const rawExpressionSurfaces = new Set<string>();
 	let hasRawIndexPredicateFallback = false;
 	let rawIndexPredicateFallbackCause: unknown;
-	const physicalOptions: ComparePgsqlDatabaseSchemaOptions | undefined =
+	const physicalOptions: ComparePgDatabaseSchemaOptions | undefined =
 		physicalDesired === undefined
 			? options
 			: (() => {
@@ -805,10 +805,10 @@ function assertStrictIndexPredicateCanonicalization(
 }
 
 async function canonicalizeLiveExpressions(
-	adapter: PgsqlAdapter,
+	adapter: PgAdapter,
 	desired: ModelIR,
 	dbModel: ModelIR,
-	options: ComparePgsqlDatabaseSchemaOptions | undefined,
+	options: ComparePgDatabaseSchemaOptions | undefined,
 	rawExpressionSurfaces: Set<string>,
 	recordRawIndexPredicateFallback: (
 		rawFallback: boolean,
@@ -1126,7 +1126,7 @@ function assertNoFallbackUsesAddedEnumValue(
 	diff: SchemaDiff,
 	rawExpressionSurfaces: ReadonlySet<string>,
 	hasRawIndexPredicateFallback: boolean,
-	options: ComparePgsqlDatabaseSchemaOptions | undefined,
+	options: ComparePgDatabaseSchemaOptions | undefined,
 ): void {
 	const addedEnumValues = collectAddedEnumValues(diff);
 	if (addedEnumValues.length === 0) return;
@@ -1159,7 +1159,7 @@ function assertNoFallbackUsesAddedEnumValue(
 
 function assertNoExpressionKeyedIndexPredicateExclusionWithCreate(
 	diff: SchemaDiff,
-	options: ComparePgsqlDatabaseSchemaOptions | undefined,
+	options: ComparePgDatabaseSchemaOptions | undefined,
 ): void {
 	const changes = diff.changes.filter((change) => {
 		if (change.kind !== 'create_index' && change.kind !== 'drop_index') {
@@ -1190,7 +1190,7 @@ function assertNoExpressionKeyedIndexPredicateExclusionWithCreate(
 
 function assertNoRawIndexPredicateFallbackWithCreate(
 	diff: SchemaDiff,
-	options: ComparePgsqlDatabaseSchemaOptions | undefined,
+	options: ComparePgDatabaseSchemaOptions | undefined,
 	cause: unknown,
 ): void {
 	if (hasEmittedPredicateBearingCreateIndex(diff, options)) {
@@ -1201,7 +1201,7 @@ function assertNoRawIndexPredicateFallbackWithCreate(
 /** True when UP or DOWN SQL emits a partial-index CREATE statement. */
 function hasEmittedPredicateBearingCreateIndex(
 	diff: SchemaDiff,
-	options: ComparePgsqlDatabaseSchemaOptions | undefined,
+	options: ComparePgDatabaseSchemaOptions | undefined,
 ): boolean {
 	const migrationOptions = {
 		...(options?.schema === undefined ? {} : { schemaName: options.schema }),
@@ -1236,7 +1236,7 @@ function formatEnumName(enumDef: EnumIR): string {
 }
 
 function toIntrospectionOptions(
-	options: ComparePgsqlDatabaseSchemaOptions | undefined,
+	options: ComparePgDatabaseSchemaOptions | undefined,
 ): IntrospectionOptions {
 	return {
 		...(options?.schema !== undefined ? { schema: options.schema } : {}),
@@ -1244,14 +1244,14 @@ function toIntrospectionOptions(
 }
 
 function supportsDDLCheckConstraints(
-	options: ComparePgsqlDatabaseSchemaOptions | undefined,
+	options: ComparePgDatabaseSchemaOptions | undefined,
 ): boolean {
 	const caps = options?.dialectCapabilities;
 	return caps === undefined || caps.supportsDDLCheckConstraints === true;
 }
 
 function toCanonicalizerOptions(
-	options: ComparePgsqlDatabaseSchemaOptions | undefined,
+	options: ComparePgDatabaseSchemaOptions | undefined,
 	rawExpressionSurfaces: Set<string>,
 ): CanonicalizeExpressionSurfacesOptions {
 	return {
@@ -1330,7 +1330,7 @@ function recordRawCheckExpressionSurface(
 }
 
 function toCompareOptions(
-	options: ComparePgsqlDatabaseSchemaOptions | undefined,
+	options: ComparePgDatabaseSchemaOptions | undefined,
 	strictness: {
 		readonly delegateExpressionCanonicalization: boolean;
 	},

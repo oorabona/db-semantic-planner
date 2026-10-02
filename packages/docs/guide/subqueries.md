@@ -27,13 +27,13 @@ Filter rows where a column's value exists in the result of another query:
 
 ```typescript
 import { schema, createOrm, inSubquery, subquery } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({
   users: { id: 'integer', name: 'string', active: 'boolean' },
   blacklist: { userId: 'integer' },
 } as const);
-const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter() });
 
 orm.select('users')
   .where(inSubquery('id', subquery('blacklist').select('userId')))
@@ -53,13 +53,13 @@ Embed an aggregate from a related table as a column in the outer SELECT:
 
 ```typescript
 import { schema, createOrm, subquery, outerRef, eq } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({
   symbols: { id: 'integer', name: 'string' },
   calls: { id: 'integer', symbolId: 'integer' },
 } as const);
-const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter() });
 
 orm.select('symbols')
   .columns([
@@ -118,12 +118,12 @@ The correlation predicate (`author_id = users.id`) is resolved automatically fro
 ```typescript
 // doctest: skip — correlated outerRef() is not yet supported (see warning below); shown as the intended future syntax
 import { schema, createOrm, subquery, outerRef, eq } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({
   products: { id: 'integer', categoryId: 'integer', price: 'decimal' },
 } as const);
-const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter() });
 
 // Find products priced above the average in their category
 orm.select('products')

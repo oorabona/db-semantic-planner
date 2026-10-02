@@ -24,7 +24,7 @@ import {
 	rawDistance,
 	vectorDims,
 } from '../extensions/pgvector.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const testSchema = schema({
 	embeddings: {
@@ -254,7 +254,7 @@ describe('self-join: find-duplicates pattern', () => {
 	};
 
 	it('generates INNER JOIN embeddings AS e2 with ON embeddings.id < e2.id', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 		const orm = createOrm({ model: testSchema.model, adapter });
 
 		const dump = (orm as any)
@@ -271,7 +271,7 @@ describe('self-join: find-duplicates pattern', () => {
 	});
 
 	it('self-join SQL matches expected structure (FROM + INNER JOIN + ON id < id)', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 		const orm = createOrm({ model: testSchema.model, adapter });
 
 		const dump = (orm as any)

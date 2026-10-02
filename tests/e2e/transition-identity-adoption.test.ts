@@ -1,5 +1,5 @@
 import {
-	createPgsqlAdapter,
+	createPgAdapter,
 	createPgTransitionPack,
 	createPgTransitionRunPersister,
 	DBSP_LOGICAL_IDENTITY_TABLE,
@@ -174,7 +174,7 @@ describe('ADR-0003 transition planner: logical identity adoption', () => {
 	it('adopts a column identity, writes the side table, and re-proves no-drift after introspection', async () => {
 		await createUsers();
 		const pool = await getTestPool();
-		const adapter = createPgsqlAdapter(pool, { schemaName });
+		const adapter = createPgAdapter(pool, { schemaName });
 		const current = await adapter.introspect({ schema: schemaName });
 		const currentUsers = current.getTable('users');
 		expect(currentUsers).toBeDefined();
@@ -283,7 +283,7 @@ describe('ADR-0003 transition planner: logical identity adoption', () => {
 	it('blocks apply when baseline identity assumptions are not accepted and writes no side-table row', async () => {
 		await createUsers();
 		const pool = await getTestPool();
-		const adapter = createPgsqlAdapter(pool, { schemaName });
+		const adapter = createPgAdapter(pool, { schemaName });
 		const current = await adapter.introspect({ schema: schemaName });
 		const currentUsers = current.getTable('users');
 		expect(currentUsers).toBeDefined();

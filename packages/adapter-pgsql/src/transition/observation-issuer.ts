@@ -1072,7 +1072,7 @@ function canonicalizationScope(
 	// The caller opens a transaction and savepoint before minting this narrow
 	// adapter. That savepoint is always rolled back by
 	// cleanupObservationScratchScope, giving observation deparse the same
-	// rollback-only contract as PgsqlAdapter.withScratchScope().
+	// rollback-only contract as PgAdapter.withScratchScope().
 	const scope = {
 		executeRaw: async <T>(sql: string, parameters?: readonly unknown[]) =>
 			(await executor.query(sql, parameters)).rows as T[],

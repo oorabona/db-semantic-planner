@@ -14,7 +14,7 @@
  * - Error path: compilation failure with specific error messages
  */
 
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { describe, expect, it } from 'vitest';
 import type { Adapter, CompiledQuery } from '../adapter.js';
 import type { ModelIR, TableIR } from '../model-ir.js';
@@ -144,7 +144,7 @@ projected_posts | select id`;
 
 	it('uses frozen proof payload after public relation metadata is mutated', () => {
 		const s = createTestSchema();
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: s.model,
 		}) as Adapter;
 		const nql = createNqlTag(s.definition, s.model, adapter);
@@ -178,7 +178,7 @@ projected_posts | where some(author).email = 'alice@example.com' | select id`;
 
 	it('uses frozen proof payload after public relation-column metadata is mutated', () => {
 		const s = createTestSchema();
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: s.model,
 		}) as Adapter;
 		const nql = createNqlTag(s.definition, s.model, adapter);

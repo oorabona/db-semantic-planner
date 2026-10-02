@@ -15,14 +15,14 @@ pnpm add @dbsp/adapter-pgsql pg
 
 ```typescript
 import { createOrm } from '@dbsp/core';
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 import { Pool } from 'pg';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 const orm = createOrm({
   schema: db,
-  adapter: createPgsqlAdapter(pool),
+  adapter: createPgAdapter(pool),
 });
 
 const rows = await orm.select('users').where(eq('active', true)).all();
@@ -34,11 +34,11 @@ Compile SQL without a database connection — useful for CLI tooling, CI plan in
 
 ```typescript
 import { createOrm, eq } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
-// This is a connectionless PgsqlAdapter: dump() works; database operations
-// refuse at runtime until you instead construct createPgsqlAdapter(pool).
-const adapter = createPgsqlCompileOnlyAdapter();
+// This is a connectionless PgAdapter: dump() works; database operations
+// refuse at runtime until you instead construct createPgAdapter(pool).
+const adapter = createPgCompileOnlyAdapter();
 const orm = createOrm({ schema: db, adapter });
 const { sql, params } = orm.select('users').where(eq('active', true)).dump();
 // sql, params — no Pool needed
@@ -53,7 +53,7 @@ const { sql, params } = orm.select('users').where(eq('active', true)).dump();
 - **Parameterized queries** — All user values use `$N` positional parameters; no SQL injection surface
 - **Identifier quoting** — All table/column/schema names are double-quoted automatically
 - **AST-based compiler** — SQL is built from the plan AST, never from string templates
-- **DDL provisioning** — build one `PgPhysicalModel` with `createPgPhysicalModel()`, then use pure model-to-model `compareSchemata()` + `generateDDL()` with 12-phase topological sort; use live `comparePgsqlDatabaseSchema()` when provisioning from an introspected PostgreSQL database
+- **DDL provisioning** — build one `PgPhysicalModel` with `createPgPhysicalModel()`, then use pure model-to-model `compareSchemata()` + `generateDDL()` with 12-phase topological sort; use live `comparePgDatabaseSchema()` when provisioning from an introspected PostgreSQL database
 - **Schema migrations** — `generateMigrationSQL()` consumes the physical-model comparison with UP/DOWN sections and destructive-change safety gate
 - **Schema introspection** — Reflect live database structure back into `ModelIR`
 - **Row-Level Security** — `rlsEnabled` + `policies[]` on `TableIR`, compiled to `CREATE POLICY` DDL

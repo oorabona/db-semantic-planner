@@ -45,7 +45,7 @@ import { createNqlBindingRef } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { intentToDecisions } from '../intent-to-decisions.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Test schema: departments → employees (1:N)
@@ -97,7 +97,7 @@ function nqlToSQL(nql: string): string {
 		dialectCapabilities: POSTGRESQL_CAPABILITIES,
 	});
 
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	const result = adapter.compile(planReport, {
 		model: testSchema.model,
 	});
@@ -123,7 +123,7 @@ function nqlToSQLWithParams(nql: string): {
 		dialectCapabilities: POSTGRESQL_CAPABILITIES,
 	});
 
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	const result = adapter.compile(planReport, {
 		model: testSchema.model,
 	});
@@ -152,7 +152,7 @@ function nqlToSQLWithNamedParams(
 		dialectCapabilities: POSTGRESQL_CAPABILITIES,
 	});
 
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	const result = adapter.compile(planReport, {
 		model: testSchema.model,
 	});
@@ -174,7 +174,7 @@ function nqlCteToSQLWithNamedParams(
 		);
 	}
 
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	const result = adapter.compileCteQuery(compiled.ast.cteQuery, {
 		model: testSchema.model,
 	});
@@ -338,7 +338,7 @@ function nqlMutationToSQL(nql: string): string {
 		throw new Error(`Expected UpsertIntent, got ${mutation.type}`);
 	}
 
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	const result = adapter.compileUpsert(mutation, { model: testSchema.model });
 
 	return normalizeSQL(result.sql);
@@ -415,7 +415,7 @@ describe('NQL → SQL compile-only pipeline', () => {
 		const planReport = plan(directIntent, testSchema.model, {
 			dialectCapabilities: POSTGRESQL_CAPABILITIES,
 		});
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		let emittedSql: string | undefined;
 
 		expect(() => {
@@ -450,7 +450,7 @@ describe('NQL → SQL compile-only pipeline', () => {
 		const planReport = plan(directIntent, testSchema.model, {
 			dialectCapabilities: POSTGRESQL_CAPABILITIES,
 		});
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		let emittedSql: string | undefined;
 
 		expect(() => {
@@ -485,7 +485,7 @@ describe('NQL → SQL compile-only pipeline', () => {
 		const planReport = plan(directIntent, testSchema.model, {
 			dialectCapabilities: POSTGRESQL_CAPABILITIES,
 		});
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		let emittedSql: string | undefined;
 
 		expect(() => {
@@ -669,7 +669,7 @@ describe('NQL → SQL compile-only pipeline', () => {
 	});
 
 	it('keeps builder raw() expressions reachable from builder origin', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 		const orm = createOrm({ model: testSchema.model, adapter });
 		const dump = orm
 			.select('users')
@@ -771,7 +771,7 @@ describe('NQL → SQL compile-only pipeline', () => {
 			);
 		}
 
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const result = adapter.compile(compiled.ast, { model: testSchema.model });
 		const sql = normalizeSQL(result.sql);
 
@@ -860,7 +860,7 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(structural.sql).toContain('order by users."createdat" desc');
 		expect(structural.params).toEqual([]);
 
-		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 		const orm = createOrm({ model: testSchema.model, adapter });
 		const rawFragment = orm.nql<{
 			id: number;
@@ -927,7 +927,7 @@ describe('NQL → SQL compile-only pipeline', () => {
 			);
 		}
 
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const result = adapter.compileCteQuery(compiled.ast.cteQuery, {
 			model: testSchema.model,
 			schemaName: 'tenant_42',
@@ -942,7 +942,7 @@ describe('NQL → SQL compile-only pipeline', () => {
 	it('validates NQL CTE declaration names before emitting SQL', () => {
 		const orm = createOrm({
 			model: testSchema.model,
-			adapter: createPgsqlCompileOnlyAdapter({ model: testSchema.model }),
+			adapter: createPgCompileOnlyAdapter({ model: testSchema.model }),
 		});
 
 		expect(() =>
@@ -956,7 +956,7 @@ users | select id`.dump(),
 	it('emits NQL CTE declarations and references with their exact casing', () => {
 		const orm = createOrm({
 			model: blogSchema.model,
-			adapter: createPgsqlCompileOnlyAdapter({
+			adapter: createPgCompileOnlyAdapter({
 				model: blogSchema.model,
 				dbCasing: 'snake_case',
 			}),
@@ -974,7 +974,7 @@ activeUsers | select postTitle`.dump();
 	it('#762: keeps a nested CTE output alias verbatim under snake_case', () => {
 		const orm = createOrm({
 			model: blogSchema.model,
-			adapter: createPgsqlCompileOnlyAdapter({
+			adapter: createPgCompileOnlyAdapter({
 				model: blogSchema.model,
 				dbCasing: 'snake_case',
 			}),
@@ -992,7 +992,7 @@ u | select postTitle`.dump();
 	it('#762: qualifies a projected relation column with its verbatim join alias', () => {
 		const orm = createOrm({
 			model: queryLocalAliasSchema.model,
-			adapter: createPgsqlCompileOnlyAdapter({
+			adapter: createPgCompileOnlyAdapter({
 				model: queryLocalAliasSchema.model,
 				dbCasing: 'snake_case',
 			}),
@@ -1032,7 +1032,7 @@ u | select postTitle`.dump();
 	});
 
 	it('keeps builder-origin outerRef structure unbound', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 		const orm = createOrm({ model: testSchema.model, adapter });
 		const dump = orm
 			.select('departments')
@@ -1189,7 +1189,7 @@ describe('Intent → SQL compile-only pipeline', () => {
 		const planReport = plan(intent, testSchema.model, {
 			dialectCapabilities: POSTGRESQL_CAPABILITIES,
 		});
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const result = adapter.compile(planReport, { model: testSchema.model });
 		return normalizeSQL(result.sql);
 	}
@@ -1319,7 +1319,7 @@ function threeLevelSQL(nql: string): string {
 		dialectCapabilities: POSTGRESQL_CAPABILITIES,
 	});
 
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	const result = adapter.compile(planReport, { model: threeLevel.model });
 	return normalizeSQL(result.sql);
 }
@@ -1398,7 +1398,7 @@ describe('NQL → SQL upsert (ON CONFLICT)', () => {
 		const mutation = compiled.ast!.mutation!;
 		expect(isUpsertIntent(mutation)).toBe(true);
 
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const result = adapter.compileUpsert(mutation as any, {
 			model: testSchema.model,
 		});
@@ -1418,7 +1418,7 @@ describe('NQL → SQL upsert (ON CONFLICT)', () => {
 		const mutation = compiled.ast!.mutation!;
 		expect(isUpsertIntent(mutation)).toBe(true);
 
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const result = adapter.compileUpsert(mutation as any, {
 			model: testSchema.model,
 		});
@@ -1476,7 +1476,7 @@ function blogToSQL(nql: string): { sql: string; params: readonly unknown[] } {
 	const planReport = plan(compiled.ast.query, blogSchema.model, {
 		dialectCapabilities: POSTGRESQL_CAPABILITIES,
 	});
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	const result = adapter.compile(planReport, { model: blogSchema.model });
 	return { sql: normalizeSQL(result.sql), params: result.parameters };
 }
@@ -1489,7 +1489,7 @@ function blogCteToSQL(nql: string, schemaName?: string): string {
 		);
 	}
 
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	return normalizeSQL(
 		adapter.compileCteQuery(compiled.ast.cteQuery, {
 			model: blogSchema.model,
@@ -1500,7 +1500,7 @@ function blogCteToSQL(nql: string, schemaName?: string): string {
 
 describe('CTE relation planning', () => {
 	it('keeps a schema-scoped binding as a query-local source in rawExists', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: testSchema.model,
 			schemaName: 'tenant',
 		});
@@ -1537,7 +1537,7 @@ describe('CTE relation planning', () => {
 	});
 
 	it('keeps the relation binding in scope across a CTE body filter and projection', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ model: blogSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: blogSchema.model });
 		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(
 			'tenant_42',
 		);
@@ -1664,7 +1664,7 @@ filtered_posts
 	it('uses emitted CTE projection keys for snake_case relation targets', () => {
 		const orm = createOrm({
 			model: blogSchema.model,
-			adapter: createPgsqlCompileOnlyAdapter({
+			adapter: createPgCompileOnlyAdapter({
 				model: blogSchema.model,
 				dbCasing: 'snake_case',
 			}),
@@ -1696,7 +1696,7 @@ authors | select name, posts.authorId | flat`.dump();
 	it('compares visible CTE relation keys in database casing', () => {
 		const orm = createOrm({
 			model: blogSchema.model,
-			adapter: createPgsqlCompileOnlyAdapter({
+			adapter: createPgCompileOnlyAdapter({
 				model: blogSchema.model,
 				dbCasing: 'snake_case',
 			}),
@@ -1729,7 +1729,7 @@ authors | select name, posts.title | flat`.dump(),
 	});
 
 	it('keeps a CTE that shadows a model table as the outer source', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ model: blogSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: blogSchema.model });
 		const result = adapter.compileCteQuery({
 			kind: 'cteQuery',
 			ctes: [
@@ -1765,7 +1765,7 @@ authors | select name, posts.title | flat`.dump(),
 	});
 
 	it('keeps scalar CTE compilation working without a model', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const result = adapter.compileCteQuery({
 			kind: 'cteQuery',
 			ctes: [
@@ -1997,7 +1997,7 @@ describe('Bug regressions', () => {
 			const planReport = plan(compiled.ast.query, categorySchema.model, {
 				dialectCapabilities: POSTGRESQL_CAPABILITIES,
 			});
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const result = adapter.compile(planReport, {
 				model: categorySchema.model,
 			});
@@ -2192,7 +2192,7 @@ function mutationToSQLWithNamedParams(
 	}
 
 	const mutation = compiled.ast.mutation;
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	const opts = {
 		model: mutationSchema.model,
 	};
@@ -2228,7 +2228,7 @@ describe('NQL → SQL mutation E2E', () => {
 					`NQL mutation compilation failed: ${compiled.errors.map((error) => error.message).join(', ')}`,
 				);
 			}
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				dbCasing: 'snake_case',
 			});
 			const options = { model: mutationSchema.model };
@@ -2244,7 +2244,7 @@ describe('NQL → SQL mutation E2E', () => {
 
 		const select = createOrm({
 			model: mutationSchema.model,
-			adapter: createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' }),
+			adapter: createPgCompileOnlyAdapter({ dbCasing: 'snake_case' }),
 		})
 			.select('archivedPosts')
 			.columns(['userId'])
@@ -2393,7 +2393,7 @@ describe('NQL → SQL multi-row INSERT E2E', () => {
 		const localDb = schema({ t: { a: 'integer', b: 'integer' } } as const);
 		const localOrm = createOrm({
 			schema: localDb,
-			adapter: createPgsqlCompileOnlyAdapter({ model: localDb.model }),
+			adapter: createPgCompileOnlyAdapter({ model: localDb.model }),
 		});
 		const result = localOrm.nql`insert into t values (a=1), (b=2)`.dump();
 		expect(result.sql).toBe(
@@ -2472,7 +2472,7 @@ function bindToSQL(
 	}
 
 	const ast = compiled.ast;
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	const opts = { model };
 	const allParams: unknown[] = [];
 	const sourceQueryMutationSource =
@@ -2551,7 +2551,7 @@ function boundBundleToSQL(
 		);
 	}
 
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	const result = adapter.compile(compiled.ast, {
 		model,
 		...(schemaName !== undefined && { schemaName }),
@@ -2604,7 +2604,7 @@ describe('NQL → SQL bind + CTE E2E', () => {
 				`NQL compilation failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
 			);
 		}
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const result = adapter.compile(compiled.ast, {
 			model: hierarchySchema.model,
 		});
@@ -2669,7 +2669,7 @@ describe('NQL → SQL bind + CTE E2E', () => {
 	});
 
 	it('withSchema binding-final query keeps real tables in the final query qualified', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: mutationSchema.model,
 		});
 		const orm = createOrm({ schema: mutationSchema, adapter });
@@ -2762,7 +2762,7 @@ draft_posts | where id in (comments | select postId) | select id`.dump();
 				},
 			},
 		};
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: blogSchema.model,
 		});
 
@@ -2805,7 +2805,7 @@ draft_posts | where id in (comments | select postId) | select id`.dump();
 				},
 			},
 		};
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: blogSchema.model,
 		});
 
@@ -2853,7 +2853,7 @@ draft_posts | where id in (comments | select postId) | select id`.dump();
 			bindings: new Map([['draft_posts', bindingQuery]]),
 			query: finalQuery,
 		};
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: mutationSchema.model,
 		});
 
@@ -2919,7 +2919,7 @@ draft_posts | where id in (comments | select postId) | select id`.dump();
 		if (!compiled.success || compiled.ast?.mutation?.type !== 'insert_from') {
 			throw new Error('Expected insert_from mutation from NQL compilation');
 		}
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const result = adapter.compileInsertFrom(compiled.ast.mutation, {
 			model: mutationSchema.model,
 			schemaName: 'tenant_direct',
@@ -2942,7 +2942,7 @@ draft_posts | where id in (comments | select postId) | select id`.dump();
 		if (!compiled.success || compiled.ast?.mutation?.type !== 'upsert_from') {
 			throw new Error('Expected upsert_from mutation from NQL compilation');
 		}
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const result = adapter.compileUpsertFrom(compiled.ast.mutation, {
 			model: mutationSchema.model,
 			schemaName: 'tenant_direct',
@@ -2958,7 +2958,7 @@ draft_posts | where id in (comments | select postId) | select id`.dump();
 	});
 
 	it('direct compileInsertFrom with sourceQuery fails loudly without a model', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const sourceQuery: QueryIntent = {
 			type: 'select',
 			from: 'posts',
@@ -3013,7 +3013,7 @@ draft_posts | where id in (comments | select postId) | select id`.dump();
 			},
 			bindings: new Map([['subset', bindingQuery]]),
 		};
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const result = adapter.compile(bundle, {
 			model: mutationSchema.model,
 			schemaName: 'tenant_bound',
@@ -3027,7 +3027,7 @@ draft_posts | where id in (comments | select postId) | select id`.dump();
 	});
 
 	it('fails closed when a branded binding ref reaches a direct mutation compile path', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 
 		expect(() =>
 			adapter.compileDelete(
@@ -3046,7 +3046,7 @@ draft_posts | where id in (comments | select postId) | select id`.dump();
 	});
 
 	it('does not reject user JSON with $ref on a direct mutation compile path', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const refValue = { $ref: 'leaked_posts' };
 		const result = adapter.compileDelete(
 			{
@@ -3120,7 +3120,7 @@ describe('existsWrap → SELECT EXISTS SQL', () => {
 		const planReport = plan(intent, testSchema.model, {
 			dialectCapabilities: POSTGRESQL_CAPABILITIES,
 		});
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const result = adapter.compile(planReport, { model: testSchema.model });
 		const sql = normalizeSQL(result.sql);
 
@@ -3145,7 +3145,7 @@ describe('existsWrap → SELECT EXISTS SQL', () => {
 		const planReport = plan(intent, testSchema.model, {
 			dialectCapabilities: POSTGRESQL_CAPABILITIES,
 		});
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const result = adapter.compile(planReport, { model: testSchema.model });
 		const sql = normalizeSQL(result.sql);
 
@@ -3166,7 +3166,7 @@ describe('existsWrap → SELECT EXISTS SQL', () => {
 		const planReport = plan(intent, testSchema.model, {
 			dialectCapabilities: POSTGRESQL_CAPABILITIES,
 		});
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const result = adapter.compile(planReport, {
 			model: testSchema.model,
 			schemaName: 'tenant_42',
@@ -3338,7 +3338,7 @@ function jsonNqlToSQL(nql: string): string {
 	const planReport = plan(compiled.ast.query, jsonSchema.model, {
 		dialectCapabilities: POSTGRESQL_CAPABILITIES,
 	});
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	const result = adapter.compile(planReport, { model: jsonSchema.model });
 	return normalizeSQL(result.sql);
 }
@@ -3364,7 +3364,7 @@ function jsonNqlToSQLWithParams(
 	const planReport = plan(compiled.ast.query, jsonSchema.model, {
 		dialectCapabilities: POSTGRESQL_CAPABILITIES,
 	});
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	const result = adapter.compile(planReport, {
 		model: jsonSchema.model,
 	});
@@ -3555,7 +3555,7 @@ function compileIntentToSQL(
 	const planReport = plan(intent as QueryIntent, model, {
 		dialectCapabilities: POSTGRESQL_CAPABILITIES,
 	});
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	const result = adapter.compile(planReport, { model });
 	return normalizeSQL(result.sql);
 }

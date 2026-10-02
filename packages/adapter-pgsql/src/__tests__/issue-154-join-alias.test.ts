@@ -8,7 +8,7 @@ import {
 } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const issue154Schema = schema({
 	files: {
@@ -46,7 +46,7 @@ const employeeSchema = schema({
 });
 
 function buildOrm(model = issue154Schema.model) {
-	const adapter = createPgsqlCompileOnlyAdapter({ model });
+	const adapter = createPgCompileOnlyAdapter({ model });
 	return createOrm({ model, adapter });
 }
 
@@ -422,7 +422,7 @@ describe('FIX-154: path-based join identity for multi-path includes', () => {
 	});
 
 	it('compiling the same query twice on one adapter instance is deterministic', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: issue154Schema.model,
 		});
 		const orm = createOrm({ model: issue154Schema.model, adapter });

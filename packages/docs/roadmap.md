@@ -41,8 +41,8 @@ This means your application code stays the same — only the adapter import chan
 ```typescript
 // doctest: skip — aspirational adapter portability example (adapter-sqlite is planned, not yet implemented; duplicate const declarations are intentional for illustration)
 // PostgreSQL (today)
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
-const adapter = createPgsqlAdapter(pool);
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
+const adapter = createPgAdapter(pool);
 
 // SQLite (future)
 import { createSqliteAdapter } from '@dbsp/adapter-sqlite';

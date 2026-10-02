@@ -1137,7 +1137,7 @@ function createsAddress(change: SchemaChange): boolean {
  * plan time, so no executable generator step can later fall through to a
  * permissive "no managed address" branch.
  */
-export function createPgsqlGeneratedManagedStep(input: {
+export function createPgGeneratedManagedStep(input: {
 	readonly change: SchemaChange;
 	readonly database: string;
 	readonly schema: string;
@@ -1187,9 +1187,7 @@ export function createPgsqlGeneratedManagedStep(input: {
  * The live differ is the shape comparator. Persist the exact authored table
  * shape, rather than a boolean that could later be reinterpreted.
  */
-export function pgsqlDeclaredAdoptionDeclaration(
-	table: TableIR,
-): LedgerPayload {
+export function pgDeclaredAdoptionDeclaration(table: TableIR): LedgerPayload {
 	const value = JSON.parse(
 		canonicalJson({ kind: 'table', name: table.name, shape: table }),
 	) as LedgerPayload['value'];
@@ -1201,7 +1199,7 @@ export function pgsqlDeclaredAdoptionDeclaration(
  * table into the managed ledger.  It intentionally mirrors the historical
  * generator lifecycle material so CLI plans retain their byte representation.
  */
-export function createPgsqlDeclaredAdoptionStep(input: {
+export function createPgDeclaredAdoptionStep(input: {
 	readonly address: Address;
 	readonly table: TableIR;
 	readonly stepKey: string;
@@ -1220,14 +1218,14 @@ export function createPgsqlDeclaredAdoptionStep(input: {
 		classification: 'non-destructive',
 		requiresVacancy: false,
 		selection: { kind: 'adoption', selector: `table:${input.table.name}` },
-		expectedDeclaration: pgsqlDeclaredAdoptionDeclaration(input.table),
+		expectedDeclaration: pgDeclaredAdoptionDeclaration(input.table),
 		expectedCatalogueIdentity: input.catalogueIdentity,
 		lifecycle: { kind: 'adoption', shape: input.table },
 		replayPolicy: 'recorded',
 	};
 }
 
-export function pgsqlDeclaredSequenceAdoptionDeclaration(
+export function pgDeclaredSequenceAdoptionDeclaration(
 	sequence: SequenceIR,
 ): LedgerPayload {
 	const { adopt: _adopt, ...shape } = sequence;
@@ -1238,7 +1236,7 @@ export function pgsqlDeclaredSequenceAdoptionDeclaration(
 }
 
 /** Creates the token-gated adoption claim for a physical standalone sequence. */
-export function createPgsqlDeclaredSequenceAdoptionStep(input: {
+export function createPgDeclaredSequenceAdoptionStep(input: {
 	readonly address: Address;
 	readonly sequence: SequenceIR;
 	readonly stepKey: string;
@@ -1262,7 +1260,7 @@ export function createPgsqlDeclaredSequenceAdoptionStep(input: {
 		classification: 'non-destructive',
 		requiresVacancy: false,
 		selection: { kind: 'adoption', selector: `sequence:${shape.name}` },
-		expectedDeclaration: pgsqlDeclaredSequenceAdoptionDeclaration(shape),
+		expectedDeclaration: pgDeclaredSequenceAdoptionDeclaration(shape),
 		expectedCatalogueIdentity: input.catalogueIdentity,
 		lifecycle: { kind: 'sequence-adoption', shape },
 		replayPolicy: 'recorded',

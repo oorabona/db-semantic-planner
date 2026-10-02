@@ -16,7 +16,7 @@ import {
 } from '@dbsp/adapter-pgsql';
 import {
 	applyPgTransitionRun,
-	comparePgsqlDeclaredAdoptionSchema,
+	comparePgDeclaredAdoptionSchema,
 	executeGeneratorPlan,
 	type GeneratorExecutionResult,
 	lockPgJournalRun,
@@ -1414,7 +1414,7 @@ async function runApplyInternal(
 						},
 						verifyDeclaredAdoptionShape: async (executor, step) => {
 							if (step.lifecycle?.kind !== 'adoption') return false;
-							const compared = await comparePgsqlDeclaredAdoptionSchema({
+							const compared = await comparePgDeclaredAdoptionSchema({
 								// Outcome protocol provides its claimed pg session here. It is
 								// intentionally not the outer pool held by runApply.
 								executor,

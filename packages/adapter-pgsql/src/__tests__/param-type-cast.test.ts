@@ -12,8 +12,8 @@
 import type { ModelIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
-	createPgsqlCompileOnlyAdapter,
-	type PgsqlAdapterOptions,
+	createPgCompileOnlyAdapter,
+	type PgAdapterOptions,
 } from '../pgsql-adapter.js';
 
 type ColumnDef = {
@@ -66,10 +66,10 @@ function compileSelect(
 	whereColumn: string,
 	whereValue: unknown,
 	operator = '=',
-	adapterOptions: Omit<PgsqlAdapterOptions, 'model'> = {},
+	adapterOptions: Omit<PgAdapterOptions, 'model'> = {},
 ): { sql: string; parameters: readonly unknown[] } {
 	const model = buildModel(tableName, columns);
-	const adapter = createPgsqlCompileOnlyAdapter({ ...adapterOptions, model });
+	const adapter = createPgCompileOnlyAdapter({ ...adapterOptions, model });
 	return adapter.compile({
 		rootTable: tableName,
 		decisions: [
@@ -190,7 +190,7 @@ describe('PARAM-TYPE-CAST: comparison handler emits CAST when originalDbType set
 	});
 
 	it('does NOT cast when no model is provided (backward compat)', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const { sql, parameters } = adapter.compile({
 			rootTable: 'items',
 			decisions: [
@@ -208,7 +208,7 @@ describe('PARAM-TYPE-CAST: comparison handler emits CAST when originalDbType set
 			{ name: 'manager_id', type: 'number', originalDbType: 'integer' },
 			{ name: 'id', type: 'number', originalDbType: 'integer' },
 		]);
-		const adapter = createPgsqlCompileOnlyAdapter({ model });
+		const adapter = createPgCompileOnlyAdapter({ model });
 		const { sql } = adapter.compile({
 			rootTable: 'employees',
 			decisions: [
@@ -321,7 +321,7 @@ describe('PARAM-TYPE-CAST: IN handler emits CAST when originalDbType set', () =>
 		const model = buildModel('items', [
 			{ name: 'status', type: 'number', originalDbType: 'integer' },
 		]);
-		const adapter = createPgsqlCompileOnlyAdapter({ model });
+		const adapter = createPgCompileOnlyAdapter({ model });
 		const { sql, parameters } = adapter.compile({
 			rootTable: 'items',
 			decisions: [
@@ -337,7 +337,7 @@ describe('PARAM-TYPE-CAST: IN handler emits CAST when originalDbType set', () =>
 		const model = buildModel('users', [
 			{ name: 'role_id', type: 'uuid', originalDbType: 'uuid' },
 		]);
-		const adapter = createPgsqlCompileOnlyAdapter({ model });
+		const adapter = createPgCompileOnlyAdapter({ model });
 		const { sql, parameters } = adapter.compile({
 			rootTable: 'users',
 			decisions: [
@@ -358,7 +358,7 @@ describe('PARAM-TYPE-CAST: IN handler emits CAST when originalDbType set', () =>
 		const model = buildModel('orders', [
 			{ name: 'state', type: 'number', originalDbType: 'integer' },
 		]);
-		const adapter = createPgsqlCompileOnlyAdapter({ model });
+		const adapter = createPgCompileOnlyAdapter({ model });
 		const { sql, parameters } = adapter.compile({
 			rootTable: 'orders',
 			decisions: [
@@ -371,7 +371,7 @@ describe('PARAM-TYPE-CAST: IN handler emits CAST when originalDbType set', () =>
 	});
 
 	it('does NOT cast IN when no model is provided (backward compat)', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const { sql, parameters } = adapter.compile({
 			rootTable: 'items',
 			decisions: [
@@ -386,7 +386,7 @@ describe('PARAM-TYPE-CAST: IN handler emits CAST when originalDbType set', () =>
 
 	it('does NOT cast IN when originalDbType is absent', () => {
 		const model = buildModel('items', [{ name: 'status', type: 'number' }]);
-		const adapter = createPgsqlCompileOnlyAdapter({ model });
+		const adapter = createPgCompileOnlyAdapter({ model });
 		const { sql, parameters } = adapter.compile({
 			rootTable: 'items',
 			decisions: [

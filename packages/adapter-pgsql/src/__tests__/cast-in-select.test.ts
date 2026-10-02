@@ -26,7 +26,7 @@ import type { CastExpressionIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ============================================================================
 // Test schema & ORM factory
@@ -42,7 +42,7 @@ const testSchema = schema({
 } as const);
 
 function buildOrm() {
-	const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+	const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 	return createOrm({ model: testSchema.model, adapter });
 }
 

@@ -6,9 +6,9 @@
  */
 
 import {
-	comparePgsqlDatabaseSchema,
+	comparePgDatabaseSchema,
+	createPgAdapter,
 	createPgPhysicalModel,
-	createPgsqlAdapter,
 	escapeDiagnosticText,
 } from '@dbsp/adapter-pgsql';
 import { Command } from 'commander';
@@ -63,10 +63,10 @@ export const verifyCommand = new Command('verify')
 				const { pool } = await createDbConnection(options.db);
 
 				try {
-					const adapter = createPgsqlAdapter(pool);
+					const adapter = createPgAdapter(pool);
 					// Live diff: introspect database and canonicalise PostgreSQL CHECK
 					// expressions before comparing.
-					const diff = await comparePgsqlDatabaseSchema(adapter, physical, {
+					const diff = await comparePgDatabaseSchema(adapter, physical, {
 						onExpressionCanonicalizationWarning: (warning) =>
 							console.warn(
 								`⚠️  [${warning.kind} ${escapeDiagnosticText(warning.table)}.${escapeDiagnosticText(warning.name)}] ${warning.message}`,

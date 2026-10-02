@@ -10,7 +10,7 @@
  *   - NqlBuilderImpl (nql template tag)
  */
 
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { describe, expect, it } from 'vitest';
 import { eq } from '../filters.js';
 import { createNqlTag } from '../nql.js';
@@ -22,7 +22,7 @@ describe('QueryBuilder.dump(meta?)', () => {
 	const db = schema({ users: { id: 'integer', name: 'string' } } as const);
 	const orm = createOrm({
 		schema: db,
-		adapter: createPgsqlCompileOnlyAdapter(),
+		adapter: createPgCompileOnlyAdapter(),
 	});
 
 	it('attaches correlationId and queryName to dump.meta', () => {
@@ -72,7 +72,7 @@ describe('QueryBuilder.dump(meta?)', () => {
 
 describe('orm.from(tableRef).dump(meta?)', () => {
 	const db = schema({ users: { id: 'integer', name: 'string' } } as const);
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	const orm = createOrm({ schema: db, adapter });
 
 	it('attaches queryName and correlationId via from() path', () => {
@@ -89,7 +89,7 @@ describe('orm.from(tableRef).dump(meta?)', () => {
 
 describe('nql`...`.dump(meta?)', () => {
 	const db = schema({ users: { id: 'integer', name: 'string' } } as const);
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	const nql = createNqlTag(db.definition, db.model, adapter);
 
 	it('attaches queryName and correlationId via NQL path', () => {
@@ -131,7 +131,7 @@ describe('nql`...`.dump(meta?)', () => {
 
 describe('mutation dump(meta?)', () => {
 	const db = schema({ users: { id: 'integer', name: 'string' } } as const);
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	const orm = stringMutationOrm(createOrm({ schema: db, adapter }));
 
 	it('attaches queryName and correlationId via fluent mutation dump path', () => {

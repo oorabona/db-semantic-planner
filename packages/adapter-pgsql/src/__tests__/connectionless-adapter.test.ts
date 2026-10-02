@@ -1,5 +1,5 @@
 /**
- * Connectionless PgsqlAdapter contract.
+ * Connectionless PgAdapter contract.
  *
  * Each execution entry point has an individual regression test. Removing its
  * guard lets that operation reach compilation or a distinct legacy failure.
@@ -16,8 +16,8 @@ import type { CompileOnlyAdapter } from '@dbsp/types';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
-	createPgsqlCompileOnlyAdapter,
-	type PgsqlAdapter,
+	createPgCompileOnlyAdapter,
+	type PgAdapter,
 } from '../pgsql-adapter.js';
 import { stringMutationOrm } from '../test-compat/issue-441.js';
 
@@ -34,15 +34,15 @@ const query = projectionlessCompiledQuery(
 );
 
 function connectionlessMessage(operation: string): string {
-	return `Cannot ${operation}: this PgsqlAdapter was constructed without a connection. Use createPgsqlAdapter(pool) to execute database operations.`;
+	return `Cannot ${operation}: this PgAdapter was constructed without a connection. Use createPgAdapter(pool) to execute database operations.`;
 }
 
 function ormConnectionlessMessage(operation: string): string {
-	return `Cannot execute ${operation}: this PgsqlAdapter was constructed without a connection.\n\nTo fix: Use createPgsqlAdapter(pool) to execute database operations.`;
+	return `Cannot execute ${operation}: this PgAdapter was constructed without a connection.\n\nTo fix: Use createPgAdapter(pool) to execute database operations.`;
 }
 
 function createConnectionlessOrm() {
-	const adapter = createPgsqlCompileOnlyAdapter({ model: db.model });
+	const adapter = createPgCompileOnlyAdapter({ model: db.model });
 	return {
 		adapter,
 		orm: stringMutationOrm(createOrm({ schema: db, adapter })),
@@ -65,10 +65,10 @@ function connectionlessRawCteQuery() {
 	});
 }
 
-describe('createPgsqlCompileOnlyAdapter connectionless construction', () => {
-	it('returns PgsqlAdapter and the documented createOrm(...).dump() call typechecks and works', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ model: db.model });
-		expectTypeOf(adapter).toEqualTypeOf<PgsqlAdapter>();
+describe('createPgCompileOnlyAdapter connectionless construction', () => {
+	it('returns PgAdapter and the documented createOrm(...).dump() call typechecks and works', () => {
+		const adapter = createPgCompileOnlyAdapter({ model: db.model });
+		expectTypeOf(adapter).toEqualTypeOf<PgAdapter>();
 		const existingCompileOnlyAnnotation: CompileOnlyAdapter = adapter;
 
 		const orm = createOrm({ model: db.model, adapter });
@@ -78,13 +78,13 @@ describe('createPgsqlCompileOnlyAdapter connectionless construction', () => {
 	});
 
 	it('supportsExecution is false for an adapter constructed without a connection', () => {
-		expect(supportsExecution(createPgsqlCompileOnlyAdapter())).toBe(false);
+		expect(supportsExecution(createPgCompileOnlyAdapter())).toBe(false);
 	});
 });
 
 describe('connectionless execution refusal', () => {
 	it('query execution: rejects before validating a compiled query', async () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		await expect(
 			adapter.execute({ sql: 'SELECT 1', parameters: [] } as never),
 		).rejects.toThrow(connectionlessMessage('execute'));
@@ -140,7 +140,7 @@ describe('connectionless execution refusal', () => {
 	});
 
 	it('hook-aware exists(): refuses uniformly through the execution funnel', async () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ model: db.model });
+		const adapter = createPgCompileOnlyAdapter({ model: db.model });
 		const hooks = createHookManager().beforeQuery((context) => context);
 		const orm = createOrm({ schema: db, adapter, hooks });
 
@@ -185,7 +185,7 @@ describe('connectionless execution refusal', () => {
 	);
 
 	it('stream: refuses on first iteration, not construction', async () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const stream = adapter.stream(query);
 		await expect(stream.next()).rejects.toThrow(
 			connectionlessMessage('stream'),
@@ -193,7 +193,7 @@ describe('connectionless execution refusal', () => {
 	});
 
 	it('raw stream: refuses on first iteration, not construction', async () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const stream = adapter.streamRaw('SELECT 1');
 		await expect(stream.next()).rejects.toThrow(
 			connectionlessMessage('streamRaw'),
@@ -201,7 +201,7 @@ describe('connectionless execution refusal', () => {
 	});
 
 	it('transaction: returns a rejected promise rather than throwing synchronously', async () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		let transaction: Promise<void> | undefined;
 		expect(() => {
 			transaction = adapter.transaction(async () => undefined);
@@ -212,42 +212,42 @@ describe('connectionless execution refusal', () => {
 	});
 
 	it('pinned connection: refuses uniformly', async () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		await expect(
 			adapter.withPinnedConnection(async () => undefined),
 		).rejects.toThrow(connectionlessMessage('withPinnedConnection'));
 	});
 
 	it('introspection: refuses uniformly', async () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		await expect(adapter.introspect()).rejects.toThrow(
 			connectionlessMessage('introspect'),
 		);
 	});
 
 	it('DDL execution: refuses uniformly', async () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		await expect(
 			adapter.executeDDL('CREATE TABLE users (id integer)'),
 		).rejects.toThrow(connectionlessMessage('executeDDL'));
 	});
 
 	it('index listing catalog read: refuses uniformly', async () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		await expect(adapter.listIndexes('users')).rejects.toThrow(
 			connectionlessMessage('listIndexes'),
 		);
 	});
 
 	it('index existence catalog read: refuses uniformly', async () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		await expect(
 			adapter.indexExists('users_name_idx', 'users'),
 		).rejects.toThrow(connectionlessMessage('indexExists'));
 	});
 
 	it('storage-size catalog read: refuses uniformly', async () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		await expect(adapter.storageSize('users')).rejects.toThrow(
 			connectionlessMessage('storageSize'),
 		);

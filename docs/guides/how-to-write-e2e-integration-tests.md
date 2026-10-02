@@ -30,7 +30,7 @@ Each run creates a schema with an unpredictable identifier-safe suffix and makes
 | Helper | Use |
 |--------|-----|
 | `getTestPool()` | shared `pg.Pool` on the live container |
-| `getTestAdapter()` | `createPgsqlAdapter(pool)` on the live pool |
+| `getTestAdapter()` | `createPgAdapter(pool)` on the live pool |
 | `createSchema(name)` / `dropSchema(name)` | per-test schema isolation |
 | `execInSchema(name, sql)` / `sql\`...\`.execute(pool)` | DDL + seed via tagged templates |
 | `closeTestDb()` | teardown |

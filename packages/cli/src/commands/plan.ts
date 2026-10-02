@@ -5,9 +5,9 @@
 
 import {
 	acquirePgTransitionClient,
+	createPgAdapter,
 	createPgExecutionContract,
 	createPgPhysicalModel,
-	createPgsqlAdapter,
 	createPgTransitionLessor,
 	createPgTransitionPack,
 	createPgTransitionRunPersister,
@@ -348,7 +348,7 @@ const defaultPlanDeps: PlanDeps = {
 					`PostgreSQL introspection target identity does not match the captured target: ${mismatch}`,
 				);
 			}
-			return await createPgsqlAdapter(lease.client, {
+			return await createPgAdapter(lease.client, {
 				borrowedClient: true,
 			}).introspect(schema === undefined ? {} : { schema });
 		} finally {
@@ -466,7 +466,7 @@ export async function runPlan(
 			const lifecycle = await planPhysicalPgTransitionRun(
 				physical,
 				async (client: TransitionSessionClient, schema: string | undefined) =>
-					createPgsqlAdapter(client as unknown as PoolClient, {
+					createPgAdapter(client as unknown as PoolClient, {
 						borrowedClient: true,
 					}).introspect(schema === undefined ? {} : { schema }),
 				pool,

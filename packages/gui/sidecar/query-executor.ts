@@ -8,7 +8,7 @@
 import {
 	compileSetOperation,
 	createLeafCompileFn,
-	createPgsqlCompileOnlyAdapter,
+	createPgCompileOnlyAdapter,
 } from '@dbsp/adapter-pgsql';
 import { extractPseudoColumnKeywords, plan } from '@dbsp/core';
 import { compile as compileNql } from '@dbsp/nql';
@@ -271,7 +271,7 @@ export async function handleExecuteNQL(
 	}
 
 	const compiled = result.ast;
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 
 	let sql: string;
 	let sqlParams: readonly unknown[];

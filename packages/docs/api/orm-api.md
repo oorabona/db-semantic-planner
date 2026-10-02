@@ -48,7 +48,7 @@ const db = schema({
 
 ```typescript
 import { createOrm, schema, ref, eq } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 // Schema declares camelCase identifiers (idiomatic JS/TS).
 const db = schema({
@@ -67,7 +67,7 @@ const db = schema({
 
 // dbCasing: 'snake_case' translates camelCase model identifiers to
 // snake_case at the SQL boundary — no runtime column renaming needed.
-const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' });
+const adapter = createPgCompileOnlyAdapter({ dbCasing: 'snake_case' });
 const orm = createOrm({ schema: db, adapter });
 
 // Type-safe query — code uses camelCase names; SQL uses snake_case columns.
@@ -123,9 +123,9 @@ For testing, CLI tooling, or SQL preview — no `pg.Pool` needed:
 
 ```typescript
 import { createOrm, eq } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
-const adapter = createPgsqlCompileOnlyAdapter();
+const adapter = createPgCompileOnlyAdapter();
 const orm = createOrm({ schema: db, adapter }); // db from schema() above
 
 const dump = orm.select('users').where(eq('active', true)).dump();
@@ -373,12 +373,12 @@ const db = schema(
 
 ```typescript
 import { createOrm } from '@dbsp/core';
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 import { Pool } from 'pg';
 
 const orm = createOrm({
   schema: db,
-  adapter: createPgsqlAdapter(new Pool({ connectionString: process.env.DATABASE_URL })),
+  adapter: createPgAdapter(new Pool({ connectionString: process.env.DATABASE_URL })),
 });
 ```
 
@@ -388,7 +388,7 @@ const orm = createOrm({
 |--------|------|---------|-------------|
 | `schema` | `Schema` | - | From `schema()` (preferred) |
 | `model` | `ModelIR` | - | Direct ModelIR (alternative to schema) |
-| `adapter` | `Adapter` | - | Database adapter; use a connectionless PgsqlAdapter for compile-only work |
+| `adapter` | `Adapter` | - | Database adapter; use a connectionless PgAdapter for compile-only work |
 | `strictMode` | `boolean` | `false` | Throw on ambiguous relations |
 | `maxDepth` | `number` | `10` | Max recursive depth |
 | `maxTableHops` | `number` | `5` | Max relation hops |
@@ -398,11 +398,11 @@ const orm = createOrm({
 For tooling, testing, or SQL preview without a database connection:
 
 ```typescript
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const orm = createOrm({
   schema: db,
-  adapter: createPgsqlCompileOnlyAdapter(),
+  adapter: createPgCompileOnlyAdapter(),
 });
 
 // dump() works — returns SQL + params
@@ -622,14 +622,14 @@ Filter by related records without loading them:
 ```typescript
 import { Pool } from 'pg';
 import { schema, ref, createOrm, eq, exists, notExists, some, every, none } from '@dbsp/core';
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 
 const __db = schema({
   users: { id: 'integer', name: 'string' },
   posts: { id: 'integer', userId: ref('users'), published: 'boolean' },
 } as const);
 const __pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const __orm = createOrm({ schema: __db, adapter: createPgsqlAdapter(__pool) });
+const __orm = createOrm({ schema: __db, adapter: createPgAdapter(__pool) });
 
 // Users who have at least one post
 __orm.select('users').where(exists('posts'))
@@ -651,13 +651,13 @@ __orm.select('users').where(none(__db.tables.users.posts, (p) => eq(p.published,
 
 ```typescript
 import { schema, createOrm, rangeOverlaps, rangeContains, rangeContainedBy } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const __rangeDb = schema({
   bookings: { id: 'integer', period: 'daterange' },
   events: { id: 'integer', dateRange: 'daterange' },
 } as const);
-const __rangeOrm = createOrm({ schema: __rangeDb, adapter: createPgsqlCompileOnlyAdapter() });
+const __rangeOrm = createOrm({ schema: __rangeDb, adapter: createPgCompileOnlyAdapter() });
 
 // Bookings that overlap a date range
 __rangeOrm.select('bookings').where(rangeOverlaps('period', ['2024-01-01', '2024-01-31'])).dump();
@@ -1418,10 +1418,10 @@ Both the primary key convention and the FK derivation function are configurable.
 ### Adapter Options
 
 ```typescript
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 import { singularize } from '@dbsp/core';
 
-const adapter = createPgsqlAdapter(pool, {
+const adapter = createPgAdapter(pool, {
   // Default PK column name (default: 'id')
   defaultPkColumnName: 'uuid',
 
@@ -1441,10 +1441,10 @@ const adapter = createPgsqlAdapter(pool, {
 `NamingPlugin` converts declared model names to physical database names during compilation. Result keys come from the query projection's logical keys; the adapter does not infer them from returned PostgreSQL labels.
 
 ```typescript
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 
 // Built-in: CamelCaseNamingPlugin (camelCase ↔ snake_case)
-const adapter = createPgsqlAdapter(pool, {
+const adapter = createPgAdapter(pool, {
   dbCasing: 'snake_case',  // enables CamelCaseNamingPlugin
 });
 
@@ -1519,7 +1519,7 @@ import { IRREGULAR_PLURALS } from '@dbsp/core';
 A fully custom FK naming strategy using a Map of overrides:
 
 ```typescript
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 import { singularize } from '@dbsp/core';
 
 const myPlurals: Record<string, string> = {
@@ -1527,7 +1527,7 @@ const myPlurals: Record<string, string> = {
   alumni: 'alumnus',
 };
 
-const adapter = createPgsqlAdapter(pool, {
+const adapter = createPgAdapter(pool, {
   deriveFkColumnName: (tableName, pkColumnName) =>
     `${singularize(tableName, myPlurals)}_${pkColumnName}`,
 });
@@ -1540,9 +1540,9 @@ const adapter = createPgsqlAdapter(pool, {
 The adapter accepts an optional `AdapterLogger` for query observability. All methods are optional — implement only what you need:
 
 ```typescript
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 
-const adapter = createPgsqlAdapter(pool, {
+const adapter = createPgAdapter(pool, {
   logger: {
     debug(message, ...args) {
       console.debug(`[dbsp] ${message}`, ...args);

@@ -1,4 +1,4 @@
-import { createPgsqlGeneratedManagedStep } from '@dbsp/adapter-pgsql';
+import { createPgGeneratedManagedStep } from '@dbsp/adapter-pgsql';
 import {
 	executeGeneratorPlan,
 	lockPgJournalRun,
@@ -40,7 +40,7 @@ function deferredKindsPlan(input: {
 		preconditions: [],
 		segments: [],
 		steps: [
-			createPgsqlGeneratedManagedStep({
+			createPgGeneratedManagedStep({
 				change: {
 					kind: 'create_enum',
 					table: '',
@@ -58,7 +58,7 @@ function deferredKindsPlan(input: {
 					`CREATE TYPE ${quoteIdent(input.schema)}.${quoteIdent('order_state')} AS ENUM ('new', 'paid')`,
 				],
 			}),
-			createPgsqlGeneratedManagedStep({
+			createPgGeneratedManagedStep({
 				change: {
 					kind: 'create_sequence',
 					table: '',

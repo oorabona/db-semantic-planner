@@ -7,7 +7,7 @@ import {
 	appendIntentJournal,
 	classifyGeneratedMutation,
 	classifyRemovalEffectsClosure,
-	createPgsqlGeneratedManagedStep,
+	createPgGeneratedManagedStep,
 	createPgTransitionRunPersister,
 	DBSP_LEDGER_EVENT_TABLE,
 	DBSP_LEDGER_MARKER_TABLE,
@@ -175,13 +175,11 @@ function generatorPlan(
 		steps:
 			database && schema
 				? [
-						createPgsqlGeneratedManagedStep({
+						createPgGeneratedManagedStep({
 							change: {
 								...change,
 								destructive: change.classification !== 'non-destructive',
-							} as Parameters<
-								typeof createPgsqlGeneratedManagedStep
-							>[0]['change'],
+							} as Parameters<typeof createPgGeneratedManagedStep>[0]['change'],
 							database,
 							schema,
 							stepKey: 'generator:0',

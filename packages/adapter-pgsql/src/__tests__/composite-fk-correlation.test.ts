@@ -1,7 +1,7 @@
 import { createOrm, exists, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { compilePlan, type PlanDecision } from '../compiler.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const tables = new Map([
 	[
@@ -117,7 +117,7 @@ describe('composite FK correlation SQL', () => {
 		});
 		expect(db.model.getRelationsFrom('items')).toContainEqual(itemsOrder);
 
-		const adapter = createPgsqlCompileOnlyAdapter({ model: db.model });
+		const adapter = createPgCompileOnlyAdapter({ model: db.model });
 		const orm = createOrm({ model: db.model, adapter });
 		const { sql } = (orm as any).select('orders').where(exists('items')).dump();
 
@@ -128,7 +128,7 @@ describe('composite FK correlation SQL', () => {
 	});
 
 	it('SELECT exists() correlates on every composite FK column', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ model });
+		const adapter = createPgCompileOnlyAdapter({ model });
 		const orm = createOrm({ model, adapter });
 
 		const { sql } = (orm as any).select('orders').where(exists('items')).dump();

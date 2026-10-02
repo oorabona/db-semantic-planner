@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { SchemaChange } from '@dbsp/adapter-pgsql';
 import {
 	acquirePgLedgerLocks,
-	createPgsqlGeneratedManagedStep,
+	createPgGeneratedManagedStep,
 	createPgTransitionRunPersister,
 	generatedPostconditionForChange,
 	readPgCatalogueIdentity,
@@ -243,7 +243,7 @@ async function applyPersistedReaddress(input: {
 			table: readdressTable(input.declaration.to.name),
 		},
 	};
-	const step = createPgsqlGeneratedManagedStep({
+	const step = createPgGeneratedManagedStep({
 		change,
 		database: input.database,
 		schema: input.targetSchema,

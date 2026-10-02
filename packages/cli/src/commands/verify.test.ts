@@ -1,5 +1,5 @@
 import type {
-	ComparePgsqlDatabaseSchemaOptions,
+	ComparePgDatabaseSchemaOptions,
 	SchemaChange,
 	SchemaDiff,
 } from '@dbsp/adapter-pgsql';
@@ -15,9 +15,9 @@ vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('@dbsp/adapter-pgsql')>();
 	return {
 		...actual,
-		comparePgsqlDatabaseSchema: (...args: unknown[]) =>
+		comparePgDatabaseSchema: (...args: unknown[]) =>
 			mockComparePgsqlDatabaseSchema(...args),
-		createPgsqlAdapter: (...args: unknown[]) => mockCreatePgsqlAdapter(...args),
+		createPgAdapter: (...args: unknown[]) => mockCreatePgsqlAdapter(...args),
 	};
 });
 
@@ -145,7 +145,7 @@ describe('verify command live diff integration', () => {
 			async (
 				_pool: unknown,
 				_desired: unknown,
-				options?: ComparePgsqlDatabaseSchemaOptions,
+				options?: ComparePgDatabaseSchemaOptions,
 			) => {
 				if (options?.canonicalizeExpressions !== false) {
 					return makeDiff();
@@ -254,7 +254,7 @@ describe('verify command live diff integration', () => {
 			async (
 				_pool: unknown,
 				_desired: unknown,
-				options?: ComparePgsqlDatabaseSchemaOptions,
+				options?: ComparePgDatabaseSchemaOptions,
 			) => {
 				options?.onExpressionCanonicalizationWarning?.({
 					kind: 'check_constraint',

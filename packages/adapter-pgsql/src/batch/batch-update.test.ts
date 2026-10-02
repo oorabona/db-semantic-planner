@@ -10,7 +10,7 @@
 
 import { createOrm, InvalidOperationError, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { stringMutationOrm } from '../test-compat/issue-441.js';
 
 // ---------------------------------------------------------------------------
@@ -32,7 +32,7 @@ const batchSchema = schema({
 } as const);
 
 function createBatchAdapter() {
-	return createPgsqlCompileOnlyAdapter({ model: batchSchema.model });
+	return createPgCompileOnlyAdapter({ model: batchSchema.model });
 }
 
 function makeOrm() {
@@ -166,7 +166,7 @@ describe('SC-06: mixed scalar + array SET', () => {
 		const orm = stringMutationOrm(
 			createOrm({
 				model,
-				adapter: createPgsqlCompileOnlyAdapter({ model }),
+				adapter: createPgCompileOnlyAdapter({ model }),
 			}),
 		);
 
@@ -197,7 +197,7 @@ describe('SC-06: mixed scalar + array SET', () => {
 		const orm = stringMutationOrm(
 			createOrm({
 				model,
-				adapter: createPgsqlCompileOnlyAdapter({ model }),
+				adapter: createPgCompileOnlyAdapter({ model }),
 			}),
 		);
 

@@ -40,7 +40,7 @@ parser. No `targetVersion` option, no second version-requirement map, no third c
    given `DialectCapabilities` (fail-loud, hard-reject, aggregate error). The four: `generateCreateIndex`
    (ddl-generator.ts:374), `upCreateIndex` (migration-sql.ts:686, forward+DOWN), `generateCreateIndexSQL`
    (index-operations.ts:72, public), FK auto-index inline template (migration-sql.ts:457-490).
-4. **The bridge: `derivePostgresqlCapabilitiesForVersion(version)` (B3).** Produces version-filtered
+4. **The bridge: `derivePgCapabilitiesForVersion(version)` (B3).** Produces version-filtered
    `DialectCapabilities` from the index-feature descriptor table (§2 above) + ADR-0003's `serverVersionNum`
    parser (exported from `core/src/transition/registry.ts:222` — do NOT reuse the private `compareVersions`).
    Reachability uses the EXISTING `dialectCapabilities` option on the DDL entry points (no new `targetVersion`).
@@ -164,7 +164,7 @@ Uniform hard-reject (declared features are contractual). Order: (1) input invari
   descriptors ARE the truth).
 
 ### §4.5 The bridge + reachability (B3)
-- `derivePostgresqlCapabilitiesForVersion(version): DialectCapabilities` (adapter-pgsql): start from
+- `derivePgCapabilitiesForVersion(version): DialectCapabilities` (adapter-pgsql): start from
   `POSTGRESQL_CAPABILITIES`; for each index-feature descriptor, if `serverVersionNum(version) <
   descriptor.predicate.minServerVersionNum` → set the mapped `DialectCapabilities` flag false. The
   descriptor-id → flag mapping is one small explicit table here (INDEX_INCLUDE → `supportsDDLIndexInclude`;
@@ -172,7 +172,7 @@ Uniform hard-reject (declared features are contractual). Order: (1) input invari
   parse; reject the `server_version_num` int form ambiguity; reject below a documented floor `'10'`).
 - Reachability: renderers/preflight read `caps` from the EXISTING `dialectCapabilities` option (default →
   POSTGRESQL_CAPABILITIES all-on → inert → non-breaking). A caller gates by passing
-  `derivePostgresqlCapabilitiesForVersion('14')`. #323 / a future transition rule feed caps derived from the
+  `derivePgCapabilitiesForVersion('14')`. #323 / a future transition rule feed caps derived from the
   live `ObservationContext.engineVersion` via the SAME descriptors.
 
 ### §4.6 Gate placement + direction-aware DOWN
@@ -195,7 +195,7 @@ Uniform hard-reject (declared features are contractual). Order: (1) input invari
 
 ## §5 BDD scenarios
 
-Gating is exercised by passing `derivePostgresqlCapabilitiesForVersion('14')` etc. as the existing
+Gating is exercised by passing `derivePgCapabilitiesForVersion('14')` etc. as the existing
 `dialectCapabilities` option — NOT a `targetVersion` option.
 
 - **S1 — default unchanged.** No caps (or latest-PG) → INCLUDE + NND index emits byte-identical SQL to today.
@@ -210,13 +210,13 @@ Gating is exercised by passing `derivePostgresqlCapabilitiesForVersion('14')` et
 - **S9 — four assemblers agree** (byte-identical via the shared renderer).
 - **S10 — public API unchanged** without a context; gated with a PG14 context.
 - **S11 — multiple unsupported features aggregate** (PG10 caps + include + NND → one error lists both).
-- **S12 — bridge validation** — `derivePostgresqlCapabilitiesForVersion('garbage' | '9' | '140005')` throws.
+- **S12 — bridge validation** — `derivePgCapabilitiesForVersion('garbage' | '9' | '140005')` throws.
 - **S13 — input error wins** over version error (non-unique + NND at PG10 caps).
 - **S14 — expression index gated at render despite diff-unmanaged.**
 - **S15 — adversarial identifiers stay safely quoted** (byte-identical vs captured goldens, all entry points).
 - **S16 — degenerate inputs** (empty keys → throw; `with:{}` → no WITH).
 - **S17 — Q2d:** an adapter without `generateCreateIndex` fails to typecheck (`@ts-expect-error` lock); the
-  core fallback is gone; `PgsqlAdapter` + test mocks satisfy the required method.
+  core fallback is gone; `PgAdapter` + test mocks satisfy the required method.
 - **S18 — descriptor is the single truth.** The PG15 min for NND lives ONLY in `INDEX_NULLS_NOT_DISTINCT_CAPABILITY`;
   the bridge derives the flag from it (no second literal '15'/'150000' in the DDL/renderer layer). Lock: a test
   asserts the bridge's PG14/PG15 cutoff comes from the descriptor's `minServerVersionNum`.
@@ -234,7 +234,7 @@ Gating is exercised by passing `derivePostgresqlCapabilitiesForVersion('14')` et
   (aggregate) + `assertCreateIndexSupported` + `renderCreateIndex`. Capture pre-refactor golden SQL FIRST.
   Port all FOUR assemblers (per-site translation preserves emit-order/ifNotExists/concurrently). Input errors.
   Unit tests: S2–S5, S9, S10, S11, S13–S16.
-- **B3 — Bridge + thread option + preflight (adapter).** `derivePostgresqlCapabilitiesForVersion(version)`
+- **B3 — Bridge + thread option + preflight (adapter).** `derivePgCapabilitiesForVersion(version)`
   (reuses the descriptors + `serverVersionNum`, with validation/floor); thread the EXISTING `dialectCapabilities`
   option into renderers + the boundary preflight (all-or-nothing); direction-aware DOWN. **No `targetVersion`
   option.** Unit tests: S6, S7, S8, S12.
@@ -243,7 +243,7 @@ Gating is exercised by passing `derivePostgresqlCapabilitiesForVersion('14')` et
 
 ## §7 Observable Success (write this or don't ship)
 
-`generateMigrationSQL`, given `derivePostgresqlCapabilitiesForVersion('14')` via the existing
+`generateMigrationSQL`, given `derivePgCapabilitiesForVersion('14')` via the existing
 `dialectCapabilities` option, on a diff creating a unique index declaring `NULLS NOT DISTINCT` → **throws**
 `IndexFeatureUnsupportedError` (mentions "NULLS NOT DISTINCT", "15", the index name), returns **no** SQL.
 Before: it silently emits `NULLS NOT DISTINCT` (rejected by PG14 at execution). The PG15 min comes from

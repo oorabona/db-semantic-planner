@@ -100,15 +100,15 @@ Warnings do not stop execution — they surface potential performance or correct
 
 ## Compile-Only Mode
 
-For CLI tooling, SQL preview, or offline testing, use `createPgsqlCompileOnlyAdapter()`. It constructs a normal PostgreSQL adapter without a connection, so planning, compilation, and `.dump()` work without a database. Execution methods remain present and refuse at runtime with the attempted operation and a pointer to `createPgsqlAdapter(pool)`.
+For CLI tooling, SQL preview, or offline testing, use `createPgCompileOnlyAdapter()`. It constructs a normal PostgreSQL adapter without a connection, so planning, compilation, and `.dump()` work without a database. Execution methods remain present and refuse at runtime with the attempted operation and a pointer to `createPgAdapter(pool)`.
 
 ```typescript
 import { createOrm, eq } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const orm = createOrm({
   schema: db,
-  adapter: createPgsqlCompileOnlyAdapter(),
+  adapter: createPgCompileOnlyAdapter(),
 });
 
 const dump = orm.select('users')
@@ -129,10 +129,10 @@ Attach a correlation ID to a dump to annotate that compile-only result:
 
 ```typescript
 import { schema, createOrm, eq } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({ users: { id: 'integer', name: 'string' } } as const);
-const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter() });
 
 const userId = 1;
 const requestId = 'req-123';
@@ -165,7 +165,7 @@ const hooks = createHookManager().beforeQuery((ctx) => ({
 ```typescript
 // doctest: skip — requires real PostgreSQL pool
 import { createOrm, createHookManager, schema } from '@dbsp/core';
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({ users: { id: 'integer', name: 'string' } } as const);
 
@@ -181,7 +181,7 @@ const hooks = createHookManager()
     metrics.histogram('db.query.duration', ctx.duration ?? 0);
   });
 
-const orm = createOrm({ schema: db, adapter: createPgsqlAdapter(pool), hooks });
+const orm = createOrm({ schema: db, adapter: createPgAdapter(pool), hooks });
 ```
 
 | Hook | Type | When called |
@@ -191,7 +191,7 @@ const orm = createOrm({ schema: db, adapter: createPgsqlAdapter(pool), hooks });
 | `afterQuery` | `AfterQueryHook` | After successful query execution only |
 | `onError` | `OnErrorHook` | When the query throws (errors bypass `afterQuery`) |
 
-`PgsqlAdapterOptions` (the second argument to `createPgsqlAdapter`) does not accept query callbacks — use ORM-level hooks via `createHookManager()` instead.
+`PgAdapterOptions` (the second argument to `createPgAdapter`) does not accept query callbacks — use ORM-level hooks via `createHookManager()` instead.
 
 ### Observer diagnostics
 
@@ -203,7 +203,7 @@ control-flow handler for before-hooks and result transformers only; returning
 
 ```typescript
 import { createHookManager, createOrm, schema } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({ users: { id: 'integer', name: 'string' } } as const);
 const hooks = createHookManager();
@@ -213,7 +213,7 @@ const telemetry = {
 
 const orm = createOrm({
   schema: db,
-  adapter: createPgsqlCompileOnlyAdapter(),
+  adapter: createPgCompileOnlyAdapter(),
   hooks,
   onObserverError(error, observerName, phase) {
     telemetry.captureException(error, { observerName, phase });
@@ -234,7 +234,7 @@ Create a `HookManager` with `createHookManager()` and chain your hooks before pa
 ```typescript
 // doctest: skip — requires real PostgreSQL pool; illustrates hook registration pattern
 import { createOrm, createHookManager, schema } from '@dbsp/core';
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({ users: { id: 'integer', name: 'string', deletedAt: 'timestamp' } } as const);
 
@@ -247,7 +247,7 @@ const hooks = createHookManager()
     console.log(`[${ctx.table}] returned ${Array.isArray(results) ? results.length : 1} row(s) in ${ctx.duration}ms`);
   });
 
-const orm = createOrm({ schema: db, adapter: createPgsqlAdapter(pool), hooks });
+const orm = createOrm({ schema: db, adapter: createPgAdapter(pool), hooks });
 ```
 
 Source: `packages/core/src/dx/hooks.ts` — `createHookManager()` returns a `HookManager`.
@@ -322,7 +322,7 @@ const __nqlHookDb = schema({
   },
 } as const);
 
-const __nqlHookAdapter = createPgsqlCompileOnlyAdapter() as unknown as NonNullable<
+const __nqlHookAdapter = createPgCompileOnlyAdapter() as unknown as NonNullable<
   Parameters<typeof createOrm>[0]['adapter']
 >;
 __nqlHookAdapter.executeWithMeta = async () => ({ rows: [{ id: 1 }], rowCount: 1 });
@@ -388,7 +388,7 @@ Use `beforeQuery` to inject a `deletedAt IS NULL` filter on every SELECT without
 ```typescript
 // doctest: skip — requires real PostgreSQL connection
 import { createHookManager, createOrm, schema } from '@dbsp/core';
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({
   posts: { id: 'integer', title: 'string', deletedAt: 'timestamp' },
@@ -410,7 +410,7 @@ const hooks = createHookManager()
     return ctx;
   });
 
-const orm = createOrm({ schema: db, adapter: createPgsqlAdapter(pool), hooks });
+const orm = createOrm({ schema: db, adapter: createPgAdapter(pool), hooks });
 ```
 
 > **Note:** `schema()` accepts a `defaultFilters` option as its third argument for table-level default WHERE clauses. Use `defaultFilters` for simple equality/null checks — it is more idiomatic than a manual `beforeQuery` hook for this pattern:

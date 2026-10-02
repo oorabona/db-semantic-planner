@@ -6,7 +6,7 @@
  * dropped in convertWhereCondition (default: return null). These tests MUST
  * fail on main (no WHERE clause produced) and pass after the fix.
  *
- * All tests use createPgsqlCompileOnlyAdapter + createOrm (compile-only path,
+ * All tests use createPgCompileOnlyAdapter + createOrm (compile-only path,
  * no database connection required).
  */
 
@@ -22,7 +22,7 @@ import {
 	subquery,
 } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -42,7 +42,7 @@ const testSchema = schema({
 } as const);
 
 function buildOrm() {
-	const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+	const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 	return createOrm({ model: testSchema.model, adapter });
 }
 

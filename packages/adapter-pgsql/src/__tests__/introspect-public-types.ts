@@ -10,7 +10,7 @@ import { type IntrospectionOptions, introspect } from '../introspection.js';
 
 function assertIntrospectRejectsABorrowedClient(client: PoolClient): void {
 	// @ts-expect-error a checked-out PoolClient may be sitting inside a transaction
-	// that belongs to its owner. Declare it: new PgsqlAdapter(client, { borrowedClient: true }).
+	// that belongs to its owner. Declare it: new PgAdapter(client, { borrowedClient: true }).
 	void introspect(client);
 
 	// @ts-expect-error and neither may a hand-rolled object that merely has a query().

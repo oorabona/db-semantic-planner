@@ -117,7 +117,7 @@ try {
       .execute();
   });
 } catch (error) {
-  if (error instanceof Error && error.name === 'PgsqlTransactionAbortedError') {
+  if (error instanceof Error && error.name === 'PgTransactionAbortedError') {
     refused = true;
   }
 }
@@ -148,7 +148,7 @@ function assertPgCode(error: unknown, code: string, label: string): void {
 function assertTransactionAborted(error: unknown, label: string): void {
   if (
     !(error instanceof Error) ||
-    error.name !== 'PgsqlTransactionAbortedError' ||
+    error.name !== 'PgTransactionAbortedError' ||
     errorProperty(error, 'dbspTransactionAborted') !== true
   ) {
     throw new Error(`${label} was not dbsp's aborted-transaction refusal`);
@@ -303,10 +303,10 @@ Before 3.0.0 a nested `transaction()` did nothing at all — it simply ran your 
 
 ```typescript
 // doctest: real-db-only — requires a live PostgreSQL connection
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 
 // dbsp owns the pool: it checks out a connection, and transaction() works.
-const owned = createOrm({ schema: db, adapter: createPgsqlAdapter(pool) });
+const owned = createOrm({ schema: db, adapter: createPgAdapter(pool) });
 await owned.transaction(async (tx) => {
   await tx.raw('SELECT 1');
 });
@@ -316,7 +316,7 @@ const client = await pool.connect();
 try {
   const guest = createOrm({
     schema: db,
-    adapter: createPgsqlAdapter(client, { borrowedClient: true }),
+    adapter: createPgAdapter(client, { borrowedClient: true }),
   });
   let refusedBorrowedTransaction = false;
   try {
@@ -332,7 +332,7 @@ try {
   // Unless you say otherwise:
   const delegated = createOrm({
     schema: db,
-    adapter: createPgsqlAdapter(client, {
+    adapter: createPgAdapter(client, {
       borrowedClient: true,
       managedTransactions: true, // "run transactions on my client"
     }),
@@ -432,12 +432,12 @@ For anything that must happen only after a successful commit — publishing an e
 
 ## Compile-only mode
 
-`createPgsqlCompileOnlyAdapter()` constructs a connectionless adapter. Calling `orm.transaction()` with it returns a rejected promise before scheduling database work:
+`createPgCompileOnlyAdapter()` constructs a connectionless adapter. Calling `orm.transaction()` with it returns a rejected promise before scheduling database work:
 
 ```
-Cannot execute transaction(): this PgsqlAdapter was constructed without a connection.
+Cannot execute transaction(): this PgAdapter was constructed without a connection.
 
-To fix: Use createPgsqlAdapter(pool) to execute database operations.
+To fix: Use createPgAdapter(pool) to execute database operations.
 ```
 
 To inspect the SQL of the statements a transaction would run, call `.dump()` on the individual builders.

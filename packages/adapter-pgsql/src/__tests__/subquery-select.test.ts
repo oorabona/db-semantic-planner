@@ -13,7 +13,7 @@ import type { SubqueryExpressionIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ============================================================================
 // Unit: SubqueryExpression.asExpr() API
@@ -227,7 +227,7 @@ describe('op() with SubqueryExpression.asExpr() as argument', () => {
 	it('uses subquery as left operand of a binary op', () => {
 		// SubqueryExpression.asExpr() returns a plain ExpressionSpec (not ExpressionRef instance).
 		// toExpressionIntent() must duck-type check __expr===true to handle it correctly.
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const subExpr = subquery('t').select('col').asExpr('x');
 		const expr = op('+', subExpr, literal(1)).as('next');
 
@@ -245,7 +245,7 @@ describe('op() with SubqueryExpression.asExpr() as argument', () => {
 		// If the bug is present, toExpressionIntent would wrap the ExpressionSpec
 		// object in { kind: 'param', value: exprSpec }, and the adapter would
 		// produce a placeholder like $1 instead of a subquery expression.
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const subExpr = subquery('t').select('col').asExpr('x');
 		const expr = op('+', subExpr, literal(1));
 
@@ -260,7 +260,7 @@ describe('op() with SubqueryExpression.asExpr() as argument', () => {
 	});
 
 	it('uses subquery as right operand of a binary op', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const subExpr = subquery('t').count().asExpr('cnt');
 		const expr = op('-', literal(100), subExpr).as('remaining');
 

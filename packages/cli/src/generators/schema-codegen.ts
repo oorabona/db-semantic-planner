@@ -645,7 +645,7 @@ export function generateSchemaFileWithDiagnostics(
 	}
 	lines.push(`import { ${coreImports.join(', ')} } from '@dbsp/core';`);
 	if (options.dbCasing && options.dbCasing !== 'preserve') {
-		lines.push("import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';");
+		lines.push("import { createPgAdapter } from '@dbsp/adapter-pgsql';");
 	}
 	lines.push('');
 
@@ -687,7 +687,7 @@ export function generateSchemaFileWithDiagnostics(
 		lines.push(' * const orm = createOrm({');
 		lines.push(' *   model: dbSchema.model,');
 		lines.push(
-			` *   adapter: createPgsqlAdapter(pool, { dbCasing: '${options.dbCasing}' }),`,
+			` *   adapter: createPgAdapter(pool, { dbCasing: '${options.dbCasing}' }),`,
 		);
 		lines.push(' * });');
 		lines.push(' * ```');

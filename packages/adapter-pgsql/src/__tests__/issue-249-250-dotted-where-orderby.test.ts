@@ -1,6 +1,6 @@
 import { any, createOrm, inArray, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const testSchema = schema({
 	symbols: {
@@ -27,12 +27,12 @@ const typedCastSchema = schema({
 } as const);
 
 function buildOrm() {
-	const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+	const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 	return createOrm({ model: testSchema.model, adapter });
 }
 
 function buildTypedCastOrm() {
-	const adapter = createPgsqlCompileOnlyAdapter({
+	const adapter = createPgCompileOnlyAdapter({
 		model: typedCastSchema.model,
 	});
 	return createOrm({ model: typedCastSchema.model, adapter });
@@ -230,7 +230,7 @@ describe('FIX-347: any() casts by the declared column type when dbType is absent
 		},
 	});
 	function buildManualOrm() {
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: manualSchema.model,
 		});
 		return createOrm({ model: manualSchema.model, adapter });

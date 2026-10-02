@@ -5,7 +5,7 @@
  * BDD scenarios SC-01 through SC-10 from docs/plans/NQL-WITH.md
  */
 
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import type { CteQueryIntent, SimpleCteIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { compile } from '../src/index.js';
@@ -89,7 +89,7 @@ describe('NQL-WITH: SC-03 — CTE used in WHERE IN subquery (SQL)', () => {
 			'with recent as (orders | where active = true) products | where id in (recent | select id)',
 		);
 		expect(result.cteQuery).toBeDefined();
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const compiled = adapter.compileCteQuery(result.cteQuery as CteQueryIntent);
 		const sql = ws(compiled.sql);
 		// Should start with WITH recent AS (
@@ -200,7 +200,7 @@ describe('NQL-WITH: SC-10 — Full SQL compilation', () => {
 		);
 		expect(result.cteQuery).toBeDefined();
 
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const compiled = adapter.compileCteQuery(result.cteQuery as CteQueryIntent);
 		const sql = ws(compiled.sql);
 

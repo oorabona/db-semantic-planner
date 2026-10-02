@@ -197,13 +197,13 @@ export async function compileNqlToSql(
 	// pgsql-parser has issues with ESM dynamic requires, so we defer its import
 	// until it's actually needed (CLI-PGSQL-LAZY-LOAD)
 	const {
-		createPgsqlCompileOnlyAdapter,
+		createPgCompileOnlyAdapter,
 		compileSetOperation,
 		createLeafCompileFn,
 	} = await import('@dbsp/adapter-pgsql');
 
 	// Create compile-only adapter for SQL generation (no DB connection needed)
-	const adapter = createPgsqlCompileOnlyAdapter({
+	const adapter = createPgCompileOnlyAdapter({
 		model,
 		...(options?.schemaName !== undefined && {
 			schemaName: options.schemaName,

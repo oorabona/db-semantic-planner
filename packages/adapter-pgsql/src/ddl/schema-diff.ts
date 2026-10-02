@@ -169,7 +169,7 @@ export interface CompareSchemataOptions {
 	 * contains one of those surfaces so a caller cannot accidentally rely on a
 	 * compile-only diff for a convergence-sensitive check.
 	 *
-	 * Live PostgreSQL callers should use `comparePgsqlDatabaseSchema()`, which
+	 * Live PostgreSQL callers should use `comparePgDatabaseSchema()`, which
 	 * canonicalises CHECK constraint expressions, column defaults, and partial-index predicates before calling this function.
 	 * Under that live mode, each side is canonicalised independently; rejected
 	 * predicates refuse the migration and infrastructure fallback uses both raw
@@ -187,7 +187,7 @@ export class ExpressionCanonicalizationUnavailableError extends Error {
 			`Strict expression canonicalization was requested, but ${surfaces.length} raw SQL ` +
 				'expression surfaces could not all be canonicalized. compareSchemata() is ' +
 				'compile-only and cannot ask PostgreSQL to canonicalise CHECK constraints or ' +
-				'column defaults, and partial-index predicates. comparePgsqlDatabaseSchema() canonicalises those surfaces ' +
+				'column defaults, and partial-index predicates. comparePgDatabaseSchema() canonicalises those surfaces ' +
 				'live; under a live diff, this error means PostgreSQL could not canonicalise at least one ' +
 				'listed surface. Index expressions are not covered by the ' +
 				'live canonicalizer. Omit ' +

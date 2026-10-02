@@ -25,7 +25,7 @@ import {
 	type UpdateConfig,
 	type UpsertConfig,
 } from '../mutations/index.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { createPgPhysicalModel } from '../physical-model/index.js';
 import { queryLocal } from '../sql-identifier.js';
 
@@ -720,7 +720,7 @@ describe('UPSERT Compiler', () => {
 });
 
 describe('Alias-aware mutation RETURNING intent emission (#217)', () => {
-	const adapter = createPgsqlCompileOnlyAdapter({
+	const adapter = createPgCompileOnlyAdapter({
 		dbCasing: 'preserve',
 		model: mutationBehaviorModel,
 	});
@@ -858,7 +858,7 @@ describe('Alias-aware mutation RETURNING intent emission (#217)', () => {
 // ============================================================================
 
 describe('DELETE with notExists / exists WHERE (DELETE-NOT-EXISTS)', () => {
-	const adapter = createPgsqlCompileOnlyAdapter({
+	const adapter = createPgCompileOnlyAdapter({
 		model: mutationBehaviorModel,
 	});
 
@@ -902,7 +902,7 @@ describe('DELETE with notExists / exists WHERE (DELETE-NOT-EXISTS)', () => {
 
 	it('falls back to relation name when no model is available (compile-only mode)', () => {
 		// Preserve casing means caller-provided declared names are already SQL names.
-		const adapterNoModel = createPgsqlCompileOnlyAdapter();
+		const adapterNoModel = createPgCompileOnlyAdapter();
 
 		const intent = {
 			type: 'delete' as const,
@@ -952,7 +952,7 @@ describe('DELETE-NOTEXISTS-ALIAS: notExists() resolves relation to real table na
 			},
 		}).model;
 
-		const { createPgsqlCompileOnlyAdapter: createAdapter } = await import(
+		const { createPgCompileOnlyAdapter: createAdapter } = await import(
 			'../pgsql-adapter.js'
 		);
 		const adapterWithModel = createAdapter({ model });
@@ -971,7 +971,7 @@ describe('DELETE-NOTEXISTS-ALIAS: notExists() resolves relation to real table na
 	});
 
 	it('resolves caller-supplied declared table names from the complete model', () => {
-		const adapterWithModel = createPgsqlCompileOnlyAdapter({
+		const adapterWithModel = createPgCompileOnlyAdapter({
 			model: mutationBehaviorModel,
 		});
 

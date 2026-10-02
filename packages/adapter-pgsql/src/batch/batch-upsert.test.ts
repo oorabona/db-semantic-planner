@@ -19,7 +19,7 @@ import {
 	subquery,
 } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -118,7 +118,7 @@ const upsertFixtureModel = schema({
 }).model;
 
 function createUpsertTestAdapter(options: Record<string, unknown> = {}) {
-	return createPgsqlCompileOnlyAdapter({
+	return createPgCompileOnlyAdapter({
 		...options,
 		model: upsertFixtureModel,
 	});

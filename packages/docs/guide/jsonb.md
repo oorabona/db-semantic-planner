@@ -37,7 +37,7 @@ Use `->` when the result will be passed to another JSON operator. Use `->>` when
 
 ```typescript
 import { schema, createOrm } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({
   profiles: {
@@ -51,7 +51,7 @@ const db = schema({
     details: 'jsonb',
   },
 } as const);
-const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter() });
 ```
 
 ---
@@ -62,10 +62,10 @@ Filter rows where a text field inside the JSON document matches a value:
 
 ```typescript
 import { schema, createOrm, op, exprRef, param, literal } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({ profiles: { id: 'integer', userId: 'integer', data: 'jsonb' } } as const);
-const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter() });
 
 // WHERE (data ->> 'email') = $1
 orm.select('profiles')
@@ -85,10 +85,10 @@ Find all profiles with a specific role embedded in the document:
 
 ```typescript
 import { schema, createOrm, op, exprRef, param, cast } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({ profiles: { id: 'integer', userId: 'integer', data: 'jsonb' } } as const);
-const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter() });
 
 const roleFilter = { role: 'admin' };
 
@@ -110,10 +110,10 @@ Check whether a specific key is present in the document:
 
 ```typescript
 import { schema, createOrm, boolFn, exprRef, literal } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({ profiles: { id: 'integer', userId: 'integer', data: 'jsonb' } } as const);
-const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter() });
 
 // WHERE jsonb_exists(data, 'phone')
 orm.select('profiles')
@@ -134,10 +134,10 @@ Drill into a nested array in the JSONB document — for example, accessing the f
 
 ```typescript
 import { schema, createOrm, op, exprRef, literal } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({ profiles: { id: 'integer', userId: 'integer', data: 'jsonb' } } as const);
-const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter() });
 
 // Select first element: data->'tags'->0
 orm.select('profiles')
@@ -159,10 +159,10 @@ Build a JSON aggregation in a GROUP BY query:
 
 ```typescript
 import { schema, createOrm, fn, exprRef } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({ profiles: { id: 'integer', userId: 'integer', data: 'jsonb' } } as const);
-const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter() });
 
 // SELECT userId, jsonb_agg(data) AS allData FROM profiles GROUP BY userId
 orm.select('profiles')

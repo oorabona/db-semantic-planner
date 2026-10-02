@@ -11,7 +11,7 @@ import type { CompiledNqlQuery } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { buildCompiledColumnProjections } from '../column-metadata.js';
 import { createDeclaredNameResolver } from '../declared-name-resolver.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { createPgPhysicalModel } from '../physical-model/index.js';
 
 const testSchema = schema({
@@ -50,7 +50,7 @@ function resolverFor(model: typeof testSchema.model) {
 }
 
 function compile(plan: PlanReport) {
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	return adapter.compile(plan, { model: testSchema.model });
 }
 
@@ -61,7 +61,7 @@ function compileNqlToPg(nql: string) {
 			`NQL compilation failed: ${result.errors.map((e) => e.message).join(', ')}`,
 		);
 	}
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	return {
 		bundle: result.ast,
 		compiled: adapter.compile(result.ast, { model: testSchema.model }),
@@ -238,7 +238,7 @@ describe('bigint js column metadata provenance', () => {
 	});
 
 	it('populates metadata for mutation RETURNING and RETURNING *', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const returning = adapter.compileInsert(
 			{
 				type: 'insert',
@@ -272,7 +272,7 @@ describe('bigint js column metadata provenance', () => {
 	});
 
 	it('populates metadata for direct and many-to-many subquery include output', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 		const direct = adapter.compileSubqueryInclude(
 			{
 				relationName: 'metrics',
@@ -319,7 +319,7 @@ describe('bigint js column metadata provenance', () => {
 			?.columns.find((column) => column.name === 'code');
 		(codeColumn as { js?: 'bigint' }).js = 'bigint';
 
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const compiled = adapter.compile(
 			{
 				rootTable: 'docs',
@@ -332,7 +332,7 @@ describe('bigint js column metadata provenance', () => {
 	});
 
 	it('does not resolve batchValues FROM output through a colliding model table alias', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 		const orm = createOrm({ model: testSchema.model, adapter });
 		const batch = batchValues([['9007199254740993']], ['sequence'], ['int8'], {
 			alias: 'events',
@@ -346,7 +346,7 @@ describe('bigint js column metadata provenance', () => {
 	});
 
 	it('preserves bigint js metadata through a simple CTE wrapper', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const compiled = adapter.compileCteQuery(
 			{
 				kind: 'cteQuery',
@@ -378,7 +378,7 @@ describe('bigint js column metadata provenance', () => {
 	});
 
 	it('expands SELECT * from a CTE source without dropping bigint js metadata', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const compiled = adapter.compileCteQuery(
 			{
 				kind: 'cteQuery',
@@ -410,7 +410,7 @@ describe('bigint js column metadata provenance', () => {
 	});
 
 	it('moves bigint js metadata through an aliased CTE passthrough column', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const compiled = adapter.compileCteQuery(
 			{
 				kind: 'cteQuery',
@@ -524,7 +524,7 @@ describe('bigint js column metadata provenance', () => {
 	});
 
 	it('does not re-resolve a shadowing CTE as a same-named model table', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const compiled = adapter.compileCteQuery(
 			{
 				kind: 'cteQuery',
@@ -561,7 +561,7 @@ describe('bigint js column metadata provenance', () => {
 	});
 
 	it('keeps same-name CTE output fail-closed when the CTE shadows a bigint table', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const compiled = adapter.compileCteQuery(
 			{
 				kind: 'cteQuery',
@@ -589,7 +589,7 @@ describe('bigint js column metadata provenance', () => {
 	});
 
 	it('does not leak metadata through an expression CTE projection', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const compiled = adapter.compileCteQuery(
 			{
 				kind: 'cteQuery',
@@ -627,7 +627,7 @@ describe('bigint js column metadata provenance', () => {
 	});
 
 	it('throws when a raw recursive CTE would carry bigint js metadata', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 
 		expect(() =>
 			adapter.compileCteQuery(
@@ -664,7 +664,7 @@ describe('bigint js column metadata provenance', () => {
 	});
 
 	it('throws for raw recursive positional merge instead of applying base metadata', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 
 		expect(() =>
 			adapter.compileCteQuery(
@@ -713,7 +713,7 @@ describe('bigint js column metadata provenance', () => {
 	});
 
 	it('throws through the fluent raw recursive builder when base output has bigint js metadata', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 		const orm = createOrm({ model: testSchema.model, adapter });
 
 		const builder = orm.recursive('event_chain', {
@@ -727,7 +727,7 @@ describe('bigint js column metadata provenance', () => {
 	});
 
 	it('emits bigint js metadata for standalone recursive CTE output columns', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const compiled = adapter.compileRecursive(
 			recursiveEventsReport(),
 			testSchema.model,
@@ -741,7 +741,7 @@ describe('bigint js column metadata provenance', () => {
 	});
 
 	it('drops recursive depth metadata when the tracking alias collides with a selected js column', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileRecursive(
 				recursiveEventsReport({ depth: { as: 'sequence' } }),
@@ -751,7 +751,7 @@ describe('bigint js column metadata provenance', () => {
 	});
 
 	it('drops recursive path metadata when the tracking alias collides with a selected js column', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileRecursive(
 				recursiveEventsReport({ path: { as: 'sequence' } }),
@@ -761,7 +761,7 @@ describe('bigint js column metadata provenance', () => {
 	});
 
 	it('keeps non-colliding recursive tracking aliases metadata-free', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const compiled = adapter.compileRecursive(
 			recursiveEventsReport({
 				depth: { as: 'depth' },
@@ -819,7 +819,7 @@ e | select sequence as seq`);
 	});
 
 	it('expands SELECT * over an NQL binding source without dropping bigint js metadata', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const bundle: CompiledNqlQuery = {
 			bindings: new Map([
 				[
@@ -894,7 +894,7 @@ e | select sequence + 1 as nextSequence`);
 	});
 
 	it('throws when set operations would carry bigint js metadata', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 
 		expect(() =>
 			adapter.compileSetOperation(
@@ -921,7 +921,7 @@ e | select sequence + 1 as nextSequence`);
 	});
 
 	it('throws when set operations over an NQL binding would carry bigint js metadata', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const bundle: CompiledNqlQuery = {
 			bindings: new Map([
 				[
@@ -956,7 +956,7 @@ e | select sequence + 1 as nextSequence`);
 	});
 
 	it('throws when set operations over a runtime NQL binding would carry bigint js metadata', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const bundle: CompiledNqlQuery = {
 			runtimeBindings: new Map([
 				[

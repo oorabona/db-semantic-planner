@@ -7,10 +7,10 @@
 
 import {
 	type ChangeKind,
-	type ComparePgsqlDatabaseSchemaOptions,
-	comparePgsqlDatabaseSchema,
+	type ComparePgDatabaseSchemaOptions,
+	comparePgDatabaseSchema,
+	createPgAdapter,
 	createPgPhysicalModel,
-	createPgsqlAdapter,
 	type DiffSummary,
 	type ExpressionCanonicalizationWarning,
 	generateDownSQL,
@@ -82,12 +82,12 @@ export interface SchemaDiffResult {
 
 /**
  * The smallest useful seam for the handler: one completed live comparison.
- * Tests can fake PostgreSQL's outcome without faking a PgsqlAdapter.
+ * Tests can fake PostgreSQL's outcome without faking a PgAdapter.
  */
 export type SchemaDiffComparisonOperation = (
 	connectionId: string,
 	desired: PgPhysicalModel,
-	options: ComparePgsqlDatabaseSchemaOptions,
+	options: ComparePgDatabaseSchemaOptions,
 ) => Promise<
 	SchemaDiff & {
 		readonly physical: Pick<PgPhysicalModel, 'schema' | 'fkAutoIndex'>;
@@ -100,8 +100,8 @@ export const compareManagedSchema: SchemaDiffComparisonOperation = async (
 	desired,
 	options,
 ) =>
-	comparePgsqlDatabaseSchema(
-		createPgsqlAdapter(getPool(connectionId)),
+	comparePgDatabaseSchema(
+		createPgAdapter(getPool(connectionId)),
 		desired,
 		options,
 	);
@@ -188,7 +188,7 @@ export async function handleSchemaDiff(
 	// explicitly. `public` keeps the unqualified output.
 	const connectionSchema = getConnectionInfo(connectionId)?.schema;
 	const warnings: SchemaDiffComparisonWarning[] = [];
-	const compareOptions: ComparePgsqlDatabaseSchemaOptions = {
+	const compareOptions: ComparePgDatabaseSchemaOptions = {
 		onExpressionCanonicalizationWarning: (warning) => {
 			warnings.push(serializeCanonicalizationWarning(warning));
 		},

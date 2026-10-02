@@ -15,7 +15,7 @@ pnpm add @dbsp/core @dbsp/adapter-pgsql
 
 ```typescript
 import { schema, ref, createOrm, eq } from '@dbsp/core';
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 import { Pool } from 'pg';
 
 // 1. Define schema
@@ -27,7 +27,7 @@ const db = schema({
 // 2. Create ORM
 const orm = createOrm({
   schema: db,
-  adapter: createPgsqlAdapter(new Pool({ connectionString: process.env.DATABASE_URL })),
+  adapter: createPgAdapter(new Pool({ connectionString: process.env.DATABASE_URL })),
 });
 
 // 3. Query

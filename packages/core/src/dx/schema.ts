@@ -1952,7 +1952,7 @@ interface IntrospectableAdapter {
  *
  * @example
  * ```typescript
- * const adapter = createPgsqlAdapter(pool);
+ * const adapter = createPgAdapter(pool);
  * const schema = await getSchemaFromDb(adapter, { schema: 'public' });
  * const orm = createOrm({ schema, adapter });
  * ```

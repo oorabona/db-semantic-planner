@@ -673,7 +673,7 @@ describe('generateSchemaFileWithDiagnostics', () => {
 			const result = generateSchemaCode(model, { dbCasing: 'snake_case' });
 
 			expect(result).toContain(
-				"import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';",
+				"import { createPgAdapter } from '@dbsp/adapter-pgsql';",
 			);
 		});
 
@@ -699,7 +699,7 @@ describe('generateSchemaFileWithDiagnostics', () => {
 			const result = generateSchemaCode(model, { dbCasing: 'snake_case' });
 
 			expect(result).toContain("dbCasing: 'snake_case'");
-			expect(result).toContain('createPgsqlAdapter(pool');
+			expect(result).toContain('createPgAdapter(pool');
 		});
 
 		it('converts table names to camelCase too', () => {
@@ -1448,7 +1448,7 @@ describe('generateSchemaFileWithDiagnostics', () => {
 			// --- Imports ---
 			expect(result).toContain("import { schema, ref } from '@dbsp/core';");
 			expect(result).toContain(
-				"import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';",
+				"import { createPgAdapter } from '@dbsp/adapter-pgsql';",
 			);
 
 			// --- Table names are camelCase ---
@@ -1482,7 +1482,7 @@ describe('generateSchemaFileWithDiagnostics', () => {
 			expect(result).toContain(
 				"export const dbCasing = 'snake_case' as const;",
 			);
-			expect(result).toContain('createPgsqlAdapter(pool');
+			expect(result).toContain('createPgAdapter(pool');
 
 			// --- Syntactic validity: balanced braces ---
 			const opens = (result.match(/\{/g) || []).length;

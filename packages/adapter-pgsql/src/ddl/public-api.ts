@@ -1,6 +1,6 @@
 /** Public physical-model DDL facade.  The rendering engines remain ModelIR-only. */
 
-import type { PgsqlAdapter } from '../pgsql-adapter.js';
+import type { PgAdapter } from '../pgsql-adapter.js';
 import type { PgPhysicalModel } from '../physical-model/index.js';
 import { declaredSequenceNamesFromInventory } from '../sequence-name.js';
 import {
@@ -8,8 +8,8 @@ import {
 	type GenerateDDLOptions as InternalGenerateDDLOptions,
 } from './ddl-generator.js';
 import {
-	comparePgsqlDatabaseSchema as comparePgsqlDatabaseSchemaForModel,
-	type ComparePgsqlDatabaseSchemaOptions as InternalComparePgsqlDatabaseSchemaOptions,
+	comparePgDatabaseSchema as comparePgsqlDatabaseSchemaForModel,
+	type ComparePgDatabaseSchemaOptions as InternalComparePgsqlDatabaseSchemaOptions,
 } from './live-diff.js';
 import {
 	generateDownSQL as generateDownSQLForDiff,
@@ -32,7 +32,7 @@ export interface CompareSchemataOptions
 		InternalCompareSchemataOptions,
 		'schema' | 'dbCasing' | 'declaredSequenceNames'
 	> {}
-export interface ComparePgsqlDatabaseSchemaOptions
+export interface ComparePgDatabaseSchemaOptions
 	extends Omit<
 		InternalComparePgsqlDatabaseSchemaOptions,
 		'schema' | 'dbCasing' | 'declaredSequenceNames'
@@ -113,10 +113,10 @@ export function compareSchemata(
 	);
 }
 
-export async function comparePgsqlDatabaseSchema(
-	adapter: PgsqlAdapter,
+export async function comparePgDatabaseSchema(
+	adapter: PgAdapter,
 	desired: PgPhysicalModel,
-	options?: ComparePgsqlDatabaseSchemaOptions,
+	options?: ComparePgDatabaseSchemaOptions,
 ): Promise<PgSchemaDiff> {
 	return stamp(
 		await comparePgsqlDatabaseSchemaForModel(adapter, desired.model, {

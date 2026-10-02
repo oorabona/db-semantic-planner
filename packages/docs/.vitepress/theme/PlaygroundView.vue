@@ -345,7 +345,7 @@ async function rebuildOrm(dsl: string): Promise<void> {
 		const builtSchema = buildSchemaFromParsed(parsed, coreModule);
 		const orm = coreModule.createOrm({
 			schema: builtSchema,
-			adapter: adapterModule.createPgsqlCompileOnlyAdapter(),
+			adapter: adapterModule.createPgCompileOnlyAdapter(),
 		});
 		nqlTag = orm.nql as NqlTag;
 		nqlTagReady.value = true;

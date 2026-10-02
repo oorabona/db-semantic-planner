@@ -36,7 +36,7 @@ import {
 	type WhereCompilerCtx,
 } from '../compile-where.js';
 import { createCompilerState } from '../handlers/types.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Schema: users → posts (hasMany via posts.author_id)
@@ -62,7 +62,7 @@ const testSchema = schema({
 } as const);
 
 function buildOrm() {
-	const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+	const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 	return createOrm({ model: testSchema.model, adapter });
 }
 
@@ -401,7 +401,7 @@ describe('nested exists — string[] relationFilter inside outer exists', () => 
 	// hop from the correct source table, not coerce the array to a mis-resolved string.
 
 	it('exists(posts) wrapping inner relationFilter(["comments"]) — no error, exactly 2 EXISTS', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 		const planReport = plan(
 			{
 				type: 'select',
@@ -445,7 +445,7 @@ describe('nested exists — string[] relationFilter inside outer exists', () => 
 	});
 
 	it('exists(posts) wrapping inner relationFilter(["comments"], mode=every) — no throw', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 		const planReport = plan(
 			{
 				type: 'select',
@@ -681,7 +681,7 @@ describe('scalar-direct guard: limit and orderBy rejected on direct path', () =>
 
 describe('nested multi-hop fail-closed for undeclared hops', () => {
 	it('exists(posts) wrapping relationFilter([comments,undeclared]) throws at undeclared hop', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 		const planReport = plan(
 			{
 				type: 'select',
@@ -711,7 +711,7 @@ describe('nested multi-hop fail-closed for undeclared hops', () => {
 	});
 
 	it('exists(posts) wrapping relationFilter([undeclared]) throws on first hop', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 		const planReport = plan(
 			{
 				type: 'select',
@@ -741,7 +741,7 @@ describe('nested multi-hop fail-closed for undeclared hops', () => {
 	});
 
 	it('exists(posts) wrapping inner relationFilter(["comments"]) — fully-declared does not throw (regression)', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 		const planReport = plan(
 			{
 				type: 'select',

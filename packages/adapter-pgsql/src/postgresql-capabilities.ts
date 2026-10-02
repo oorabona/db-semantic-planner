@@ -31,7 +31,7 @@ const INDEX_FEATURE_CAPABILITY_PROJECTIONS = [
 	readonly flag: keyof DialectCapabilities;
 }[];
 
-export function derivePostgresqlCapabilitiesForVersion(
+export function derivePgCapabilitiesForVersion(
 	version: string,
 ): DialectCapabilities {
 	const trimmed = version.trim();

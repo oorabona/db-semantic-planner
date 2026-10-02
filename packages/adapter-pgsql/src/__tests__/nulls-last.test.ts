@@ -1,6 +1,6 @@
 import { createOrm, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const testSchema = schema({
 	tasks: {
@@ -12,7 +12,7 @@ const testSchema = schema({
 
 const orm = createOrm({
 	schema: testSchema,
-	adapter: createPgsqlCompileOnlyAdapter(),
+	adapter: createPgCompileOnlyAdapter(),
 });
 
 describe('orderBy() NULLS FIRST / NULLS LAST', () => {

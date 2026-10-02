@@ -8,8 +8,8 @@
  */
 
 import {
-	PgsqlTransactionAbortSignalError,
-	PgsqlTransactionTimeoutError,
+	PgTransactionAbortSignalError,
+	PgTransactionTimeoutError,
 } from '@dbsp/adapter-pgsql';
 import { createOrm, eq, schema } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -358,10 +358,8 @@ describe('E15 — Row-level locking', () => {
 				throw new Error('Expected lock timeout');
 			})();
 
-			expect(error).toBeInstanceOf(PgsqlTransactionTimeoutError);
-			expect((error as PgsqlTransactionTimeoutError).timeout).toBe(
-				'lock_timeout',
-			);
+			expect(error).toBeInstanceOf(PgTransactionTimeoutError);
+			expect((error as PgTransactionTimeoutError).timeout).toBe('lock_timeout');
 		} finally {
 			await holder.query('ROLLBACK').catch(() => undefined);
 			holder.release();
@@ -398,7 +396,7 @@ describe('E15 — Row-level locking', () => {
 				throw new Error('Expected AbortSignal transaction abort');
 			})();
 
-			expect(error).toBeInstanceOf(PgsqlTransactionAbortSignalError);
+			expect(error).toBeInstanceOf(PgTransactionAbortSignalError);
 		} finally {
 			if (abortTimer !== undefined) clearTimeout(abortTimer);
 			await holder.query('ROLLBACK').catch(() => undefined);

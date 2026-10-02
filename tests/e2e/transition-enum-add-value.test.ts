@@ -1,5 +1,5 @@
 import {
-	createPgsqlAdapter,
+	createPgAdapter,
 	createPgTransitionPack,
 	createPgTransitionRunPersister,
 	readPgObservationContextFromLessor,
@@ -130,7 +130,7 @@ describe('ADR-0003 transition planner: ALTER TYPE ADD VALUE', () => {
 		expect(result.journals[0]?.outcome).toBe('completed');
 		expect(await enumLabels()).toEqual(['inactive', 'pending', 'active']);
 
-		const adapter = createPgsqlAdapter(pool, { schemaName });
+		const adapter = createPgAdapter(pool, { schemaName });
 		const introspected = await adapter.introspect({ schema: schemaName });
 		const noOp = comparator.compare(desired, introspected);
 		expect(noOp.kind).toBe('no-drift');

@@ -24,7 +24,7 @@
 
 import { and, createOrm, eq, exists, notExists, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Test schema — 4-level chain: symbols → callee_calls → files → projects → teams
@@ -58,7 +58,7 @@ const testSchema = schema({
 });
 
 function buildAdapter() {
-	return createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+	return createPgCompileOnlyAdapter({ model: testSchema.model });
 }
 
 /** Normalize whitespace for SQL comparison. */
@@ -262,7 +262,7 @@ describe('SC-06: declared FK addresses', () => {
 
 describe('SC-06: FK fallback without ModelIR', () => {
 	it('multi-join without ModelIR falls back to convention and still emits JOINs', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 
 		const { sql } = adapter.compileDelete({
 			type: 'delete' as const,

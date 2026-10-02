@@ -33,7 +33,7 @@ import {
 	markEngineCanonicalCheck,
 } from './expression-provenance.js';
 import * as namingPlugin from './naming-plugin.js';
-import { PgsqlAdapter } from './pgsql-adapter.js';
+import { PgAdapter } from './pgsql-adapter.js';
 import { createPgPhysicalModel } from './physical-model/index.js';
 
 function makeCol(name: string, overrides: Partial<ColumnIR> = {}): ColumnIR {
@@ -519,18 +519,18 @@ class FakePgPool {
 	constructor(readonly client: FakePgClient) {}
 }
 
-function adapterForPool(pool: FakePgPool): PgsqlAdapter {
-	return new PgsqlAdapter(pool as unknown as Pool);
+function adapterForPool(pool: FakePgPool): PgAdapter {
+	return new PgAdapter(pool as unknown as Pool);
 }
 
-function adapterForBorrowedClient(client: FakePgClient): PgsqlAdapter {
-	return new PgsqlAdapter(client as unknown as PoolClient, {
+function adapterForBorrowedClient(client: FakePgClient): PgAdapter {
+	return new PgAdapter(client as unknown as PoolClient, {
 		borrowedClient: true,
 	});
 }
 
 async function canonicalizeWithScratch(
-	adapter: PgsqlAdapter,
+	adapter: PgAdapter,
 	desired: ModelIR,
 	dbModel: ModelIR,
 	options?: Parameters<typeof canonicalizeCheckConstraints>[3],

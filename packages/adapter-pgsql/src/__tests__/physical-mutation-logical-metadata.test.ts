@@ -1,6 +1,6 @@
 import { schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 describe('mutation logical metadata with physical identifiers', () => {
 	const model = schema({
@@ -10,7 +10,7 @@ describe('mutation logical metadata with physical identifiers', () => {
 			eventRange: 'daterange',
 		},
 	}).model;
-	const adapter = createPgsqlCompileOnlyAdapter({
+	const adapter = createPgCompileOnlyAdapter({
 		model,
 		dbCasing: 'snake_case',
 	});

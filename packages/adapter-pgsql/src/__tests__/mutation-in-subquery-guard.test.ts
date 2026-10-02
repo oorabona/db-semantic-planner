@@ -38,7 +38,7 @@
 
 import { schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const mutationGuardModel = schema({
 	users: { id: 'integer', name: 'text' },
@@ -49,7 +49,7 @@ const mutationGuardModel = schema({
 		token: 'text',
 	},
 }).model;
-const adapter = createPgsqlCompileOnlyAdapter({ model: mutationGuardModel });
+const adapter = createPgCompileOnlyAdapter({ model: mutationGuardModel });
 
 // ---------------------------------------------------------------------------
 // Helpers — build raw WhereIntent objects (bypassing the fluent builder to

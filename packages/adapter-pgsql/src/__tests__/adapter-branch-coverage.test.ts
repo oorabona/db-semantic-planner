@@ -34,8 +34,8 @@ import {
 import { introspect } from '../introspection.js';
 import { identityNaming } from '../naming-plugin.js';
 import {
-	createPgsqlAdapter,
-	createPgsqlCompileOnlyAdapter,
+	createPgAdapter,
+	createPgCompileOnlyAdapter,
 } from '../pgsql-adapter.js';
 import {
 	appendPathColumn,
@@ -89,33 +89,33 @@ const defaultDeps = {
 };
 
 // ---------------------------------------------------------------------------
-// pgsql-adapter.ts — PgsqlAdapter branches
+// pgsql-adapter.ts — PgAdapter branches
 // ---------------------------------------------------------------------------
 
-describe('PgsqlAdapter constructor + compile-only mode', () => {
+describe('PgAdapter constructor + compile-only mode', () => {
 	it('requireConnection throws when no pool given (compile-only adapter)', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() => adapter.getPoolInstance()).toThrow(
-			'Cannot getPoolInstance(): this PgsqlAdapter was constructed without a connection',
+			'Cannot getPoolInstance(): this PgAdapter was constructed without a connection',
 		);
 	});
 
 	it('capabilities.supportsStreaming is false for compile-only adapter', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(adapter.capabilities.supportsStreaming).toBe(false);
 		expect(adapter.capabilities.supportsTransactions).toBe(false);
 	});
 
 	it('capabilities.supportsStreaming is true when pool is provided', () => {
 		const pool = makePool();
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		expect(adapter.capabilities.supportsStreaming).toBe(true);
 		expect(adapter.capabilities.supportsTransactions).toBe(true);
 	});
 
 	it('unmanaged borrowed clients do not pass core transaction or streaming feature detection', () => {
 		const client = makeClient();
-		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+		const adapter = createPgAdapter(client, { borrowedClient: true });
 
 		expect(adapter.capabilities.supportsStreaming).toBe(false);
 		expect(supportsTransactions(adapter)).toBe(false);
@@ -123,7 +123,7 @@ describe('PgsqlAdapter constructor + compile-only mode', () => {
 
 	it('managed borrowed clients pass core transaction detection and run a savepoint transaction', async () => {
 		const client = makeClient();
-		const adapter = createPgsqlAdapter(client, {
+		const adapter = createPgAdapter(client, {
 			borrowedClient: true,
 			managedTransactions: true,
 		});
@@ -143,37 +143,37 @@ describe('PgsqlAdapter constructor + compile-only mode', () => {
 
 	it('factory rejects a PoolClient unless borrowedClient: true is declared', () => {
 		const client = makeClient();
-		expect(() => createPgsqlAdapter(client as unknown as Pool)).toThrow(
+		expect(() => createPgAdapter(client as unknown as Pool)).toThrow(
 			/borrowedClient: true/,
 		);
 	});
 
 	it('borrowed client adapters are not inTransaction when pg reports idle', () => {
 		const client = Object.assign(makeClient(), { _txStatus: 'I' });
-		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+		const adapter = createPgAdapter(client, { borrowedClient: true });
 		expect(adapter.inTransaction).toBe(false);
 	});
 
 	it('borrowed client adapters fail closed when pg transaction status is unavailable', () => {
 		const client = makeClient();
-		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+		const adapter = createPgAdapter(client, { borrowedClient: true });
 		expect(adapter.inTransaction).toBe(true);
 	});
 
 	it('inTransaction is false when created from pool', () => {
 		const pool = makePool();
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		expect(adapter.inTransaction).toBe(false);
 	});
 });
 
-describe('PgsqlAdapter.execute error paths', () => {
+describe('PgAdapter.execute error paths', () => {
 	it('execute throws when pool query rejects', async () => {
 		const pool = makePool();
 		(pool.query as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
 			new Error('db error'),
 		);
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		await expect(adapter.execute(testQuery('SELECT 1'))).rejects.toThrow(
 			'db error',
 		);
@@ -181,32 +181,32 @@ describe('PgsqlAdapter.execute error paths', () => {
 
 	it('executeOne returns null when no rows', async () => {
 		const pool = makePool([[]]); // empty rows
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		expect(await adapter.executeOne(testQuery('SELECT 1'))).toBe(null);
 	});
 
 	it('executeOneOrThrow throws when no rows', async () => {
 		const pool = makePool([[]]); // empty rows
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		await expect(
 			adapter.executeOneOrThrow(testQuery('SELECT 1')),
 		).rejects.toThrow('No results found');
 	});
 });
 
-describe('PgsqlAdapter.introspect', () => {
+describe('PgAdapter.introspect', () => {
 	it('throws on compile-only adapter', async () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		await expect(adapter.introspect()).rejects.toThrow(
-			'Cannot introspect: this PgsqlAdapter was constructed without a connection',
+			'Cannot introspect: this PgAdapter was constructed without a connection',
 		);
 	});
 });
 
-describe('PgsqlAdapter.transaction', () => {
+describe('PgAdapter.transaction', () => {
 	it('throws for a borrowed client without managedTransactions', async () => {
 		const client = makeClient();
-		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+		const adapter = createPgAdapter(client, { borrowedClient: true });
 		await expect(adapter.transaction(async () => undefined)).rejects.toThrow(
 			/managedTransactions: true/,
 		);
@@ -218,7 +218,7 @@ describe('PgsqlAdapter.transaction', () => {
 		const connectClient = makeClient(queryMock);
 		const pool = makePool();
 		(pool.connect as ReturnType<typeof vi.fn>).mockResolvedValue(connectClient);
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		await expect(
 			adapter.transaction(async () => {
 				throw new Error('fn error');
@@ -231,28 +231,28 @@ describe('PgsqlAdapter.transaction', () => {
 	});
 });
 
-describe('PgsqlAdapter.withSchema', () => {
+describe('PgAdapter.withSchema', () => {
 	it('throws on invalid schema name (space)', () => {
-		const adapter = createPgsqlAdapter(makePool());
+		const adapter = createPgAdapter(makePool());
 		expect(() => adapter.withSchema('bad name!')).toThrow();
 	});
 
 	it('returns a new adapter instance', () => {
-		const adapter = createPgsqlAdapter(makePool());
+		const adapter = createPgAdapter(makePool());
 		expect(adapter.withSchema('tenant_1')).not.toBe(adapter);
 	});
 });
 
-describe('PgsqlAdapter.executeDDL', () => {
+describe('PgAdapter.executeDDL', () => {
 	it('throws on compile-only adapter', async () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		await expect(adapter.executeDDL('CREATE TABLE x (id INT)')).rejects.toThrow(
-			'Cannot executeDDL: this PgsqlAdapter was constructed without a connection',
+			'Cannot executeDDL: this PgAdapter was constructed without a connection',
 		);
 	});
 });
 
-describe('PgsqlAdapter.createDump', () => {
+describe('PgAdapter.createDump', () => {
 	const basePlan = {
 		rootTable: 't',
 		decisions: [],
@@ -263,19 +263,19 @@ describe('PgsqlAdapter.createDump', () => {
 	};
 
 	it('includes schema in meta when schemaName is set', () => {
-		const adapter = createPgsqlAdapter(makePool(), { schemaName: 'myschema' });
+		const adapter = createPgAdapter(makePool(), { schemaName: 'myschema' });
 		const dump = adapter.createDump(basePlan as never, testQuery('SELECT 1'));
 		expect(dump.meta?.schema).toBe('myschema');
 	});
 
 	it('omits schema from meta when no schemaName', () => {
-		const adapter = createPgsqlAdapter(makePool());
+		const adapter = createPgAdapter(makePool());
 		const dump = adapter.createDump(basePlan as never, testQuery('SELECT 1'));
 		expect(dump.meta?.schema).toBeUndefined();
 	});
 });
 
-describe('PgsqlAdapter.listIndexes', () => {
+describe('PgAdapter.listIndexes', () => {
 	it('passes namePattern as 3rd param', async () => {
 		const rows = [
 			{
@@ -284,7 +284,7 @@ describe('PgsqlAdapter.listIndexes', () => {
 			},
 		];
 		const pool = makePool([rows]);
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		const result = await adapter.listIndexes('foo', 'public', {
 			namePattern: 'idx_%',
 		});
@@ -305,7 +305,7 @@ describe('PgsqlAdapter.listIndexes', () => {
 			},
 		];
 		const pool = makePool([rows]);
-		const result = await createPgsqlAdapter(pool).listIndexes('t', 'public');
+		const result = await createPgAdapter(pool).listIndexes('t', 'public');
 		expect(result[0]!.unique).toBe(true);
 		expect(result[0]!.method).toBe('btree');
 	});
@@ -314,22 +314,22 @@ describe('PgsqlAdapter.listIndexes', () => {
 		const rows = [
 			{ indexname: 'g', indexdef: 'CREATE INDEX g ON t USING gin (col)' },
 		];
-		const result = await createPgsqlAdapter(makePool([rows])).listIndexes('t');
+		const result = await createPgAdapter(makePool([rows])).listIndexes('t');
 		expect(result[0]!.method).toBe('gin');
 		expect(result[0]!.unique).toBe(false);
 	});
 
 	it('defaults method to btree when USING absent', async () => {
 		const rows = [{ indexname: 'i', indexdef: 'CREATE INDEX i ON t (id)' }];
-		const result = await createPgsqlAdapter(makePool([rows])).listIndexes('t');
+		const result = await createPgAdapter(makePool([rows])).listIndexes('t');
 		expect(result[0]!.method).toBe('btree');
 	});
 });
 
-describe('PgsqlAdapter.indexExists', () => {
+describe('PgAdapter.indexExists', () => {
 	it('returns true when exists', async () => {
 		expect(
-			await createPgsqlAdapter(makePool([[{ exists: true }]])).indexExists(
+			await createPgAdapter(makePool([[{ exists: true }]])).indexExists(
 				'idx',
 				'tbl',
 			),
@@ -338,19 +338,19 @@ describe('PgsqlAdapter.indexExists', () => {
 
 	it('returns false when no rows', async () => {
 		expect(
-			await createPgsqlAdapter(makePool([[]])).indexExists('idx', 'tbl'),
+			await createPgAdapter(makePool([[]])).indexExists('idx', 'tbl'),
 		).toBe(false);
 	});
 });
 
-describe('PgsqlAdapter.storageSize', () => {
+describe('PgAdapter.storageSize', () => {
 	it('returns 0 when no rows', async () => {
-		expect(await createPgsqlAdapter(makePool([[]])).storageSize('tbl')).toBe(0);
+		expect(await createPgAdapter(makePool([[]])).storageSize('tbl')).toBe(0);
 	});
 
 	it('parses size string to number', async () => {
 		expect(
-			await createPgsqlAdapter(makePool([[{ size: '8192' }]])).storageSize(
+			await createPgAdapter(makePool([[{ size: '8192' }]])).storageSize(
 				'tbl',
 				'schema',
 			),
@@ -359,7 +359,7 @@ describe('PgsqlAdapter.storageSize', () => {
 
 	it('escapes embedded double-quotes in names', async () => {
 		const pool = makePool([[{ size: '4096' }]]);
-		await createPgsqlAdapter(pool).storageSize('my"table', 'my"schema');
+		await createPgAdapter(pool).storageSize('my"table', 'my"schema');
 		const arg = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0]![1][0];
 		expect(arg).toBe('"my""schema"."my""table"');
 	});

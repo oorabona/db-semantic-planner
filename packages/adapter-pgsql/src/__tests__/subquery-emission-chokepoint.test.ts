@@ -58,7 +58,7 @@ import {
 import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
 import { createCompilerState } from '../handlers/types.js';
 import { convertWhereCondition } from '../intent-to-decisions.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ============================================================================
 // Schema
@@ -87,7 +87,7 @@ const testSchema = schema({
 });
 
 function buildOrm() {
-	const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+	const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 	return createOrm({ model: testSchema.model, adapter });
 }
 
@@ -295,7 +295,7 @@ describe('PATH D: nested IN inside logical group (mapInSubqueryCondition → inS
 
 describe('PATH E: mutation path (normalizeToDecision → inSubqueryHandler)', () => {
 	it('GROUP BY in mutation WHERE IN-subquery throws via normalizeToDecision', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 		expect(() =>
 			adapter.compileDelete({
 				type: 'delete',

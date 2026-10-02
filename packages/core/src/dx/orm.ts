@@ -67,7 +67,7 @@ export interface SimplifiedOrmOptions<
 	 *
 	 * Required — provides dialect capabilities for planner strategy selection.
 	 * For compile-only usage (no DB), use `createMockAdapter()` from test-utils
-	 * or `createPgsqlCompileOnlyAdapter()` from adapter-pgsql.
+	 * or `createPgCompileOnlyAdapter()` from adapter-pgsql.
 	 */
 	readonly adapter: Adapter<unknown>;
 

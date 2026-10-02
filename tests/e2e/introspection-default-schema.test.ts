@@ -8,7 +8,7 @@
  * 'public' and silently missed the objects (astix-io/astix#195).
  */
 
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -61,20 +61,20 @@ describe('#283 catalog reads resolve the table search_path-aware (real PG)', () 
 		// No schemaName on the adapter and no explicit schema arg → the table is
 		// resolved search_path-aware (SCHEMA), even though current_schema() is
 		// EMPTY_FIRST.
-		const adapter = createPgsqlAdapter(scopedPool);
+		const adapter = createPgAdapter(scopedPool);
 		const indexes = await adapter.listIndexes('widgets');
 		expect(indexes.map((i) => i.name)).toContain('idx_widgets_label');
 	});
 
 	it('indexExists resolves the table search_path-aware when no schema is given', async () => {
-		const adapter = createPgsqlAdapter(scopedPool);
+		const adapter = createPgAdapter(scopedPool);
 		expect(await adapter.indexExists('idx_widgets_label', 'widgets')).toBe(
 			true,
 		);
 	});
 
 	it('storageSize resolves the table search_path-aware when no schema is given', async () => {
-		const adapter = createPgsqlAdapter(scopedPool);
+		const adapter = createPgAdapter(scopedPool);
 		expect(await adapter.storageSize('widgets')).toBeGreaterThan(0);
 	});
 });

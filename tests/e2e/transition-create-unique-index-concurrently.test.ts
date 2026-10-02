@@ -1,5 +1,5 @@
 import {
-	createPgsqlAdapter,
+	createPgAdapter,
 	createPgTransitionPack,
 	createPgTransitionRunPersister,
 	readPgObservationContextFromLessor,
@@ -187,7 +187,7 @@ describe('ADR-0003 transition planner: CREATE UNIQUE INDEX CONCURRENTLY', () => 
 			indisready: true,
 		});
 
-		const adapter = createPgsqlAdapter(pool, { schemaName });
+		const adapter = createPgAdapter(pool, { schemaName });
 		const introspected = await adapter.introspect({ schema: schemaName });
 		// Isolate index idempotency from the deferred author-vs-introspected column
 		// equivalence (tracked in #345): mirror the introspected columns and re-declare

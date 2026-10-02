@@ -55,7 +55,7 @@ Given a schema with `calls.caller_id → symbols`:
 
 ```typescript
 import { createOrm, ref, schema } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const __joinsDb = schema({
   calls: {
@@ -73,7 +73,7 @@ const __joinsDb = schema({
     vector: 'string',
   },
 } as const);
-const orm = createOrm({ schema: __joinsDb, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: __joinsDb, adapter: createPgCompileOnlyAdapter() });
 
 const results = await orm.select('calls')
   .join('caller')
@@ -99,7 +99,7 @@ The default join type is `INNER JOIN`.
 
 ```typescript
 import { createOrm, ref, schema } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const __joinsDb = schema({
   calls: {
@@ -117,7 +117,7 @@ const __joinsDb = schema({
     vector: 'string',
   },
 } as const);
-const orm = createOrm({ schema: __joinsDb, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: __joinsDb, adapter: createPgCompileOnlyAdapter() });
 
 const results = await orm.select('calls')
   .join('callee', { type: 'left' })
@@ -139,7 +139,7 @@ Use `type: 'left'` when root rows without a matching related row should still ap
 
 ```typescript
 import { createOrm, eq, ref, schema } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const __joinsDb = schema({
   calls: {
@@ -157,7 +157,7 @@ const __joinsDb = schema({
     vector: 'string',
   },
 } as const);
-const orm = createOrm({ schema: __joinsDb, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: __joinsDb, adapter: createPgCompileOnlyAdapter() });
 
 const results = await orm.select('calls')
   .join('caller')
@@ -179,7 +179,7 @@ Chain `.join()` calls to add more than one join. They accumulate left-to-right:
 
 ```typescript
 import { createOrm, ref, schema } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const __joinsDb = schema({
   calls: {
@@ -197,7 +197,7 @@ const __joinsDb = schema({
     vector: 'string',
   },
 } as const);
-const orm = createOrm({ schema: __joinsDb, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: __joinsDb, adapter: createPgCompileOnlyAdapter() });
 
 const results = await orm.select('calls')
   .join('caller')
@@ -219,7 +219,7 @@ When joining a table to itself, provide `as` (required to disambiguate) and an e
 
 ```typescript
 import { createOrm, eq, ref, schema } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const __joinsDb = schema({
   calls: {
@@ -237,7 +237,7 @@ const __joinsDb = schema({
     vector: 'string',
   },
 } as const);
-const orm = createOrm({ schema: __joinsDb, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: __joinsDb, adapter: createPgCompileOnlyAdapter() });
 
 // Find all pairs where embeddings.id < e2.id
 const results = await orm.select('embeddings')
@@ -261,7 +261,7 @@ dotted `'table.column'` notation to qualify column references in the ON conditio
 
 ```typescript
 import { createOrm, eq, ref, schema } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const __joinsDb = schema({
   calls: {
@@ -279,7 +279,7 @@ const __joinsDb = schema({
     vector: 'string',
   },
 } as const);
-const orm = createOrm({ schema: __joinsDb, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: __joinsDb, adapter: createPgCompileOnlyAdapter() });
 
 // Explicit equality ON condition
 const results = await orm.select('embeddings')
@@ -297,7 +297,7 @@ Use `as` to override the alias the joined table receives in the query:
 
 ```typescript
 import { createOrm, ref, schema } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const __joinsDb = schema({
   calls: {
@@ -315,7 +315,7 @@ const __joinsDb = schema({
     vector: 'string',
   },
 } as const);
-const orm = createOrm({ schema: __joinsDb, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: __joinsDb, adapter: createPgCompileOnlyAdapter() });
 
 const results = await orm.select('calls')
   .join('caller', { as: 'c', type: 'inner' })
@@ -345,7 +345,7 @@ The `on` parameter accepts any `WhereIntent` — the same filter helpers used in
 
 ```typescript
 import { and, createOrm, eq, gt, ref, schema } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const __joinsDb = schema({
   calls: {
@@ -363,7 +363,7 @@ const __joinsDb = schema({
     vector: 'string',
   },
 } as const);
-const orm = createOrm({ schema: __joinsDb, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: __joinsDb, adapter: createPgCompileOnlyAdapter() });
 
 // ON condition with AND
 const results = await orm.select('calls')

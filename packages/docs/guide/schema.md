@@ -152,7 +152,7 @@ Pass that `Schema<T>` object directly to `createOrm({ schema })`:
 
 ```typescript
 import { createOrm, ref, schema } from '@dbsp/core';
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({
   users: {
@@ -166,7 +166,7 @@ const db = schema({
   },
 } as const);
 
-const orm = createOrm({ schema: db, adapter: createPgsqlAdapter(pool) });
+const orm = createOrm({ schema: db, adapter: createPgAdapter(pool) });
 ```
 
 The planner consumes the compiled model, while TypeScript keeps the literal table and column definitions available for query result inference.

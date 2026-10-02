@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { compileCteQuery } from '../adapter-compiler-recursive.js';
 import { compilePlan } from '../compiler.js';
 import { createDeclaredNameResolver } from '../declared-name-resolver.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { createPgPhysicalModel } from '../physical-model/index.js';
 import { fromOutputDescriptors } from '../projection-envelope.js';
 
@@ -59,7 +59,7 @@ describe('bigint js json_agg SQL projection', () => {
 				[longColumn]: 'string',
 			},
 		});
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: longSchema.model,
 			dbCasing: 'snake_case',
 		});
@@ -155,7 +155,7 @@ describe('bigint js json_agg SQL projection', () => {
 	});
 
 	it('forces explicit projection and casts opted-in bigint columns to text', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const compiled = adapter.compile(
 			{
 				rootTable: 'parents',
@@ -204,7 +204,7 @@ describe('bigint js json_agg SQL projection', () => {
 			.getTable('readings')
 			?.columns.find((column) => column.name === 'code');
 		(codeColumn as { js?: 'bigint' }).js = 'bigint';
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 
 		const compiled = adapter.compile(
 			{
@@ -233,7 +233,7 @@ describe('bigint js json_agg SQL projection', () => {
 	});
 
 	it('records exact JSON keys and resolver nested transforms on the compile-local hydration plan', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: includeSchema.model,
 			dbCasing: 'snake_case',
 		});
@@ -311,7 +311,7 @@ describe('bigint js json_agg SQL projection', () => {
 	});
 
 	it('hydrates a renamed bigint CTE projection with the adapter-produced key map', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: includeSchema.model,
 		});
 		const compiled = adapter.compileCteQuery(

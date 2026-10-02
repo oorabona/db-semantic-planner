@@ -72,7 +72,7 @@ Suppose an `employees` table with a `manager_id` self-reference:
 ```typescript
 // Standalone example: define the schema and compile-only ORM used below.
 import { createOrm, eq, ref, schema } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const employeeDb = schema({
   employees: {
@@ -83,7 +83,7 @@ const employeeDb = schema({
 } as const);
 const orm = createOrm({
   schema: employeeDb,
-  adapter: createPgsqlCompileOnlyAdapter({
+  adapter: createPgCompileOnlyAdapter({
     model: employeeDb.model,
     dbCasing: 'snake_case',
   }),
@@ -120,7 +120,7 @@ When cycles are possible or the tree depth is unbounded, use `maxDepth` to preve
 
 ```typescript
 // Standalone example: define the schema and compile-only ORM used below.
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { createOrm, eq, ref, schema } from '@dbsp/core';
 
 const categoryDb = schema({
@@ -133,7 +133,7 @@ const categoryDb = schema({
 } as const);
 const orm = createOrm({
   schema: categoryDb,
-  adapter: createPgsqlCompileOnlyAdapter({
+  adapter: createPgCompileOnlyAdapter({
     model: categoryDb.model,
     dbCasing: 'snake_case',
   }),
@@ -181,7 +181,7 @@ Use `unionAll: false` when the same node can be reached by multiple paths and yo
 
 ```typescript
 // Standalone example: define the schema and compile-only ORM used below.
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { createOrm, eq, schema } from '@dbsp/core';
 
 const graphDb = schema({
@@ -192,7 +192,7 @@ const graphDb = schema({
 } as const);
 const orm = createOrm({
   schema: graphDb,
-  adapter: createPgsqlCompileOnlyAdapter({
+  adapter: createPgCompileOnlyAdapter({
     model: graphDb.model,
     dbCasing: 'snake_case',
   }),
@@ -230,7 +230,7 @@ Inspect the compiled SQL and parameters without running against the database:
 
 ```typescript
 // Standalone example: define the schema and compile-only ORM used below.
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { createOrm, eq, ref, schema } from '@dbsp/core';
 
 const employeeDb = schema({
@@ -242,7 +242,7 @@ const employeeDb = schema({
 } as const);
 const orm = createOrm({
   schema: employeeDb,
-  adapter: createPgsqlCompileOnlyAdapter({
+  adapter: createPgCompileOnlyAdapter({
     model: employeeDb.model,
     dbCasing: 'snake_case',
   }),

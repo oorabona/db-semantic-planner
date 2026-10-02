@@ -8,7 +8,7 @@
 
 import { InvalidOperationError, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const insertFixtureModel = schema({
 	embeddings: {
@@ -23,7 +23,7 @@ const insertFixtureModel = schema({
 }).model;
 
 function createInsertTestAdapter() {
-	return createPgsqlCompileOnlyAdapter({ model: insertFixtureModel });
+	return createPgCompileOnlyAdapter({ model: insertFixtureModel });
 }
 
 // ---------------------------------------------------------------------------
@@ -451,7 +451,7 @@ describe('SQL structure', () => {
 	});
 
 	it('schema-scoped table uses schema prefix', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: insertFixtureModel,
 			schemaName: 'tenant_xyz',
 		});

@@ -1,4 +1,4 @@
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { describe, expect, it } from 'vitest';
 import * as expressions from './expressions.js';
 import {
@@ -30,7 +30,7 @@ const db = schema({
 	},
 } as const);
 
-const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter() });
 
 describe('predicate-branded expression primitives', () => {
 	it.each([
@@ -185,7 +185,7 @@ describe('predicate-branded expression primitives', () => {
 
 		const typedOrm = createTypedOrm(
 			schemaToModelIR(db.definition),
-			createPgsqlCompileOnlyAdapter(),
+			createPgCompileOnlyAdapter(),
 		);
 		expect(() =>
 			typedOrm.from(db.tables.documents).where(bare as never),
@@ -215,7 +215,7 @@ describe('predicate-branded expression primitives', () => {
 
 		const typedOrm = createTypedOrm(
 			schemaToModelIR(db.definition),
-			createPgsqlCompileOnlyAdapter(),
+			createPgCompileOnlyAdapter(),
 		);
 		expect(() =>
 			typedOrm.from(db.tables.documents).where(foreignPredicate as never),
@@ -237,7 +237,7 @@ describe('predicate-branded expression primitives', () => {
 
 		const typedOrm = createTypedOrm(
 			schemaToModelIR(db.definition),
-			createPgsqlCompileOnlyAdapter(),
+			createPgCompileOnlyAdapter(),
 		);
 		expect(
 			typedOrm.from(db.tables.documents).where(predicate).dump().sql,

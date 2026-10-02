@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createOrm, schema, sql } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const columns = {
 	id: 'integer',
@@ -20,7 +20,7 @@ const db = schema({
 		tags: { type: 'text', dbType: 'text[]' },
 	},
 } as const);
-const adapter = createPgsqlCompileOnlyAdapter({ model: db.model });
+const adapter = createPgCompileOnlyAdapter({ model: db.model });
 const orm = createOrm({ schema: db, adapter });
 const insert = (values: Record<string, unknown>[], batchThreshold = 50) =>
 	adapter.compileInsert(

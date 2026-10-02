@@ -2,7 +2,7 @@
  * FR-6: caseWhen() expression builder integration tests.
  * All assertions use exact SQL matching (toEqual).
  *
- * SQL format note: createPgsqlCompileOnlyAdapter({ model }) uses identityNaming
+ * SQL format note: createPgCompileOnlyAdapter({ model }) uses identityNaming
  * which produces unquoted identifiers without table aliases (e.g. symbols.name, not "t0"."name").
  */
 import {
@@ -20,7 +20,7 @@ import {
 	schema,
 } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const testSchema = schema({
 	symbols: {
@@ -35,7 +35,7 @@ const testSchema = schema({
 } as const);
 
 function buildOrm() {
-	const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+	const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 	return createOrm({ model: testSchema.model, adapter });
 }
 

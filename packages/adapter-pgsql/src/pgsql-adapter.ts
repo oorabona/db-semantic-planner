@@ -1,5 +1,5 @@
 /**
- * PgsqlAdapter - Implements the Adapter interface for PostgreSQL using native pg driver.
+ * PgAdapter - Implements the Adapter interface for PostgreSQL using native pg driver.
  *
  * This adapter wraps a pg Pool instance and provides the unified
  * adapter interface for the db-semantic-planner ORM.
@@ -196,8 +196,8 @@ const PGSQL_CONNECTION_AVAILABLE: ConnectionAvailability = {
 
 const PGSQL_CONNECTION_UNAVAILABLE: ConnectionAvailability = {
 	status: 'unavailable',
-	reason: 'this PgsqlAdapter was constructed without a connection.',
-	fix: 'Use createPgsqlAdapter(pool) to execute database operations.',
+	reason: 'this PgAdapter was constructed without a connection.',
+	fix: 'Use createPgAdapter(pool) to execute database operations.',
 };
 
 /**
@@ -291,7 +291,7 @@ const rollbackOnlyPgsqlScopeBrand: unique symbol = Symbol(
 );
 
 /** A scope minted by withScratchScope and guaranteed to roll back on success. */
-export type RollbackOnlyPgsqlScope<DB = unknown> = PgsqlAdapter<DB> & {
+export type PgRollbackOnlyScope<DB = unknown> = PgAdapter<DB> & {
 	readonly [rollbackOnlyPgsqlScopeBrand]: typeof rollbackOnlyPgsqlScopeBrand;
 };
 
@@ -461,30 +461,30 @@ interface ResolvedPgsqlTransactionOptions
 	readonly signal?: AbortSignal;
 }
 
-export class PgsqlRawSqlTransactionControlError extends Error {
+export class PgRawSqlTransactionControlError extends Error {
 	readonly dbspRawSqlTransactionControl = true;
 
 	constructor(cause: unknown) {
 		super(RAW_SQL_TRANSACTION_CONTROL_MESSAGE, { cause });
-		this.name = 'PgsqlRawSqlTransactionControlError';
+		this.name = 'PgRawSqlTransactionControlError';
 	}
 }
 
-export class PgsqlTransactionAbortedCommitError extends Error {
+export class PgTransactionAbortedCommitError extends Error {
 	readonly dbspTransactionAbortedCommit = true;
 
 	constructor(cause: unknown) {
 		super(ABORTED_COMMIT_MESSAGE, { cause });
-		this.name = 'PgsqlTransactionAbortedCommitError';
+		this.name = 'PgTransactionAbortedCommitError';
 	}
 }
 
-export class PgsqlTransactionAbortedError extends Error {
+export class PgTransactionAbortedError extends Error {
 	readonly dbspTransactionAborted = true;
 
 	constructor(cause: unknown) {
 		super(TRANSACTION_ABORTED_MESSAGE, { cause });
-		this.name = 'PgsqlTransactionAbortedError';
+		this.name = 'PgTransactionAbortedError';
 	}
 }
 
@@ -493,39 +493,39 @@ export class PgsqlTransactionAbortedError extends Error {
  * `TransactionOptions.signal`. If the signal aborts while `pool.connect()` is
  * still pending, dbsp honors it only after a client is acquired.
  */
-export class PgsqlTransactionAbortSignalError extends Error {
+export class PgTransactionAbortSignalError extends Error {
 	readonly dbspTransactionAbortSignal = true;
 
 	constructor() {
 		super(TRANSACTION_ABORT_SIGNAL_MESSAGE);
-		this.name = 'PgsqlTransactionAbortSignalError';
+		this.name = 'PgTransactionAbortSignalError';
 	}
 }
 
-export class PgsqlPinnedConnectionAbortSignalError extends Error {
+export class PgPinnedConnectionAbortSignalError extends Error {
 	readonly dbspPinnedConnectionAbortSignal = true;
 
 	constructor() {
 		super(PINNED_CONNECTION_ABORT_SIGNAL_MESSAGE);
-		this.name = 'PgsqlPinnedConnectionAbortSignalError';
+		this.name = 'PgPinnedConnectionAbortSignalError';
 	}
 }
 
-export class PgsqlTransactionOptionsError extends Error {
+export class PgTransactionOptionsError extends Error {
 	readonly dbspTransactionOptions = true;
 
 	constructor(message: string) {
 		super(message);
-		this.name = 'PgsqlTransactionOptionsError';
+		this.name = 'PgTransactionOptionsError';
 	}
 }
 
-export class PgsqlAdvisoryLockOptionsError extends Error {
+export class PgAdvisoryLockOptionsError extends Error {
 	readonly dbspAdvisoryLockOptions = true;
 
 	constructor(message: string) {
 		super(message);
-		this.name = 'PgsqlAdvisoryLockOptionsError';
+		this.name = 'PgAdvisoryLockOptionsError';
 	}
 }
 
@@ -545,7 +545,7 @@ export class PgsqlAdvisoryLockOptionsError extends Error {
  * `NOWAIT`; a `57014` is the configured `statement_timeout` unless the backend was
  * cancelled from outside. Inspect `cause` when that distinction matters.
  */
-export class PgsqlTransactionTimeoutError extends Error {
+export class PgTransactionTimeoutError extends Error {
 	readonly dbspTransactionTimeout = true;
 
 	constructor(
@@ -553,7 +553,7 @@ export class PgsqlTransactionTimeoutError extends Error {
 		readonly timeout: PgsqlTransactionTimeoutParameter,
 	) {
 		super(TRANSACTION_TIMEOUT_MESSAGE, { cause });
-		this.name = 'PgsqlTransactionTimeoutError';
+		this.name = 'PgTransactionTimeoutError';
 	}
 }
 
@@ -566,7 +566,7 @@ export class PgsqlTransactionTimeoutError extends Error {
  * messages carry no parameter values; preserved upstream errors, including the
  * standard Error `cause`, are unsanitized.
  */
-export class PgsqlPreparedStatementReplayError extends Error {
+export class PgPreparedStatementReplayError extends Error {
 	readonly dbspPreparedStatementReplay = true;
 	readonly originalInfrastructureError: unknown;
 	readonly originalError: unknown;
@@ -577,7 +577,7 @@ export class PgsqlPreparedStatementReplayError extends Error {
 		cause: unknown,
 	) {
 		super('Prepared statement recovery replay failed.', { cause });
-		this.name = 'PgsqlPreparedStatementReplayError';
+		this.name = 'PgPreparedStatementReplayError';
 		this.originalInfrastructureError = infrastructureError;
 		this.originalError = infrastructureError;
 	}
@@ -1042,7 +1042,7 @@ function resolvePgsqlTransactionIsolationLevel(
 	) {
 		return value;
 	}
-	throw new PgsqlTransactionOptionsError(
+	throw new PgTransactionOptionsError(
 		`Unsupported transaction isolationLevel: ${describeTransactionOptionValue(value)}`,
 	);
 }
@@ -1052,7 +1052,7 @@ function resolvePgsqlTransactionReadOnly(
 ): ResolvedPgsqlTransactionBeginOptions['readOnly'] {
 	if (value === undefined) return undefined;
 	if (typeof value === 'boolean') return value;
-	throw new PgsqlTransactionOptionsError(
+	throw new PgTransactionOptionsError(
 		`transaction readOnly must be a boolean when defined; received ${describeTransactionOptionValue(value)}`,
 	);
 }
@@ -1063,7 +1063,7 @@ function resolvePgsqlTransactionTimeoutMs(
 ): number | undefined {
 	if (value === undefined) return undefined;
 	if (typeof value === 'number' && Number.isFinite(value)) return value;
-	throw new PgsqlTransactionOptionsError(
+	throw new PgTransactionOptionsError(
 		`transaction ${optionName} must be a finite number when defined; received ${describeTransactionOptionValue(value)}`,
 	);
 }
@@ -1073,7 +1073,7 @@ function resolvePgsqlTransactionSignal(
 ): ResolvedPgsqlTransactionOptions['signal'] {
 	if (value === undefined) return undefined;
 	if (value instanceof AbortSignal) return value;
-	throw new PgsqlTransactionOptionsError(
+	throw new PgTransactionOptionsError(
 		`transaction signal must be an AbortSignal when defined; received ${describeTransactionOptionValue(value)}`,
 	);
 }
@@ -1141,7 +1141,7 @@ export function resolveTransactionBeginOptions(
 		optionRecord !== undefined &&
 		'signal' in optionRecord
 	) {
-		throw new PgsqlTransactionOptionsError(
+		throw new PgTransactionOptionsError(
 			'stream transaction options do not support signal; AbortSignal is only supported by transaction()',
 		);
 	}
@@ -1179,11 +1179,11 @@ function renderTransactionIsolationLevel(
 		case 'serializable':
 			return 'SERIALIZABLE';
 		case undefined:
-			throw new PgsqlTransactionOptionsError(
+			throw new PgTransactionOptionsError(
 				'transaction isolationLevel cannot be undefined when rendering BEGIN',
 			);
 		default:
-			throw new PgsqlTransactionOptionsError(
+			throw new PgTransactionOptionsError(
 				`Unsupported transaction isolationLevel: ${String(isolationLevel)}`,
 			);
 	}
@@ -1215,27 +1215,27 @@ function assertTopLevelOnlyTransactionOptionsAreAbsent(
 		options?.isolationLevel !== undefined ||
 		options?.readOnly !== undefined
 	) {
-		throw new PgsqlTransactionOptionsError(NESTED_TRANSACTION_OPTIONS_MESSAGE);
+		throw new PgTransactionOptionsError(NESTED_TRANSACTION_OPTIONS_MESSAGE);
 	}
 }
 
 function classifyPgsqlTransactionTimeout(
 	error: unknown,
 	options: ResolvedPgsqlTransactionBeginOptions | undefined,
-): PgsqlTransactionTimeoutError | undefined {
-	if (error instanceof PgsqlTransactionTimeoutError) {
+): PgTransactionTimeoutError | undefined {
+	if (error instanceof PgTransactionTimeoutError) {
 		return error;
 	}
 	if (options === undefined) return undefined;
 	// Classify by SQLSTATE only, gated on the caller having configured that timeout.
 	// PostgreSQL overloads 55P03 (also NOWAIT) and 57014 (also external cancel) and
 	// exposes no locale-stable field to separate the causes; see the JSDoc on
-	// PgsqlTransactionTimeoutError for the boundary. The original error is the `cause`.
+	// PgTransactionTimeoutError for the boundary. The original error is the `cause`.
 	if (options.hasLockTimeout && isPgErrorWithCode(error, '55P03')) {
-		return new PgsqlTransactionTimeoutError(error, 'lock_timeout');
+		return new PgTransactionTimeoutError(error, 'lock_timeout');
 	}
 	if (options.hasStatementTimeout && isPgErrorWithCode(error, '57014')) {
-		return new PgsqlTransactionTimeoutError(error, 'statement_timeout');
+		return new PgTransactionTimeoutError(error, 'statement_timeout');
 	}
 	return undefined;
 }
@@ -1441,14 +1441,14 @@ const PG_ADVISORY_LOCK_INT32_MAX = 2 ** 31 - 1;
 function resolvePgAdvisoryLockWait(wait: unknown): 'block' | 'try' {
 	if (wait === undefined) return 'block';
 	if (wait === 'block' || wait === 'try') return wait;
-	throw new PgsqlAdvisoryLockOptionsError(
+	throw new PgAdvisoryLockOptionsError(
 		"PostgreSQL advisory lock wait option must be 'block' or 'try'.",
 	);
 }
 
 function assertPgAdvisoryLockBigintKey(key: bigint): void {
 	if (key < PG_ADVISORY_LOCK_INT64_MIN || key > PG_ADVISORY_LOCK_INT64_MAX) {
-		throw new PgsqlAdvisoryLockOptionsError(
+		throw new PgAdvisoryLockOptionsError(
 			`PostgreSQL advisory lock bigint key must fit signed int64 (${PG_ADVISORY_LOCK_INT64_MIN} to ${PG_ADVISORY_LOCK_INT64_MAX}).`,
 		);
 	}
@@ -1464,7 +1464,7 @@ function assertPgAdvisoryLockInt32KeyPart(
 		value < PG_ADVISORY_LOCK_INT32_MIN ||
 		value > PG_ADVISORY_LOCK_INT32_MAX
 	) {
-		throw new PgsqlAdvisoryLockOptionsError(
+		throw new PgAdvisoryLockOptionsError(
 			`PostgreSQL advisory lock ${name} must fit signed int32 (${PG_ADVISORY_LOCK_INT32_MIN} to ${PG_ADVISORY_LOCK_INT32_MAX}).`,
 		);
 	}
@@ -1500,7 +1500,7 @@ function resolvePgAdvisoryLockKey(
 		};
 	}
 
-	throw new PgsqlAdvisoryLockOptionsError(
+	throw new PgAdvisoryLockOptionsError(
 		'PostgreSQL advisory lock key must be a bigint or { classId, objId }; strings are not accepted and dbsp does not hash lock keys.',
 	);
 }
@@ -2459,14 +2459,14 @@ function getNqlBindingProjection(
 // ============================================================================
 
 /**
- * Options for PgsqlAdapter.
+ * Options for PgAdapter.
  */
-export interface PgsqlPreparedStatementsOptions {
+export interface PgPreparedStatementsOptions {
 	/** Maximum distinct compiled statements admitted per executor (default: 500). */
 	readonly maxStatements?: number;
 }
 
-export interface PgsqlAdapterOptions {
+export interface PgAdapterOptions {
 	/** Schema name for multi-tenant queries */
 	readonly schemaName?: string;
 	/**
@@ -2488,19 +2488,19 @@ export interface PgsqlAdapterOptions {
 	 * Opt in to node-postgres named prepared statements for compiled queries with
 	 * parameters. `true` uses the default statement cap; an object overrides it.
 	 */
-	readonly preparedStatements?: boolean | PgsqlPreparedStatementsOptions;
+	readonly preparedStatements?: boolean | PgPreparedStatementsOptions;
 }
 
-interface PgsqlPoolAdapterOptionsBase extends PgsqlAdapterOptions {
+interface PgsqlPoolAdapterOptionsBase extends PgAdapterOptions {
 	readonly borrowedClient?: false;
 }
 
-export type PgsqlPoolAdapterOptions =
+export type PgPoolAdapterOptions =
 	| (PgsqlPoolAdapterOptionsBase & {
 			readonly replayInvalidatedPlans?: false | undefined;
 	  })
 	| (Omit<PgsqlPoolAdapterOptionsBase, 'preparedStatements'> & {
-			readonly preparedStatements: true | PgsqlPreparedStatementsOptions;
+			readonly preparedStatements: true | PgPreparedStatementsOptions;
 			/**
 			 * Enable one unnamed replay after `0A000`/`RevalidateCachedQuery` only when
 			 * you assert that your statements do not invoke functions performing
@@ -2531,7 +2531,7 @@ export type PgsqlPoolAdapterOptions =
 			readonly replayInvalidatedPlans: true;
 	  });
 
-export interface PgsqlBorrowedClientAdapterOptions extends PgsqlAdapterOptions {
+export interface PgBorrowedClientAdapterOptions extends PgAdapterOptions {
 	/** Replay is only available to a pool-owned pinned scope. */
 	readonly replayInvalidatedPlans?: never;
 	/** This connection belongs to the caller. dbsp never releases it. */
@@ -2566,11 +2566,11 @@ export interface PgsqlBorrowedClientAdapterOptions extends PgsqlAdapterOptions {
 }
 
 /** Options for a connectionless adapter, which cannot own replay serialization. */
-export interface PgsqlCompileOnlyAdapterOptions extends PgsqlAdapterOptions {
+export interface PgCompileOnlyAdapterOptions extends PgAdapterOptions {
 	readonly replayInvalidatedPlans?: never;
 }
 
-interface PgsqlAdapterInternalOptions extends PgsqlAdapterOptions {
+interface PgsqlAdapterInternalOptions extends PgAdapterOptions {
 	readonly [pgsqlAdapterInternalOptionsKey]: true;
 	/** Propagated only to adapter-owned client scopes created from a pool. */
 	readonly replayInvalidatedPlans?: boolean;
@@ -2585,15 +2585,15 @@ interface PgsqlAdapterInternalOptions extends PgsqlAdapterOptions {
 }
 
 type PgsqlPublicAdapterConstructionOptions =
-	| PgsqlAdapterOptions
-	| PgsqlPoolAdapterOptions
-	| PgsqlBorrowedClientAdapterOptions;
+	| PgAdapterOptions
+	| PgPoolAdapterOptions
+	| PgBorrowedClientAdapterOptions;
 
 type PgsqlAdapterConstructionOptions =
 	| PgsqlPublicAdapterConstructionOptions
 	| PgsqlAdapterInternalOptions;
 
-type PgsqlAdapterConstructionOverrides = Partial<PgsqlAdapterOptions> & {
+type PgsqlAdapterConstructionOverrides = Partial<PgAdapterOptions> & {
 	readonly borrowedClient?: true | false;
 	readonly managedTransactions?: true;
 };
@@ -2627,7 +2627,7 @@ function isPgsqlAdapterInternalOptions(
 
 function hasBorrowedClientOption(
 	options: PgsqlAdapterConstructionOptions | undefined,
-): options is PgsqlBorrowedClientAdapterOptions | PgsqlAdapterInternalOptions {
+): options is PgBorrowedClientAdapterOptions | PgsqlAdapterInternalOptions {
 	return (
 		isPropertyContainer(options) &&
 		!isProxy(options) &&
@@ -2768,29 +2768,26 @@ function normalizePreparedStatements(
 	}
 	return Object.freeze({
 		maxStatements: normalizeMaxPreparedStatements(
-			(value as PgsqlPreparedStatementsOptions).maxStatements,
+			(value as PgPreparedStatementsOptions).maxStatements,
 		),
 	});
 }
 
 function clonePreparedStatements(
 	config: NormalizedPreparedStatementsConfig,
-): false | PgsqlPreparedStatementsOptions {
+): false | PgPreparedStatementsOptions {
 	return config === false ? false : { maxStatements: config.maxStatements };
 }
 
 function createPgsqlAdapterFromConstructionOptions<DB = unknown>(
 	connection: Pool | PoolClient | undefined,
 	options: PgsqlAdapterConstructionOptions,
-): PgsqlAdapter<DB> {
-	return new PgsqlAdapter<DB>(
-		connection as Pool,
-		options as PgsqlPoolAdapterOptions,
-	);
+): PgAdapter<DB> {
+	return new PgAdapter<DB>(connection as Pool, options as PgPoolAdapterOptions);
 }
 
 // ============================================================================
-// PgsqlAdapter
+// PgAdapter
 // ============================================================================
 
 /**
@@ -2801,14 +2798,14 @@ function createPgsqlAdapterFromConstructionOptions<DB = unknown>(
  * @example
  * ```typescript
  * import { Pool } from 'pg';
- * import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+ * import { createPgAdapter } from '@dbsp/adapter-pgsql';
  *
  * const pool = new Pool({ connectionString: process.env.DATABASE_URL });
- * const adapter = createPgsqlAdapter(pool);
+ * const adapter = createPgAdapter(pool);
  * const orm = createOrm({ model, adapter });
  * ```
  */
-export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
+export class PgAdapter<DB = unknown> implements Adapter<DB> {
 	private readonly pool: Pool | undefined;
 	private readonly client: PoolClient | undefined;
 	private readonly borrowedClient: boolean;
@@ -2832,7 +2829,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	private readonly deriveFk: FkColumnDerivation;
 
 	/**
-	 * Create a new PgsqlAdapter.
+	 * Create a new PgAdapter.
 	 *
 	 * Ownership of the connection is **declared**, never inferred. Handing over a
 	 * `PoolClient` means nothing on its own — it says the object has a `release()`
@@ -2843,9 +2840,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 *   or nothing at all for compile-only mode
 	 * @param options - configuration; declares connection ownership
 	 */
-	constructor(pool: Pool, options?: PgsqlPoolAdapterOptions);
-	constructor(client: PoolClient, options: PgsqlBorrowedClientAdapterOptions);
-	constructor(pool?: undefined, options?: PgsqlCompileOnlyAdapterOptions);
+	constructor(pool: Pool, options?: PgPoolAdapterOptions);
+	constructor(client: PoolClient, options: PgBorrowedClientAdapterOptions);
+	constructor(pool?: undefined, options?: PgCompileOnlyAdapterOptions);
 	constructor(
 		pool?: Pool | PoolClient | undefined,
 		options?: PgsqlAdapterConstructionOptions,
@@ -2860,7 +2857,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			if (isPoolClientLike(pool)) {
 				if (!declaredBorrowed) {
 					throw new Error(
-						'PgsqlAdapter received a pg PoolClient without borrowedClient: true. ' +
+						'PgAdapter received a pg PoolClient without borrowedClient: true. ' +
 							'A checked-out client belongs to whoever checked it out: declare it with ' +
 							'borrowedClient: true, and pass managedTransactions: true if dbsp should run ' +
 							'transactions on it.',
@@ -2960,7 +2957,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 */
 
 	/**
-	 * Return a new PgsqlAdapterOptions that merges current config with overrides.
+	 * Return a new PgAdapterOptions that merges current config with overrides.
 	 * Ensures that all configuration fields (logger, defaultPkColumnName,
 	 * deriveFkColumnName, etc.) are propagated to scoped/transactional adapters.
 	 */
@@ -3039,7 +3036,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		const schemaName = options?.schemaName || this.schemaName;
 		if (model === undefined && this._dbCasing !== 'preserve') {
 			throw new Error(
-				`PgsqlAdapter compilation with dbCasing '${this._dbCasing}' requires a ModelIR; declared names cannot be resolved without a model.`,
+				`PgAdapter compilation with dbCasing '${this._dbCasing}' requires a ModelIR; declared names cannot be resolved without a model.`,
 			);
 		}
 		const physicalModel =
@@ -3379,8 +3376,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		const executor = this.client ?? this.pool;
 		if (!executor) {
 			throw new Error(
-				`Cannot ${operation}: this PgsqlAdapter was constructed without a connection. ` +
-					'Use createPgsqlAdapter(pool) to execute database operations.',
+				`Cannot ${operation}: this PgAdapter was constructed without a connection. ` +
+					'Use createPgAdapter(pool) to execute database operations.',
 			);
 		}
 		return executor;
@@ -4701,7 +4698,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			options?.signal === undefined ? undefined : { signal: options.signal };
 
 		return this.withPinnedConnection(async (locked) => {
-			const pgLocked = locked as PgsqlAdapter<DB>;
+			const pgLocked = locked as PgAdapter<DB>;
 			let acquired = false;
 			let hasOriginalError = false;
 			let hasResult = false;
@@ -4763,7 +4760,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	}
 
 	private async unlockAdvisoryLock(
-		locked: PgsqlAdapter<DB>,
+		locked: PgAdapter<DB>,
 		lockKey: ResolvedPgAdvisoryLockKey,
 	): Promise<void> {
 		const rows = await locked.executeRaw<{ unlocked: boolean }>(
@@ -4784,7 +4781,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		if (this.client) {
 			if (options?.signal !== undefined) {
 				return Promise.reject(
-					new PgsqlTransactionOptionsError(
+					new PgTransactionOptionsError(
 						BORROWED_PINNED_CONNECTION_ABORT_SIGNAL_MESSAGE,
 					),
 				);
@@ -4819,7 +4816,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		return (async () => {
 			const signal = options?.signal;
 			if (signal?.aborted) {
-				throw new PgsqlPinnedConnectionAbortSignalError();
+				throw new PgPinnedConnectionAbortSignalError();
 			}
 			const client = await pool.connect();
 			let released = false;
@@ -4831,7 +4828,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			const abortErr =
 				signal === undefined
 					? undefined
-					: new PgsqlPinnedConnectionAbortSignalError();
+					: new PgPinnedConnectionAbortSignalError();
 			if (signal?.aborted) {
 				releaseOnce(abortErr);
 				throw abortErr;
@@ -4899,7 +4896,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 	private async pinnedConnectionWithClient<T>(
 		client: PoolClient,
-		fn: (adapter: PgsqlAdapter<DB>) => Promise<T>,
+		fn: (adapter: PgAdapter<DB>) => Promise<T>,
 		childObserver?: DbspChildTransactionObserver,
 	): Promise<T> {
 		let releaseScope: ((failure?: DbspScopeFailure) => void) | undefined;
@@ -4989,7 +4986,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		if (this.client) {
 			if (resolvedOptions?.signal !== undefined) {
 				return Promise.reject(
-					new PgsqlTransactionOptionsError(
+					new PgTransactionOptionsError(
 						BORROWED_TRANSACTION_ABORT_SIGNAL_MESSAGE,
 					),
 				);
@@ -4997,7 +4994,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			if (!this.managedTransactions) {
 				return Promise.reject(
 					new Error(
-						'transaction() was called on a PgsqlAdapter created with a borrowed PoolClient. ' +
+						'transaction() was called on a PgAdapter created with a borrowed PoolClient. ' +
 							'This connection is yours, so the transaction is yours. Pass managedTransactions: true ' +
 							'to let dbsp run transactions on it through a savepoint, and read the managedTransactions option documentation for the limits of that contract.',
 					),
@@ -5038,7 +5035,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			(async () => {
 				const signal = resolvedOptions?.signal;
 				if (signal?.aborted) {
-					throw new PgsqlTransactionAbortSignalError();
+					throw new PgTransactionAbortSignalError();
 				}
 				// Abort during pool.connect() is honored after acquisition; we do not
 				// race pool.connect() itself.
@@ -5052,7 +5049,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				const abortErr =
 					signal === undefined
 						? undefined
-						: new PgsqlTransactionAbortSignalError();
+						: new PgTransactionAbortSignalError();
 				if (signal?.aborted) {
 					releaseOnce(abortErr);
 					throw abortErr;
@@ -5128,14 +5125,14 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * session effects.
 	 */
 	withScratchScope<T>(
-		fn: (adapter: RollbackOnlyPgsqlScope<DB>) => Promise<T>,
+		fn: (adapter: PgRollbackOnlyScope<DB>) => Promise<T>,
 	): Promise<T> {
 		const childObserver = this.createChildTransactionObserver();
 		if (this.client) {
 			return this.observeChildTransaction(
 				this.transactionWithManagedClient(
 					this.client,
-					fn as (adapter: PgsqlAdapter<DB>) => Promise<T>,
+					fn as (adapter: PgAdapter<DB>) => Promise<T>,
 					childObserver,
 					'rollback',
 				),
@@ -5156,7 +5153,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				try {
 					return await this.transactionWithClientTransaction(
 						client,
-						fn as (adapter: PgsqlAdapter<DB>) => Promise<T>,
+						fn as (adapter: PgAdapter<DB>) => Promise<T>,
 						childObserver,
 						'rollback',
 					);
@@ -5176,7 +5173,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		scopeToken: DbspScopeToken,
 		scopeState: DbspScopeState,
 		rollbackOnlyScope = false,
-	): PgsqlAdapter<DB> {
+	): PgAdapter<DB> {
 		return createPgsqlAdapterFromConstructionOptions<DB>(
 			client,
 			this.cloneOptions({
@@ -5194,7 +5191,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		client: PoolClient,
 		scopeToken: DbspScopeToken,
 		scopeState: DbspScopeState,
-	): PgsqlAdapter<DB> {
+	): PgAdapter<DB> {
 		return createPgsqlAdapterFromConstructionOptions<DB>(
 			client,
 			this.cloneOptions({
@@ -5289,7 +5286,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 	private async transactionWithManagedClient<T>(
 		client: PoolClient,
-		fn: (adapter: PgsqlAdapter<DB>) => Promise<T>,
+		fn: (adapter: PgAdapter<DB>) => Promise<T>,
 		childObserver?: DbspChildTransactionObserver,
 		successAction: SavepointTransactionSuccessAction = 'release',
 		options?: ResolvedPgsqlTransactionOptions,
@@ -5305,7 +5302,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 	private async transactionWithManagedClientSavepointScope<T>(
 		client: PoolClient,
-		fn: (adapter: PgsqlAdapter<DB>) => Promise<T>,
+		fn: (adapter: PgAdapter<DB>) => Promise<T>,
 		childObserver?: DbspChildTransactionObserver,
 		successAction: SavepointTransactionSuccessAction = 'release',
 		options?: ResolvedPgsqlTransactionOptions,
@@ -5588,7 +5585,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 	private async transactionWithClientTransaction<T>(
 		client: PoolClient,
-		fn: (adapter: PgsqlAdapter<DB>) => Promise<T>,
+		fn: (adapter: PgAdapter<DB>) => Promise<T>,
 		childObserver?: DbspChildTransactionObserver,
 		successAction: ClientTransactionSuccessAction = 'commit',
 		options?: ResolvedPgsqlTransactionOptions,
@@ -5920,7 +5917,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			return this.poisonClientScope(
 				client,
 				allowedScopeToken,
-				new PgsqlTransactionAbortedError(releaseErr),
+				new PgTransactionAbortedError(releaseErr),
 				'cleanup',
 			);
 		}
@@ -5940,7 +5937,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			return this.poisonClientScope(
 				client,
 				allowedScopeToken,
-				new PgsqlTransactionAbortedError(releaseErr),
+				new PgTransactionAbortedError(releaseErr),
 				'cleanup',
 			);
 		}
@@ -5976,7 +5973,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				);
 			if (
 				isRawSqlTransactionControlError(classifiedRollbackFailure) ||
-				classifiedRollbackFailure instanceof PgsqlTransactionAbortedError
+				classifiedRollbackFailure instanceof PgTransactionAbortedError
 			) {
 				return classifiedRollbackFailure;
 			}
@@ -6435,7 +6432,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 	private assertCommitSucceeded(result: QueryResult): void {
 		if (result.command === 'ROLLBACK') {
-			throw new PgsqlTransactionAbortedCommitError(result);
+			throw new PgTransactionAbortedCommitError(result);
 		}
 	}
 
@@ -6711,7 +6708,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				this.poisonClientScope(
 					executor,
 					allowedScopeToken,
-					new PgsqlTransactionAbortedError(error),
+					new PgTransactionAbortedError(error),
 				);
 			}
 		}
@@ -6980,7 +6977,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 							cloneReplayableParameterValues(parameterSnapshot!),
 						)) as MaybeMultipleQueryResults<T>;
 					} catch (replayError) {
-						throw new PgsqlPreparedStatementReplayError(
+						throw new PgPreparedStatementReplayError(
 							admission.reservation?.fingerprint ??
 								derivePreparedStatementFingerprint(sql),
 							error,
@@ -7040,7 +7037,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			if (isTransactionControlCommandTag(queryResult.command)) {
 				throw this.poisonClientScopeStack(
 					executor,
-					new PgsqlRawSqlTransactionControlError(controlCause ?? queryResult),
+					new PgRawSqlTransactionControlError(controlCause ?? queryResult),
 				);
 			}
 		}
@@ -7068,7 +7065,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			if (isPgErrorWithCode(error, NO_ACTIVE_SQL_TRANSACTION)) {
 				throw this.poisonClientScopeStack(
 					client,
-					new PgsqlRawSqlTransactionControlError(cause),
+					new PgRawSqlTransactionControlError(cause),
 				);
 			}
 			throw error;
@@ -7466,49 +7463,49 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 // ============================================================================
 
 /**
- * Create a PgsqlAdapter from a pg Pool instance.
+ * Create a PgAdapter from a pg Pool instance.
  *
  * @param pool - pg Pool instance
  * @param options - Optional configuration
- * @returns A new PgsqlAdapter instance
+ * @returns A new PgAdapter instance
  *
  * @example
  * ```typescript
  * import { Pool } from 'pg';
- * import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+ * import { createPgAdapter } from '@dbsp/adapter-pgsql';
  *
  * const pool = new Pool({ connectionString: process.env.DATABASE_URL });
- * const adapter = createPgsqlAdapter(pool);
+ * const adapter = createPgAdapter(pool);
  *
  * // With naming convention
- * const adapter = createPgsqlAdapter(pool, { dbCasing: 'snake_case' });
+ * const adapter = createPgAdapter(pool, { dbCasing: 'snake_case' });
  * ```
  */
-export function createPgsqlAdapter<DB = unknown>(
+export function createPgAdapter<DB = unknown>(
 	pool: Pool,
-	options?: PgsqlPoolAdapterOptions,
-): PgsqlAdapter<DB>;
-export function createPgsqlAdapter<DB = unknown>(
+	options?: PgPoolAdapterOptions,
+): PgAdapter<DB>;
+export function createPgAdapter<DB = unknown>(
 	client: PoolClient,
-	options: PgsqlBorrowedClientAdapterOptions,
-): PgsqlAdapter<DB>;
-export function createPgsqlAdapter<DB = unknown>(
+	options: PgBorrowedClientAdapterOptions,
+): PgAdapter<DB>;
+export function createPgAdapter<DB = unknown>(
 	connection: Pool | PoolClient,
-	options?: PgsqlPoolAdapterOptions | PgsqlBorrowedClientAdapterOptions,
-): PgsqlAdapter<DB> {
+	options?: PgPoolAdapterOptions | PgBorrowedClientAdapterOptions,
+): PgAdapter<DB> {
 	// Validate this descriptor-backed option before the ownership guard performs
 	// any `in` checks on caller-owned options.
 	readReplayInvalidatedPlansOption(options);
 	if (isPoolClientLike(connection)) {
 		if (!hasBorrowedClientOption(options)) {
 			throw new Error(
-				'createPgsqlAdapter() received a pg PoolClient. Pass borrowedClient: true ' +
+				'createPgAdapter() received a pg PoolClient. Pass borrowedClient: true ' +
 					'to declare that the caller owns this connection.',
 			);
 		}
 	} else if (hasBorrowedClientOption(options)) {
 		throw new Error(
-			'createPgsqlAdapter() received borrowedClient: true with a pg Pool. ' +
+			'createPgAdapter() received borrowedClient: true with a pg Pool. ' +
 				'Pass a PoolClient when borrowing a caller-owned connection.',
 		);
 	}
@@ -7519,25 +7516,25 @@ export function createPgsqlAdapter<DB = unknown>(
 }
 
 /**
- * Creates a connectionless PgsqlAdapter for SQL generation without a database connection.
+ * Creates a connectionless PgAdapter for SQL generation without a database connection.
  *
  * All compilation methods (compile, compileInsert, etc.), createDump(), and generateDDL()
- * work normally. The adapter has the full PgsqlAdapter surface; database operations refuse
- * at runtime until it is constructed with a connection via createPgsqlAdapter(pool).
+ * work normally. The adapter has the full PgAdapter surface; database operations refuse
+ * at runtime until it is constructed with a connection via createPgAdapter(pool).
  *
  * @example
  * ```typescript
- * import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+ * import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
  * import { createOrm } from '@dbsp/core';
  *
- * const adapter = createPgsqlCompileOnlyAdapter();
+ * const adapter = createPgCompileOnlyAdapter();
  * const orm = createOrm({ model, adapter });
  * const dump = await orm.select('users').dump();
  * console.log(dump.sql);
  * ```
  */
-export function createPgsqlCompileOnlyAdapter<DB = unknown>(
-	options?: PgsqlCompileOnlyAdapterOptions,
-): PgsqlAdapter<DB> {
-	return new PgsqlAdapter<DB>(undefined, options);
+export function createPgCompileOnlyAdapter<DB = unknown>(
+	options?: PgCompileOnlyAdapterOptions,
+): PgAdapter<DB> {
+	return new PgAdapter<DB>(undefined, options);
 }

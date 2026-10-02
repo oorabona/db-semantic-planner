@@ -6,7 +6,7 @@
  * (only cleanup errors during streaming transactions).
  */
 
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 import { type AdapterLogger, createOrm } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
@@ -40,7 +40,7 @@ describe('AdapterLogger', () => {
 			error: vi.fn(),
 		};
 
-		const adapter = createPgsqlAdapter(pool, {
+		const adapter = createPgAdapter(pool, {
 			dbCasing: 'snake_case',
 			logger,
 		});
@@ -59,7 +59,7 @@ describe('AdapterLogger', () => {
 			// debug and warn intentionally omitted
 		};
 
-		const adapter = createPgsqlAdapter(pool, {
+		const adapter = createPgAdapter(pool, {
 			dbCasing: 'snake_case',
 			logger,
 		});
@@ -72,7 +72,7 @@ describe('AdapterLogger', () => {
 
 	it('should function without a logger', async () => {
 		const pool = await getTestPool();
-		const adapter = createPgsqlAdapter(pool, {
+		const adapter = createPgAdapter(pool, {
 			dbCasing: 'snake_case',
 			// no logger
 		});

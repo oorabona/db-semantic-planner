@@ -5,7 +5,7 @@
  * Uses the blog schema for comprehensive testing.
  */
 
-import { PgsqlTransactionTimeoutError } from '@dbsp/adapter-pgsql';
+import { PgTransactionTimeoutError } from '@dbsp/adapter-pgsql';
 import { createOrm, type Dump, eq } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
@@ -384,8 +384,8 @@ describe('STREAMING-001: Cursor/Streaming Support', () => {
 					throw new Error('Expected stream lock timeout');
 				})();
 
-				expect(error).toBeInstanceOf(PgsqlTransactionTimeoutError);
-				expect((error as PgsqlTransactionTimeoutError).timeout).toBe(
+				expect(error).toBeInstanceOf(PgTransactionTimeoutError);
+				expect((error as PgTransactionTimeoutError).timeout).toBe(
 					'lock_timeout',
 				);
 			} finally {

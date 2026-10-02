@@ -129,7 +129,7 @@ function compileLeafOrBranch(
 /**
  * Create a leaf compile function from adapter + model + capabilities.
  *
- * Convenience factory for the common case where you have a PgsqlAdapter
+ * Convenience factory for the common case where you have a PgAdapter
  * and need a compileFn for `compileSetOperation`.
  *
  * @param adapter - Adapter with compile() and dialectCapabilities
