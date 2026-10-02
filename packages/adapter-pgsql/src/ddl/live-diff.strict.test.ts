@@ -1,7 +1,7 @@
 import { ModelIRImpl } from '@dbsp/core';
 import type { ColumnIR, EnumIR, ModelIR, TableIR } from '@dbsp/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PgsqlAdapter } from '../pgsql-adapter.js';
+import type { PgAdapter } from '../pgsql-adapter.js';
 import { createPgPhysicalModel } from '../physical-model/index.js';
 import { declaredSequenceNamesFromInventory } from '../sequence-name.js';
 import type { CheckConstraintNewEnumValueError as CheckConstraintNewEnumValueErrorType } from './live-diff.js';
@@ -24,7 +24,7 @@ vi.mock('../expression-canonicalizer.js', async (importOriginal) => {
 
 const {
 	CheckConstraintNewEnumValueError,
-	comparePgsqlDatabaseSchema: comparePgsqlDatabaseSchemaForPhysicalModel,
+	comparePgDatabaseSchema: comparePgsqlDatabaseSchemaForPhysicalModel,
 	ExpressionKeyedIndexPredicateCanonicalizationUnsupportedError,
 	IndexPredicateCanonicalizationError,
 	NonConvergentSchemaDiffError,
@@ -32,7 +32,7 @@ const {
 	RawIndexPredicateFallbackError,
 } = await import('./live-diff.js');
 
-function comparePgsqlDatabaseSchema(
+function comparePgDatabaseSchema(
 	...args: Parameters<typeof comparePgsqlDatabaseSchemaForPhysicalModel>
 ) {
 	const [adapter, desired, options] = args;
@@ -134,16 +134,15 @@ function checkExpressionDiff(
 function makeAdapter(
 	dbModel: ModelIR,
 	withScratchScope?: (
-		fn: (scratch: PgsqlAdapter) => Promise<unknown>,
+		fn: (scratch: PgAdapter) => Promise<unknown>,
 	) => Promise<unknown>,
-): PgsqlAdapter {
+): PgAdapter {
 	const adapter = {
 		introspect: vi.fn(async () => dbModel),
 		withScratchScope: vi.fn(
-			withScratchScope ??
-				(async (fn) => fn(adapter as unknown as PgsqlAdapter)),
+			withScratchScope ?? (async (fn) => fn(adapter as unknown as PgAdapter)),
 		),
-	} as unknown as PgsqlAdapter;
+	} as unknown as PgAdapter;
 	return adapter;
 }
 
@@ -189,13 +188,13 @@ async function expectNonStrictScratchFailureToThrow(
 	const onWarning = vi.fn();
 
 	await expect(
-		comparePgsqlDatabaseSchema(adapter, desired, { onWarning }),
+		comparePgDatabaseSchema(adapter, desired, { onWarning }),
 	).rejects.toBe(error);
 	expect(mockCanonicalizeExpressionSurfaces).not.toHaveBeenCalled();
 	expect(onWarning).not.toHaveBeenCalled();
 }
 
-describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => {
+describe('comparePgDatabaseSchema strict expression canonicalization', () => {
 	beforeEach(() => {
 		mockCanonicalizeExpressionSurfaces.mockReset();
 	});
@@ -248,7 +247,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 
 		let caught: unknown;
 		try {
-			await comparePgsqlDatabaseSchema(makeAdapter(dbModel), desired, {
+			await comparePgDatabaseSchema(makeAdapter(dbModel), desired, {
 				requireExpressionCanonicalization: true,
 			});
 		} catch (error) {
@@ -296,7 +295,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 		const adapter = makeAdapter(dbModel);
 
 		await expect(
-			comparePgsqlDatabaseSchema(adapter, desired, {
+			comparePgDatabaseSchema(adapter, desired, {
 				requireExpressionCanonicalization: true,
 			}),
 		).rejects.toThrow('users_age_check refused');
@@ -339,7 +338,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 		const adapter = makeAdapter(dbModel);
 
 		await expect(
-			comparePgsqlDatabaseSchema(adapter, desired, {
+			comparePgDatabaseSchema(adapter, desired, {
 				requireExpressionCanonicalization: true,
 			}),
 		).resolves.toBeDefined();
@@ -378,7 +377,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 		});
 
 		await expect(
-			comparePgsqlDatabaseSchema(makeAdapter(dbModel), desired, {
+			comparePgDatabaseSchema(makeAdapter(dbModel), desired, {
 				requireExpressionCanonicalization: true,
 			}),
 		).rejects.toMatchObject({
@@ -417,7 +416,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 		});
 
 		await expect(
-			comparePgsqlDatabaseSchema(makeAdapter(dbModel), desired),
+			comparePgDatabaseSchema(makeAdapter(dbModel), desired),
 		).rejects.toBeInstanceOf(IndexPredicateCanonicalizationError);
 	});
 
@@ -459,7 +458,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 
 		let caught: unknown;
 		try {
-			await comparePgsqlDatabaseSchema(makeAdapter(dbModel), desired);
+			await comparePgDatabaseSchema(makeAdapter(dbModel), desired);
 		} catch (error) {
 			caught = error;
 		}
@@ -485,7 +484,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 				defaultOutcomes: [{ side, table, column, status: 'unavailable' }],
 			});
 			await expect(
-				comparePgsqlDatabaseSchema(makeAdapter(dbModel), desired, {
+				comparePgDatabaseSchema(makeAdapter(dbModel), desired, {
 					requireExpressionCanonicalization: true,
 				}),
 			).rejects.toMatchObject({
@@ -512,7 +511,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 		]);
 
 		await expect(
-			comparePgsqlDatabaseSchema(makeAdapter(dbModel), desired, {
+			comparePgDatabaseSchema(makeAdapter(dbModel), desired, {
 				canonicalizeExpressions: false,
 				requireExpressionCanonicalization: true,
 			}),
@@ -555,7 +554,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 		});
 
 		await expect(
-			comparePgsqlDatabaseSchema(makeAdapter(dbModel), desired, {
+			comparePgDatabaseSchema(makeAdapter(dbModel), desired, {
 				requireExpressionCanonicalization: true,
 			}),
 		).rejects.toThrow(ExpressionCanonicalizationUnavailableError);
@@ -569,7 +568,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 		});
 		const onWarning = vi.fn();
 
-		const diff = await comparePgsqlDatabaseSchema(adapter, desired, {
+		const diff = await comparePgDatabaseSchema(adapter, desired, {
 			onWarning,
 		});
 
@@ -604,7 +603,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 			throw tempTablePermissionDeniedError();
 		});
 
-		const diff = await comparePgsqlDatabaseSchema(adapter, desired, {
+		const diff = await comparePgDatabaseSchema(adapter, desired, {
 			onWarning,
 		});
 
@@ -637,7 +636,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 		});
 
 		await expect(
-			comparePgsqlDatabaseSchema(adapter, desired, {
+			comparePgDatabaseSchema(adapter, desired, {
 				previouslyAppliedDiff: {
 					changes: [
 						{
@@ -683,7 +682,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 		});
 
 		await expect(
-			comparePgsqlDatabaseSchema(makeAdapter(dbModel), desired, {
+			comparePgDatabaseSchema(makeAdapter(dbModel), desired, {
 				requireExpressionCanonicalization: true,
 			}),
 		).rejects.toThrow(
@@ -757,7 +756,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 		});
 
 		await expect(
-			comparePgsqlDatabaseSchema(adapter, desired, {
+			comparePgDatabaseSchema(adapter, desired, {
 				requireExpressionCanonicalization: true,
 			}),
 		).rejects.toBe(tempError);
@@ -775,7 +774,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 		const adapter = makeAdapter(dbModel);
 
 		await expect(
-			comparePgsqlDatabaseSchema(adapter, desired, {
+			comparePgDatabaseSchema(adapter, desired, {
 				canonicalizeExpressions: false,
 				requireExpressionCanonicalization: true,
 			}),
@@ -837,7 +836,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 
 		let caught: unknown;
 		try {
-			await comparePgsqlDatabaseSchema(adapter, desired, {
+			await comparePgDatabaseSchema(adapter, desired, {
 				onWarning: vi.fn(),
 			});
 		} catch (error) {
@@ -899,7 +898,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 			],
 		});
 		await expect(
-			comparePgsqlDatabaseSchema(makeAdapter(database), desired, {
+			comparePgDatabaseSchema(makeAdapter(database), desired, {
 				onWarning: vi.fn(),
 			}),
 		).resolves.toMatchObject({
@@ -958,7 +957,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 		});
 
 		await expect(
-			comparePgsqlDatabaseSchema(adapter, desired, {
+			comparePgDatabaseSchema(adapter, desired, {
 				dbCasing: 'snake_case',
 				onWarning: vi.fn(),
 			}),
@@ -1019,7 +1018,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 		});
 
 		await expect(
-			comparePgsqlDatabaseSchema(adapter, desired, {
+			comparePgDatabaseSchema(adapter, desired, {
 				dbCasing: 'snake_case',
 				onWarning: vi.fn(),
 			}),
@@ -1081,7 +1080,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 		});
 
 		await expect(
-			comparePgsqlDatabaseSchema(makeAdapter(dbModel), desired),
+			comparePgDatabaseSchema(makeAdapter(dbModel), desired),
 		).resolves.toMatchObject({
 			changes: expect.arrayContaining([
 				expect.objectContaining({ kind: 'alter_enum_add_value' }),
@@ -1127,7 +1126,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 		const adapter = makeAdapter(dbModel);
 
 		await expect(
-			comparePgsqlDatabaseSchema(adapter, desired, {
+			comparePgDatabaseSchema(adapter, desired, {
 				previouslyAppliedDiff: checkExpressionDiff(
 					'jobs',
 					'jobs_status_check',
@@ -1170,19 +1169,19 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 		});
 
 		await expect(
-			comparePgsqlDatabaseSchema(adapter, desired, {
+			comparePgDatabaseSchema(adapter, desired, {
 				dbCasing: 'snake_case',
 				onWarning: vi.fn(),
 			}),
 		).rejects.toBeInstanceOf(RawIndexPredicateFallbackError);
 		await expect(
-			comparePgsqlDatabaseSchema(adapter, desired, {
+			comparePgDatabaseSchema(adapter, desired, {
 				dbCasing: 'snake_case',
 				onWarning: vi.fn(),
 			}),
 		).rejects.toThrow('Grant TEMP');
 		await expect(
-			comparePgsqlDatabaseSchema(adapter, desired, {
+			comparePgDatabaseSchema(adapter, desired, {
 				dbCasing: 'snake_case',
 				onWarning: vi.fn(),
 			}),
@@ -1227,14 +1226,14 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 		});
 
 		await expect(
-			comparePgsqlDatabaseSchema(makeAdapter(dbModel), desired, {
+			comparePgDatabaseSchema(makeAdapter(dbModel), desired, {
 				onWarning: vi.fn(),
 			}),
 		).rejects.toThrow(
 			'CREATE SEQUENCE requires CREATE on the target schema, not TEMP',
 		);
 		await expect(
-			comparePgsqlDatabaseSchema(makeAdapter(dbModel), desired, {
+			comparePgDatabaseSchema(makeAdapter(dbModel), desired, {
 				onWarning: vi.fn(),
 			}),
 		).rejects.toThrow('permission denied for schema "tenant"');
@@ -1264,7 +1263,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 		});
 
 		await expect(
-			comparePgsqlDatabaseSchema(adapter, desired, {
+			comparePgDatabaseSchema(adapter, desired, {
 				dbCasing: 'snake_case',
 				onWarning: vi.fn(),
 			}),
@@ -1290,7 +1289,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 		});
 
 		await expect(
-			comparePgsqlDatabaseSchema(adapter, desired, {
+			comparePgDatabaseSchema(adapter, desired, {
 				dbCasing: 'snake_case',
 				onWarning: vi.fn(),
 			}),
@@ -1314,7 +1313,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 		const dbModel = makeModel([makeTable({ name: 'audit_log' })]);
 
 		await expect(
-			comparePgsqlDatabaseSchema(makeAdapter(dbModel), desired, {
+			comparePgDatabaseSchema(makeAdapter(dbModel), desired, {
 				dbCasing: 'snake_case',
 				canonicalizeExpressions: false,
 			}),
@@ -1345,7 +1344,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 			throw tempTablePermissionDeniedError();
 		});
 		await expect(
-			comparePgsqlDatabaseSchema(adapter, desired, {
+			comparePgDatabaseSchema(adapter, desired, {
 				dbCasing: 'snake_case',
 				onWarning: vi.fn(),
 			}),
@@ -1385,7 +1384,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 		});
 
 		await expect(
-			comparePgsqlDatabaseSchema(adapter, desired, {
+			comparePgDatabaseSchema(adapter, desired, {
 				dbCasing: 'snake_case',
 				onWarning: vi.fn(),
 			}),

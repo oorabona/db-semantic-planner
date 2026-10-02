@@ -121,9 +121,9 @@ tenantOrm.tables.users.truncate()
 ```typescript
 // doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection and table bootstrap
 import { schema, createOrm } from '@dbsp/core';
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 const __db = schema({ orders: { id: 'integer', total: 'integer' } });
-const __orm = createOrm({ schema: __db, adapter: createPgsqlAdapter(pool) });
+const __orm = createOrm({ schema: __db, adapter: createPgAdapter(pool) });
 
 // Clear orders and all dependent rows, reset auto-increment sequences
 await __orm.tables.orders.truncate({ cascade: true, restartIdentity: true })
@@ -139,9 +139,9 @@ TRUNCATE "public"."orders" CASCADE RESTART IDENTITY
 ```typescript
 // doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection and table bootstrap
 import { schema, createOrm } from '@dbsp/core';
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 const __db = schema({ events: { id: 'integer', type: 'string', occurredAt: 'timestamp' } });
-const __orm = createOrm({ schema: __db, adapter: createPgsqlAdapter(pool) });
+const __orm = createOrm({ schema: __db, adapter: createPgAdapter(pool) });
 
 // Reclaim storage and update planner statistics (locks table)
 await __orm.tables.events.vacuum({ full: true, analyze: true })
@@ -157,9 +157,9 @@ VACUUM FULL ANALYZE "public"."events"
 ```typescript
 // doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection and table bootstrap
 import { schema, createOrm } from '@dbsp/core';
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 const __db = schema({ embeddings: { id: 'integer', vector: { type: 'text', dbType: 'vector(384)', nullable: true } } });
-const __orm = createOrm({ schema: __db, adapter: createPgsqlAdapter(pool) });
+const __orm = createOrm({ schema: __db, adapter: createPgAdapter(pool) });
 
 await __orm.tables.embeddings.indexes.create({
   name: 'idx_embeddings_vector_hnsw',
@@ -206,9 +206,9 @@ CREATE INDEX "idx_users_email_lower"
 ```typescript
 // doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection and table bootstrap
 import { schema, createOrm } from '@dbsp/core';
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 const __db = schema({ products: { id: 'integer', name: 'string', price_cents: 'string' } });
-const __orm = createOrm({ schema: __db, adapter: createPgsqlAdapter(pool) });
+const __orm = createOrm({ schema: __db, adapter: createPgAdapter(pool) });
 
 // Convert a text column to integer, with explicit cast
 await __orm.tables.products.alterColumn('price_cents', {
@@ -242,9 +242,9 @@ if (!exists) {
 ```typescript
 // doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection and table bootstrap
 import { schema, createOrm } from '@dbsp/core';
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 const __db = schema({ embeddings: { id: 'integer', vector: { type: 'text', dbType: 'vector(384)', nullable: true } } });
-const __orm = createOrm({ schema: __db, adapter: createPgsqlAdapter(pool) });
+const __orm = createOrm({ schema: __db, adapter: createPgAdapter(pool) });
 
 // List indexes matching a pattern
 const vecIndexes = await __orm.tables.embeddings.indexes.list({
@@ -272,5 +272,5 @@ console.log(`embeddings table: ${(size / 1024 / 1024).toFixed(1)} MB`)
 - **`expression` in `CreateIndexOptions` is raw SQL** — it is not parameterized, and identifiers inside it are not rewritten. Use database column names after `dbCasing`; wrap non-function expression keys in their own parentheses as PostgreSQL requires.
 - **`using` and SQL-form `setDefault` in `AlterColumnOptions` are raw SQL** — `using`, `setDefault: { sql }` and a `setDefault` string ending in `()` are emitted as SQL, not parameterized. Write them in code; never build them from request data.
 - **`storageSize()` uses `pg_total_relation_size`** — this includes the table heap, indexes, and TOAST storage. For heap-only size use `pg_relation_size`.
-- **Core generates zero SQL** — all DDL SQL is delegated to the adapter. If you use `createPgsqlCompileOnlyAdapter()`, DDL methods that require a live connection (truncate, vacuum, storageSize) will throw.
+- **Core generates zero SQL** — all DDL SQL is delegated to the adapter. If you use `createPgCompileOnlyAdapter()`, DDL methods that require a live connection (truncate, vacuum, storageSize) will throw.
 - **`alterColumn` with `setNotNull: true`** triggers a full table scan in PostgreSQL to validate the constraint. On large tables, prefer adding a CHECK constraint first and then promoting it.

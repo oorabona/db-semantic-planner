@@ -1,11 +1,11 @@
 /** #383 — PostgreSQL partial-index predicates converge in live diffs. */
 
 import {
-	createPgsqlAdapter,
+	createPgAdapter,
 	IndexPredicateCanonicalizationError,
 } from '@dbsp/adapter-pgsql';
 import {
-	comparePgsqlDatabaseSchema,
+	comparePgDatabaseSchema,
 	compareSchemata,
 	generateMigrationSQL,
 } from '@dbsp/adapter-pgsql/internal';
@@ -118,11 +118,11 @@ function publicEnumModel(predicate: string): ModelIR {
 
 describe('#383 partial-index predicate canonicalization (real PG)', () => {
 	let pool: Awaited<ReturnType<typeof getTestPool>>;
-	let adapter: ReturnType<typeof createPgsqlAdapter>;
+	let adapter: ReturnType<typeof createPgAdapter>;
 
 	beforeAll(async () => {
 		pool = await getTestPool();
-		adapter = createPgsqlAdapter(pool);
+		adapter = createPgAdapter(pool);
 	});
 
 	beforeEach(async () => {
@@ -159,7 +159,7 @@ describe('#383 partial-index predicate canonicalization (real PG)', () => {
 				expect.objectContaining({ kind: 'drop_index' }),
 			]),
 		);
-		const diff = await comparePgsqlDatabaseSchema(adapter, desired, {
+		const diff = await comparePgDatabaseSchema(adapter, desired, {
 			schema: SCHEMA,
 			ignoreUnmanagedExtensions: true,
 		});
@@ -198,7 +198,7 @@ describe('#383 partial-index predicate canonicalization (real PG)', () => {
 				]),
 			);
 
-			const diff = await comparePgsqlDatabaseSchema(adapter, desired, {
+			const diff = await comparePgDatabaseSchema(adapter, desired, {
 				schema: SCHEMA,
 				ignoreUnmanagedExtensions: true,
 			});
@@ -214,7 +214,7 @@ describe('#383 partial-index predicate canonicalization (real PG)', () => {
 	it('refuses a migration when PostgreSQL rejects the predicate', async () => {
 		const warning = vi.fn();
 		await expect(
-			comparePgsqlDatabaseSchema(adapter, model('missing = true'), {
+			comparePgDatabaseSchema(adapter, model('missing = true'), {
 				schema: SCHEMA,
 				ignoreUnmanagedExtensions: true,
 				onExpressionCanonicalizationWarning: warning,
@@ -229,7 +229,7 @@ describe('#383 partial-index predicate canonicalization (real PG)', () => {
 		await pool.query(`DROP TABLE "${SCHEMA}".jobs`);
 		await pool.query(`CREATE TABLE "${SCHEMA}".jobs (id integer NOT NULL)`);
 
-		const diff = await comparePgsqlDatabaseSchema(
+		const diff = await comparePgDatabaseSchema(
 			adapter,
 			model("state = 'active'"),
 			{
@@ -248,7 +248,7 @@ describe('#383 partial-index predicate canonicalization (real PG)', () => {
 
 	it('refuses a rejected predicate in strict mode', async () => {
 		await expect(
-			comparePgsqlDatabaseSchema(adapter, model('missing = true'), {
+			comparePgDatabaseSchema(adapter, model('missing = true'), {
 				schema: SCHEMA,
 				ignoreUnmanagedExtensions: true,
 				requireExpressionCanonicalization: true,
@@ -258,7 +258,7 @@ describe('#383 partial-index predicate canonicalization (real PG)', () => {
 
 	it('reports same-migration enum additions as candidates for a rejected predicate', async () => {
 		await expect(
-			comparePgsqlDatabaseSchema(
+			comparePgDatabaseSchema(
 				adapter,
 				model('missing = true', ['active', 'inactive', 'pending']),
 				{
@@ -272,7 +272,7 @@ describe('#383 partial-index predicate canonicalization (real PG)', () => {
 	});
 
 	it('still emits a replacement for a true predicate change', async () => {
-		const diff = await comparePgsqlDatabaseSchema(
+		const diff = await comparePgDatabaseSchema(
 			adapter,
 			model("state = 'inactive'"),
 			{
@@ -289,7 +289,7 @@ describe('#383 partial-index predicate canonicalization (real PG)', () => {
 	});
 
 	it('emits a non-empty migration from a live-canonicalized predicate containing a backslash', async () => {
-		const diff = await comparePgsqlDatabaseSchema(
+		const diff = await comparePgDatabaseSchema(
 			adapter,
 			model("state = 'active'", undefined, [
 				{
@@ -312,7 +312,7 @@ describe('#383 partial-index predicate canonicalization (real PG)', () => {
 	});
 
 	it('preserves a canonicalized backslash predicate when generated SQL auto-commits', async () => {
-		const diff = await comparePgsqlDatabaseSchema(
+		const diff = await comparePgDatabaseSchema(
 			adapter,
 			model("state = 'active'", undefined, [
 				{

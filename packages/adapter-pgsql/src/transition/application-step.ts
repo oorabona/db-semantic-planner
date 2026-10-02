@@ -11,10 +11,7 @@ import {
 	type OwnedCheckState,
 	renderOwnedTableChecksInScratchScope,
 } from '../expression-canonicalizer.js';
-import {
-	createPgsqlAdapter,
-	type RollbackOnlyPgsqlScope,
-} from '../pgsql-adapter.js';
+import { createPgAdapter, type PgRollbackOnlyScope } from '../pgsql-adapter.js';
 import { readPgLedgerAddressChain } from './chain-reader.js';
 import type { TransitionJournalQueryable } from './journal.js';
 import {
@@ -695,7 +692,7 @@ async function setPgApplicationStepSearchPath(
 }
 
 function scratchScopeSession(
-	scope: Pick<RollbackOnlyPgsqlScope, 'executeRaw'>,
+	scope: Pick<PgRollbackOnlyScope, 'executeRaw'>,
 ): TransitionJournalQueryable {
 	return {
 		query: async (sql, params) => ({
@@ -721,7 +718,7 @@ async function renderPgApplicationStepOwnedChecks(
 ): Promise<PgApplicationStepOwnedState> {
 	if (checks.length === 0) return { checks: [] };
 	try {
-		const adapter = createPgsqlAdapter(client, {
+		const adapter = createPgAdapter(client, {
 			borrowedClient: true,
 			managedTransactions: true,
 		});

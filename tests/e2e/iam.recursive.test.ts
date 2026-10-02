@@ -9,7 +9,7 @@
  * Uses edge-table traversal pattern (role_edges junction table).
  */
 
-import type { PgsqlAdapter } from '@dbsp/adapter-pgsql';
+import type { PgAdapter } from '@dbsp/adapter-pgsql';
 import { planRecursive, type RecursiveIntent } from '@dbsp/core';
 import type { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -30,7 +30,7 @@ const IAM_SCHEMA = 'iam_test';
 
 /** Helper: compile and execute a recursive CTE */
 async function execRecursive<T extends Record<string, unknown>>(
-	adapter: PgsqlAdapter<unknown>,
+	adapter: PgAdapter<unknown>,
 	pool: Pool,
 	intent: RecursiveIntent,
 ): Promise<T[]> {
@@ -44,7 +44,7 @@ async function execRecursive<T extends Record<string, unknown>>(
 
 describe('E2E-003: IAM/RBAC Recursive CTE', () => {
 	let pool: Pool;
-	let adapter: PgsqlAdapter<unknown>;
+	let adapter: PgAdapter<unknown>;
 
 	beforeAll(async () => {
 		pool = await getTestPool();

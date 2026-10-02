@@ -11,18 +11,18 @@ export {
 	generateDDL,
 } from './ddl/ddl-generator.js';
 export {
-	type ComparePgsqlDatabaseSchemaOptions,
-	type ComparePgsqlDeclaredAdoptionSchemaInput,
-	comparePgsqlDatabaseSchema,
-	comparePgsqlDeclaredAdoptionSchema,
+	type ComparePgDatabaseSchemaOptions,
+	type ComparePgDeclaredAdoptionSchemaInput,
+	comparePgDatabaseSchema,
+	comparePgDeclaredAdoptionSchema,
 	modelForDeclaredAdoption,
-	type PgsqlAdoptionComparisonExecutor,
+	type PgAdoptionComparisonExecutor,
 } from './ddl/live-diff.js';
 export {
-	createPgsqlDeclaredAdoptionStep,
-	createPgsqlDeclaredSequenceAdoptionStep,
-	pgsqlDeclaredAdoptionDeclaration,
-	pgsqlDeclaredSequenceAdoptionDeclaration,
+	createPgDeclaredAdoptionStep,
+	createPgDeclaredSequenceAdoptionStep,
+	pgDeclaredAdoptionDeclaration,
+	pgDeclaredSequenceAdoptionDeclaration,
 } from './ddl/managed-step-manifest.js';
 export {
 	generateDownSQL,

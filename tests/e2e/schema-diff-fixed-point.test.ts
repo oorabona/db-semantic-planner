@@ -10,7 +10,7 @@ import {
 	ReferencedKeyRemovalError,
 } from '@dbsp/adapter-pgsql';
 import {
-	comparePgsqlDatabaseSchema,
+	comparePgDatabaseSchema,
 	compareSchemata,
 	generateMigrationSQL,
 } from '@dbsp/adapter-pgsql/internal';
@@ -145,7 +145,7 @@ describe('#797 schema-diff fixed points (real PG)', () => {
 	}
 
 	async function changes(modelToCompare: ModelIR, dbCasing?: DbCasing) {
-		return comparePgsqlDatabaseSchema(adapter, modelToCompare, {
+		return comparePgDatabaseSchema(adapter, modelToCompare, {
 			schema: SCHEMA,
 			...(dbCasing === undefined ? {} : { dbCasing }),
 			ignoreUnmanagedExtensions: true,

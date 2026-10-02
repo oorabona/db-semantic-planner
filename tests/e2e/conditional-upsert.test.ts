@@ -7,7 +7,7 @@
 
 import { createOrm, isUpsertIntent, schema } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createPgsqlAdapter } from '../../packages/adapter-pgsql/src/pgsql-adapter.js';
+import { createPgAdapter } from '../../packages/adapter-pgsql/src/pgsql-adapter.js';
 import { compile } from '../../packages/nql/src/index.js';
 import {
 	closeTestDb,
@@ -42,7 +42,7 @@ async function compileConditionalUpsert(nql: string) {
 	}
 
 	const pool = await getTestPool();
-	const adapter = createPgsqlAdapter(pool, {
+	const adapter = createPgAdapter(pool, {
 		schemaName: SCHEMA,
 		dbCasing: 'snake_case',
 	});
@@ -127,7 +127,7 @@ describe('Issue #160 — conditional upsert', () => {
 				('TAG_OPEN', 'tag old open', true)
 		`.execute(pool);
 
-		const adapter = createPgsqlAdapter(pool, {
+		const adapter = createPgAdapter(pool, {
 			schemaName: SCHEMA,
 			dbCasing: 'snake_case',
 		});

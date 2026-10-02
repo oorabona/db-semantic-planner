@@ -11,7 +11,7 @@ import {
 import { compile } from '@dbsp/nql';
 import { describe, expect, it } from 'vitest';
 import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const issue763Schema = schema({
 	users: {
@@ -85,14 +85,14 @@ const e2eBlogSchema = schema({
 });
 
 function orm() {
-	const adapter = createPgsqlCompileOnlyAdapter({
+	const adapter = createPgCompileOnlyAdapter({
 		model: issue763Schema.model,
 	});
 	return createOrm({ model: issue763Schema.model, adapter });
 }
 
 function e2eOrm() {
-	const adapter = createPgsqlCompileOnlyAdapter({
+	const adapter = createPgCompileOnlyAdapter({
 		model: e2eBlogSchema.model,
 	});
 	return createOrm({ model: e2eBlogSchema.model, adapter });
@@ -441,7 +441,7 @@ describe('issue 763: relation qualifiers require an emitted SQL alias', () => {
 			dialectCapabilities: POSTGRESQL_CAPABILITIES,
 		});
 		expect(() =>
-			createPgsqlCompileOnlyAdapter().compile(planReport, {
+			createPgCompileOnlyAdapter().compile(planReport, {
 				model: e2eBlogSchema.model,
 			}),
 		).toThrow('relation column "tags"."*" has no emitted alias in this query');

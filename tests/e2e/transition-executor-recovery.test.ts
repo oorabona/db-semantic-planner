@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 import {
 	ADD_CHECK_RULE_ID,
 	createManualSqlOperationRuntime,
+	createPgAdapter,
 	createPgObservationIssuer,
-	createPgsqlAdapter,
 	createPgTransitionPack,
 	createPgTransitionRunPersister,
 	DBSP_META_SCHEMA,
@@ -680,7 +680,7 @@ describe('ADR-0003 transition executor recovery', () => {
 	it('resumes from a staged durable completed prefix and applies the known remaining CHECK', async () => {
 		await createBaseTasks(['active']);
 		const pool = await getTestPool();
-		const adapter = createPgsqlAdapter(pool, { schemaName });
+		const adapter = createPgAdapter(pool, { schemaName });
 		const registry = createPackRegistry([createPgTransitionPack()]);
 		const comparator = createComparator(registry);
 		const loadCurrent = () => adapter.introspect({ schema: schemaName });

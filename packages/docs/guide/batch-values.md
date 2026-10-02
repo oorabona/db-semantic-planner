@@ -101,7 +101,7 @@ Filter rows in a real table against a set of in-memory values.
 
 ```typescript
 import { schema, createOrm, batchValues, eq, ref } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const __batchCallsDb = schema({
   calls: {
@@ -109,7 +109,7 @@ const __batchCallsDb = schema({
     callee_id: 'integer',
   },
 } as const);
-const __batchCallsOrm = createOrm({ schema: __batchCallsDb, adapter: createPgsqlCompileOnlyAdapter() });
+const __batchCallsOrm = createOrm({ schema: __batchCallsDb, adapter: createPgCompileOnlyAdapter() });
 
 const batch = batchValues(
   [[1, 2, 3], [10, 20, 30]],

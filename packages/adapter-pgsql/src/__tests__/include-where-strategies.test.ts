@@ -1,6 +1,6 @@
 import { and, createOrm, eq, or, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const testSchema = schema({
 	users: {
@@ -24,7 +24,7 @@ const testSchema = schema({
 		postId: ref('posts', { as: 'post', inverse: 'comments' }),
 	},
 } as const);
-const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 const orm = createOrm({
 	schema: testSchema,
 	adapter,
@@ -234,7 +234,7 @@ it('refuses public M:N include where', () => {
 	} as const);
 	const manyOrm = createOrm({
 		schema: db,
-		adapter: createPgsqlCompileOnlyAdapter({ model: db.model }),
+		adapter: createPgCompileOnlyAdapter({ model: db.model }),
 	});
 	expect(() =>
 		manyOrm

@@ -31,7 +31,7 @@ imported from `@dbsp/adapter-pgsql`.
 
 ```typescript
 import { schema, createOrm } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter, cosineDistance, rawDistance } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter, cosineDistance, rawDistance } from '@dbsp/adapter-pgsql';
 
 const db = schema({
   embeddings: {
@@ -45,7 +45,7 @@ const db = schema({
     signature: 'text',
   },
 } as const);
-const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter() });
 
 const qv = [0.1, 0.2, 0.3]; // query vector (same dimension as stored vectors)
 
@@ -118,7 +118,7 @@ const db = schema(
 
 ```typescript
 import { schema, createOrm } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter, score, bm25Search } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter, score, bm25Search } from '@dbsp/adapter-pgsql';
 
 const db = schema({
   symbols: {
@@ -128,7 +128,7 @@ const db = schema({
     doc_comment: 'text',
   },
 } as const);
-const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter() });
 
 const searchTerm = 'semantic query planner';
 
@@ -209,7 +209,7 @@ rows that have no matching related record:
 
 ```typescript
 import { schema, createOrm } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter, cosineDistance, rawDistance } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter, cosineDistance, rawDistance } from '@dbsp/adapter-pgsql';
 
 const db = schema({
   embeddings: {
@@ -222,7 +222,7 @@ const db = schema({
     name: 'text',
   },
 } as const);
-const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter() });
 
 const qv = [0.1, 0.2, 0.3];
 

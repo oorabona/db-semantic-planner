@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import {
-	createPgsqlAdapter,
+	createPgAdapter,
 	DBSP_LEDGER_EVENT_TABLE,
 	DBSP_LEDGER_IDENTITY_TABLE,
 	DBSP_LEDGER_MARKER_TABLE,
@@ -630,7 +630,7 @@ async function planConcurrentIndex(
 	const pool = await getTestPool();
 	const db = process.env.DATABASE_URL;
 	if (!db) throw new Error('DATABASE_URL is required for managed-outcome E2E');
-	const adapter = createPgsqlAdapter(pool, { schemaName: schema });
+	const adapter = createPgAdapter(pool, { schemaName: schema });
 	const current = await adapter.introspect({ schema });
 	const planned = await runPlan(
 		{ db, schemaFile: 'managed-outcome-wiring-index.ts', schema },

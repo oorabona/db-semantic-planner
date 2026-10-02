@@ -17,7 +17,7 @@ import {
 } from '@dbsp/core';
 import type { WhereComparisonIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const testSchema = schema({
 	calls: {
@@ -32,7 +32,7 @@ const testSchema = schema({
 } as const);
 
 function buildOrm() {
-	const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+	const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 	return createOrm({ model: testSchema.model, adapter });
 }
 
@@ -118,7 +118,7 @@ describe('FR-3: batchValues()', () => {
 			users: { id: 'integer' },
 			activeItems: { id: 'integer' },
 		});
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: collisionSchema.model,
 			dbCasing: 'snake_case',
 		});
@@ -227,7 +227,7 @@ describe('FR-3: batchValues()', () => {
 		const usersSchema = schema({
 			users: { id: 'uuid', name: 'string', active: 'boolean' },
 		} as const);
-		const adapter = createPgsqlCompileOnlyAdapter({ model: usersSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: usersSchema.model });
 		const orm = createOrm({ model: usersSchema.model, adapter });
 
 		const ids = ['11111111-1111-1111-1111-111111111111'];
@@ -260,7 +260,7 @@ describe('FR-3: batchValues()', () => {
 		const usersSchema = schema({
 			users: { id: 'uuid', name: 'string', active: 'boolean' },
 		} as const);
-		const adapter = createPgsqlCompileOnlyAdapter({ model: usersSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: usersSchema.model });
 		const orm = createOrm({ model: usersSchema.model, adapter });
 		const ids = ['11111111-1111-1111-1111-111111111111'];
 		const batch = batchValues([ids], ['id'], ['uuid'], { alias: 'filter' });
@@ -279,7 +279,7 @@ describe('FR-3: batchValues()', () => {
 		const usersSchema = schema({
 			users: { id: 'uuid', priority: 'integer' },
 		} as const);
-		const adapter = createPgsqlCompileOnlyAdapter({ model: usersSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: usersSchema.model });
 		const orm = createOrm({ model: usersSchema.model, adapter });
 		const ids = [1, 2, 3];
 		const batch = batchValues([ids], ['threshold'], ['integer'], {
@@ -365,7 +365,7 @@ describe('batchValues() SQL injection prevention (DEFECT-1)', () => {
 		const usersSchema = schema({
 			users: { id: 'uuid', name: 'string' },
 		} as const);
-		const adapter = createPgsqlCompileOnlyAdapter({ model: usersSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: usersSchema.model });
 		const orm = createOrm({ model: usersSchema.model, adapter });
 		const batch = batchValues(
 			[['11111111-1111-1111-1111-111111111111']],

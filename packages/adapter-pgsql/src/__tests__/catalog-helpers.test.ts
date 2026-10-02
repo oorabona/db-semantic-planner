@@ -1,5 +1,5 @@
 /**
- * Unit tests for catalog helper methods on PgsqlAdapter:
+ * Unit tests for catalog helper methods on PgAdapter:
  *   - listIndexes (with namePattern option)
  *   - indexExists
  *   - storageSize
@@ -11,8 +11,8 @@ import { createOrm, schema } from '@dbsp/core';
 import type { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import {
-	createPgsqlAdapter,
-	createPgsqlCompileOnlyAdapter,
+	createPgAdapter,
+	createPgCompileOnlyAdapter,
 } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
@@ -53,7 +53,7 @@ describe('#762 physical names through public ORM helpers', () => {
 				rows: sql.includes('SELECT EXISTS') ? [{ exists: true }] : [],
 			})),
 		} as unknown as Pool;
-		const adapter = createPgsqlAdapter(pool, {
+		const adapter = createPgAdapter(pool, {
 			dbCasing: 'snake_case',
 			model: helperSchema.model,
 		});
@@ -95,7 +95,7 @@ describe('#762 physical names through public ORM helpers', () => {
 
 	it('refuses a declared helper column absent from the physical inventory', () => {
 		const model = schema({ userProfiles: { id: 'integer' } }).model;
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			dbCasing: 'snake_case',
 			model,
 		});
@@ -120,7 +120,7 @@ describe('#762 physical names through public ORM helpers', () => {
 			getTable: () => undefined,
 			getRelation: () => undefined,
 		} as never;
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compile({ rootTable: 'users', decisions: [] } as never, {
 				model: malformed,
@@ -133,7 +133,7 @@ describe('#762 physical names through public ORM helpers', () => {
 // listIndexes - namePattern filter
 // ===========================================================================
 
-describe('PgsqlAdapter.listIndexes()', () => {
+describe('PgAdapter.listIndexes()', () => {
 	it('queries pg_indexes without LIKE clause when options omitted', async () => {
 		const pool = makeMockPool([
 			{
@@ -141,7 +141,7 @@ describe('PgsqlAdapter.listIndexes()', () => {
 				indexdef: 'CREATE INDEX idx_users_email ON users USING btree (email)',
 			},
 		]);
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		const result = await adapter.listIndexes('users');
 
 		const [sql, params] = catalogCall(pool);
@@ -158,7 +158,7 @@ describe('PgsqlAdapter.listIndexes()', () => {
 
 	it('adds LIKE $3 clause when namePattern is provided', async () => {
 		const pool = makeMockPool([]);
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		await adapter.listIndexes('users', 'myschema', { namePattern: 'idx_vec%' });
 
 		const [sql, params] = catalogCall(pool);
@@ -168,7 +168,7 @@ describe('PgsqlAdapter.listIndexes()', () => {
 
 	it('uses adapter schemaName when schema arg is omitted', async () => {
 		const pool = makeMockPool([]);
-		const adapter = createPgsqlAdapter(pool, { schemaName: 'tenant_42' });
+		const adapter = createPgAdapter(pool, { schemaName: 'tenant_42' });
 		await adapter.listIndexes('orders');
 
 		const [, params] = catalogCall(pool);
@@ -182,7 +182,7 @@ describe('PgsqlAdapter.listIndexes()', () => {
 				indexdef: 'CREATE UNIQUE INDEX idx_unique ON users USING btree (email)',
 			},
 		]);
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		const result = await adapter.listIndexes('users');
 		expect(result[0]!.unique).toBe(true);
 		expect(result[0]!.method).toBe('btree');
@@ -193,10 +193,10 @@ describe('PgsqlAdapter.listIndexes()', () => {
 // indexExists
 // ===========================================================================
 
-describe('PgsqlAdapter.indexExists()', () => {
+describe('PgAdapter.indexExists()', () => {
 	it('returns true when EXISTS query returns true', async () => {
 		const pool = makeMockPool([{ exists: true }]);
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		const result = await adapter.indexExists('idx_users_email', 'users');
 
 		expect(result).toBe(true);
@@ -208,13 +208,13 @@ describe('PgsqlAdapter.indexExists()', () => {
 
 	it('returns false when index does not exist', async () => {
 		const pool = makeMockPool([{ exists: false }]);
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		expect(await adapter.indexExists('idx_missing', 'users')).toBe(false);
 	});
 
 	it('uses provided schema in params', async () => {
 		const pool = makeMockPool([{ exists: true }]);
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		await adapter.indexExists('idx_foo', 'users', 'tenant_42');
 
 		const [, params] = catalogCall(pool);
@@ -223,7 +223,7 @@ describe('PgsqlAdapter.indexExists()', () => {
 
 	it('falls back to adapter schemaName when schema arg omitted', async () => {
 		const pool = makeMockPool([{ exists: false }]);
-		const adapter = createPgsqlAdapter(pool, { schemaName: 'myschema' });
+		const adapter = createPgAdapter(pool, { schemaName: 'myschema' });
 		await adapter.indexExists('idx_foo', 'orders');
 
 		const [, params] = catalogCall(pool);
@@ -232,7 +232,7 @@ describe('PgsqlAdapter.indexExists()', () => {
 
 	it('returns false when query returns no rows', async () => {
 		const pool = makeMockPool([]);
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		expect(await adapter.indexExists('idx_ghost', 'users')).toBe(false);
 	});
 });
@@ -241,10 +241,10 @@ describe('PgsqlAdapter.indexExists()', () => {
 // storageSize
 // ===========================================================================
 
-describe('PgsqlAdapter.storageSize()', () => {
+describe('PgAdapter.storageSize()', () => {
 	it('returns the size as a number', async () => {
 		const pool = makeMockPool([{ size: '8192' }]);
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		const result = await adapter.storageSize('users');
 
 		expect(result).toBe(8192);
@@ -256,7 +256,7 @@ describe('PgsqlAdapter.storageSize()', () => {
 
 	it('uses the provided schema in the qualified identifier param', async () => {
 		const pool = makeMockPool([{ size: '4096' }]);
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		await adapter.storageSize('orders', 'tenant_42');
 
 		const [, params] = catalogCall(pool);
@@ -265,7 +265,7 @@ describe('PgsqlAdapter.storageSize()', () => {
 
 	it('falls back to adapter schemaName', async () => {
 		const pool = makeMockPool([{ size: '0' }]);
-		const adapter = createPgsqlAdapter(pool, { schemaName: 'myschema' });
+		const adapter = createPgAdapter(pool, { schemaName: 'myschema' });
 		await adapter.storageSize('logs');
 
 		const [, params] = catalogCall(pool);
@@ -274,12 +274,12 @@ describe('PgsqlAdapter.storageSize()', () => {
 
 	it('returns 0 when query returns no rows', async () => {
 		const pool = makeMockPool([]);
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		expect(await adapter.storageSize('empty')).toBe(0);
 	});
 
 	it('throws on compile-only adapter', async () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		await expect(adapter.storageSize('users')).rejects.toThrow(
 			'constructed without a connection',
 		);

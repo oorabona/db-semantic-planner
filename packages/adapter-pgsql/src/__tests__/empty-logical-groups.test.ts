@@ -23,7 +23,7 @@ import type { WhereIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { compilePlan } from '../compiler.js';
 import { convertWhereCondition } from '../intent-to-decisions.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { convertWhereToDecisions } from '../plan-decision-extractor.js';
 
 const testSchema = schema({
@@ -43,7 +43,7 @@ const testSchema = schema({
 	},
 } as const);
 const model = testSchema.model;
-const adapter = createPgsqlCompileOnlyAdapter({ model });
+const adapter = createPgCompileOnlyAdapter({ model });
 const orm = createOrm({ schema: testSchema, adapter });
 type Result =
 	| { sql: string; params: readonly unknown[] }

@@ -17,7 +17,7 @@ import {
 import type { WhereIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { compilePlan } from '../compiler.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const testSchema = schema({
 	users: { id: { type: 'integer', primaryKey: true }, name: { type: 'text' } },
@@ -37,7 +37,7 @@ const testSchema = schema({
 	},
 } as const);
 const model = testSchema.model;
-const adapter = createPgsqlCompileOnlyAdapter({ model });
+const adapter = createPgCompileOnlyAdapter({ model });
 const orm = createOrm({ schema: testSchema, adapter });
 const refusal =
 	/Relation predicates inside an include where are not supported yet.*include\[0\]\(posts\).*#892/;

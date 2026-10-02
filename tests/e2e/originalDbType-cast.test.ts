@@ -20,8 +20,8 @@
  */
 
 import {
-	createPgsqlAdapter,
-	createPgsqlCompileOnlyAdapter,
+	createPgAdapter,
+	createPgCompileOnlyAdapter,
 	introspect,
 } from '@dbsp/adapter-pgsql';
 import type { Adapter } from '@dbsp/core';
@@ -35,7 +35,7 @@ import { closeTestDb, dropSchema, getTestPool } from './testkit/index.js';
 // (`dump()`), so we cast to Adapter<unknown> once here instead of
 // duplicating the cast at each createOrm() call site.
 function makeCompileOnlyAdapter(): Adapter<unknown> {
-	return createPgsqlCompileOnlyAdapter() as unknown as Adapter<unknown>;
+	return createPgCompileOnlyAdapter() as unknown as Adapter<unknown>;
 }
 
 // ─── S-2 schema ───────────────────────────────────────────────────────────────
@@ -194,7 +194,7 @@ describe('S-2: originalDbType + CAST round-trip (real PostgreSQL)', () => {
 		}
 
 		const model = await introspect(pool, { schema: S2_SCHEMA });
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		// Pass model (IntrospectedModelIR extends ModelIR) directly.
 		const orm = createOrm({ model, adapter });
 

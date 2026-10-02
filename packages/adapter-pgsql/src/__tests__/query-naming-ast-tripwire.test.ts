@@ -15,7 +15,7 @@ import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { emittedBindName } from '../binding-registry.js';
 import type { InsertConfig } from '../mutations/mutation-compiler.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { queryLocal } from '../sql-identifier.js';
 
 const sourceRoot = fileURLToPath(new URL('..', import.meta.url));
@@ -252,7 +252,7 @@ describe('query naming syntax tripwire for literal member and call forms', () =>
 		}).model;
 		const orm = createOrm({
 			model,
-			adapter: createPgsqlCompileOnlyAdapter({
+			adapter: createPgCompileOnlyAdapter({
 				model,
 				dbCasing: 'snake_case',
 			}),
@@ -307,7 +307,7 @@ describe('query naming syntax tripwire for literal member and call forms', () =>
 				childRoleId: ref('roles', { as: 'childRole' }),
 			},
 		}).model;
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model,
 			dbCasing: 'snake_case',
 		});
@@ -353,7 +353,7 @@ describe('query naming syntax tripwire for literal member and call forms', () =>
 			}).model;
 			const orm = createOrm({
 				model,
-				adapter: createPgsqlCompileOnlyAdapter({ model, dbCasing }),
+				adapter: createPgCompileOnlyAdapter({ model, dbCasing }),
 			});
 
 			const compiled = orm
@@ -374,7 +374,7 @@ describe('query naming syntax tripwire for literal member and call forms', () =>
 			authors: { id: { type: 'integer', primaryKey: true } },
 			posts: { id: 'integer', authorId: ref('authors') },
 		}).model;
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model,
 			dbCasing: 'snake_case',
 		});
@@ -404,7 +404,7 @@ describe('query naming syntax tripwire for literal member and call forms', () =>
 			}).model;
 			const orm = createOrm({
 				model,
-				adapter: createPgsqlCompileOnlyAdapter({
+				adapter: createPgCompileOnlyAdapter({
 					model,
 					dbCasing,
 				}),
@@ -427,7 +427,7 @@ describe('query naming syntax tripwire for literal member and call forms', () =>
 		const model = schema({ posts: { id: 'integer', amount: 'integer' } }).model;
 		const orm = createOrm({
 			model,
-			adapter: createPgsqlCompileOnlyAdapter({ model, dbCasing: 'snake_case' }),
+			adapter: createPgCompileOnlyAdapter({ model, dbCasing: 'snake_case' }),
 		});
 		expect(
 			orm
@@ -465,7 +465,7 @@ describe('query naming syntax tripwire for literal member and call forms', () =>
 		);
 		const orm = createOrm({
 			model,
-			adapter: createPgsqlCompileOnlyAdapter({ model, dbCasing: 'snake_case' }),
+			adapter: createPgCompileOnlyAdapter({ model, dbCasing: 'snake_case' }),
 		});
 
 		const countSql = orm
@@ -499,7 +499,7 @@ describe('query naming syntax tripwire for literal member and call forms', () =>
 		}).model;
 		const orm = createOrm({
 			model,
-			adapter: createPgsqlCompileOnlyAdapter({ model, dbCasing: 'snake_case' }),
+			adapter: createPgCompileOnlyAdapter({ model, dbCasing: 'snake_case' }),
 		});
 		expect(() =>
 			orm
@@ -515,7 +515,7 @@ describe('query naming syntax tripwire for literal member and call forms', () =>
 		const model = schema({
 			userProfiles: { id: 'integer', displayName: 'string' },
 		}).model;
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model,
 			dbCasing: 'snake_case',
 		});
@@ -577,7 +577,7 @@ describe('query naming syntax tripwire for literal member and call forms', () =>
 				email: 'string',
 			},
 		}).model;
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model,
 			dbCasing: 'snake_case',
 		});

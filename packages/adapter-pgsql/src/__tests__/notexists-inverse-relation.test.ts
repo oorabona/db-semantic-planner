@@ -16,7 +16,7 @@
 
 import { createOrm, exists, notExists, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Test schema — two distinct inverse relations on symbols pointing to calls
@@ -35,7 +35,7 @@ const testSchema = schema({
 });
 
 function buildAdapter() {
-	return createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+	return createPgCompileOnlyAdapter({ model: testSchema.model });
 }
 
 function buildOrm() {

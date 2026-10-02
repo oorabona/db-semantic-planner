@@ -1,6 +1,6 @@
 /**
  * Mutation compilation: INSERT, UPDATE, DELETE, UPSERT.
- * Extracted from PgsqlAdapter.compileInsert/Update/Delete/Upsert/etc.
+ * Extracted from PgAdapter.compileInsert/Update/Delete/Upsert/etc.
  *
  * @internal
  */
@@ -579,7 +579,7 @@ function compileUpsertActionWhere(
  * - rows <= batchThreshold (default 50): VALUES ($1,$2),($3,$4),...
  * - rows > batchThreshold OR batchThreshold === 0: SELECT unnest($1::type[]),...
  *
- * Extracted body of PgsqlAdapter.compileInsert().
+ * Extracted body of PgAdapter.compileInsert().
  */
 export function compileInsert(
 	intent: InsertIntent,
@@ -587,7 +587,7 @@ export function compileInsert(
 	deps: AdapterCompilerDeps,
 	rowShape?: ReturnType<typeof inspectMutationRows>,
 ): CompiledQuery {
-	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
+	// schemaName precedence (options > adapter ctor) is resolved in PgAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const ctx = mutationContext(deps, intent.table, MAX_DEPTH_LIMIT);
 	const state = createCompilerState();
 
@@ -658,14 +658,14 @@ export function compileInsert(
 /**
  * Compile an insert-from intent to executable SQL (NQL-ALIGN).
  * INSERT INTO target (cols) SELECT cols FROM source WHERE ... LIMIT ... RETURNING ...
- * Extracted body of PgsqlAdapter.compileInsertFrom().
+ * Extracted body of PgAdapter.compileInsertFrom().
  */
 export function compileInsertFrom(
 	intent: InsertFromIntent,
 	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
-	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
+	// schemaName precedence (options > adapter ctor) is resolved in PgAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const sourceCte =
 		intent.sourceQuery !== undefined &&
 		!hasBindingName(deps.bindingNames, intent.source)
@@ -752,14 +752,14 @@ export function compileInsertFrom(
 
 /**
  * Compile an update intent to executable SQL.
- * Extracted body of PgsqlAdapter.compileUpdate().
+ * Extracted body of PgAdapter.compileUpdate().
  */
 export function compileUpdate(
 	intent: UpdateIntent,
 	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
-	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
+	// schemaName precedence (options > adapter ctor) is resolved in PgAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const ctx = mutationContext(deps, intent.table, MAX_DEPTH_LIMIT);
 	const state = createCompilerState();
 
@@ -807,14 +807,14 @@ export function compileUpdate(
  *   WHERE "table"."match_col" = t."match_col"
  *   [RETURNING ...]
  *
- * Extracted body of PgsqlAdapter.compileBatchUpdate().
+ * Extracted body of PgAdapter.compileBatchUpdate().
  */
 export function compileBatchUpdate(
 	intent: BatchUpdateIntent,
 	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
-	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
+	// schemaName precedence (options > adapter ctor) is resolved in PgAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const schemaName = deps.schemaName;
 	const ctx = mutationContext(deps, intent.table, MAX_DEPTH_LIMIT);
 	const state = createCompilerState();
@@ -955,14 +955,14 @@ export function compileBatchUpdate(
 
 /**
  * Compile a delete intent to executable SQL.
- * Extracted body of PgsqlAdapter.compileDelete().
+ * Extracted body of PgAdapter.compileDelete().
  */
 export function compileDelete(
 	intent: DeleteIntent,
 	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
-	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
+	// schemaName precedence (options > adapter ctor) is resolved in PgAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const ctx = mutationContext(deps, intent.table, MAX_DEPTH_LIMIT);
 	const state = createCompilerState();
 
@@ -998,7 +998,7 @@ export function compileDelete(
 
 /**
  * Compile an upsert intent to executable SQL (DX-026).
- * Extracted body of PgsqlAdapter.compileUpsert().
+ * Extracted body of PgAdapter.compileUpsert().
  */
 export function compileUpsert(
 	intent: UpsertIntent,
@@ -1006,7 +1006,7 @@ export function compileUpsert(
 	deps: AdapterCompilerDeps,
 	rowShape?: ReturnType<typeof inspectMutationRows>,
 ): CompiledQuery {
-	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
+	// schemaName precedence (options > adapter ctor) is resolved in PgAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const schemaName = deps.schemaName;
 	const ctx = mutationContext(deps, intent.table, MAX_DEPTH_LIMIT);
 	const state = createCompilerState();
@@ -1213,14 +1213,14 @@ export function compileUpsert(
 /**
  * Compile an upsert-from intent to executable SQL (NQL-BIND).
  * INSERT INTO target SELECT ... FROM source ON CONFLICT (cols) DO UPDATE SET ...
- * Extracted body of PgsqlAdapter.compileUpsertFrom().
+ * Extracted body of PgAdapter.compileUpsertFrom().
  */
 export function compileUpsertFrom(
 	intent: UpsertFromIntent,
 	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
-	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
+	// schemaName precedence (options > adapter ctor) is resolved in PgAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const sourceCte =
 		intent.sourceQuery !== undefined &&
 		!hasBindingName(deps.bindingNames, intent.source)

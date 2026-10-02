@@ -1,4 +1,4 @@
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import { Pool } from 'pg';
 
@@ -8,7 +8,7 @@ const pool = new Pool({
 	application_name: process.env.DBSP_APPLICATION_NAME,
 });
 pool.on('error', () => {});
-const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+const adapter = createPgAdapter(pool, { preparedStatements: true });
 const compiled = (value: boolean) =>
 	projectionlessCompiledQuery(
 		{

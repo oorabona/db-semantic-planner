@@ -18,7 +18,7 @@ import {
 	schema,
 } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { stringMutationOrm } from '../test-compat/issue-441.js';
 
 const batchSchema = schema({
@@ -37,7 +37,7 @@ function makeOrm() {
 	return stringMutationOrm(
 		createOrm({
 			schema: batchSchema,
-			adapter: createPgsqlCompileOnlyAdapter(),
+			adapter: createPgCompileOnlyAdapter(),
 		}),
 	);
 }
@@ -160,7 +160,7 @@ describe('SC-15: CTE joined with outer query', () => {
 	});
 
 	it('works with direct adapter compileCteQuery', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const result = adapter.compileCteQuery({
 			kind: 'cteQuery',
 			ctes: [
@@ -187,7 +187,7 @@ describe('SC-15: CTE joined with outer query', () => {
 		const orm = stringMutationOrm(
 			createOrm({
 				schema: batchSchema,
-				adapter: createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' }),
+				adapter: createPgCompileOnlyAdapter({ dbCasing: 'snake_case' }),
 			}),
 		);
 		const cteOrm = orm as any;
@@ -205,7 +205,7 @@ describe('SC-15: CTE joined with outer query', () => {
 		const orm = stringMutationOrm(
 			createOrm({
 				schema: batchSchema,
-				adapter: createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' }),
+				adapter: createPgCompileOnlyAdapter({ dbCasing: 'snake_case' }),
 			}),
 		);
 		const cteOrm = orm as any;
@@ -373,7 +373,7 @@ const joinSchema = schema({
 
 describe('Gap 5: CTE outer query with JOINs', () => {
 	it('CTE outer query with relation JOIN produces correct SQL', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: joinSchema.model,
 		});
 		const orm = createOrm({ model: joinSchema.model, adapter });
@@ -395,7 +395,7 @@ describe('Gap 5: CTE outer query with JOINs', () => {
 	});
 
 	it('CTE outer query WITH JOIN and WHERE produces correct SQL and param ordering', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: joinSchema.model,
 		});
 		const orm = createOrm({ model: joinSchema.model, adapter });

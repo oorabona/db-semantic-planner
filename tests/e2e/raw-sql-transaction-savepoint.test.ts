@@ -1,4 +1,4 @@
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
@@ -36,7 +36,7 @@ async function itemIds(ids: readonly number[]): Promise<number[]> {
 function expectTransactionControlError(error: unknown): void {
 	expect(error).toBeInstanceOf(Error);
 	expect(error).not.toBeInstanceOf(AggregateError);
-	expect((error as Error).name).toBe('PgsqlRawSqlTransactionControlError');
+	expect((error as Error).name).toBe('PgRawSqlTransactionControlError');
 	expect((error as Error).message).toContain(
 		'Transaction control through raw SQL',
 	);
@@ -107,7 +107,7 @@ describe('raw SQL inside caller transactions', () => {
 				`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2)`,
 				[1, 'before create concurrently'],
 			);
-			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+			const adapter = createPgAdapter(client, { borrowedClient: true });
 
 			const error = await captureRejection(() =>
 				adapter.executeRaw(
@@ -116,9 +116,7 @@ describe('raw SQL inside caller transactions', () => {
 			);
 
 			expect((error as { code?: string }).code).toBe('25001');
-			expect((error as Error).name).not.toBe(
-				'PgsqlRawSqlTransactionControlError',
-			);
+			expect((error as Error).name).not.toBe('PgRawSqlTransactionControlError');
 			expect(
 				(error as { readonly dbspRawSqlTransactionControl?: unknown })
 					.dbspRawSqlTransactionControl,
@@ -157,7 +155,7 @@ describe('raw SQL inside caller transactions', () => {
 				`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2)`,
 				[20, 'committed by raw commit'],
 			);
-			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+			const adapter = createPgAdapter(client, { borrowedClient: true });
 
 			const error = await captureRejection(() => adapter.executeRaw('COMMIT'));
 			transactionGone = true;
@@ -184,7 +182,7 @@ describe('raw SQL inside caller transactions', () => {
 				`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2)`,
 				[21, 'rolled back by raw rollback'],
 			);
-			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+			const adapter = createPgAdapter(client, { borrowedClient: true });
 
 			const error = await captureRejection(() =>
 				adapter.executeRaw('ROLLBACK'),
@@ -210,7 +208,7 @@ describe('raw SQL inside caller transactions', () => {
 		let committed = false;
 		try {
 			await client.query('BEGIN');
-			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+			const adapter = createPgAdapter(client, { borrowedClient: true });
 
 			const error = await captureRejection(() => adapter.executeRaw(rawSql));
 
@@ -248,7 +246,7 @@ describe('raw SQL inside caller transactions', () => {
 				`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2)`,
 				[3, 'before reindex concurrently'],
 			);
-			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+			const adapter = createPgAdapter(client, { borrowedClient: true });
 
 			const error = await captureRejection(() =>
 				adapter.executeRaw(
@@ -280,7 +278,7 @@ describe('raw SQL inside caller transactions', () => {
 
 	it('runs CREATE INDEX CONCURRENTLY normally outside any transaction', async () => {
 		const pool = await getTestPool();
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 
 		await adapter.executeRaw(
 			`CREATE INDEX CONCURRENTLY "idx_raw_sql_tx_create_outside" ON "${SCHEMA}".items (label)`,
@@ -295,7 +293,7 @@ describe('raw SQL inside caller transactions', () => {
 
 	it('runs REINDEX INDEX CONCURRENTLY normally outside any transaction', async () => {
 		const pool = await getTestPool();
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgAdapter(pool);
 		await pool.query(
 			`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2), ($3, $4)`,
 			[30, 'before outside reindex', 31, 'after outside reindex'],

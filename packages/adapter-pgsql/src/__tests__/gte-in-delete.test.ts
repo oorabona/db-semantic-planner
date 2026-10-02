@@ -18,7 +18,7 @@
 import { and, eq, gte, inArray, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const testSchema = schema({
 	embeddings: {
@@ -30,7 +30,7 @@ const testSchema = schema({
 });
 
 function buildAdapter() {
-	return createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+	return createPgCompileOnlyAdapter({ model: testSchema.model });
 }
 
 describe('GTE-IN-DELETE: and(inArray(), eq(), gte()) in DELETE WHERE', () => {

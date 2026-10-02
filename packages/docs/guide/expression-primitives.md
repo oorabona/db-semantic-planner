@@ -89,7 +89,7 @@ created by another copy.
 
 ```typescript
 import { createOrm, exprRef, op, schema } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const predicateDb = schema({
   users: {
@@ -99,7 +99,7 @@ const predicateDb = schema({
     enabled: 'boolean',
   },
 } as const);
-const orm = createOrm({ schema: predicateDb, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: predicateDb, adapter: createPgCompileOnlyAdapter() });
 
 orm.select('users').where(op('!=', exprRef('ownerId'), exprRef('editorId')))
 
@@ -262,7 +262,7 @@ When a string is a value (not a column), use `param()` or `literal()` explicitly
 
 ```typescript
 import { schema, createOrm, op, exprRef, param, cast, literal } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({
   embeddings: {
@@ -270,7 +270,7 @@ const db = schema({
     vector: { type: 'text', dbType: 'vector(768)' },
   },
 } as const);
-const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter() });
 
 const qv = [0.1, 0.2, 0.3];
 

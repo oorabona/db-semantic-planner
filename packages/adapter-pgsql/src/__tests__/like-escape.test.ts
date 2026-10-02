@@ -1,6 +1,6 @@
 import { createOrm, like, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const testSchema = schema({
 	products: {
@@ -9,7 +9,7 @@ const testSchema = schema({
 	},
 });
 
-const adapter = createPgsqlCompileOnlyAdapter();
+const adapter = createPgCompileOnlyAdapter();
 const orm = createOrm({ schema: testSchema, adapter });
 
 function compile(builder: ReturnType<typeof orm.select>) {

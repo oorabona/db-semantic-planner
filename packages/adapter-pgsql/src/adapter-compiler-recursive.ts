@@ -1,6 +1,6 @@
 /**
  * Recursive CTE and unnest-CTE compilation.
- * Extracted from PgsqlAdapter.compileRecursive(), compileCteQuery(),
+ * Extracted from PgAdapter.compileRecursive(), compileCteQuery(),
  * buildUnnestCte(), and buildRecursiveAnchorWhere().
  *
  * @internal
@@ -398,7 +398,7 @@ function rehomeQueryEnvelope(
 /**
  * Compile a recursive CTE plan to executable SQL.
  * Supports adjacency-list and edge-table traversal modes.
- * Extracted body of PgsqlAdapter.compileRecursive().
+ * Extracted body of PgAdapter.compileRecursive().
  */
 export function compileRecursive<T = unknown>(
 	report: RecursivePlanReport,
@@ -406,7 +406,7 @@ export function compileRecursive<T = unknown>(
 	_options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery<T> {
-	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
+	// schemaName precedence (options > adapter ctor) is resolved in PgAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const schemaName = deps.schemaName;
 	const state = createCompilerState();
 	const intent = report.intent;
@@ -604,7 +604,7 @@ export function compileRecursive<T = unknown>(
 		// Exhaustive check: only 'custom' remains, which is reserved for P2
 		const _exhaustive: 'custom' = traversal.kind;
 		throw new Error(
-			`PgsqlAdapter.compileRecursive: Unsupported traversal kind '${_exhaustive}'`,
+			`PgAdapter.compileRecursive: Unsupported traversal kind '${_exhaustive}'`,
 		);
 	}
 
@@ -726,7 +726,7 @@ export function compileRecursive<T = unknown>(
  * independently (parameters starting at $1), then renumber outer params
  * to start after CTE params and prepend WITH clause.
  *
- * Extracted body of PgsqlAdapter.compileCteQuery().
+ * Extracted body of PgAdapter.compileCteQuery().
  */
 export function compileCteQuery<T = unknown>(
 	intent: CteQueryIntent,
@@ -734,7 +734,7 @@ export function compileCteQuery<T = unknown>(
 	deps: AdapterCompilerDeps,
 	initialProjectionByName?: CteProjectionRegistry,
 ): CompiledQuery<T> {
-	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
+	// schemaName precedence (options > adapter ctor) is resolved in PgAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const state = createCompilerState();
 
 	// All parameters accumulated from all CTEs (in declaration order)
@@ -846,7 +846,7 @@ export function compileCteQuery<T = unknown>(
 		} else {
 			const kind = (cte as { kind: string }).kind;
 			throw new Error(
-				`PgsqlAdapter.compileCteQuery: Unsupported CTE kind '${kind}'`,
+				`PgAdapter.compileCteQuery: Unsupported CTE kind '${kind}'`,
 			);
 		}
 
@@ -916,7 +916,7 @@ export function compileCteQuery<T = unknown>(
 /**
  * Build a CommonTableExpr AST node for an unnest-backed CTE.
  * Produces: CommonTableExpr { ctename: 'name', ctequery: SelectStmt {...} }
- * Extracted body of PgsqlAdapter.buildUnnestCte().
+ * Extracted body of PgAdapter.buildUnnestCte().
  */
 function buildUnnestCte(
 	cte: UnnestCteIntent,
@@ -1119,7 +1119,7 @@ function buildRawCte(
 /**
  * Build an anchor WHERE clause AST node from a WhereIntent.
  * Used for edge-table recursive CTE anchor queries.
- * Extracted body of PgsqlAdapter.buildRecursiveAnchorWhere().
+ * Extracted body of PgAdapter.buildRecursiveAnchorWhere().
  */
 function buildRecursiveAnchorWhere(
 	where: unknown,

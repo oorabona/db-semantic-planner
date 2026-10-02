@@ -61,7 +61,7 @@ try {
   // issues so a failure of its own does not poison it.
   const scopedOrm = createOrm({
     schema: db,
-    adapter: createPgsqlAdapter(client, { borrowedClient: true }),
+    adapter: createPgAdapter(client, { borrowedClient: true }),
   });
   await scopedOrm
     .into(scopedOrm.tables.users)
@@ -95,12 +95,12 @@ This does not make raw transaction control safe through dbsp. If you call `orm.r
 ## Gotchas
 
 - **Raw SQL outside a dbsp transaction still runs on a pooled session.** Avoid session-level changes unless you also reset them, or use a client whose lifetime you control.
-- **`transaction()` rejecting is not proof nothing committed** — if the callback used raw transaction control, read the error. `PgsqlRawSqlTransactionControlError` means exactly this happened.
+- **`transaction()` rejecting is not proof nothing committed** — if the callback used raw transaction control, read the error. `PgRawSqlTransactionControlError` means exactly this happened.
 - **Catch an error inside `orm.transaction()` and the transaction stays poisoned.** dbsp does not savepoint each statement, so a failed statement aborts the transaction, as PostgreSQL intends. Swallowing the error does not give you a usable transaction back; it gives you a poisoned one, and dbsp will refuse the next statement rather than let it run outside the transaction you think you are in.
 - **On a borrowed client that is inside *your* transaction, dbsp does savepoint its own statements** — because breaking a transaction that belongs to you is not dbsp's right.
 
 ## Key files
 
-- `packages/adapter-pgsql/src/pgsql-adapter.ts` — the scope registry, the transaction contract, `PgsqlRawSqlTransactionControlError`
+- `packages/adapter-pgsql/src/pgsql-adapter.ts` — the scope registry, the transaction contract, `PgRawSqlTransactionControlError`
 - `tests/e2e/raw-sql-transaction-savepoint.test.ts` — the guarantees above, against a real PostgreSQL
 - `tests/e2e/borrowed-client-ownership.test.ts` — who owns the connection, and what follows from that

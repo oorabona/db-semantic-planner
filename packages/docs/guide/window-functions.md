@@ -28,12 +28,12 @@ In `@dbsp/core`, the builder chain maps directly:
 
 ```typescript
 import { schema, createOrm, rowNumber } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({
   sales: { id: 'integer', region: 'string', amount: 'decimal', date: 'date' },
 } as const);
-const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter() });
 
 orm.select('sales')
   .columns(['id', 'region', rowNumber().partitionBy('region').orderBy('amount', 'desc').as('rn')])
@@ -81,12 +81,12 @@ Rank each sale within its region by amount, descending. Keeping only the top 3 p
 
 ```typescript
 import { schema, createOrm, rank } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({
   sales: { id: 'integer', region: 'string', amount: 'decimal', repName: 'string' },
 } as const);
-const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter() });
 
 const ranked = orm.select('sales').columns([
   'id', 'region', 'repName', 'amount',
@@ -104,12 +104,12 @@ filter it outside. This example compiles without a database; with a connected ad
 
 ```typescript
 import { schema, createOrm } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({
   sales: { id: 'integer', region: 'string', amount: 'decimal' },
 } as const);
-const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter() });
 
 orm.nql<{
   id: number;
@@ -137,12 +137,12 @@ Compute a cumulative order total per user, ordered by date.
 
 ```typescript
 import { schema, createOrm, wSum } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({
   orders: { id: 'integer', userId: 'integer', total: 'decimal', createdAt: 'timestamp' },
 } as const);
-const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter() });
 
 orm.select('orders')
   .columns([
@@ -165,12 +165,12 @@ Detect a gap between an event's `startedAt` and the previous event's `endedAt` f
 
 ```typescript
 import { schema, createOrm, lag } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({
   events: { id: 'integer', sessionId: 'integer', startedAt: 'timestamp', endedAt: 'timestamp' },
 } as const);
-const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter() });
 
 orm.select('events')
   .columns([
@@ -193,12 +193,12 @@ An alternative to `OFFSET` pagination that avoids the "skipped rows on concurren
 
 ```typescript
 import { schema, createOrm, rowNumber } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({
   products: { id: 'integer', name: 'string', price: 'decimal' },
 } as const);
-const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter() });
 
 orm.select('products')
   .columns([

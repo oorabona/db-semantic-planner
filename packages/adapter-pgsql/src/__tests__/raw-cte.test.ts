@@ -1,13 +1,13 @@
 /**
  * FR-8: orm.recursive() — WITH RECURSIVE CTE via explicit base/step builders.
  *
- * Tests compile to exact SQL using createPgsqlCompileOnlyAdapter + createOrm.
+ * Tests compile to exact SQL using createPgCompileOnlyAdapter + createOrm.
  * No DB connection required.
  */
 
 import { createOrm, createRawCteBuilder, eq, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -43,7 +43,7 @@ const testSchema = schema({
 } as const);
 
 function buildOrm() {
-	const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+	const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 	return createOrm({ model: testSchema.model, adapter });
 }
 
@@ -78,7 +78,7 @@ function relationQuery(from = 'employees', column = 'name') {
 
 describe('FR-8: orm.recursive() — WITH RECURSIVE CTE', () => {
 	it('resolves a declared recursive CTE root from the physical inventory', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 		const result = adapter.compileCteQuery({
 			kind: 'cteQuery',
 			ctes: [
@@ -107,7 +107,7 @@ describe('FR-8: orm.recursive() — WITH RECURSIVE CTE', () => {
 	});
 
 	it('plans relation paths in a recursive CTE anchor over a model table', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 		const result = adapter.compileCteQuery({
 			kind: 'cteQuery',
 			ctes: [
@@ -132,7 +132,7 @@ describe('FR-8: orm.recursive() — WITH RECURSIVE CTE', () => {
 	});
 
 	it('plans relation paths in a recursive CTE step over a model table', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 		const result = adapter.compileCteQuery({
 			kind: 'cteQuery',
 			ctes: [

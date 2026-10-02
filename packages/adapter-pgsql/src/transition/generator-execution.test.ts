@@ -18,7 +18,7 @@ import {
 import {
 	generatedPostconditionDigest,
 	generatedPostconditionForChange,
-	pgsqlDeclaredSequenceAdoptionDeclaration,
+	pgDeclaredSequenceAdoptionDeclaration,
 } from '../ddl/managed-step-manifest.js';
 import { executeGeneratorPlan } from './generator-execution.js';
 import { readPgOutcomeSessionCompromise } from './outcome-protocol.js';
@@ -254,7 +254,7 @@ function declaredSequenceAdoptionStep(
 			kind: 'sequence-adoption',
 			shape: { name: 'union_group_seq' },
 		},
-		expectedDeclaration: pgsqlDeclaredSequenceAdoptionDeclaration({
+		expectedDeclaration: pgDeclaredSequenceAdoptionDeclaration({
 			name: 'union_group_seq',
 		}),
 		expectedCatalogueIdentity: {

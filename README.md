@@ -93,14 +93,14 @@ const db = schema({
 
 ```typescript
 import { createOrm, eq } from '@dbsp/core';
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 import { Pool } from 'pg';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 const orm = createOrm({
   schema: db,
-  adapter: createPgsqlAdapter(pool),
+  adapter: createPgAdapter(pool),
 });
 
 const activeUsers = orm
@@ -142,14 +142,14 @@ See the [Getting Started guide](https://oorabona.github.io/db-semantic-planner/g
 ```typescript
 import { Pool } from 'pg';
 import { schema, ref, createOrm, eq, some } from '@dbsp/core';
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 
 const __db = schema({
   users: { id: 'integer', name: 'string' },
   posts: { id: 'integer', userId: ref('users'), published: 'boolean' },
 } as const);
 const __pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const __orm = createOrm({ schema: __db, adapter: createPgsqlAdapter(__pool) });
+const __orm = createOrm({ schema: __db, adapter: createPgAdapter(__pool) });
 
 // Find users with at least one published post
 __orm.select('users')
@@ -264,7 +264,7 @@ See [Production: Observability & Logging](https://oorabona.github.io/db-semantic
 │  @dbsp/adapter-pgsql                                            │
 │  ┌─────────────────────────────────────────────────────────┐   │
 │  │  SQL Compiler (PlanReport → PostgreSQL AST → SQL)       │   │
-│  │  PgsqlAdapter (with a pg Pool or connectionless)        │   │
+│  │  PgAdapter (with a pg Pool or connectionless)        │   │
 │  └─────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
 ```

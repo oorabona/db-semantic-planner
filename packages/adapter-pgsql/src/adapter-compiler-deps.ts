@@ -1,6 +1,6 @@
 /**
  * Shared dependencies injected into AdapterCompiler sub-modules.
- * Extracted from PgsqlAdapter fields to enable compilation without `this`.
+ * Extracted from PgAdapter fields to enable compilation without `this`.
  *
  * @internal
  */
@@ -13,8 +13,8 @@ import type { PgPhysicalModel } from './physical-model/index.js';
 import type { RelationTargetProjectionRegistry } from './relation-target-projection.js';
 
 /**
- * All state that compilation methods need from PgsqlAdapter.
- * Passed by reference — constructed once in PgsqlAdapter constructor.
+ * All state that compilation methods need from PgAdapter.
+ * Passed by reference — constructed once in PgAdapter constructor.
  */
 export interface AdapterCompilerDeps {
 	readonly dbCasing?: DbCasing;

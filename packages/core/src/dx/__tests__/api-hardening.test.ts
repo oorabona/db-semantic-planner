@@ -10,7 +10,7 @@
  * - FIND-037: SelectExpressionResult.execute() default Record<string, unknown>
  */
 
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { fn } from '../expressions.js';
 import { eq } from '../filters.js';
@@ -43,7 +43,7 @@ const db = schema({
 	},
 });
 
-const adapter = createPgsqlCompileOnlyAdapter();
+const adapter = createPgCompileOnlyAdapter();
 const orm = createOrm({ schema: db, adapter });
 
 type UserRow = { id: number; name: string; email: string; active: boolean };

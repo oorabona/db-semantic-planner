@@ -13,7 +13,7 @@ import {
 	compilePlan,
 	type SimplifiedPlanReport,
 } from '../compiler.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 function caps(overrides: Partial<DialectCapabilities>): DialectCapabilities {
 	return { ...POSTGRESQL_CAPABILITIES, ...overrides };
@@ -247,7 +247,7 @@ describe('NQL text surface dialect capability gates', () => {
 	});
 
 	it('threads adapter compile options into handler capability gates', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const plan = jsonPlan as unknown as PlanReport;
 
 		expect(() =>

@@ -28,7 +28,7 @@ import { generateCreatePolicy } from '../ddl/ddl-generator.js';
 import { generateAlterColumnSQL } from '../ddl/table-operations.js';
 import { createDeclaredNameResolver } from '../declared-name-resolver.js';
 import { identityNaming } from '../naming-plugin.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { createPgPhysicalModel } from '../physical-model/index.js';
 import {
 	declaredColumn,
@@ -43,7 +43,7 @@ const minimalSchema = schema({
 } as const);
 
 function buildOrm() {
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	return createOrm({ schema: minimalSchema, adapter });
 }
 
@@ -53,7 +53,7 @@ function buildOrm() {
 
 describe('ITEM-2: literal() rejects non-primitive values (injection defense)', () => {
 	it('rejects object value — prevents [object Object] SQL emission', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'literal',
@@ -63,7 +63,7 @@ describe('ITEM-2: literal() rejects non-primitive values (injection defense)', (
 	});
 
 	it('rejects array value', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'literal',
@@ -73,7 +73,7 @@ describe('ITEM-2: literal() rejects non-primitive values (injection defense)', (
 	});
 
 	it('rejects NaN — not finite', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'literal',
@@ -83,7 +83,7 @@ describe('ITEM-2: literal() rejects non-primitive values (injection defense)', (
 	});
 
 	it('rejects Infinity — not finite', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'literal',
@@ -93,14 +93,14 @@ describe('ITEM-2: literal() rejects non-primitive values (injection defense)', (
 	});
 
 	it("allows literal string with single-quote — produces 'o''brien' safely", () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const { sql } = adapter.compileSelectExpression(literal("o'brien").intent);
 		// The deparser single-quote-escapes: 'o''brien'
 		expect(sql).toContain("'o''brien'");
 	});
 
 	it('allows literal null', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const { sql } = adapter.compileSelectExpression(
 			literal(null as unknown as string).intent,
 		);
@@ -108,13 +108,13 @@ describe('ITEM-2: literal() rejects non-primitive values (injection defense)', (
 	});
 
 	it('allows literal boolean', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const { sql } = adapter.compileSelectExpression(literal(true).intent);
 		expect(sql).toContain('true');
 	});
 
 	it('allows literal number', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const { sql } = adapter.compileSelectExpression(literal(42).intent);
 		expect(sql).toContain('42');
 	});
@@ -549,7 +549,7 @@ describe('ITEM-5b: RLS policy command allowlist (buildPolicySQL / migration-sql)
 
 describe('ITEM-6: customOp operator injection guard', () => {
 	it('rejects operator with semicolon injection', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -561,7 +561,7 @@ describe('ITEM-6: customOp operator injection guard', () => {
 	});
 
 	it('rejects operator with block-comment injection', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -573,7 +573,7 @@ describe('ITEM-6: customOp operator injection guard', () => {
 	});
 
 	it('allows pgvector cosine distance operator: <=>', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -585,7 +585,7 @@ describe('ITEM-6: customOp operator injection guard', () => {
 	});
 
 	it('allows pgvector L2 distance operator: <->', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -599,7 +599,7 @@ describe('ITEM-6: customOp operator injection guard', () => {
 
 describe('ITEM-6: cast typeName injection guard', () => {
 	it('rejects type name with injection payload', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'cast',
@@ -610,7 +610,7 @@ describe('ITEM-6: cast typeName injection guard', () => {
 	});
 
 	it('rejects type name with closing paren injection', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'cast',
@@ -621,7 +621,7 @@ describe('ITEM-6: cast typeName injection guard', () => {
 	});
 
 	it('allows vector type', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'cast',
@@ -632,7 +632,7 @@ describe('ITEM-6: cast typeName injection guard', () => {
 	});
 
 	it('allows tsvector type', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'cast',
@@ -643,7 +643,7 @@ describe('ITEM-6: cast typeName injection guard', () => {
 	});
 
 	it('allows numeric(10,2) type', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'cast',
@@ -657,7 +657,7 @@ describe('ITEM-6: cast typeName injection guard', () => {
 	// schema-qualified types and multi-word base types are accepted by cast().
 
 	it('allows schema-qualified type: audit.status_enum', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'cast',
@@ -668,7 +668,7 @@ describe('ITEM-6: cast typeName injection guard', () => {
 	});
 
 	it('allows multi-word base type: timestamp without time zone', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'cast',
@@ -679,7 +679,7 @@ describe('ITEM-6: cast typeName injection guard', () => {
 	});
 
 	it('still rejects injection payload: x; DROP TABLE users', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'cast',
@@ -692,7 +692,7 @@ describe('ITEM-6: cast typeName injection guard', () => {
 
 describe('ITEM-6: namedArg name injection guard', () => {
 	it('rejects named arg with semicolon in name', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'namedArg',
@@ -703,7 +703,7 @@ describe('ITEM-6: namedArg name injection guard', () => {
 	});
 
 	it('rejects named arg with embedded quote', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'namedArg',
@@ -714,7 +714,7 @@ describe('ITEM-6: namedArg name injection guard', () => {
 	});
 
 	it('allows valid namedArg: query_string', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'namedArg',
@@ -725,7 +725,7 @@ describe('ITEM-6: namedArg name injection guard', () => {
 	});
 
 	it('allows valid namedArg: field_name', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'namedArg',
@@ -870,7 +870,7 @@ describe('GAP-1: partition strategy allowlist — migration-sql.ts path', () => 
 
 describe('GAP-2: customOp operator strict symbolic allowlist', () => {
 	it('rejects word operator: OR true OR', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -882,7 +882,7 @@ describe('GAP-2: customOp operator strict symbolic allowlist', () => {
 	});
 
 	it('rejects bare word operator: OR', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -894,7 +894,7 @@ describe('GAP-2: customOp operator strict symbolic allowlist', () => {
 	});
 
 	it('rejects operator with semicolon: ; DROP TABLE x --', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -906,7 +906,7 @@ describe('GAP-2: customOp operator strict symbolic allowlist', () => {
 	});
 
 	it('rejects operator with space: <=> ANY(SELECT', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -918,7 +918,7 @@ describe('GAP-2: customOp operator strict symbolic allowlist', () => {
 	});
 
 	it('allows pgvector cosine distance: <=>', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -930,7 +930,7 @@ describe('GAP-2: customOp operator strict symbolic allowlist', () => {
 	});
 
 	it('allows pgvector L2 distance: <->', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -942,7 +942,7 @@ describe('GAP-2: customOp operator strict symbolic allowlist', () => {
 	});
 
 	it('allows ParadeDB full-text operator: @@', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -954,7 +954,7 @@ describe('GAP-2: customOp operator strict symbolic allowlist', () => {
 	});
 
 	it('allows range containment operator: @>', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -966,7 +966,7 @@ describe('GAP-2: customOp operator strict symbolic allowlist', () => {
 	});
 
 	it('allows regex match operator: ~', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -992,7 +992,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 	// --- REJECT: comment sequences that pass the symbolic-charset regex ---
 
 	it('rejects bare line-comment operator: --', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -1004,7 +1004,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 	});
 
 	it('rejects operator containing -- prefix: <--', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -1016,7 +1016,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 	});
 
 	it('rejects operator containing -- suffix: -->', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -1028,7 +1028,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 	});
 
 	it('rejects block-comment open: /*', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -1040,7 +1040,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 	});
 
 	it('rejects block-comment close: */', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -1052,7 +1052,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 	});
 
 	it('rejects empty block comment: /**/', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -1067,7 +1067,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 	//   '-', '/', or '*' but do NOT form a comment sequence ---
 
 	it('allows bare minus: -', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -1079,7 +1079,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 	});
 
 	it('allows bare multiply: *', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -1091,7 +1091,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 	});
 
 	it('allows bare divide: /', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -1103,7 +1103,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 	});
 
 	it('allows bare add: +', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -1115,7 +1115,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 	});
 
 	it('allows pgvector cosine distance (confirmed legit): <=>', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -1127,7 +1127,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 	});
 
 	it('allows pgvector inner product: <#>', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -1139,7 +1139,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 	});
 
 	it('allows equality: =', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -1151,7 +1151,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 	});
 
 	it('allows not-equal: <>', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -1163,7 +1163,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 	});
 
 	it('allows not-equal: !=', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -1185,7 +1185,7 @@ describe('FINDING-1: unary operator injection guard (assertSafeOperator)', () =>
 	// --- REJECT: word injection payloads ---
 
 	it('rejects multi-word injection: NOT true OR', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'unary',
@@ -1196,7 +1196,7 @@ describe('FINDING-1: unary operator injection guard (assertSafeOperator)', () =>
 	});
 
 	it('rejects injection with semicolon: NOT true; DROP', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'unary',
@@ -1207,7 +1207,7 @@ describe('FINDING-1: unary operator injection guard (assertSafeOperator)', () =>
 	});
 
 	it('rejects bare unknown word: NOOP', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'unary',
@@ -1220,7 +1220,7 @@ describe('FINDING-1: unary operator injection guard (assertSafeOperator)', () =>
 	// --- REJECT: comment sequences ---
 
 	it('rejects line-comment operator: --', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'unary',
@@ -1231,7 +1231,7 @@ describe('FINDING-1: unary operator injection guard (assertSafeOperator)', () =>
 	});
 
 	it('rejects block-comment open: /*', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'unary',
@@ -1244,7 +1244,7 @@ describe('FINDING-1: unary operator injection guard (assertSafeOperator)', () =>
 	// --- ACCEPT: legitimate unary operators ---
 
 	it('allows NOT (keyword unary)', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'unary',
@@ -1255,7 +1255,7 @@ describe('FINDING-1: unary operator injection guard (assertSafeOperator)', () =>
 	});
 
 	it('allows NOT case-insensitive: not', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'unary',
@@ -1266,7 +1266,7 @@ describe('FINDING-1: unary operator injection guard (assertSafeOperator)', () =>
 	});
 
 	it('allows unary minus: -', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'unary',
@@ -1277,7 +1277,7 @@ describe('FINDING-1: unary operator injection guard (assertSafeOperator)', () =>
 	});
 
 	it('allows unary plus: +', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'unary',
@@ -1288,7 +1288,7 @@ describe('FINDING-1: unary operator injection guard (assertSafeOperator)', () =>
 	});
 
 	it('allows bitwise NOT: ~', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'unary',
@@ -1430,7 +1430,7 @@ describe('FINDING-2: multi-word PostgreSQL base types pass via validateDbType', 
 
 describe('FINDING-1: non-string operator throws (assertSafeOperator typeof guard)', () => {
 	it('rejects number as customOp operator', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -1442,7 +1442,7 @@ describe('FINDING-1: non-string operator throws (assertSafeOperator typeof guard
 	});
 
 	it('rejects object as customOp operator', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'customOp',
@@ -1454,7 +1454,7 @@ describe('FINDING-1: non-string operator throws (assertSafeOperator typeof guard
 	});
 
 	it('rejects number as unary operator', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'unary',
@@ -1467,7 +1467,7 @@ describe('FINDING-1: non-string operator throws (assertSafeOperator typeof guard
 
 describe('FINDING-1: non-string cast typeName throws (typeof guard)', () => {
 	it('rejects number as cast typeName', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'cast',
@@ -1478,7 +1478,7 @@ describe('FINDING-1: non-string cast typeName throws (typeof guard)', () => {
 	});
 
 	it('rejects object as cast typeName', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'cast',
@@ -1491,7 +1491,7 @@ describe('FINDING-1: non-string cast typeName throws (typeof guard)', () => {
 
 describe('FINDING-1: non-string namedArg name throws (typeof guard)', () => {
 	it('rejects number as namedArg name', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
 			adapter.compileSelectExpression({
 				kind: 'namedArg',
@@ -1537,7 +1537,7 @@ describe('FINDING-1: non-string ALTER COLUMN USING throws (typeof guard)', () =>
 
 describe('TOCTOU getter-probe: customOp operator snapshot-once', () => {
 	it('renders only the validated (safe) operator when getter switches after first read', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		let reads = 0;
 		const intent = {
 			kind: 'customOp' as const,
@@ -1557,7 +1557,7 @@ describe('TOCTOU getter-probe: customOp operator snapshot-once', () => {
 
 describe('TOCTOU getter-probe: unary operator snapshot-once', () => {
 	it('renders only the validated (safe) operator when getter switches after first read', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		let reads = 0;
 		const intent = {
 			kind: 'unary' as const,
@@ -1574,7 +1574,7 @@ describe('TOCTOU getter-probe: unary operator snapshot-once', () => {
 
 describe('TOCTOU getter-probe: cast typeName snapshot-once', () => {
 	it('renders only the validated (safe) typeName when getter switches after first read', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		let reads = 0;
 		const intent = {
 			kind: 'cast' as const,
@@ -1592,7 +1592,7 @@ describe('TOCTOU getter-probe: cast typeName snapshot-once', () => {
 
 describe('TOCTOU getter-probe: namedArg name snapshot-once', () => {
 	it('renders only the validated (safe) name when getter switches after first read', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		let reads = 0;
 		const intent = {
 			kind: 'namedArg' as const,

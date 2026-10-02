@@ -12,7 +12,7 @@ import { createOrm, fullTextSearch, schema, textScore } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -271,7 +271,7 @@ describe('fullTextSearch', () => {
 		}).model;
 		const orm = createOrm({
 			model,
-			adapter: createPgsqlCompileOnlyAdapter({
+			adapter: createPgCompileOnlyAdapter({
 				model,
 				dbCasing: 'snake_case',
 			}),

@@ -2,7 +2,7 @@
  * FEAT-134 E2E: NQL tag interpolation binds values as PostgreSQL params.
  */
 
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 import { createHookManager, createOrm, nqlRaw } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -607,7 +607,7 @@ authors | where id in (new_author) | select id`;
 		try {
 			const searchPath = sql`SET search_path TO ${sql.ref(SCHEMA)}`.compile();
 			await client.query(searchPath.sql, searchPath.parameters as unknown[]);
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				dbCasing: 'snake_case',
 			});

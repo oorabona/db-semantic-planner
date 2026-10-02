@@ -9,8 +9,8 @@ import type {
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
-	createPgsqlCompileOnlyAdapter,
-	type PgsqlAdapterOptions,
+	createPgCompileOnlyAdapter,
+	type PgAdapterOptions,
 } from '../pgsql-adapter.js';
 import { InvalidIdentifierError } from '../validate.js';
 
@@ -64,13 +64,13 @@ function compileNqlBundle(nql: string): CompiledNqlQuery {
 
 function tryCompileNqlBundle(
 	bundle: CompiledNqlQuery,
-	adapterOptions?: PgsqlAdapterOptions,
+	adapterOptions?: PgAdapterOptions,
 ): {
 	error: unknown;
 	params: readonly unknown[] | undefined;
 	sql: string | undefined;
 } {
-	const adapter = createPgsqlCompileOnlyAdapter(adapterOptions);
+	const adapter = createPgCompileOnlyAdapter(adapterOptions);
 	try {
 		const result = adapter.compile(bundle, { model: testSchema.model });
 		return { error: undefined, params: result.parameters, sql: result.sql };
@@ -340,7 +340,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 				],
 			]),
 		};
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			dbCasing: 'snake_case',
 			model,
 		});
@@ -435,7 +435,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		const bundle = compileNqlBundle(
 			'items | select id | bind recent_items\nitems | select id, (recent_items | select count() as total) as recent_count',
 		);
-		const adapter = createPgsqlCompileOnlyAdapter().withSchema('tenant_1');
+		const adapter = createPgCompileOnlyAdapter().withSchema('tenant_1');
 
 		const result = adapter.compile(bundle, { model: testSchema.model });
 

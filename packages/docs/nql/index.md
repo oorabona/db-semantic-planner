@@ -158,7 +158,7 @@ NQL supports named value parameters in expression positions. A named parameter i
 
 ```typescript
 // doctest: skip — illustrative direct compiler params example
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { compile } from '@dbsp/nql';
 
 const compiled = compile('users | where id = :id and active = :active', db.model, undefined, {
@@ -169,7 +169,7 @@ if (!compiled.success || !compiled.ast?.query) {
   throw new Error(compiled.errors.map((e) => e.message).join(', '));
 }
 
-const adapter = createPgsqlCompileOnlyAdapter();
+const adapter = createPgCompileOnlyAdapter();
 const query = adapter.compile(compiled.ast, { model: db.model });
 ```
 
@@ -1746,7 +1746,7 @@ const mutationBindingDb = schema({
 } as const);
 const mutationBindingOrm = createOrm({
   schema: mutationBindingDb,
-  adapter: createPgsqlCompileOnlyAdapter({ model: mutationBindingDb.model }),
+  adapter: createPgCompileOnlyAdapter({ model: mutationBindingDb.model }),
 });
 
 const orderedMutationProgram = mutationBindingOrm.nql<unknown>`
@@ -1794,7 +1794,7 @@ Mutation hooks run for tag mutations during execution:
 ```typescript
 const { createHookManager } = await import('@dbsp/core');
 
-const adapterWithExecute = createPgsqlCompileOnlyAdapter() as unknown as NonNullable<
+const adapterWithExecute = createPgCompileOnlyAdapter() as unknown as NonNullable<
   Parameters<typeof createOrm>[0]['adapter']
 >;
 adapterWithExecute.executeWithMeta = async () => ({
@@ -1845,7 +1845,7 @@ const mutationBindingFailureDb = schema({
 } as const);
 const mutationBindingFailureOrm = createOrm({
   schema: mutationBindingFailureDb,
-  adapter: createPgsqlCompileOnlyAdapter({ model: mutationBindingFailureDb.model }),
+  adapter: createPgCompileOnlyAdapter({ model: mutationBindingFailureDb.model }),
 });
 
 let missingBind = '';
@@ -1927,7 +1927,7 @@ const snapshotDb = schema({
 } as const);
 const snapshotOrm = createOrm({
   schema: snapshotDb,
-  adapter: createPgsqlCompileOnlyAdapter({ model: snapshotDb.model }),
+  adapter: createPgCompileOnlyAdapter({ model: snapshotDb.model }),
 });
 
 const snapshotProgram = snapshotOrm.nql<unknown>`
@@ -2007,7 +2007,7 @@ const bindingFinalFromDb = schema({
 } as const);
 const bindingFinalFromOrm = createOrm({
   schema: bindingFinalFromDb,
-  adapter: createPgsqlCompileOnlyAdapter({
+  adapter: createPgCompileOnlyAdapter({
     model: bindingFinalFromDb.model,
     dbCasing: 'snake_case',
     schemaName: 'iam_example',

@@ -1,9 +1,9 @@
 import type { ModelIR } from '@dbsp/types';
 import { canonicalizeCheckConstraints } from '../expression-canonicalizer.js';
 import { engineCanonicalSqlDefault } from '../expression-provenance.js';
-import type { PgsqlAdapter } from '../pgsql-adapter.js';
+import type { PgAdapter } from '../pgsql-adapter.js';
 
-declare const ordinaryAdapter: PgsqlAdapter;
+declare const ordinaryAdapter: PgAdapter;
 declare const model: ModelIR;
 
 // @ts-expect-error canonicalisation only accepts a withScratchScope-minted scope.

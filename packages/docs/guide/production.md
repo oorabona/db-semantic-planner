@@ -36,7 +36,7 @@ Configure the connection pool based on your expected load:
 
 ```typescript
 import { Pool } from 'pg';
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 import { createOrm } from '@dbsp/core';
 
 const pool = new Pool({
@@ -56,7 +56,7 @@ const pool = new Pool({
 
 const orm = createOrm({
   model: schema,
-  adapter: createPgsqlAdapter(pool),
+  adapter: createPgAdapter(pool),
 });
 ```
 
@@ -105,7 +105,7 @@ default**. Opt in only for workloads that repeatedly execute the same compiled,
 parameterized SQL on long-lived PostgreSQL connections:
 
 ```typescript
-const adapter = createPgsqlAdapter(pool, {
+const adapter = createPgAdapter(pool, {
   preparedStatements: { maxStatements: 500 }, // `true` uses the same default
 });
 ```
@@ -222,7 +222,7 @@ caller's own object. Over budget or outside this domain, the named submission st
 proceeds with its shallow parameters, but transparent replay is declined.
 
 If the one permitted unnamed replay fails, dbsp throws the exported
-`PgsqlPreparedStatementReplayError`, rather than the replay error directly. Its
+`PgPreparedStatementReplayError`, rather than the replay error directly. Its
 message is always `Prepared statement recovery replay failed.`, its standard
 `cause` is the replay error, and its `infrastructureError` and
 `admissionFingerprint` fields identify the failed recovery. An absent or unexpected

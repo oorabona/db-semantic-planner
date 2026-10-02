@@ -168,7 +168,7 @@ async function main() {
 	);
 	const { plan } = await import('@dbsp/core');
 	const { compile: compileNql } = await import('@dbsp/nql');
-	const { createPgsqlCompileOnlyAdapter } = await import(
+	const { createPgCompileOnlyAdapter } = await import(
 		'@dbsp/adapter-pgsql'
 	);
 
@@ -192,7 +192,7 @@ async function main() {
 	}
 	console.log('');
 
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 
 	let passed = 0;
 	let failed = 0;

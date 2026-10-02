@@ -5,7 +5,7 @@ import { compiledQueryFromProjection } from '@dbsp/types/adapter-sdk';
 import { markNqlTrustedRelationFilter } from '@dbsp/types/internal';
 import type { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
-import { createPgsqlAdapter } from '../pgsql-adapter.js';
+import { createPgAdapter } from '../pgsql-adapter.js';
 import { stringMutationOrm } from '../test-compat/issue-441.js';
 
 const ctx = {
@@ -229,9 +229,9 @@ describe('bigint js read conversion rules', () => {
 	});
 });
 
-describe('PgsqlAdapter bigint js result conversion', () => {
+describe('PgAdapter bigint js result conversion', () => {
 	it('converts only keys present in compiled column metadata', async () => {
-		const adapter = createPgsqlAdapter(
+		const adapter = createPgAdapter(
 			makePool([
 				{
 					sequence: '9007199254740993',
@@ -277,7 +277,7 @@ describe('PgsqlAdapter bigint js result conversion', () => {
 	});
 
 	it('uses provenance instead of column-name lookup', async () => {
-		const adapter = createPgsqlAdapter(
+		const adapter = createPgAdapter(
 			makePool([{ id: '550e8400-e29b-41d4-a716-446655440000', metricId: '7' }]),
 		);
 
@@ -298,7 +298,7 @@ describe('PgsqlAdapter bigint js result conversion', () => {
 	});
 
 	it('throws RangeError for js:number overflow at the adapter boundary', async () => {
-		const adapter = createPgsqlAdapter(
+		const adapter = createPgAdapter(
 			makePool([{ safeSequence: '9007199254740992' }]),
 		);
 
@@ -319,7 +319,7 @@ describe('PgsqlAdapter bigint js result conversion', () => {
 	});
 
 	it('converts fluent mutation RETURNING rows by threading the builder model', async () => {
-		const adapter = createPgsqlAdapter(
+		const adapter = createPgAdapter(
 			makePool([{ sequence: '9007199254740993' }]),
 		);
 		const orm = stringMutationOrm(
@@ -336,7 +336,7 @@ describe('PgsqlAdapter bigint js result conversion', () => {
 	});
 
 	it('converts subquery include rows by carrying include column metadata', async () => {
-		const adapter = createPgsqlAdapter(
+		const adapter = createPgAdapter(
 			makePool([{ id: 'metric-1', eventId: 'event-1', bigCount: '7' }]),
 			{ model: conversionSchema.model },
 		);
@@ -359,7 +359,7 @@ describe('PgsqlAdapter bigint js result conversion', () => {
 	});
 
 	it('converts NQL binding-wrapper final rows by preserving leaf metadata', async () => {
-		const adapter = createPgsqlAdapter(
+		const adapter = createPgAdapter(
 			makePool([{ sequence: '9007199254740993' }]),
 			{ model: conversionSchema.model },
 		);
@@ -394,7 +394,7 @@ describe('PgsqlAdapter bigint js result conversion', () => {
 	});
 
 	it('converts runtime NQL binding-final rows from declared outputs', async () => {
-		const adapter = createPgsqlAdapter(
+		const adapter = createPgAdapter(
 			makePool([{ sequence: '9007199254740993' }]),
 			{ model: conversionSchema.model },
 		);
@@ -440,7 +440,7 @@ describe('PgsqlAdapter bigint js result conversion', () => {
 	});
 
 	it('casts mixed declared runtime binding scalars while converting only js bigint outputs', async () => {
-		const adapter = createPgsqlAdapter(
+		const adapter = createPgAdapter(
 			makePool([{ sequence: '9007199254740993', label: 'release' }]),
 			{ model: conversionSchema.model },
 		);
@@ -501,7 +501,7 @@ describe('PgsqlAdapter bigint js result conversion', () => {
 	});
 
 	it('keeps unproven runtime NQL binding outputs metadata-free', async () => {
-		const adapter = createPgsqlAdapter(
+		const adapter = createPgAdapter(
 			makePool([{ sequence: '9007199254740993' }]),
 			{ model: conversionSchema.model },
 		);
@@ -559,7 +559,7 @@ post_author_accounts | select accountNumber, safeAccountNumber, stringAccountNum
 		if (outputSchema === undefined) {
 			throw new Error('missing post_author_accounts output schema');
 		}
-		const adapter = createPgsqlAdapter(
+		const adapter = createPgAdapter(
 			makePool([
 				{
 					accountNumber: '9007199254740993',
@@ -643,7 +643,7 @@ post_author_accounts | select accountNumber, safeAccountNumber, stringAccountNum
 		if (outputSchema === undefined) {
 			throw new Error('missing post_author_accounts output schema');
 		}
-		const adapter = createPgsqlAdapter(
+		const adapter = createPgAdapter(
 			makePool([
 				{
 					accountNumber: '9007199254740993',
@@ -722,7 +722,7 @@ post_author_accounts | select accountNumber, safeAccountNumber, stringAccountNum
 			| select author.profile.accountNumber as profileAccountNumber, author.profile.safeAccountNumber as profileSafeAccountNumber, author.profile.stringAccountNumber as profileStringAccountNumber
 			| bind profile_accounts
 profile_accounts | select profileAccountNumber, profileSafeAccountNumber, profileStringAccountNumber`);
-		const adapter = createPgsqlAdapter(
+		const adapter = createPgAdapter(
 			makePool([
 				{
 					profileAccountNumber: '9007199254740995',
@@ -802,7 +802,7 @@ profile_accounts | select profileAccountNumber, profileSafeAccountNumber, profil
 			| select posts.viewCount as postViewCount, posts.safeViewCount as postSafeViewCount, posts.stringViewCount as postStringViewCount
 			| bind user_post_counts
 user_post_counts | select postViewCount, postSafeViewCount, postStringViewCount`);
-		const adapter = createPgsqlAdapter(
+		const adapter = createPgAdapter(
 			makePool([
 				{
 					postViewCount: ['9007199254740997'],
@@ -948,7 +948,7 @@ user_post_counts | select postViewCount, postSafeViewCount, postStringViewCount`
 				select: { type: 'fields', fields: ['tagScores'] },
 			},
 		};
-		const adapter = createPgsqlAdapter(
+		const adapter = createPgAdapter(
 			makePool([{ tagScores: ['9007199254740999'] }]),
 			{ model: relationConversionSchema.model },
 		);
@@ -982,7 +982,7 @@ user_post_counts | select postViewCount, postSafeViewCount, postStringViewCount`
 	});
 
 	it('converts rows from a WITH body that reads an NQL binding', async () => {
-		const adapter = createPgsqlAdapter(
+		const adapter = createPgAdapter(
 			makePool([{ sequence: '9007199254740993' }]),
 			{ model: conversionSchema.model },
 		);
@@ -1025,7 +1025,7 @@ user_post_counts | select postViewCount, postSafeViewCount, postStringViewCount`
 	});
 
 	it('does not convert recursive depth tracking when its alias collides with a js column', async () => {
-		const adapter = createPgsqlAdapter(
+		const adapter = createPgAdapter(
 			makePool([{ id: 'event-1', sequence: 1 }]),
 			{ model: conversionSchema.model },
 		);
@@ -1038,7 +1038,7 @@ user_post_counts | select postViewCount, postSafeViewCount, postStringViewCount`
 	});
 
 	it('does not convert recursive path tracking when its alias collides with a js column', async () => {
-		const adapter = createPgsqlAdapter(
+		const adapter = createPgAdapter(
 			makePool([{ id: 'event-1', sequence: ['event-1'] }]),
 			{ model: conversionSchema.model },
 		);
@@ -1051,7 +1051,7 @@ user_post_counts | select postViewCount, postSafeViewCount, postStringViewCount`
 	});
 
 	it('converts normal recursive js columns and leaves non-colliding tracking aliases raw', async () => {
-		const adapter = createPgsqlAdapter(
+		const adapter = createPgAdapter(
 			makePool([
 				{
 					id: 'event-1',
@@ -1088,7 +1088,7 @@ user_post_counts | select postViewCount, postSafeViewCount, postStringViewCount`
 	});
 
 	it('converts recursive js columns without tracking collisions', async () => {
-		const adapter = createPgsqlAdapter(
+		const adapter = createPgAdapter(
 			makePool([{ id: 'event-1', sequence: '9007199254740993' }]),
 			{ model: conversionSchema.model },
 		);
@@ -1137,7 +1137,7 @@ user_post_counts | select postViewCount, postSafeViewCount, postStringViewCount`
 				},
 			},
 		};
-		const adapter = createPgsqlAdapter(
+		const adapter = createPgAdapter(
 			makePool([
 				{ id: 'node-1', display_name: 'Root', total_count: '9007199254740993' },
 			]),
@@ -1156,7 +1156,7 @@ user_post_counts | select postViewCount, postSafeViewCount, postStringViewCount`
 	});
 
 	it('converts fluent withCte outer rows by threading the ORM model', async () => {
-		const adapter = createPgsqlAdapter(
+		const adapter = createPgAdapter(
 			makePool([{ sequence: '9007199254740993' }]),
 		);
 		const orm = createOrm({ model: conversionSchema.model, adapter });
@@ -1171,7 +1171,7 @@ user_post_counts | select postViewCount, postSafeViewCount, postStringViewCount`
 	});
 
 	it('converts ORM stream rows by preserving compiled metadata into cursor fetches', async () => {
-		const adapter = createPgsqlAdapter(
+		const adapter = createPgAdapter(
 			makeStreamingPool([{ sequence: '9007199254740993' }]),
 		);
 		const orm = createOrm({ model: conversionSchema.model, adapter });

@@ -2,7 +2,7 @@ import { canonicalJsonDigest } from '@dbsp/core';
 import type { DbCasing, IndexIR, ModelIR, TableIR } from '@dbsp/types';
 import type { Pool, PoolClient } from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createPgsqlGeneratedManagedStep } from '../ddl/managed-step-manifest.js';
+import { createPgGeneratedManagedStep } from '../ddl/managed-step-manifest.js';
 import { compareSchemata, type SchemaChange } from '../ddl/schema-diff.js';
 import { getNamingPluginForDbCasing } from '../naming-plugin.js';
 import * as physicalModel from '../physical-model/index.js';
@@ -98,7 +98,7 @@ function forward(fn: unknown, args: readonly unknown[]): unknown {
 
 vi.mock('../ddl/index.js', async (importOriginal) => ({
 	...(await importOriginal<typeof import('../ddl/index.js')>()),
-	createPgsqlGeneratedManagedStep: (...args: unknown[]) =>
+	createPgGeneratedManagedStep: (...args: unknown[]) =>
 		forward(mocks.createStep, args),
 }));
 
@@ -109,7 +109,7 @@ vi.mock('../ddl/migration-sql.js', async (importOriginal) => ({
 
 vi.mock('../ddl/live-diff.js', async (importOriginal) => ({
 	...(await importOriginal<typeof import('../ddl/live-diff.js')>()),
-	comparePgsqlDeclaredAdoptionSchema: async (...args: unknown[]) => {
+	comparePgDeclaredAdoptionSchema: async (...args: unknown[]) => {
 		const input = args[0] as {
 			readonly model: ModelIR;
 			readonly schema: string;
@@ -202,7 +202,7 @@ vi.mock('../ddl/live-diff.js', async (importOriginal) => ({
 	},
 }));
 vi.mock('../pgsql-adapter.js', () => ({
-	createPgsqlAdapter: () => mocks.adapter,
+	createPgAdapter: () => mocks.adapter,
 }));
 vi.mock('./generator-execution.js', () => ({
 	executeGeneratorPlan: (...args: unknown[]) => forward(mocks.execute, args),
@@ -1974,7 +1974,7 @@ describe('convergePg refusal boundary', () => {
 			meta: { index: created.indexes[0] },
 		};
 		mocks.compare.mockResolvedValue({ changes: [createTable, createIndex] });
-		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+		mocks.createStep.mockImplementation(createPgGeneratedManagedStep);
 		mocks.identity.mockImplementation(
 			async (_client: unknown, address: { readonly name?: string }) =>
 				address.name === adopted.name ? { catalogueIdentity } : undefined,
@@ -3560,7 +3560,7 @@ describe('convergePg refusal boundary', () => {
 		mocks.compare.mockResolvedValue({
 			changes: [freshSingleColumnFkChange(overrides)],
 		});
-		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+		mocks.createStep.mockImplementation(createPgGeneratedManagedStep);
 
 		await expect(convergePg(poolFor(), emptyModel())).resolves.toMatchObject({
 			kind: 'applied',
@@ -3588,7 +3588,7 @@ describe('convergePg refusal boundary', () => {
 				],
 			});
 
-			mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+			mocks.createStep.mockImplementation(createPgGeneratedManagedStep);
 
 			await expect(convergePg(poolFor(), emptyModel())).resolves.toMatchObject({
 				kind: 'applied',
@@ -3624,7 +3624,7 @@ describe('convergePg refusal boundary', () => {
 		mocks.compare.mockResolvedValue({
 			changes: [createTableWithForeignKey('posts', ['author_id', 'tenant_id'])],
 		});
-		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+		mocks.createStep.mockImplementation(createPgGeneratedManagedStep);
 
 		await expect(convergePg(poolFor(), emptyModel())).resolves.toMatchObject({
 			kind: 'applied',
@@ -3645,7 +3645,7 @@ describe('convergePg refusal boundary', () => {
 				),
 			],
 		});
-		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+		mocks.createStep.mockImplementation(createPgGeneratedManagedStep);
 
 		await expect(convergePg(poolFor(), emptyModel())).resolves.toMatchObject({
 			kind: 'applied',
@@ -3680,7 +3680,7 @@ describe('convergePg refusal boundary', () => {
 			column: undefined,
 		};
 		mocks.compare.mockResolvedValue({ changes: [sequenceChange] });
-		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+		mocks.createStep.mockImplementation(createPgGeneratedManagedStep);
 
 		await expect(
 			convergePg(poolFor(), modelWithSequences(['orderNumber']), {
@@ -3732,7 +3732,7 @@ describe('convergePg refusal boundary', () => {
 				column: undefined,
 			};
 			mocks.compare.mockResolvedValue({ changes: [sequenceChange] });
-			mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+			mocks.createStep.mockImplementation(createPgGeneratedManagedStep);
 
 			await expect(
 				convergePg(poolFor(), modelWithSequences([name]), { dbCasing }),
@@ -3819,7 +3819,7 @@ describe('convergePg refusal boundary', () => {
 			meta: { column: { name: 'email', type: 'string', nullable: true } },
 		};
 		mocks.compare.mockResolvedValue({ changes: [generatedChange] });
-		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+		mocks.createStep.mockImplementation(createPgGeneratedManagedStep);
 		mocks.identity.mockResolvedValue({
 			catalogueIdentity: {
 				engine: 'postgresql',
@@ -4114,7 +4114,7 @@ describe('convergePg refusal boundary', () => {
 			},
 		];
 		mocks.compare.mockResolvedValue({ changes });
-		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+		mocks.createStep.mockImplementation(createPgGeneratedManagedStep);
 
 		await expect(convergePg(poolFor(), emptyModel())).resolves.toMatchObject({
 			kind: 'applied',
@@ -4211,7 +4211,7 @@ describe('convergePg refusal boundary', () => {
 			},
 		];
 		mocks.compare.mockResolvedValue({ changes });
-		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+		mocks.createStep.mockImplementation(createPgGeneratedManagedStep);
 
 		await expect(convergePg(poolFor(), emptyModel())).resolves.toEqual({
 			kind: 'applied',
@@ -4252,7 +4252,7 @@ describe('convergePg refusal boundary', () => {
 				primaryKey: ['tenant_id', 'external_id'],
 			}),
 		});
-		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+		mocks.createStep.mockImplementation(createPgGeneratedManagedStep);
 
 		await expect(convergePg(poolFor(), emptyModel())).resolves.toMatchObject({
 			kind: 'applied',
@@ -4269,7 +4269,7 @@ describe('convergePg refusal boundary', () => {
 				},
 			}),
 		});
-		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+		mocks.createStep.mockImplementation(createPgGeneratedManagedStep);
 
 		await expect(convergePg(poolFor(), emptyModel())).resolves.toMatchObject({
 			kind: 'applied',
@@ -4392,7 +4392,7 @@ describe('convergePg refusal boundary', () => {
 				},
 			],
 		});
-		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+		mocks.createStep.mockImplementation(createPgGeneratedManagedStep);
 
 		await expect(convergePg(poolFor(), emptyModel())).resolves.toMatchObject({
 			kind: 'applied',
@@ -4583,7 +4583,7 @@ describe('convergePg refusal boundary', () => {
 			},
 		];
 		mocks.compare.mockResolvedValue({ changes });
-		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+		mocks.createStep.mockImplementation(createPgGeneratedManagedStep);
 
 		await expect(convergePg(poolFor(), emptyModel())).resolves.toMatchObject({
 			kind: 'applied',
@@ -4722,7 +4722,7 @@ describe('convergePg refusal boundary', () => {
 			meta: { column: { name: 'email', type: 'integer', nullable: true } },
 		};
 		mocks.compare.mockResolvedValue({ changes: [addColumn, createTable] });
-		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+		mocks.createStep.mockImplementation(createPgGeneratedManagedStep);
 		await expect(convergePg(poolFor(), emptyModel())).resolves.toMatchObject({
 			kind: 'applied',
 		});

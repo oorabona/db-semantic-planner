@@ -1,7 +1,7 @@
 import { fork } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { createPgsqlAdapter, PgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter, PgAdapter } from '@dbsp/adapter-pgsql';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import { Pool, type PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -115,22 +115,22 @@ function expectNamedReplayThenUnnamed(
 }
 
 async function preparedCount(
-	executor: PoolClient | PgsqlAdapter,
+	executor: PoolClient | PgAdapter,
 	sql?: string,
 ): Promise<number> {
 	const statement = `SELECT count(*)::text AS count FROM pg_prepared_statements
 		 WHERE name LIKE 'dbsp_ps_%'${sql === undefined ? '' : ' AND statement = $1'}`;
 	const parameters = sql === undefined ? [] : [sql];
 	const rows =
-		executor instanceof PgsqlAdapter
+		executor instanceof PgAdapter
 			? await executor.executeRaw<{ count: string }>(statement, parameters)
 			: (await executor.query<{ count: string }>(statement, parameters)).rows;
 	return Number(rows[0]?.count ?? '0');
 }
 
-function requirePgsqlAdapter(adapter: unknown): PgsqlAdapter {
-	if (!(adapter instanceof PgsqlAdapter)) {
-		throw new TypeError('Expected a PgsqlAdapter pinned connection.');
+function requirePgsqlAdapter(adapter: unknown): PgAdapter {
+	if (!(adapter instanceof PgAdapter)) {
+		throw new TypeError('Expected a PgAdapter pinned connection.');
 	}
 	return adapter;
 }
@@ -167,7 +167,7 @@ async function expectPoolOwnedScopeToReplaceQuarantinedClient(
 ): Promise<void> {
 	const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
 	try {
-		const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+		const adapter = createPgAdapter(pool, { preparedStatements: true });
 		const sql = 'SELECT pg_backend_pid()::int AS pid, $1::int AS value';
 		const name = `dbsp_ps_${createHash('sha256')
 			.update(sql)
@@ -242,7 +242,7 @@ describe('adapter prepared statements', () => {
 	it('leaves no server-side statements when disabled', async () => {
 		const { client, close } = await getIsolatedClient();
 		try {
-			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+			const adapter = createPgAdapter(client, { borrowedClient: true });
 			const query = compiled<{ value: number }>('SELECT $1::int AS value', [1]);
 
 			await expect(adapter.execute(query)).resolves.toEqual([{ value: 1 }]);
@@ -256,7 +256,7 @@ describe('adapter prepared statements', () => {
 	it('prepares repeated compiled reads and RETURNING mutations once per connection', async () => {
 		const { client, close } = await getIsolatedClient();
 		try {
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				preparedStatements: true,
 			});
@@ -284,7 +284,7 @@ describe('adapter prepared statements', () => {
 	it('never prepares raw SQL, DDL, or multi-command raw SQL', async () => {
 		const { client, close } = await getIsolatedClient();
 		try {
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				preparedStatements: true,
 			});
@@ -304,7 +304,7 @@ describe('adapter prepared statements', () => {
 	it('leaves cap plus one unnamed', async () => {
 		const { client, close } = await getIsolatedClient();
 		try {
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				preparedStatements: { maxStatements: 1 },
 			});
@@ -328,7 +328,7 @@ describe('adapter prepared statements', () => {
 	it('frees failed Parse reservations so a later hot query can prepare', async () => {
 		const { client, close } = await getIsolatedClient();
 		try {
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				preparedStatements: { maxStatements: 2 },
 			});
@@ -364,7 +364,7 @@ describe('adapter prepared statements', () => {
 			max: 1,
 		});
 		try {
-			const poolAdapter = createPgsqlAdapter(pool, {
+			const poolAdapter = createPgAdapter(pool, {
 				preparedStatements: true,
 			});
 			const poolSql = 'SELECT $1::int AS value';
@@ -379,7 +379,7 @@ describe('adapter prepared statements', () => {
 
 			const client = await pool.connect();
 			try {
-				const clientAdapter = createPgsqlAdapter(client, {
+				const clientAdapter = createPgAdapter(client, {
 					borrowedClient: true,
 					preparedStatements: true,
 				});
@@ -405,7 +405,7 @@ describe('adapter prepared statements', () => {
 			max: 1,
 		});
 		try {
-			const adapter = createPgsqlAdapter(pool, {
+			const adapter = createPgAdapter(pool, {
 				preparedStatements: true,
 				replayInvalidatedPlans: true,
 			});
@@ -440,7 +440,7 @@ describe('adapter prepared statements', () => {
 			max: 1,
 		});
 		try {
-			const adapter = createPgsqlAdapter(pool, {
+			const adapter = createPgAdapter(pool, {
 				preparedStatements: true,
 			});
 			await expect(
@@ -476,7 +476,7 @@ describe('adapter prepared statements', () => {
 		let transactionOpen = false;
 		let queuedBegin: Promise<unknown> | undefined;
 		try {
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				preparedStatements: true,
 			});
@@ -532,7 +532,7 @@ describe('adapter prepared statements', () => {
 	it('rejects the invalidated call but quarantines subsequent execution in a caller-owned transaction', async () => {
 		const { client, close } = await getIsolatedClient();
 		try {
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				preparedStatements: true,
 			});
@@ -580,7 +580,7 @@ describe('adapter prepared statements', () => {
 		async (reset) => {
 			const { client, close } = await getIsolatedClient();
 			try {
-				const adapter = createPgsqlAdapter(client, {
+				const adapter = createPgAdapter(client, {
 					borrowedClient: true,
 					preparedStatements: true,
 				});
@@ -607,7 +607,7 @@ describe('adapter prepared statements', () => {
 	it('runs every admitted SQL unnamed after one verified client-wide reset failure', async () => {
 		const { client, close } = await getIsolatedClient();
 		try {
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				preparedStatements: true,
 			});
@@ -642,7 +642,7 @@ describe('adapter prepared statements', () => {
 		async (code) => {
 			const { client, close } = await getIsolatedClient();
 			try {
-				const adapter = createPgsqlAdapter(client, {
+				const adapter = createPgAdapter(client, {
 					borrowedClient: true,
 					preparedStatements: true,
 				});
@@ -697,7 +697,7 @@ describe('adapter prepared statements', () => {
 			max: 1,
 		});
 		try {
-			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const adapter = createPgAdapter(pool, { preparedStatements: true });
 			const sequence = `"${SCHEMA}".nested_missing_statement_sequence`;
 			const fn = `"${SCHEMA}".nextval_then_missing_statement`;
 			const sql = `SELECT ${fn}($1::boolean) AS value`;
@@ -744,7 +744,7 @@ describe('adapter prepared statements', () => {
 	it('quarantines a duplicate external prepared statement name on its client', async () => {
 		const { client, close } = await getIsolatedClient();
 		try {
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				preparedStatements: true,
 			});
@@ -774,7 +774,7 @@ describe('adapter prepared statements', () => {
 		try {
 			first = await pool.connect();
 			second = await pool.connect();
-			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const adapter = createPgAdapter(pool, { preparedStatements: true });
 			const table = 'prepared_statements_client_local';
 			const sql = `SELECT * FROM ${table} WHERE id = $1`;
 
@@ -826,7 +826,7 @@ describe('adapter prepared statements', () => {
 			max: 1,
 		});
 		try {
-			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const adapter = createPgAdapter(pool, { preparedStatements: true });
 			const sql = 'SELECT $1::int AS value';
 			const query = compiled<{ value: number }>(sql, [13]);
 

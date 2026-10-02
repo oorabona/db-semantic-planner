@@ -22,7 +22,7 @@ import {
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { convertWhereCondition } from '../intent-to-decisions.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Helper: compile a full QueryIntent to SQL string (same pattern as
@@ -35,7 +35,7 @@ function compileIntent(
 	const planReport = plan(intent, model, {
 		dialectCapabilities: POSTGRESQL_CAPABILITIES,
 	});
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	const result = adapter.compile(planReport, { model });
 	return { sql: normalizeSQL(result.sql), params: result.parameters };
 }
@@ -60,7 +60,7 @@ const testSchema = schema({
 });
 
 function buildOrm() {
-	const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+	const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 	return createOrm({ model: testSchema.model, adapter });
 }
 

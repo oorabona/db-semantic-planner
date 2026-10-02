@@ -36,7 +36,7 @@ Semantic query planning for databases - an intent-first approach that transforms
 ┌─────────────────────────────────────────────────────────────────┐
 │                    packages/adapter-pgsql                       │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │  Compiler   │  │ PgsqlAdapter│  │  PostgreSQL-native       │  │
+│  │  Compiler   │  │ PgAdapter│  │  PostgreSQL-native       │  │
 │  │  (SQL gen)  │  │  (Engine)   │  │  (pg Pool)              │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
 │                                                                 │
@@ -48,12 +48,12 @@ Semantic query planning for databases - an intent-first approach that transforms
 
 ```typescript
 import { createOrm, eq } from '@dbsp/core';
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 
 // Create ORM with adapter injection
 const orm = createOrm({
   schema: db,
-  adapter: createPgsqlAdapter(pgPool)
+  adapter: createPgAdapter(pgPool)
 });
 
 // Query with the concise table-name API
@@ -113,7 +113,7 @@ dependency-free — `core/src/dx/nql.ts` imports `@dbsp/nql`, and both it and `n
 | Scope | Package | Description | Status |
 |-------|---------|-------------|--------|
 | `core` | `packages/core` | Schema, Query AST, Planner, DX layer, Adapter interface | Complete |
-| `adapter` | `packages/adapter-pgsql` | SQL compiler, PgsqlAdapter, PostgreSQL-native | Complete |
+| `adapter` | `packages/adapter-pgsql` | SQL compiler, PgAdapter, PostgreSQL-native | Complete |
 
 ## Tech Stack
 
@@ -188,9 +188,9 @@ For CLI/tooling that needs SQL compilation without a database connection:
 
 ```typescript
 import { createOrm, eq } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
-const adapter = createPgsqlCompileOnlyAdapter();
+const adapter = createPgCompileOnlyAdapter();
 const orm = createOrm({ schema: db, adapter });
 const { sql, params } = orm.select('users').where(eq('active', true)).dump();
 // sql, params — no Pool needed

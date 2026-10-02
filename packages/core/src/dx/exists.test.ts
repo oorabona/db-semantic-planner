@@ -3,7 +3,7 @@
  * Acceptance criteria A1-A9.
  */
 
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { describe, expect, it, vi } from 'vitest';
 import type { Adapter, Dump } from '../adapter.js';
 import { eq } from './filters.js';
@@ -85,7 +85,7 @@ function createSpyAdapter(executeResult: unknown[] = []) {
  * stripping logic and must be proven fixed independently).
  */
 function createHookProbeAdapter(executeResult: unknown[] = []) {
-	const real = createPgsqlCompileOnlyAdapter();
+	const real = createPgCompileOnlyAdapter();
 	// Capture the genuine compile BEFORE shadowing it, so the spy delegates to
 	// the real compiler (real SQL) without recursing into itself.
 	const realCompile = real.compile.bind(real);
@@ -132,7 +132,7 @@ function createHookProbeAdapter(executeResult: unknown[] = []) {
  * stays the real implementation; only capability negotiation is overridden.
  */
 function createRecursiveCapabilityGuardAdapter() {
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	const original = adapter.dialectCapabilities;
 	Object.defineProperty(adapter, 'dialectCapabilities', {
 		get: () => ({ ...original, supportsRecursiveCTE: false }),
@@ -334,7 +334,7 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 		} as never);
 
 		it('keeps the JOIN + its where for an inner-join include (full SQL, the #230 repro)', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const orm = createOrm({ adapter, schema: testSchema });
 
 			const dump = orm
@@ -353,7 +353,7 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 		});
 
 		it('keeps the LEFT JOIN + its where for a left-join include (also filters — was wrongly dropped by the inner-only design)', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const orm = createOrm({ adapter, schema: testSchema });
 
 			const dump = orm
@@ -374,7 +374,7 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 		});
 
 		it('keeps a to-many LEFT JOIN under offset() so row multiplicity stays correct', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const orm = createOrm({ adapter, schema: testSchema });
 
 			const dump = orm
@@ -394,7 +394,7 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 		});
 
 		it('preserves an explicit .limit(0) — an empty result set makes .exists() false, never a spurious true (any positive limit is capped to 1)', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const orm = createOrm({ adapter, schema: testSchema });
 
 			// .limit(0) means "no rows": EXISTS must be over an empty set, so the
@@ -414,7 +414,7 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 		});
 
 		it('keeps an inner-join CHAIN: both JOINs appear for a 2-hop inner-join include', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const orm = createOrm({ adapter, schema: nestedSchema });
 
 			// Dot-notation propagates join:'inner' to every intermediate hop
@@ -435,7 +435,7 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 		});
 
 		it('keeps a recursive-flagged self-referential include under exists — its CTE + LEFT JOIN survive existsWrap (a to-many join multiplies root rows, so pruning it would change offset/groupBy/having results)', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const orm = createOrm({ adapter, schema: categorySchema });
 
 			// existsWrap only swaps the target list for `1`; the WITH cte + LEFT
@@ -485,7 +485,7 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 			// `.include('ancestors')` resolves to a CTE strategy even though the
 			// include entry has no `recursive` field. Its `WITH ... LEFT JOIN`
 			// is a FROM join that rides along under existsWrap.
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const orm = createOrm({ adapter, schema: categorySchema });
 
 			const ancestorsDump = orm
@@ -515,7 +515,7 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 			// for a dotted path — so the `recursive` flag still reaches the
 			// (non-self) leaf relation's intent, and its explicit join:'inner' +
 			// where is a real FROM filter that rides along under existsWrap.
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const orm = createOrm({ adapter, schema: nestedSchema });
 
 			const dump = orm
@@ -541,7 +541,7 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 			// processInclude), so the include compiles to `WITH ... LEFT JOIN cte`
 			// — a FROM join that survives existsWrap. Cover BOTH the include-level
 			// `recursive` flag AND a relation that is recursive on its own.
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const orm = createOrm({ adapter, schema: categorySchema });
 
 			// (a) include-level `recursive` flag + explicit join on the same entry
@@ -598,7 +598,7 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 		});
 
 		it('exists() and existsDump() refuse a default json_agg include where before target-list stripping (#230)', async () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const orm = createOrm({ adapter, schema: testSchema });
 			const query = orm
 				.select('posts')
@@ -613,7 +613,7 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 		});
 
 		it('exists() and existsDump() refuse a nested include where under a default json_agg parent (#230)', async () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const orm = createOrm({ adapter, schema: nestedSchema });
 			const query = orm
 				.select('users')
@@ -636,7 +636,7 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 		});
 
 		it('a to-many pure-hydration include (default json_agg) has no effect on the wrapped SQL — its target-list scalar subquery is discarded by existsWrap (A6)', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const orm = createOrm({ adapter, schema: testSchema });
 
 			// Default 'posts' include (no explicit `join`) → json_agg, a
@@ -659,7 +659,7 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 			// like the explicit-join case. Pruning on `include.join === undefined`
 			// (the pre-fix classification) would silently drop this filter and
 			// the OFFSET multiplicity under `.exists()`.
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const orm = createOrm({ adapter, schema: testSchema });
 
 			const dump = orm
@@ -684,7 +684,7 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 			// subquery that existsWrap's `SELECT 1` discards), a LATERAL is a FROM
 			// join whose per-parent rows multiply the root — pruning it would
 			// change what offset/groupBy/having count. existsWrap keeps it.
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const orm = createOrm({ adapter, schema: testSchema });
 
 			const dump = orm

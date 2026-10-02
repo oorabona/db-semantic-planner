@@ -9,7 +9,7 @@
  * SC-06: from() preserves set operations (union)
  */
 
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { normalizeSQL } from '../../sql-utils.js';
 import { ref as expressionRef, op } from '../expressions.js';
@@ -33,7 +33,7 @@ const db = schema({
 	},
 });
 
-const adapter = createPgsqlCompileOnlyAdapter();
+const adapter = createPgCompileOnlyAdapter();
 const orm = createOrm({ schema: db, adapter });
 
 function skipRuntimeTypeCanaries(): boolean {

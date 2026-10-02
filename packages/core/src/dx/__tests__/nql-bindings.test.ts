@@ -5,7 +5,7 @@
  * Regression: https://github.com/oorabona/db-semantic-planner/issues/173
  */
 
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import type {
 	CompiledNqlQuery,
 	ModelIR,
@@ -86,7 +86,7 @@ function createBindingTag(executeResult: readonly unknown[] = []) {
 			postId: ref('posts', { inverse: 'comments' }),
 		},
 	} as const);
-	const adapter = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
+	const adapter = createPgCompileOnlyAdapter() as unknown as Adapter;
 	const compile = vi.spyOn(adapter, 'compile');
 	const execute = vi.fn(async () => [...executeResult]);
 	adapter.execute = executeRows(execute);
@@ -124,7 +124,7 @@ function createBlogBindingTag(executeResult: readonly unknown[] = []) {
 			createdAt: 'timestamp',
 		},
 	} as const);
-	const adapter = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
+	const adapter = createPgCompileOnlyAdapter() as unknown as Adapter;
 	const compile = vi.spyOn(adapter, 'compile');
 	const execute = vi.fn(async () => [...executeResult]);
 	adapter.execute = executeRows(execute);
@@ -210,7 +210,7 @@ function createM2mBindingTag(executeResult: readonly unknown[] = []) {
 		getRelationsTo: db.model.getRelationsTo.bind(db.model),
 		isAmbiguous: db.model.isAmbiguous.bind(db.model),
 	} satisfies ModelIR;
-	const adapter = createPgsqlCompileOnlyAdapter({
+	const adapter = createPgCompileOnlyAdapter({
 		model,
 		dbCasing: 'snake_case',
 	}) as unknown as Adapter;
@@ -250,7 +250,7 @@ function createMutationBindingTag(
 			embedding2: { type: 'jsonb', dbType: 'vector' },
 		},
 	} as const);
-	const adapter = createPgsqlCompileOnlyAdapter({
+	const adapter = createPgCompileOnlyAdapter({
 		model: db.model,
 		...(options.dbCasing !== undefined && { dbCasing: options.dbCasing }),
 	}) as unknown as Adapter;
@@ -847,7 +847,7 @@ b | select id`.dump();
 				getRelationsFrom: db.model.getRelationsFrom.bind(db.model),
 				getRelationsTo: db.model.getRelationsTo.bind(db.model),
 			} as ModelIR;
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				model,
 			}) as unknown as Adapter;
 			const compile = vi.spyOn(adapter, 'compile');
@@ -1209,7 +1209,7 @@ users | select id`.dump();
 					active: 'boolean',
 				},
 			} as const);
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				model: db.model,
 			}) as unknown as Adapter;
 			const compile = vi.spyOn(adapter, 'compile');
@@ -2302,7 +2302,7 @@ posts | where authorId in (touched) | select authorId`.all(),
 		const { nql } = createMutationBindingTag(execute, transaction);
 		transaction.mockImplementation(async (fn) => {
 			events.push('begin');
-			const adapter = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
+			const adapter = createPgCompileOnlyAdapter() as unknown as Adapter;
 			adapter.execute = executeRows(execute);
 			adapter.executeWithMeta = executeWithMetaFromRows(execute);
 			adapter.transaction = transaction as Adapter['transaction'];

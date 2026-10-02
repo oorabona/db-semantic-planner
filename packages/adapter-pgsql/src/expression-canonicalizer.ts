@@ -41,7 +41,7 @@ import {
 	markEngineCanonicalCheck,
 	markEngineCanonicalIndex,
 } from './expression-provenance.js';
-import type { RollbackOnlyPgsqlScope } from './pgsql-adapter.js';
+import type { PgRollbackOnlyScope } from './pgsql-adapter.js';
 import { escapeDiagnosticText, validateCheckExpression } from './validate.js';
 
 export interface CheckConstraintCanonicalizationWarning {
@@ -185,7 +185,7 @@ export interface RenderedOwnedTableCheck {
 
 /** Run owned-CHECK rendering inside an adapter-created rollback-only scope. */
 export function renderOwnedTableChecksInScratchScope(
-	adapter: RollbackOnlyPgsqlScope,
+	adapter: PgRollbackOnlyScope,
 	request: {
 		readonly schema: string;
 		readonly physicalTable: string;
@@ -198,7 +198,7 @@ export function renderOwnedTableChecksInScratchScope(
 
 /** Mint canonicalization provenance from the adapter's rollback-only scope. */
 function canonicalizationScope(
-	adapter: RollbackOnlyPgsqlScope,
+	adapter: PgRollbackOnlyScope,
 ): PgsqlCanonicalizationScope {
 	return adapter as unknown as PgsqlCanonicalizationScope;
 }
@@ -526,7 +526,7 @@ export function fallbackToRawExpressionComparison(
  * Canonicalise PostgreSQL CHECK constraint expressions in a desired model.
  */
 export async function canonicalizeCheckConstraints(
-	adapter: RollbackOnlyPgsqlScope,
+	adapter: PgRollbackOnlyScope,
 	desired: ModelIR,
 	dbModel: ModelIR,
 	options?: CanonicalizeCheckConstraintsOptions,
@@ -681,7 +681,7 @@ async function canonicalizeCheckConstraintModels(
  * lease.
  */
 export async function canonicalizeExpressionSurfaces(
-	adapter: RollbackOnlyPgsqlScope,
+	adapter: PgRollbackOnlyScope,
 	desired: ModelIR,
 	dbModel: ModelIR,
 	options?: CanonicalizeExpressionSurfacesOptions,

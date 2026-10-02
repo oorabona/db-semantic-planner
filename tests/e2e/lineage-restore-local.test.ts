@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-	createPgsqlAdapter,
+	createPgAdapter,
 	DBSP_LEDGER_EVENT_TABLE,
 	DBSP_LEDGER_IDENTITY_TABLE,
 	DBSP_LEDGER_MARKER_TABLE,
@@ -94,7 +94,7 @@ async function planEnumAdd(
 				release: async () => undefined,
 			}),
 			loadSchema: async () => {
-				const current = await createPgsqlAdapter(pool, {
+				const current = await createPgAdapter(pool, {
 					schemaName: schema,
 				}).introspect({ schema });
 				return {

@@ -63,15 +63,15 @@ export {
 } from './live-diff.js';
 export {
 	assertDeclarableChangeKind,
-	createPgsqlGeneratedManagedStep,
+	createPgGeneratedManagedStep,
 	type GeneratedPostcondition,
 	generatedPostconditionDigest,
 	generatedPostconditionForChange,
 } from './managed-step-manifest.js';
 export {
-	type ComparePgsqlDatabaseSchemaOptions,
+	type ComparePgDatabaseSchemaOptions,
 	type CompareSchemataOptions,
-	comparePgsqlDatabaseSchema,
+	comparePgDatabaseSchema,
 	compareSchemata,
 	type GenerateDDLOptions,
 	generateDDL,

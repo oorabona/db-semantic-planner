@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { unlink, writeFile } from 'node:fs/promises';
 import {
-	createPgsqlAdapter,
+	createPgAdapter,
 	DBSP_LEDGER_MARKER_TABLE,
 	PG_LEDGER_SHAPE_VERSION,
 	readPgCatalogueIdentity,
@@ -12,7 +12,7 @@ import {
 } from '@dbsp/adapter-pgsql';
 import {
 	appendPgLedgerResolution,
-	comparePgsqlDatabaseSchema,
+	comparePgDatabaseSchema,
 } from '@dbsp/adapter-pgsql/internal';
 import { projectLedgerChain, schema } from '@dbsp/core';
 import {
@@ -866,8 +866,8 @@ describe('unit 13 adoption, release, replacement, and drift (SC-59…62)', {
 			);
 		expect(applied.result).toEqual({ outcome: 'completed' });
 
-		const endState = await comparePgsqlDatabaseSchema(
-			createPgsqlAdapter(pool),
+		const endState = await comparePgDatabaseSchema(
+			createPgAdapter(pool),
 			desired.model,
 			{ schema: schemaName, ignoreUnmanagedExtensions: true },
 		);

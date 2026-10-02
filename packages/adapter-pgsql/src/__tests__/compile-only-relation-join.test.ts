@@ -1,7 +1,7 @@
 /**
  * Regression test: compile-only adapter relation-mode join without constructor model.
  *
- * Before the fix, `createPgsqlCompileOnlyAdapter()` (no options) stored
+ * Before the fix, `createPgCompileOnlyAdapter()` (no options) stored
  * `this.model = undefined`.  The `compileDeps` getter returned `{ model: undefined }`
  * so `compileJoinIntents` threw:
  *   "join('caller'): relation-mode join requires a model for FK resolution."
@@ -13,7 +13,7 @@
 
 import { createOrm, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Minimal schema: calls → caller/callee → symbols → file → files
@@ -47,8 +47,8 @@ function ws(sql: string): string {
 
 describe('compile-only adapter — relation-mode join without constructor model', () => {
 	it('resolves FK from schema model passed via createOrm when adapter has no model in options', () => {
-		// KEY: no model option passed to createPgsqlCompileOnlyAdapter()
-		const adapter = createPgsqlCompileOnlyAdapter();
+		// KEY: no model option passed to createPgCompileOnlyAdapter()
+		const adapter = createPgCompileOnlyAdapter();
 		const orm = createOrm({ schema: testSchema, adapter });
 
 		// Before the fix this threw:
@@ -61,7 +61,7 @@ describe('compile-only adapter — relation-mode join without constructor model'
 	});
 
 	it('SQL contains the correct JOIN alias (caller) and FK column (caller_id)', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const orm = createOrm({ schema: testSchema, adapter });
 
 		const dump = orm.select('calls').join('caller').dump();
@@ -73,7 +73,7 @@ describe('compile-only adapter — relation-mode join without constructor model'
 	});
 
 	it('callee join also resolves FK correctly without constructor model', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const orm = createOrm({ schema: testSchema, adapter });
 
 		const dump = orm.select('calls').join('callee').dump();
@@ -86,7 +86,7 @@ describe('compile-only adapter — relation-mode join without constructor model'
 
 	it('adapter with explicit model option still works (regression guard)', () => {
 		// Constructor-time model should still work as before
-		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 		const orm = createOrm({ schema: testSchema, adapter });
 
 		const dump = orm.select('calls').join('caller').dump();
@@ -98,7 +98,7 @@ describe('compile-only adapter — relation-mode join without constructor model'
 		// Verifies that orm.withSchema() works end-to-end when the adapter has no
 		// constructor model: schemaName from withSchema + model from createOrm both
 		// reach the compiler through buildCompileDeps(options).
-		const adapter = createPgsqlCompileOnlyAdapter(); // no model, no schema
+		const adapter = createPgCompileOnlyAdapter(); // no model, no schema
 		const orm = createOrm({ schema: testSchema, adapter });
 
 		const dump = orm
@@ -127,7 +127,7 @@ describe('compile-only adapter — relation-mode join without constructor model'
 			},
 		} as const);
 
-		const adapter = createPgsqlCompileOnlyAdapter({ model: schemaA.model });
+		const adapter = createPgCompileOnlyAdapter({ model: schemaA.model });
 		// createOrm injects testSchema.model into options.model on every compile call
 		const orm = createOrm({ schema: testSchema, adapter });
 

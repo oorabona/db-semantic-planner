@@ -17,7 +17,7 @@
 import { createOrm, exprRef, op, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { whereExpression } from '../test-compat/issue-442.js';
 
 const testSchema = schema({
@@ -32,7 +32,7 @@ const testSchema = schema({
 });
 
 function buildOrm() {
-	const adapter = createPgsqlCompileOnlyAdapter({
+	const adapter = createPgCompileOnlyAdapter({
 		model: testSchema.model,
 	});
 	return createOrm({ model: testSchema.model, adapter });

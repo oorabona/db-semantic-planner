@@ -2,7 +2,7 @@
  * @fileoverview Tests for typed-query-builder (DX-040 Block 4).
  */
 
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { normalizeSQL } from '../sql-utils.js';
 import { eq, gt } from './filters.js';
@@ -45,7 +45,7 @@ describe('DX-040 Block 4: Typed Query Builder', () => {
 		it('from() compiles a table-ref query to SQL and params', () => {
 			const s = createTestSchema();
 			const model = schemaToModelIR(s.definition);
-			const orm = createTypedOrm(model, createPgsqlCompileOnlyAdapter());
+			const orm = createTypedOrm(model, createPgCompileOnlyAdapter());
 			const { users } = s.tables;
 
 			const dump = orm.from(users).where(eq(users.active, true)).dump();
@@ -59,7 +59,7 @@ describe('DX-040 Block 4: Typed Query Builder', () => {
 		it('from() compiles picked columns using table-ref column names', () => {
 			const s = createTestSchema();
 			const model = schemaToModelIR(s.definition);
-			const orm = createTypedOrm(model, createPgsqlCompileOnlyAdapter());
+			const orm = createTypedOrm(model, createPgCompileOnlyAdapter());
 			const { users } = s.tables;
 
 			const dump = orm

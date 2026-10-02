@@ -46,7 +46,7 @@ export interface MockAdapterOptions {
  * Create a mock adapter for testing.
  *
  * All execution methods throw "Not implemented" — use adapter-pgsql for SQL execution tests.
- * Compile methods also throw — use createPgsqlCompileOnlyAdapter() for SQL generation tests.
+ * Compile methods also throw — use createPgCompileOnlyAdapter() for SQL generation tests.
  *
  * The mock adapter's primary purpose is to provide `dialectCapabilities` and
  * `capabilities` for planner strategy selection in core tests.

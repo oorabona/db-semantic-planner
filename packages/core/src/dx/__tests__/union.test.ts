@@ -9,7 +9,7 @@
  * 5. No adapter → ExecutionError on dump() / all()
  */
 
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { describe, expect, it } from 'vitest';
 import { ExecutionError } from '../errors.js';
 import { createOrm } from '../orm.js';
@@ -48,7 +48,7 @@ const orm = createOrm({ schema: testSchema, adapter: createMockAdapter() });
 /** ORM with compile-only adapter (SQL compilation without DB) */
 const compilableOrm = createOrm({
 	schema: testSchema,
-	adapter: createPgsqlCompileOnlyAdapter(),
+	adapter: createPgCompileOnlyAdapter(),
 });
 
 // ---------------------------------------------------------------------------

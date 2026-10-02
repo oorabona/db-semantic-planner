@@ -23,7 +23,7 @@
 import { and, POSTGRESQL_CAPABILITIES, plan, ref, schema } from '@dbsp/core';
 import type { WhereIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Schema: users → posts (via posts.authorId) → comments (via comments.postId)
@@ -48,7 +48,7 @@ const testSchema = schema({
 	},
 } as const);
 
-const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 
 function ws(sql: string): string {
 	return sql.replace(/\s+/g, ' ').trim();
@@ -184,7 +184,7 @@ describe('2. fail-closed guard — declared multi-hop path does not throw', () =
 				entityType: 'text',
 			},
 		} as const);
-		const adapterLocal = createPgsqlCompileOnlyAdapter({
+		const adapterLocal = createPgCompileOnlyAdapter({
 			model: schemaWithAuditLog.model,
 		});
 		const planReport = plan(

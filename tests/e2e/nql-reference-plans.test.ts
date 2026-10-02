@@ -21,7 +21,7 @@ import {
 } from '@dbsp/core';
 import { compile } from '@dbsp/nql';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../../packages/adapter-pgsql/src/pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../../packages/adapter-pgsql/src/pgsql-adapter.js';
 import {
 	compileSetOperation,
 	createLeafCompileFn,
@@ -357,7 +357,7 @@ function compileQuery(
 
 	// Set operations produce ast.setOperation instead of ast.query
 	if (compiled.ast?.setOperation) {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const leafCompileFn = createLeafCompileFn(adapter, schemaObj.model, plan);
 		const result = compileSetOperation(
 			compiled.ast.setOperation,
@@ -368,7 +368,7 @@ function compileQuery(
 
 	// CTE queries (WITH ... AS (...) mainQuery) produce ast.cteQuery
 	if (compiled.ast?.cteQuery) {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 		const result = adapter.compileCteQuery(compiled.ast.cteQuery);
 		return { sql: result.sql, params: result.parameters };
 	}
@@ -383,7 +383,7 @@ function compileQuery(
 		dialectCapabilities: POSTGRESQL_CAPABILITIES,
 	});
 
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	const result = adapter.compile(planReport, { model: schemaObj.model });
 
 	return {
@@ -405,7 +405,7 @@ function compileMutation(
 	}
 
 	const mutation = compiled.ast.mutation;
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	const options = { model: schemaObj.model };
 
 	if (isInsertIntent(mutation)) {

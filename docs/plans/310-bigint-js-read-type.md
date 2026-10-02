@@ -52,7 +52,7 @@ guarantee to `numeric`/`decimal` (also driver-strings) = **#351**.
 | Row-type inference #2 (TableRef path) | duplicate mapper | `packages/core/src/dx/schema-tables-types.ts:118-152` |
 | Compiled query (add `columnMetadata?`) | `CompiledQuery<T>` (`sql`,`parameters`,`__resultType?`) | `packages/types/src/adapter.ts:85` |
 | Compile SELECT (populate provenance from targetList) | `compileSelect` (has AST/targetList, currently discards it) | `adapter-compiler-select.ts:849-852` · compiler.ts:643 (`CompiledResult.ast`) |
-| Top-level read conversion | `PgsqlAdapter.transformResultRows` (execute→transform at :2102-2113) | `pgsql-adapter.ts:2113` |
+| Top-level read conversion | `PgAdapter.transformResultRows` (execute→transform at :2102-2113) | `pgsql-adapter.ts:2113` |
 | JSON-agg include SQL (inject CAST) | `compileJsonAggRecursive` (**has `ctx.model`**) → `jsonAggSubquery` (no model) | `handlers/include/json-agg.ts:67` · `ast-helpers.ts:927` |
 | Include hydration (convert back) | `hydrateJsonAggIncludes` (needs `compileOptions.model` threaded) | `packages/core/src/dx/hydration-utils.ts:22` |
 | Write side (BigInt params already work) | — | no change |

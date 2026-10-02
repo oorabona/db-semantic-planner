@@ -1,4 +1,4 @@
-import { createPgsqlGeneratedManagedStep } from '@dbsp/adapter-pgsql';
+import { createPgGeneratedManagedStep } from '@dbsp/adapter-pgsql';
 import {
 	executeGeneratorPlan,
 	lockPgJournalRun,
@@ -32,7 +32,7 @@ void (async () => {
 	);
 	if (!databaseId)
 		throw new Error('destructive checkpoint child has no database');
-	const step = createPgsqlGeneratedManagedStep({
+	const step = createPgGeneratedManagedStep({
 		change: {
 			kind: 'drop_table',
 			table: rootName,

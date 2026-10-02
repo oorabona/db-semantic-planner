@@ -34,9 +34,9 @@ import {
 	withGeneratedPostconditionSession,
 } from '../ddl/generated-postcondition-verifier.js';
 import { modelForDeclaredAdoption } from '../ddl/live-diff.js';
-import { pgsqlDeclaredSequenceAdoptionDeclaration } from '../ddl/managed-step-manifest.js';
+import { pgDeclaredSequenceAdoptionDeclaration } from '../ddl/managed-step-manifest.js';
 import { compareSchemata } from '../ddl/schema-diff.js';
-import { createPgsqlAdapter } from '../pgsql-adapter.js';
+import { createPgAdapter } from '../pgsql-adapter.js';
 import {
 	executePgDeclaredAdoption,
 	preflightPgDeclaredAdoption,
@@ -146,7 +146,7 @@ async function adoptionShapeMatches(
 	schema: string,
 	shape: TableIR,
 ): Promise<boolean> {
-	const live = await createPgsqlAdapter(pool).introspect({ schema });
+	const live = await createPgAdapter(pool).introspect({ schema });
 	const diff = compareSchemata(modelForDeclaredAdoption(shape), live);
 	return !diff.changes.some((change) => change.table === shape.name);
 }
@@ -689,7 +689,7 @@ export async function executeGeneratorPlan(input: {
 				lifecycle.kind === 'sequence-adoption' &&
 				!isDeepStrictEqual(
 					step.expectedDeclaration,
-					pgsqlDeclaredSequenceAdoptionDeclaration(lifecycle.shape),
+					pgDeclaredSequenceAdoptionDeclaration(lifecycle.shape),
 				)
 			)
 				return {

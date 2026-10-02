@@ -8,7 +8,7 @@ import {
 	schema,
 } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const issue162Schema = schema({
 	files: {
@@ -29,7 +29,7 @@ const issue162Schema = schema({
 });
 
 function buildOrm(dbCasing?: 'snake_case' | 'camelCase' | 'preserve') {
-	const adapter = createPgsqlCompileOnlyAdapter({
+	const adapter = createPgCompileOnlyAdapter({
 		model: issue162Schema.model,
 		...(dbCasing ? { dbCasing } : {}),
 	});

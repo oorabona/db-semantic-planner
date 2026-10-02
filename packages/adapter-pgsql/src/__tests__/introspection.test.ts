@@ -8,7 +8,7 @@ import { createOrm, exists } from '@dbsp/core';
 import type { Pool, QueryResult } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import { type DetectedHierarchy, introspect } from '../introspection.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ============================================================================
 // Mock Pool Factory
@@ -794,7 +794,7 @@ describe('introspect', () => {
 			sourceKey: ['order_id', 'tenant_id'],
 		});
 
-		const adapter = createPgsqlCompileOnlyAdapter({ model: result });
+		const adapter = createPgCompileOnlyAdapter({ model: result });
 		const orm = createOrm({ model: result, adapter });
 		const { sql } = (orm as any)
 			.select('orders')

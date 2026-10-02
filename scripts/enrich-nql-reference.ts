@@ -26,7 +26,7 @@ import {
 	plan,
 } from '@dbsp/core';
 import { compile } from '@dbsp/nql';
-import { createPgsqlCompileOnlyAdapter } from '../packages/adapter-pgsql/src/pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../packages/adapter-pgsql/src/pgsql-adapter.js';
 
 const ROOT_DIR = resolve(import.meta.dirname, '..');
 const DOC_PATH = resolve(ROOT_DIR, 'packages/docs/nql/index.md');
@@ -141,7 +141,7 @@ function compileQuery(
 		dialectCapabilities: POSTGRESQL_CAPABILITIES,
 	});
 
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	const result = adapter.compile(planReport, { model: schemaObj.model });
 
 	return {
@@ -163,7 +163,7 @@ function compileMutation(
 	}
 
 	const mutation = compiled.ast.mutation;
-	const adapter = createPgsqlCompileOnlyAdapter();
+	const adapter = createPgCompileOnlyAdapter();
 	const options = { model: schemaObj.model };
 
 	if (isInsertIntent(mutation)) {

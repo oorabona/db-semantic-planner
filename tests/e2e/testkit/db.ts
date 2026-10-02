@@ -1,13 +1,13 @@
 /**
  * Test Database Utilities
  *
- * Provides pg Pool and PgsqlAdapter for E2E tests.
+ * Provides pg Pool and PgAdapter for E2E tests.
  */
 
 import {
-	createPgsqlAdapter,
+	createPgAdapter,
 	createPgTransitionLessor,
-	type PgsqlAdapter,
+	type PgAdapter,
 } from '@dbsp/adapter-pgsql';
 import type { Adapter } from '@dbsp/core';
 import type { TransitionLessor } from '@dbsp/types';
@@ -24,7 +24,7 @@ const { Pool } = pg;
 let pgPool: pg.Pool | undefined;
 
 // Singleton adapter
-let pgsqlAdapter: PgsqlAdapter<any> | undefined;
+let pgsqlAdapter: PgAdapter<any> | undefined;
 
 // ============================================================================
 // Database Connection
@@ -66,15 +66,15 @@ export async function getTestTransitionLessor(): Promise<TransitionLessor> {
 // ============================================================================
 
 /**
- * Get or create the shared PgsqlAdapter instance.
+ * Get or create the shared PgAdapter instance.
  */
-export async function getPgsqlAdapter(): Promise<PgsqlAdapter<any>> {
+export async function getPgsqlAdapter(): Promise<PgAdapter<any>> {
 	if (pgsqlAdapter) {
 		return pgsqlAdapter;
 	}
 
 	const pool = await getTestPool();
-	pgsqlAdapter = createPgsqlAdapter(pool, {
+	pgsqlAdapter = createPgAdapter(pool, {
 		dbCasing: 'snake_case',
 	});
 	return pgsqlAdapter;
@@ -82,20 +82,20 @@ export async function getPgsqlAdapter(): Promise<PgsqlAdapter<any>> {
 
 /**
  * Get the default test adapter.
- * Returns PgsqlAdapter (sole adapter).
+ * Returns PgAdapter (sole adapter).
  */
 export async function getTestAdapter(): Promise<Adapter<any>> {
 	return getPgsqlAdapter();
 }
 
 /**
- * Create a PgsqlAdapter for a specific schema.
+ * Create a PgAdapter for a specific schema.
  */
 export async function createPgsqlAdapterForSchema(
 	schemaName: string,
-): Promise<PgsqlAdapter<unknown>> {
+): Promise<PgAdapter<unknown>> {
 	const pool = await getTestPool();
-	return createPgsqlAdapter(pool, {
+	return createPgAdapter(pool, {
 		schemaName,
 		dbCasing: 'snake_case',
 	});

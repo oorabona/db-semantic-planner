@@ -123,13 +123,13 @@ Already have a database? Use `dbsp introspect` to generate the schema from your 
 
 ```typescript
 import { createOrm } from '@dbsp/core';
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 import { Pool } from 'pg';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const orm = createOrm({
   schema: db,
-  adapter: createPgsqlAdapter(pool),
+  adapter: createPgAdapter(pool),
 });
 ```
 
@@ -295,7 +295,7 @@ console.log(dump.plan?.warnings);
 `dump()` is safe to call in tests and logging pipelines — no database connection required.
 
 ::: tip Compile-only mode
-You can use `createPgsqlCompileOnlyAdapter()` instead of `createPgsqlAdapter(pool)` to preview SQL without a database connection. Perfect for testing and development.
+You can use `createPgCompileOnlyAdapter()` instead of `createPgAdapter(pool)` to preview SQL without a database connection. Perfect for testing and development.
 :::
 
 ---

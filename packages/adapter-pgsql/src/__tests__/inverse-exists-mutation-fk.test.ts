@@ -6,7 +6,7 @@
 
 import { exists, notExists, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const inverseFkSchema = schema({
 	symbols: {
@@ -28,7 +28,7 @@ const inverseFkSchema = schema({
 });
 
 function buildAdapter() {
-	return createPgsqlCompileOnlyAdapter({ model: inverseFkSchema.model });
+	return createPgCompileOnlyAdapter({ model: inverseFkSchema.model });
 }
 
 function expectInverseCorrelation(sql: string) {
@@ -124,7 +124,7 @@ const compositeFkModel = {
 function buildCompositeFkAdapter() {
 	const relation = compositeFkModel.getRelation('orders.items');
 	expect(relation?.foreignKey).toEqual(['order_id', 'tenant_id']);
-	return createPgsqlCompileOnlyAdapter({ model: compositeFkModel });
+	return createPgCompileOnlyAdapter({ model: compositeFkModel });
 }
 
 function expectCompositeCorrelation(sql: string, sourceAlias = 'orders') {
@@ -147,7 +147,7 @@ function expectCompositeCorrelation(sql: string, sourceAlias = 'orders') {
 }
 
 function compileMutationWhere(
-	adapter: ReturnType<typeof createPgsqlCompileOnlyAdapter>,
+	adapter: ReturnType<typeof createPgCompileOnlyAdapter>,
 	entryPoint: string,
 	table: string,
 	where: unknown,

@@ -16,7 +16,7 @@
 import { and, createOrm, eq, exists, gt, ref, schema } from '@dbsp/core';
 import type { ModelIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Helpers: build a minimal ModelIR with a relation that has NO foreignKey field.
@@ -114,7 +114,7 @@ function makeConventionFkModel(): ModelIR {
 describe('dotted-field EXISTS with convention-FK relation', () => {
 	it('and(eq("posts.title","x"), exists("posts",{where:gt("views",10)})) — both predicates survive', () => {
 		const model = makeConventionFkModel();
-		const adapter = createPgsqlCompileOnlyAdapter({ model });
+		const adapter = createPgCompileOnlyAdapter({ model });
 		// Use createOrm with the convention-FK model.
 		const orm = createOrm({ model, adapter } as any);
 
@@ -147,7 +147,7 @@ describe('dotted-field EXISTS with convention-FK relation', () => {
 
 	it('eq("posts.title","x") alone with convention-FK — compiles without error', () => {
 		const model = makeConventionFkModel();
-		const adapter = createPgsqlCompileOnlyAdapter({ model });
+		const adapter = createPgCompileOnlyAdapter({ model });
 		const orm = createOrm({ model, adapter } as any);
 
 		expect(() => {
@@ -175,7 +175,7 @@ describe('dotted-field EXISTS with explicit-FK relation (regression)', () => {
 	} as const);
 
 	function buildOrm() {
-		const adapter = createPgsqlCompileOnlyAdapter({
+		const adapter = createPgCompileOnlyAdapter({
 			model: testSchema.model,
 		});
 		return createOrm({ model: testSchema.model, adapter });

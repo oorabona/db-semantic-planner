@@ -3,10 +3,10 @@ import type { NormalizedManagedStep } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 
 const generator = vi.hoisted(() => ({
-	comparePgsqlDatabaseSchema: vi.fn(),
-	comparePgsqlDeclaredAdoptionSchema: vi.fn(),
+	comparePgDatabaseSchema: vi.fn(),
+	comparePgDeclaredAdoptionSchema: vi.fn(),
 	createDbConnection: vi.fn(),
-	createPgsqlAdapter: vi.fn(),
+	createPgAdapter: vi.fn(),
 	generateMigrationSQL: vi.fn(),
 	loadSchema: vi.fn(),
 	readPgCatalogueIdentity: vi.fn(),
@@ -14,16 +14,15 @@ const generator = vi.hoisted(() => ({
 
 vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => ({
 	...(await importOriginal<typeof import('@dbsp/adapter-pgsql')>()),
-	comparePgsqlDatabaseSchema: generator.comparePgsqlDatabaseSchema,
-	createPgsqlAdapter: generator.createPgsqlAdapter,
+	comparePgDatabaseSchema: generator.comparePgDatabaseSchema,
+	createPgAdapter: generator.createPgAdapter,
 	generateMigrationSQL: generator.generateMigrationSQL,
 	readPgCatalogueIdentity: generator.readPgCatalogueIdentity,
 }));
 
 vi.mock('@dbsp/adapter-pgsql/internal', async (importOriginal) => ({
 	...(await importOriginal<typeof import('@dbsp/adapter-pgsql/internal')>()),
-	comparePgsqlDeclaredAdoptionSchema:
-		generator.comparePgsqlDeclaredAdoptionSchema,
+	comparePgDeclaredAdoptionSchema: generator.comparePgDeclaredAdoptionSchema,
 }));
 
 vi.mock('../utils/db-utils.js', () => ({
@@ -85,7 +84,7 @@ describe('generated managed-step dependencies', () => {
 			'sequence adoption is available through convergePg / dbsp migrate',
 		);
 		expect(generator.createDbConnection).not.toHaveBeenCalled();
-		expect(generator.comparePgsqlDatabaseSchema).not.toHaveBeenCalled();
+		expect(generator.comparePgDatabaseSchema).not.toHaveBeenCalled();
 	});
 
 	it('refuses a replacement plan with an empty primary key before replacement-create material exists', async () => {
@@ -111,8 +110,8 @@ describe('generated managed-step dependencies', () => {
 			},
 		});
 		generator.createDbConnection.mockResolvedValue({ pool });
-		generator.createPgsqlAdapter.mockReturnValue({});
-		generator.comparePgsqlDatabaseSchema.mockResolvedValue({
+		generator.createPgAdapter.mockReturnValue({});
+		generator.comparePgDatabaseSchema.mockResolvedValue({
 			changes: [],
 			hasDestructive: false,
 			summary: {
@@ -122,7 +121,7 @@ describe('generated managed-step dependencies', () => {
 				constraints: { added: 0, dropped: 0, altered: 0 },
 			},
 		});
-		generator.comparePgsqlDeclaredAdoptionSchema.mockResolvedValue({
+		generator.comparePgDeclaredAdoptionSchema.mockResolvedValue({
 			changes: [],
 		});
 		generator.generateMigrationSQL.mockReturnValue([
@@ -165,8 +164,8 @@ describe('generated managed-step dependencies', () => {
 		];
 		generator.loadSchema.mockResolvedValue({ model: { tables: new Map() } });
 		generator.createDbConnection.mockResolvedValue({ pool });
-		generator.createPgsqlAdapter.mockReturnValue({});
-		generator.comparePgsqlDatabaseSchema.mockResolvedValue({
+		generator.createPgAdapter.mockReturnValue({});
+		generator.comparePgDatabaseSchema.mockResolvedValue({
 			changes: [
 				{
 					kind: 'drop_index',
@@ -230,8 +229,8 @@ describe('generated managed-step dependencies', () => {
 			model: { tables: new Map([[shape.name, shape]]) },
 		});
 		generator.createDbConnection.mockResolvedValue({ pool });
-		generator.createPgsqlAdapter.mockReturnValue({});
-		generator.comparePgsqlDatabaseSchema.mockResolvedValue({
+		generator.createPgAdapter.mockReturnValue({});
+		generator.comparePgDatabaseSchema.mockResolvedValue({
 			changes: [],
 			hasDestructive: false,
 			summary: {
@@ -241,7 +240,7 @@ describe('generated managed-step dependencies', () => {
 				constraints: { added: 0, dropped: 0, altered: 0 },
 			},
 		});
-		generator.comparePgsqlDeclaredAdoptionSchema.mockResolvedValue({
+		generator.comparePgDeclaredAdoptionSchema.mockResolvedValue({
 			changes: [],
 		});
 		generator.readPgCatalogueIdentity.mockResolvedValue({
@@ -335,8 +334,8 @@ describe('generated managed-step dependencies', () => {
 			indexes: [],
 		};
 		generator.createDbConnection.mockResolvedValue({ pool });
-		generator.createPgsqlAdapter.mockReturnValue({});
-		generator.comparePgsqlDatabaseSchema.mockResolvedValue({
+		generator.createPgAdapter.mockReturnValue({});
+		generator.comparePgDatabaseSchema.mockResolvedValue({
 			changes: [],
 			hasDestructive: false,
 			summary: {
@@ -346,7 +345,7 @@ describe('generated managed-step dependencies', () => {
 				constraints: { added: 0, dropped: 0, altered: 0 },
 			},
 		});
-		generator.comparePgsqlDeclaredAdoptionSchema.mockResolvedValue({
+		generator.comparePgDeclaredAdoptionSchema.mockResolvedValue({
 			changes: [],
 		});
 		generator.readPgCatalogueIdentity.mockResolvedValue({
@@ -436,8 +435,8 @@ describe('generated managed-step dependencies', () => {
 			},
 		});
 		generator.createDbConnection.mockResolvedValue({ pool });
-		generator.createPgsqlAdapter.mockReturnValue({});
-		generator.comparePgsqlDatabaseSchema.mockResolvedValue({
+		generator.createPgAdapter.mockReturnValue({});
+		generator.comparePgDatabaseSchema.mockResolvedValue({
 			changes: [
 				{
 					kind: 'add_foreign_key',
@@ -631,8 +630,8 @@ describe('generated managed-step dependencies', () => {
 			dbCasing: 'snake_case',
 		});
 		generator.createDbConnection.mockResolvedValue({ pool });
-		generator.createPgsqlAdapter.mockReturnValue({});
-		generator.comparePgsqlDatabaseSchema.mockResolvedValue({
+		generator.createPgAdapter.mockReturnValue({});
+		generator.comparePgDatabaseSchema.mockResolvedValue({
 			changes: [],
 			hasDestructive: false,
 			summary: {
@@ -642,7 +641,7 @@ describe('generated managed-step dependencies', () => {
 				constraints: { added: 0, dropped: 0, altered: 0 },
 			},
 		});
-		generator.comparePgsqlDeclaredAdoptionSchema.mockResolvedValue({
+		generator.comparePgDeclaredAdoptionSchema.mockResolvedValue({
 			changes: [],
 		});
 		generator.readPgCatalogueIdentity.mockResolvedValue({
@@ -676,7 +675,7 @@ describe('generated managed-step dependencies', () => {
 			lifecycle: { shape: { name: 'legacyOrders' } },
 		});
 
-		generator.comparePgsqlDatabaseSchema.mockResolvedValue({
+		generator.comparePgDatabaseSchema.mockResolvedValue({
 			changes: [],
 			hasDestructive: false,
 			summary: {
@@ -686,7 +685,7 @@ describe('generated managed-step dependencies', () => {
 				constraints: { added: 0, dropped: 0, altered: 0 },
 			},
 		});
-		generator.comparePgsqlDeclaredAdoptionSchema.mockResolvedValue({
+		generator.comparePgDeclaredAdoptionSchema.mockResolvedValue({
 			changes: [{ kind: 'add_column' }],
 		});
 		generator.readPgCatalogueIdentity.mockClear();
@@ -738,8 +737,8 @@ describe('generated managed-step dependencies', () => {
 			},
 		});
 		generator.createDbConnection.mockResolvedValue({ pool });
-		generator.createPgsqlAdapter.mockReturnValue({});
-		generator.comparePgsqlDatabaseSchema.mockResolvedValue({
+		generator.createPgAdapter.mockReturnValue({});
+		generator.comparePgDatabaseSchema.mockResolvedValue({
 			changes: [
 				{
 					kind: 'add_column',
@@ -770,7 +769,7 @@ describe('generated managed-step dependencies', () => {
 				constraints: { added: 0, dropped: 0, altered: 0 },
 			},
 		});
-		generator.comparePgsqlDeclaredAdoptionSchema.mockResolvedValue({
+		generator.comparePgDeclaredAdoptionSchema.mockResolvedValue({
 			changes: [],
 		});
 		generator.generateMigrationSQL.mockReturnValue(['ALTER TABLE']);
@@ -802,7 +801,7 @@ describe('generated managed-step dependencies', () => {
 			expect.objectContaining({ kind: 'add_column', table: 'legacy_orders' }),
 		);
 
-		generator.comparePgsqlDatabaseSchema.mockResolvedValue({
+		generator.comparePgDatabaseSchema.mockResolvedValue({
 			changes: [],
 			hasDestructive: false,
 			summary: {
@@ -812,7 +811,7 @@ describe('generated managed-step dependencies', () => {
 				constraints: { added: 0, dropped: 0, altered: 0 },
 			},
 		});
-		generator.comparePgsqlDeclaredAdoptionSchema.mockResolvedValue({
+		generator.comparePgDeclaredAdoptionSchema.mockResolvedValue({
 			changes: [{ kind: 'add_column' }],
 		});
 		generator.readPgCatalogueIdentity.mockClear();

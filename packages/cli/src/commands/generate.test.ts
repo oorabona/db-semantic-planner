@@ -7,7 +7,7 @@
  * than on a mocked adapter's own bookkeeping.
  */
 
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { schema } from '@dbsp/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -273,7 +273,7 @@ describe('generate: the command options reach the generator', () => {
 			dbCasing: 'snake_case',
 		});
 		const { createPgPhysicalModel } = await import('@dbsp/adapter-pgsql');
-		const expected = createPgsqlCompileOnlyAdapter()
+		const expected = createPgCompileOnlyAdapter()
 			.generateDDL(
 				createPgPhysicalModel({
 					mode: 'logical',

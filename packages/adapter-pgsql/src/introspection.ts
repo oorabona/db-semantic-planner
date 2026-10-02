@@ -251,7 +251,7 @@ function parseExpressionsList(raw: string): readonly string[] {
  * @example
  * ```typescript
  * const model = await introspect(pool);
- * const orm = createOrm({ model, adapter: createPgsqlAdapter(pool) });
+ * const orm = createOrm({ model, adapter: createPgAdapter(pool) });
  * ```
  */
 
@@ -1345,7 +1345,7 @@ function buildSequenceMap(
  * client may be sitting inside a transaction that belongs to its owner, and a
  * catalog query that fails there aborts *their* transaction. Protecting that
  * needs a savepoint, and knowing whether to take one needs the caller to say
- * whose transaction it is — which is what `PgsqlAdapter`'s `borrowedClient`
+ * whose transaction it is — which is what `PgAdapter`'s `borrowedClient`
  * declaration is for. Guessing it from the object's shape is the exact defect
  * this adapter was rewritten to remove.
  *
@@ -1355,7 +1355,7 @@ function buildSequenceMap(
  * adapter's own protected executor carries the brand. A client cannot be passed
  * here at all.
  *
- * So: hold a client, use `new PgsqlAdapter(client, { borrowedClient: true })`
+ * So: hold a client, use `new PgAdapter(client, { borrowedClient: true })`
  * and call `.introspect()` on it.
  */
 export async function introspect(
@@ -1373,7 +1373,7 @@ export async function introspect(
 				'That client may be sitting inside a transaction that belongs to you, and a ' +
 				'catalog query that fails there would abort it. dbsp will not guess whose ' +
 				'transaction it is: declare it — ' +
-				'new PgsqlAdapter(client, { borrowedClient: true }).introspect() — and the ' +
+				'new PgAdapter(client, { borrowedClient: true }).introspect() — and the ' +
 				'declaration is what buys the savepoint protection.',
 		);
 	}
@@ -1397,7 +1397,7 @@ export async function introspect(
 }
 
 /**
- * The path `PgsqlAdapter.introspect()` takes, with an executor that already
+ * The path `PgAdapter.introspect()` takes, with an executor that already
  * carries the savepoint protection appropriate to whoever owns the connection.
  * Not exported from the package: reaching the catalog reads unprotected is the
  * thing the public entry point exists to prevent.

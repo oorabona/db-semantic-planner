@@ -2,8 +2,8 @@
 /**
  * Coverage tests for pgsql-adapter.ts.
  *
- * Focus: Branch coverage for PgsqlAdapter including:
- * - createPgsqlCompileOnlyAdapter() with default and custom options
+ * Focus: Branch coverage for PgAdapter including:
+ * - createPgCompileOnlyAdapter() with default and custom options
  * - compile() with various decision types
  * - compile() with schema scoping
  * - compileWithIncludes() with and without subquery includes
@@ -17,10 +17,7 @@ import { schema } from '@dbsp/core';
 import type { ModelIR, PlanReport } from '@dbsp/types';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import { describe, expect, it } from 'vitest';
-import {
-	createPgsqlCompileOnlyAdapter,
-	PgsqlAdapter,
-} from './pgsql-adapter.js';
+import { createPgCompileOnlyAdapter, PgAdapter } from './pgsql-adapter.js';
 import { createPgPhysicalModel } from './physical-model/index.js';
 
 function completeModel(
@@ -79,10 +76,10 @@ function testQuery<T = unknown>(
 	);
 }
 
-describe('PgsqlAdapter - Coverage Tests', () => {
-	describe('createPgsqlCompileOnlyAdapter', () => {
+describe('PgAdapter - Coverage Tests', () => {
+	describe('createPgCompileOnlyAdapter', () => {
 		it('creates adapter with default options', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 
 			expect(adapter).toBeDefined();
 			expect(adapter.dbCasing).toBe('preserve');
@@ -91,7 +88,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('creates adapter with custom dbCasing', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				dbCasing: 'snake_case',
 			});
 
@@ -99,7 +96,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('creates adapter with schemaName option', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				schemaName: 'tenant_xyz',
 			});
 
@@ -108,7 +105,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('creates adapter with defaultPkColumnName option', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				defaultPkColumnName: 'uuid',
 			});
 
@@ -119,7 +116,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			const customDerivation = (tableName: string, pkName: string) =>
 				`${tableName}_${pkName}_fk`;
 
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				deriveFkColumnName: customDerivation,
 			});
 
@@ -134,7 +131,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				error: () => {},
 			};
 
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				logger: mockLogger,
 			});
 
@@ -144,7 +141,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('dialectCapabilities', () => {
 		it('returns PostgreSQL capabilities', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const caps = adapter.dialectCapabilities;
 
 			expect(caps).toBeDefined();
@@ -156,14 +153,14 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('capabilities', () => {
 		it('compile-only adapter reports no execution support', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 
 			expect(adapter.capabilities.supportsReturning).toBe(true);
 			expect(adapter.capabilities.supportsStreaming).toBe(false);
 		});
 
 		it('compile-only adapter reports schema support', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 
 			expect(adapter.capabilities.supportsSchemas).toBe(true);
 		});
@@ -171,7 +168,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compile - basic SELECT', () => {
 		it('compiles minimal SELECT plan', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan: PlanReport = {
 				rootTable: 'users',
 				decisions: [{ type: 'select', column: '*' }],
@@ -185,7 +182,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles SELECT with specific columns', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan: PlanReport = {
 				rootTable: 'users',
 				decisions: [
@@ -203,7 +200,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compile - schema scoping', () => {
 		it('includes schema from adapter options', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				schemaName: 'tenant_123',
 			});
 			const plan: PlanReport = {
@@ -217,7 +214,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('includes schema from compile options', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan: PlanReport = {
 				rootTable: 'users',
 				decisions: [{ type: 'select', column: '*' }],
@@ -229,7 +226,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compile options schemaName takes precedence over adapter constructor schemaName', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				schemaName: 'adapter_schema',
 			});
 			const plan: PlanReport = {
@@ -246,7 +243,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compile options schemaName empty string falls through to adapter constructor schemaName', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				schemaName: 'adapter_default',
 			});
 			const plan: PlanReport = {
@@ -264,7 +261,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compile - schemaName validation in options', () => {
 		it('rejects malicious schemaName via compile options (SQL injection)', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan: PlanReport = {
 				rootTable: 'users',
 				decisions: [{ type: 'select', column: '*' }],
@@ -276,7 +273,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('rejects schemaName with semicolon via compile options', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan: PlanReport = {
 				rootTable: 'users',
 				decisions: [{ type: 'select', column: '*' }],
@@ -288,7 +285,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('accepts valid identifier in options.schemaName', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan: PlanReport = {
 				rootTable: 'users',
 				decisions: [{ type: 'select', column: '*' }],
@@ -301,7 +298,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compile - DISTINCT', () => {
 		it('compiles SELECT DISTINCT', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan: PlanReport = {
 				rootTable: 'users',
 				decisions: [{ type: 'select', column: 'email' }, { type: 'distinct' }],
@@ -315,7 +312,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compile - ORDER BY', () => {
 		it('compiles ORDER BY ASC', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan: PlanReport = {
 				rootTable: 'users',
 				decisions: [
@@ -330,7 +327,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles ORDER BY DESC', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan: PlanReport = {
 				rootTable: 'users',
 				decisions: [
@@ -348,7 +345,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compile - LIMIT and OFFSET', () => {
 		it('compiles LIMIT', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan: PlanReport = {
 				rootTable: 'users',
 				decisions: [
@@ -364,7 +361,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles OFFSET', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan: PlanReport = {
 				rootTable: 'users',
 				decisions: [
@@ -380,7 +377,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles LIMIT and OFFSET together', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan: PlanReport = {
 				rootTable: 'users',
 				decisions: [
@@ -400,7 +397,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compile - WHERE with parameters', () => {
 		it('compiles WHERE clause with parameterized value', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan: PlanReport = {
 				rootTable: 'users',
 				decisions: [
@@ -422,7 +419,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles WHERE with multiple conditions', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan: PlanReport = {
 				rootTable: 'users',
 				decisions: [
@@ -452,7 +449,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compile - GROUP BY', () => {
 		it('compiles GROUP BY', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan: PlanReport = {
 				rootTable: 'orders',
 				decisions: [
@@ -469,7 +466,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compileWithIncludes', () => {
 		it('returns main query and empty subqueryIncludes array', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan: PlanReport = {
 				rootTable: 'users',
 				decisions: [{ type: 'select', column: '*' }],
@@ -484,7 +481,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles with include-strategy decisions', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan: PlanReport = {
 				rootTable: 'users',
 				decisions: [
@@ -507,7 +504,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles synthetic binding json_agg include decisions with CTE parentKey correlation', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan: PlanReport = {
 				rootTable: 'active_authors',
 				intent: {
@@ -568,7 +565,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles synthetic binding nested json_agg includes from flat chained intent paths', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan: PlanReport = {
 				rootTable: 'projected_authors',
 				intent: {
@@ -656,7 +653,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('rejects synthetic binding json_agg includes when the dialect disables JSON aggregation', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan: PlanReport = {
 				rootTable: 'active_authors',
 				intent: {
@@ -706,7 +703,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('withSchema', () => {
 		it('returns new adapter with schema scope', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const scopedAdapter = adapter.withSchema('tenant_456');
 
 			expect(scopedAdapter).toBeDefined();
@@ -714,7 +711,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('schema-scoped adapter includes schema in compiled SQL', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const scopedAdapter = adapter.withSchema('tenant_456');
 
 			const plan: PlanReport = {
@@ -728,14 +725,14 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('validates schema identifier', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 
 			// Invalid schema name with SQL injection attempt
 			expect(() => adapter.withSchema('tenant"; DROP TABLE users--')).toThrow();
 		});
 
 		it('preserves dbCasing in scoped adapter', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				dbCasing: 'snake_case',
 			});
 			const scopedAdapter = adapter.withSchema('tenant_789');
@@ -746,7 +743,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compile options - custom PK and FK derivation', () => {
 		it('uses custom defaultPkColumnName', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				defaultPkColumnName: 'uuid',
 			});
 
@@ -758,7 +755,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			const customFn = (tableName: string, pkName: string) =>
 				`${tableName}_${pkName}_custom`;
 
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				deriveFkColumnName: customFn,
 			});
 
@@ -769,7 +766,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compile with model option', () => {
 		it('passes model to compile function', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const mockModel = coverageModel;
 
 			const plan: PlanReport = {
@@ -785,7 +782,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compile - edge cases', () => {
 		it('compiles plan without decisions array', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan: PlanReport = {
 				rootTable: 'users',
 				decisions: [],
@@ -798,7 +795,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles plan with intent object', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan: PlanReport = {
 				rootTable: 'users',
 				intent: {
@@ -817,7 +814,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('multiple options combinations', () => {
 		it('creates adapter with all options', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				schemaName: 'tenant_full',
 				dbCasing: 'camelCase',
 				defaultPkColumnName: 'id',
@@ -829,7 +826,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('refuses non-preserve compilation without a model', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				schemaName: 'tenant_all',
 				dbCasing: 'snake_case',
 			});
@@ -840,7 +837,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			} as any;
 
 			expect(() => adapter.compile(plan)).toThrow(
-				"PgsqlAdapter compilation with dbCasing 'snake_case' requires a ModelIR",
+				"PgAdapter compilation with dbCasing 'snake_case' requires a ModelIR",
 			);
 		});
 	});
@@ -852,7 +849,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compileInsert', () => {
 		it('compiles a basic INSERT with single row', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				values: [{ name: 'Alice', email: 'alice@ex.com' }],
@@ -865,7 +862,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles INSERT with RETURNING', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				values: [{ name: 'Bob' }],
@@ -877,7 +874,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles INSERT with schema scoping', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				model: coverageModel,
 				schemaName: 'tenant_ins',
 			});
@@ -890,7 +887,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles INSERT with schema from compile options', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				values: [{ name: 'Dave' }],
@@ -904,7 +901,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		it('empty-string compile options schemaName falls through to adapter constructor schemaName (INSERT path)', () => {
 			// Regression guard for M-1 fix: deps.schemaName is now authoritative.
 			// buildCompileDeps() uses || for schemaName, so '' falls through to constructor value.
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				model: coverageModel,
 				schemaName: 'adapter_default',
 			});
@@ -919,7 +916,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles INSERT with multiple rows', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				values: [
@@ -933,7 +930,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('refuses INSERT with empty values array', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				values: [],
@@ -944,7 +941,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('refuses INSERT with undefined values', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 			};
@@ -956,7 +953,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compileUpdate', () => {
 		it('compiles a basic UPDATE', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				set: { name: 'Updated' },
@@ -968,7 +965,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles UPDATE with WHERE clause', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				set: { active: false },
@@ -981,7 +978,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles UPDATE with RETURNING', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				set: { active: true },
@@ -993,7 +990,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles UPDATE with schema scoping', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				model: coverageModel,
 				schemaName: 'tenant_upd',
 			});
@@ -1006,7 +1003,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles UPDATE with schema from compile options', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				set: { name: 'X' },
@@ -1020,7 +1017,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compileDelete', () => {
 		it('compiles a basic DELETE', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const intent = { table: 'users' };
 			const result = adapter.compileDelete(intent as any);
 			const sql = result.sql.toLowerCase();
@@ -1029,7 +1026,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles DELETE with WHERE clause', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				where: { kind: 'comparison', field: 'id', operator: 'eq', value: 99 },
@@ -1041,7 +1038,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles DELETE with RETURNING', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				where: { kind: 'comparison', field: 'id', operator: 'eq', value: 1 },
@@ -1053,7 +1050,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles DELETE with schema scoping', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				model: coverageModel,
 				schemaName: 'tenant_del',
 			});
@@ -1063,7 +1060,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles DELETE with schema from compile options', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const intent = { table: 'users' };
 			const result = adapter.compileDelete(intent as any, {
 				schemaName: 'del_schema',
@@ -1074,7 +1071,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compileUpsert', () => {
 		it('compiles upsert with doNothing action', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				values: [{ id: 1, name: 'Alice' }],
@@ -1089,7 +1086,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles upsert with doUpdate action (implicit update columns)', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				values: [{ id: 1, name: 'Alice', email: 'alice@ex.com' }],
@@ -1103,7 +1100,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles upsert with doUpdate and explicit set', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				values: [{ id: 1, name: 'Alice' }],
@@ -1116,7 +1113,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles upsert with constraint-based conflict', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				values: [{ id: 1, name: 'Alice' }],
@@ -1129,7 +1126,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles upsert with RETURNING', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				values: [{ id: 1, name: 'Alice' }],
@@ -1143,7 +1140,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles upsert with schema scoping', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				model: coverageModel,
 				schemaName: 'tenant_ups',
 			});
@@ -1160,7 +1157,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compileInsertFrom', () => {
 		it('compiles INSERT FROM SELECT', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'archive_users',
 				source: 'users',
@@ -1173,7 +1170,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles INSERT FROM with WHERE', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'archive_users',
 				source: 'users',
@@ -1191,7 +1188,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles INSERT FROM with LIMIT', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'archive_users',
 				source: 'users',
@@ -1203,7 +1200,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles INSERT FROM with RETURNING', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'archive_users',
 				source: 'users',
@@ -1215,7 +1212,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles INSERT FROM with schema scoping', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				model: coverageModel,
 				schemaName: 'tenant_if',
 			});
@@ -1230,7 +1227,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compileUpsertFrom', () => {
 		it('compiles UPSERT FROM SELECT', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				source: 'staging_users',
@@ -1244,7 +1241,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles UPSERT FROM with WHERE', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				source: 'staging',
@@ -1263,7 +1260,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles UPSERT FROM with schema', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				model: coverageModel,
 				schemaName: 'tenant_uf',
 			});
@@ -1280,7 +1277,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compileRecursive', () => {
 		it('compiles adjacency-list descendant traversal', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const report = {
 				intent: {
 					cteName: 'tree_cte',
@@ -1307,7 +1304,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles adjacency-list ancestor traversal', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const report = {
 				intent: {
 					cteName: 'anc_cte',
@@ -1332,7 +1329,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles edge-table traversal', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const report = {
 				intent: {
 					cteName: 'graph_cte',
@@ -1360,7 +1357,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles edge-table with bidirectional direction', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const report = {
 				intent: {
 					cteName: 'bidir_cte',
@@ -1388,7 +1385,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles recursive with track depth', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const report = {
 				intent: {
 					cteName: 'depth_cte',
@@ -1412,7 +1409,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles recursive with track path', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const report = {
 				intent: {
 					cteName: 'path_cte',
@@ -1436,7 +1433,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles recursive with schema scoping', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				schemaName: 'tenant_rec',
 			});
 			const report = {
@@ -1462,7 +1459,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('throws for unsupported traversal kind', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const report = {
 				intent: {
 					cteName: 'custom_cte',
@@ -1485,7 +1482,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles edge-table with anchor WHERE', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const report = {
 				intent: {
 					cteName: 'anchor_cte',
@@ -1517,7 +1514,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles edge-table with "in" direction (swaps edgeFrom/edgeTo)', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const report = {
 				intent: {
 					cteName: 'in_cte',
@@ -1545,7 +1542,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('buildRecursiveAnchorWhere - edge cases', () => {
 		it('handles AND condition with single item', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const report = {
 				intent: {
 					cteName: 'and_cte',
@@ -1577,7 +1574,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('handles OR condition with multiple items', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const report = {
 				intent: {
 					cteName: 'or_cte',
@@ -1610,7 +1607,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('refuses unknown recursive anchor kind', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const report = {
 				intent: {
 					cteName: 'unk_cte',
@@ -1638,7 +1635,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('handles null/undefined where with fallback to TRUE', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const report = {
 				intent: {
 					cteName: 'null_cte',
@@ -1668,7 +1665,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compileSubqueryInclude', () => {
 		it('compiles simple subquery include for single FK', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const info = {
 				relationName: 'posts',
 				targetTable: 'posts',
@@ -1685,7 +1682,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('returns WHERE FALSE for empty parentIds', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const info = {
 				relationName: 'posts',
 				targetTable: 'posts',
@@ -1699,7 +1696,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('returns WHERE FALSE with schema for empty parentIds', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				schemaName: 'tenant_sq',
 			});
 			const info = {
@@ -1715,7 +1712,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles composite FK with multiple parent IDs', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const info = {
 				relationName: 'items',
 				targetTable: 'items',
@@ -1731,7 +1728,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles composite FK with single parent ID', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const info = {
 				relationName: 'items',
 				targetTable: 'items',
@@ -1744,7 +1741,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles M:N subquery include via junction table', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const info = {
 				relationName: 'tags',
 				targetTable: 'tags',
@@ -1763,7 +1760,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles subquery include with schema', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				schemaName: 'tenant_sqi',
 			});
 			const info = {
@@ -1783,7 +1780,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		// hydrateJsonAggIncludes only processes decisions with choice === 'json_agg';
 		// choice === 'subquery' decisions must travel the subquery hydration path.
 		it('subqueryIncludes is populated for subquery include-strategy (hasMany)', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'users',
 				decisions: [
@@ -1807,7 +1804,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('skips include-strategy decisions that are not subquery', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'users',
 				decisions: [
@@ -1827,7 +1824,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('skips subquery decisions with no target', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'users',
 				decisions: [
@@ -1844,7 +1841,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('uses includeAlias: subqueryIncludes uses includeAlias as relationName', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'users',
 				decisions: [
@@ -1868,7 +1865,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('handles belongsTo: subqueryIncludes is populated with correct sourceKey/foreignKey', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'posts',
 				decisions: [
@@ -1895,7 +1892,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('createDump', () => {
 		it('creates a dump with minimal meta', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan = { rootTable: 'users', decisions: [] } as any;
 			const query = testQuery('SELECT 1');
 			const dump = adapter.createDump(plan, query);
@@ -1907,7 +1904,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('creates dump with schema in meta', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				schemaName: 'tenant_dump',
 			});
 			const plan = { rootTable: 'users', decisions: [] } as any;
@@ -1918,7 +1915,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('creates dump with custom meta overrides', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan = { rootTable: 'users', decisions: [] } as any;
 			const query = testQuery('SELECT 1');
 			const dump = adapter.createDump(plan, query, {
@@ -1933,49 +1930,49 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('error paths - compile-only adapter', () => {
 		it('throws on execute', async () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			await expect(adapter.execute(testQuery('SELECT 1'))).rejects.toThrow(
 				/constructed without a connection/,
 			);
 		});
 
 		it('throws on executeOne', async () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			await expect(adapter.executeOne(testQuery('SELECT 1'))).rejects.toThrow(
 				/constructed without a connection/,
 			);
 		});
 
 		it('throws on executeRaw', async () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			await expect(adapter.executeRaw('SELECT 1')).rejects.toThrow(
 				/constructed without a connection/,
 			);
 		});
 
 		it('throws on getPoolInstance', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			expect(() => adapter.getPoolInstance()).toThrow(
 				/constructed without a connection/,
 			);
 		});
 
 		it('throws on introspect', async () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			await expect(adapter.introspect()).rejects.toThrow(
 				/constructed without a connection/,
 			);
 		});
 
 		it('throws on transaction', async () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			await expect(adapter.transaction(async () => 'x')).rejects.toThrow(
 				/constructed without a connection/,
 			);
 		});
 
 		it('stream throws on a connectionless adapter', async () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const iter = adapter.stream(testQuery('SELECT 1'));
 			// The generator should throw when iterated
 			await expect(iter.next()).rejects.toThrow(
@@ -1986,12 +1983,12 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('validateIdentifier', () => {
 		it('accepts valid identifier', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			expect(() => adapter.validateIdentifier('users', 'table')).not.toThrow();
 		});
 
 		it('rejects SQL injection in identifier', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			expect(() =>
 				adapter.validateIdentifier('users"; DROP TABLE--', 'table'),
 			).toThrow();
@@ -2000,7 +1997,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compile - lock mode variants', () => {
 		it('compiles FOR UPDATE via legacy plan', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'jobs',
 				intent: {
@@ -2017,7 +2014,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles FOR SHARE with skipLocked via intent', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'jobs',
 				intent: {
@@ -2035,7 +2032,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles FOR NO KEY UPDATE with noWait via intent', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'items',
 				intent: {
@@ -2053,7 +2050,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles FOR KEY SHARE via intent', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'posts',
 				intent: {
@@ -2072,7 +2069,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compile - existsWrap via intent', () => {
 		it('wraps select in EXISTS when intent has existsWrap', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'users',
 				intent: {
@@ -2091,7 +2088,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compile - dbCasing variants', () => {
 		it('refuses snake_case naming without a model', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				dbCasing: 'snake_case',
 			});
 			const plan = {
@@ -2102,7 +2099,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('refuses camelCase naming without a model', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				dbCasing: 'camelCase',
 			});
 			const plan = {
@@ -2113,42 +2110,42 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('refuses INSERT compilation without a model', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' });
+			const adapter = createPgCompileOnlyAdapter({ dbCasing: 'snake_case' });
 			expect(() =>
 				adapter.compileInsert({ table: 'users', values: [{ id: 1 }] } as any),
 			).toThrow('requires a ModelIR');
 		});
 
 		it('refuses INSERT FROM compilation without a model', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' });
+			const adapter = createPgCompileOnlyAdapter({ dbCasing: 'snake_case' });
 			expect(() =>
 				adapter.compileInsertFrom({ table: 'users' } as any),
 			).toThrow('requires a ModelIR');
 		});
 
 		it('refuses UPDATE compilation without a model', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' });
+			const adapter = createPgCompileOnlyAdapter({ dbCasing: 'snake_case' });
 			expect(() => adapter.compileUpdate({ table: 'users' } as any)).toThrow(
 				'requires a ModelIR',
 			);
 		});
 
 		it('refuses batch UPDATE compilation without a model', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' });
+			const adapter = createPgCompileOnlyAdapter({ dbCasing: 'snake_case' });
 			expect(() =>
 				adapter.compileBatchUpdate({ table: 'users' } as any),
 			).toThrow('requires a ModelIR');
 		});
 
 		it('refuses DELETE compilation without a model', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' });
+			const adapter = createPgCompileOnlyAdapter({ dbCasing: 'snake_case' });
 			expect(() => adapter.compileDelete({ table: 'users' } as any)).toThrow(
 				'requires a ModelIR',
 			);
 		});
 
 		it('refuses UPSERT compilation without a model', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' });
+			const adapter = createPgCompileOnlyAdapter({ dbCasing: 'snake_case' });
 			expect(() =>
 				adapter.compileUpsert({
 					table: 'users',
@@ -2160,7 +2157,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('refuses UPSERT FROM compilation without a model', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' });
+			const adapter = createPgCompileOnlyAdapter({ dbCasing: 'snake_case' });
 			expect(() =>
 				adapter.compileUpsertFrom({
 					table: 'users',
@@ -2174,7 +2171,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('generateDDL', () => {
 		it('generates DDL from a simple model', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const model = {
 				tables: new Map([
 					[
@@ -2208,7 +2205,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('generates DDL with schema name', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({
+			const adapter = createPgCompileOnlyAdapter({
 				schemaName: 'tenant_ddl',
 			});
 			const model = {
@@ -2287,7 +2284,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			// Use intent path: plan.intent triggers intentToDecisions which produces
 			// selectRelationColumn decisions. plan.decisions contains planner output
 			// (include-strategy) consumed by extractAllIncludeDecisions.
-			const adapter = createPgsqlCompileOnlyAdapter({ model });
+			const adapter = createPgCompileOnlyAdapter({ model });
 			const plan = {
 				rootTable: 'posts',
 				// Planner decisions: include-strategy produces includeStrategy decisions
@@ -2353,7 +2350,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				getRelation: () => undefined,
 			} as any;
 
-			const adapter = createPgsqlCompileOnlyAdapter({ model });
+			const adapter = createPgCompileOnlyAdapter({ model });
 			const plan = {
 				rootTable: 'events',
 				decisions: [],
@@ -2378,7 +2375,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compile — intent path with relationColumnsMap', () => {
 		it('deduplicates selectRelationColumn when covered by include', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'posts',
 				decisions: [
@@ -2416,7 +2413,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('keeps selectRelationColumn when no include covers the relation', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'posts',
 				decisions: [],
@@ -2437,7 +2434,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('handles wildcard column in selectRelationColumn dedup', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'posts',
 				decisions: [
@@ -2472,7 +2469,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('getColumnTypes — coverage', () => {
 		it('returns undefined when model is absent', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const result = adapter.compileInsert({
 				type: 'insert',
 				table: 'users',
@@ -2482,7 +2479,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('returns no special column types for scalar columns in a declared model', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			// getColumnTypes is private, but exercised through compileInsert
 			const result = adapter.compileInsert({
 				type: 'insert',
@@ -2497,7 +2494,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				unknown_table: { foo: 'text' },
 			});
 
-			const adapter = createPgsqlCompileOnlyAdapter({ model });
+			const adapter = createPgCompileOnlyAdapter({ model });
 			const result = adapter.compileInsert({
 				type: 'insert',
 				table: 'unknown_table',
@@ -2531,7 +2528,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				getRelation: () => undefined,
 			} as any;
 
-			const adapter = createPgsqlCompileOnlyAdapter({ model });
+			const adapter = createPgCompileOnlyAdapter({ model });
 			const result = adapter.compileInsert({
 				type: 'insert',
 				table: 'events',
@@ -2547,7 +2544,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		it('derives columns from model when not specified', () => {
 			const model = coverageModel;
 
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const result = adapter.compileUpsertFrom(
 				{
 					type: 'upsertFrom',
@@ -2562,7 +2559,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('uses explicit columns when provided', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const result = adapter.compileUpsertFrom({
 				type: 'upsertFrom',
 				table: 'users',
@@ -2574,7 +2571,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles with where and limit', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const result = adapter.compileUpsertFrom({
 				type: 'upsertFrom',
 				table: 'users',
@@ -2600,7 +2597,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		// subquery strategy decisions populate subqueryIncludes for client-side hydration.
 		// hydrateJsonAggIncludes only runs for choice === 'json_agg' planner decisions.
 		it('subqueryIncludes populated for hasMany subquery decision', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'authors',
 				decisions: [
@@ -2631,7 +2628,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('subqueryIncludes passes through includeIntent.select', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'authors',
 				decisions: [
@@ -2668,7 +2665,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('subqueryIncludes refuses includeIntent.where', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const whereClause = {
 				kind: 'comparison',
 				field: 'active',
@@ -2708,7 +2705,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('subqueryIncludes populated for belongsTo relationType', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'posts',
 				decisions: [
@@ -2737,7 +2734,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('subqueryIncludes uses includeAlias as relationName when set', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'posts',
 				decisions: [
@@ -2769,7 +2766,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compileInsertFrom — coverage', () => {
 		it('compiles insert-from with columns, where, limit, returning', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const result = adapter.compileInsertFrom({
 				type: 'insertFrom',
 				table: 'archive',
@@ -2790,7 +2787,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles insert-from without optional fields', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const result = adapter.compileInsertFrom({
 				type: 'insertFrom',
 				table: 'archive',
@@ -2825,7 +2822,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				getRelation: () => undefined,
 			} as any;
 
-			const adapter = createPgsqlCompileOnlyAdapter({ model });
+			const adapter = createPgCompileOnlyAdapter({ model });
 			const result = adapter.compileUpdate({
 				type: 'update',
 				table: 'events',
@@ -2843,7 +2840,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 	describe('compile — existsWrap and lock via intent', () => {
 		it('propagates lock from intent', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'jobs',
 				decisions: [],
@@ -2860,7 +2857,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 
 		it('propagates existsWrap from intent', () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'users',
 				decisions: [],
@@ -2890,7 +2887,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			// (planner could not resolve the relation), the adapter throws rather than
 			// guessing (using the relation name as a table name with a derived FK),
 			// which would produce silently wrong SQL.
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'posts',
 				decisions: [],
@@ -2929,9 +2926,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				query: async () => ({ rows: [] }),
 			} as any;
 
-			expect(() => new PgsqlAdapter(fakeClient)).toThrow(
-				/borrowedClient: true/,
-			);
+			expect(() => new PgAdapter(fakeClient)).toThrow(/borrowedClient: true/);
 		});
 
 		it('runs no transaction on a borrowed client unless asked to manage one', async () => {
@@ -2941,7 +2936,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				_txStatus: 'I',
 			} as any;
 
-			const adapter = new PgsqlAdapter(fakeClient, { borrowedClient: true });
+			const adapter = new PgAdapter(fakeClient, { borrowedClient: true });
 			expect(adapter.capabilities.supportsStreaming).toBe(false);
 			expect(adapter.capabilities.supportsTransactions).toBe(false);
 			expect(adapter.inTransaction).toBe(false);

@@ -7,7 +7,7 @@ import {
 	markEngineCanonicalCheck,
 	markEngineCanonicalIndex,
 } from '../expression-provenance.js';
-import { derivePostgresqlCapabilitiesForVersion } from '../postgresql-capabilities.js';
+import { derivePgCapabilitiesForVersion } from '../postgresql-capabilities.js';
 import { generateCreateIndex } from './ddl-generator.js';
 import { generateCreateIndexSQL } from './index-operations.js';
 import {
@@ -439,7 +439,7 @@ describe('CREATE INDEX capability assertions', () => {
 
 	it('renders CONCURRENTLY for PG10/PG11 derived capabilities', () => {
 		for (const version of ['10', '11']) {
-			const caps = derivePostgresqlCapabilitiesForVersion(version);
+			const caps = derivePgCapabilitiesForVersion(version);
 			expect(
 				generateCreateIndexSQL(
 					'users',
@@ -706,37 +706,37 @@ describe('CREATE INDEX capability assertions', () => {
 
 describe('PostgreSQL version-derived index capabilities', () => {
 	it('validates version strings accepted by the projection bridge', () => {
-		expect(() => derivePostgresqlCapabilitiesForVersion('14')).not.toThrow();
-		expect(() => derivePostgresqlCapabilitiesForVersion('14.2')).not.toThrow();
-		expect(() => derivePostgresqlCapabilitiesForVersion('garbage')).toThrow(
+		expect(() => derivePgCapabilitiesForVersion('14')).not.toThrow();
+		expect(() => derivePgCapabilitiesForVersion('14.2')).not.toThrow();
+		expect(() => derivePgCapabilitiesForVersion('garbage')).toThrow(
 			'Invalid PostgreSQL version "garbage"',
 		);
 		for (const version of ['14junk', '14.evil', '', 'v14', '14.0.5.6']) {
-			expect(() => derivePostgresqlCapabilitiesForVersion(version)).toThrow(
+			expect(() => derivePgCapabilitiesForVersion(version)).toThrow(
 				`Invalid PostgreSQL version "${version}"`,
 			);
 		}
-		expect(() => derivePostgresqlCapabilitiesForVersion('9')).toThrow(
+		expect(() => derivePgCapabilitiesForVersion('9')).toThrow(
 			'Unsupported PostgreSQL version "9"; minimum supported major version is 10',
 		);
-		expect(() => derivePostgresqlCapabilitiesForVersion('140005')).toThrow(
+		expect(() => derivePgCapabilitiesForVersion('140005')).toThrow(
 			'PostgreSQL version "140005" must be a dotted or major version string, not server_version_num form',
 		);
 		// A minor/patch segment >= 100 overflows serverVersionNum's packed math
 		// ("14.100" -> 150000 = PG15) and would falsely enable a gated feature.
 		for (const version of ['10.100', '14.100', '14.0.100']) {
-			expect(() => derivePostgresqlCapabilitiesForVersion(version)).toThrow(
+			expect(() => derivePgCapabilitiesForVersion(version)).toThrow(
 				'minor/patch segments must be below 100',
 			);
 		}
-		expect(() => derivePostgresqlCapabilitiesForVersion('14.99')).not.toThrow();
+		expect(() => derivePgCapabilitiesForVersion('14.99')).not.toThrow();
 	});
 
 	it('a below-min minor cannot falsely enable a version-gated feature (F8)', () => {
 		// "14.100" once computed to PG15 and enabled NULLS NOT DISTINCT; it must now be rejected.
-		expect(() => derivePostgresqlCapabilitiesForVersion('14.100')).toThrow();
+		expect(() => derivePgCapabilitiesForVersion('14.100')).toThrow();
 		// A genuine PG14 target keeps NND / INCLUDE gated off.
-		const pg14 = derivePostgresqlCapabilitiesForVersion('14');
+		const pg14 = derivePgCapabilitiesForVersion('14');
 		expect(pg14.supportsDDLIndexNullsNotDistinct).toBe(false);
 		expect(pg14.supportsDDLIndexInclude).toBe(true);
 	});
@@ -754,12 +754,12 @@ describe('PostgreSQL version-derived index capabilities', () => {
 
 		expect(() =>
 			generateMigrationSQL(diff, {
-				dialectCapabilities: derivePostgresqlCapabilitiesForVersion('14'),
+				dialectCapabilities: derivePgCapabilitiesForVersion('14'),
 			}),
 		).toThrow(IndexFeatureUnsupportedError);
 		expect(() =>
 			generateMigrationSQL(diff, {
-				dialectCapabilities: derivePostgresqlCapabilitiesForVersion('14'),
+				dialectCapabilities: derivePgCapabilitiesForVersion('14'),
 			}),
 		).toThrow('NULLS NOT DISTINCT requires PostgreSQL >= 15');
 	});
@@ -774,7 +774,7 @@ describe('PostgreSQL version-derived index capabilities', () => {
 
 		expect(
 			generateDownSQL(diff, {
-				dialectCapabilities: derivePostgresqlCapabilitiesForVersion('14'),
+				dialectCapabilities: derivePgCapabilitiesForVersion('14'),
 			}),
 		).toEqual(['DROP INDEX IF EXISTS "uk_users_email_nulls";']);
 	});
@@ -789,7 +789,7 @@ describe('PostgreSQL version-derived index capabilities', () => {
 
 		expect(() =>
 			generateDownSQL(diff, {
-				dialectCapabilities: derivePostgresqlCapabilitiesForVersion('14'),
+				dialectCapabilities: derivePgCapabilitiesForVersion('14'),
 			}),
 		).toThrow(IndexFeatureUnsupportedError);
 	});

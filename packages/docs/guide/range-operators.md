@@ -87,7 +87,7 @@ A reservation system stores room availability as `daterange` periods. To find co
 
 ```typescript
 import { schema, createOrm, rangeOverlaps } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const __db = schema({
   bookings: {
@@ -96,7 +96,7 @@ const __db = schema({
     period: 'daterange',
   },
 } as const);
-const __orm = createOrm({ schema: __db, adapter: createPgsqlCompileOnlyAdapter() });
+const __orm = createOrm({ schema: __db, adapter: createPgCompileOnlyAdapter() });
 
 // "Does any booking conflict with 2024-06-10..2024-06-15?"
 __orm
@@ -113,7 +113,7 @@ A pricing table stores tiers as `daterange` periods. To resolve "what tier appli
 
 ```typescript
 import { schema, createOrm, rangeContains } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const __db = schema({
   pricingTiers: {
@@ -122,7 +122,7 @@ const __db = schema({
     validity: 'daterange',
   },
 } as const);
-const __orm = createOrm({ schema: __db, adapter: createPgsqlCompileOnlyAdapter() });
+const __orm = createOrm({ schema: __db, adapter: createPgCompileOnlyAdapter() });
 
 // "Which tier covers 2024-06-15?"
 // Encode the single day as a half-open range [2024-06-15, 2024-06-16):
@@ -139,7 +139,7 @@ Events are stored as `tstzrange` periods. To list every event scheduled inside Q
 
 ```typescript
 import { schema, createOrm, rangeContainedBy } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const __db = schema({
   events: {
@@ -148,7 +148,7 @@ const __db = schema({
     occursAt: 'tstzrange',
   },
 } as const);
-const __orm = createOrm({ schema: __db, adapter: createPgsqlCompileOnlyAdapter() });
+const __orm = createOrm({ schema: __db, adapter: createPgCompileOnlyAdapter() });
 
 __orm
   .select('events')
@@ -169,7 +169,7 @@ The same operators work for numeric ranges. A product catalog might store discou
 
 ```typescript
 import { schema, createOrm, rangeOverlaps } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const __db = schema({
   discounts: {
@@ -177,7 +177,7 @@ const __db = schema({
     band: 'int4range',
   },
 } as const);
-const __orm = createOrm({ schema: __db, adapter: createPgsqlCompileOnlyAdapter() });
+const __orm = createOrm({ schema: __db, adapter: createPgCompileOnlyAdapter() });
 
 // "Which discount bands include any price between 50 and 200?"
 __orm
@@ -198,13 +198,13 @@ Range operators benefit substantially from a GiST index on the range column. The
 // compile-only adapter used elsewhere in this guide cannot execute DDL).
 import { Pool } from 'pg';
 import { schema, createOrm } from '@dbsp/core';
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({
   bookings: { id: 'integer', period: 'daterange' },
 } as const);
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const orm = createOrm({ schema: db, adapter: createPgsqlAdapter(pool) });
+const orm = createOrm({ schema: db, adapter: createPgAdapter(pool) });
 
 await orm.tables.bookings.indexes.create({
   name: 'bookings_period_gist',

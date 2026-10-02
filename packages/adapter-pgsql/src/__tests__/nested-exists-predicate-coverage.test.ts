@@ -27,7 +27,7 @@ import {
 	subquery,
 } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Schema: users → posts (hasMany), plus auditLog (standalone, for rawExists)
@@ -60,7 +60,7 @@ const testSchema = schema({
 } as const);
 
 function buildOrm() {
-	const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+	const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 	return createOrm({ model: testSchema.model, adapter });
 }
 
@@ -196,7 +196,7 @@ describe('nested rawExists modifier guard still applies', () => {
 describe('jsonContains / jsonExists / any nested inside exists() where clause', () => {
 	it('exists(posts, { where: jsonContains(metadata, val) }) — predicate compiles, not dropped', () => {
 		// Inject the intent directly via plan() since jsonContains has no ORM helper.
-		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 		const planReport = plan(
 			{
 				type: 'select',
@@ -223,7 +223,7 @@ describe('jsonContains / jsonExists / any nested inside exists() where clause', 
 	});
 
 	it('exists(posts, { where: any(tags, [1,2,3]) }) — any predicate not dropped', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 		const planReport = plan(
 			{
 				type: 'select',
@@ -320,7 +320,7 @@ describe('nested IN value-list: not flag honoured in exists() where clause', () 
 
 	it('exists(posts, { where: { kind:"in", not:true } }) — compiles <> ALL (NOT IN), not = ANY', () => {
 		// Inject via plan() to use the raw intent directly (no public notIn() helper).
-		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 		const planReport = plan(
 			{
 				type: 'select',
@@ -357,7 +357,7 @@ describe('nested IN value-list: not flag honoured in exists() where clause', () 
 	});
 
 	it('exists(posts, { where: { kind:"in", not:false } }) — still compiles = ANY (positive IN)', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 		const planReport = plan(
 			{
 				type: 'select',
@@ -412,7 +412,7 @@ describe('nested IN value-list: not flag honoured in exists() where clause', () 
 	it('exists(posts, { where: { kind:"like", caseInsensitive:true } }) — compiles ILIKE', () => {
 		// caseInsensitive:true — previously the hand-rolled path always emitted LIKE.
 		// After delegation to convertLike, ILIKE is correctly emitted.
-		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 		const planReport = plan(
 			{
 				type: 'select',
@@ -444,7 +444,7 @@ describe('nested IN value-list: not flag honoured in exists() where clause', () 
 	// ── Regression: null inside nested exists ───────────────────────────────
 
 	it('exists(posts, { where: { kind:"null", operator:"isNull" } }) — IS NULL compiles', () => {
-		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 		const planReport = plan(
 			{
 				type: 'select',

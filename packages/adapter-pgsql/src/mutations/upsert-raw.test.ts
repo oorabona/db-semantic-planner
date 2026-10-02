@@ -12,7 +12,7 @@
 
 import { schema, sql } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const rawMutationModel = schema({
 	files: {
@@ -26,7 +26,7 @@ const rawMutationModel = schema({
 }).model;
 
 function createRawMutationAdapter() {
-	return createPgsqlCompileOnlyAdapter({ model: rawMutationModel });
+	return createPgCompileOnlyAdapter({ model: rawMutationModel });
 }
 
 // ---------------------------------------------------------------------------

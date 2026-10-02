@@ -1,4 +1,4 @@
-import { createPgsqlGeneratedManagedStep } from '@dbsp/adapter-pgsql';
+import { createPgGeneratedManagedStep } from '@dbsp/adapter-pgsql';
 import { projectLedgerChain } from '@dbsp/core';
 import { type LedgerAddress, ledgerAddressKey, refusalFor } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
@@ -126,7 +126,7 @@ describe('inspect address selection', () => {
 	});
 
 	it('C10 gives generated and inspect-side child addresses the same ledger key', () => {
-		const generated = createPgsqlGeneratedManagedStep({
+		const generated = createPgGeneratedManagedStep({
 			change: {
 				kind: 'create_index',
 				table: 'orders',

@@ -17,7 +17,7 @@
 
 import { createOrm, eq, exists, notExists, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Test schema
@@ -46,7 +46,7 @@ const testSchema = schema({
 });
 
 function buildAdapter() {
-	return createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+	return createPgCompileOnlyAdapter({ model: testSchema.model });
 }
 
 /** Normalize whitespace for SQL comparison. */
@@ -171,7 +171,7 @@ describe('notExists() with include — DELETE mutation path', () => {
 	});
 
 	it('without ModelIR falls back to FK derivation and still produces a JOIN', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter();
 
 		const { sql } = adapter.compileDelete({
 			type: 'delete' as const,

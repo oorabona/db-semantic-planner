@@ -3,8 +3,8 @@
 import { randomUUID } from 'node:crypto';
 import {
 	camelCaseNaming,
-	createPgsqlGeneratedManagedStep,
-	derivePostgresqlCapabilitiesForVersion,
+	createPgGeneratedManagedStep,
+	derivePgCapabilitiesForVersion,
 	readGeneratedPostcondition,
 	withGeneratedPostconditionSession,
 } from '@dbsp/adapter-pgsql';
@@ -105,7 +105,7 @@ describe('PostgreSQL DDL generator restored guarantees', () => {
 		const schemaName = `postcondition_${randomUUID().replaceAll('-', '')}`;
 		await createSchema(schemaName);
 		try {
-			const step = createPgsqlGeneratedManagedStep({
+			const step = createPgGeneratedManagedStep({
 				change: {
 					kind: 'create_table',
 					table: 'QuotedTable',
@@ -237,7 +237,7 @@ describe('PostgreSQL DDL generator restored guarantees', () => {
 		});
 		const latestDdl = generateDDL(desired.model, {
 			schemaName: INDEX_SCHEMA,
-			dialectCapabilities: derivePostgresqlCapabilitiesForVersion('18'),
+			dialectCapabilities: derivePgCapabilitiesForVersion('18'),
 		});
 		expect(defaultDdl).toEqual(latestDdl);
 		expect(defaultDdl.join('\n')).toContain('INCLUDE ("displayName")');

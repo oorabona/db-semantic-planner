@@ -3,22 +3,22 @@ import type { ColumnIR, EnumIR, ModelIR, TableIR } from '@dbsp/types';
 import type { Pool, PoolClient } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import type { PgsqlCanonicalizationScope } from '../expression-canonicalizer.js';
-import { PgsqlAdapter } from '../pgsql-adapter.js';
+import { PgAdapter } from '../pgsql-adapter.js';
 import * as physicalModel from '../physical-model/index.js';
 import { createPgPhysicalModel } from '../physical-model/index.js';
 import { declaredSequenceNamesFromInventory } from '../sequence-name.js';
 import {
 	assertNoRepeatedExpressionSurfaceDrift,
 	CheckConstraintNewEnumValueError,
-	comparePgsqlDatabaseSchema as comparePgsqlDatabaseSchemaForPhysicalModel,
-	comparePgsqlDeclaredAdoptionSchema,
+	comparePgDeclaredAdoptionSchema,
+	comparePgDatabaseSchema as comparePgsqlDatabaseSchemaForPhysicalModel,
 	IndexPredicateCanonicalizationError,
 	modelForDeclaredAdoption,
 	NonConvergentSchemaDiffError,
 } from './live-diff.js';
 import type { SchemaDiff } from './schema-diff.js';
 
-function comparePgsqlDatabaseSchema(
+function comparePgDatabaseSchema(
 	...args: Parameters<typeof comparePgsqlDatabaseSchemaForPhysicalModel>
 ) {
 	const [adapter, desired, options] = args;
@@ -466,8 +466,8 @@ class FakeLiveDiffPool {
 	constructor(readonly client: FakeQueryableClient) {}
 }
 
-function adapterForPool(pool: FakeLiveDiffPool): PgsqlAdapter {
-	return new PgsqlAdapter(pool as unknown as Pool);
+function adapterForPool(pool: FakeLiveDiffPool): PgAdapter {
+	return new PgAdapter(pool as unknown as Pool);
 }
 
 describe('assertNoRepeatedExpressionSurfaceDrift', () => {
@@ -580,7 +580,7 @@ describe('assertNoRepeatedExpressionSurfaceDrift', () => {
 	);
 });
 
-describe('comparePgsqlDatabaseSchema', () => {
+describe('comparePgDatabaseSchema', () => {
 	it('uses a supplied physical adoption snapshot without recreating it', async () => {
 		const physical = createPgPhysicalModel({
 			mode: 'physical',
@@ -597,7 +597,7 @@ describe('comparePgsqlDatabaseSchema', () => {
 		const factory = vi.spyOn(physicalModel, 'createPgPhysicalModel');
 		try {
 			await expect(
-				comparePgsqlDeclaredAdoptionSchema({
+				comparePgDeclaredAdoptionSchema({
 					executor: new FakeLiveDiffPool(new FakeLiveDiffClient('', false, [])),
 					model: physical.model,
 					schema: physical.schema,
@@ -622,7 +622,7 @@ describe('comparePgsqlDatabaseSchema', () => {
 			cycle: false,
 		});
 		const compare = (sequences: readonly Record<string, unknown>[]) =>
-			comparePgsqlDeclaredAdoptionSchema({
+			comparePgDeclaredAdoptionSchema({
 				executor: new FakeLiveDiffPool(
 					new FakeLiveDiffClient('', false, [], [], [], sequences),
 				),
@@ -643,7 +643,7 @@ describe('comparePgsqlDatabaseSchema', () => {
 			changes: [],
 		});
 		await expect(
-			comparePgsqlDeclaredAdoptionSchema({
+			comparePgDeclaredAdoptionSchema({
 				executor: new FakeLiveDiffPool(
 					new FakeLiveDiffClient(
 						'',
@@ -685,7 +685,7 @@ describe('comparePgsqlDatabaseSchema', () => {
 			),
 		);
 		await expect(
-			comparePgsqlDatabaseSchema(legacyAdapter, desired, {
+			comparePgDatabaseSchema(legacyAdapter, desired, {
 				canonicalizeExpressions: false,
 				dbCasing: 'snake_case',
 			}),
@@ -710,7 +710,7 @@ describe('comparePgsqlDatabaseSchema', () => {
 			}),
 		});
 		await expect(
-			comparePgsqlDatabaseSchema(nonLegacyAdapter, malformed, {
+			comparePgDatabaseSchema(nonLegacyAdapter, malformed, {
 				canonicalizeExpressions: false,
 			}),
 		).rejects.toBe(original);
@@ -740,7 +740,7 @@ describe('comparePgsqlDatabaseSchema', () => {
 		]);
 
 		await expect(
-			comparePgsqlDeclaredAdoptionSchema({
+			comparePgDeclaredAdoptionSchema({
 				executor: pool,
 				model: defaultShape,
 				schema: 'public',
@@ -752,7 +752,7 @@ describe('comparePgsqlDatabaseSchema', () => {
 			{ ...bigintColumn, column_name: 'camel_case', column_default: null },
 		]);
 		await expect(
-			comparePgsqlDeclaredAdoptionSchema({
+			comparePgDeclaredAdoptionSchema({
 				executor: new FakeLiveDiffPool(snakeClient),
 				model: makeModel([
 					makeTable({
@@ -765,7 +765,7 @@ describe('comparePgsqlDatabaseSchema', () => {
 			}),
 		).resolves.toMatchObject({ changes: [] });
 
-		const missingColumn = await comparePgsqlDeclaredAdoptionSchema({
+		const missingColumn = await comparePgDeclaredAdoptionSchema({
 			executor: pool,
 			model: makeModel([
 				makeTable({
@@ -804,7 +804,7 @@ describe('comparePgsqlDatabaseSchema', () => {
 			readonly columnTypes: ReadonlySet<string>;
 			readonly indexes: ReadonlySet<string>;
 		}) =>
-			comparePgsqlDeclaredAdoptionSchema({
+			comparePgDeclaredAdoptionSchema({
 				executor: new FakeLiveDiffPool(
 					new FakeLiveDiffClient('', false, [liveColumn]),
 				),
@@ -882,7 +882,7 @@ describe('comparePgsqlDatabaseSchema', () => {
 		await expect(
 			Promise.all(
 				[projects, projectState].map((table) =>
-					comparePgsqlDeclaredAdoptionSchema({
+					comparePgDeclaredAdoptionSchema({
 						executor: new FakeLiveDiffPool(
 							new FakeLiveDiffClient('', false, columns, foreignKeys),
 						),
@@ -1006,7 +1006,7 @@ describe('comparePgsqlDatabaseSchema', () => {
 			is_deferrable: 'NO',
 			initially_deferred: 'NO',
 		};
-		const matching = await comparePgsqlDeclaredAdoptionSchema({
+		const matching = await comparePgDeclaredAdoptionSchema({
 			executor: new FakeLiveDiffPool(
 				new FakeLiveDiffClient('', false, columns, [
 					liveForeignKey,
@@ -1019,7 +1019,7 @@ describe('comparePgsqlDatabaseSchema', () => {
 		});
 		expect(matching.changes).toEqual([]);
 
-		const undeclaredForeignKey = await comparePgsqlDeclaredAdoptionSchema({
+		const undeclaredForeignKey = await comparePgDeclaredAdoptionSchema({
 			executor: new FakeLiveDiffPool(
 				new FakeLiveDiffClient('', false, columns, [
 					liveForeignKey,
@@ -1056,7 +1056,7 @@ describe('comparePgsqlDatabaseSchema', () => {
 				identity_generation: null,
 			},
 		];
-		const compared = await comparePgsqlDeclaredAdoptionSchema({
+		const compared = await comparePgDeclaredAdoptionSchema({
 			executor: new FakeLiveDiffPool(
 				new FakeLiveDiffClient(
 					'',
@@ -1098,14 +1098,14 @@ describe('comparePgsqlDatabaseSchema', () => {
 			connect: async () => undefined,
 		};
 		await expect(
-			comparePgsqlDeclaredAdoptionSchema({
+			comparePgDeclaredAdoptionSchema({
 				executor: unsupportedExecutor,
 				model: makeModel([]),
 				schema: 'public',
 				dbCasing: 'preserve',
 			}),
 		).rejects.toThrow(
-			'comparePgsqlDeclaredAdoptionSchema() requires a pg Pool or checked-out PoolClient executor',
+			'comparePgDeclaredAdoptionSchema() requires a pg Pool or checked-out PoolClient executor',
 		);
 	});
 
@@ -1154,10 +1154,10 @@ describe('comparePgsqlDatabaseSchema', () => {
 				async (fn: (scope: PgsqlCanonicalizationScope) => Promise<unknown>) =>
 					fn(scratch as unknown as PgsqlCanonicalizationScope),
 			),
-		} as unknown as PgsqlAdapter;
+		} as unknown as PgAdapter;
 
 		await expect(
-			comparePgsqlDatabaseSchema(adapter, desired, {
+			comparePgDatabaseSchema(adapter, desired, {
 				requireExpressionCanonicalization: true,
 				onWarning: vi.fn(),
 			}),
@@ -1166,7 +1166,7 @@ describe('comparePgsqlDatabaseSchema', () => {
 		);
 
 		await expect(
-			comparePgsqlDatabaseSchema(adapter, desired, { onWarning: vi.fn() }),
+			comparePgDatabaseSchema(adapter, desired, { onWarning: vi.fn() }),
 		).rejects.toBeInstanceOf(IndexPredicateCanonicalizationError);
 		expect(scratch.executeRaw).toHaveBeenCalledWith(
 			expect.stringMatching(/^CREATE INDEX /u),
@@ -1215,10 +1215,10 @@ describe('comparePgsqlDatabaseSchema', () => {
 				async (fn: (scope: PgsqlCanonicalizationScope) => Promise<unknown>) =>
 					fn(scratch as unknown as PgsqlCanonicalizationScope),
 			),
-		} as unknown as PgsqlAdapter;
+		} as unknown as PgAdapter;
 
 		await expect(
-			comparePgsqlDatabaseSchema(adapter, desired),
+			comparePgDatabaseSchema(adapter, desired),
 		).rejects.toMatchObject({
 			statement: 'create_partial_index',
 			cause: cancelled,
@@ -1259,7 +1259,7 @@ describe('comparePgsqlDatabaseSchema', () => {
 		const pool = new FakeLiveDiffPool(client);
 
 		await expect(
-			comparePgsqlDatabaseSchema(adapterForPool(pool), desired, {
+			comparePgDatabaseSchema(adapterForPool(pool), desired, {
 				schema: 'tenant_1',
 				onWarning: vi.fn(),
 			}),
@@ -1302,7 +1302,7 @@ describe('comparePgsqlDatabaseSchema', () => {
 		);
 		const client = new FakeEnumValueLiveDiffClient();
 
-		const diff = await comparePgsqlDatabaseSchema(
+		const diff = await comparePgDatabaseSchema(
 			adapterForPool(new FakeLiveDiffPool(client)),
 			desired,
 			{ schema: 'tenant_1', onWarning: vi.fn() },
@@ -1350,7 +1350,7 @@ describe('comparePgsqlDatabaseSchema', () => {
 		const onExpressionCanonicalizationWarning = vi.fn();
 
 		await expect(
-			comparePgsqlDatabaseSchema(adapterForPool(pool), desired, {
+			comparePgDatabaseSchema(adapterForPool(pool), desired, {
 				schema: 'tenant_1',
 				onWarning,
 				onExpressionCanonicalizationWarning,
@@ -1386,7 +1386,7 @@ describe('comparePgsqlDatabaseSchema', () => {
 		const pool = new FakeLiveDiffPool(client);
 
 		await expect(
-			comparePgsqlDatabaseSchema(adapterForPool(pool), desired, {
+			comparePgDatabaseSchema(adapterForPool(pool), desired, {
 				dbCasing: 'snake_case',
 				previouslyAppliedDiff: checkExpressionDiff(
 					'users',
@@ -1415,18 +1415,14 @@ describe('comparePgsqlDatabaseSchema', () => {
 		const pool = new FakeLiveDiffPool(client);
 		const onWarning = vi.fn();
 
-		const diff = await comparePgsqlDatabaseSchema(
-			adapterForPool(pool),
-			desired,
-			{
-				dialectCapabilities: {
-					...POSTGRESQL_CAPABILITIES,
-					supportsDDLCheckConstraints: false,
-				},
-				requireExpressionCanonicalization: true,
-				onWarning,
+		const diff = await comparePgDatabaseSchema(adapterForPool(pool), desired, {
+			dialectCapabilities: {
+				...POSTGRESQL_CAPABILITIES,
+				supportsDDLCheckConstraints: false,
 			},
-		);
+			requireExpressionCanonicalization: true,
+			onWarning,
+		});
 
 		expect(diff.changes).toEqual([]);
 		expect(onWarning).not.toHaveBeenCalled();

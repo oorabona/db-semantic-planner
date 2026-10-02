@@ -1,5 +1,5 @@
 /**
- * PgsqlAdapter Unit Tests
+ * PgAdapter Unit Tests
  *
  * Tests adapter interface implementation without database connection.
  */
@@ -9,11 +9,11 @@ import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import type { Pool, PoolClient } from 'pg';
 import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import {
-	createPgsqlAdapter,
-	createPgsqlCompileOnlyAdapter,
-	PgsqlAdapter,
-	PgsqlPreparedStatementReplayError,
-	PgsqlTransactionAbortedError,
+	createPgAdapter,
+	createPgCompileOnlyAdapter,
+	PgAdapter,
+	PgPreparedStatementReplayError,
+	PgTransactionAbortedError,
 } from './pgsql-adapter.js';
 import { createPgPhysicalModel } from './physical-model/index.js';
 import {
@@ -66,17 +66,17 @@ function deferredPromise<T>() {
 // Tests
 // ============================================================================
 
-describe('PgsqlAdapter', () => {
+describe('PgAdapter', () => {
 	describe('constructor', () => {
 		it('accepts the zero-argument compile-only constructor overload', () => {
-			expectTypeOf(new PgsqlAdapter()).toEqualTypeOf<PgsqlAdapter>();
+			expectTypeOf(new PgAdapter()).toEqualTypeOf<PgAdapter>();
 		});
 
 		it('should create adapter with default options', () => {
 			const pool = createMockPool();
-			const adapter = new PgsqlAdapter(pool);
+			const adapter = new PgAdapter(pool);
 
-			expect(adapter).toBeInstanceOf(PgsqlAdapter);
+			expect(adapter).toBeInstanceOf(PgAdapter);
 			expect(adapter.dbCasing).toBe('preserve');
 			expect(adapter.capabilities).toEqual({
 				supportsReturning: true,
@@ -93,7 +93,7 @@ describe('PgsqlAdapter', () => {
 
 		it('should create adapter with custom dbCasing', () => {
 			const pool = createMockPool();
-			const adapter = new PgsqlAdapter(pool, {
+			const adapter = new PgAdapter(pool, {
 				dbCasing: 'snake_case',
 			});
 
@@ -102,11 +102,11 @@ describe('PgsqlAdapter', () => {
 
 		it('should create adapter with schema name', () => {
 			const pool = createMockPool();
-			const adapter = new PgsqlAdapter(pool, {
+			const adapter = new PgAdapter(pool, {
 				schemaName: 'tenant_123',
 			});
 
-			expect(adapter).toBeInstanceOf(PgsqlAdapter);
+			expect(adapter).toBeInstanceOf(PgAdapter);
 		});
 
 		it('rejects a checked-out PoolClient passed as the pool', () => {
@@ -115,8 +115,8 @@ describe('PgsqlAdapter', () => {
 				release: vi.fn(),
 			} as unknown as PoolClient;
 
-			expect(() => createPgsqlAdapter(client as unknown as Pool)).toThrow(
-				/createPgsqlAdapter\(\) received a pg PoolClient\. Pass borrowedClient: true/,
+			expect(() => createPgAdapter(client as unknown as Pool)).toThrow(
+				/createPgAdapter\(\) received a pg PoolClient\. Pass borrowedClient: true/,
 			);
 		});
 
@@ -129,13 +129,13 @@ describe('PgsqlAdapter', () => {
 		])('rejects an invalid preparedStatements $label', ({ value }) => {
 			expect(
 				() =>
-					new PgsqlAdapter(undefined, {
+					new PgAdapter(undefined, {
 						preparedStatements: value,
 					} as any),
 			).toThrowError(Error);
 			expect(
 				() =>
-					new PgsqlAdapter(undefined, {
+					new PgAdapter(undefined, {
 						preparedStatements: value,
 					} as any),
 			).toThrow(
@@ -146,10 +146,10 @@ describe('PgsqlAdapter', () => {
 		it('normalizes prepared statements independently of later caller mutation', () => {
 			const pool = createMockPool();
 			const preparedStatements = { maxStatements: 1 };
-			const adapter = createPgsqlAdapter(pool, { preparedStatements });
+			const adapter = createPgAdapter(pool, { preparedStatements });
 			preparedStatements.maxStatements = 2;
 
-			const scoped = adapter.withSchema('tenant_1') as PgsqlAdapter;
+			const scoped = adapter.withSchema('tenant_1') as PgAdapter;
 			const parentConfig = (adapter as any).preparedStatements;
 			const childConfig = (scoped as any).preparedStatements;
 			expect(parentConfig.maxStatements).toBe(1);
@@ -159,10 +159,10 @@ describe('PgsqlAdapter', () => {
 
 		it('shares equal prepared-statement caps and rejects conflicting pool caps', () => {
 			const pool = createMockPool();
-			const first = createPgsqlAdapter(pool, {
+			const first = createPgAdapter(pool, {
 				preparedStatements: { maxStatements: 1 },
 			});
-			const equal = createPgsqlAdapter(pool, {
+			const equal = createPgAdapter(pool, {
 				preparedStatements: { maxStatements: 1 },
 			});
 
@@ -170,7 +170,7 @@ describe('PgsqlAdapter', () => {
 				(first as any).preparedStatementRegistry,
 			);
 			expect(() =>
-				createPgsqlAdapter(pool, { preparedStatements: { maxStatements: 2 } }),
+				createPgAdapter(pool, { preparedStatements: { maxStatements: 2 } }),
 			).toThrow(
 				/preparedStatements\.maxStatements is configured pool-wide: expected 1, received 2/,
 			);
@@ -181,11 +181,11 @@ describe('PgsqlAdapter', () => {
 				release: vi.fn(),
 				_txStatus: 'I',
 			}) as unknown as PoolClient;
-			const first = createPgsqlAdapter(client, {
+			const first = createPgAdapter(client, {
 				borrowedClient: true,
 				preparedStatements: { maxStatements: 1 },
 			});
-			const equal = createPgsqlAdapter(client, {
+			const equal = createPgAdapter(client, {
 				borrowedClient: true,
 				preparedStatements: { maxStatements: 1 },
 			});
@@ -194,7 +194,7 @@ describe('PgsqlAdapter', () => {
 				(first as any).preparedStatementRegistry,
 			);
 			expect(() =>
-				createPgsqlAdapter(client, {
+				createPgAdapter(client, {
 					borrowedClient: true,
 					preparedStatements: { maxStatements: 2 },
 				}),
@@ -210,7 +210,7 @@ describe('PgsqlAdapter', () => {
 			} as unknown as PoolClient;
 
 			expect(() =>
-				createPgsqlAdapter(client, {
+				createPgAdapter(client, {
 					borrowedClient: true,
 					replayInvalidatedPlans: true,
 				} as any),
@@ -218,7 +218,7 @@ describe('PgsqlAdapter', () => {
 				'replayInvalidatedPlans requires a pg Pool-owned adapter; it is not supported by borrowed-client or compile-only adapters.',
 			);
 			expect(() =>
-				createPgsqlCompileOnlyAdapter({
+				createPgCompileOnlyAdapter({
 					replayInvalidatedPlans: true,
 				} as any),
 			).toThrow(
@@ -230,7 +230,7 @@ describe('PgsqlAdapter', () => {
 			const pool = createMockPool();
 
 			expect(() =>
-				createPgsqlAdapter(pool, {
+				createPgAdapter(pool, {
 					replayInvalidatedPlans: true,
 				} as any),
 			).toThrow(
@@ -242,7 +242,7 @@ describe('PgsqlAdapter', () => {
 			const pool = createMockPool();
 
 			expect(() =>
-				createPgsqlAdapter(pool, {
+				createPgAdapter(pool, {
 					preparedStatements: true,
 					replayInvalidatedPlans: 'true',
 				} as any),
@@ -256,7 +256,7 @@ describe('PgsqlAdapter', () => {
 				replayInvalidatedPlans: true as const,
 			});
 
-			const adapter = createPgsqlAdapter(pool, options);
+			const adapter = createPgAdapter(pool, options);
 
 			expect((adapter as any).replayInvalidatedPlans).toBe(true);
 		});
@@ -268,7 +268,7 @@ describe('PgsqlAdapter', () => {
 				replayInvalidatedPlans: 'true',
 			});
 
-			expect(() => createPgsqlAdapter(pool, options as any)).toThrow(
+			expect(() => createPgAdapter(pool, options as any)).toThrow(
 				'replayInvalidatedPlans: expected a boolean.',
 			);
 		});
@@ -281,7 +281,7 @@ describe('PgsqlAdapter', () => {
 				borrowedClient: true as const,
 			});
 
-			const adapter = createPgsqlAdapter(client, options);
+			const adapter = createPgAdapter(client, options);
 
 			expect(adapter.getPoolInstance()).toBe(client);
 		});
@@ -296,7 +296,7 @@ describe('PgsqlAdapter', () => {
 				{},
 			);
 
-			expect(() => createPgsqlAdapter(pool, options)).toThrow(
+			expect(() => createPgAdapter(pool, options)).toThrow(
 				'replayInvalidatedPlans: expected a boolean.',
 			);
 		});
@@ -337,14 +337,14 @@ describe('PgsqlAdapter', () => {
 			({ createOptions }) => {
 				const pool = createMockPool();
 
-				expect(() => createPgsqlAdapter(pool, createOptions() as any)).toThrow(
+				expect(() => createPgAdapter(pool, createOptions() as any)).toThrow(
 					'replayInvalidatedPlans: expected a boolean.',
 				);
 			},
 		);
 	});
 
-	describe('createPgsqlAdapter', () => {
+	describe('createPgAdapter', () => {
 		it('accepts Pool and opted-in PoolClient factory overloads only', () => {
 			const pool = createMockPool();
 			const client = {
@@ -352,16 +352,16 @@ describe('PgsqlAdapter', () => {
 				release: vi.fn(),
 			} as unknown as PoolClient;
 
-			expectTypeOf(createPgsqlAdapter(pool)).toEqualTypeOf<PgsqlAdapter>();
+			expectTypeOf(createPgAdapter(pool)).toEqualTypeOf<PgAdapter>();
 			expectTypeOf(
-				createPgsqlAdapter(client, { borrowedClient: true }),
-			).toEqualTypeOf<PgsqlAdapter>();
+				createPgAdapter(client, { borrowedClient: true }),
+			).toEqualTypeOf<PgAdapter>();
 			expectTypeOf(
-				createPgsqlAdapter(pool, {
+				createPgAdapter(pool, {
 					preparedStatements: true,
 					replayInvalidatedPlans: true,
 				}),
-			).toEqualTypeOf<PgsqlAdapter>();
+			).toEqualTypeOf<PgAdapter>();
 
 			if (process.env.DBSP_TYPECHECK_ONLY === '1') {
 				const uncoupledPoolReplayOptions = {
@@ -375,33 +375,33 @@ describe('PgsqlAdapter', () => {
 					replayInvalidatedPlans: true,
 				} as const;
 				// @ts-expect-error a PoolClient requires an explicit borrowedClient opt-in.
-				createPgsqlAdapter(client);
+				createPgAdapter(client);
 				// @ts-expect-error borrowedClient requires a PoolClient, not a Pool.
-				createPgsqlAdapter(pool, { borrowedClient: true });
+				createPgAdapter(pool, { borrowedClient: true });
 				// @ts-expect-error replay requires preparedStatements through a predeclared pool options object.
-				createPgsqlAdapter(pool, uncoupledPoolReplayOptions);
+				createPgAdapter(pool, uncoupledPoolReplayOptions);
 				// @ts-expect-error replay requires a pool-owned adapter.
-				createPgsqlAdapter(client, {
+				createPgAdapter(client, {
 					borrowedClient: true,
 					replayInvalidatedPlans: true,
 				});
 				// @ts-expect-error replay remains forbidden through a predeclared borrowed options object.
-				createPgsqlAdapter(client, borrowedReplayOptions);
+				createPgAdapter(client, borrowedReplayOptions);
 				// @ts-expect-error replay requires a pool-owned adapter.
-				createPgsqlCompileOnlyAdapter({ replayInvalidatedPlans: true });
+				createPgCompileOnlyAdapter({ replayInvalidatedPlans: true });
 				// @ts-expect-error replay remains forbidden through a predeclared compile-only options object.
-				createPgsqlCompileOnlyAdapter(compileOnlyReplayOptions);
+				createPgCompileOnlyAdapter(compileOnlyReplayOptions);
 				// @ts-expect-error replay requires a pool-owned adapter.
-				new PgsqlAdapter(undefined, { replayInvalidatedPlans: true });
+				new PgAdapter(undefined, { replayInvalidatedPlans: true });
 				// @ts-expect-error replay remains forbidden through a predeclared compile-only options object.
-				new PgsqlAdapter(undefined, compileOnlyReplayOptions);
+				new PgAdapter(undefined, compileOnlyReplayOptions);
 			}
 		});
 	});
 
 	describe('getPoolInstance', () => {
 		it('declares that the current executor can be a pool or transaction client', () => {
-			const adapter = createPgsqlAdapter(createMockPool());
+			const adapter = createPgAdapter(createMockPool());
 
 			expectTypeOf(adapter.getPoolInstance()).toEqualTypeOf<
 				Pool | PoolClient
@@ -417,20 +417,20 @@ describe('PgsqlAdapter', () => {
 			const pool = Object.assign(createMockPool(), {
 				connect: vi.fn<() => Promise<PoolClient>>().mockResolvedValue(client),
 			});
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgAdapter(pool);
 
 			expect(adapter.executionAvailable()).toBe(true);
 			await adapter.withPinnedConnection(async (pinned) => {
-				expect((pinned as PgsqlAdapter).executionAvailable()).toBe(true);
+				expect((pinned as PgAdapter).executionAvailable()).toBe(true);
 			});
-			expect(createPgsqlCompileOnlyAdapter().executionAvailable()).toBe(false);
+			expect(createPgCompileOnlyAdapter().executionAvailable()).toBe(false);
 		});
 	});
 
 	describe('capabilities', () => {
 		it('should report full PostgreSQL capabilities', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgAdapter(pool);
 
 			expect(adapter.capabilities.supportsReturning).toBe(true);
 			expect(adapter.capabilities.supportsSchemas).toBe(true);
@@ -445,7 +445,7 @@ describe('PgsqlAdapter', () => {
 	describe('compile', () => {
 		it('should compile a plan to CompiledQuery', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgAdapter(pool);
 
 			// Mock plan (simplified)
 			const plan: PlanReport = {
@@ -463,7 +463,7 @@ describe('PgsqlAdapter', () => {
 
 		it('should use schema from adapter options', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool, {
+			const adapter = createPgAdapter(pool, {
 				schemaName: 'tenant_123',
 			});
 
@@ -480,7 +480,7 @@ describe('PgsqlAdapter', () => {
 
 		it('should use schema from compile options', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgAdapter(pool);
 
 			const plan: PlanReport = {
 				rootTable: 'users',
@@ -496,7 +496,7 @@ describe('PgsqlAdapter', () => {
 	describe('compileWithIncludes', () => {
 		it('should compile plan with includes', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgAdapter(pool);
 
 			const plan: PlanReport = {
 				rootTable: 'posts',
@@ -516,7 +516,7 @@ describe('PgsqlAdapter', () => {
 	describe('mutations', () => {
 		it('should compile insert intent', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool, { model: mutationTestModel });
+			const adapter = createPgAdapter(pool, { model: mutationTestModel });
 
 			const intent = {
 				table: 'users',
@@ -531,7 +531,7 @@ describe('PgsqlAdapter', () => {
 
 		it('should compile update intent', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool, { model: mutationTestModel });
+			const adapter = createPgAdapter(pool, { model: mutationTestModel });
 
 			const intent = {
 				table: 'users',
@@ -546,7 +546,7 @@ describe('PgsqlAdapter', () => {
 
 		it('should compile delete intent', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool, { model: mutationTestModel });
+			const adapter = createPgAdapter(pool, { model: mutationTestModel });
 
 			const intent = {
 				table: 'users',
@@ -560,7 +560,7 @@ describe('PgsqlAdapter', () => {
 
 		it('should compile upsert intent', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool, { model: mutationTestModel });
+			const adapter = createPgAdapter(pool, { model: mutationTestModel });
 
 			const intent = {
 				type: 'upsert' as const,
@@ -583,7 +583,7 @@ describe('PgsqlAdapter', () => {
 				priceTiers: { name: 'string', quantityRange: 'int4range' },
 			}).model;
 
-			const adapter = createPgsqlAdapter(pool, { model });
+			const adapter = createPgAdapter(pool, { model });
 
 			const intent = {
 				table: 'priceTiers',
@@ -603,7 +603,7 @@ describe('PgsqlAdapter', () => {
 				priceTiers: { name: 'string', quantityRange: 'int4range' },
 			}).model;
 
-			const adapter = createPgsqlAdapter(pool, { model });
+			const adapter = createPgAdapter(pool, { model });
 
 			const intent = {
 				table: 'priceTiers',
@@ -631,7 +631,7 @@ describe('PgsqlAdapter', () => {
 				command: 'SELECT',
 			} as any);
 
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgAdapter(pool);
 			const query = testQuery('SELECT * FROM users');
 
 			const results = await adapter.execute(query);
@@ -649,7 +649,7 @@ describe('PgsqlAdapter', () => {
 				rowCount: 1,
 				command: 'SELECT',
 			} as any);
-			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const adapter = createPgAdapter(pool, { preparedStatements: true });
 			const query = testQuery('SELECT id FROM users WHERE id = $1', [7]);
 
 			await expect(adapter.execute(query)).resolves.toEqual([{ id: 7 }]);
@@ -678,7 +678,7 @@ describe('PgsqlAdapter', () => {
 				.mockRejectedValueOnce(connectionError)
 				.mockResolvedValueOnce({ rows: [{ id: 8 }], rowCount: 1 } as any)
 				.mockResolvedValueOnce({ rows: [{ id: 8 }], rowCount: 1 } as any);
-			const adapter = createPgsqlAdapter(pool, {
+			const adapter = createPgAdapter(pool, {
 				preparedStatements: { maxStatements: 1 },
 			});
 
@@ -704,7 +704,7 @@ describe('PgsqlAdapter', () => {
 				.mockRejectedValueOnce(serverError)
 				.mockResolvedValueOnce({ rows: [{ id: 8 }], rowCount: 1 } as any)
 				.mockResolvedValueOnce({ rows: [{ id: 8 }], rowCount: 1 } as any);
-			const serverAdapter = createPgsqlAdapter(serverPool, {
+			const serverAdapter = createPgAdapter(serverPool, {
 				preparedStatements: { maxStatements: 1 },
 			});
 
@@ -731,7 +731,7 @@ describe('PgsqlAdapter', () => {
 				rows: [{ id: 8 }],
 				rowCount: 1,
 			} as any);
-			const adapter = createPgsqlAdapter(pool, {
+			const adapter = createPgAdapter(pool, {
 				preparedStatements: { maxStatements: 1 },
 			});
 
@@ -770,7 +770,7 @@ describe('PgsqlAdapter', () => {
 				.mockRejectedValueOnce(error)
 				.mockResolvedValueOnce({ rows: [{ id: 8 }], rowCount: 1 } as any)
 				.mockResolvedValueOnce({ rows: [{ id: 8 }], rowCount: 1 } as any);
-			const adapter = createPgsqlAdapter(pool, {
+			const adapter = createPgAdapter(pool, {
 				preparedStatements: { maxStatements: 1 },
 			});
 
@@ -804,7 +804,7 @@ describe('PgsqlAdapter', () => {
 				.mockRejectedValueOnce(error)
 				.mockResolvedValueOnce({ rows: [{ id: 8 }], rowCount: 1 } as any)
 				.mockResolvedValueOnce({ rows: [{ id: 8 }], rowCount: 1 } as any);
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				preparedStatements: { maxStatements: 1 },
 			});
@@ -873,7 +873,7 @@ describe('PgsqlAdapter', () => {
 						return Promise.resolve({ rows: [{ id: 7 }], rowCount: 1 } as any);
 					return Promise.resolve({ rows: [{ id: 8 }], rowCount: 1 } as any);
 				});
-				const adapter = createPgsqlAdapter(client, {
+				const adapter = createPgAdapter(client, {
 					borrowedClient: true,
 					preparedStatements: { maxStatements: 1 },
 				});
@@ -913,7 +913,7 @@ describe('PgsqlAdapter', () => {
 					return Promise.resolve({ rows: [{ id: 7 }], rowCount: 1 } as any);
 				return Promise.resolve({ rows: [{ id: 8 }], rowCount: 1 } as any);
 			});
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				preparedStatements: { maxStatements: 1 },
 			});
@@ -940,7 +940,7 @@ describe('PgsqlAdapter', () => {
 					.mockRejectedValueOnce(error)
 					.mockResolvedValueOnce({ rows: [{ id: 8 }], rowCount: 1 } as any)
 					.mockResolvedValueOnce({ rows: [{ id: 8 }], rowCount: 1 } as any);
-				const adapter = createPgsqlAdapter(pool, {
+				const adapter = createPgAdapter(pool, {
 					preparedStatements: { maxStatements: 1 },
 				});
 
@@ -959,7 +959,7 @@ describe('PgsqlAdapter', () => {
 
 		it('does not manually acquire or release a pooled client while a query is pending', async () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const adapter = createPgAdapter(pool, { preparedStatements: true });
 			const sql = 'SELECT id FROM users WHERE id = $1';
 			const query = testQuery(sql, [7]);
 			const deferred = deferredPromise<unknown>();
@@ -979,7 +979,7 @@ describe('PgsqlAdapter', () => {
 		it('does not name compiled executions without parameters', async () => {
 			const pool = createMockPool();
 			vi.mocked(pool.query).mockResolvedValue({ rows: [], rowCount: 0 } as any);
-			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const adapter = createPgAdapter(pool, { preparedStatements: true });
 			const query = testQuery('SELECT 1');
 
 			await adapter.execute(query);
@@ -1025,7 +1025,7 @@ describe('PgsqlAdapter', () => {
 					.mockRejectedValueOnce(error)
 					.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 					.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any);
-				const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+				const adapter = createPgAdapter(pool, { preparedStatements: true });
 				const query = testQuery(sql, [7]);
 
 				await adapter.withPinnedConnection(async (pinned) => {
@@ -1076,7 +1076,7 @@ describe('PgsqlAdapter', () => {
 					.mockRejectedValueOnce(error)
 					.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 					.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any);
-				const adapter = createPgsqlAdapter(client, {
+				const adapter = createPgAdapter(client, {
 					borrowedClient: true,
 					preparedStatements: true,
 				});
@@ -1145,7 +1145,7 @@ describe('PgsqlAdapter', () => {
 					.mockRejectedValueOnce(error)
 					.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 					.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any);
-				const adapter = createPgsqlAdapter(client, {
+				const adapter = createPgAdapter(client, {
 					borrowedClient: true,
 					preparedStatements: true,
 				});
@@ -1201,7 +1201,7 @@ describe('PgsqlAdapter', () => {
 				.mockRejectedValueOnce(error)
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any);
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				preparedStatements: true,
 			});
@@ -1234,7 +1234,7 @@ describe('PgsqlAdapter', () => {
 			vi.mocked(client.query)
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 				.mockRejectedValueOnce(error);
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				preparedStatements: true,
 			});
@@ -1276,7 +1276,7 @@ describe('PgsqlAdapter', () => {
 					throw error;
 				})
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any);
-			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const adapter = createPgAdapter(pool, { preparedStatements: true });
 			const query = testQuery(sql, parameters);
 
 			await adapter.withPinnedConnection(async (pinned) => {
@@ -1325,7 +1325,7 @@ describe('PgsqlAdapter', () => {
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 				.mockRejectedValueOnce(error)
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any);
-			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const adapter = createPgAdapter(pool, { preparedStatements: true });
 			const query = testQuery(sql, [payload]);
 
 			await adapter.withPinnedConnection(async (pinned) => {
@@ -1371,7 +1371,7 @@ describe('PgsqlAdapter', () => {
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 				.mockRejectedValueOnce(error)
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any);
-			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const adapter = createPgAdapter(pool, { preparedStatements: true });
 			const query = testQuery(sql, [new Date('2026-08-24T12:00:00.000Z')]);
 
 			await adapter.withPinnedConnection(async (pinned) => {
@@ -1404,7 +1404,7 @@ describe('PgsqlAdapter', () => {
 			vi.mocked(client.query)
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 				.mockRejectedValueOnce(error);
-			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const adapter = createPgAdapter(pool, { preparedStatements: true });
 
 			await expect(
 				adapter.withPinnedConnection(async (pinned) => {
@@ -1439,7 +1439,7 @@ describe('PgsqlAdapter', () => {
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 				.mockRejectedValueOnce(error)
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any);
-			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const adapter = createPgAdapter(pool, { preparedStatements: true });
 
 			await adapter.withPinnedConnection(async (pinned) => {
 				await pinned.execute(testQuery(sql, [array, bytes]));
@@ -1474,7 +1474,7 @@ describe('PgsqlAdapter', () => {
 			vi.mocked(client.query)
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 				.mockRejectedValueOnce(error);
-			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const adapter = createPgAdapter(pool, { preparedStatements: true });
 
 			try {
 				await expect(
@@ -1522,7 +1522,7 @@ describe('PgsqlAdapter', () => {
 			vi.mocked(client.query)
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 				.mockRejectedValueOnce(error);
-			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const adapter = createPgAdapter(pool, { preparedStatements: true });
 
 			await expect(
 				adapter.withPinnedConnection(async (pinned) => {
@@ -1569,12 +1569,12 @@ describe('PgsqlAdapter', () => {
 			vi.mocked(client.query)
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 				.mockRejectedValueOnce(error);
-			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const adapter = createPgAdapter(pool, { preparedStatements: true });
 			const query = testQuery(sql, [7]);
 
 			await expect(
 				adapter.withPinnedConnection(async (pinned) => {
-					expect((pinned as PgsqlAdapter).getPoolInstance()).toBe(client);
+					expect((pinned as PgAdapter).getPoolInstance()).toBe(client);
 					await pinned.execute(query);
 					await pinned.execute(query);
 				}),
@@ -1601,7 +1601,7 @@ describe('PgsqlAdapter', () => {
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 				.mockRejectedValueOnce(error)
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any);
-			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const adapter = createPgAdapter(pool, { preparedStatements: true });
 			const query = testQuery(sql, [7]);
 
 			await adapter.withPinnedConnection(async (pinned) => {
@@ -1636,12 +1636,12 @@ describe('PgsqlAdapter', () => {
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 				.mockRejectedValueOnce(error)
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any);
-			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const adapter = createPgAdapter(pool, { preparedStatements: true });
 			const query = testQuery(sql, [7]);
 
-			let retained: PgsqlAdapter | undefined;
+			let retained: PgAdapter | undefined;
 			await adapter.withPinnedConnection(async (pinned) => {
-				retained = pinned as PgsqlAdapter;
+				retained = pinned as PgAdapter;
 				expect(retained.getPoolInstance()).toBe(client);
 			});
 			expect(client.release).toHaveBeenCalledOnce();
@@ -1688,7 +1688,7 @@ describe('PgsqlAdapter', () => {
 				.mockResolvedValueOnce({ rows: [], rowCount: 0 } as any)
 				.mockResolvedValueOnce({ rows: [], rowCount: 0 } as any)
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any);
-			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const adapter = createPgAdapter(pool, { preparedStatements: true });
 			const query = testQuery(sql, [7]);
 
 			await expect(
@@ -1697,14 +1697,14 @@ describe('PgsqlAdapter', () => {
 					const pending = pinned.execute(query);
 					await vi.waitFor(() => expect(client.query).toHaveBeenCalledTimes(2));
 					const rawClient = (
-						pinned as PgsqlAdapter
+						pinned as PgAdapter
 					).getPoolInstance() as PoolClient;
 					await rawClient.query('BEGIN');
 					await rawClient.query('SET ROLE injected_role');
 					namedFailure.reject(error);
 					await expect(pending).rejects.toBe(error);
 				}),
-			).rejects.toBeInstanceOf(PgsqlTransactionAbortedError);
+			).rejects.toBeInstanceOf(PgTransactionAbortedError);
 			expect(
 				vi
 					.mocked(client.query)
@@ -1740,7 +1740,7 @@ describe('PgsqlAdapter', () => {
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 				.mockRejectedValueOnce(error)
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any);
-			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const adapter = createPgAdapter(pool, { preparedStatements: true });
 			const query = testQuery(sql, [bytes]);
 
 			try {
@@ -1813,7 +1813,7 @@ describe('PgsqlAdapter', () => {
 							rowCount: 1,
 						} as any);
 					}
-					const adapter = createPgsqlAdapter(pool, {
+					const adapter = createPgAdapter(pool, {
 						preparedStatements: true,
 					});
 
@@ -1931,7 +1931,7 @@ describe('PgsqlAdapter', () => {
 				vi.mocked(client.query)
 					.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 					.mockRejectedValueOnce(error);
-				const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+				const adapter = createPgAdapter(pool, { preparedStatements: true });
 				const bufferFrom = vi.spyOn(Buffer, 'from');
 				try {
 					await (adapter as any).issueConnectionQuery(
@@ -1975,7 +1975,7 @@ describe('PgsqlAdapter', () => {
 				rows: [{ id: 7 }],
 				rowCount: 1,
 			} as any);
-			const poolAdapter = createPgsqlAdapter(pool, {
+			const poolAdapter = createPgAdapter(pool, {
 				preparedStatements: true,
 			});
 			await (poolAdapter as any).issueConnectionQuery(
@@ -2010,7 +2010,7 @@ describe('PgsqlAdapter', () => {
 				rows: [{ id: 7 }],
 				rowCount: 1,
 			} as any);
-			const borrowedAdapter = createPgsqlAdapter(client, {
+			const borrowedAdapter = createPgAdapter(client, {
 				borrowedClient: true,
 				preparedStatements: true,
 			});
@@ -2091,7 +2091,7 @@ describe('PgsqlAdapter', () => {
 			vi.mocked(client.query)
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 				.mockRejectedValueOnce(error);
-			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const adapter = createPgAdapter(pool, { preparedStatements: true });
 			const query = testQuery(sql, [value]);
 
 			await expect(
@@ -2124,7 +2124,7 @@ describe('PgsqlAdapter', () => {
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 				.mockRejectedValueOnce(initialError)
 				.mockRejectedValueOnce(replayError);
-			const adapter = createPgsqlAdapter(pool, {
+			const adapter = createPgAdapter(pool, {
 				preparedStatements: true,
 				replayInvalidatedPlans: true,
 			});
@@ -2136,7 +2136,7 @@ describe('PgsqlAdapter', () => {
 				await pinned.execute(query);
 			});
 			const recoveryError = await operation.catch((error: unknown) => error);
-			expect(recoveryError).toBeInstanceOf(PgsqlPreparedStatementReplayError);
+			expect(recoveryError).toBeInstanceOf(PgPreparedStatementReplayError);
 			expect(recoveryError).toMatchObject({
 				admissionFingerprint: derivePreparedStatementFingerprint(sql),
 				infrastructureError: initialError,
@@ -2227,7 +2227,7 @@ describe('PgsqlAdapter', () => {
 						}),
 				);
 				client.query = query as typeof client.query;
-				const adapter = createPgsqlAdapter(client, {
+				const adapter = createPgAdapter(client, {
 					borrowedClient: true,
 					preparedStatements: true,
 				});
@@ -2268,7 +2268,7 @@ describe('PgsqlAdapter', () => {
 			vi.mocked(client.query)
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 				.mockRejectedValueOnce(error);
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				preparedStatements: true,
 			});
@@ -2308,7 +2308,7 @@ describe('PgsqlAdapter', () => {
 				vi.mocked(client.query)
 					.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 					.mockRejectedValueOnce(error);
-				const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+				const adapter = createPgAdapter(pool, { preparedStatements: true });
 				const query = testQuery(sql, [7]);
 
 				await expect(
@@ -2316,7 +2316,7 @@ describe('PgsqlAdapter', () => {
 						await pinned.execute(query);
 						await expect(pinned.execute(query)).rejects.toBe(error);
 					}),
-				).rejects.toBeInstanceOf(PgsqlTransactionAbortedError);
+				).rejects.toBeInstanceOf(PgTransactionAbortedError);
 				expect(client.query).toHaveBeenCalledTimes(2);
 				expect(client.query).toHaveBeenNthCalledWith(1, sql, [7]);
 				expect(client.query).toHaveBeenNthCalledWith(2, {
@@ -2347,7 +2347,7 @@ describe('PgsqlAdapter', () => {
 				.mockResolvedValueOnce({ rows: [{ id: 8 }], rowCount: 1 } as any)
 				.mockRejectedValueOnce(error)
 				.mockResolvedValueOnce({ rows: [{ id: 8 }], rowCount: 1 } as any);
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				preparedStatements: true,
 			});
@@ -2377,7 +2377,7 @@ describe('PgsqlAdapter', () => {
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 				.mockRejectedValueOnce(error)
 				.mockResolvedValue({ rows: [{ id: 7 }], rowCount: 1 } as any);
-			const adapter = createPgsqlAdapter(pool, {
+			const adapter = createPgAdapter(pool, {
 				preparedStatements: true,
 			});
 			const sql = 'SELECT id FROM users WHERE id = $1';
@@ -2416,7 +2416,7 @@ describe('PgsqlAdapter', () => {
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 				.mockRejectedValueOnce(error)
 				.mockResolvedValue({ rows: [{ id: 7 }], rowCount: 1 } as any);
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				preparedStatements: true,
 			});
@@ -2451,7 +2451,7 @@ describe('PgsqlAdapter', () => {
 					.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 					.mockRejectedValueOnce(error)
 					.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any);
-				const adapter = createPgsqlAdapter(client, {
+				const adapter = createPgAdapter(client, {
 					borrowedClient: true,
 					preparedStatements: true,
 				});
@@ -2486,7 +2486,7 @@ describe('PgsqlAdapter', () => {
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 				.mockRejectedValueOnce(error)
 				.mockResolvedValue({ rows: [{ id: 7 }], rowCount: 1 } as any);
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				preparedStatements: true,
 			});
@@ -2512,7 +2512,7 @@ describe('PgsqlAdapter', () => {
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 				.mockRejectedValueOnce(error)
 				.mockResolvedValue({ rows: [{ id: 7 }], rowCount: 1 } as any);
-			const adapter = createPgsqlAdapter(client, {
+			const adapter = createPgAdapter(client, {
 				borrowedClient: true,
 				preparedStatements: true,
 			});
@@ -2538,7 +2538,7 @@ describe('PgsqlAdapter', () => {
 					.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 					.mockRejectedValueOnce(error)
 					.mockResolvedValue({ rows: [{ id: 7 }], rowCount: 1 } as any);
-				const adapter = createPgsqlAdapter(client, {
+				const adapter = createPgAdapter(client, {
 					borrowedClient: true,
 					preparedStatements: true,
 				});
@@ -2574,7 +2574,7 @@ describe('PgsqlAdapter', () => {
 				command: 'UPDATE',
 			} as any);
 
-			const adapter = createPgsqlAdapter(pool, { dbCasing: 'snake_case' });
+			const adapter = createPgAdapter(pool, { dbCasing: 'snake_case' });
 			const query = testQuery('UPDATE users SET full_name = $1 WHERE id = $2', [
 				'Alice',
 				1,
@@ -2598,7 +2598,7 @@ describe('PgsqlAdapter', () => {
 				command: 'UPDATE',
 			} as any);
 
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgAdapter(pool);
 			const result = await adapter.executeWithMeta(
 				testQuery('UPDATE users SET active = false'),
 			);
@@ -2617,7 +2617,7 @@ describe('PgsqlAdapter', () => {
 			const mockRows = [{ id: 1, name: 'Alice' }];
 			vi.mocked(pool.query).mockResolvedValue({ rows: mockRows } as any);
 
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgAdapter(pool);
 			const query = testQuery('SELECT * FROM users LIMIT 1');
 
 			const result = await adapter.executeOne(query);
@@ -2629,7 +2629,7 @@ describe('PgsqlAdapter', () => {
 			const pool = createMockPool();
 			vi.mocked(pool.query).mockResolvedValue({ rows: [] } as any);
 
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgAdapter(pool);
 			const query = testQuery('SELECT * FROM users WHERE id = $1', [999]);
 
 			const result = await adapter.executeOne(query);
@@ -2644,7 +2644,7 @@ describe('PgsqlAdapter', () => {
 			const mockRows = [{ id: 1, name: 'Alice' }];
 			vi.mocked(pool.query).mockResolvedValue({ rows: mockRows } as any);
 
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgAdapter(pool);
 			const query = testQuery('SELECT * FROM users LIMIT 1');
 
 			const result = await adapter.executeOneOrThrow(query);
@@ -2656,7 +2656,7 @@ describe('PgsqlAdapter', () => {
 			const pool = createMockPool();
 			vi.mocked(pool.query).mockResolvedValue({ rows: [] } as any);
 
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgAdapter(pool);
 			const query = testQuery('SELECT * FROM users WHERE id = $1', [999]);
 
 			await expect(adapter.executeOneOrThrow(query)).rejects.toThrow(
@@ -2671,7 +2671,7 @@ describe('PgsqlAdapter', () => {
 			const mockRows = [{ count: 5 }];
 			vi.mocked(pool.query).mockResolvedValue({ rows: mockRows } as any);
 
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgAdapter(pool);
 			const sql = 'SELECT COUNT(*) FROM users';
 
 			const results = await adapter.executeRaw(sql);
@@ -2685,7 +2685,7 @@ describe('PgsqlAdapter', () => {
 			const mockRows = [{ id: 1, name: 'Alice' }];
 			vi.mocked(pool.query).mockResolvedValue({ rows: mockRows } as any);
 
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgAdapter(pool);
 			const sql = 'SELECT * FROM users WHERE id = $1';
 			const params = [1];
 
@@ -2698,7 +2698,7 @@ describe('PgsqlAdapter', () => {
 		it('never names raw SQL even when prepared statements are enabled', async () => {
 			const pool = createMockPool();
 			vi.mocked(pool.query).mockResolvedValue({ rows: [{ id: 1 }] } as any);
-			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const adapter = createPgAdapter(pool, { preparedStatements: true });
 			const sql = 'SELECT id FROM users WHERE id = $1';
 
 			await adapter.executeRaw(sql, [1]);
@@ -2713,7 +2713,7 @@ describe('PgsqlAdapter', () => {
 		it('preserves each existing driver argument shape', async () => {
 			const pool = createMockPool();
 			vi.mocked(pool.query).mockResolvedValue({ rows: [], rowCount: 0 } as any);
-			const adapter = createPgsqlAdapter(pool, { preparedStatements: false });
+			const adapter = createPgAdapter(pool, { preparedStatements: false });
 
 			await adapter.execute(testQuery('SELECT $1', [1]));
 			await adapter.executeRaw('SELECT $1', [1]);
@@ -2731,17 +2731,17 @@ describe('PgsqlAdapter', () => {
 	describe('withSchema', () => {
 		it('should create schema-scoped adapter', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgAdapter(pool);
 
 			const scopedAdapter = adapter.withSchema('tenant_456');
 
-			expect(scopedAdapter).toBeInstanceOf(PgsqlAdapter);
+			expect(scopedAdapter).toBeInstanceOf(PgAdapter);
 			expect(scopedAdapter).not.toBe(adapter);
 		});
 
 		it('should validate schema name', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgAdapter(pool);
 
 			// Invalid schema name with SQL injection attempt
 			expect(() => adapter.withSchema('tenant"; DROP TABLE users--')).toThrow();
@@ -2751,7 +2751,7 @@ describe('PgsqlAdapter', () => {
 	describe('validateIdentifier', () => {
 		it('should accept valid identifiers', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgAdapter(pool);
 
 			expect(() => adapter.validateIdentifier('users', 'table')).not.toThrow();
 			expect(() =>
@@ -2764,7 +2764,7 @@ describe('PgsqlAdapter', () => {
 
 		it('should reject invalid identifiers', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgAdapter(pool);
 
 			// SQL injection attempts
 			expect(() =>
@@ -2779,7 +2779,7 @@ describe('PgsqlAdapter', () => {
 	describe('createDump', () => {
 		it('should create dump with plan and query', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgAdapter(pool);
 
 			const plan: PlanReport = {
 				rootTable: 'users',
@@ -2799,7 +2799,7 @@ describe('PgsqlAdapter', () => {
 
 		it('should include schema in dump metadata', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool, {
+			const adapter = createPgAdapter(pool, {
 				schemaName: 'tenant_123',
 			});
 
@@ -2819,14 +2819,14 @@ describe('PgsqlAdapter', () => {
 	describe('factory function', () => {
 		it('should create adapter via factory', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgAdapter(pool);
 
-			expect(adapter).toBeInstanceOf(PgsqlAdapter);
+			expect(adapter).toBeInstanceOf(PgAdapter);
 		});
 
 		it('should pass options to adapter', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool, {
+			const adapter = createPgAdapter(pool, {
 				dbCasing: 'snake_case',
 				schemaName: 'public',
 			});
@@ -2838,7 +2838,7 @@ describe('PgsqlAdapter', () => {
 	describe('stubs (not yet implemented)', () => {
 		it('compileSubqueryInclude generates SELECT with IN clause', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgAdapter(pool);
 
 			const info = {
 				relationName: 'posts',
@@ -2858,7 +2858,7 @@ describe('PgsqlAdapter', () => {
 
 		it('compileSubqueryInclude returns empty result for no parent IDs', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgAdapter(pool);
 
 			const info = {
 				relationName: 'posts',
@@ -2880,7 +2880,7 @@ describe('PgsqlAdapter', () => {
 				users: { id: 'integer', name: 'text' },
 				archivedUsers: { id: 'integer', name: 'text' },
 			}).model;
-			const adapter = createPgsqlAdapter(pool, { model });
+			const adapter = createPgAdapter(pool, { model });
 
 			const intent = {
 				type: 'insert_from' as const,
@@ -2897,7 +2897,7 @@ describe('PgsqlAdapter', () => {
 
 		it('stream returns async iterator', () => {
 			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool);
+			const adapter = createPgAdapter(pool);
 
 			const query = testQuery('SELECT * FROM users');
 
@@ -2908,10 +2908,10 @@ describe('PgsqlAdapter', () => {
 		});
 
 		it('introspect should throw on compile-only adapter', async () => {
-			const adapter = createPgsqlCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter();
 
 			await expect(adapter.introspect()).rejects.toThrow(
-				'Cannot introspect: this PgsqlAdapter was constructed without a connection',
+				'Cannot introspect: this PgAdapter was constructed without a connection',
 			);
 		});
 
@@ -2924,15 +2924,15 @@ describe('PgsqlAdapter', () => {
 
 	describe('compile-only mode', () => {
 		it('should create adapter without pool via factory', () => {
-			const adapter = new PgsqlAdapter(undefined, {});
+			const adapter = new PgAdapter(undefined, {});
 
-			expect(adapter).toBeInstanceOf(PgsqlAdapter);
+			expect(adapter).toBeInstanceOf(PgAdapter);
 			expect(adapter.dbCasing).toBe('preserve');
 			expect(adapter.capabilities.supportsStreaming).toBe(false);
 		});
 
 		it('should compile SELECT in compile-only mode', () => {
-			const adapter = new PgsqlAdapter(undefined, {});
+			const adapter = new PgAdapter(undefined, {});
 			const plan: PlanReport = {
 				rootTable: 'users',
 				decisions: [{ type: 'select', column: 'id' }] as any,
@@ -2944,14 +2944,14 @@ describe('PgsqlAdapter', () => {
 		});
 
 		it('should throw on execute in compile-only mode', async () => {
-			const adapter = new PgsqlAdapter(undefined, {});
+			const adapter = new PgAdapter(undefined, {});
 			await expect(adapter.execute(testQuery('SELECT 1'))).rejects.toThrow(
 				'constructed without a connection',
 			);
 		});
 
 		it('should throw on stream in compile-only mode', async () => {
-			const adapter = new PgsqlAdapter(undefined, {});
+			const adapter = new PgAdapter(undefined, {});
 			const iter = adapter.stream(testQuery('SELECT 1'));
 			await expect(iter.next()).rejects.toThrow(
 				'constructed without a connection',
@@ -2959,24 +2959,24 @@ describe('PgsqlAdapter', () => {
 		});
 
 		it('should throw on transaction in compile-only mode', async () => {
-			const adapter = new PgsqlAdapter(undefined, {});
+			const adapter = new PgAdapter(undefined, {});
 			await expect(adapter.transaction(async () => {})).rejects.toThrow(
 				'constructed without a connection',
 			);
 		});
 
 		it('should throw on executeRaw in compile-only mode', async () => {
-			const adapter = new PgsqlAdapter(undefined, {});
+			const adapter = new PgAdapter(undefined, {});
 			await expect(adapter.executeRaw('SELECT 1')).rejects.toThrow(
 				'constructed without a connection',
 			);
 		});
 
 		it('should create schema-scoped compile-only adapter via withSchema', async () => {
-			const adapter = new PgsqlAdapter(undefined, {});
+			const adapter = new PgAdapter(undefined, {});
 			const scoped = adapter.withSchema('tenant_1');
 
-			expect(scoped).toBeInstanceOf(PgsqlAdapter);
+			expect(scoped).toBeInstanceOf(PgAdapter);
 			// Scoped adapter should also be in compile-only mode
 			await expect(scoped.execute(testQuery('SELECT 1'))).rejects.toThrow(
 				'constructed without a connection',
@@ -3003,7 +3003,7 @@ describe('PgsqlAdapter', () => {
 				relations: new Map(),
 			} as any;
 
-			const adapter = new PgsqlAdapter(undefined, {});
+			const adapter = new PgAdapter(undefined, {});
 			const ddl = adapter.generateDDL(
 				createPgPhysicalModel({
 					mode: 'logical',
@@ -3016,7 +3016,7 @@ describe('PgsqlAdapter', () => {
 		});
 
 		it('should createDump in compile-only mode', () => {
-			const adapter = new PgsqlAdapter(undefined, {});
+			const adapter = new PgAdapter(undefined, {});
 			const plan: PlanReport = {
 				rootTable: 'users',
 				decisions: [{ type: 'select', column: 'id' }] as any,
@@ -3073,7 +3073,7 @@ describe('PgsqlAdapter', () => {
 		}
 
 		it('propagates specific columns from selectRelationColumn to lateral include', () => {
-			const adapter = new PgsqlAdapter(undefined, {});
+			const adapter = new PgAdapter(undefined, {});
 			const plan = buildPlanWithRelationColumns(
 				'customers',
 				[
@@ -3094,7 +3094,7 @@ describe('PgsqlAdapter', () => {
 		});
 
 		it('propagates multiple columns for same relation', () => {
-			const adapter = new PgsqlAdapter(undefined, {});
+			const adapter = new PgAdapter(undefined, {});
 			const plan = buildPlanWithRelationColumns(
 				'customers',
 				[
@@ -3120,7 +3120,7 @@ describe('PgsqlAdapter', () => {
 		});
 
 		it('keeps star expansion when column is *', () => {
-			const adapter = new PgsqlAdapter(undefined, {});
+			const adapter = new PgAdapter(undefined, {});
 			const plan = buildPlanWithRelationColumns(
 				'customers',
 				[
@@ -3144,7 +3144,7 @@ describe('PgsqlAdapter', () => {
 				orders: { id: 'integer', name: 'string', total: 'decimal' },
 			}).model;
 
-			const adapter = new PgsqlAdapter(undefined, {});
+			const adapter = new PgAdapter(undefined, {});
 			const plan = buildPlanWithRelationColumns(
 				'customers',
 				[
@@ -3164,7 +3164,7 @@ describe('PgsqlAdapter', () => {
 		});
 
 		it('skips validation when no model is provided', () => {
-			const adapter = new PgsqlAdapter(undefined, {});
+			const adapter = new PgAdapter(undefined, {});
 			const plan = buildPlanWithRelationColumns(
 				'customers',
 				[
@@ -3189,7 +3189,7 @@ describe('PgsqlAdapter', () => {
 				orders: { id: 'integer', anything: 'string' },
 			}).model;
 
-			const adapter = new PgsqlAdapter(undefined, {});
+			const adapter = new PgAdapter(undefined, {});
 			const plan = buildPlanWithRelationColumns(
 				'customers',
 				[
@@ -3228,7 +3228,7 @@ describe('PgsqlAdapter', () => {
 		}
 
 		it('propagates user-supplied alias for join include (RELATION-COL-RESULT)', () => {
-			const adapter = new PgsqlAdapter(undefined, {});
+			const adapter = new PgAdapter(undefined, {});
 			const plan = buildPlanWithRelationColumns(
 				'symbols',
 				[
@@ -3253,7 +3253,7 @@ describe('PgsqlAdapter', () => {
 		});
 
 		it('falls back to relation.column alias when no alias provided (join)', () => {
-			const adapter = new PgsqlAdapter(undefined, {});
+			const adapter = new PgAdapter(undefined, {});
 			const plan = buildPlanWithRelationColumns(
 				'symbols',
 				[

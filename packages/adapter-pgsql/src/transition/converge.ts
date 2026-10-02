@@ -23,7 +23,7 @@ import type {
 import type { Pool, PoolClient } from 'pg';
 import { hasDeclaredFkIndexAdmission } from '../ddl/fk-index-coverage.js';
 import {
-	createPgsqlGeneratedManagedStep,
+	createPgGeneratedManagedStep,
 	type SchemaChange,
 } from '../ddl/index.js';
 import {
@@ -32,15 +32,15 @@ import {
 	sameColumnSet,
 } from '../ddl/key-column-set.js';
 import {
-	comparePgsqlDeclaredAdoptionSchema,
+	comparePgDeclaredAdoptionSchema,
 	modelForDeclaredAdoption,
 	pgsqlSurfaceKey,
 	resolvePgsqlDeclaredIndexName,
 } from '../ddl/live-diff.js';
 import {
 	addressForChange,
-	createPgsqlDeclaredAdoptionStep,
-	createPgsqlDeclaredSequenceAdoptionStep,
+	createPgDeclaredAdoptionStep,
+	createPgDeclaredSequenceAdoptionStep,
 } from '../ddl/managed-step-manifest.js';
 import { generateMigrationSQL, getPhase } from '../ddl/migration-sql.js';
 import { mapColumnType } from '../ddl/type-mapping.js';
@@ -891,7 +891,7 @@ async function compareConvergeMaskedSchema(input: {
 	readonly ownership?: ResolvedOwnershipMask;
 	readonly declaredSequenceNames: ReadonlyMap<string, string>;
 }) {
-	return comparePgsqlDeclaredAdoptionSchema({
+	return comparePgDeclaredAdoptionSchema({
 		executor: input.executor,
 		model: input.model ?? input.physical.model,
 		schema: input.physical.schema,
@@ -2082,7 +2082,7 @@ export async function convergePgPhysical(
 					`declared adoption for ${physicalName} refuses live shape mismatch`,
 				);
 			adoptionSteps.push(
-				createPgsqlDeclaredAdoptionStep({
+				createPgDeclaredAdoptionStep({
 					address,
 					table,
 					stepKey: `converge:${adoptionSteps.length}:adoption`,
@@ -2149,7 +2149,7 @@ export async function convergePgPhysical(
 					`declared sequence adoption for ${physicalName} refuses live shape mismatch`,
 				);
 			adoptionSteps.push(
-				createPgsqlDeclaredSequenceAdoptionStep({
+				createPgDeclaredSequenceAdoptionStep({
 					address,
 					sequence,
 					stepKey: `converge:${adoptionSteps.length}:sequence-adoption`,
@@ -2365,7 +2365,7 @@ export async function convergePgPhysical(
 					fkAutoIndexCoverage: model,
 				},
 			);
-			const step = createPgsqlGeneratedManagedStep({
+			const step = createPgGeneratedManagedStep({
 				change,
 				database,
 				schema,

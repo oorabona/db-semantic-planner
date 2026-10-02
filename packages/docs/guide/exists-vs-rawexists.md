@@ -54,7 +54,7 @@ predicate (`communities.id = files_exists_0."communityId"`) and appends your cus
 
 ```typescript
 import { schema, ref, createOrm, exists, gt, outerRef } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const __existsDb = schema({
   communities: {
@@ -70,7 +70,7 @@ const __existsDb = schema({
 
 const __existsOrm = createOrm({
   schema: __existsDb,
-  adapter: createPgsqlCompileOnlyAdapter(),
+  adapter: createPgCompileOnlyAdapter(),
 });
 
 const dump = (__existsOrm as any)
@@ -95,7 +95,7 @@ at compile time:
 ```typescript
 // doctest: skip — rawExists + outerRef throws today; use exists() when FK is declared
 import { createOrm, rawExists, subquery, gt, outerRef, ref, schema } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const __rawExistsThrowDb = schema({
   communities: { id: { type: 'integer', primaryKey: true }, createdAt: 'timestamp' },
@@ -104,7 +104,7 @@ const __rawExistsThrowDb = schema({
 
 const __rawExistsThrowOrm = createOrm({
   schema: __rawExistsThrowDb,
-  adapter: createPgsqlCompileOnlyAdapter(),
+  adapter: createPgCompileOnlyAdapter(),
 });
 
 // This throws: "correlated subqueries (outerRef inside the inner WHERE) are not yet supported"
@@ -129,7 +129,7 @@ with the filter you want:
 
 ```typescript
 import { createOrm, rawExists, subquery, eq, schema } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const __rawExistsDb = schema({
   users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
@@ -138,7 +138,7 @@ const __rawExistsDb = schema({
 
 const __rawExistsOrm = createOrm({
   schema: __rawExistsDb,
-  adapter: createPgsqlCompileOnlyAdapter(),
+  adapter: createPgCompileOnlyAdapter(),
 });
 
 const dump = (__rawExistsOrm as any)
@@ -163,7 +163,7 @@ clause — you get a plain `SELECT * FROM users` with no filter:
 ```typescript
 // doctest: skip — illustrative: shows the silent-drop bug for undeclared relations
 import { createOrm, exists, eq, schema } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const __existsSilentDb = schema({
   users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
@@ -172,7 +172,7 @@ const __existsSilentDb = schema({
 
 const __existsSilentOrm = createOrm({
   schema: __existsSilentDb,
-  adapter: createPgsqlCompileOnlyAdapter(),
+  adapter: createPgCompileOnlyAdapter(),
 });
 
 const dump = (__existsSilentOrm as any)

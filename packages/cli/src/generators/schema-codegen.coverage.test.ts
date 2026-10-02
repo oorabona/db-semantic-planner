@@ -534,7 +534,7 @@ describe('generateSchemaFileWithDiagnostics — coverage', () => {
 
 			// camelCase dbCasing is not 'preserve', so it triggers the import and export
 			expect(result).toContain(
-				"import { createPgsqlAdapter } from '@dbsp/adapter-pgsql'",
+				"import { createPgAdapter } from '@dbsp/adapter-pgsql'",
 			);
 			expect(result).toContain("export const dbCasing = 'camelCase' as const");
 			// Column names stay as-is (no conversion needed)
