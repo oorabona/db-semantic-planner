@@ -67,16 +67,17 @@ describe('#888 empty logical groups with rows', () => {
 			.orderBy('id')
 			.execute()) as unknown as Array<{
 			id: number;
-			posts: { id: number; published: boolean; authorId: number };
+			posts: { id: number };
 		}>;
+		// A join include projects the related key only (posts.id AS "posts.id").
 		expect(
 			published.map((user) => ({
 				id: user.id,
 				posts: user.posts,
 			})),
 		).toEqual([
-			{ id: 1, posts: { id: 11, published: true, authorId: 1 } },
-			{ id: 2, posts: { id: 22, published: true, authorId: 2 } },
+			{ id: 1, posts: { id: 11 } },
+			{ id: 2, posts: { id: 22 } },
 		]);
 		const empty = (await orm
 			.select('users')
@@ -84,7 +85,7 @@ describe('#888 empty logical groups with rows', () => {
 			.orderBy('id')
 			.execute()) as unknown as Array<{
 			id: number;
-			posts: { id: number; published: boolean; authorId: number };
+			posts: { id: number };
 		}>;
 		expect(empty).toEqual([]);
 		await expect(
