@@ -11,6 +11,7 @@ import {
 	POSTGRESQL_CAPABILITIES,
 	plan as planFn,
 } from '@dbsp/core';
+import { inspectMutationRows } from '@dbsp/core/internal';
 import type {
 	BatchUpdateIntent,
 	CompiledQuery,
@@ -40,7 +41,7 @@ import {
 	compileWhereIntent,
 	type WhereCompilerCtx,
 } from './compile-where.js';
-import { buildCustomFnFilter } from './compiler.js';
+import { buildCustomFnFilter, renumberParamRefsInAst } from './compiler.js';
 import {
 	transposeToColumnArrays,
 	validateBatchCardinality,
@@ -78,6 +79,7 @@ import {
 	type UpsertConfig,
 	type UpsertFromConfig,
 } from './mutations/index.js';
+import { DEFAULT_INSERT_CELL } from './mutations/mutation-compiler.js';
 import {
 	finalizeEnvelope,
 	fromAstProjection,
@@ -90,6 +92,44 @@ import {
 	resolveDeclaredIdentifier,
 	type SqlIdentifier,
 } from './sql-identifier.js';
+
+export const POSTGRESQL_PARAMETER_LIMIT = 65_535;
+export const HETEROGENEOUS_INSERT_CELL_LIMIT = 2 * POSTGRESQL_PARAMETER_LIMIT;
+
+/** Validate nonempty input and the insert/upsert batch-size limit. */
+export function validateMutationRowCount(
+	operation: 'insert' | 'upsert' | 'update',
+	rows: readonly Record<string, unknown>[],
+	options?: CompileOptions,
+): void {
+	if (rows.length === 0)
+		throw new InvalidOperationError(
+			operation,
+			operation === 'update'
+				? 'batchSet requires at least one row'
+				: `${operation}: values requires at least one row`,
+		);
+	if (
+		operation !== 'update' &&
+		options?.maxBatchSize !== undefined &&
+		rows.length > options.maxBatchSize
+	)
+		throw new InvalidOperationError(
+			operation,
+			`Batch size ${rows.length} exceeds maxBatchSize ${options.maxBatchSize}`,
+		);
+}
+
+function assertParameterLimit(
+	operation: 'insert' | 'upsert',
+	count: number,
+): void {
+	if (count > POSTGRESQL_PARAMETER_LIMIT)
+		throw new InvalidOperationError(
+			operation,
+			`${operation}: batch requires ${count} parameters, exceeding PostgreSQL limit ${POSTGRESQL_PARAMETER_LIMIT}`,
+		);
+}
 
 // ============================================================================
 // Internal helpers
@@ -438,6 +478,7 @@ function getColumnTypes(
 	columns: string[],
 	deps: AdapterCompilerDeps,
 	unnestedColumns: ReadonlySet<string> = new Set(),
+	operation: 'insert' | 'upsert' | 'update' = 'insert',
 ): Record<string, MutationColumnMetadata> | undefined {
 	if (!deps.model) return undefined;
 	const table = deps.model.getTable(tableName);
@@ -470,7 +511,7 @@ function getColumnTypes(
 			// clear message instead of emitting SQL PostgreSQL rejects at runtime.
 			if (unnestedColumns.has(col) && castTarget.trim().endsWith('[]')) {
 				throw new Error(
-					`Batch mutation of array-typed column '${col}' (${castTarget}) is not supported: unnest flattens multi-dimensional arrays. Set batchThreshold to at least the batch size to use VALUES, or use single-row mutations for array columns.`,
+					`Batch mutation of array-typed column '${col}' (${castTarget}) is not supported: unnest flattens multi-dimensional arrays. ${operation === 'update' ? 'Use single-row updates, or scalar set for a non-match assignment column only when every row should receive the same array.' : 'Set batchThreshold to at least the batch size to use VALUES, or use single-row mutations for array columns.'}`,
 				);
 			}
 			// Mutation compiler columns are physical identifiers. Keep the cast map
@@ -544,17 +585,35 @@ export function compileInsert(
 	intent: InsertIntent,
 	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
+	rowShape?: ReturnType<typeof inspectMutationRows>,
 ): CompiledQuery {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const ctx = mutationContext(deps, intent.table, MAX_DEPTH_LIMIT);
 	const state = createCompilerState();
 
-	const firstRow = intent.values?.[0] ?? {};
-	const columns = Object.keys(firstRow);
 	const rows = intent.values ?? [];
-	const values = rows.map((row) => columns.map((col) => row[col]));
+	const { columns, heterogeneous, rowKeys } =
+		rowShape ??
+		inspectMutationRows(rows, {
+			operation: 'insert',
+		});
+	validateMutationRowCount('insert', rows, options);
+	if (
+		heterogeneous &&
+		rows.length > HETEROGENEOUS_INSERT_CELL_LIMIT / columns.length
+	)
+		throw new InvalidOperationError(
+			'insert',
+			`insert: heterogeneous batch has ${rows.length} rows and ${columns.length} columns, exceeding cell limit ${HETEROGENEOUS_INSERT_CELL_LIMIT}; split the rows by shape`,
+		);
+	const values = rows.map((row, index) =>
+		columns.map((col) =>
+			rowKeys[index]?.has(col) ? (row[col] ?? null) : DEFAULT_INSERT_CELL,
+		),
+	);
 	const batchThreshold = options?.batchThreshold ?? 50;
 	const useUnnest =
+		!heterogeneous &&
 		values.length > 0 &&
 		(batchThreshold === 0 || values.length > batchThreshold);
 	const columnTypes = getColumnTypes(
@@ -584,19 +643,11 @@ export function compileInsert(
 		...(columnTypes && { columnTypes }),
 	};
 
-	// maxBatchSize guard (INV-07)
-	const maxBatchSize = options?.maxBatchSize;
-	if (maxBatchSize !== undefined && values.length > maxBatchSize) {
-		throw new InvalidOperationError(
-			'insert',
-			`Batch size ${values.length} exceeds maxBatchSize ${maxBatchSize}`,
-		);
-	}
-
 	// Strategy switch: unnest for large batches, VALUES for small (INV-03)
 	const ast = useUnnest
 		? compileUnnestInsertMutation(config, ctx, state)
 		: compileInsertMutation(config, ctx, state);
+	if (!useUnnest) assertParameterLimit('insert', state.parameters.length);
 	return compileMutationQuery(ast, intent.table, state, options, deps);
 }
 
@@ -760,7 +811,7 @@ export function compileUpdate(
  */
 export function compileBatchUpdate(
 	intent: BatchUpdateIntent,
-	_options: CompileOptions | undefined,
+	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
@@ -768,29 +819,43 @@ export function compileBatchUpdate(
 	const ctx = mutationContext(deps, intent.table, MAX_DEPTH_LIMIT);
 	const state = createCompilerState();
 
-	if (intent.updates.length === 0) {
+	validateMutationRowCount('update', intent.updates, options);
+	if (intent.matchColumns.length === 0)
 		throw new InvalidOperationError(
 			'update',
-			'batchSet requires at least one row',
+			'batchSet requires at least one match key',
 		);
-	}
 
-	// Extract all columns from the first row
-	const allColumns = Object.keys(intent.updates[0]!);
 	const matchColumns = [...intent.matchColumns];
+	const { columns: allColumns, rowKeys } = inspectMutationRows(intent.updates, {
+		operation: 'update',
+		homogeneous: true,
+		requiredKeys: matchColumns,
+	});
 
-	// Validate that all match columns appear in the data
-	for (const mc of matchColumns) {
-		if (!allColumns.includes(mc)) {
+	const assignmentColumns = allColumns.filter(
+		(column) => !matchColumns.includes(column),
+	);
+	const scalarColumns = Object.keys(intent.scalarSet ?? {});
+	if (assignmentColumns.length === 0 && scalarColumns.length === 0)
+		throw new InvalidOperationError(
+			'update',
+			'batchSet requires at least one assignment',
+		);
+	for (const column of assignmentColumns) {
+		if (scalarColumns.includes(column))
 			throw new InvalidOperationError(
 				'update',
-				`Match column "${mc}" not found in update data. Each row must include the match column(s).`,
+				`batchSet column '${column}' also appears in scalar set`,
 			);
-		}
 	}
 
 	// Build row-major values matrix and validate cardinality
-	const values = intent.updates.map((row) => allColumns.map((col) => row[col]));
+	const values = intent.updates.map((row, index) =>
+		allColumns.map((col) =>
+			rowKeys[index]?.has(col) ? (row[col] ?? null) : null,
+		),
+	);
 	validateBatchCardinality(allColumns, values);
 
 	// Transpose to column-major arrays
@@ -802,6 +867,7 @@ export function compileBatchUpdate(
 		[...allColumns, ...Object.keys(intent.scalarSet ?? {})],
 		deps,
 		new Set(allColumns),
+		'update',
 	);
 
 	// Build scalar SET entries from scalarSet
@@ -880,7 +946,7 @@ export function compileBatchUpdate(
 	};
 
 	const ast = compileUnnestUpdateMutation(config, ctx, state);
-	return compileMutationQuery(ast, intent.table, state, _options, deps);
+	return compileMutationQuery(ast, intent.table, state, options, deps);
 }
 
 // ============================================================================
@@ -938,13 +1004,23 @@ export function compileUpsert(
 	intent: UpsertIntent,
 	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
+	rowShape?: ReturnType<typeof inspectMutationRows>,
 ): CompiledQuery {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const schemaName = deps.schemaName;
 	const ctx = mutationContext(deps, intent.table, MAX_DEPTH_LIMIT);
 	const state = createCompilerState();
 
-	const firstRow = intent.values?.[0] ?? {};
+	const rows = intent.values ?? [];
+	const { columns: inspectedColumns, rowKeys } =
+		rowShape ??
+		inspectMutationRows(rows, {
+			operation: 'upsert',
+			homogeneous: true,
+		});
+
+	validateMutationRowCount('upsert', rows, options);
+	const columns = [...inspectedColumns];
 
 	// Separate raw SQL expressions from scalar set values.
 	// Raw expressions are emitted verbatim in ON CONFLICT DO UPDATE SET —
@@ -964,16 +1040,19 @@ export function compileUpsert(
 
 	// Merge only scalar set values into INSERT VALUES rows so EXCLUDED.column
 	// references resolve correctly.
-	const hasScalarSet = Object.keys(scalarSet).length > 0;
-	const mergedFirstRow = hasScalarSet
-		? { ...firstRow, ...scalarSet }
-		: firstRow;
-
-	const columns = Object.keys(mergedFirstRow);
-	const values = (intent.values ?? []).map((row) => {
-		const mergedRow = hasScalarSet ? { ...row, ...scalarSet } : row;
-		return columns.map((col) => mergedRow[col]);
-	});
+	for (const key of Object.keys(scalarSet)) {
+		if (!columns.includes(key)) columns.push(key);
+	}
+	const scalarKeys = new Set(Object.keys(scalarSet));
+	const values = rows.map((row, index) =>
+		columns.map((col) =>
+			scalarKeys.has(col)
+				? (scalarSet[col] ?? null)
+				: rowKeys[index]?.has(col)
+					? (row[col] ?? null)
+					: null,
+		),
+	);
 	const batchThreshold = options?.batchThreshold ?? 50;
 	const useUnnest =
 		values.length > 0 &&
@@ -1050,6 +1129,7 @@ export function compileUpsert(
 		columns,
 		deps,
 		useUnnest ? new Set(columns) : undefined,
+		'upsert',
 	);
 	const hasRawExprs = Object.keys(rawExprs).length > 0;
 	const actionWhere =
@@ -1096,30 +1176,33 @@ export function compileUpsert(
 		}),
 		...(resolvedActionWhere && {
 			actionWhereIntent: resolvedActionWhere,
-			compileActionWhere: (where, paramState) =>
-				compileUpsertActionWhere(
+			compileActionWhere: (where, paramState) => {
+				// Lower the action in its own parameter namespace, then append it. The
+				// complete upsert statement is checked once after all parameters exist.
+				const actionState = createCompilerState();
+				const actionWhere = compileUpsertActionWhere(
 					where,
 					intent.table,
-					paramState,
+					actionState,
 					deps,
 					schemaName,
-				),
+				);
+				const shifted = renumberParamRefsInAst(
+					actionWhere,
+					paramState.paramIndex,
+				);
+				paramState.parameters.push(...actionState.parameters);
+				paramState.paramIndex += actionState.paramIndex;
+				return shifted;
+			},
 		}),
 	};
-
-	// maxBatchSize guard (INV-07)
-	const maxBatchSize = options?.maxBatchSize;
-	if (maxBatchSize !== undefined && values.length > maxBatchSize) {
-		throw new InvalidOperationError(
-			'upsert',
-			`Batch size ${values.length} exceeds maxBatchSize ${maxBatchSize}`,
-		);
-	}
 
 	// Strategy switch: unnest for large batches, VALUES for small (INV-03)
 	const ast = useUnnest
 		? compileUnnestUpsertMutation(config, ctx, state)
 		: compileUpsertMutation(config, ctx, state);
+	assertParameterLimit('upsert', state.parameters.length);
 	return compileMutationQuery(ast, intent.table, state, options, deps);
 }
 

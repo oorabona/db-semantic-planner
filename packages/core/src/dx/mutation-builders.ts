@@ -25,6 +25,7 @@ import type {
 	WhereIntent,
 } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
+import { inspectMutationRows } from '../mutation-rows.js';
 import {
 	ExecutionError,
 	InvalidOperationError,
@@ -120,7 +121,7 @@ function toWhereIntent(condition: MutationWhereCondition): WhereIntent {
 function assertNonEmptyMutationRows(
 	operation: 'insert' | 'upsert',
 	values: readonly unknown[],
-): asserts values is readonly Record<string, unknown>[] {
+): ReturnType<typeof inspectMutationRows> {
 	for (const value of values) {
 		if (value === null || typeof value !== 'object' || Array.isArray(value)) {
 			throw new InvalidOperationError(
@@ -128,20 +129,28 @@ function assertNonEmptyMutationRows(
 				`${operation} values() requires every row to be a non-null, non-array object`,
 			);
 		}
-		if (Object.keys(value).length === 0) {
-			throw new InvalidOperationError(
-				operation,
-				`${operation} values() requires every row to contain at least one column`,
-			);
-		}
 	}
+	const shape = inspectMutationRows(
+		values as readonly Record<string, unknown>[],
+		{
+			operation,
+			homogeneous: operation === 'upsert',
+		},
+	);
+	if (shape.rowKeys.some((keys) => keys.size === 0)) {
+		throw new InvalidOperationError(
+			operation,
+			`${operation} values() requires every row to contain at least one column`,
+		);
+	}
+	return shape;
 }
 
 function assertMutationPayloadColumns(
 	operation: 'insert' | 'update' | 'upsert',
 	model: ModelIR,
 	table: string,
-	payload: Record<string, unknown>,
+	columns: readonly string[],
 ): void {
 	const tableIR = model.getTable(table);
 	// Mutation compilation renders the payload columns when no model table is
@@ -149,9 +158,7 @@ function assertMutationPayloadColumns(
 	// resolved the target table, otherwise leave enforcement to the database.
 	if (!tableIR) return;
 	const allowedColumns = new Set(tableIR.columns.map((column) => column.name));
-	const offendingKeys = Object.keys(payload).filter(
-		(key) => !allowedColumns.has(key),
-	);
+	const offendingKeys = columns.filter((key) => !allowedColumns.has(key));
 	if (offendingKeys.length > 0) {
 		throw new InvalidOperationError(
 			operation,
@@ -699,6 +706,7 @@ export class InsertBuilder<
 	/**
 	 * Set values to insert.
 	 * Accepts a single object or an array for bulk insert.
+	 * Missing enumerable own keys use DEFAULT; explicit undefined and null use SQL NULL.
 	 */
 	values<TInput extends Insertable<TRow> | readonly Insertable<TRow>[]>(
 		data: TInput &
@@ -710,10 +718,8 @@ export class InsertBuilder<
 		data: Insertable<TRow> | readonly Insertable<TRow>[],
 	): InsertBuilder<TRow, TResult> {
 		const valueArray = Array.isArray(data) ? data : [data];
-		assertNonEmptyMutationRows('insert', valueArray);
-		for (const value of valueArray) {
-			assertMutationPayloadColumns('insert', this.model, this.table, value);
-		}
+		const { columns } = assertNonEmptyMutationRows('insert', valueArray);
+		assertMutationPayloadColumns('insert', this.model, this.table, columns);
 		return new InsertBuilder<TRow, TResult>({
 			...this.baseOpts,
 			values: valueArray as readonly Record<string, unknown>[],
@@ -821,7 +827,12 @@ export class UpdateBuilder<
 		data: ExactMutationPayload<TInput, Updateable<TRow>>,
 	): UpdateBuilder<TRow, TResult> {
 		assertMutationObjectPayload('update', data);
-		assertMutationPayloadColumns('update', this.model, this.table, data);
+		assertMutationPayloadColumns(
+			'update',
+			this.model,
+			this.table,
+			Object.keys(data),
+		);
 		return new UpdateBuilder<TRow, TResult>({
 			...this.baseOpts,
 			set: { ...this.setData, ...data },
@@ -894,6 +905,7 @@ export class UpdateBuilder<
 	 *   .batchSet('id', [{ id: 10, callee_id: 42 }, { id: 20, callee_id: 43 }])
 	 *   .execute();
 	 * ```
+	 * Rows must share enumerable own keys and each carry every match key.
 	 */
 	batchSet<TInput extends BatchUpdateable<TRow>>(
 		matchColumn: MutationKey<TRow> | MutationKey<TRow>[],
@@ -902,10 +914,20 @@ export class UpdateBuilder<
 		const matchColumns = Array.isArray(matchColumn)
 			? matchColumn
 			: [matchColumn];
+		if (matchColumns.length === 0)
+			throw new InvalidOperationError(
+				'update',
+				'batchSet requires at least one match key',
+			);
 		for (const row of data) {
 			assertMutationObjectPayload('update', row);
-			assertMutationPayloadColumns('update', this.model, this.table, row);
 		}
+		const { columns } = inspectMutationRows(data, {
+			operation: 'update',
+			homogeneous: true,
+			requiredKeys: matchColumns,
+		});
+		assertMutationPayloadColumns('update', this.model, this.table, columns);
 		return new UpdateBuilder<TRow, TResult>({
 			...this.baseOpts,
 			set: this.setData,
@@ -1169,6 +1191,7 @@ export class UpsertBuilder<
 	/**
 	 * Set values to insert.
 	 * Accepts a single object or an array for bulk upsert.
+	 * Batch rows must share enumerable own keys; explicit undefined and null use SQL NULL.
 	 */
 	values<TInput extends Insertable<TRow> | readonly Insertable<TRow>[]>(
 		data: TInput &
@@ -1180,10 +1203,8 @@ export class UpsertBuilder<
 		data: Insertable<TRow> | readonly Insertable<TRow>[],
 	): UpsertBuilder<TRow, TResult> {
 		const valueArray = Array.isArray(data) ? data : [data];
-		assertNonEmptyMutationRows('upsert', valueArray);
-		for (const value of valueArray) {
-			assertMutationPayloadColumns('upsert', this.model, this.table, value);
-		}
+		const { columns } = assertNonEmptyMutationRows('upsert', valueArray);
+		assertMutationPayloadColumns('upsert', this.model, this.table, columns);
 		return new UpsertBuilder<TRow, TResult>({
 			...this.baseOpts,
 			values: valueArray as readonly Record<string, unknown>[],
@@ -1238,7 +1259,12 @@ export class UpsertBuilder<
 	): UpsertBuilder<TRow, TResult> {
 		if (set !== undefined) {
 			assertMutationObjectPayload('upsert', set);
-			assertMutationPayloadColumns('upsert', this.model, this.table, set);
+			assertMutationPayloadColumns(
+				'upsert',
+				this.model,
+				this.table,
+				Object.keys(set),
+			);
 		}
 		const action: UpsertConflictAction = {
 			type: 'doUpdate',

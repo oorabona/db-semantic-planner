@@ -147,31 +147,14 @@ function compileMutation(
 function compileInsert(insert: NqlInsert, ctx: CompilerContext): InsertIntent {
 	ctx.validator?.validateTable(insert.table);
 
-	// Collect all unique columns across all rows (column normalization)
-	const allColumns = new Set<string>();
-	for (const row of insert.rows) {
+	const values = insert.rows.map((row) => {
+		const rowValues: Record<string, unknown> = {};
 		for (const assignment of row) {
 			ctx.validator?.validateColumn(insert.table, assignment.column);
-			allColumns.add(assignment.column);
-		}
-	}
-
-	// Build values array with normalized columns (missing → undefined → NULL)
-	const values: Record<string, unknown>[] = [];
-	for (const row of insert.rows) {
-		const rowValues: Record<string, unknown> = {};
-		const rowColumns = new Set<string>();
-		for (const assignment of row) {
-			rowColumns.add(assignment.column);
 			assignMutationValue(rowValues, assignment.column, assignment.value, ctx);
 		}
-		for (const col of allColumns) {
-			if (!rowColumns.has(col)) {
-				rowValues[col] = undefined;
-			}
-		}
-		values.push(rowValues);
-	}
+		return rowValues;
+	});
 
 	return {
 		type: 'insert',

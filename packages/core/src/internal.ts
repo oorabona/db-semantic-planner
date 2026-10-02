@@ -3,6 +3,8 @@
  * the PostgreSQL adapter and CLI orchestration; it is not part of the
  * documented @dbsp/core API.
  */
+
+export { inspectMutationRows } from './mutation-rows.js';
 export {
 	type AdmittedDestructiveOutcomeClaim,
 	admitDestructiveOutcomeClaim,

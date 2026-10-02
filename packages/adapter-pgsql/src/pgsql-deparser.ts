@@ -74,6 +74,8 @@ export function deparse(node: Node): string {
 	const inner = rec[key];
 
 	switch (key) {
+		case 'SetToDefault':
+			return 'DEFAULT';
 		case 'SelectStmt':
 			return deparseSelectStmt(inner as SelectStmt);
 		case 'InsertStmt':

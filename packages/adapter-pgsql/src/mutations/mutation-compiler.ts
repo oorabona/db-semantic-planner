@@ -28,6 +28,7 @@ import {
 	sqlInsertStmt,
 	sqlResTarget,
 	sqlUpdateStmt,
+	typeCast,
 } from '../ast-helpers.js';
 import type { RelationBinding } from '../binding-registry.js';
 import {
@@ -327,7 +328,9 @@ export function compileInsert(
 			const dbType = colName
 				? mutationColumnType(columnTypes, colName)
 				: undefined;
-			return valueToNode(val, state, dbType);
+			return val === DEFAULT_INSERT_CELL
+				? { SetToDefault: {} }
+				: valueToNode(val, state, dbType);
 		}),
 	);
 
@@ -459,9 +462,11 @@ export function compileUpdate(
 	const setClause: Array<{ column: SqlIdentifier; value: Node }> =
 		config.set.map(({ column, value }) => ({
 			column,
-			value: isSqlRaw(value)
-				? parseRawExpression(value.sql)
-				: valueToNode(value, state, mutationColumnType(columnTypes, column)),
+			value: assignmentToNode(
+				value,
+				state,
+				mutationColumnType(columnTypes, column),
+			),
 		}));
 
 	// Build WHERE clause if present
@@ -551,6 +556,9 @@ export function compileUnnestUpdate(
 ): Node {
 	const { table, matchColumns, allColumns, columnArrays, columnTypes } = config;
 	const dbTable = table;
+	let sourceAlias = 't';
+	for (let index = 1; sourceAlias === dbTable; index++)
+		sourceAlias = `t${index}`;
 	const dbMatchColumns = matchColumns;
 	const dbAllColumns = allColumns;
 	const updateColumns = dbAllColumns.filter((c) => !dbMatchColumns.includes(c));
@@ -576,7 +584,7 @@ export function compileUnnestUpdate(
 		RangeFunction: {
 			functions: [{ List: { items: [unnestCall] } }],
 			alias: {
-				aliasname: 't',
+				aliasname: sourceAlias,
 				colnames: dbAllColumns.map((c) => ({
 					String: { sval: c },
 				})),
@@ -589,12 +597,16 @@ export function compileUnnestUpdate(
 		// Array-sourced update columns: "col" = t."col"
 		...updateColumns.map((col) => ({
 			column: col,
-			value: sqlColumnRef(col, queryLocal('t')),
+			value: sqlColumnRef(col, queryLocal(sourceAlias)),
 		})),
 		// Scalar SET from scalarSet (e.g. .set({ confidence: 0.85 }))
 		...(config.scalarSet ?? []).map(({ column, value }) => ({
 			column,
-			value: valueToNode(value, state, mutationColumnType(columnTypes, column)),
+			value: assignmentToNode(
+				value,
+				state,
+				mutationColumnType(columnTypes, column),
+			),
 		})),
 	];
 
@@ -604,7 +616,7 @@ export function compileUnnestUpdate(
 			kind: 'AEXPR_OP',
 			name: [{ String: { sval: '=' } }],
 			lexpr: sqlColumnRef(col, dbTable),
-			rexpr: sqlColumnRef(col, queryLocal('t')),
+			rexpr: sqlColumnRef(col, queryLocal(sourceAlias)),
 		},
 	}));
 
@@ -996,7 +1008,7 @@ function valueToNode(
 			state.parameters.push(boundValue);
 			state.paramIndex++;
 			return dbType && RANGE_TYPES.has(dbType)
-				? createTypeCastParamRef(state.paramIndex, dbType)
+				? typeCast({ ParamRef: { number: state.paramIndex } }, dbType)
 				: {
 						ParamRef: {
 							number: state.paramIndex,
@@ -1012,7 +1024,7 @@ function valueToNode(
 
 	// Range types require explicit cast ($N::int4range) for PostgreSQL to parse the literal
 	if (dbType && RANGE_TYPES.has(dbType)) {
-		return createTypeCastParamRef(state.paramIndex, dbType);
+		return typeCast({ ParamRef: { number: state.paramIndex } }, dbType);
 	}
 
 	return {
@@ -1146,4 +1158,17 @@ export function compileMutation(
 		default:
 			throw new Error(`Unknown mutation type: ${type}`);
 	}
+}
+
+/** Internal sentinel for an absent insert cell; explicit undefined is SQL NULL. */
+export const DEFAULT_INSERT_CELL = Symbol('default insert cell');
+
+function assignmentToNode(
+	value: unknown,
+	state: CompilerState,
+	dbType: string | undefined,
+): Node {
+	return isSqlRaw(value)
+		? parseRawExpression(value.sql)
+		: valueToNode(value, state, dbType);
 }

@@ -48,7 +48,7 @@ describe('mutation logical metadata with physical identifiers', () => {
 					type: 'batchUpdate',
 					table: 'eventLogs',
 					matchColumns: ['eventId'],
-					updates: [{ eventId }],
+					updates: [{ eventId, displayName: 'event' }],
 				}),
 			],
 			[

@@ -2382,11 +2382,24 @@ describe('NQL → SQL multi-row INSERT E2E', () => {
 		const { sql, params } = mutationToSQL(
 			"insert into authors values (name = 'Alice'), (name = 'Bob', email = 'bob@test.com')",
 		);
-		// Column normalization: union of all columns, first row has literal NULL for email
+		// Column normalization: union of all columns, first row uses DEFAULT for email
 		expect(sql).toEqual(
-			'insert into authors (name, email) values ($1, null), ($2, $3)',
+			'insert into authors (name, email) values ($1, default), ($2, $3)',
 		);
 		expect(params).toEqual(['Alice', 'Bob', 'bob@test.com']);
+	});
+
+	it('uses DEFAULT for disjoint NQL insert rows', () => {
+		const localDb = schema({ t: { a: 'integer', b: 'integer' } } as const);
+		const localOrm = createOrm({
+			schema: localDb,
+			adapter: createPgsqlCompileOnlyAdapter({ model: localDb.model }),
+		});
+		const result = localOrm.nql`insert into t values (a=1), (b=2)`.dump();
+		expect(result.sql).toBe(
+			'INSERT INTO t (a, b) VALUES ($1, DEFAULT), (DEFAULT, $2)',
+		);
+		expect('parameters' in result && result.parameters).toEqual([1, 2]);
 	});
 
 	it('B8d: Multi-row INSERT with 3+ rows', () => {

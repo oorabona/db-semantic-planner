@@ -2276,12 +2276,14 @@ table                              -- table scan
 | Operation | Syntax |
 |-----------|--------|
 | INSERT | `insert into table set col = val!` |
-| Multi-row INSERT | `insert into table values (a=1), (b=2)!` |
+| Multi-row INSERT (missing keys use DEFAULT) | `insert into table values (a=1), (b=2)!` |
 | UPDATE | `update table set col = val where condition!` |
 | DELETE | `delete from table where condition!` |
 | UPSERT | `upsert into table on conflictCol set col = val!` |
 | Tag mutation dump | ``orm.nql`insert into table set col = ${value}`.dump()`` |
 | Bound pipeline mutation | ``query-or-returning-mutation \| bind source`` then `insert into table from source` |
+
+The multi-row example compiles to `INSERT INTO table (a, b) VALUES ($1, DEFAULT), (DEFAULT, $2)` with parameters `[1, 2]`. Explicit NULL remains SQL NULL.
 
 ### Include Strategies
 
