@@ -1,4 +1,9 @@
-/** All fixtures enter through the public builder (planner for typed recursive anchors). */
+/**
+ * Fixtures enter through public builders (planner for typed recursive anchors).
+ * Ordered subqueries use QueryIntent because SubqueryBuilder has no order/limit API.
+ * Custom authorities enter through createPgCompileOnlyAdapter constructor options;
+ * the same position builders exercise every entry it can reach, including errors.
+ */
 import {
 	and,
 	any,
@@ -74,167 +79,215 @@ type Position = {
 	prefix?: string;
 	run: (c: WhereIntent) => Result;
 };
-const positions: Position[] = [
-	{ name: 'select-where', run: (c) => orm.select('users').where(c).dump() },
-	{
-		name: 'having-alias',
-		field: 'n',
-		run: (c) =>
-			orm.select('users').count({ as: 'n' }).groupBy(['id']).having(c).dump(),
-	},
-	{
-		name: 'select-filter',
-		run: (c) =>
-			orm
-				.select('users')
-				.columns([fn('count', star()).filter(c).as('n')])
-				.dump(),
-	},
-	{
-		name: 'having-filter',
-		run: (c) =>
-			orm
-				.select('users')
-				.groupBy(['id'])
-				.having(fn('count', star()).filter(c).gt(19))
-				.dump(),
-	},
-	{
-		name: 'case-when',
-		run: (c) =>
-			orm
-				.select('users')
-				.columns([caseWhen(c, literal(11)).else(literal(22)).as('label')])
-				.dump(),
-	},
-	{
-		name: 'in-subquery-body',
-		table: 'posts',
-		run: (c) =>
-			orm
-				.select('users')
-				.where(inSubquery('id', subquery('posts').select('authorId').where(c)))
-				.dump(),
-	},
-	{
-		name: 'scalar-subquery-body',
-		table: 'posts',
-		run: (c) =>
-			orm
-				.select('users')
-				.where({
-					kind: 'subquery',
-					field: 'score',
-					operator: 'eq',
-					subquery: {
-						type: 'select',
-						from: 'posts',
-						select: { type: 'fields', fields: ['score'] },
-						where: c,
-					},
-				})
-				.dump(),
-	},
-	{
-		name: 'raw-exists-body',
-		table: 'posts',
-		run: (c) =>
-			orm
-				.select('users')
-				.where(rawExists(subquery('posts').select('id').where(c)))
-				.dump(),
-	},
-	...(['exists', 'notExists'] as const).map((name) => ({
-		name: `relation-${name}`,
-		table: 'posts' as const,
-		run: (c: WhereIntent) =>
-			orm
-				.select('users')
-				.where((name === 'exists' ? exists : notExists)('posts', { where: c }))
-				.dump(),
-	})),
-	...(['some', 'every', 'none'] as const).map((name) => ({
-		name: `relation-${name}`,
-		table: 'posts' as const,
-		run: (c: WhereIntent) =>
-			orm
-				.select('users')
-				.where({ some, every, none }[name](orm.tables.users.posts, () => c))
-				.dump(),
-	})),
-	{
-		name: 'dotted-relation',
-		prefix: 'posts.',
-		run: (c) => orm.select('users').where(c).dump(),
-	},
-	{
-		name: 'dotted-two-hop',
-		prefix: 'posts.comments.',
-		run: (c) => orm.select('users').where(c).dump(),
-	},
-	...(['inner', 'left'] as const).map((join) => ({
-		name: `include-${join}-where`,
-		table: 'posts' as const,
-		run: (c: WhereIntent) =>
-			orm
-				.select('users')
-				.where(eq('score', 31))
-				.include('posts', { join, where: c })
-				.dump(),
-	})),
-	{
-		name: 'manual-join-on',
-		run: (c) => orm.select('users').join('posts', { as: 'p', on: c }).dump(),
-	},
-	// orm.recursive(name, { base, step }) is the raw-CTE API and cannot express start.where.
-	{
-		name: 'recursive-start-where',
-		run: (c) =>
-			adapter.compileRecursive(
-				planRecursive(
-					{
-						type: 'recursive',
-						cteName: 'tree',
-						start: {
-							from: 'users',
-							nodeIdExpr: { kind: 'column', name: 'id' },
+type MatrixOrm = typeof orm;
+function makePositions(
+	orm: MatrixOrm,
+	adapter: ReturnType<typeof createPgCompileOnlyAdapter>,
+	model: typeof db.model = db.model,
+): Position[] {
+	return [
+		{ name: 'select-where', run: (c) => orm.select('users').where(c).dump() },
+		{
+			name: 'having-alias',
+			field: 'n',
+			run: (c) =>
+				orm.select('users').count({ as: 'n' }).groupBy(['id']).having(c).dump(),
+		},
+		{
+			name: 'select-filter',
+			run: (c) =>
+				orm
+					.select('users')
+					.columns([fn('count', star()).filter(c).as('n')])
+					.dump(),
+		},
+		{
+			name: 'having-filter',
+			run: (c) =>
+				orm
+					.select('users')
+					.groupBy(['id'])
+					.having(fn('count', star()).filter(c).gt(19))
+					.dump(),
+		},
+		{
+			name: 'case-when',
+			run: (c) =>
+				orm
+					.select('users')
+					.columns([caseWhen(c, literal(11)).else(literal(22)).as('label')])
+					.dump(),
+		},
+		{
+			name: 'in-subquery-body',
+			table: 'posts',
+			run: (c) =>
+				orm
+					.select('users')
+					.where(
+						inSubquery('id', subquery('posts').select('authorId').where(c)),
+					)
+					.dump(),
+		},
+		{
+			name: 'scalar-subquery-body',
+			table: 'posts',
+			run: (c) =>
+				orm
+					.select('users')
+					.where({
+						kind: 'subquery',
+						field: 'score',
+						operator: 'eq',
+						subquery: {
+							type: 'select',
+							from: 'posts',
+							select: { type: 'fields', fields: ['score'] },
 							where: c,
 						},
-						traversal: {
-							kind: 'edge-table',
-							nodeTable: 'users',
-							nodeId: 'id',
-							edgeTable: 'edges',
-							edgeFrom: 'from_id',
-							edgeTo: 'to_id',
-							direction: 'out',
+					})
+					.dump(),
+		},
+		{
+			name: 'raw-exists-body',
+			table: 'posts',
+			run: (c) =>
+				orm
+					.select('users')
+					.where(rawExists(subquery('posts').select('id').where(c)))
+					.dump(),
+		},
+		...(['exists', 'notExists'] as const).map((name) => ({
+			name: `relation-${name}`,
+			table: 'posts' as const,
+			run: (c: WhereIntent) =>
+				orm
+					.select('users')
+					.where(
+						(name === 'exists' ? exists : notExists)('posts', { where: c }),
+					)
+					.dump(),
+		})),
+		...(['some', 'every', 'none'] as const).map((name) => ({
+			name: `relation-${name}`,
+			table: 'posts' as const,
+			run: (c: WhereIntent) =>
+				orm
+					.select('users')
+					.where({ some, every, none }[name](orm.tables.users.posts, () => c))
+					.dump(),
+		})),
+		{
+			name: 'dotted-relation',
+			prefix: 'posts.',
+			run: (c) => orm.select('users').where(c).dump(),
+		},
+		{
+			name: 'dotted-two-hop',
+			prefix: 'posts.comments.',
+			run: (c) => orm.select('users').where(c).dump(),
+		},
+		...(['inner', 'left'] as const).map((join) => ({
+			name: `include-${join}-where`,
+			table: 'posts' as const,
+			run: (c: WhereIntent) =>
+				orm
+					.select('users')
+					.where(eq('score', 31))
+					.include('posts', { join, where: c })
+					.dump(),
+		})),
+		{
+			name: 'manual-join-on',
+			run: (c) => orm.select('users').join('posts', { as: 'p', on: c }).dump(),
+		},
+		// orm.recursive(name, { base, step }) is the raw-CTE API and cannot express start.where.
+		{
+			name: 'recursive-start-where',
+			run: (c) =>
+				adapter.compileRecursive(
+					planRecursive(
+						{
+							type: 'recursive',
+							cteName: 'tree',
+							start: {
+								from: 'users',
+								nodeIdExpr: { kind: 'column', name: 'id' },
+								where: c,
+							},
+							traversal: {
+								kind: 'edge-table',
+								nodeTable: 'users',
+								nodeId: 'id',
+								edgeTable: 'edges',
+								edgeFrom: 'from_id',
+								edgeTo: 'to_id',
+								direction: 'out',
+							},
+							maxDepth: 2,
 						},
-						maxDepth: 2,
-					},
-					db.model,
+						model,
+					),
+					model,
 				),
-				db.model,
-			),
+		},
+		{
+			name: 'update-where',
+			run: (c) =>
+				orm.modify(orm.tables.users).set({ score: 41 }).where(c).dump(),
+		},
+		{
+			name: 'delete-where',
+			run: (c) => orm.removeFrom(orm.tables.users).where(c).dump(),
+		},
+		{
+			name: 'upsert-guard',
+			run: (c) =>
+				orm
+					.upsert('users')
+					.values({ id: 1, score: 43 })
+					.onConflict(['id'])
+					.doUpdate({ score: 47 }, c)
+					.dump(),
+		},
+	];
+}
+const positions = makePositions(orm, adapter);
+// The extra declared columns let both conventions produce SQL instead of failing
+// declared-name validation before the FK derivation can become observable.
+const authorityColumns = {
+	...columns,
+	matrix_pk: { type: 'integer' },
+	matrix_users_matrix_pk: { type: 'integer' },
+	matrix_posts_matrix_pk: { type: 'integer' },
+	matrix_comments_matrix_pk: { type: 'integer' },
+} as const;
+const authorityDb = schema({
+	users: authorityColumns,
+	posts: {
+		...authorityColumns,
+		authorId: ref('users', { as: 'author', inverse: 'posts' }),
 	},
-	{
-		name: 'update-where',
-		run: (c) => orm.modify(orm.tables.users).set({ score: 41 }).where(c).dump(),
+	comments: {
+		...authorityColumns,
+		postId: ref('posts', { as: 'post', inverse: 'comments' }),
 	},
-	{
-		name: 'delete-where',
-		run: (c) => orm.removeFrom(orm.tables.users).where(c).dump(),
+	edges: {
+		id: { type: 'integer', primaryKey: true },
+		from_id: { type: 'integer' },
+		to_id: { type: 'integer' },
 	},
-	{
-		name: 'upsert-guard',
-		run: (c) =>
-			orm
-				.upsert('users')
-				.values({ id: 1, score: 43 })
-				.onConflict(['id'])
-				.doUpdate({ score: 47 }, c)
-				.dump(),
-	},
-];
+} as const);
+const authorityAdapter = createPgCompileOnlyAdapter({
+	model: authorityDb.model,
+	defaultPkColumnName: 'matrix_pk',
+	deriveFkColumnName: (table, pk) => `matrix_${table}_${pk}`,
+});
+const authorityPositions = makePositions(
+	createOrm({ schema: authorityDb, adapter: authorityAdapter }),
+	authorityAdapter,
+	authorityDb.model,
+);
 function predicates(p: Position): [string, WhereIntent][] {
 	const field = (name: string) =>
 		`${p.prefix ?? ''}${name === 'period' || name === 'data' ? name : (p.field ?? name)}`;
@@ -242,6 +295,15 @@ function predicates(p: Position): [string, WhereIntent][] {
 	const relation =
 		p.table === 'posts' ? orm.tables.posts.comments : orm.tables.users.posts;
 	const inner = subquery('posts').select('id').where(eq('score', 53));
+	const ordered = {
+		...subquery('posts')
+			.select('score')
+			.where(eq('score', 59))
+			.build()
+			.toIntent(),
+		orderBy: [{ field: 'score', direction: 'desc' as const }],
+		limit: 1,
+	};
 	const range = { lower: '2026-01-01', upper: '2026-02-01' };
 	return [
 		...Object.entries({ eq, neq, gt, gte, lt, lte, isDistinctFrom }).map(
@@ -309,6 +371,42 @@ function predicates(p: Position): [string, WhereIntent][] {
 		],
 		['rawExists', rawExists(inner)],
 		[
+			'inSubquery-order-limit',
+			{ kind: 'in', field: field('id'), subquery: ordered },
+		],
+		['rawExists-order-limit', { kind: 'rawExists', subquery: ordered }],
+		[
+			'scalar-subquery-order-limit',
+			{
+				kind: 'subquery',
+				field: field('score'),
+				operator: 'eq',
+				subquery: ordered,
+			},
+		],
+		[
+			'expression-scalar-subquery',
+			{
+				kind: 'expression',
+				expr: { kind: 'subquery', query: ordered },
+				operator: 'gt',
+				value: 67,
+			},
+		],
+		...(['exists', 'notExists'] as const).flatMap(
+			(kind): [string, WhereIntent][] =>
+				(['up', 'down'] as const).map((direction) => [
+					`${kind}-recursive-${direction}`,
+					{
+						kind,
+						relation: child,
+						where: eq('score', 71),
+						recursive: { direction, through: child, maxDepth: 3 },
+					},
+				]),
+		),
+
+		[
 			'rawNotExists',
 			{ kind: 'rawNotExists', subquery: inner.build().toIntent() },
 		],
@@ -333,7 +431,24 @@ export type MatrixOutcome =
 	| { sql: string; params: readonly unknown[]; error: null }
 	| { sql: null; params: null; error: string };
 export const conditionMatrix = positions.flatMap((position) =>
-	predicates(position).flatMap(([kind, predicate]) => {
+	[
+		...predicates(position).map(([kind, predicate]) => ({
+			kind,
+			predicate,
+			runPosition: position,
+		})),
+		...predicates(position)
+			.filter(([kind]) =>
+				['exists', 'notExists', 'some', 'every', 'none'].includes(kind),
+			)
+			.map(([kind, predicate]) => ({
+				kind: `${kind}-custom-authorities`,
+				predicate,
+				runPosition: authorityPositions.find(
+					({ name }) => name === position.name,
+				)!,
+			})),
+	].flatMap(({ kind, predicate, runPosition }) => {
 		const field = `${position.prefix ?? ''}${position.field ?? 'score'}`;
 		const sibling = eq(field, 13);
 		const shapes: [string, WhereIntent][] = [
@@ -351,7 +466,7 @@ export const conditionMatrix = positions.flatMap((position) =>
 			shape,
 			run(): MatrixOutcome {
 				try {
-					const result = position.run(condition);
+					const result = runPosition.run(condition);
 					return {
 						sql: result.sql,
 						params: 'params' in result ? result.params : result.parameters,

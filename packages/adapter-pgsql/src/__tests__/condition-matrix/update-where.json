@@ -1628,6 +1628,454 @@
 		},
 		{
 			"position": "update-where",
+			"kind": "inSubquery-order-limit",
+			"shape": "leaf",
+			"sql": "UPDATE users SET score = $1 WHERE users.id = ANY (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $2 ORDER BY posts_subq_0.score DESC LIMIT 1)",
+			"params": [41, 59],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "inSubquery-order-limit",
+			"shape": "and",
+			"sql": "UPDATE users SET score = $1 WHERE users.id = ANY (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $2 ORDER BY posts_subq_0.score DESC LIMIT 1) AND users.score = $3",
+			"params": [41, 59, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "inSubquery-order-limit",
+			"shape": "or",
+			"sql": "UPDATE users SET score = $1 WHERE users.id = ANY (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $2 ORDER BY posts_subq_0.score DESC LIMIT 1) OR users.score = $3",
+			"params": [41, 59, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "inSubquery-order-limit",
+			"shape": "not",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (users.id = ANY (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $2 ORDER BY posts_subq_0.score DESC LIMIT 1))",
+			"params": [41, 59],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "inSubquery-order-limit",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "inSubquery-order-limit",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "inSubquery-order-limit",
+			"shape": "two-level",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (users.id = ANY (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $3 ORDER BY posts_subq_0.score DESC LIMIT 1)) OR users.score = $4)",
+			"params": [41, 13, 59, 17],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "rawExists-order-limit",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "update-where",
+			"kind": "rawExists-order-limit",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "update-where",
+			"kind": "rawExists-order-limit",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "update-where",
+			"kind": "rawExists-order-limit",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "update-where",
+			"kind": "rawExists-order-limit",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "rawExists-order-limit",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "rawExists-order-limit",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "update-where",
+			"kind": "scalar-subquery-order-limit",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Comparison handler requires a column"
+		},
+		{
+			"position": "update-where",
+			"kind": "scalar-subquery-order-limit",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Comparison handler requires a column"
+		},
+		{
+			"position": "update-where",
+			"kind": "scalar-subquery-order-limit",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Comparison handler requires a column"
+		},
+		{
+			"position": "update-where",
+			"kind": "scalar-subquery-order-limit",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Comparison handler requires a column"
+		},
+		{
+			"position": "update-where",
+			"kind": "scalar-subquery-order-limit",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "scalar-subquery-order-limit",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "scalar-subquery-order-limit",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Comparison handler requires a column"
+		},
+		{
+			"position": "update-where",
+			"kind": "expression-scalar-subquery",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Comparison handler requires a column"
+		},
+		{
+			"position": "update-where",
+			"kind": "expression-scalar-subquery",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Comparison handler requires a column"
+		},
+		{
+			"position": "update-where",
+			"kind": "expression-scalar-subquery",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Comparison handler requires a column"
+		},
+		{
+			"position": "update-where",
+			"kind": "expression-scalar-subquery",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Comparison handler requires a column"
+		},
+		{
+			"position": "update-where",
+			"kind": "expression-scalar-subquery",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "expression-scalar-subquery",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "expression-scalar-subquery",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Comparison handler requires a column"
+		},
+		{
+			"position": "update-where",
+			"kind": "exists-recursive-up",
+			"shape": "leaf",
+			"sql": "UPDATE users SET score = $1 WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)",
+			"params": [41, 71],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "exists-recursive-up",
+			"shape": "and",
+			"sql": "UPDATE users SET score = $1 WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2) AND users.score = $3",
+			"params": [41, 71, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "exists-recursive-up",
+			"shape": "or",
+			"sql": "UPDATE users SET score = $1 WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2) OR users.score = $3",
+			"params": [41, 71, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "exists-recursive-up",
+			"shape": "not",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))",
+			"params": [41, 71],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "exists-recursive-up",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "exists-recursive-up",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "exists-recursive-up",
+			"shape": "two-level",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $3)) OR users.score = $4)",
+			"params": [41, 13, 71, 17],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "exists-recursive-down",
+			"shape": "leaf",
+			"sql": "UPDATE users SET score = $1 WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)",
+			"params": [41, 71],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "exists-recursive-down",
+			"shape": "and",
+			"sql": "UPDATE users SET score = $1 WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2) AND users.score = $3",
+			"params": [41, 71, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "exists-recursive-down",
+			"shape": "or",
+			"sql": "UPDATE users SET score = $1 WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2) OR users.score = $3",
+			"params": [41, 71, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "exists-recursive-down",
+			"shape": "not",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))",
+			"params": [41, 71],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "exists-recursive-down",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "exists-recursive-down",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "exists-recursive-down",
+			"shape": "two-level",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $3)) OR users.score = $4)",
+			"params": [41, 13, 71, 17],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "notExists-recursive-up",
+			"shape": "leaf",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))",
+			"params": [41, 71],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "notExists-recursive-up",
+			"shape": "and",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) AND users.score = $3",
+			"params": [41, 71, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "notExists-recursive-up",
+			"shape": "or",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR users.score = $3",
+			"params": [41, 71, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "notExists-recursive-up",
+			"shape": "not",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)))",
+			"params": [41, 71],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "notExists-recursive-up",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "notExists-recursive-up",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "notExists-recursive-up",
+			"shape": "two-level",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $3))) OR users.score = $4)",
+			"params": [41, 13, 71, 17],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "notExists-recursive-down",
+			"shape": "leaf",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))",
+			"params": [41, 71],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "notExists-recursive-down",
+			"shape": "and",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) AND users.score = $3",
+			"params": [41, 71, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "notExists-recursive-down",
+			"shape": "or",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR users.score = $3",
+			"params": [41, 71, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "notExists-recursive-down",
+			"shape": "not",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)))",
+			"params": [41, 71],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "notExists-recursive-down",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "notExists-recursive-down",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "notExists-recursive-down",
+			"shape": "two-level",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $3))) OR users.score = $4)",
+			"params": [41, 13, 71, 17],
+			"error": null
+		},
+		{
+			"position": "update-where",
 			"kind": "rawNotExists",
 			"shape": "leaf",
 			"sql": null,
@@ -2073,6 +2521,286 @@
 			"sql": null,
 			"params": null,
 			"error": "Comparison handler requires a column"
+		},
+		{
+			"position": "update-where",
+			"kind": "exists-custom-authorities",
+			"shape": "leaf",
+			"sql": "UPDATE users SET score = $1 WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)",
+			"params": [41, 61],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "exists-custom-authorities",
+			"shape": "and",
+			"sql": "UPDATE users SET score = $1 WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2) AND users.score = $3",
+			"params": [41, 61, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "exists-custom-authorities",
+			"shape": "or",
+			"sql": "UPDATE users SET score = $1 WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2) OR users.score = $3",
+			"params": [41, 61, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "exists-custom-authorities",
+			"shape": "not",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))",
+			"params": [41, 61],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "exists-custom-authorities",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "exists-custom-authorities",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "exists-custom-authorities",
+			"shape": "two-level",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $3)) OR users.score = $4)",
+			"params": [41, 13, 61, 17],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "notExists-custom-authorities",
+			"shape": "leaf",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))",
+			"params": [41, 61],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "notExists-custom-authorities",
+			"shape": "and",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) AND users.score = $3",
+			"params": [41, 61, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "notExists-custom-authorities",
+			"shape": "or",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR users.score = $3",
+			"params": [41, 61, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "notExists-custom-authorities",
+			"shape": "not",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)))",
+			"params": [41, 61],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "notExists-custom-authorities",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "notExists-custom-authorities",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "notExists-custom-authorities",
+			"shape": "two-level",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $3))) OR users.score = $4)",
+			"params": [41, 13, 61, 17],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "some-custom-authorities",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "update-where",
+			"kind": "some-custom-authorities",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "update-where",
+			"kind": "some-custom-authorities",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "update-where",
+			"kind": "some-custom-authorities",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "update-where",
+			"kind": "some-custom-authorities",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "some-custom-authorities",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "some-custom-authorities",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "update-where",
+			"kind": "every-custom-authorities",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "update-where",
+			"kind": "every-custom-authorities",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "update-where",
+			"kind": "every-custom-authorities",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "update-where",
+			"kind": "every-custom-authorities",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "update-where",
+			"kind": "every-custom-authorities",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "every-custom-authorities",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "every-custom-authorities",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "update-where",
+			"kind": "none-custom-authorities",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "update-where",
+			"kind": "none-custom-authorities",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "update-where",
+			"kind": "none-custom-authorities",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "update-where",
+			"kind": "none-custom-authorities",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "update-where",
+			"kind": "none-custom-authorities",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "none-custom-authorities",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "none-custom-authorities",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
 		}
 	]
 }

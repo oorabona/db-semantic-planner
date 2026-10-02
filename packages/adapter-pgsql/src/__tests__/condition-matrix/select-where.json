@@ -1618,6 +1618,454 @@
 		},
 		{
 			"position": "select-where",
+			"kind": "inSubquery-order-limit",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE users.id = ANY (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 ORDER BY posts_subq_0.score DESC LIMIT 1)",
+			"params": [59],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "inSubquery-order-limit",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE users.id = ANY (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 ORDER BY posts_subq_0.score DESC LIMIT 1) AND users.score = $2",
+			"params": [59, 13],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "inSubquery-order-limit",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE users.id = ANY (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 ORDER BY posts_subq_0.score DESC LIMIT 1) OR users.score = $2",
+			"params": [59, 13],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "inSubquery-order-limit",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (users.id = ANY (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 ORDER BY posts_subq_0.score DESC LIMIT 1))",
+			"params": [59],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "inSubquery-order-limit",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "inSubquery-order-limit",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "inSubquery-order-limit",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE users.score = $1 AND (NOT (users.id = ANY (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $2 ORDER BY posts_subq_0.score DESC LIMIT 1)) OR users.score = $3)",
+			"params": [13, 59, 17],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "rawExists-order-limit",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "rawExists subquery with LIMIT, ORDER BY is not supported — it would silently change which rows match; restructure the query or use a CTE."
+		},
+		{
+			"position": "select-where",
+			"kind": "rawExists-order-limit",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "rawExists subquery with LIMIT, ORDER BY is not supported — it would silently change which rows match; restructure the query or use a CTE."
+		},
+		{
+			"position": "select-where",
+			"kind": "rawExists-order-limit",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "rawExists subquery with LIMIT, ORDER BY is not supported — it would silently change which rows match; restructure the query or use a CTE."
+		},
+		{
+			"position": "select-where",
+			"kind": "rawExists-order-limit",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "rawExists subquery with LIMIT, ORDER BY is not supported — it would silently change which rows match; restructure the query or use a CTE."
+		},
+		{
+			"position": "select-where",
+			"kind": "rawExists-order-limit",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "rawExists-order-limit",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "rawExists-order-limit",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "rawExists subquery with LIMIT, ORDER BY is not supported — it would silently change which rows match; restructure the query or use a CTE."
+		},
+		{
+			"position": "select-where",
+			"kind": "scalar-subquery-order-limit",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 ORDER BY posts_subq_0.score DESC LIMIT 1)",
+			"params": [59],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "scalar-subquery-order-limit",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 ORDER BY posts_subq_0.score DESC LIMIT 1) AND users.score = $2",
+			"params": [59, 13],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "scalar-subquery-order-limit",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 ORDER BY posts_subq_0.score DESC LIMIT 1) OR users.score = $2",
+			"params": [59, 13],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "scalar-subquery-order-limit",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 ORDER BY posts_subq_0.score DESC LIMIT 1))",
+			"params": [59],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "scalar-subquery-order-limit",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "scalar-subquery-order-limit",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "scalar-subquery-order-limit",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE users.score = $1 AND (NOT (users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $2 ORDER BY posts_subq_0.score DESC LIMIT 1)) OR users.score = $3)",
+			"params": [13, 59, 17],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "expression-scalar-subquery",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
+		},
+		{
+			"position": "select-where",
+			"kind": "expression-scalar-subquery",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
+		},
+		{
+			"position": "select-where",
+			"kind": "expression-scalar-subquery",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
+		},
+		{
+			"position": "select-where",
+			"kind": "expression-scalar-subquery",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
+		},
+		{
+			"position": "select-where",
+			"kind": "expression-scalar-subquery",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "expression-scalar-subquery",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "expression-scalar-subquery",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
+		},
+		{
+			"position": "select-where",
+			"kind": "exists-recursive-up",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)",
+			"params": [71],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "exists-recursive-up",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND users.score = $2",
+			"params": [71, 13],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "exists-recursive-up",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR users.score = $2",
+			"params": [71, 13],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "exists-recursive-up",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
+			"params": [71],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "exists-recursive-up",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "exists-recursive-up",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "exists-recursive-up",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE users.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR users.score = $3)",
+			"params": [13, 71, 17],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "exists-recursive-down",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)",
+			"params": [71],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "exists-recursive-down",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND users.score = $2",
+			"params": [71, 13],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "exists-recursive-down",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR users.score = $2",
+			"params": [71, 13],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "exists-recursive-down",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
+			"params": [71],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "exists-recursive-down",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "exists-recursive-down",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "exists-recursive-down",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE users.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR users.score = $3)",
+			"params": [13, 71, 17],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "notExists-recursive-up",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
+			"params": [71],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "notExists-recursive-up",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND users.score = $2",
+			"params": [71, 13],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "notExists-recursive-up",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR users.score = $2",
+			"params": [71, 13],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "notExists-recursive-up",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)))",
+			"params": [71],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "notExists-recursive-up",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "notExists-recursive-up",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "notExists-recursive-up",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE users.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR users.score = $3)",
+			"params": [13, 71, 17],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "notExists-recursive-down",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
+			"params": [71],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "notExists-recursive-down",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND users.score = $2",
+			"params": [71, 13],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "notExists-recursive-down",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR users.score = $2",
+			"params": [71, 13],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "notExists-recursive-down",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)))",
+			"params": [71],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "notExists-recursive-down",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "notExists-recursive-down",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "notExists-recursive-down",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE users.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR users.score = $3)",
+			"params": [13, 71, 17],
+			"error": null
+		},
+		{
+			"position": "select-where",
 			"kind": "rawNotExists",
 			"shape": "leaf",
 			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1))",
@@ -2063,6 +2511,286 @@
 			"sql": null,
 			"params": null,
 			"error": "compileExpressionIntent: unsupported expression kind 'raw'"
+		},
+		{
+			"position": "select-where",
+			"kind": "exists-custom-authorities",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "exists-custom-authorities",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND users.score = $2",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "exists-custom-authorities",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR users.score = $2",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "exists-custom-authorities",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "exists-custom-authorities",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "exists-custom-authorities",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "exists-custom-authorities",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE users.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR users.score = $3)",
+			"params": [13, 61, 17],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "notExists-custom-authorities",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "notExists-custom-authorities",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND users.score = $2",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "notExists-custom-authorities",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR users.score = $2",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "notExists-custom-authorities",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "notExists-custom-authorities",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "notExists-custom-authorities",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "notExists-custom-authorities",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE users.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR users.score = $3)",
+			"params": [13, 61, 17],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "some-custom-authorities",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "some-custom-authorities",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND users.score = $2",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "some-custom-authorities",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR users.score = $2",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "some-custom-authorities",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "some-custom-authorities",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "some-custom-authorities",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "some-custom-authorities",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE users.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR users.score = $3)",
+			"params": [13, 61, 17],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "every-custom-authorities",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1)))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "every-custom-authorities",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) AND users.score = $2",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "every-custom-authorities",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) OR users.score = $2",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "every-custom-authorities",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "every-custom-authorities",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "every-custom-authorities",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "every-custom-authorities",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE users.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $2)))) OR users.score = $3)",
+			"params": [13, 61, 17],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "none-custom-authorities",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "none-custom-authorities",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND users.score = $2",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "none-custom-authorities",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR users.score = $2",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "none-custom-authorities",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "none-custom-authorities",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "none-custom-authorities",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "select-where",
+			"kind": "none-custom-authorities",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE users.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR users.score = $3)",
+			"params": [13, 61, 17],
+			"error": null
 		}
 	]
 }

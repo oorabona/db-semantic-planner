@@ -1628,6 +1628,454 @@
 		},
 		{
 			"position": "include-inner-where",
+			"kind": "inSubquery-order-limit",
+			"shape": "leaf",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.id = ANY (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2 ORDER BY posts_subq_1.score DESC LIMIT 1)",
+			"params": [31, 59],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "inSubquery-order-limit",
+			"shape": "and",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.id = ANY (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2 ORDER BY posts_subq_1.score DESC LIMIT 1) AND posts.score = $3",
+			"params": [31, 59, 13],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "inSubquery-order-limit",
+			"shape": "or",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.id = ANY (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2 ORDER BY posts_subq_1.score DESC LIMIT 1) OR posts.score = $3)",
+			"params": [31, 59, 13],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "inSubquery-order-limit",
+			"shape": "not",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.id = ANY (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2 ORDER BY posts_subq_1.score DESC LIMIT 1))",
+			"params": [31, 59],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "inSubquery-order-limit",
+			"shape": "empty-or",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND false",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "inSubquery-order-limit",
+			"shape": "empty-and",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND true",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "inSubquery-order-limit",
+			"shape": "two-level",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.id = ANY (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $3 ORDER BY posts_subq_1.score DESC LIMIT 1)) OR posts.score = $4)",
+			"params": [31, 13, 59, 17],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "rawExists-order-limit",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "rawExists subquery with LIMIT, ORDER BY is not supported — it would silently change which rows match; restructure the query or use a CTE."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "rawExists-order-limit",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "rawExists subquery with LIMIT, ORDER BY is not supported — it would silently change which rows match; restructure the query or use a CTE."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "rawExists-order-limit",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "rawExists subquery with LIMIT, ORDER BY is not supported — it would silently change which rows match; restructure the query or use a CTE."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "rawExists-order-limit",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "rawExists subquery with LIMIT, ORDER BY is not supported — it would silently change which rows match; restructure the query or use a CTE."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "rawExists-order-limit",
+			"shape": "empty-or",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND false",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "rawExists-order-limit",
+			"shape": "empty-and",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND true",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "rawExists-order-limit",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "rawExists subquery with LIMIT, ORDER BY is not supported — it would silently change which rows match; restructure the query or use a CTE."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "scalar-subquery-order-limit",
+			"shape": "leaf",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2 ORDER BY posts_subq_1.score DESC LIMIT 1)",
+			"params": [31, 59],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "scalar-subquery-order-limit",
+			"shape": "and",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2 ORDER BY posts_subq_1.score DESC LIMIT 1) AND posts.score = $3",
+			"params": [31, 59, 13],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "scalar-subquery-order-limit",
+			"shape": "or",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2 ORDER BY posts_subq_1.score DESC LIMIT 1) OR posts.score = $3)",
+			"params": [31, 59, 13],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "scalar-subquery-order-limit",
+			"shape": "not",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2 ORDER BY posts_subq_1.score DESC LIMIT 1))",
+			"params": [31, 59],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "scalar-subquery-order-limit",
+			"shape": "empty-or",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND false",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "scalar-subquery-order-limit",
+			"shape": "empty-and",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND true",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "scalar-subquery-order-limit",
+			"shape": "two-level",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $3 ORDER BY posts_subq_1.score DESC LIMIT 1)) OR posts.score = $4)",
+			"params": [31, 13, 59, 17],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "expression-scalar-subquery",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "expression-scalar-subquery",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "expression-scalar-subquery",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "expression-scalar-subquery",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "expression-scalar-subquery",
+			"shape": "empty-or",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND false",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "expression-scalar-subquery",
+			"shape": "empty-and",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND true",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "expression-scalar-subquery",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "exists-recursive-up",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "exists-recursive-up",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "exists-recursive-up",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "exists-recursive-up",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "exists-recursive-up",
+			"shape": "empty-or",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND false",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "exists-recursive-up",
+			"shape": "empty-and",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND true",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "exists-recursive-up",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "exists-recursive-down",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "exists-recursive-down",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "exists-recursive-down",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "exists-recursive-down",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "exists-recursive-down",
+			"shape": "empty-or",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND false",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "exists-recursive-down",
+			"shape": "empty-and",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND true",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "exists-recursive-down",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "notExists-recursive-up",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "notExists-recursive-up",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "notExists-recursive-up",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "notExists-recursive-up",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "notExists-recursive-up",
+			"shape": "empty-or",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND false",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "notExists-recursive-up",
+			"shape": "empty-and",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND true",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "notExists-recursive-up",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "notExists-recursive-down",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "notExists-recursive-down",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "notExists-recursive-down",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "notExists-recursive-down",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "notExists-recursive-down",
+			"shape": "empty-or",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND false",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "notExists-recursive-down",
+			"shape": "empty-and",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND true",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "notExists-recursive-down",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
 			"kind": "rawNotExists",
 			"shape": "leaf",
 			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $2))",
@@ -2073,6 +2521,286 @@
 			"sql": null,
 			"params": null,
 			"error": "compileExpressionIntent: unsupported expression kind 'raw'"
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "exists-custom-authorities",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "exists-custom-authorities",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "exists-custom-authorities",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "exists-custom-authorities",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "exists-custom-authorities",
+			"shape": "empty-or",
+			"sql": "SELECT users.*, posts.matrix_pk AS \"posts.matrix_pk\" FROM users JOIN posts AS posts ON users.matrix_pk = posts.\"authorId\" WHERE users.score = $1 AND false",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "exists-custom-authorities",
+			"shape": "empty-and",
+			"sql": "SELECT users.*, posts.matrix_pk AS \"posts.matrix_pk\" FROM users JOIN posts AS posts ON users.matrix_pk = posts.\"authorId\" WHERE users.score = $1 AND true",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "exists-custom-authorities",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "notExists-custom-authorities",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "notExists-custom-authorities",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "notExists-custom-authorities",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "notExists-custom-authorities",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "notExists-custom-authorities",
+			"shape": "empty-or",
+			"sql": "SELECT users.*, posts.matrix_pk AS \"posts.matrix_pk\" FROM users JOIN posts AS posts ON users.matrix_pk = posts.\"authorId\" WHERE users.score = $1 AND false",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "notExists-custom-authorities",
+			"shape": "empty-and",
+			"sql": "SELECT users.*, posts.matrix_pk AS \"posts.matrix_pk\" FROM users JOIN posts AS posts ON users.matrix_pk = posts.\"authorId\" WHERE users.score = $1 AND true",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "notExists-custom-authorities",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "some-custom-authorities",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "some-custom-authorities",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "some-custom-authorities",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "some-custom-authorities",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "some-custom-authorities",
+			"shape": "empty-or",
+			"sql": "SELECT users.*, posts.matrix_pk AS \"posts.matrix_pk\" FROM users JOIN posts AS posts ON users.matrix_pk = posts.\"authorId\" WHERE users.score = $1 AND false",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "some-custom-authorities",
+			"shape": "empty-and",
+			"sql": "SELECT users.*, posts.matrix_pk AS \"posts.matrix_pk\" FROM users JOIN posts AS posts ON users.matrix_pk = posts.\"authorId\" WHERE users.score = $1 AND true",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "some-custom-authorities",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "every-custom-authorities",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "every-custom-authorities",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "every-custom-authorities",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "every-custom-authorities",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "every-custom-authorities",
+			"shape": "empty-or",
+			"sql": "SELECT users.*, posts.matrix_pk AS \"posts.matrix_pk\" FROM users JOIN posts AS posts ON users.matrix_pk = posts.\"authorId\" WHERE users.score = $1 AND false",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "every-custom-authorities",
+			"shape": "empty-and",
+			"sql": "SELECT users.*, posts.matrix_pk AS \"posts.matrix_pk\" FROM users JOIN posts AS posts ON users.matrix_pk = posts.\"authorId\" WHERE users.score = $1 AND true",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "every-custom-authorities",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "none-custom-authorities",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "none-custom-authorities",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "none-custom-authorities",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "none-custom-authorities",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "none-custom-authorities",
+			"shape": "empty-or",
+			"sql": "SELECT users.*, posts.matrix_pk AS \"posts.matrix_pk\" FROM users JOIN posts AS posts ON users.matrix_pk = posts.\"authorId\" WHERE users.score = $1 AND false",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "none-custom-authorities",
+			"shape": "empty-and",
+			"sql": "SELECT users.*, posts.matrix_pk AS \"posts.matrix_pk\" FROM users JOIN posts AS posts ON users.matrix_pk = posts.\"authorId\" WHERE users.score = $1 AND true",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "none-custom-authorities",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
 		}
 	]
 }
