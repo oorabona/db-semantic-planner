@@ -83,7 +83,7 @@ and internal symbols do not (#860 tracks the convention for the existing exports
 ## Deliveries
 
 1. Physical model, namespace verdict, neutral inventory, and the closed DDL, comparison, migration, live
-   comparison, converge, declaration and CLI entry points (#784): not shipped.
+   comparison, converge, declaration and CLI entry points (#784): shipped in `662d66f6` (#784).
 2. Model-backed query compilation on the physical model, query-local aliases and the `orm.tables` runtime
-   helpers (#762): not shipped.
-3. Expression text documented as physical SQL (#318): not shipped.
+   helpers (#762): shipped in `1b3c3838` (#762).
+3. Expression text documented as physical SQL (#318): shipped with #318.

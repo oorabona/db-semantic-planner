@@ -56,6 +56,7 @@ type ColumnDef =
 			unique?: boolean;
 			primaryKey?: boolean;
 			autoIncrement?: boolean;
+			/** Default value (optional): either a value that the DDL renderer formats as a SQL literal, or `{ sql: string }` containing physical SQL. In `sql`, column names are database names after `dbCasing`, and the text is emitted as written. */
 			default?: unknown;
 			index?: boolean;
 	  };

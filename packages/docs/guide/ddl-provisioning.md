@@ -9,6 +9,12 @@ PostgreSQL DDL APIs take a `PgPhysicalModel`, created once with
 same value to `generateDDL`, `compareSchemata`, and live comparison; an
 introspected model is wrapped with `mode: 'physical'` and is never mapped again.
 
+CHECK expressions, index predicates and expressions, policy `USING` and
+`WITH CHECK`, and SQL default expression text are physical SQL: column names are
+the database names (after `dbCasing`), and the text is emitted unchanged. If
+`createdAt` is mapped by `snake_case`, write `created_at` in an expression such
+as `created_at > now()`.
+
 Managed database changes use one path: `dbsp plan` records a proven change and
 `dbsp apply` executes a replayable record. This keeps execution authority, live
 observation, and the durable outcome in the same workflow.

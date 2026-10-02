@@ -180,6 +180,9 @@ CREATE INDEX IF NOT EXISTS "idx_embeddings_vector_hnsw"
 
 ### 4. Expression index (partial)
 
+The `where` predicate is physical SQL: column names are the database names
+(after `dbCasing`), and the text is emitted unchanged.
+
 ```typescript
 // doctest: real-db-only — requires a live PostgreSQL connection
 await orm.tables.users.indexes.create({

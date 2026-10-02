@@ -263,6 +263,8 @@ default index name). Converge leaves owned surfaces out of its schema comparison
 not emit an owned CHECK or index on a fresh table, and does not check one during adoption. For owned
 CHECKs it renders the state handed to `inspect` and `apply`; the step decides whether that state is
 healthy. Other column properties, including defaults and nullability, remain compared.
+The CHECK text passed to `tx.query` is physical SQL: use database column names
+in the expression, and the text is emitted as written.
 
 ```typescript
 // doctest: skip — illustrates an assertion-owned CHECK
