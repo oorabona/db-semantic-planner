@@ -1387,47 +1387,7 @@ export function compileSelectEnvelope<T = unknown>(
 		}
 		assertSupportedIncludeWhere(execIntent.include, strategies);
 		// Real usage: convert intent to decisions
-		// Separate-query includes still need parent attachment keys in the main row.
-		const sourceKeys = plan.decisions.flatMap((d) => {
-			if (
-				d.type !== 'include-strategy' ||
-				d.choice !== 'subquery' ||
-				d.context.intentPath?.includes('.include[')
-			)
-				return [];
-			return toColumnList(
-				d.context.relationType === 'belongsTo'
-					? (deriveForeignKey(d.context, deps.deriveFk, deps.defaultPk) ??
-							deps.defaultPk)
-					: (d.context.parentKey ?? deps.defaultPk),
-			);
-		});
-		const mainIntent =
-			execIntent.select?.type === 'fields' && sourceKeys.length > 0
-				? {
-						...execIntent,
-						select: {
-							...execIntent.select,
-							fields: [
-								...new Set([...execIntent.select.fields, ...sourceKeys]),
-							],
-						},
-					}
-				: execIntent;
-		let decisions = intentToDecisions(mainIntent, plan.rootTable);
-		if (execIntent.select?.type === 'expressions') {
-			for (const column of new Set(sourceKeys)) {
-				if (
-					!decisions.some(
-						(d) =>
-							d.type === 'select' &&
-							(d.column === '*' || (d.column === column && !d.alias)),
-					)
-				) {
-					decisions.push({ type: 'select', table: plan.rootTable, column });
-				}
-			}
-		}
+		let decisions = intentToDecisions(execIntent, plan.rootTable);
 		const resolvedModel = options?.model ?? deps.model;
 
 		// Convert dotted-field comparisons (e.g., "parent.name") to EXISTS subqueries
@@ -1471,12 +1431,6 @@ export function compileSelectEnvelope<T = unknown>(
 				.map((d) => d.relationName as string)
 				.filter(Boolean),
 		);
-		for (const d of planForCompilation.decisions) {
-			if (d.type === 'include-strategy' && d.choice === 'subquery') {
-				const alias = d.context.includeAlias ?? d.context.relation;
-				if (alias) coveredByPlanner.add(alias);
-			}
-		}
 		const synthesizedModel = options?.model ?? deps.model;
 		const synthesizedJoins = synthesizedModel
 			? synthesizeMissingJoinDecisions(
@@ -1658,7 +1612,11 @@ export function compileWithIncludes<T = unknown>(
 
 	// Extract subquery include info from planner decisions.
 	// Decisions with choice === 'subquery' need separate execution:
-	// They are omitted from SQL lowering in both compile APIs.
+	// mapToHandlerDecision lowers them to json_agg at the SQL level so the main
+	// query compiles, but hydrateJsonAggIncludes only processes decisions whose
+	// planner choice is 'json_agg'. When the user sets defaultIncludeStrategy:
+	// 'subquery', planner decisions carry choice === 'subquery', so hydration
+	// must happen via the subquery path (separate query + hydrateIncludes).
 	const subqueryIncludes: SubqueryIncludeInfo[] = [];
 	const intentsByPath = new Map<string, IncludeIntent>();
 	const rootIntentsByRelation = new Map<string, IncludeIntent>();

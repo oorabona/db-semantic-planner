@@ -329,41 +329,6 @@ export class ResultHydrator<TResult = unknown> {
 					);
 				}
 			}
-			// Attachment keys remain available until all nested includes are hydrated.
-			const selection = includeInfo.select;
-			if (
-				selection &&
-				selection.type !== 'all' &&
-				!(selection.type === 'fields' && selection.fields.includes('*'))
-			) {
-				const selected = new Set(
-					selection.type === 'fields'
-						? selection.fields
-						: selection.type === 'aggregate'
-							? (selection.fields ?? [])
-							: selection.columns.flatMap((column) =>
-									column.kind === 'column' && !column.as
-										? [column.column]
-										: 'as' in column && column.as
-											? [column.as]
-											: column.kind === 'columnAlias'
-												? [column.alias]
-												: [],
-								),
-				);
-				const keys = new Set([
-					...toColumnList(includeInfo.foreignKey),
-					...(includeInfo.nestedIncludes ?? []).flatMap((nested) =>
-						toColumnList(nested.sourceKey),
-					),
-				]);
-				for (const child of childResults) {
-					for (const key of keys) {
-						if (!selected.has(key))
-							delete (child as Record<string, unknown>)[key];
-					}
-				}
-			}
 		}
 	}
 

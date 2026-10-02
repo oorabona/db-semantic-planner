@@ -129,7 +129,7 @@ The planner picks the SQL strategy from the query shape by default:
 |----------|-----------|-------|
 | `json_agg` | Simple 1:N includes on the same root query | Aggregates rows with `json_agg()` + `GROUP BY` |
 | `lateral` | Flat includes with a per-parent `limit` | Uses `LATERAL` join for per-row subqueries |
-| `subquery` | Large or deeply nested includes | One separate query per include level after the main statement |
+| `subquery` | Large or deeply nested includes | Separate correlated subquery per relation |
 
 Inspect the chosen strategy at any time with `dump()`:
 
