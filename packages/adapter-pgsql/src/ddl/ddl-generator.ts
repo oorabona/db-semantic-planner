@@ -47,6 +47,7 @@ import {
 	quoteCollation,
 	quoteRoleName,
 } from './phases/utils.js';
+import { renderPolicyClauses } from './policy-clauses.js';
 import {
 	assertSchemaName,
 	collectModelScopeEvidence,
@@ -652,5 +653,5 @@ export function generateCreatePolicy(
 	}
 	const usingClause = usingExpr ? ` USING (${usingExpr})` : '';
 	const withCheckClause = withCheckExpr ? ` WITH CHECK (${withCheckExpr})` : '';
-	return `CREATE POLICY ${policyName} ON ${qualifiedTable}${forClause}${asClause}${toClause}${usingClause}${withCheckClause};`;
+	return `CREATE POLICY ${policyName} ON ${qualifiedTable}${renderPolicyClauses(asClause, forClause, toClause, usingClause, withCheckClause)};`;
 }

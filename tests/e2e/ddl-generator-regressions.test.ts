@@ -9,7 +9,8 @@ import {
 	withGeneratedPostconditionSession,
 } from '@dbsp/adapter-pgsql';
 import { generateDDL } from '@dbsp/adapter-pgsql/internal';
-import { schema } from '@dbsp/core';
+import { ModelIRImpl, schema } from '@dbsp/core';
+import type { TableIR } from '@dbsp/types';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
@@ -38,6 +39,68 @@ afterAll(async () => {
 });
 
 describe('PostgreSQL DDL generator restored guarantees', () => {
+	it('executes permissive and restrictive policies with valid PostgreSQL clause ordering', async () => {
+		const schemaName = `policy_order_${randomUUID().replaceAll('-', '')}`;
+		await createSchema(schemaName);
+		const table: TableIR = {
+			name: 'policy_events',
+			columns: [{ name: 'created_at', type: 'timestamp', nullable: true }],
+			foreignKeys: [],
+			indexes: [],
+			rlsEnabled: true,
+			policies: [
+				{
+					name: 'events_permissive',
+					command: 'ALL',
+					permissive: true,
+					using: 'created_at IS NOT NULL',
+					withCheck: 'created_at IS NOT NULL',
+				},
+				{
+					name: 'events_restrictive',
+					command: 'ALL',
+					permissive: false,
+					using: 'created_at IS NOT NULL',
+					withCheck: 'created_at IS NOT NULL',
+				},
+			],
+		};
+		try {
+			const statements = generateDDL(
+				new ModelIRImpl(new Map([[table.name, table]]), new Map()),
+				{ schemaName },
+			);
+			await executeDdl(statements);
+
+			const result = await (await getTestPool()).query<{
+				policyname: string;
+				permissive: string;
+				qual: string | null;
+				with_check: string | null;
+			}>(
+				`SELECT policyname, permissive, qual, with_check FROM pg_policies WHERE schemaname = $1 AND tablename = $2 ORDER BY policyname`,
+				[schemaName, 'policy_events'],
+			);
+			expect(result.rows).toHaveLength(2);
+			expect(result.rows).toEqual([
+				expect.objectContaining({
+					policyname: 'events_permissive',
+					permissive: 'PERMISSIVE',
+					qual: expect.stringContaining('created_at IS NOT NULL'),
+					with_check: expect.stringContaining('created_at IS NOT NULL'),
+				}),
+				expect.objectContaining({
+					policyname: 'events_restrictive',
+					permissive: 'RESTRICTIVE',
+					qual: expect.stringContaining('created_at IS NOT NULL'),
+					with_check: expect.stringContaining('created_at IS NOT NULL'),
+				}),
+			]);
+		} finally {
+			await dropSchema(schemaName);
+		}
+	});
+
 	it('OBL-GEN-POST1 mutation: raw catalogue spellings must not reject a numeric/function-default/CHECK quoted table read-back', async () => {
 		const schemaName = `postcondition_${randomUUID().replaceAll('-', '')}`;
 		await createSchema(schemaName);

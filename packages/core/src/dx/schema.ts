@@ -63,7 +63,7 @@ export type ColumnDef =
 			unique?: boolean;
 			primaryKey?: boolean;
 			autoIncrement?: boolean;
-			/** Default value (optional): either a value that the DDL renderer formats as a SQL literal, or `{ sql: string }` containing physical SQL. In `sql`, column names are database names after `dbCasing`, and the text is emitted as written. */
+			/** Default value (optional): `{ sql: string }` is SQL; a string ending in `()` is also emitted as SQL; other values are formatted as literals. SQL text is not identifier-rewritten: column names must use database names after `dbCasing`. */
 			default?: unknown;
 			index?: boolean;
 	  };
@@ -193,7 +193,7 @@ export interface SchemaIndexOptions {
 	name?: string;
 	/** Index access method (default: btree). E.g. 'gin', 'gist', 'hnsw', 'bm25' */
 	method?: string;
-	/** Partial index predicate (WHERE clause). Non-empty predicate text is physical SQL: column names are the database names (after `dbCasing`), and the text is emitted unchanged. */
+	/** Partial index predicate (WHERE clause). Column names in this physical SQL use database names after `dbCasing`; identifiers inside it are not rewritten. */
 	where?: string;
 	/**
 	 * Non-key columns to include (INCLUDE clause, PG11+).
@@ -220,7 +220,7 @@ export interface SchemaTableOptions {
 	/** CHECK constraints for this table */
 	checkConstraints?: Array<{
 		name: string;
-		/** CHECK expression. This expression is physical SQL: column names are the database names (after `dbCasing`), and the text is emitted unchanged. */
+		/** CHECK expression. Column names in this physical SQL use database names after `dbCasing`; identifiers inside it are not rewritten. */
 		expression: string;
 	}>;
 	/** Composite foreign keys for this table (use ref() with columns/references) */

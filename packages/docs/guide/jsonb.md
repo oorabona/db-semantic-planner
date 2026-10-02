@@ -188,9 +188,10 @@ orm.select('profiles')
 | Expression index | Equality on a specific path (`data->>'email' = ?`) | `CREATE INDEX ON profiles ((data->>'email'))` |
 | `BTREE` on extracted cast | Range queries on a numeric field (`(data->>'score')::int`) | `CREATE INDEX ON profiles (((data->>'score')::integer))` |
 
-Index expression text is physical SQL: column names are the database names
-(after `dbCasing`), and the text is emitted unchanged. For expression indexes
-via dbsp DDL helpers, see [DDL Helpers](./ddl-helpers).
+Index expression text is physical SQL: column names must be the database names
+after `dbCasing`, and identifiers inside the expression are not rewritten. For
+expression indexes via dbsp DDL helpers, see [DDL Helpers](./ddl-helpers) for
+an example using `{ expression: 'lower(email)' }`.
 
 ---
 

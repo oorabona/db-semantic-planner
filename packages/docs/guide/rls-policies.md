@@ -7,9 +7,9 @@ title: Row-Level Security Policies
 Build the declared schema with `createPgPhysicalModel` before DDL or comparison.
 Under a casing rule, table and policy identifiers are derived there once; policy
 `USING` and `WITH CHECK` expressions remain physical SQL and are not rewritten.
-Each expression is physical SQL: column names are the database names (after
-`dbCasing`), and the text is emitted unchanged. For a `tenantId` column under
-`snake_case`, write `tenant_id` in both expressions.
+Column names inside the expressions must use their database names after
+`dbCasing`; identifiers inside the SQL text are not rewritten. For a `tenantId`
+column under `snake_case`, write `tenant_id` in both expressions.
 
 Row-Level Security (RLS) lets PostgreSQL enforce access control at the row level, so different database roles see only the rows they are allowed to see. Use this guide when you need multi-tenant isolation or per-role data filtering enforced at the database layer rather than in application code.
 
@@ -53,9 +53,9 @@ const schema = {
 ALTER TABLE "tenants" ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "tenant_isolation" ON "tenants"
+  AS PERMISSIVE
   FOR ALL
   TO app_user
-  AS PERMISSIVE
   USING (tenant_id = current_setting('app.current_tenant')::uuid)
   WITH CHECK (tenant_id = current_setting('app.current_tenant')::uuid);
 ```
@@ -89,7 +89,7 @@ RLS is gated by `supportsDDLRowLevelSecurity` capability flag:
 
 ## Gotchas
 
-- `using` and `withCheck` are raw SQL strings — no parameter binding, no validation; they are emitted as written
+- `using` and `withCheck` are raw SQL strings and are not parameterized. `validateSqlExpression` lexically rejects semicolons, `--`, `/*`, `*/`, `$$`, and backslashes, including when those tokens occur inside quoted literals; it does not parse PostgreSQL expression syntax.
 - Policy names must be unique per table
 - `PERMISSIVE` is the default; set `permissive: false` for `RESTRICTIVE` policies
 - Introspection reads from `pg_policy` catalog — requires appropriate privileges

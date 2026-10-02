@@ -1736,7 +1736,7 @@ describe('generateDownSQL', () => {
 					meta: { policy: { name: 'tenant_isolation' } },
 				},
 				expectedSql:
-					'CREATE POLICY "tenant_isolation" ON "documents" FOR ALL AS PERMISSIVE;',
+					'CREATE POLICY "tenant_isolation" ON "documents" AS PERMISSIVE FOR ALL;',
 			},
 			{
 				name: 'alter_column_unique false DOWN adds the unique constraint',
@@ -5947,7 +5947,7 @@ describe('DDL-RLS: Row-Level Security', () => {
 				]),
 			);
 			expect(sql).toEqual([
-				`CREATE POLICY "tenant_isolation" ON "documents" FOR ALL AS PERMISSIVE TO "app_user", "app_admin" USING (tenant_id = current_setting('app.tenant')::uuid) WITH CHECK (tenant_id = current_setting('app.tenant')::uuid);`,
+				`CREATE POLICY "tenant_isolation" ON "documents" AS PERMISSIVE FOR ALL TO "app_user", "app_admin" USING (tenant_id = current_setting('app.tenant')::uuid) WITH CHECK (tenant_id = current_setting('app.tenant')::uuid);`,
 			]);
 		});
 
@@ -5984,7 +5984,7 @@ describe('DDL-RLS: Row-Level Security', () => {
 				]),
 			);
 			expect(sql).toEqual([
-				`CREATE POLICY "open" ON "documents" FOR ALL AS PERMISSIVE;`,
+				`CREATE POLICY "open" ON "documents" AS PERMISSIVE FOR ALL;`,
 			]);
 		});
 
@@ -6006,7 +6006,7 @@ describe('DDL-RLS: Row-Level Security', () => {
 				]),
 			);
 			expect(sql).toEqual([
-				`CREATE POLICY "read_own" ON "documents" FOR SELECT AS PERMISSIVE USING (owner_id = current_user_id());`,
+				`CREATE POLICY "read_own" ON "documents" AS PERMISSIVE FOR SELECT USING (owner_id = current_user_id());`,
 			]);
 		});
 
@@ -6029,7 +6029,7 @@ describe('DDL-RLS: Row-Level Security', () => {
 				]),
 			);
 			expect(sql).toEqual([
-				`CREATE POLICY "no_delete" ON "documents" FOR DELETE AS RESTRICTIVE USING (false);`,
+				`CREATE POLICY "no_delete" ON "documents" AS RESTRICTIVE FOR DELETE USING (false);`,
 			]);
 		});
 
@@ -6075,7 +6075,7 @@ describe('DDL-RLS: Row-Level Security', () => {
 				'ALTER TABLE "tenant_42"."documents" ENABLE ROW LEVEL SECURITY;',
 			);
 			expect(sql[1]).toBe(
-				`CREATE POLICY "tenant" ON "tenant_42"."documents" FOR ALL AS PERMISSIVE USING (tenant_id = $1);`,
+				`CREATE POLICY "tenant" ON "tenant_42"."documents" AS PERMISSIVE FOR ALL USING (tenant_id = $1);`,
 			);
 		});
 
@@ -6236,7 +6236,7 @@ describe('DDL-RLS: Row-Level Security', () => {
 				]),
 			);
 			expect(sql).toEqual([
-				`CREATE POLICY "tenant_isolation" ON "documents" FOR SELECT AS PERMISSIVE TO "app_user" USING (tenant_id = current_setting('app.tenant')::uuid);`,
+				`CREATE POLICY "tenant_isolation" ON "documents" AS PERMISSIVE FOR SELECT TO "app_user" USING (tenant_id = current_setting('app.tenant')::uuid);`,
 			]);
 		});
 	});
@@ -6520,11 +6520,11 @@ describe('DDL-RLS: Row-Level Security', () => {
 			]);
 			expect(generateMigrationSQL(diff)).toEqual([
 				`DROP POLICY IF EXISTS "tenant_isolation" ON "documents";`,
-				`CREATE POLICY "tenant_isolation" ON "documents" FOR SELECT AS PERMISSIVE TO "app_user" USING (tenant_id = current_setting('app.tenant')::uuid AND archived_at IS NULL);`,
+				`CREATE POLICY "tenant_isolation" ON "documents" AS PERMISSIVE FOR SELECT TO "app_user" USING (tenant_id = current_setting('app.tenant')::uuid AND archived_at IS NULL);`,
 			]);
 			expect(generateDownSQL(diff)).toEqual([
 				`DROP POLICY IF EXISTS "tenant_isolation" ON "documents";`,
-				`CREATE POLICY "tenant_isolation" ON "documents" FOR SELECT AS PERMISSIVE TO "app_user" USING (tenant_id = current_setting('app.tenant')::uuid);`,
+				`CREATE POLICY "tenant_isolation" ON "documents" AS PERMISSIVE FOR SELECT TO "app_user" USING (tenant_id = current_setting('app.tenant')::uuid);`,
 			]);
 		});
 

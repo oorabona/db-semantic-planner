@@ -788,7 +788,7 @@ export type IndexMethod =
 export type IndexColumnDef =
 	| string
 	| {
-			/** This expression is physical SQL: column names are the database names (after `dbCasing`), and the text is emitted unchanged. */
+			/** Column names in this physical SQL use database names after `dbCasing`; identifiers inside it are not rewritten. PostgreSQL requires a non-function expression key to have its own parentheses. */
 			expression: string;
 			opclass?: string;
 	  };
@@ -801,7 +801,7 @@ export type CreateIndexOptions = {
 	readonly opclass?: Readonly<Record<string, string>>;
 	readonly include?: readonly string[];
 	readonly with?: Readonly<Record<string, unknown>>;
-	/** Partial index predicate (WHERE clause). When present, this predicate is physical SQL: column names are the database names (after `dbCasing`), and the text is emitted unchanged. */
+	/** Partial index predicate (WHERE clause). Column names in this physical SQL use database names after `dbCasing`; identifiers inside it are not rewritten. */
 	readonly where?: string;
 	readonly unique?: boolean;
 	/** PG15+ — valid only on UNIQUE indexes; declaring it on a non-unique index is a fail-loud error. */
@@ -832,7 +832,7 @@ export type TruncateOptions = {
 /** Options for ALTER COLUMN. */
 export type AlterColumnOptions = {
 	readonly type?: string;
-	/** USING expression for the type conversion. This expression is physical SQL: column names are the database names (after `dbCasing`), and the text is emitted unchanged. */
+	/** USING expression for the type conversion. Column names in this physical SQL use database names after `dbCasing`; identifiers inside it are not rewritten. */
 	readonly using?: string;
 	readonly setNotNull?: boolean;
 	readonly setDefault?: unknown;

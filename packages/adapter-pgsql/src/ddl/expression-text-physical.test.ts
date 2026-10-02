@@ -1,10 +1,9 @@
 import { ModelIRImpl, POSTGRESQL_CAPABILITIES, schema } from '@dbsp/core';
 import type { ModelIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { createPgPhysicalModel } from '../physical-model/index.js';
-import { generateCreateIndexSQL } from './index-operations.js';
 import { compareSchemata, generateDDL } from './public-api.js';
-import { generateAlterColumnSQL } from './table-operations.js';
 
 type ExpressionKind =
 	| 'check'
@@ -24,6 +23,8 @@ function modelWith(kind: ExpressionKind, expression: string): ModelIR {
 				nullable: false,
 				...(kind === 'default' ? { default: { sql: expression } } : {}),
 			},
+			{ name: 'userEmail', type: 'string', nullable: true },
+			{ name: 'deletedAt', type: 'timestamp', nullable: true },
 		],
 		foreignKeys: [],
 		indexes:
@@ -69,7 +70,7 @@ function expectedDDL(kind: ExpressionKind, expression: string): string[] {
 	const statements = [
 		'CREATE TABLE "public"."events" (\n  "created_at" TIMESTAMPTZ NOT NULL' +
 			(kind === 'default' ? ` DEFAULT ${expression}` : '') +
-			'\n);',
+			',\n  "user_email" VARCHAR(255),\n  "deleted_at" TIMESTAMPTZ\n);',
 	];
 	if (kind === 'check')
 		statements.push(
@@ -86,7 +87,7 @@ function expectedDDL(kind: ExpressionKind, expression: string): string[] {
 	if (kind === 'using' || kind === 'with-check') {
 		statements.push('ALTER TABLE "public"."events" ENABLE ROW LEVEL SECURITY;');
 		statements.push(
-			`CREATE POLICY "events_policy" ON "public"."events" FOR ALL AS PERMISSIVE${kind === 'using' ? ` USING (${expression})` : ` WITH CHECK (${expression})`};`,
+			`CREATE POLICY "events_policy" ON "public"."events" AS PERMISSIVE FOR ALL${kind === 'using' ? ` USING (${expression})` : ` WITH CHECK (${expression})`};`,
 		);
 	}
 	return statements;
@@ -104,7 +105,12 @@ const kinds: readonly ExpressionKind[] = [
 describe('physical SQL expression text', () => {
 	for (const kind of kinds) {
 		it(`preserves database-spelled ${kind} text in complete public DDL`, () => {
-			const expression = 'created_at > now()';
+			const expression =
+				kind === 'predicate'
+					? 'deleted_at IS NULL'
+					: kind === 'index-expression'
+						? 'lower(user_email)'
+						: 'created_at > now()';
 			const physical = createPgPhysicalModel({
 				mode: 'logical',
 				model: modelWith(kind, expression),
@@ -126,8 +132,13 @@ describe('physical SQL expression text', () => {
 			).toEqual([]);
 		});
 
-		it(`preserves model-spelled ${kind} text unchanged in complete public DDL`, () => {
-			const expression = 'createdAt > now()';
+		it(`does not rewrite model-spelled identifiers inside ${kind} text`, () => {
+			const expression =
+				kind === 'predicate'
+					? 'deletedAt IS NULL'
+					: kind === 'index-expression'
+						? 'lower(userEmail)'
+						: 'createdAt > now()';
 			const physical = createPgPhysicalModel({
 				mode: 'logical',
 				model: modelWith(kind, expression),
@@ -150,7 +161,7 @@ describe('physical SQL expression text', () => {
 		});
 	}
 
-	it('preserves schema DSL CHECK and partial-index predicate text', () => {
+	it('does not rewrite identifiers in schema DSL CHECK and partial-index predicate text', () => {
 		const declared = schema(
 			{ events: { createdAt: 'timestamp' } },
 			{
@@ -186,30 +197,38 @@ describe('physical SQL expression text', () => {
 		]);
 	});
 
-	it('preserves public index expression and predicate option text', () => {
+	it('does not rewrite public index expression and predicate text', () => {
+		const adapter = createPgsqlCompileOnlyAdapter({
+			model: modelWith('index-expression', 'lower(userEmail)'),
+			dbCasing: 'snake_case',
+		});
 		expect(
-			generateCreateIndexSQL('events', 'public', {
+			adapter.generateCreateIndex('events', 'public', {
 				name: 'events_expression',
-				columns: [{ expression: 'createdAt > now()' }],
-				where: 'createdAt > now()',
+				columns: ['userEmail', { expression: 'lower(userEmail)' }],
+				where: 'deletedAt IS NULL',
 			}),
 		).toBe(
-			'CREATE INDEX "events_expression" ON "public"."events" (createdAt > now()) WHERE createdAt > now()',
+			'CREATE INDEX "events_expression" ON "public"."events" ("user_email", lower(userEmail)) WHERE deletedAt IS NULL',
 		);
 	});
 
-	it('preserves public ALTER COLUMN USING text', () => {
+	it('does not rewrite public ALTER COLUMN USING text', () => {
+		const adapter = createPgsqlCompileOnlyAdapter({
+			model: modelWith('check', 'createdAt > now()'),
+			dbCasing: 'snake_case',
+		});
 		expect(
-			generateAlterColumnSQL('events', 'public', 'created_at', {
+			adapter.generateAlterColumn('events', 'public', 'createdAt', {
 				type: 'TIMESTAMPTZ',
-				using: 'createdAt > now()',
+				using: 'createdAt::timestamptz',
 			}),
 		).toBe(
-			'ALTER TABLE "public"."events" ALTER COLUMN "created_at" TYPE TIMESTAMPTZ USING createdAt > now()',
+			'ALTER TABLE "public"."events" ALTER COLUMN "created_at" TYPE TIMESTAMPTZ USING createdAt::timestamptz',
 		);
 	});
 
-	it('compares policy expressions unchanged through the public RLS schema comparison path', () => {
+	it('does not report policy expressions as changed after physical schema comparison', () => {
 		const expression = 'createdAt > now()';
 		const desired = createPgPhysicalModel({
 			mode: 'logical',
