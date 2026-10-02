@@ -18,6 +18,7 @@ import type {
 	VacuumOptions,
 } from '@dbsp/core';
 import { POSTGRESQL_CAPABILITIES, plan as planFn } from '@dbsp/core';
+import { inspectMutationRows } from '@dbsp/core/internal';
 import type {
 	Adapter,
 	AdapterCapabilities,
@@ -3600,7 +3601,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		this.assertDeclaredMutationReferences(
 			intent.table,
 			[
-				...Object.keys(intent.values?.[0] ?? {}),
+				...inspectMutationRows(intent.values ?? [], {
+					operation: 'insert',
+				}).columns,
 				...(intent.returningItems?.map((item) => item.source) ??
 					intent.returning ??
 					[]),
@@ -3713,7 +3716,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		this.assertDeclaredMutationReferences(
 			intent.table,
 			[
-				...Object.keys(intent.values?.[0] ?? {}),
+				...inspectMutationRows(intent.values ?? [], {
+					operation: 'upsert',
+					homogeneous: true,
+				}).columns,
 				...conflictColumns,
 				...actionColumns,
 				...(intent.returningItems?.map((item) => item.source) ??

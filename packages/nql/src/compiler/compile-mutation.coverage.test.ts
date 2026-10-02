@@ -89,7 +89,7 @@ describe('compile-mutation: INSERT multi-row', () => {
 		expect(insert.values[1]!.name).toBe('Bob');
 	});
 
-	it('normalizes columns across rows (missing → undefined)', () => {
+	it('preserves missing keys across rows', () => {
 		const result = compileNql(
 			"insert into users set name = 'Alice', email = 'a@b.com' | set name = 'Bob'",
 		);
@@ -103,13 +103,13 @@ describe('compile-mutation: INSERT multi-row', () => {
 			email: 'a@b.com',
 		});
 
-		// Second row: email normalized to undefined (→ NULL)
+		// Second row: email is absent (→ DEFAULT)
 		expect(insert.values[1]!.name).toBe('Bob');
-		expect('email' in insert.values[1]!).toBe(true);
+		expect(Object.hasOwn(insert.values[1]!, 'email')).toBe(false);
 		expect(insert.values[1]!.email).toBeUndefined();
 	});
 
-	it('normalizes columns when second row has extra columns', () => {
+	it('preserves extra columns in later rows', () => {
 		const result = compileNql(
 			"insert into users set name = 'Alice' | set name = 'Bob', role = 'admin'",
 		);
@@ -117,9 +117,9 @@ describe('compile-mutation: INSERT multi-row', () => {
 		const insert = result.mutation as InsertIntent;
 		expect(insert.values).toHaveLength(2);
 
-		// First row: role normalized to undefined
+		// First row: role is absent (→ DEFAULT)
 		expect(insert.values[0]!.name).toBe('Alice');
-		expect('role' in insert.values[0]!).toBe(true);
+		expect(Object.hasOwn(insert.values[0]!, 'role')).toBe(false);
 		expect(insert.values[0]!.role).toBeUndefined();
 
 		// Second row has both

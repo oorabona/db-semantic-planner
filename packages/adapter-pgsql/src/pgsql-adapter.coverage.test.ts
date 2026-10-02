@@ -932,23 +932,25 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			expect(result.parameters).toHaveLength(4);
 		});
 
-		it('compiles INSERT with empty values array', () => {
+		it('refuses INSERT with empty values array', () => {
 			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 				values: [],
 			};
-			const result = adapter.compileInsert(intent as any);
-			expect(result.sql.toLowerCase()).toContain('insert');
+			expect(() => adapter.compileInsert(intent as any)).toThrow(
+				'Invalid insert: insert: values requires at least one row',
+			);
 		});
 
-		it('compiles INSERT with undefined values', () => {
+		it('refuses INSERT with undefined values', () => {
 			const adapter = createPgsqlCompileOnlyAdapter({ model: coverageModel });
 			const intent = {
 				table: 'users',
 			};
-			const result = adapter.compileInsert(intent as any);
-			expect(result.sql.toLowerCase()).toContain('insert');
+			expect(() => adapter.compileInsert(intent as any)).toThrow(
+				'Invalid insert: insert: values requires at least one row',
+			);
 		});
 	});
 

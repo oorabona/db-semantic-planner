@@ -223,19 +223,15 @@ describe('SC-03: unnest batch with RETURNING clause', () => {
 // SC-04: Empty values array rejected (by InsertBuilder.buildIntent)
 // ---------------------------------------------------------------------------
 describe('SC-04: empty values array is rejected', () => {
-	it('produces empty INSERT when values is empty (no crash)', () => {
-		// Note: InsertBuilder.buildIntent() rejects empty via InvalidOperationError.
-		// At the adapter level (compileInsert), empty values returns a no-op INSERT.
-		// The guard is in the builder, not the adapter.
+	it('refuses empty values before SQL generation', () => {
 		const adapter = createInsertTestAdapter();
-		const intent = {
-			type: 'insert' as const,
-			table: 'embeddings',
-			values: [],
-		};
-		// Adapter-level: does not throw, columns/values are empty
-		const result = adapter.compileInsert(intent as any);
-		expect(result.sql).toContain('INSERT');
+		expect(() =>
+			adapter.compileInsert({
+				type: 'insert',
+				table: 'embeddings',
+				values: [],
+			}),
+		).toThrow('Invalid insert: insert: values requires at least one row');
 	});
 });
 

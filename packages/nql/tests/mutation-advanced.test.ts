@@ -395,15 +395,15 @@ describe('NQL Mutation - Multi-row INSERT', () => {
 		expect(insert.values[1]).toEqual({ name: 'B' });
 	});
 
-	it('B3: Mixed columns get normalized (union, missing → undefined)', () => {
+	it('B3: Mixed columns preserve missing own keys', () => {
 		const result = compileNql(
 			"insert into users values (name = 'A'), (name = 'B', email = 'b@test.com')",
 		);
 
 		const insert = result.mutation as InsertIntent;
 		expect(insert.values).toHaveLength(2);
-		// First row should have undefined email (column normalization)
-		expect(insert.values[0]).toEqual({ name: 'A', email: undefined });
+		// Missing email remains absent for DEFAULT lowering
+		expect(insert.values[0]).toEqual({ name: 'A' });
 		// Second row has both columns
 		expect(insert.values[1]).toEqual({ name: 'B', email: 'b@test.com' });
 	});

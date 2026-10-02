@@ -327,7 +327,9 @@ export function compileInsert(
 			const dbType = colName
 				? mutationColumnType(columnTypes, colName)
 				: undefined;
-			return valueToNode(val, state, dbType);
+			return val === DEFAULT_INSERT_CELL
+				? { SetToDefault: {} }
+				: valueToNode(val, state, dbType);
 		}),
 	);
 
@@ -459,9 +461,11 @@ export function compileUpdate(
 	const setClause: Array<{ column: SqlIdentifier; value: Node }> =
 		config.set.map(({ column, value }) => ({
 			column,
-			value: isSqlRaw(value)
-				? parseRawExpression(value.sql)
-				: valueToNode(value, state, mutationColumnType(columnTypes, column)),
+			value: assignmentToNode(
+				value,
+				state,
+				mutationColumnType(columnTypes, column),
+			),
 		}));
 
 	// Build WHERE clause if present
@@ -594,7 +598,11 @@ export function compileUnnestUpdate(
 		// Scalar SET from scalarSet (e.g. .set({ confidence: 0.85 }))
 		...(config.scalarSet ?? []).map(({ column, value }) => ({
 			column,
-			value: valueToNode(value, state, mutationColumnType(columnTypes, column)),
+			value: assignmentToNode(
+				value,
+				state,
+				mutationColumnType(columnTypes, column),
+			),
 		})),
 	];
 
@@ -1146,4 +1154,17 @@ export function compileMutation(
 		default:
 			throw new Error(`Unknown mutation type: ${type}`);
 	}
+}
+
+/** Internal sentinel for an absent insert cell; explicit undefined is SQL NULL. */
+export const DEFAULT_INSERT_CELL = Symbol('default insert cell');
+
+function assignmentToNode(
+	value: unknown,
+	state: CompilerState,
+	dbType: string | undefined,
+): Node {
+	return isSqlRaw(value)
+		? parseRawExpression(value.sql)
+		: valueToNode(value, state, dbType);
 }
