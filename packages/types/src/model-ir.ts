@@ -167,6 +167,7 @@ export type JoinDefault = 'left' | 'inner' | 'auto';
 export type AuthorAttester = Exclude<TrustRoot, { readonly kind: 'pack' }>;
 
 export interface AuthorAttestedNativeDefault {
+	/** SQL default expression from the attested native default. */
 	readonly sql: string;
 	readonly attestedBy: AuthorAttester;
 	readonly statement?: string;
@@ -205,7 +206,7 @@ export interface ColumnIR {
 	/** Whether NULL is allowed */
 	readonly nullable: boolean;
 
-	/** Default value (optional) */
+	/** Default value (optional). `{ sql: string }` and a string ending in `()` are emitted as SQL text; column names in that text are database names after `dbCasing`, which does not rewrite them. */
 	readonly default?: unknown;
 
 	/**
@@ -356,7 +357,7 @@ export interface CheckConstraintIR {
 	/** Constraint name in database */
 	readonly name: string;
 
-	/** CHECK expression in canonical form (from pg_get_constraintdef) */
+	/** CHECK expression in canonical form (from pg_get_constraintdef). Column names in this physical SQL use database names after `dbCasing`; identifiers inside it are not rewritten. */
 	readonly expression: string;
 
 	/** If true, add the constraint WITHOUT scanning existing rows (NOT VALID). Use validate_constraint to validate later. */
@@ -393,9 +394,9 @@ export interface PolicyIR {
 	readonly roles?: readonly string[];
 	/** Whether the policy is permissive or restrictive (default: PERMISSIVE) */
 	readonly permissive?: boolean;
-	/** USING expression — SQL predicate for row visibility (SELECT, UPDATE, DELETE) */
+	/** USING expression — SQL predicate for row visibility (SELECT, UPDATE, DELETE). Column names in this physical SQL use database names after `dbCasing`; identifiers inside it are not rewritten. */
 	readonly using?: string;
-	/** WITH CHECK expression — SQL predicate for new/modified rows (INSERT, UPDATE) */
+	/** WITH CHECK expression — SQL predicate for new/modified rows (INSERT, UPDATE). Column names in this physical SQL use database names after `dbCasing`; identifiers inside it are not rewritten. */
 	readonly withCheck?: string;
 }
 
@@ -418,7 +419,7 @@ export interface IndexIR {
 	/** Index name (auto-generated if not provided: idx_{table}_{columns}) */
 	readonly name?: string;
 
-	/** Columns included in the index (1+ columns) */
+	/** Columns included in the index; may be empty when `expressions` supplies the index keys. */
 	readonly columns: readonly string[];
 
 	/** Whether this is a unique index */
@@ -440,11 +441,12 @@ export interface IndexIR {
 	 * Partial index predicate (WHERE clause). The model representation has one
 	 * absence value: `undefined`. Every present string, including an empty or
 	 * whitespace-only string, is an authored `WHERE` clause and must reach
-	 * PostgreSQL.
+	 * PostgreSQL. Column names in this physical SQL use database names after
+	 * `dbCasing`; identifiers inside it are not rewritten.
 	 */
 	readonly where?: string;
 
-	/** Expression-based index entries (used instead of/alongside columns) */
+	/** Expression-based index entries (used instead of/alongside columns). Column names in this physical SQL use database names after `dbCasing`; identifiers inside it are not rewritten. PostgreSQL requires a non-function expression key to have its own parentheses. */
 	readonly expressions?: readonly string[];
 
 	/** Non-key columns to include (INCLUDE clause, PG11+) */

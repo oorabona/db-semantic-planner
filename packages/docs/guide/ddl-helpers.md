@@ -4,12 +4,12 @@ title: DDL Helpers
 
 # How to Use DDL Helpers
 
-The DDL helpers give you a type-safe API for table maintenance and index management operations directly from your ORM instance, without writing raw SQL. Use this guide when you need to truncate tables, create or drop indexes, alter columns, or check table storage size — especially in multi-tenant setups where schema scoping matters.
+The DDL helpers give you a type-safe API for table maintenance and index management operations directly from your ORM instance, without writing complete DDL statements; `where`, index `expression`, `using`, and an `alterColumn` `setDefault` given as `{ sql }` or as a string ending in `()` are the raw SQL fragments they accept (see Gotchas). Use this guide when you need to truncate tables, create or drop indexes, alter columns, or check table storage size — especially in multi-tenant setups where schema scoping matters.
 
 ## When
 
 When you need to run DDL operations (TRUNCATE, VACUUM, CREATE/DROP INDEX, ALTER COLUMN) or check
-table storage size without writing raw SQL. All helpers are available via `orm.tables.<name>` and
+table storage size without writing complete DDL statements. All helpers are available via `orm.tables.<name>` and
 use the adapter's configured schema, unless `orm.withSchema()` supplies an explicit multi-tenant
 override.
 
@@ -180,11 +180,16 @@ CREATE INDEX IF NOT EXISTS "idx_embeddings_vector_hnsw"
 
 ### 4. Expression index (partial)
 
+Index expressions and `where` predicates are physical SQL: column names must be
+the database names after `dbCasing`, and identifiers in the SQL text are not
+rewritten. PostgreSQL requires a key that is not a function call to have its
+own parentheses.
+
 ```typescript
 // doctest: real-db-only — requires a live PostgreSQL connection
 await orm.tables.users.indexes.create({
   name: 'idx_users_email_lower',
-  columns: ['email'],
+  columns: [{ expression: 'lower(email)' }],
   where: '"active" = true',
 })
 ```
@@ -192,7 +197,7 @@ await orm.tables.users.indexes.create({
 Generated SQL:
 ```sql
 CREATE INDEX "idx_users_email_lower"
-  ON "public"."users" ("email")
+  ON "public"."users" (lower(email))
   WHERE "active" = true
 ```
 
@@ -264,6 +269,8 @@ console.log(`embeddings table: ${(size / 1024 / 1024).toFixed(1)} MB`)
 - **VACUUM cannot run inside a transaction** — calling `vacuum()` will throw if called within a transaction block. The adapter executes it outside any transaction automatically, but if you wrap it manually you'll get a PostgreSQL error.
 - **CREATE INDEX CONCURRENTLY cannot run inside a transaction** — same constraint. Use `concurrently: true` only outside explicit transaction blocks.
 - **`where` in `CreateIndexOptions` is raw SQL** — it is not parameterized. Never interpolate untrusted user input into this field. Use hard-coded SQL expressions only (e.g. `'"active" = true'`).
+- **`expression` in `CreateIndexOptions` is raw SQL** — it is not parameterized, and identifiers inside it are not rewritten. Use database column names after `dbCasing`; wrap non-function expression keys in their own parentheses as PostgreSQL requires.
+- **`using` and SQL-form `setDefault` in `AlterColumnOptions` are raw SQL** — `using`, `setDefault: { sql }` and a `setDefault` string ending in `()` are emitted as SQL, not parameterized. Write them in code; never build them from request data.
 - **`storageSize()` uses `pg_total_relation_size`** — this includes the table heap, indexes, and TOAST storage. For heap-only size use `pg_relation_size`.
 - **Core generates zero SQL** — all DDL SQL is delegated to the adapter. If you use `createPgsqlCompileOnlyAdapter()`, DDL methods that require a live connection (truncate, vacuum, storageSize) will throw.
 - **`alterColumn` with `setNotNull: true`** triggers a full table scan in PostgreSQL to validate the constraint. On large tables, prefer adding a CHECK constraint first and then promoting it.

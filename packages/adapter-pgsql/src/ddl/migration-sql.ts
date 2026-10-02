@@ -62,6 +62,7 @@ import {
 	quoteRoleName,
 	validateEnumLabel,
 } from './phases/utils.js';
+import { renderPolicyClauses } from './policy-clauses.js';
 import { escapeCanonicalSqlLiterals } from './rendered-sql.js';
 import {
 	collectReferencedKeyRemovalConflicts,
@@ -278,7 +279,7 @@ function buildPolicySQL(
 	}
 	const usingClause = usingExpr ? ` USING (${usingExpr})` : '';
 	const withCheckClause = withCheckExpr ? ` WITH CHECK (${withCheckExpr})` : '';
-	return `CREATE POLICY ${policyName} ON ${qt}${forClause}${asClause}${toClause}${usingClause}${withCheckClause};`;
+	return `CREATE POLICY ${policyName} ON ${qt}${renderPolicyClauses(asClause, forClause, toClause, usingClause, withCheckClause)};`;
 }
 
 /**

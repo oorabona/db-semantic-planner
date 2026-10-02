@@ -34,8 +34,8 @@ The PostgreSQL adapter owns one immutable physical model, `PgPhysicalModel`, bui
 introspected physical model (with the target schema and no naming). Logical names are mapped exactly once;
 physical input is never mapped. Every PostgreSQL schema consumer of a declared object — DDL generation, schema
 comparison and migration SQL, live comparison and converge, and declaration binding — takes this value. Model-backed
-query compilation still maps names with the adapter's naming plugin; it moves onto this value in the second delivery
-(#762).
+query compilation resolves declared names through it as well; queries still name tables and columns by their
+logical names (#762).
 
 The model records the physical name of every table, column, index (explicit, default and automatic
 foreign-key), primary-key, foreign-key, CHECK and column-unique constraint, standalone sequence, enum and policy.
@@ -59,7 +59,8 @@ model carries, primary-key, foreign-key and automatic-index names included. Ever
 in the adapter.
 
 Expression text — CHECK expressions, index predicates and expressions, policy `USING`/`WITH CHECK`, SQL column
-defaults — is physical SQL and is never rewritten (#318, option a). Enum names keep their existing physical
+defaults — is physical SQL: it names database columns, and `dbCasing` never maps identifiers inside it (#318,
+option a). The DDL renderer may still trim and wrap a CHECK clause and re-escape engine-canonical literals. Enum names keep their existing physical
 meaning. Query-local aliases (CTE columns, relation aliases, `RETURNING` labels) are compiler-local, not model
 names, and are handled with the query compiler (#762).
 
@@ -83,7 +84,7 @@ and internal symbols do not (#860 tracks the convention for the existing exports
 ## Deliveries
 
 1. Physical model, namespace verdict, neutral inventory, and the closed DDL, comparison, migration, live
-   comparison, converge, declaration and CLI entry points (#784): not shipped.
+   comparison, converge, declaration and CLI entry points (#784): shipped in `662d66f6` (#784).
 2. Model-backed query compilation on the physical model, query-local aliases and the `orm.tables` runtime
-   helpers (#762): not shipped.
-3. Expression text documented as physical SQL (#318): not shipped.
+   helpers (#762): shipped in `1b3c3838` (#762).
+3. Expression text documented as physical SQL (#318): shipped with #318.

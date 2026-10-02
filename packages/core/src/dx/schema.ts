@@ -63,6 +63,7 @@ export type ColumnDef =
 			unique?: boolean;
 			primaryKey?: boolean;
 			autoIncrement?: boolean;
+			/** Default value (optional). `{ sql: string }` and a string ending in `()` are emitted as SQL text; column names in that text are database names after `dbCasing`, which does not rewrite them. */
 			default?: unknown;
 			index?: boolean;
 	  };
@@ -192,7 +193,7 @@ export interface SchemaIndexOptions {
 	name?: string;
 	/** Index access method (default: btree). E.g. 'gin', 'gist', 'hnsw', 'bm25' */
 	method?: string;
-	/** Partial index predicate (WHERE clause) */
+	/** Partial index predicate (WHERE clause). Column names in this physical SQL use database names after `dbCasing`; identifiers inside it are not rewritten. */
 	where?: string;
 	/**
 	 * Non-key columns to include (INCLUDE clause, PG11+).
@@ -219,6 +220,7 @@ export interface SchemaTableOptions {
 	/** CHECK constraints for this table */
 	checkConstraints?: Array<{
 		name: string;
+		/** CHECK expression. Column names in this physical SQL use database names after `dbCasing`; identifiers inside it are not rewritten. */
 		expression: string;
 	}>;
 	/** Composite foreign keys for this table (use ref() with columns/references) */

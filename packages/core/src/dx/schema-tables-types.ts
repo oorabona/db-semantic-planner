@@ -56,6 +56,7 @@ type ColumnDef =
 			unique?: boolean;
 			primaryKey?: boolean;
 			autoIncrement?: boolean;
+			/** Default value (optional). `{ sql: string }` and a string ending in `()` are emitted as SQL text; column names in that text are database names after `dbCasing`, which does not rewrite them. */
 			default?: unknown;
 			index?: boolean;
 	  };

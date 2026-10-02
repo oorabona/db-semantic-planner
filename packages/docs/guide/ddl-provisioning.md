@@ -9,6 +9,18 @@ PostgreSQL DDL APIs take a `PgPhysicalModel`, created once with
 same value to `generateDDL`, `compareSchemata`, and live comparison; an
 introspected model is wrapped with `mode: 'physical'` and is never mapped again.
 
+CHECK expressions, index predicates and expressions, policy `USING` and
+`WITH CHECK`, and SQL default expression text use database column names after
+`dbCasing`; identifiers inside those SQL strings are not rewritten. If
+`createdAt` is mapped by `snake_case`, write `created_at` in an expression such
+as `created_at > now()`. CHECK expressions may be trimmed, have `NOT VALID`
+re-attached, and be wrapped as a `CHECK` clause; engine-canonical literals can
+also be re-escaped when the DDL is rendered.
+
+These fields take SQL written by the schema author. Never build them from request
+data: the values are not parameterized, and no lexical check makes untrusted
+SQL safe.
+
 Managed database changes use one path: `dbsp plan` records a proven change and
 `dbsp apply` executes a replayable record. This keeps execution authority, live
 observation, and the durable outcome in the same workflow.
