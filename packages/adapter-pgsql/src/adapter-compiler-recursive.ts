@@ -1185,6 +1185,8 @@ function buildRecursiveAnchorWhere(
 				buildRecursiveAnchorWhere(w.condition, tableAlias, table, deps, state),
 			);
 		default:
-			return { A_Const: { boolval: { boolval: true } } };
+			throw new Error(
+				`Unsupported recursive start.where predicate kind '${String(w.kind)}'.`,
+			);
 	}
 }

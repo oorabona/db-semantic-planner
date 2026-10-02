@@ -97,7 +97,7 @@ export const orHandler: WhereHandler = {
 /**
  * NOT operator handler
  *
- * Note: NOT takes a single condition in `conditions[0]`
+ * Multiple conditions are negated as a conjunction.
  */
 export const notHandler: WhereHandler = {
 	operators: [LOGICAL_OPERATORS.NOT],
@@ -114,9 +114,14 @@ export const notHandler: WhereHandler = {
 			throw new Error('NOT handler requires a condition in conditions[0]');
 		}
 
-		// NOT wraps the first condition
-		const compiledCondition = dispatch(conditions[0]!, ctx, state);
+		const compiledConditions = conditions.map((condition) =>
+			dispatch(condition, ctx, state),
+		);
 
-		return notExpr(compiledCondition);
+		return notExpr(
+			compiledConditions.length === 1
+				? compiledConditions[0]!
+				: andExpr(...compiledConditions),
+		);
 	},
 };

@@ -401,7 +401,7 @@ describe('notHandler', () => {
 		expect(node.BoolExpr?.args).toHaveLength(1);
 	});
 
-	it('only uses first condition (ignores rest)', () => {
+	it('negates every condition as a conjunction', () => {
 		const state = createCompilerState();
 		let dispatchCount = 0;
 
@@ -420,10 +420,11 @@ describe('notHandler', () => {
 			],
 		} as Decision;
 
-		notHandler.compile(decision, ctx, state, countingDispatch);
+		const node = notHandler.compile(decision, ctx, state, countingDispatch);
 
-		// Should only dispatch the first condition
-		expect(dispatchCount).toBe(1);
+		expect(dispatchCount).toBe(3);
+		expect(node.BoolExpr?.args?.[0]?.BoolExpr?.boolop).toBe('AND_EXPR');
+		expect(node.BoolExpr?.args?.[0]?.BoolExpr?.args).toHaveLength(3);
 	});
 
 	it('passes context correctly to nested condition', () => {

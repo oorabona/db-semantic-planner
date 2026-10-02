@@ -1609,7 +1609,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			expect(result.sql).toBeDefined();
 		});
 
-		it('handles unknown kind with fallback to TRUE', () => {
+		it('refuses unknown recursive anchor kind', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			const report = {
 				intent: {
@@ -1632,8 +1632,9 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const result = adapter.compileRecursive(report as any, coverageModel);
-			expect(result.sql).toBeDefined();
+			expect(() =>
+				adapter.compileRecursive(report as any, coverageModel),
+			).toThrow(/recursive start\.where.*unknown_kind/);
 		});
 
 		it('handles null/undefined where with fallback to TRUE', () => {

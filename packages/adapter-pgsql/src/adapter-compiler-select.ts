@@ -10,6 +10,7 @@ import type {
 	CompiledQuery,
 	CompileOptions,
 	CompileResultWithIncludes,
+	IncludeIntent,
 	JoinIntent,
 	ModelIR,
 	NestedOutputReadHandling,
@@ -17,6 +18,7 @@ import type {
 	OutputValueShape,
 	PlanReport,
 	SubqueryIncludeInfo,
+	WhereIntent,
 } from '@dbsp/types';
 import { resolveOutputReadHandling, toColumnList } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
@@ -1217,6 +1219,34 @@ function buildSimplifiedPlanReport(
 // compile (SELECT)
 // ============================================================================
 
+/** Refuse relation filters before enrichment can promote include-local decisions. */
+function assertSupportedIncludeWhere(
+	includes: readonly IncludeIntent[] | undefined,
+	parent = '',
+): void {
+	for (const [index, include] of (includes ?? []).entries()) {
+		const path = `${parent}include[${index}](${include.relation})`;
+		const visit = (where: WhereIntent): void => {
+			switch (where.kind) {
+				case 'exists':
+				case 'notExists':
+				case 'relationFilter':
+					throw new Error(
+						`Relation predicates inside an include where are not supported yet at ${path}.where (oorabona/db-semantic-planner#892).`,
+					);
+				case 'and':
+				case 'or':
+					for (const condition of where.conditions) visit(condition);
+					break;
+				case 'not':
+					visit(where.condition);
+			}
+		};
+		if (include.where) visit(include.where);
+		assertSupportedIncludeWhere(include.include, `${path}.`);
+	}
+}
+
 /**
  * Compile a PlanReport to a parameterised SELECT query.
  * Extracted body of PgsqlAdapter.compile().
@@ -1287,6 +1317,7 @@ export function compileSelectEnvelope<T = unknown>(
 	let simplifiedPlan: SimplifiedPlanReport;
 
 	if (execIntent) {
+		assertSupportedIncludeWhere(execIntent.include);
 		// Real usage: convert intent to decisions
 		let decisions = intentToDecisions(execIntent, plan.rootTable);
 		const resolvedModel = options?.model ?? deps.model;

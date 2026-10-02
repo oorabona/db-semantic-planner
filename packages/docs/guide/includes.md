@@ -52,6 +52,8 @@ Each call is independent. Nested paths (like `posts.comments`) automatically tri
 
 ## Include with Options
 
+Relation predicates (`exists`, `some`, `every`, `none`) inside an include `where` are refused for now (oorabona/db-semantic-planner#892).
+
 Pass an options object as the second argument to filter, project, or disambiguate the include:
 
 ```typescript
