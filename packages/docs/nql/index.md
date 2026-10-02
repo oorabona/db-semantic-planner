@@ -67,6 +67,10 @@ pnpm dbsp repl --schema ./examples/ecommerce.schema.ts \
   --input ./examples/ecommerce.dbsp
 ```
 
+The result tables below are REPL output: column headers are the labels PostgreSQL returns, so model columns
+appear under their database names (`parent_id`) and written aliases as written (`userCount`). Queries run through
+the ORM return model columns under their logical keys (`parentId`).
+
 ### Pipe Syntax
 
 NQL uses pipes (`|`) to chain operators, left to right:
@@ -112,8 +116,8 @@ SELECT categories.* FROM ch5_ecommerce.categories
 ```
 </details>
 
-| id | name            | slug            | parentId | sortOrder |
-|----|-----------------|-----------------|----------|-----------|
+| id | name            | slug            | parent_id | sort_order |
+|----|-----------------|-----------------|-----------|------------|
 | 1  | Electronics     | electronics     | NULL      | 1          |
 | 2  | Clothing        | clothing        | NULL      | 2          |
 | 3  | Books           | books           | NULL      | 3          |
@@ -138,8 +142,8 @@ SELECT customers.* FROM ch5_ecommerce.customers
 ```
 </details>
 
-| id | email             | firstName | lastName | phone       | createdAt                |
-|----|-------------------|-----------|----------|-------------|--------------------------|
+| id | email             | first_name | last_name | phone       | created_at               |
+|----|-------------------|------------|-----------|-------------|--------------------------|
 | 1  | alice@example.com | Alice      | Johnson   | +1-555-0101 | 2024-01-01T09:00:00.000Z |
 | 2  | bob@example.com   | Bob        | Smith     | +1-555-0102 | 2024-01-01T09:00:00.000Z |
 | 3  | carol@example.com | Carol      | Williams  | NULL        | 2024-01-02T10:00:00.000Z |
@@ -216,8 +220,8 @@ LIMIT 5
 ```
 </details>
 
-| id | sku           | name            | description                               | price   | stock | categoryId | active | createdAt                |
-|----|---------------|-----------------|-------------------------------------------|---------|-------|------------|--------|--------------------------|
+| id | sku           | name            | description                               | price   | stock | category_id | active | created_at               |
+|----|---------------|-----------------|-------------------------------------------|---------|-------|-------------|--------|--------------------------|
 | 1  | LAPTOP-001    | ProBook 15      | High-performance laptop for professionals | 1299.99 | 50    | 11          | true   | 2024-01-01T08:00:00.000Z |
 | 2  | LAPTOP-002    | UltraLight 13   | Lightweight laptop for travel             | 999.99  | 30    | 11          | true   | 2024-01-01T08:00:00.000Z |
 | 3  | PHONE-001     | SmartPhone X    | Latest flagship smartphone                | 899.99  | 100   | 13          | true   | 2024-01-01T08:00:00.000Z |
@@ -243,8 +247,8 @@ WHERE resources.parent_id IS NULL
 ```
 </details>
 
-| id | name | type   | parentId |
-|----|------|--------|----------|
+| id | name | type   | parent_id |
+|----|------|--------|-----------|
 | 1  | Root | folder | NULL      |
 
 *(1 row)*
@@ -269,8 +273,8 @@ WHERE posts.view_count > $1
 ```
 </details>
 
-| id | title                  | featured | viewCount | published |
-|----|------------------------|----------|-----------|-----------|
+| id | title                  | featured | view_count | published |
+|----|------------------------|----------|------------|-----------|
 | 1  | TypeScript Fundamentals| True     | 1500       | True      |
 | 3  | PostgreSQL Deep Dive   | True     | 2000       | True      |
 
@@ -294,8 +298,8 @@ WHERE posts.featured = $1 AND posts.view_count > $2
 ```
 </details>
 
-| id | title                | featured | viewCount |
-|----|----------------------|----------|-----------|
+| id | title                | featured | view_count |
+|----|----------------------|----------|------------|
 | 3  | PostgreSQL Deep Dive | True     | 2000       |
 
 *(1 row)*
@@ -320,8 +324,8 @@ WHERE employees.salary BETWEEN $1 AND $2
 ```
 </details>
 
-| id | name  | salary | departmentId | active |
-|----|-------|--------|--------------|--------|
+| id | name  | salary | department_id | active |
+|----|-------|--------|---------------|--------|
 | 2  | Bob   | 85000  | 1             | True   |
 | 3  | Carol | 95000  | 2             | True   |
 | 5  | Eve   | 60000  | 3             | True   |
@@ -346,8 +350,8 @@ WHERE employees.name LIKE $1
 ```
 </details>
 
-| id | name  | salary | departmentId | active |
-|----|-------|--------|--------------|--------|
+| id | name  | salary | department_id | active |
+|----|-------|--------|---------------|--------|
 | 1  | Alice | 120000 | 1             | True   |
 
 *(1 row)*
@@ -370,8 +374,8 @@ WHERE employees.department_id IN ($1, $2, $3)
 ```
 </details>
 
-| id | name  | salary | departmentId | active |
-|----|-------|--------|--------------|--------|
+| id | name  | salary | department_id | active |
+|----|-------|--------|---------------|--------|
 | 1  | Alice | 120000 | 1             | True   |
 | 2  | Bob   | 85000  | 1             | True   |
 | 3  | Carol | 95000  | 2             | True   |
@@ -399,8 +403,8 @@ WHERE employees.department_id NOT IN ($1, $2)
 ```
 </details>
 
-| id | name  | salary | departmentId | active |
-|----|-------|--------|--------------|--------|
+| id | name  | salary | department_id | active |
+|----|-------|--------|---------------|--------|
 | 1  | Alice | 120000 | 1             | True   |
 | 2  | Bob   | 85000  | 1             | True   |
 | 3  | Carol | 95000  | 2             | True   |
@@ -433,8 +437,8 @@ ORDER BY posts.view_count DESC
 ```
 </details>
 
-| id | title                   | viewCount | published |
-|----|-------------------------|-----------|-----------|
+| id | title                   | view_count | published |
+|----|-------------------------|------------|-----------|
 | 3  | PostgreSQL Deep Dive    | 2000       | True      |
 | 1  | TypeScript Fundamentals | 1500       | True      |
 | 2  | Advanced TypeScript     | 800        | True      |
@@ -464,8 +468,8 @@ LIMIT 3
 ```
 </details>
 
-| id | title                   | viewCount |
-|----|-------------------------|-----------|
+| id | title                   | view_count |
+|----|-------------------------|------------|
 | 3  | PostgreSQL Deep Dive    | 2000       |
 | 1  | TypeScript Fundamentals | 1500       |
 | 2  | Advanced TypeScript     | 800        |
@@ -753,7 +757,7 @@ SELECT avg(orders.total) FROM ch5_ecommerce.orders
 
 *Schema: iam*
 
-Use `as alias` to name aggregate columns. NQL applies the project's naming convention (here, camelCase → snake_case) to the alias automatically.
+Use `as alias` to name aggregate columns. The alias is emitted as written, quoted when it contains uppercase letters.
 
 ```nql
 userRoles | group by roleId | select roleId, count(*) as userCount
@@ -762,14 +766,14 @@ userRoles | group by roleId | select roleId, count(*) as userCount
 <details><summary>SQL</summary>
 
 ```sql
-SELECT user_roles.role_id, count(*) AS user_count
+SELECT user_roles.role_id, count(*) AS "userCount"
 FROM iam_example.user_roles
 GROUP BY user_roles.role_id
 ```
 </details>
 
-| roleId | userCount |
-|--------|-----------|
+| role_id | userCount |
+|---------|------------|
 | 1       | 1          |
 | 2       | 1          |
 | 3       | 1          |
@@ -977,8 +981,8 @@ WHERE (audit_log.details ->> $1) = $2
 ```
 </details>
 
-| id | userId | action | resource | timestamp                | details            |
-|----|--------|--------|----------|--------------------------|--------------------|
+| id | user_id | action | resource | timestamp                | details            |
+|----|---------|--------|----------|--------------------------|--------------------|
 | 1  | 1       | login  | system   | 2025-06-01T08:00:00.000Z | {"ip": "10.0.0.1"} |
 
 *(1 row)*
@@ -995,7 +999,7 @@ auditLog | where action = 'login' | select id, action, details -> 'ip' as ipJson
 
 ```sql
 SELECT audit_log.id, audit_log.action,
-  audit_log.details -> $1 AS ip_json
+  audit_log.details -> $1 AS "ipJson"
 FROM iam_example.audit_log
 WHERE audit_log.action = $2
 -- params: ["ip", "login"]
@@ -1027,8 +1031,8 @@ WHERE audit_log.details @> $1
 ```
 </details>
 
-| id | userId | action | resource | timestamp                | details            |
-|----|--------|--------|----------|--------------------------|--------------------|
+| id | user_id | action | resource | timestamp                | details            |
+|----|---------|--------|----------|--------------------------|--------------------|
 | 1  | 1       | login  | system   | 2025-06-01T08:00:00.000Z | {"ip": "10.0.0.1"} |
 
 *(1 row)*
@@ -1051,8 +1055,8 @@ WHERE audit_log.details ? $1
 ```
 </details>
 
-| id | userId | action | resource | timestamp                | details            |
-|----|--------|--------|----------|--------------------------|--------------------|
+| id | user_id | action | resource | timestamp                | details            |
+|----|---------|--------|----------|--------------------------|--------------------|
 | 1  | 1       | login  | system   | 2025-06-01T08:00:00.000Z | {"ip": "10.0.0.1"} |
 | 2  | 2       | login  | system   | 2025-06-01T08:30:00.000Z | {"ip": "10.0.0.2"} |
 | 5  | 3       | login  | system   | 2025-06-01T10:00:00.000Z | {"ip": "10.0.0.3"} |
@@ -1136,8 +1140,8 @@ WHERE EXISTS (
 ```
 </details>
 
-| id | name     | orgId | budget |
-|----|----------|-------|--------|
+| id | name     | org_id | budget |
+|----|----------|--------|--------|
 | 1  | Backend  | 2      | 500000 |
 | 2  | Frontend | 2      | 300000 |
 | 3  | Outbound | 3      | 200000 |
@@ -1456,8 +1460,8 @@ WHERE room_bookings.booking_period && CAST($1 AS daterange)
 ```
 </details>
 
-| id | roomId | bookedBy      | bookingPeriod           | purpose            |
-|----|--------|---------------|-------------------------|--------------------|
+| id | room_id | booked_by     | booking_period          | purpose            |
+|----|---------|---------------|-------------------------|--------------------|
 | 1  | 1       | Alice Johnson | [2024-01-15,2024-01-17) | Product planning   |
 | 5  | 2       | Eve Davis     | [2024-01-18,2024-01-19) | Code review        |
 | 10 | 4       | Jack Taylor   | [2024-01-15,2024-01-20) | Technical training |
@@ -1483,8 +1487,8 @@ WHERE room_bookings.booking_period <@ CAST($1 AS daterange)
 ```
 </details>
 
-| id | roomId | bookedBy      | bookingPeriod           | purpose               |
-|----|--------|---------------|-------------------------|-----------------------|
+| id | room_id | booked_by     | booking_period          | purpose               |
+|----|---------|---------------|-------------------------|-----------------------|
 | 1  | 1       | Alice Johnson | [2024-01-15,2024-01-17) | Product planning      |
 | 2  | 1       | Bob Smith     | [2024-01-20,2024-01-21) | Client meeting        |
 | 3  | 1       | Carol White   | [2024-01-25,2024-01-28) | Team workshop         |
@@ -1512,8 +1516,8 @@ WHERE price_tiers.quantity_range @> $1
 ```
 </details>
 
-| id | productName  | quantityRange | unitPrice |
-|----|--------------|---------------|-----------|
+| id | product_name | quantity_range | unit_price |
+|----|-------------|----------------|------------|
 | 2  | Widget Pro   | [10,50)        | 89.99      |
 | 8  | Gadget Basic | [25,100)       | 19.99      |
 | 10 | API Calls    | [1,1000)       | 0.01       |
