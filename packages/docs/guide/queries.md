@@ -72,6 +72,8 @@ orm.select('users').where(or(eq('role', 'admin'), eq('role', 'moderator')))
 orm.select('users').where(not(eq('deleted', true)))
 ```
 
+An empty `or()` matches no row, and an empty `and()` matches every row.
+
 | Helper | SQL | Helper | SQL |
 |--------|-----|--------|-----|
 | `eq` | `=` | `neq` | `!=` |

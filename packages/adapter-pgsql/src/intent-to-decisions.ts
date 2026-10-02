@@ -79,7 +79,7 @@ export function intentToDecisions(
 	if (intent.having) {
 		const havingDecisions = convertWhere(intent.having, rootTable);
 		for (const d of havingDecisions) {
-			decisions.push({ ...d, type: 'having' });
+			decisions.push({ type: 'having', conditions: [d] });
 		}
 	}
 
@@ -733,6 +733,9 @@ function convertLogicalGroup(
 	rootTable: string,
 	decisionType: 'whereAnd' | 'whereOr',
 ): PlanDecision | null {
+	if ((cond.conditions as WhereIntent[]).length === 0) {
+		return { type: decisionType, conditions: [] };
+	}
 	const subDecisions: PlanDecision[] = [];
 	for (const sub of cond.conditions as WhereIntent[]) {
 		const subDecision = convertWhereCondition(sub, rootTable);

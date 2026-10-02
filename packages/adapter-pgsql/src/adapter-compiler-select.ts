@@ -55,6 +55,7 @@ import {
 	deriveForeignKey,
 	enrichExistsDecisionsInPlace,
 	extractAllIncludeDecisions,
+	resolveIncludeByPath,
 	synthesizeMissingJoinDecisions,
 } from './plan-decision-extractor.js';
 import {
@@ -1518,6 +1519,7 @@ export function compileWithIncludes<T = unknown>(
 	// 'subquery', planner decisions carry choice === 'subquery', so hydration
 	// must happen via the subquery path (separate query + hydrateIncludes).
 	const subqueryIncludes: SubqueryIncludeInfo[] = [];
+	const entriesByPath = new Map<string, Mutable<SubqueryIncludeInfo>>();
 
 	for (const d of plan.decisions) {
 		if (d.type !== 'include-strategy' || d.choice !== 'subquery') continue;
@@ -1558,10 +1560,17 @@ export function compileWithIncludes<T = unknown>(
 			: fk;
 
 		// Find matching include intent for select/where passthrough
-		const includeIntent = (
-			plan.intent?.include as Array<Record<string, unknown>> | undefined
-		)?.find(
-			(i) => i.relation === relationName || i.relation === ctx.includeAlias,
+		const includeIntent = resolveIncludeByPath(
+			plan.intent?.include as
+				| Array<{
+						relation: string;
+						where?: unknown;
+						select?: unknown;
+						include?: unknown[];
+				  }>
+				| undefined,
+			ctx.intentPath,
+			relationName,
 		);
 
 		const entry: Mutable<SubqueryIncludeInfo> = {
@@ -1585,7 +1594,25 @@ export function compileWithIncludes<T = unknown>(
 			>;
 		}
 		subqueryIncludes.push(entry);
+		if (ctx.intentPath) entriesByPath.set(ctx.intentPath, entry);
 	}
 
-	return { main, subqueryIncludes };
+	// Nested subquery filters must run against the fetched parent include rows,
+	// rather than against root IDs. The hydrator already consumes this tree.
+	const nestedEntries = new Set<SubqueryIncludeInfo>();
+	for (const [path, entry] of entriesByPath) {
+		const separator = path.lastIndexOf('.include[');
+		if (separator < 0) continue;
+		const parentPath = path.slice(0, separator);
+		const parent = entriesByPath.get(parentPath);
+		if (!parent || parent === entry) continue;
+		parent.nestedIncludes = [...(parent.nestedIncludes ?? []), entry];
+		nestedEntries.add(entry);
+	}
+	return {
+		main,
+		subqueryIncludes: subqueryIncludes.filter(
+			(entry) => !nestedEntries.has(entry),
+		),
+	};
 }

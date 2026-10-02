@@ -401,7 +401,9 @@ describe('plan-decision-extractor - coverage', () => {
 
 		it('converts AND with empty conditions', () => {
 			const where = { kind: 'and', conditions: [] };
-			expect(convertWhereToDecisions(where, 'users')).toEqual([]);
+			expect(convertWhereToDecisions(where, 'users')).toEqual([
+				{ type: 'whereAnd', conditions: [] },
+			]);
 		});
 
 		it('converts OR with multiple conditions', () => {
@@ -432,7 +434,9 @@ describe('plan-decision-extractor - coverage', () => {
 
 		it('converts OR with empty conditions', () => {
 			const where = { kind: 'or', conditions: [] };
-			expect(convertWhereToDecisions(where, 'users')).toEqual([]);
+			expect(convertWhereToDecisions(where, 'users')).toEqual([
+				{ type: 'whereOr', conditions: [] },
+			]);
 		});
 
 		it('converts NOT with condition', () => {

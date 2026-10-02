@@ -104,7 +104,7 @@ export function resolveIncludeAlias(context: {
  * intentPath is e.g. "include[0]" or "include[0].include[0]" for deeply nested includes.
  * Falls back to flat search by relation name if intentPath is not available.
  */
-function resolveIncludeByPath(
+export function resolveIncludeByPath(
 	includes:
 		| Array<{
 				relation: string;
@@ -308,6 +308,8 @@ export function convertWhereToDecisions(
 			];
 		case 'and': {
 			const conditions = w.conditions as unknown[];
+			if (conditions.length === 0)
+				return [{ type: 'whereAnd', conditions: [] }];
 			const subDecisions = conditions.flatMap((c) =>
 				convertWhereToDecisions(c, table),
 			);
@@ -317,6 +319,7 @@ export function convertWhereToDecisions(
 		}
 		case 'or': {
 			const conditions = w.conditions as unknown[];
+			if (conditions.length === 0) return [{ type: 'whereOr', conditions: [] }];
 			const subDecisions = conditions.flatMap((c) =>
 				convertWhereToDecisions(c, table),
 			);
@@ -1733,6 +1736,9 @@ function toIncludeDecision(
 		relationName,
 	);
 	const limit = includeIntent?.limit;
+	const conditions = includeIntent?.where
+		? convertWhereToDecisions(includeIntent.where, context.target)
+		: [];
 
 	return {
 		type: 'includeStrategy',
@@ -1757,6 +1763,7 @@ function toIncludeDecision(
 		...(context.orderByFallback ? { orderByFallback: true } : {}),
 		...(context.intentPath && { intentPath: context.intentPath }),
 		...(limit != null && { limit }),
+		...(conditions.length > 0 && { conditions }),
 	};
 }
 

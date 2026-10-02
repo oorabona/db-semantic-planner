@@ -26,9 +26,11 @@ import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { compileSelectEnvelope } from './adapter-compiler-select.js';
 import {
 	binaryExpr,
+	booleanConstNode,
 	distinctExpr,
 	funcCall,
 	integerNode,
+	notExpr,
 	sqlColumnRef,
 	stringNode,
 } from './ast-helpers.js';
@@ -1166,6 +1168,7 @@ function buildRecursiveAnchorWhere(
 			const conditions = (w.conditions as unknown[]).map((c) =>
 				buildRecursiveAnchorWhere(c, tableAlias, table, deps, state),
 			);
+			if (conditions.length === 0) return booleanConstNode(true);
 			if (conditions.length === 1) return conditions[0]!;
 			return { BoolExpr: { boolop: 'AND_EXPR', args: conditions } };
 		}
@@ -1173,9 +1176,14 @@ function buildRecursiveAnchorWhere(
 			const conditions = (w.conditions as unknown[]).map((c) =>
 				buildRecursiveAnchorWhere(c, tableAlias, table, deps, state),
 			);
+			if (conditions.length === 0) return booleanConstNode(false);
 			if (conditions.length === 1) return conditions[0]!;
 			return { BoolExpr: { boolop: 'OR_EXPR', args: conditions } };
 		}
+		case 'not':
+			return notExpr(
+				buildRecursiveAnchorWhere(w.condition, tableAlias, table, deps, state),
+			);
 		default:
 			return { A_Const: { boolval: { boolval: true } } };
 	}

@@ -67,12 +67,13 @@ function buildCteSelect(
 	whereConditions: readonly Decision[] | undefined,
 	ctx: CompilerContext,
 	state: CompilerState,
+	compiledFilter: Node | undefined,
 ): Node {
 	const targetList = buildCteTargets(columns, innerAlias, ctx);
 
 	// Build WHERE if conditions exist
-	let whereClause: Node | undefined;
-	if (whereConditions && whereConditions.length > 0) {
+	let whereClause: Node | undefined = compiledFilter;
+	if (!compiledFilter && whereConditions && whereConditions.length > 0) {
 		const dispatch = createWhereDispatcher();
 
 		const subCtx: CompilerContext = {
@@ -271,6 +272,7 @@ export const cteIncludeHandler: IncludeHandler = {
 			conditions,
 			scopedCtx,
 			state,
+			decision._compiledFilterWhere,
 		);
 
 		// Build the CTE node

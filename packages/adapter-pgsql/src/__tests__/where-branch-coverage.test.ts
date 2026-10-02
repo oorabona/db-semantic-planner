@@ -1086,37 +1086,21 @@ describe('compileWhereIntent — null kind (bridges field -> column)', () => {
 // ===========================================================================
 
 describe('compileWhereIntent — and/or/not structural branches', () => {
-	it('empty AND conditions returns tautology TypeCast node with ival=1', () => {
-		// deparseSync renders "CAST(1 AS )" for TypeCast with names=["bool"] due to deparser quirk.
-		// Test the node structure directly to avoid deparser format dependency.
+	it('empty AND conditions returns tautology boolean true node', () => {
 		const { node, params } = compileNode({
 			kind: 'and',
 			conditions: [],
 		} as unknown as Parameters<typeof compileWhereIntent>[0]);
-		const tc = (node as Record<string, unknown>).TypeCast as Record<
-			string,
-			unknown
-		>;
-		expect(tc).toBeDefined();
-		const arg = tc.arg as Record<string, unknown>;
-		const integer = arg.Integer as Record<string, unknown>;
-		expect(integer.ival).toBe(1);
+		expect(node).toEqual({ A_Const: { boolval: { boolval: true } } });
 		expect(params).toEqual([]);
 	});
 
-	it('empty OR conditions returns contradiction TypeCast node with ival=0', () => {
+	it('empty OR conditions returns contradiction boolean false node', () => {
 		const { node, params } = compileNode({
 			kind: 'or',
 			conditions: [],
 		} as unknown as Parameters<typeof compileWhereIntent>[0]);
-		const tc = (node as Record<string, unknown>).TypeCast as Record<
-			string,
-			unknown
-		>;
-		expect(tc).toBeDefined();
-		const arg = tc.arg as Record<string, unknown>;
-		const integer = arg.Integer as Record<string, unknown>;
-		expect(integer.ival).toBe(0);
+		expect(node).toEqual({ A_Const: { boolval: { boolval: false } } });
 		expect(params).toEqual([]);
 	});
 

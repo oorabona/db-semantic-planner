@@ -40,8 +40,6 @@ import {
 	integerNode,
 	leftJoin,
 	mapLockToAst,
-	notExpr,
-	orExpr,
 	selectStmt,
 	sortBy,
 	sqlColumnRef,
@@ -1287,43 +1285,56 @@ export class PlanCompiler {
 			handlerDecision.strategy as 'json_agg' | 'join' | 'lateral' | 'cte',
 		);
 
-		// Pre-compile filter conditions for the handler (e.g., EXISTS propagation).
-		// INCLUDE-WHERE-SCOPE: skip for 'join' strategy — its conditions are folded
-		// into the root WHERE clause in compileSelect() instead. Pre-compiling here
-		// would double-consume parameter slots without producing usable SQL.
-		if (
-			strategy !== 'join' &&
-			decision.conditions &&
-			(decision.conditions as PlanDecision[]).length > 0
-		) {
-			const innerAlias = '__t__';
-			const filterCtx = this.createHandlerContext(plan);
-			const targetTable = handlerDecision.targetTable ?? decision.targetTable;
-			const aliasColumnAuthorities = targetTable
-				? bindAliasAuthority(
-						filterCtx.aliasColumnAuthorities,
-						queryLocal(innerAlias),
-						resolveRelationTarget(queryLocal(targetTable), filterCtx),
-					)
-				: filterCtx.aliasColumnAuthorities;
-			const condNodes = (decision.conditions as PlanDecision[]).map((c) => {
-				// Rewrite condition table references to use the inner alias
-				const rewritten = { ...c, table: innerAlias };
-				return this.dispatchWhere(rewritten, {
-					currentAlias: innerAlias,
-					...(aliasColumnAuthorities !== undefined && {
-						aliasColumnAuthorities,
-					}),
+		// Prepare each non-join include filter in the alias used by its handler.
+		// Join filters are folded into the root WHERE separately.
+		let includeAliasIndex = 0;
+		const prepareFilters = (
+			input: PlanDecision,
+			output: HandlerDecision,
+			depth: number,
+		): void => {
+			const innerAlias =
+				strategy === 'json_agg' || strategy === 'subquery'
+					? depth === 0
+						? '__t__'
+						: `__t${depth}__`
+					: `${output.targetTable}_inner_${includeAliasIndex++}`;
+			if (input.conditions?.length) {
+				const filterCtx = this.createHandlerContext(plan);
+				const targetTable = output.targetTable ?? input.targetTable;
+				const aliasColumnAuthorities = targetTable
+					? bindAliasAuthority(
+							filterCtx.aliasColumnAuthorities,
+							queryLocal(innerAlias),
+							resolveRelationTarget(queryLocal(targetTable), filterCtx),
+						)
+					: filterCtx.aliasColumnAuthorities;
+				const scopeCondition = (condition: PlanDecision): PlanDecision => ({
+					...condition,
+					table: innerAlias,
+					...(condition.type === 'whereAnd' ||
+					condition.type === 'whereOr' ||
+					condition.type === 'whereNot'
+						? { conditions: (condition.conditions ?? []).map(scopeCondition) }
+						: {}),
 				});
+				const nodes = input.conditions.map((condition) =>
+					this.dispatchWhere(scopeCondition(condition), {
+						currentAlias: innerAlias,
+						...(aliasColumnAuthorities !== undefined && {
+							aliasColumnAuthorities,
+						}),
+					}),
+				);
+				(output as { _compiledFilterWhere?: Node })._compiledFilterWhere =
+					nodes.length === 1 ? nodes[0]! : andExpr(...nodes);
+			}
+			input.children?.forEach((child, index) => {
+				const mapped = output.children?.[index];
+				if (mapped) prepareFilters(child, mapped, depth + 1);
 			});
-			const combined =
-				condNodes.length === 1 ? condNodes[0]! : andExpr(...condNodes);
-			// Inject pre-compiled filter for the json_agg handler to read.
-			// Property is readonly on Decision; the compiler is the sole writer.
-			(
-				handlerDecision as { _compiledFilterWhere?: Node }
-			)._compiledFilterWhere = combined;
-		}
+		};
+		if (strategy !== 'join') prepareFilters(decision, handlerDecision, 0);
 
 		const relationIdentityPath =
 			decision.choice === 'join'
@@ -1351,8 +1362,23 @@ export class PlanCompiler {
 		const parentAlias = parentRelationPath
 			? this.joinAliasMap.get(parentRelationPath)?.alias
 			: undefined;
+		const cteParentPath = getParentRelationPath(decision.relationPath);
+		const cteParent =
+			decision.choice === 'cte'
+				? plan.decisions.find(
+						(candidate) =>
+							candidate.type === 'includeStrategy' &&
+							candidate.choice === 'cte' &&
+							(cteParentPath
+								? candidate.relationPath === cteParentPath
+								: candidate.targetTable === decision.sourceTable),
+					)
+				: undefined;
 		const sourceAlias =
 			parentAlias ??
+			(cteParent
+				? `${cteParent.relationName ?? cteParent.relation}_ref_0`
+				: undefined) ??
 			(decision.sourceTable && decision.sourceTable !== plan.rootTable
 				? (this.findAliasForLegacySourceTable(decision.sourceTable) ??
 					decision.sourceTable)
@@ -1404,6 +1430,12 @@ export class PlanCompiler {
 		} as HandlerCompilerContext;
 
 		const result = handler.compile(handlerDecision, ctx, handlerState);
+		if (decision.choice === 'cte' && decision.targetTable) {
+			this.registerAliasAuthority(
+				queryLocal(`${decision.relationName ?? decision.relation}_ref_0`),
+				queryLocal(decision.targetTable),
+			);
+		}
 
 		// Sync parameters back
 		this.state.paramIndex = handlerState.paramIndex;
@@ -2805,44 +2837,12 @@ export class PlanCompiler {
 			}
 
 			case 'whereAnd':
-				if (decision.conditions) {
-					const andConditions = decision.conditions.map((c) =>
-						this.dispatchWhere(c),
-					);
-					const combined =
-						andConditions.length === 1
-							? andConditions[0]!
-							: andExpr(...andConditions);
-					return currentWhere ? andExpr(currentWhere, combined) : combined;
-				}
-				return currentWhere;
-
 			case 'whereOr':
-				if (decision.conditions) {
-					const orConditions = decision.conditions.map((c) =>
-						this.dispatchWhere(c),
-					);
-					const combined =
-						orConditions.length === 1
-							? orConditions[0]!
-							: orExpr(...orConditions);
-					return currentWhere ? andExpr(currentWhere, combined) : combined;
-				}
-				return currentWhere;
-
-			case 'whereNot':
-				if (decision.conditions) {
-					const notConditions = decision.conditions.map((c) =>
-						this.dispatchWhere(c),
-					);
-					const innerExpr =
-						notConditions.length === 1
-							? notConditions[0]!
-							: andExpr(...notConditions);
-					const negated = notExpr(innerExpr);
-					return currentWhere ? andExpr(currentWhere, negated) : negated;
-				}
-				return currentWhere;
+			case 'whereNot': {
+				if (!decision.conditions) return currentWhere;
+				const combined = this.dispatchWhere(decision);
+				return currentWhere ? andExpr(currentWhere, combined) : combined;
+			}
 
 			default:
 				return currentWhere;
@@ -3221,6 +3221,14 @@ export class PlanCompiler {
 		decision: PlanDecision,
 		decisions: readonly PlanDecision[],
 	): PlanDecision {
+		if (decision.conditions) {
+			return {
+				...decision,
+				conditions: decision.conditions.map((child) =>
+					this.resolveHavingAggregateAlias(child, decisions),
+				),
+			};
+		}
 		if (!decision.column) return decision;
 		const projection = decisions.find(
 			(candidate) =>
@@ -3230,6 +3238,7 @@ export class PlanCompiler {
 		if (!projection?.function || !projection.column) return decision;
 		return {
 			...decision,
+			type: 'having',
 			column: projection.column,
 			function: projection.function,
 			...(projection.distinct !== undefined && {
@@ -3324,7 +3333,12 @@ export class PlanCompiler {
 
 				case 'having':
 					having = this.dispatchWhere(
-						this.resolveHavingAggregateAlias(decision, decisions),
+						this.resolveHavingAggregateAlias(
+							decision.conditions
+								? { type: 'whereAnd', conditions: decision.conditions }
+								: decision,
+							decisions,
+						),
 					);
 					break;
 
