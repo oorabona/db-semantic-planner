@@ -24,7 +24,7 @@ orm.insert('users')
 
 ### Bulk Insert
 
-Pass an array to `.values()` to insert multiple rows in a single statement. Missing enumerable own keys use the column DEFAULT in that row, while explicit `undefined` or `null` uses SQL NULL; heterogeneous inserts always use VALUES.
+Pass an array to `.values()` to insert multiple rows in a single statement. Missing enumerable own keys use the column DEFAULT in that row, while explicit `undefined` or `null` uses SQL NULL; heterogeneous inserts always use VALUES. Heterogeneous inserts are limited to 131,070 cells (rows × union columns, twice the PostgreSQL bind limit); split larger batches by shape.
 
 ```typescript
 orm.insert('users')
@@ -62,7 +62,7 @@ orm.update('users')
   .dump();
 ```
 
-`update()` **requires a `.where()` clause**. Omitting it throws `UnsafeOperationError` — this is a safety guard against accidental full-table updates.
+Ordinary scalar `update()` **requires a `.where()` clause**; `batchSet()` uses its required match keys. Omitting `.where()` from an ordinary update throws `UnsafeOperationError` — this is a safety guard against accidental full-table updates.
 
 ### Batch Update
 
@@ -102,7 +102,7 @@ orm.delete('posts')
   .dump();
 ```
 
-Like `update()`, `delete()` **requires a `.where()` clause**. Use `deleteAll()` when you intend to remove every row:
+Like ordinary scalar `update()`, `delete()` **requires a `.where()` clause**. Use `deleteAll()` when you intend to remove every row:
 
 ```typescript
 orm.deleteAll('users').dump();

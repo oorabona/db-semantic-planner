@@ -94,6 +94,7 @@ import {
 } from './sql-identifier.js';
 
 export const POSTGRESQL_PARAMETER_LIMIT = 65_535;
+export const HETEROGENEOUS_INSERT_CELL_LIMIT = 2 * POSTGRESQL_PARAMETER_LIMIT;
 
 /** Validate nonempty input and the insert/upsert batch-size limit. */
 export function validateMutationRowCount(
@@ -510,7 +511,7 @@ function getColumnTypes(
 			// clear message instead of emitting SQL PostgreSQL rejects at runtime.
 			if (unnestedColumns.has(col) && castTarget.trim().endsWith('[]')) {
 				throw new Error(
-					`Batch mutation of array-typed column '${col}' (${castTarget}) is not supported: unnest flattens multi-dimensional arrays. ${operation === 'update' ? 'Use single-row updates, or scalar set only when every row should receive the same array.' : 'Set batchThreshold to at least the batch size to use VALUES, or use single-row mutations for array columns.'}`,
+					`Batch mutation of array-typed column '${col}' (${castTarget}) is not supported: unnest flattens multi-dimensional arrays. ${operation === 'update' ? 'Use single-row updates, or scalar set for a non-match assignment column only when every row should receive the same array.' : 'Set batchThreshold to at least the batch size to use VALUES, or use single-row mutations for array columns.'}`,
 				);
 			}
 			// Mutation compiler columns are physical identifiers. Keep the cast map
@@ -597,6 +598,14 @@ export function compileInsert(
 			operation: 'insert',
 		});
 	validateMutationRowCount('insert', rows, options);
+	if (
+		heterogeneous &&
+		rows.length > HETEROGENEOUS_INSERT_CELL_LIMIT / columns.length
+	)
+		throw new InvalidOperationError(
+			'insert',
+			`insert: heterogeneous batch has ${rows.length} rows and ${columns.length} columns, exceeding cell limit ${HETEROGENEOUS_INSERT_CELL_LIMIT}; split the rows by shape`,
+		);
 	const values = rows.map((row, index) =>
 		columns.map((col) =>
 			rowKeys[index]?.has(col) ? (row[col] ?? null) : DEFAULT_INSERT_CELL,
@@ -1169,7 +1178,7 @@ export function compileUpsert(
 			actionWhereIntent: resolvedActionWhere,
 			compileActionWhere: (where, paramState) => {
 				// Lower the action in its own parameter namespace, then append it. The
-				// complete VALUES statement is checked once after all parameters exist.
+				// complete upsert statement is checked once after all parameters exist.
 				const actionState = createCompilerState();
 				const actionWhere = compileUpsertActionWhere(
 					where,

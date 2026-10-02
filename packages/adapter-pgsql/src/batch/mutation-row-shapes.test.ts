@@ -312,6 +312,59 @@ describe('mutation enumerable own keys contract', () => {
 			}
 		}
 	});
+	for (const count of [43690, 43691]) {
+		it(`bounds sparse heterogeneous inserts with ${count} rows at both entry points`, () => {
+			const rows = Array.from({ length: count }, (_, i) =>
+				i % 3 === 0 ? { id: null } : i % 3 === 1 ? { a: null } : { b: null },
+			);
+			const direct = () => insert(rows);
+			const built = () => orm.insert('t').values(rows).dump();
+			if (count === 43691) {
+				const message =
+					'Invalid insert: insert: heterogeneous batch has 43691 rows and 3 columns, exceeding cell limit 131070; split the rows by shape';
+				exactRefusal(direct, message);
+				exactRefusal(built, message);
+			} else {
+				const expected = `INSERT INTO t (id, a, b) VALUES ${rows
+					.map((_, i) =>
+						i % 3 === 0
+							? '(NULL, DEFAULT, DEFAULT)'
+							: i % 3 === 1
+								? '(DEFAULT, NULL, DEFAULT)'
+								: '(DEFAULT, DEFAULT, NULL)',
+					)
+					.join(', ')}`;
+				for (const run of [direct, built]) {
+					const result = run();
+					expect(result.sql).toBe(expected);
+					expect(result.parameters).toEqual([]);
+				}
+			}
+		});
+	}
+	it('qualifies scalar array advice for an array match key at both entry points', () => {
+		const rows = [{ tags: ['x'], a: 1 }];
+		const message =
+			"Batch mutation of array-typed column 'tags' (text[]) is not supported: unnest flattens multi-dimensional arrays. Use single-row updates, or scalar set for a non-match assignment column only when every row should receive the same array.";
+		exactRefusal(
+			() =>
+				adapter.compileBatchUpdate({
+					type: 'batchUpdate',
+					table: 't',
+					updates: rows,
+					matchColumns: ['tags'],
+				}),
+			message,
+		);
+		exactRefusal(
+			() =>
+				createOrm({ model: db.model, adapter })
+					.update('t')
+					.batchSet('tags', rows)
+					.dump(),
+			message,
+		);
+	});
 	it('counts DEFAULT cells as zero binds at the exact boundary', () => {
 		const rows = Array.from({ length: 32768 }, (_, i) =>
 			i === 0 ? { a: 1 } : { a: 1, b: 2 },
@@ -446,6 +499,7 @@ describe('mutation enumerable own keys contract', () => {
 				operation === 'insert'
 					? orm.insert('t').values([row])
 					: orm.upsert('t').values([row]).onConflict(['id']).doNothing();
+			expect(scans).toBe(1);
 			const expected = `INSERT INTO t (id, a) VALUES ($1, $2)${operation === 'upsert' ? ' ON CONFLICT (id) DO NOTHING' : ''}`;
 			for (const run of [
 				() => (operation === 'insert' ? insert([row]) : upsert([row])),
@@ -590,7 +644,7 @@ describe('mutation enumerable own keys contract', () => {
 			const arrayOrm = createOrm({ model: db.model, adapter });
 			const advice =
 				operation === 'update'
-					? 'Use single-row updates, or scalar set only when every row should receive the same array.'
+					? 'Use single-row updates, or scalar set for a non-match assignment column only when every row should receive the same array.'
 					: 'Set batchThreshold to at least the batch size to use VALUES, or use single-row mutations for array columns.';
 			const message = `Batch mutation of array-typed column 'tags' (text[]) is not supported: unnest flattens multi-dimensional arrays. ${advice}`;
 			exactRefusal(

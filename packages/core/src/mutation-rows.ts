@@ -19,7 +19,7 @@ export function inspectMutationRows(
 	const seen = new Set(columns);
 	let heterogeneous = false;
 	for (const [index, keys] of rowKeys.entries()) {
-		for (const key of firstKeys) {
+		for (const key of heterogeneous ? [] : firstKeys) {
 			if (!keys.has(key)) {
 				heterogeneous = true;
 				if (options.homogeneous)
@@ -30,7 +30,7 @@ export function inspectMutationRows(
 			}
 		}
 		for (const key of keys) {
-			if (!rowKeys[0]?.has(key)) {
+			if (!heterogeneous && !rowKeys[0]?.has(key)) {
 				heterogeneous = true;
 				if (options.homogeneous)
 					throw new InvalidOperationError(

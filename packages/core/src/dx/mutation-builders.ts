@@ -121,7 +121,7 @@ function toWhereIntent(condition: MutationWhereCondition): WhereIntent {
 function assertNonEmptyMutationRows(
 	operation: 'insert' | 'upsert',
 	values: readonly unknown[],
-): asserts values is readonly Record<string, unknown>[] {
+): ReturnType<typeof inspectMutationRows> {
 	for (const value of values) {
 		if (value === null || typeof value !== 'object' || Array.isArray(value)) {
 			throw new InvalidOperationError(
@@ -129,13 +129,21 @@ function assertNonEmptyMutationRows(
 				`${operation} values() requires every row to be a non-null, non-array object`,
 			);
 		}
-		if (Object.keys(value).length === 0) {
-			throw new InvalidOperationError(
-				operation,
-				`${operation} values() requires every row to contain at least one column`,
-			);
-		}
 	}
+	const shape = inspectMutationRows(
+		values as readonly Record<string, unknown>[],
+		{
+			operation,
+			homogeneous: operation === 'upsert',
+		},
+	);
+	if (shape.rowKeys.some((keys) => keys.size === 0)) {
+		throw new InvalidOperationError(
+			operation,
+			`${operation} values() requires every row to contain at least one column`,
+		);
+	}
+	return shape;
 }
 
 function assertMutationPayloadColumns(
@@ -710,11 +718,7 @@ export class InsertBuilder<
 		data: Insertable<TRow> | readonly Insertable<TRow>[],
 	): InsertBuilder<TRow, TResult> {
 		const valueArray = Array.isArray(data) ? data : [data];
-		assertNonEmptyMutationRows('insert', valueArray);
-		const { columns } = inspectMutationRows(valueArray, {
-			operation: 'insert',
-			homogeneous: false,
-		});
+		const { columns } = assertNonEmptyMutationRows('insert', valueArray);
 		assertMutationPayloadColumns('insert', this.model, this.table, columns);
 		return new InsertBuilder<TRow, TResult>({
 			...this.baseOpts,
@@ -1199,11 +1203,7 @@ export class UpsertBuilder<
 		data: Insertable<TRow> | readonly Insertable<TRow>[],
 	): UpsertBuilder<TRow, TResult> {
 		const valueArray = Array.isArray(data) ? data : [data];
-		assertNonEmptyMutationRows('upsert', valueArray);
-		const { columns } = inspectMutationRows(valueArray, {
-			operation: 'upsert',
-			homogeneous: true,
-		});
+		const { columns } = assertNonEmptyMutationRows('upsert', valueArray);
 		assertMutationPayloadColumns('upsert', this.model, this.table, columns);
 		return new UpsertBuilder<TRow, TResult>({
 			...this.baseOpts,
