@@ -53,14 +53,14 @@ describe('#888 empty logical groups with rows', () => {
 			.execute();
 		expect(rows.map((row) => row.id)).toEqual([1, 2]);
 	});
-	it('include where returns only published posts per user and empty OR returns empty arrays', async () => {
+	it('join include where keeps roots with published posts and empty OR removes roots', async () => {
 		const orm = createOrm({
 			schema: testSchema,
 			adapter: await getTestAdapter(),
 		}).withSchema(SCHEMA);
 		const published = (await orm
 			.select('users')
-			.include('posts', { where: eq('published', true) })
+			.include('posts', { join: 'inner', where: eq('published', true) })
 			.orderBy('id')
 			.execute()) as unknown as Array<{
 			id: number;
@@ -74,20 +74,18 @@ describe('#888 empty logical groups with rows', () => {
 		).toEqual([
 			{ id: 1, posts: [11] },
 			{ id: 2, posts: [22] },
-			{ id: 3, posts: [] },
 		]);
 		const empty = (await orm
 			.select('users')
-			.include('posts', { where: or() })
+			.include('posts', { join: 'inner', where: or() })
 			.orderBy('id')
 			.execute()) as unknown as Array<{
 			id: number;
 			posts: Array<{ id: number }>;
 		}>;
-		expect(empty.map((user) => ({ id: user.id, posts: user.posts }))).toEqual([
-			{ id: 1, posts: [] },
-			{ id: 2, posts: [] },
-			{ id: 3, posts: [] },
-		]);
+		expect(empty).toEqual([]);
+		await expect(
+			orm.select('users').include('posts', { where: or() }).all(),
+		).rejects.toThrow(/strategy json_agg.*include\[0\]\(posts\).*#892/);
 	});
 });

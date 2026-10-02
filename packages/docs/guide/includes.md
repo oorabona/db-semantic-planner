@@ -52,14 +52,14 @@ Each call is independent. Nested paths (like `posts.comments`) automatically tri
 
 ## Include with Options
 
-Relation predicates (`exists`, `some`, `every`, `none`) inside an include `where` are refused for now (oorabona/db-semantic-planner#892).
+An include `where` is supported on join includes and becomes a root `WHERE` predicate. An inner join keeps only roots with a matching related row; a left join with a `where` behaves like an inner join. Other strategies refuse include `where`. Relation predicates (`exists`, `notExists`, `some`, `every`, `none`) anywhere inside it, including nested query bodies, are also refused. See oorabona/db-semantic-planner#892.
 
 Pass an options object as the second argument to filter, project, or disambiguate the include:
 
 ```typescript
-// Filter related records
+// Keep users with a published post
 const usersFiltered = await orm.select('users')
-  .include('posts', { where: eq('published', true) })
+  .include('posts', { join: 'inner', where: eq('published', true) })
   .dump();
 
 // Select specific columns on the relation
@@ -79,7 +79,7 @@ const posts = await orm.select('posts')
 
 | Option | Type | Description |
 |--------|------|-------------|
-| `where` | `WhereIntent` | Filter conditions applied to related records |
+| `where` | `WhereIntent` | Root WHERE predicate; join includes only |
 | `select` | `SelectSpec` | Columns to select on the related table |
 | `via` | `string` | Relation name hint when multiple FKs point to the same table |
 | `recursive` | `boolean` | Enable recursive CTE traversal (trees/hierarchies) |

@@ -18,7 +18,6 @@ import type {
 	OutputValueShape,
 	PlanReport,
 	SubqueryIncludeInfo,
-	WhereIntent,
 } from '@dbsp/types';
 import { resolveOutputReadHandling, toColumnList } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
@@ -57,7 +56,6 @@ import {
 	deriveForeignKey,
 	enrichExistsDecisionsInPlace,
 	extractAllIncludeDecisions,
-	resolveIncludeByPath,
 	synthesizeMissingJoinDecisions,
 } from './plan-decision-extractor.js';
 import {
@@ -1219,31 +1217,67 @@ function buildSimplifiedPlanReport(
 // compile (SELECT)
 // ============================================================================
 
-/** Refuse relation filters before enrichment can promote include-local decisions. */
+/** Validate include predicates before lowering or allocating bindings. */
 function assertSupportedIncludeWhere(
 	includes: readonly IncludeIntent[] | undefined,
+	plan: PlanReport,
 	parent = '',
+	intentParent = '',
 ): void {
 	for (const [index, include] of (includes ?? []).entries()) {
 		const path = `${parent}include[${index}](${include.relation})`;
-		const visit = (where: WhereIntent): void => {
-			switch (where.kind) {
-				case 'exists':
-				case 'notExists':
-				case 'relationFilter':
+		const intentPath = `${intentParent}include[${index}]`;
+		if (include.where) {
+			const decision = plan.decisions.find(
+				(d) =>
+					d.type === 'include-strategy' &&
+					(d.context.intentPath === intentPath ||
+						(!d.context.intentPath &&
+							(d.context.relation === include.relation ||
+								d.context.includeAlias === include.relation))),
+			);
+			const strategy = decision?.choice ?? (include.join ? 'join' : 'json_agg');
+			// Walk the complete predicate intent, including query and expression bodies.
+			const visit = (node: unknown): void => {
+				if (!node || typeof node !== 'object') return;
+				if (Array.isArray(node)) {
+					for (const child of node) visit(child);
+					return;
+				}
+				const record = node as Record<string, unknown>;
+				if (
+					record.kind === 'exists' ||
+					record.kind === 'notExists' ||
+					record.kind === 'relationFilter'
+				) {
 					throw new Error(
-						`Relation predicates inside an include where are not supported yet at ${path}.where (oorabona/db-semantic-planner#892).`,
+						`Relation predicates inside an include where are not supported yet at ${path}.where for strategy ${strategy} (oorabona/db-semantic-planner#892).`,
 					);
-				case 'and':
-				case 'or':
-					for (const condition of where.conditions) visit(condition);
-					break;
-				case 'not':
-					visit(where.condition);
+				}
+				for (const [key, child] of Object.entries(record)) {
+					// Literal payloads are data, rather than query/expression intent.
+					if (
+						key === 'values' ||
+						(key === 'value' && record.kind !== 'namedArg')
+					)
+						continue;
+					visit(child);
+				}
+			};
+			visit(include.where);
+
+			if (strategy !== 'join') {
+				throw new Error(
+					`Include where is not supported for strategy ${strategy} at ${path}.where (oorabona/db-semantic-planner#892).`,
+				);
 			}
-		};
-		if (include.where) visit(include.where);
-		assertSupportedIncludeWhere(include.include, `${path}.`);
+		}
+		assertSupportedIncludeWhere(
+			include.include,
+			plan,
+			`${path}.`,
+			`${intentPath}.`,
+		);
 	}
 }
 
@@ -1317,7 +1351,7 @@ export function compileSelectEnvelope<T = unknown>(
 	let simplifiedPlan: SimplifiedPlanReport;
 
 	if (execIntent) {
-		assertSupportedIncludeWhere(execIntent.include);
+		assertSupportedIncludeWhere(execIntent.include, planForCompilation);
 		// Real usage: convert intent to decisions
 		let decisions = intentToDecisions(execIntent, plan.rootTable);
 		const resolvedModel = options?.model ?? deps.model;
@@ -1550,7 +1584,6 @@ export function compileWithIncludes<T = unknown>(
 	// 'subquery', planner decisions carry choice === 'subquery', so hydration
 	// must happen via the subquery path (separate query + hydrateIncludes).
 	const subqueryIncludes: SubqueryIncludeInfo[] = [];
-	const entriesByPath = new Map<string, Mutable<SubqueryIncludeInfo>>();
 
 	for (const d of plan.decisions) {
 		if (d.type !== 'include-strategy' || d.choice !== 'subquery') continue;
@@ -1591,17 +1624,10 @@ export function compileWithIncludes<T = unknown>(
 			: fk;
 
 		// Find matching include intent for select/where passthrough
-		const includeIntent = resolveIncludeByPath(
-			plan.intent?.include as
-				| Array<{
-						relation: string;
-						where?: unknown;
-						select?: unknown;
-						include?: unknown[];
-				  }>
-				| undefined,
-			ctx.intentPath,
-			relationName,
+		const includeIntent = (
+			plan.intent?.include as Array<Record<string, unknown>> | undefined
+		)?.find(
+			(i) => i.relation === relationName || i.relation === ctx.includeAlias,
 		);
 
 		const entry: Mutable<SubqueryIncludeInfo> = {
@@ -1625,25 +1651,7 @@ export function compileWithIncludes<T = unknown>(
 			>;
 		}
 		subqueryIncludes.push(entry);
-		if (ctx.intentPath) entriesByPath.set(ctx.intentPath, entry);
 	}
 
-	// Nested subquery filters must run against the fetched parent include rows,
-	// rather than against root IDs. The hydrator already consumes this tree.
-	const nestedEntries = new Set<SubqueryIncludeInfo>();
-	for (const [path, entry] of entriesByPath) {
-		const separator = path.lastIndexOf('.include[');
-		if (separator < 0) continue;
-		const parentPath = path.slice(0, separator);
-		const parent = entriesByPath.get(parentPath);
-		if (!parent || parent === entry) continue;
-		parent.nestedIncludes = [...(parent.nestedIncludes ?? []), entry];
-		nestedEntries.add(entry);
-	}
-	return {
-		main,
-		subqueryIncludes: subqueryIncludes.filter(
-			(entry) => !nestedEntries.has(entry),
-		),
-	};
+	return { main, subqueryIncludes };
 }

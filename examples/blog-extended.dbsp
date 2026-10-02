@@ -56,7 +56,7 @@ posts | where featured = true and viewCount > 1500
 # 3.5 Nested Includes (NQL v2.1 simplified)
 # =============================================================================
 # Note: Filtered includes (where on relations) not yet supported in NQL v2.1
-# Use ORM API for: include('posts', { where: { published: true } })
+# Use ORM API for: include('posts', { join: 'inner', where: eq('published', true) })
 authors | where active = true | select *, posts.*
 
 # =============================================================================

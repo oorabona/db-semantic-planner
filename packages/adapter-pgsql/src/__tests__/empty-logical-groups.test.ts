@@ -92,9 +92,6 @@ for (const [name, helper] of [
 add('include join', () =>
 	orm.select('users').include('posts', { join: 'inner', where: or() }).dump(),
 );
-add('include non join', () =>
-	orm.select('users').include('posts', { where: or() }).dump(),
-);
 add('IN inner where', () =>
 	orm
 		.select('users')
@@ -268,10 +265,6 @@ const expected: Record<string, { sql: string; params: readonly unknown[] }> = {
 	},
 	'include join': {
 		sql: 'SELECT users.*, posts.id AS "posts.id" FROM users JOIN posts AS posts ON users.id = posts."authorId" WHERE false',
-		params: [],
-	},
-	'include non join': {
-		sql: 'SELECT users.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM posts AS __t__ WHERE __t__."authorId" = users.id AND false), \'[]\'::json) AS posts_json FROM users',
 		params: [],
 	},
 	'IN inner where': {

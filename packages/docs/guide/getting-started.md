@@ -201,6 +201,7 @@ const usersWithComments = await orm.select('users')
 // Filter and select within an include
 const usersFiltered = await orm.select('users')
   .include('posts', {
+    join: 'inner',
     where: eq('published', true),
     select: { type: 'fields', fields: ['id', 'title'] },
   })

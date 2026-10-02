@@ -2667,7 +2667,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			});
 		});
 
-		it('subqueryIncludes passes through includeIntent.where', () => {
+		it('subqueryIncludes refuses includeIntent.where', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			const whereClause = {
 				kind: 'comparison',
@@ -2702,10 +2702,9 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				},
 			} as any;
 
-			const result = adapter.compileWithIncludes(plan);
-			expect(result.subqueryIncludes).toHaveLength(1);
-			// where is passed through from the include intent
-			expect(result.subqueryIncludes[0]?.where).toEqual(whereClause);
+			expect(() => adapter.compileWithIncludes(plan)).toThrow(
+				/strategy subquery.*include\[0\]\(posts\).*#892/,
+			);
 		});
 
 		it('subqueryIncludes populated for belongsTo relationType', () => {

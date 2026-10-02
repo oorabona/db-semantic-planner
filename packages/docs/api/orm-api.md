@@ -923,7 +923,8 @@ orm.select('users')
 
 ```typescript
 orm.select('users').include('posts', {
-  where: eq('published', true),                          // filter related records
+  join: 'inner',
+  where: eq('published', true),                          // root WHERE predicate on a join include
   select: { type: 'fields', fields: ['title', 'slug'] }, // select specific columns
   via: 'authoredPosts',                                  // disambiguate relation
 })

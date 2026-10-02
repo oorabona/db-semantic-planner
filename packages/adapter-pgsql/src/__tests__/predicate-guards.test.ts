@@ -3,17 +3,14 @@ import {
 	createOrm,
 	eq,
 	exists,
-	inSubquery,
 	like,
 	not,
 	notExists,
 	or,
 	planRecursive,
-	rawExists,
 	ref,
 	schema,
 	some,
-	subquery,
 } from '@dbsp/core';
 import type { WhereIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
@@ -89,21 +86,6 @@ describe('#888 include preflight', () => {
 				})
 				.dump(),
 		).toThrow(/include\[0\]\(posts\).*include\[0\]\(comments\).*#892/);
-	});
-	it('keeps include IN subqueries', () => {
-		const result = orm
-			.select('users')
-			.include('posts', {
-				where: inSubquery(
-					'id',
-					subquery('comments').select('postId').where(eq('published', true)),
-				),
-			})
-			.dump();
-		expect(result.params).toEqual([true]);
-		expect(result.sql).toBe(
-			'SELECT users.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM posts AS __t__ WHERE __t__."authorId" = users.id AND __t__.id = ANY (SELECT comments_subq_0."postId" FROM comments AS comments_subq_0 WHERE comments_subq_0.published = $1)), \'[]\'::json) AS posts_json FROM users',
-		);
 	});
 });
 function recursive(where: WhereIntent) {
@@ -196,36 +178,6 @@ for (const kind of [
 	});
 }
 
-for (const [name, where] of [
-	[
-		'scalar',
-		{
-			kind: 'subquery',
-			field: 'id',
-			operator: 'eq',
-			subquery: {
-				type: 'select',
-				from: 'comments',
-				select: { type: 'fields', fields: ['postId'] },
-				where: eq('published', true),
-			},
-		} as WhereIntent,
-	],
-	[
-		'raw exists',
-		rawExists(subquery('comments').select('id').where(eq('published', true))),
-	],
-] as const) {
-	it(`keeps include ${name} subqueries`, () => {
-		const result = orm.select('users').include('posts', { where }).dump();
-		expect(result.sql).toBe(
-			name === 'scalar'
-				? 'SELECT users.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM posts AS __t__ WHERE __t__."authorId" = users.id AND __t__.id = (SELECT comments_subq_0."postId" FROM comments AS comments_subq_0 WHERE comments_subq_0.published = $1)), \'[]\'::json) AS posts_json FROM users'
-				: 'SELECT users.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM posts AS __t__ WHERE __t__."authorId" = users.id AND EXISTS (SELECT comments_sq.id FROM comments AS comments_sq WHERE comments_sq.published = $1)), \'[]\'::json) AS posts_json FROM users',
-		);
-		expect(result.params).toEqual([true]);
-	});
-}
 for (const join of ['inner', 'left'] as const) {
 	it(`keeps ordinary ${join} include conditions in root WHERE`, () => {
 		const result = orm
@@ -240,3 +192,81 @@ for (const join of ['inner', 'left'] as const) {
 		expect(result.params).toEqual([7]);
 	});
 }
+
+for (const predicate of [
+	exists('post'),
+	notExists('post'),
+	some(orm.tables.comments.post, () => eq('id', 1)),
+]) {
+	const body = {
+		type: 'select',
+		from: 'comments',
+		select: { type: 'fields', fields: ['id'] },
+		where: and(eq('id', 7), not(or(predicate))),
+	} as const;
+	for (const [name, where] of [
+		[
+			'scalar',
+			{ kind: 'subquery', field: 'id', operator: 'eq', subquery: body },
+		],
+		['IN', { kind: 'in', field: 'id', subquery: body }],
+		['rawExists', { kind: 'rawExists', subquery: body }],
+		['rawNotExists', { kind: 'rawNotExists', subquery: body }],
+		[
+			'expression',
+			{
+				kind: 'expression',
+				expr: { kind: 'subquery', query: body },
+				operator: 'eq',
+				value: 1,
+			},
+		],
+		[
+			'named argument expression',
+			{
+				kind: 'expression',
+				expr: {
+					kind: 'function',
+					name: 'custom',
+					args: [
+						{
+							kind: 'namedArg',
+							name: 'input',
+							value: { kind: 'subquery', query: body },
+						},
+					],
+				},
+				operator: 'eq',
+				value: 1,
+			},
+		],
+		[
+			'deep query',
+			{
+				kind: 'rawExists',
+				subquery: { ...body, where: { kind: 'rawNotExists', subquery: body } },
+			},
+		],
+	] as const) {
+		it(`refuses ${predicate.kind} inside join include ${name} query body`, () => {
+			expect(() =>
+				orm
+					.select('users')
+					.include('posts', { join: 'inner', where: where as WhereIntent })
+					.dump(),
+			).toThrow(refusal);
+		});
+	}
+}
+
+it('treats parameter payloads as opaque in join include where', () => {
+	const value = { kind: 'exists', relation: 'comments' };
+	const result = orm
+		.select('users')
+		.include('posts', { join: 'inner', where: eq('id', value) })
+		.dump();
+	expect(result.sql).toBe(
+		'SELECT users.*, posts.id AS "posts.id" FROM users JOIN posts AS posts ON users.id = posts."authorId" WHERE posts.id = $1',
+	);
+	expect(result.params).toEqual([value]);
+});

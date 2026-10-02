@@ -15,24 +15,15 @@ import { toColumnList } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import {
-	andExpr,
 	innerJoin,
 	sqlColumnRef,
 	sqlColumnRefStar,
 	sqlRangeVar,
 } from './ast-helpers.js';
-import {
-	buildSubqueryFromIntent,
-	compileWhereIntent,
-} from './compile-where.js';
 import { quoteIdent } from './ddl/phases/utils.js';
 import { deparseQuoted } from './deparse.js';
 import { createCompilerState } from './handlers/index.js';
 import { finalizeEnvelope, fromAstProjection } from './projection-envelope.js';
-import {
-	bindAliasAuthority,
-	resolveRelationTarget,
-} from './relation-target-projection.js';
 import {
 	identifierText,
 	queryLocal,
@@ -60,48 +51,6 @@ function compileIncludeSelectEnvelope(
 	);
 }
 
-function includeFilter(
-	info: SubqueryIncludeInfo,
-	state: ReturnType<typeof createCompilerState>,
-	deps: AdapterCompilerDeps,
-	alias = info.targetTable,
-): Node | undefined {
-	if (!info.where) return undefined;
-	return compileWhereIntent(info.where, {
-		rootTable: info.targetTable,
-		currentAlias: alias,
-		aliasColumnAuthorities: bindAliasAuthority(
-			undefined,
-			queryLocal(alias),
-			resolveRelationTarget(queryLocal(info.targetTable), deps),
-		),
-		aliases: new Map(),
-		paramState: state,
-		...(deps.model && { model: deps.model }),
-		...(deps.declaredNames && { declaredNames: deps.declaredNames }),
-		...(deps.schemaName !== undefined && { schemaName: deps.schemaName }),
-		...(deps.scope && { scope: deps.scope }),
-		...(deps.relationTargetProjections && {
-			relationTargetProjections: deps.relationTargetProjections,
-		}),
-		...(deps.dialectCapabilities && {
-			dialectCapabilities: deps.dialectCapabilities,
-		}),
-		dbCasing: deps.dbCasing ?? 'preserve',
-		compileSubquery: (intent, offset) =>
-			buildSubqueryFromIntent(
-				intent,
-				offset,
-				deps.declaredNames,
-				deps.schemaName,
-				'rawExists',
-				deps.scope,
-				deps.dialectCapabilities,
-				deps.dbCasing,
-			),
-	});
-}
-
 // ============================================================================
 // compileSubqueryInclude
 // ============================================================================
@@ -117,6 +66,11 @@ export function compileSubqueryInclude(
 	_options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
+	if (info.where) {
+		throw new Error(
+			`Include where is not supported for strategy subquery at include(${info.relationName}).where (oorabona/db-semantic-planner#892).`,
+		);
+	}
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const schemaName = deps.schemaName;
 	const state = createCompilerState();
@@ -266,9 +220,6 @@ export function compileSubqueryInclude(
 				: { BoolExpr: { boolop: 'OR_EXPR', args: conditions as Node[] } };
 	}
 
-	const filter = includeFilter(info, state, deps);
-	if (filter) whereClause = andExpr(whereClause, filter);
-
 	// Build SELECT statement
 	const selectAst: Node = {
 		SelectStmt: {
@@ -390,8 +341,6 @@ function compileSubqueryIncludeManyToMany(
 	const joinNode = innerJoin(targetRangeVar, junctionRangeVar, joinQuals);
 	const fromClause = [joinNode];
 
-	const filter = includeFilter(info, state, deps, targetAlias);
-
 	// Build SELECT t.*
 	const targetList = [
 		{
@@ -409,7 +358,7 @@ function compileSubqueryIncludeManyToMany(
 		SelectStmt: {
 			targetList,
 			fromClause,
-			whereClause: filter ? andExpr(whereClause, filter) : whereClause,
+			whereClause,
 		},
 	};
 

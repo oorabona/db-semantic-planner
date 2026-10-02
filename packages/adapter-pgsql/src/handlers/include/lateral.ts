@@ -14,7 +14,6 @@ import { type ColumnListInput, toColumnList } from '@dbsp/types';
 import type { JoinExpr, Node, SelectStmt } from '@pgsql/types';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
 import {
-	andExpr,
 	sqlColumnRefStar,
 	sqlRangeAlias,
 	sqlRangeVar,
@@ -73,7 +72,6 @@ function buildLateralSubquery(
 	columns: readonly string[] | undefined,
 	limit: number | undefined,
 	ctx: CompilerContext,
-	filter: Node | undefined,
 ): Node {
 	// Build the correlation condition
 	// LATERAL can reference outer columns directly
@@ -104,7 +102,7 @@ function buildLateralSubquery(
 				ctx.schema === undefined ? undefined : queryLocal(ctx.schema),
 			),
 		],
-		whereClause: filter ? andExpr(whereClause, filter) : whereClause,
+		whereClause,
 		...(limit !== undefined && {
 			limitCount: { A_Const: { ival: { ival: limit } } },
 		}),
@@ -226,7 +224,6 @@ function compileLateralCascade(
 		columns,
 		limit,
 		scopedCtx,
-		decision._compiledFilterWhere,
 	);
 
 	// Build the JOIN LATERAL
