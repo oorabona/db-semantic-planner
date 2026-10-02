@@ -44,7 +44,7 @@ import { createWhereDispatcher } from './handlers/index.js';
 // in compileExpressionIntent can compile their WHEN conditions. This module is the
 // natural bridge: it imports both custom.ts and handlers/index.ts.
 // Called once at module-load time (safe: no circular calls, just stores the factory ref).
-registerWhereDispatcherFactory(createWhereDispatcher);
+registerWhereDispatcherFactory(() => createWhereDispatcher(compileWhereIntent));
 
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from './assert-field.js';
 import { buildCustomFnFilter } from './custom-fn-filter.js';
@@ -103,14 +103,15 @@ import type {
 	ConditionCompilerCtx,
 	WhereCompilerCtx,
 } from './condition-context.js';
-import { registerSubqueryConditionCompiler } from './condition-subquery.js';
+import { createSubqueryBuilder } from './condition-subquery.js';
 
 export type {
 	ConditionCompilerCtx,
 	ConditionPosition,
 	WhereCompilerCtx,
 } from './condition-context.js';
-export { buildSubqueryFromIntent } from './condition-subquery.js';
+export const buildSubqueryFromIntent =
+	createSubqueryBuilder(compileWhereIntent);
 
 // ============================================================================
 // Private: bridge WhereCompilerCtx → CompilerContext
@@ -739,7 +740,7 @@ function compileConditionWithLegacyContext(
 	intent: WhereIntent,
 	ctx: WhereCompilerCtx,
 ): Node {
-	const dispatcher = createWhereDispatcher();
+	const dispatcher = createWhereDispatcher(compileWhereIntent);
 	const handlerCtx = toHandlerContext(ctx);
 
 	if (intent.kind === 'range') {
@@ -821,4 +822,3 @@ export function compileWhereIntent(
 		position: 'where',
 	});
 }
-registerSubqueryConditionCompiler(compileWhereIntent);

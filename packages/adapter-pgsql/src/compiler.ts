@@ -7,9 +7,6 @@
  * that builds PostgreSQL AST nodes and deparses them to SQL.
  */
 
-// Preserve direct-subquery compiler registration formerly reached through the
-// raw-EXISTS handler's cyclic import of compile-where.ts.
-import './condition-compiler.js';
 import { InvalidOperationError } from '@dbsp/core';
 import {
 	type DialectCapabilities,
@@ -60,6 +57,7 @@ import {
 	relationBinding,
 	relationBindingFor,
 } from './binding-registry.js';
+import { compileWhereIntent } from './condition-compiler.js';
 import { deparseQuoted } from './deparse.js';
 import { assertDialectCapability } from './dialect-capabilities.js';
 import { resolveCaseValue as resolveCaseValueShared } from './handlers/expression/case-value.js';
@@ -92,7 +90,7 @@ import {
 // Register createWhereDispatcher with compileExpressionIntent so CASE expressions
 // can compile their WHEN conditions. compiler.ts is the bridge: it imports both
 // compileExpressionIntent (from custom.ts) and createWhereDispatcher (from handlers/index.ts).
-registerWhereDispatcherFactory(createWhereDispatcher);
+registerWhereDispatcherFactory(() => createWhereDispatcher(compileWhereIntent));
 
 import type { DeclaredNameResolver } from './declared-name-resolver.js';
 import type {
@@ -759,7 +757,7 @@ export class PlanCompiler {
 		decision: PlanDecision,
 		ctxOverrides?: Partial<HandlerCompilerContext>,
 	): Node {
-		const dispatcher = createWhereDispatcher();
+		const dispatcher = createWhereDispatcher(compileWhereIntent);
 
 		// Decision-level guard for already-lowered predicate-subquery decisions
 		// (operator already 'inSubquery'/'notInSubquery'/'scalarSubquery'/...).
@@ -2072,7 +2070,7 @@ export class PlanCompiler {
 			throw new Error('NQL CASE expression requires at least one WHEN clause');
 		}
 
-		const dispatcher = createWhereDispatcher();
+		const dispatcher = createWhereDispatcher(compileWhereIntent);
 		const args: Node[] = whenClauses.map((branch) => {
 			const condition = (branch as { condition?: unknown }).condition;
 			const result = (branch as { result?: unknown }).result;
@@ -2175,7 +2173,7 @@ export class PlanCompiler {
 				// Compile FILTER (WHERE ...) clause if present
 				const filterNode = compileFilterCondition(
 					decision.filterCondition,
-					createWhereDispatcher(),
+					createWhereDispatcher(compileWhereIntent),
 					ctx,
 					state,
 				);

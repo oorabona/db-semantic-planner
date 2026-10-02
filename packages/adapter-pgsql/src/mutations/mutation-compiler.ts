@@ -38,6 +38,7 @@ import {
 	transposeToColumnArrays,
 	validateBatchCardinality,
 } from '../compiler-utils.js';
+import { compileWhereIntent } from '../condition-compiler.js';
 import { createWhereDispatcher } from '../handlers/index.js';
 import type {
 	CompilerContext,
@@ -472,7 +473,7 @@ export function compileUpdate(
 	// Build WHERE clause if present
 	let whereClause: Node | undefined;
 	if (config.where && config.where.length > 0) {
-		const dispatch = createWhereDispatcher();
+		const dispatch = createWhereDispatcher(compileWhereIntent);
 		const subCtx = { ...ctx, currentAlias: tableAlias };
 
 		if (config.where.length === 1) {
@@ -671,7 +672,7 @@ export function compileDelete(
 	// Build WHERE clause if present
 	let whereClause: Node | undefined;
 	if (config.where && config.where.length > 0) {
-		const dispatch = createWhereDispatcher();
+		const dispatch = createWhereDispatcher(compileWhereIntent);
 		const subCtx = { ...ctx, currentAlias: tableAlias };
 
 		if (config.where.length === 1) {
@@ -752,7 +753,7 @@ export function compileInsertFrom(
 	// Build WHERE clause for source query if present
 	let whereClause: Node | undefined;
 	if (config.where && config.where.length > 0) {
-		const dispatch = createWhereDispatcher();
+		const dispatch = createWhereDispatcher(compileWhereIntent);
 		const subCtx = { ...ctx, currentAlias: sourceAlias };
 
 		if (config.where.length === 1) {
@@ -864,7 +865,7 @@ export function compileUpsertFrom(
 	// Build WHERE clause for source query if present
 	let whereClause: Node | undefined;
 	if (config.where && config.where.length > 0) {
-		const dispatch = createWhereDispatcher();
+		const dispatch = createWhereDispatcher(compileWhereIntent);
 		const subCtx = { ...ctx, currentAlias: sourceAlias };
 
 		if (config.where.length === 1) {

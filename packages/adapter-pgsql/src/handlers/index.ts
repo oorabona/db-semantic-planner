@@ -7,6 +7,7 @@
 
 import type { ColumnListInput } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
+import type { SubqueryConditionCompiler } from '../condition-subquery.js';
 import { assertNoUnsupportedSubqueryModifiers } from '../intent-to-decisions.js';
 import { escapeDiagnosticText } from '../validate.js';
 import { allExpressionHandlers } from './expression/index.js';
@@ -24,6 +25,11 @@ import type {
 import { INCLUDE_STRATEGIES, isSelectWithFields } from './types.js';
 import { allWhereHandlers } from './where/index.js';
 import { resolveWhereOperator } from './where/operator-resolver.js';
+import {
+	rawExistsHandler as builtinRawExistsHandler,
+	createDispatcherConditionCompiler,
+	createRawExistsHandler,
+} from './where/raw-exists.js';
 
 // Re-export types
 export * from './types.js';
@@ -650,7 +656,15 @@ function normalizeToDecision(input: Decision, ctx?: CompilerContext): Decision {
 /**
  * Create a WHERE dispatcher that looks up handlers from the registry.
  */
-export function createWhereDispatcher(): WhereDispatcher {
+export function createWhereDispatcher(
+	compiler?: SubqueryConditionCompiler,
+): WhereDispatcher {
+	const rawExistsHandler = createRawExistsHandler(
+		compiler ??
+			((intent, ctx) =>
+				createDispatcherConditionCompiler(dispatch)(intent, ctx)),
+	);
+
 	const dispatch: WhereDispatcher = (
 		decision: Decision,
 		ctx: CompilerContext,
@@ -664,7 +678,11 @@ export function createWhereDispatcher(): WhereDispatcher {
 			OPERATOR_ALIASES,
 			whereHandlers,
 		);
-		const handler = getWhereHandler(operator);
+		const registeredHandler = getWhereHandler(operator);
+		const handler =
+			registeredHandler === builtinRawExistsHandler
+				? rawExistsHandler
+				: registeredHandler;
 		// Pass normalized decision with resolved operator so handler's switch matches
 		const resolved =
 			operator !== rawOperator ? { ...normalized, operator } : normalized;
