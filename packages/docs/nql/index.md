@@ -358,7 +358,7 @@ WHERE employees.name LIKE $1
 
 ### IN (Value List)
 
-Check membership against a list of values. Each value becomes a separate parameter.
+Check membership against a list of values. The list is bound as one array parameter.
 
 ```nql
 employees | where departmentId in (1, 2, 3)
@@ -369,8 +369,8 @@ employees | where departmentId in (1, 2, 3)
 ```sql
 SELECT employees.*
 FROM test_strategies.employees
-WHERE employees.department_id IN ($1, $2, $3)
--- params: [1, 2, 3]
+WHERE employees.department_id = ANY ($1)
+-- params: [[1, 2, 3]]
 ```
 </details>
 
@@ -398,8 +398,8 @@ employees | where departmentId not in (4, 5)
 ```sql
 SELECT employees.*
 FROM test_strategies.employees
-WHERE employees.department_id NOT IN ($1, $2)
--- params: [4, 5]
+WHERE NOT (employees.department_id = ANY ($1))
+-- params: [[4, 5]]
 ```
 </details>
 
@@ -490,8 +490,13 @@ posts | limit 10 | offset 20
 <details><summary>SQL</summary>
 
 ```sql
-SELECT posts.* FROM posts LIMIT 10
-SELECT posts.* FROM posts LIMIT 10 OFFSET 20
+SELECT posts.*
+FROM minimal.posts
+LIMIT 10
+
+SELECT posts.*
+FROM minimal.posts
+LIMIT 10 OFFSET 20
 ```
 </details>
 
@@ -578,14 +583,14 @@ users | select *, userRoles.* | limit userRoles 2
 <details><summary>SQL</summary>
 
 ```sql
-SELECT users.*, user_roles_lat_0.*
+SELECT users.*, "userRoles_lat_0".*
 FROM iam_example.users
 LEFT JOIN LATERAL (
-  SELECT user_roles_inner_0.*
-  FROM iam_example.user_roles AS user_roles_inner_0
-  WHERE user_roles_inner_0.user_id = users.id
+  SELECT "userRoles_inner_0".*
+  FROM iam_example.user_roles AS "userRoles_inner_0"
+  WHERE "userRoles_inner_0".user_id = users.id
   LIMIT 2
-) AS user_roles_lat_0 ON true
+) AS "userRoles_lat_0" ON true
 ```
 </details>
 
@@ -617,9 +622,24 @@ users | where active = true \
 
 ```sql
 SELECT users.*,
-  COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.user_id ASC NULLS LAST, __t__.role_id ASC NULLS LAST)
+  COALESCE((
+    SELECT json_agg(
+      jsonb_build_object('role_id', __t__.role_id) || jsonb_build_object('role', COALESCE((
+        SELECT json_agg(to_jsonb(__t1__) || jsonb_build_object('rolePermissions', COALESCE((
+          SELECT json_agg(to_jsonb(__t2__) || jsonb_build_object('permission', COALESCE((
+            SELECT json_agg(to_jsonb(__t3__) ORDER BY __t3__.id ASC NULLS LAST)
+            FROM iam_example.permissions AS __t3__
+            WHERE __t3__.id = __t2__.permission_id
+          ), '[]'::json)) ORDER BY __t2__.id ASC NULLS LAST)
+          FROM iam_example.role_permissions AS __t2__
+          WHERE __t2__.role_id = __t1__.id
+        ), '[]'::json)) ORDER BY __t1__.id ASC NULLS LAST)
+        FROM iam_example.roles AS __t1__
+        WHERE __t1__.id = __t__.role_id
+      ), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST)
     FROM iam_example.user_roles AS __t__
-    WHERE __t__.user_id = users.id), '[]'::json) AS user_roles_json
+    WHERE __t__.user_id = users.id
+  ), '[]'::json) AS "userRoles_json"
 FROM iam_example.users
 WHERE users.active = $1
 -- params: [true]
@@ -628,11 +648,11 @@ WHERE users.active = $1
 
 | id | username | email              | active | userRoles_json                                         |
 |----|----------|--------------------|--------|--------------------------------------------------------|
-| 1  | alice    | alice@example.com  | True   | [{"id":1,"role":[{"id":1,"name":"super_admin",...}]}]  |
-| 2  | bob      | bob@example.com    | True   | [{"id":2,"role":[{"id":2,"name":"admin",...}]}]        |
-| 3  | carol    | carol@example.com  | True   | [{"id":3,"role":[{"id":3,"name":"manager",...}]},...]  |
-| 4  | dave     | dave@example.com   | True   | [{"id":5,"role":[{"id":4,"name":"editor",...}]}]       |
-| 5  | eve      | eve@example.com    | True   | [{"id":6,"role":[{"id":5,"name":"viewer",...}]}]       |
+| 1  | alice    | alice@example.com  | True   | [{"role_id":1,"role":[{"id":1,"name":"super_admin",...}]}]  |
+| 2  | bob      | bob@example.com    | True   | [{"role_id":2,"role":[{"id":2,"name":"admin",...}]}]        |
+| 3  | carol    | carol@example.com  | True   | [{"role_id":3,"role":[{"id":3,"name":"manager",...}]},...]  |
+| 4  | dave     | dave@example.com   | True   | [{"role_id":5,"role":[{"id":4,"name":"editor",...}]}]       |
+| 5  | eve      | eve@example.com    | True   | [{"role_id":6,"role":[{"id":5,"name":"viewer",...}]}]       |
 
 *(5 rows — the planner traverses: users → userRoles → roles → rolePermissions → permissions)*
 
@@ -659,9 +679,9 @@ roleEdges | select *, parentRole.*, childRole.*
 ```sql
 SELECT role_edges.*,
   COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM iam_example.roles AS __t__
-    WHERE __t__.id = role_edges.parent_role_id), '[]'::json) AS parent_role_json,
+    WHERE __t__.id = role_edges.parent_role_id), '[]'::json) AS "parentRole_json",
   COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM iam_example.roles AS __t__
-    WHERE __t__.id = role_edges.child_role_id), '[]'::json) AS child_role_json
+    WHERE __t__.id = role_edges.child_role_id), '[]'::json) AS "childRole_json"
 FROM iam_example.role_edges
 ```
 </details>
@@ -838,8 +858,8 @@ FROM ch5_ecommerce.products
 ```
 </details>
 
-| id | sku        | name          | price   | categoryId | priceRank |
-|----|------------|---------------|---------|------------|------------|
+| id | sku        | name          | price   | category_id | priceRank |
+|----|------------|---------------|---------|-------------|------------|
 | 1  | LAPTOP-001 | ProBook 15    | 1299.99 | 11          | 1          |
 | 2  | LAPTOP-002 | UltraLight 13 | 999.99  | 11          | 2          |
 | 13 | DESKTOP-001| PowerStation  | 2499.99 | 12          | 1          |
@@ -859,13 +879,13 @@ orders | select orderNumber, total, sum(total) over (order by createdAt) as runn
 
 ```sql
 SELECT orders.order_number, orders.total,
-  sum(orders.total) OVER (ORDER BY orders.created_at) AS "runningTotal"
+  sum(orders.total) OVER (ORDER BY orders.created_at ASC) AS "runningTotal"
 FROM ch5_ecommerce.orders
 ```
 </details>
 
-| orderNumber | total   | runningTotal |
-|-------------|---------|---------------|
+| order_number | total   | runningTotal |
+|--------------|---------|---------------|
 | ORD-2024-001 | 1499.98 | 1499.98       |
 | ORD-2024-005 | 179.97  | 1679.95       |
 | ORD-2024-002 | 349.99  | 2029.94       |
@@ -1084,13 +1104,7 @@ WHERE audit_log.details ? $1
 
 *Schema: iam*
 
-Use a subquery to filter dynamically. Here, we find roles assigned to user 1 by first selecting their role IDs from the junction table. NQL compiles the inner pipe to a subquery using `= ANY(...)`.
-
-**Portability:** the `IN (subquery)` form shown here compiles to `= ANY (SELECT ...)`,
-which is standard portable SQL and is NOT capability-gated. Only the *bound-array*
-form — `= ANY(:param)` over an array parameter — requires
-`DialectCapabilities.supportsArrayType` and throws before SQL emission on adapters
-that lack array support (where a plain `IN` over a value list is emitted instead).
+Here, the filter compiles to a correlated `EXISTS` query on `user_roles`, matching each role ID and binding the user ID as `$1`.
 
 ```nql
 roles | where id in (userRoles | where userId = 1 | select roleId)
@@ -1101,10 +1115,11 @@ roles | where id in (userRoles | where userId = 1 | select roleId)
 ```sql
 SELECT roles.*
 FROM iam_example.roles
-WHERE roles.id = ANY (
-  SELECT user_roles_subq_0.role_id
-  FROM iam_example.user_roles AS user_roles_subq_0
-  WHERE user_roles_subq_0.user_id = $1
+WHERE EXISTS (
+  SELECT 1
+  FROM iam_example.user_roles AS "userRoles_exists_0"
+  WHERE roles.id = "userRoles_exists_0".role_id
+    AND "userRoles_exists_0".user_id = $1
 )
 -- params: [1]
 ```
@@ -1390,7 +1405,7 @@ employees | select name, manager.name, manager.manager.name
 
 ### Recursive Ancestors (CTE)
 
-The `managementChain` pseudo-column walks all the way up to the root. NQL compiles this to a `WITH RECURSIVE` CTE — no manual recursion needed.
+This query selects each employee's name and left-joins the employees they manage; it does not walk the management chain recursively (see #877).
 
 ```nql
 employees | select name, managementChain.*
@@ -1399,24 +1414,14 @@ employees | select name, managementChain.*
 <details><summary>SQL</summary>
 
 ```sql
-WITH RECURSIVE management_chain_cte AS (
-  SELECT employees.id, employees.name, employees.title,
-    employees.manager_id, 1 AS depth
-  FROM hierarchy_example.employees
-  WHERE employees.id IN (SELECT manager_id FROM hierarchy_example.employees)
-  UNION ALL
-  SELECT e.id, e.name, e.title, e.manager_id, mc.depth + 1
-  FROM hierarchy_example.employees e
-  INNER JOIN management_chain_cte mc ON e.id = mc.manager_id
+WITH "managementChain_cte" AS (
+  SELECT employees_inner_0.*
+  FROM hierarchy.employees AS employees_inner_0
 )
-SELECT employees.name,
-  COALESCE(
-    (SELECT json_agg(to_jsonb(mc))
-     FROM management_chain_cte mc
-     WHERE mc.id = employees.manager_id),
-    '[]'::json
-  ) AS management_chain_json
-FROM hierarchy_example.employees
+SELECT employees.name
+FROM hierarchy.employees
+LEFT JOIN "managementChain_cte" AS "managementChain_ref_0"
+  ON employees.id = "managementChain_ref_0".manager_id
 ```
 </details>
 
@@ -1510,8 +1515,8 @@ priceTiers | where quantityRange contains 25
 
 ```sql
 SELECT price_tiers.*
-FROM scheduling.price_tiers
-WHERE price_tiers.quantity_range @> $1
+FROM ch4_scheduling.price_tiers
+WHERE price_tiers.quantity_range @> CAST($1 AS integer)
 -- params: [25]
 ```
 </details>
@@ -2036,16 +2041,16 @@ roles | where id in (userRoles | where userId = 1 | select roleId)
 
 ```sql
 SELECT roles.*
-FROM iam_example.roles
+FROM advanced_patterns.roles
 WHERE roles.id = ANY (
-  SELECT user_roles_subq_0.role_id
-  FROM iam_example.user_roles AS user_roles_subq_0
-  WHERE user_roles_subq_0.user_id = $1
+  SELECT "userRoles_subq_0".role_id
+  FROM advanced_patterns.user_roles AS "userRoles_subq_0"
+  WHERE "userRoles_subq_0".user_id = $1
 )
 AND EXISTS (
   SELECT 1
-  FROM iam_example.user_roles AS user_roles_exists_1
-  WHERE roles.id = user_roles_exists_1.role_id
+  FROM advanced_patterns.user_roles AS "userRoles_exists_1"
+  WHERE roles.id = "userRoles_exists_1".role_id
 )
 -- params: [1]
 ```
@@ -2068,14 +2073,14 @@ users | select *, userRoles.* | limit userRoles 2
 <details><summary>SQL</summary>
 
 ```sql
-SELECT users.*, user_roles_lat_0.*
+SELECT users.*, "userRoles_lat_0".*
 FROM iam_example.users
 LEFT JOIN LATERAL (
-  SELECT user_roles_inner_0.*
-  FROM iam_example.user_roles AS user_roles_inner_0
-  WHERE user_roles_inner_0.user_id = users.id
+  SELECT "userRoles_inner_0".*
+  FROM iam_example.user_roles AS "userRoles_inner_0"
+  WHERE "userRoles_inner_0".user_id = users.id
   LIMIT 2
-) AS user_roles_lat_0 ON true
+) AS "userRoles_lat_0" ON true
 ```
 </details>
 
