@@ -52,7 +52,7 @@ Each call is independent. Nested paths (like `posts.comments`) automatically tri
 
 ## Include with Options
 
-An include `where` is supported on join includes and becomes a root `WHERE` predicate. An inner join keeps only roots with a matching related row; a left join with a `where` behaves like an inner join. Other strategies refuse include `where`. Relation predicates (`exists`, `notExists`, `some`, `every`, `none`) anywhere inside it, including nested query bodies, are also refused. See oorabona/db-semantic-planner#892.
+An include `where` is accepted only when the include compiles as a join, and it is added to the root `WHERE`. Other strategies refuse it. Relation predicates (`exists`, `notExists`, `some`, `every`, `none`) anywhere inside it, including nested query bodies, are also refused. See oorabona/db-semantic-planner#892.
 
 Pass an options object as the second argument to filter, project, or disambiguate the include:
 
@@ -79,8 +79,8 @@ const posts = await orm.select('posts')
 
 | Option | Type | Description |
 |--------|------|-------------|
-| `join` | `'inner' \| 'left'` | Load the relation through a join instead of the planner's choice |
-| `where` | `WhereIntent` | Root WHERE predicate; join includes only |
+| `join` | `'inner' \| 'left'` | Join type |
+| `where` | `WhereIntent` | Added to the root WHERE; join includes only |
 | `select` | `SelectSpec` | Columns to select on the related table |
 | `via` | `string` | Relation name hint when multiple FKs point to the same table |
 | `recursive` | `boolean` | Enable recursive CTE traversal (trees/hierarchies) |
@@ -121,13 +121,12 @@ For schema setup with self-referential `ref()` and `roles`, see [Getting Started
 
 ## How the Planner Chooses a Strategy
 
-The planner picks the SQL strategy from the query shape unless you override it: `join: 'inner'` or `join: 'left'` on
-an include, or `defaultIncludeStrategy` in the plan options. An include `where` requires a join override.
+The planner picks the SQL strategy from the query shape by default:
 
 | Strategy | When used | Notes |
 |----------|-----------|-------|
 | `json_agg` | Simple 1:N includes on the same root query | Aggregates rows with `json_agg()` + `GROUP BY` |
-| `lateral` | Ordered sub-collections | Uses `LATERAL` join for per-row subqueries |
+| `lateral` | Flat includes with a per-parent `limit` | Uses `LATERAL` join for per-row subqueries |
 | `subquery` | Large or deeply nested includes | Separate correlated subquery per relation |
 
 Inspect the chosen strategy at any time with `dump()`:

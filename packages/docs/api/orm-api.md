@@ -932,8 +932,8 @@ orm.select('users').include('posts', {
 
 | Option | Type | Description |
 |--------|------|-------------|
-| `join` | `'inner' \| 'left'` | Load the relation through a join instead of the planner's choice |
-| `where` | `WhereIntent` | Root WHERE predicate on the joined relation; join includes only, other strategies refuse it (#892) |
+| `join` | `'inner' \| 'left'` | Join type |
+| `where` | `WhereIntent` | Added to the root WHERE; join includes only, other strategies refuse it (#892) |
 | `select` | `SelectSpec` | Select specific columns |
 | `via` | `string` | Disambiguate multiple relations to same table |
 | `recursive` | `boolean` | Enable recursive CTE traversal |

@@ -208,7 +208,7 @@ const usersFiltered = await orm.select('users')
   .dump();
 ```
 
-The planner selects the fetch strategy (`json_agg`, lateral join, or separate query) from the query shape unless an include sets `join: 'inner'` or `join: 'left'`. An include `where` requires such a join and filters the root rows: an inner join keeps only users with a matching post.
+The planner selects the fetch strategy (`json_agg`, lateral join, or separate query) from the query shape by default. An include `where` is accepted only when the include compiles as a join; see [Includes](./includes.md).
 
 ::: tip Try it
 Paste this NQL equivalent in the [Playground](/playground): `users | where active = true | select id, name`
