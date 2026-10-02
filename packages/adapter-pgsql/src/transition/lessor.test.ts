@@ -1,8 +1,8 @@
 import {
 	acquireExclusiveTransitionLease,
+	markTransitionClientCompromised,
 	planOperationSession,
-} from '@dbsp/core';
-import { markTransitionClientCompromised } from '@dbsp/core/internal';
+} from '@dbsp/core/internal';
 import { Client, Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import { evaluatePgExecutionContract } from './execution-contract.js';

@@ -4,8 +4,9 @@ import {
 	escapeDiagnosticText,
 	releasePgManagedAddress,
 } from '@dbsp/adapter-pgsql';
-import { acquireTransitionLease } from '@dbsp/core';
-import type { LedgerAddress, LedgerRefusal } from '@dbsp/types';
+import { acquireTransitionLease } from '@dbsp/core/internal';
+import type { LedgerAddress } from '@dbsp/types';
+import type { LedgerRefusal } from '@dbsp/types/internal';
 import { Command } from 'commander';
 import { createDbConnection } from '../utils/db-utils.js';
 import { printCliJson } from '../utils/output.js';

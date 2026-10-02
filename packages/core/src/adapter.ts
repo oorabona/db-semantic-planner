@@ -13,15 +13,11 @@ export type {
 	AdapterCapabilities,
 	AdapterLogger,
 	AdapterStreamOptions,
-	AliasIncludedColumnsMode,
 	AlterColumnOptions,
 	BaseAdapter,
 	CompiledQuery,
-	CompileOnlyAdapter,
 	CompileOptions,
-	CompileResultWithIncludes,
 	CompilingAdapter,
-	ConnectionAvailability,
 	CreateIndexOptions,
 	DbCasing,
 	DropIndexOptions,
@@ -33,7 +29,6 @@ export type {
 	IndexInfo,
 	IndexMethod,
 	IntrospectingAdapter,
-	IntrospectionOptions,
 	IntrospectionResult,
 	NqlRuntimeBinding,
 	RawSqlAdapter,
@@ -45,6 +40,12 @@ export type {
 	TruncateOptions,
 	VacuumOptions,
 } from '@dbsp/types';
+export type {
+	CompileOnlyAdapter,
+	CompileResultWithIncludes,
+	ConnectionAvailability,
+	IntrospectionOptions,
+} from '@dbsp/types/internal';
 
 import type {
 	Adapter,

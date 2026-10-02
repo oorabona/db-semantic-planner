@@ -14,12 +14,10 @@ import {
 	appendPgLedgerResolution,
 	comparePgDatabaseSchema,
 } from '@dbsp/adapter-pgsql/internal';
-import { projectLedgerChain, schema } from '@dbsp/core';
-import {
-	type LedgerAddress,
-	type LedgerPayload,
-	REFUSAL_VOCABULARY,
-} from '@dbsp/types';
+import { schema } from '@dbsp/core';
+import { projectLedgerChain } from '@dbsp/core/internal';
+import type { LedgerAddress, LedgerPayload } from '@dbsp/types';
+import { REFUSAL_VOCABULARY } from '@dbsp/types/internal';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import {
 	runApply,

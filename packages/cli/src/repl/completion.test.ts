@@ -3,13 +3,8 @@
  * ARCH-005: Updated to use LoadedSchema
  */
 
-import type {
-	ColumnType,
-	ModelIR,
-	RelationIR,
-	RelationType,
-	TableIR,
-} from '@dbsp/core';
+import type { ColumnType, ModelIR, TableIR } from '@dbsp/core';
+import type { RelationIR, RelationType } from '@dbsp/core/internal';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { LoadedSchema } from '../utils/schema-loader.js';
 import { CompletionProvider, formatCompletions } from './completion.js';

@@ -29,8 +29,6 @@ import type {
 	CompiledNqlQuery,
 	CompiledQuery,
 	CompileOptions,
-	CompileResultWithIncludes,
-	ConnectionAvailability,
 	CteQueryIntent,
 	DbCasing,
 	DeleteIntent,
@@ -65,6 +63,10 @@ import {
 	projectionlessCompiledQuery,
 	rebuildCompiledQuery,
 } from '@dbsp/types/adapter-sdk';
+import type {
+	CompileResultWithIncludes,
+	ConnectionAvailability,
+} from '@dbsp/types/internal';
 import { getNqlBindingRefName, isNqlBindingRef } from '@dbsp/types/internal';
 import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';

@@ -1,6 +1,7 @@
 import { createPgGeneratedManagedStep } from '@dbsp/adapter-pgsql';
-import { projectLedgerChain } from '@dbsp/core';
-import { type LedgerAddress, ledgerAddressKey, refusalFor } from '@dbsp/types';
+import { projectLedgerChain } from '@dbsp/core/internal';
+import { type LedgerAddress, refusalFor } from '@dbsp/types';
+import { ledgerAddressKey } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import {
 	inspectAddress,

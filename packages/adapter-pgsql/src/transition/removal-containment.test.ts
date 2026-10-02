@@ -1,8 +1,5 @@
-import {
-	type LedgerAddress,
-	ledgerAddressKey,
-	sameLedgerAddress,
-} from '@dbsp/types';
+import { type LedgerAddress, sameLedgerAddress } from '@dbsp/types';
+import { ledgerAddressKey } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import {
 	classifyRemovalEffectsClosure,

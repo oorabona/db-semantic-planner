@@ -1,4 +1,4 @@
-import { declarationSetFromModel } from '@dbsp/core';
+import { declarationSetFromModel } from '@dbsp/core/internal';
 import type { ModelIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {

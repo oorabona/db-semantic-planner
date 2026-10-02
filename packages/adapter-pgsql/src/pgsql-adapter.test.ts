@@ -4,7 +4,8 @@
  * Tests adapter interface implementation without database connection.
  */
 
-import { type PlanReport, schema, supportsExecution } from '@dbsp/core';
+import { type PlanReport, schema } from '@dbsp/core';
+import { supportsExecution } from '@dbsp/core/internal';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import type { Pool, PoolClient } from 'pg';
 import { describe, expect, expectTypeOf, it, vi } from 'vitest';

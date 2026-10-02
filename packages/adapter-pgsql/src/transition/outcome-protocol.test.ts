@@ -1,12 +1,14 @@
-import { validateNormalizedManagedStepManifest } from '@dbsp/core';
-import { mintDurablyLoadedRun } from '@dbsp/core/internal';
+import {
+	mintDurablyLoadedRun,
+	validateNormalizedManagedStepManifest,
+} from '@dbsp/core/internal';
 import type {
 	LedgerAddress,
 	LedgerChainMember,
-	LedgerReservationRow,
 	OutcomeClaimPlan,
 } from '@dbsp/types';
 import { refusalFor, sameLedgerAddress } from '@dbsp/types';
+import type { LedgerReservationRow } from '@dbsp/types/internal';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('./ledger.js', async (importOriginal) => ({

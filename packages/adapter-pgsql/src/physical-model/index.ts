@@ -1,19 +1,21 @@
+import type {
+	CheckConstraintIR,
+	ColumnIR,
+	DbCasing,
+	EnumIR,
+	ForeignKeyIR,
+	IndexIR,
+	ModelIR,
+	PolicyIR,
+	RelationIR,
+	SequenceIR,
+	TableIR,
+} from '@dbsp/types';
 import {
-	type CheckConstraintIR,
-	type ColumnIR,
 	createPhysicalNameInventory,
-	type DbCasing,
-	type EnumIR,
-	type ForeignKeyIR,
-	type IndexIR,
-	type ModelIR,
 	type PhysicalNameEntry,
 	type PhysicalNameInventory,
-	type PolicyIR,
-	type RelationIR,
-	type SequenceIR,
-	type TableIR,
-} from '@dbsp/types';
+} from '@dbsp/types/internal';
 import { shouldEmitAutoFkIndex } from '../ddl/fk-index-coverage.js';
 import {
 	getNamingPluginForDbCasing,

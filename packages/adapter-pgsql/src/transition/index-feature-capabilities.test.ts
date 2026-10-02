@@ -1,4 +1,4 @@
-import { serverVersionNum } from '@dbsp/core';
+import { serverVersionNum } from '@dbsp/core/internal';
 import type { CapabilityDescriptor } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {

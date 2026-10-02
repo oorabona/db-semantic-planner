@@ -1,4 +1,4 @@
-import { canonicalJsonDigest } from '@dbsp/core';
+import { canonicalJsonDigest } from '@dbsp/core/internal';
 import type { DbCasing, IndexIR, ModelIR, TableIR } from '@dbsp/types';
 import type { Pool, PoolClient } from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';

@@ -264,7 +264,7 @@ See [Production: Observability & Logging](https://oorabona.github.io/db-semantic
 │  @dbsp/adapter-pgsql                                            │
 │  ┌─────────────────────────────────────────────────────────┐   │
 │  │  SQL Compiler (PlanReport → PostgreSQL AST → SQL)       │   │
-│  │  PgAdapter (with a pg Pool or connectionless)        │   │
+│  │  PgAdapter    (with a pg Pool or connectionless)        │   │
 │  └─────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
 ```

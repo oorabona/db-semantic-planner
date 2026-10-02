@@ -8,16 +8,18 @@ import {
 	projectLedgerChain,
 	resourceScopeCovers,
 	transitionPlanDigest,
-} from '@dbsp/core';
+} from '@dbsp/core/internal';
 import type {
 	LedgerAddress,
 	LedgerHome,
 	LedgerPayload,
-	LedgerReservationRow,
-	OutcomeIndeterminateRecoveryEvidence,
 	ResourceAddress,
 } from '@dbsp/types';
 import { sameLedgerAddress } from '@dbsp/types';
+import type {
+	LedgerReservationRow,
+	OutcomeIndeterminateRecoveryEvidence,
+} from '@dbsp/types/internal';
 import type { Pool } from 'pg';
 import { readPgLedgerAddressChain } from './chain-reader.js';
 import {

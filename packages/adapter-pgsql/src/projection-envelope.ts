@@ -1,14 +1,16 @@
 import type {
-	CompiledColumnMetadata,
 	CompiledQuery,
 	ModelIR,
 	OutputDescriptor,
-	OutputSource,
 	OutputValueShape,
 	PlanReport,
 } from '@dbsp/types';
 import { resolveOutputReadHandling } from '@dbsp/types';
 import { compiledQueryFromProjection } from '@dbsp/types/adapter-sdk';
+import type {
+	CompiledColumnMetadata,
+	OutputSource,
+} from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import {
 	buildCompiledColumnProjections,
@@ -45,11 +47,8 @@ export type ProjectionState =
 export type OutputProjection = OutputDescriptor & {
 	readonly logicalKey: string;
 };
-export type {
-	OutputDescriptor,
-	OutputSource,
-	OutputValueShape,
-} from '@dbsp/types';
+export type { OutputDescriptor, OutputValueShape } from '@dbsp/types';
+export type { OutputSource } from '@dbsp/types/internal';
 
 export type ProjectionDropReason =
 	| 'set-operation-positional-merge'

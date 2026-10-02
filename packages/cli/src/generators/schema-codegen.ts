@@ -9,11 +9,8 @@ import {
 	canGenerateCreateIndex,
 	generateCreateIndex,
 } from '@dbsp/adapter-pgsql';
-import {
-	type ModelIR,
-	type TableIR,
-	validateSchemaIndexOptions,
-} from '@dbsp/core';
+import type { ModelIR, TableIR } from '@dbsp/core';
+import { validateSchemaIndexOptions } from '@dbsp/core/internal';
 import type { IndexIR } from '@dbsp/types';
 import { redactDbUrl } from '../utils/db-utils.js';
 

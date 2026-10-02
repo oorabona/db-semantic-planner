@@ -188,7 +188,6 @@ export type {
 	OperationSemantics,
 	PhysicalOperation,
 	ProvenApplyGuard,
-	ProvenGuardProtocol,
 	ProvenPlanShape,
 	ProvenPlanStep,
 	RecognitionResult,
@@ -202,6 +201,7 @@ export type {
 	TransitionRule,
 	TransitionRunMetadata,
 } from '@dbsp/types';
+
 export { createApplier } from './applier.js';
 export {
 	CanonicalJsonError,

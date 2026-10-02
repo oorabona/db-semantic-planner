@@ -1,10 +1,11 @@
 /** End management without issuing DDL or accepting a caller-supplied controller. */
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { projectLedgerChain } from '@dbsp/core';
-import type { LedgerAddress, LedgerHome, LedgerRefusal } from '@dbsp/types';
+import { projectLedgerChain } from '@dbsp/core/internal';
+import type { LedgerAddress, LedgerHome } from '@dbsp/types';
 import * as transitionTypes from '@dbsp/types';
 import { refusalFor } from '@dbsp/types';
+import type { LedgerRefusal } from '@dbsp/types/internal';
 import type { readPgCatalogueIdentity } from './catalogue-identity.js';
 import {
 	readPgLedgerAddressChain,

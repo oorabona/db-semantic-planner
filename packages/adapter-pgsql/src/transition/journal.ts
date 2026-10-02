@@ -1,4 +1,7 @@
-import { type TransitionRunPersister, transitionPlanDigest } from '@dbsp/core';
+import {
+	type TransitionRunPersister,
+	transitionPlanDigest,
+} from '@dbsp/core/internal';
 import type {
 	DurableIntentRecord,
 	PhysicalOperation,
@@ -6,11 +9,13 @@ import type {
 	StepJournal,
 	TransactionalCompletionRecord,
 	TransitionJournalEvent,
-	TransitionJournalEventName,
-	TransitionRunAuthorization,
 	TransitionRunJournal,
 	TransitionRunMetadata,
 } from '@dbsp/types';
+import type {
+	TransitionJournalEventName,
+	TransitionRunAuthorization,
+} from '@dbsp/types/internal';
 import { validateIdentifier } from '../validate.js';
 import {
 	DBSP_META_SCHEMA,

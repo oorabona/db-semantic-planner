@@ -18,14 +18,14 @@ import {
 	appendPgLedgerResolution,
 	recoverPgAdmittedReaddressPair,
 } from '@dbsp/adapter-pgsql/internal';
-import { projectLedgerChain, transitionPlanDigest } from '@dbsp/core';
+import { projectLedgerChain, transitionPlanDigest } from '@dbsp/core/internal';
 import type {
 	LedgerAddress,
 	LedgerClaimKind,
-	LedgerReservationRow,
 	TableIR,
 	TableReaddressDeclaration,
 } from '@dbsp/types';
+import type { LedgerReservationRow } from '@dbsp/types/internal';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { runApply } from '../../packages/cli/src/commands/apply.js';
 import type { GeneratorDurablePlan } from '../../packages/cli/src/commands/generator-plan.js';

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { canonicalJson, canonicalJsonDigest } from '@dbsp/core';
+import { canonicalJson, canonicalJsonDigest } from '@dbsp/core/internal';
 import type {
 	CatalogueIdentity,
 	DeclarableResourceAddress,

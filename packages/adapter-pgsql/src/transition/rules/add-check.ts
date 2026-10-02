@@ -1,4 +1,4 @@
-import { checkDelta } from '@dbsp/core';
+import { checkDelta } from '@dbsp/core/internal';
 import type {
 	ApplicableEvaluation,
 	Assumption,
@@ -10,16 +10,18 @@ import type {
 	PhysicalOperation,
 	ProofClaimDraft,
 	ProofObligation,
-	RecognitionContext,
 	RecognitionResult,
-	RequiredEnumLabelIR,
 	ResourceAddress,
 	RuleEvaluation,
 	TransitionFragment,
 	TransitionFragmentComposition,
 	TransitionRule,
-	VendorValidatedExpression,
 } from '@dbsp/types';
+import type {
+	RecognitionContext,
+	RequiredEnumLabelIR,
+	VendorValidatedExpression,
+} from '@dbsp/types/internal';
 import { validateIdentifier } from '../../validate.js';
 import { pgEnumLabelVisibleFact } from '../composition-facts.js';
 import {

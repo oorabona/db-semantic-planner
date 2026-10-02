@@ -1,8 +1,9 @@
 /** Shared command-output shape for refusals that do not append a ledger event. */
 
 import { escapeDiagnosticText } from '@dbsp/adapter-pgsql';
-import type { LedgerAddress, LedgerRefusal } from '@dbsp/types';
-import { REFUSAL_VOCABULARY, type RefusalCode } from '@dbsp/types';
+import type { LedgerAddress } from '@dbsp/types';
+import type { LedgerRefusal } from '@dbsp/types/internal';
+import { REFUSAL_VOCABULARY, type RefusalCode } from '@dbsp/types/internal';
 
 /** `recorded-plan` is a command-path state, never a durable ledger state. */
 export type PreAppendRefusalState = LedgerRefusal['state'] | 'recorded-plan';

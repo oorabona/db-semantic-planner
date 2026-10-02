@@ -16,8 +16,8 @@ import type {
 	StepJournal,
 	TransactionalCompletionRecord,
 	TransitionSessionClient,
-	VendorValidatedExpression,
 } from '@dbsp/types';
+import type { VendorValidatedExpression } from '@dbsp/types/internal';
 import {
 	clampTransactionTimeoutMs,
 	setLocalTransactionTimeoutSql,

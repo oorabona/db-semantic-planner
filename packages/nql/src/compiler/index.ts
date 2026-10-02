@@ -19,11 +19,9 @@ export type {
 	InsertFromIntent,
 	InsertIntent,
 	MutationIntent,
-	NullOperator,
 	OrderByIntent,
 	PseudoColumnTraversal,
 	QueryIntent,
-	RangeOperator,
 	SelectAllIntent,
 	SelectFieldsIntent,
 	SelectIntent,
@@ -48,7 +46,6 @@ export type {
 	WhereRangeIntent,
 	WhereRelationFilterIntent,
 	WindowFunction,
-	WindowOrderBy,
 } from '@dbsp/types';
 
 import type {

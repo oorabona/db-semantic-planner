@@ -1,10 +1,10 @@
 import type {
 	JsonValue,
-	ObservationBooleanClaim,
 	ObservationRequest,
 	Proposition,
 	ResourceAddress,
 } from '@dbsp/types';
+import type { ObservationBooleanClaim } from '@dbsp/types/internal';
 
 export type StampedObservationClaim = ObservationBooleanClaim & JsonValue;
 

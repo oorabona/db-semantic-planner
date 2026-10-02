@@ -1,5 +1,6 @@
 /** Test-only boundary for ObservationBooleanClaim payload JSON compatibility. */
-import type { JsonValue, ObservationBooleanClaim } from '@dbsp/types';
+import type { JsonValue } from '@dbsp/types';
+import type { ObservationBooleanClaim } from '@dbsp/types/internal';
 
 declare const claims: readonly ObservationBooleanClaim[];
 export function verifyCompatibilityCanary(): void {

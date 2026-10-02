@@ -11,7 +11,7 @@ import {
 	createTransitionRunMetadata,
 	declarationSetFromModel,
 	type InProcessProvenPlan,
-} from '@dbsp/core';
+} from '@dbsp/core/internal';
 import type {
 	ApplyPolicy,
 	ApplyResult,
@@ -20,13 +20,15 @@ import type {
 	ModelIR,
 	ObservationContext,
 	PlanAssessment,
-	PostgreSqlObservationTargetIdentity,
 	ProvenPlanShape,
-	TransitionRunAuthorization,
 	TransitionRunJournal,
 	TransitionRunMetadata,
 	TransitionSessionClient,
 } from '@dbsp/types';
+import type {
+	PostgreSqlObservationTargetIdentity,
+	TransitionRunAuthorization,
+} from '@dbsp/types/internal';
 import type { Pool } from 'pg';
 import type { PgPhysicalModel } from '../physical-model/index.js';
 import { DBSP_META_SCHEMA, DBSP_TRANSITION_RUN_TABLE } from './constants.js';

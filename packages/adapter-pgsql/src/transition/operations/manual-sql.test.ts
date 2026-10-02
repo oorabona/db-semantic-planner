@@ -2,7 +2,7 @@ import {
 	createPackRegistry,
 	createProver,
 	createTransitionLessor,
-} from '@dbsp/core';
+} from '@dbsp/core/internal';
 import type {
 	ApplicableEvaluation,
 	Assumption,

@@ -4,14 +4,14 @@ import {
 	createPgTransitionRunPersister,
 	readPgObservationContextFromLessor,
 } from '@dbsp/adapter-pgsql';
+import type { ModelIR } from '@dbsp/core';
 import {
 	type ApplyPolicy,
 	createApplier,
 	createComparator,
 	createPackRegistry,
 	createProver,
-	type ModelIR,
-} from '@dbsp/core';
+} from '@dbsp/core/internal';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
 	createSchema,

@@ -9,11 +9,11 @@
  */
 
 import {
-	type JsonAggOrderByEntry,
 	resolveJsonAggOrderKey,
 	resolveOutputReadHandling,
 	toColumnList,
 } from '@dbsp/types';
+import type { JsonAggOrderByEntry } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import {
 	andExpr,

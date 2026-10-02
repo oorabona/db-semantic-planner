@@ -1,4 +1,7 @@
-import { bindExecutionContract, type InProcessProvenPlan } from '@dbsp/core';
+import {
+	bindExecutionContract,
+	type InProcessProvenPlan,
+} from '@dbsp/core/internal';
 import type {
 	ExecutionContract,
 	ProvenPlanShape,

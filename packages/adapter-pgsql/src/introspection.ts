@@ -18,19 +18,18 @@ import type {
 	ColumnType,
 	EnumIR,
 	ForeignKeyIR,
-	HierarchyIR,
 	IndexIR,
 	LogicalIdentity,
 	ModelIR,
 	OnDeleteAction,
-	PartitionIR,
 	PolicyIR,
 	RelationIR,
 	RelationType,
 	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
-import { buildRelationKeyFields } from '@dbsp/types';
+import type { HierarchyIR, PartitionIR } from '@dbsp/types/internal';
+import { buildRelationKeyFields } from '@dbsp/types/internal';
 import type { Pool, QueryResult, QueryResultRow } from 'pg';
 import { DEFAULT_PK_COLUMN } from './assert-field.js';
 import { stripNotValidSuffix } from './check-expression.js';

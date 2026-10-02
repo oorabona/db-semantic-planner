@@ -36,7 +36,7 @@ Semantic query planning for databases - an intent-first approach that transforms
 ┌─────────────────────────────────────────────────────────────────┐
 │                    packages/adapter-pgsql                       │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │  Compiler   │  │ PgAdapter│  │  PostgreSQL-native       │  │
+│  │  Compiler   │  │ PgAdapter   │  │  PostgreSQL-native       │  │
 │  │  (SQL gen)  │  │  (Engine)   │  │  (pg Pool)              │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
 │                                                                 │

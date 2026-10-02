@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { NonRollbackableExecutionTracker } from '@dbsp/core';
+import type { NonRollbackableExecutionTracker } from '@dbsp/core/internal';
 import type {
 	ApplyGuard,
 	Assumption,

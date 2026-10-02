@@ -9,10 +9,10 @@ import type {
 	ColumnListInput,
 	DbCasing,
 	DialectCapabilities,
-	JsonAggOrderByEntry,
 	ModelIR,
 	ParamIntent,
 } from '@dbsp/types';
+import type { JsonAggOrderByEntry } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import type { FkColumnDerivation } from '../assert-field.js';
 import { sqlColumnRef, sqlColumnRefStar } from '../ast-helpers.js';

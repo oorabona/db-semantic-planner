@@ -7,16 +7,18 @@ import {
 	readPgObservationContextFromLessor,
 } from '@dbsp/adapter-pgsql';
 import {
+	createStagedTransitionOrchestrator,
+	type ModelIR,
+	type TableIR,
+} from '@dbsp/core';
+import {
 	type ApplyPolicy,
 	createApplier,
 	createComparator,
 	createPackRegistry,
 	createProver,
-	createStagedTransitionOrchestrator,
 	createTransitionLessor,
-	type ModelIR,
-	type TableIR,
-} from '@dbsp/core';
+} from '@dbsp/core/internal';
 import type { CheckConstraintIR, EnumIR } from '@dbsp/types';
 import { Pool, type PoolClient } from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';

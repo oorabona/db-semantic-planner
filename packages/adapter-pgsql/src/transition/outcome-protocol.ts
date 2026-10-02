@@ -1,19 +1,17 @@
-import {
-	canonicalJson,
-	classifyOutcomeRecovery,
-	projectLedgerChain,
-	selectorMatchesResource,
-	type ValidatedManagedStepManifest,
-} from '@dbsp/core';
 import type { AdmittedDestructiveOutcomeClaim } from '@dbsp/core/internal';
 import {
 	admitDestructiveOutcomeClaim,
 	admitOutcomeClaim,
+	canonicalJson,
 	claimIdForToken,
+	classifyOutcomeRecovery,
 	consumeClaimToken,
 	type DurablyLoadedRun,
 	isDestructiveAuthorityPermit,
 	isDurablyLoadedRun,
+	projectLedgerChain,
+	selectorMatchesResource,
+	type ValidatedManagedStepManifest,
 } from '@dbsp/core/internal';
 import type {
 	AdmittedOutcomeClaim,
@@ -25,18 +23,20 @@ import type {
 	LedgerChainMember,
 	LedgerEventKind,
 	LedgerPayload,
-	LedgerReservationRow,
 	OutcomeClaimAdmission,
 	OutcomeClaimPlan,
-	OutcomeIndeterminateRecoveryEvidence,
 	OutcomeProtocolRefusal,
 	OutcomeRecoveryClassification,
-	OutcomeRecoveryEffect,
 	OutcomeRecoveryReadBack,
-	OutcomeVacancy,
-	ScopedApprovalSet,
 } from '@dbsp/types';
 import { refusalFor, sameLedgerAddress } from '@dbsp/types';
+import type {
+	LedgerReservationRow,
+	OutcomeIndeterminateRecoveryEvidence,
+	OutcomeRecoveryEffect,
+	OutcomeVacancy,
+	ScopedApprovalSet,
+} from '@dbsp/types/internal';
 import {
 	type GeneratedPostconditionSession,
 	withPinnedGeneratedPostconditionSession,

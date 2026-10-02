@@ -6,18 +6,20 @@ import {
 	outcomeClaimId,
 	projectLedgerChain,
 	type ValidatedManagedStepManifest,
-} from '@dbsp/core';
+} from '@dbsp/core/internal';
 import type {
 	LedgerAddress,
 	LedgerHome,
 	LedgerPayload,
-	LedgerReservationRow,
 	NormalizedManagedStep,
 	ResourceAddress,
-	ScopedApprovalSet,
 	TableReaddressDeclaration,
 } from '@dbsp/types';
 import { sameControllerIdentity, sameLedgerAddress } from '@dbsp/types';
+import type {
+	LedgerReservationRow,
+	ScopedApprovalSet,
+} from '@dbsp/types/internal';
 import {
 	decodeGeneratedPostconditionPayload,
 	type GeneratedPostconditionBindingAddress,

@@ -13,7 +13,7 @@
  *   EH-11    — plain-text error in --json mode goes to stderr
  */
 
-import { isOverallSuccess } from '@dbsp/core';
+import { isOverallSuccess } from '@dbsp/core/internal';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------

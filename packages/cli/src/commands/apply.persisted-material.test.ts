@@ -71,8 +71,8 @@ vi.mock('@dbsp/adapter-pgsql/internal', async (importOriginal) => {
 	};
 });
 
-vi.mock('@dbsp/core', async (importOriginal) => {
-	const actual = await importOriginal<typeof import('@dbsp/core')>();
+vi.mock('@dbsp/core/internal', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('@dbsp/core/internal')>();
 	const lease = { session: {}, release: vi.fn(async () => undefined) };
 	return {
 		...actual,
@@ -81,7 +81,7 @@ vi.mock('@dbsp/core', async (importOriginal) => {
 	};
 });
 
-import { transitionPlanDigest } from '@dbsp/core';
+import { transitionPlanDigest } from '@dbsp/core/internal';
 import { formatApplyHuman, runApply } from './apply.js';
 
 const recordedAttemptExecutionId = 'dbsp.generator.execution.recorded-attempt';

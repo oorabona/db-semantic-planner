@@ -9,13 +9,13 @@ import type {
 	PhysicalOperation,
 	ProofClaimDraft,
 	ProofObligation,
-	RecognitionContext,
 	RecognitionResult,
 	ResourceAddress,
 	RuleEvaluation,
 	TransitionFragment,
 	TransitionRule,
 } from '@dbsp/types';
+import type { RecognitionContext } from '@dbsp/types/internal';
 import {
 	columnShapeFromColumn,
 	compareSetNotNullColumnShape,

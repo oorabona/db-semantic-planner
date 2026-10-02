@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import {
+	admitOutcomeClaim,
 	outcomeClaimEventId,
 	outcomeClaimId,
 	projectLedgerChain,
-} from '@dbsp/core';
-import { admitOutcomeClaim } from '@dbsp/core/internal';
+} from '@dbsp/core/internal';
 import type { LedgerAddress, LedgerHome, LedgerPayload } from '@dbsp/types';
 import type { PoolClient, QueryConfig } from 'pg';
 import {

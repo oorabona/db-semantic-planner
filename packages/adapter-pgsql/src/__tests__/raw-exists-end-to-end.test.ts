@@ -17,10 +17,10 @@ import {
 	or,
 	outerRef,
 	rawExists,
-	rawNotExists,
 	schema,
 	subquery,
 } from '@dbsp/core';
+import { rawNotExists } from '@dbsp/core/internal';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 

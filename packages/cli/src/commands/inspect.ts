@@ -9,15 +9,18 @@ import {
 	readPgLedgerAddressChain,
 	readPgLedgerMarker,
 } from '@dbsp/adapter-pgsql';
-import { acquireTransitionLease, projectLedgerChain } from '@dbsp/core';
+import {
+	acquireTransitionLease,
+	projectLedgerChain,
+} from '@dbsp/core/internal';
 import {
 	canonicalResourceParent,
 	type LedgerAddress,
 	type LedgerChainProjection,
 	type LedgerHome,
 	type LedgerStableState,
-	type RefusalCode,
 } from '@dbsp/types';
+import type { RefusalCode } from '@dbsp/types/internal';
 import { Command } from 'commander';
 import { createDbConnection } from '../utils/db-utils.js';
 import { printCliJson, serializeCliJson } from '../utils/output.js';

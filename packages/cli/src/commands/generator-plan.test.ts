@@ -1,4 +1,4 @@
-import { validateNormalizedManagedStepManifest } from '@dbsp/core';
+import { validateNormalizedManagedStepManifest } from '@dbsp/core/internal';
 import type { NormalizedManagedStep } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 

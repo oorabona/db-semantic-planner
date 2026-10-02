@@ -9,4 +9,4 @@
  */
 
 // Re-export everything from @dbsp/types (types + type guards + helpers)
-export * from '@dbsp/types';
+export * from '@dbsp/types/internal';

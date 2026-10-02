@@ -1,4 +1,4 @@
-import { canonicalJsonDigest } from '@dbsp/core';
+import { canonicalJsonDigest } from '@dbsp/core/internal';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fixture = vi.hoisted(() => {
@@ -94,8 +94,8 @@ vi.mock('./readdress.js', () => ({ recoverPgReaddressPair: vi.fn() }));
 vi.mock('./operations/create-unique-index-concurrently.js', () => ({
 	assertCreateUniqueIndexConcurrentlyRecoveryNotInvalid: vi.fn(),
 }));
-vi.mock('@dbsp/core', async (importOriginal) => ({
-	...(await importOriginal<typeof import('@dbsp/core')>()),
+vi.mock('@dbsp/core/internal', async (importOriginal) => ({
+	...(await importOriginal<typeof import('@dbsp/core/internal')>()),
 	acquireExclusiveTransitionLease: vi.fn(async () => ({
 		session: fixture.session,
 		release: vi.fn(),

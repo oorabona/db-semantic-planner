@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 import {
 	createExclusiveTransitionTarget,
 	createTransitionLessor,
-} from '@dbsp/core';
-import { transitionPhysicalSessionIsCompromised } from '@dbsp/core/internal';
+	transitionPhysicalSessionIsCompromised,
+} from '@dbsp/core/internal';
 import type {
 	ExclusiveTransitionTarget,
 	TransitionLessor,

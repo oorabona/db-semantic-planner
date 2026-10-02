@@ -1,10 +1,10 @@
+import { POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 import {
 	DUCKDB_CAPABILITIES,
 	MSSQL_CAPABILITIES,
 	MYSQL_CAPABILITIES,
-	POSTGRESQL_CAPABILITIES,
 	SQLITE_CAPABILITIES,
-} from '@dbsp/core';
+} from '@dbsp/core/internal';
 import type { DialectCapabilities, PlanReport } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';

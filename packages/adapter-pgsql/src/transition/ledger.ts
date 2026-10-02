@@ -1,14 +1,16 @@
 import { createHash } from 'node:crypto';
+import type {
+	LedgerChainMember,
+	LedgerClaimKind,
+	LedgerEventKind,
+	LedgerHome,
+} from '@dbsp/types';
 import {
-	type LedgerChainMember,
-	type LedgerClaimKind,
-	type LedgerEventKind,
-	type LedgerHome,
 	type LedgerIdentity,
 	type LedgerReservationRow,
 	ledgerAddressKey,
 	ledgerAddressParentJson,
-} from '@dbsp/types';
+} from '@dbsp/types/internal';
 import { validateIdentifier } from '../validate.js';
 import {
 	DBSP_LEDGER_EVENT_TABLE,

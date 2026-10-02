@@ -1,8 +1,5 @@
-import {
-	type LedgerAddress,
-	REFUSAL_VOCABULARY,
-	refusalFor,
-} from '@dbsp/types';
+import { type LedgerAddress, refusalFor } from '@dbsp/types';
+import { REFUSAL_VOCABULARY } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import { serializeCliJson } from '../utils/output.js';
 import { formatApplyHuman } from './apply.js';

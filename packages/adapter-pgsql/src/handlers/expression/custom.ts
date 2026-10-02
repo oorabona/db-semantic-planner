@@ -5,7 +5,7 @@
  * Core function: compileExpressionIntent — recursive dispatcher used by SELECT, WHERE, ORDER BY.
  */
 
-import { validateTypeName } from '@dbsp/core';
+import { validateTypeName } from '@dbsp/core/internal';
 import type {
 	AggOrderByArg,
 	ArrayExpressionIntent,
@@ -17,9 +17,9 @@ import type {
 	NamedArgExpressionIntent,
 	ParamExpressionIntent,
 	RefExpressionIntent,
-	SubqueryExpressionIntent,
 	UnaryExpressionIntent,
 } from '@dbsp/types';
+import type { SubqueryExpressionIntent } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import {
 	booleanConstNode,

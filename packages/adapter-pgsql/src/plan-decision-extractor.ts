@@ -8,7 +8,7 @@
  * All functions are stateless pure functions operating on PlanReport data.
  */
 
-import { deriveRelationPathFromIntentPath } from '@dbsp/core';
+import { deriveRelationPathFromIntentPath } from '@dbsp/core/internal';
 import type { ModelIR, PlanReport, WhereIntent } from '@dbsp/types';
 import { type ColumnListInput, toColumnList } from '@dbsp/types';
 import type { Node } from '@pgsql/types';

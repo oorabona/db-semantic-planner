@@ -31,13 +31,13 @@ import {
 	modelForDeclaredAdoption,
 	pgDeclaredAdoptionDeclaration,
 } from '@dbsp/adapter-pgsql/internal';
-import type { InProcessProvenPlan } from '@dbsp/core';
+import type { InProcessProvenPlan } from '@dbsp/core/internal';
 import {
 	acquireTransitionLease,
 	canonicalJsonDigest,
 	transitionPlanDigest,
 	validateNormalizedManagedStepManifest,
-} from '@dbsp/core';
+} from '@dbsp/core/internal';
 import type {
 	CatalogueIdentity,
 	LedgerAddress,

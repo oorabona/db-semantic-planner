@@ -12,7 +12,7 @@
  *  - assert-field.ts              (75% → missing value with/without context)
  */
 
-import { supportsTransactions } from '@dbsp/core';
+import { supportsTransactions } from '@dbsp/core/internal';
 import type { RecursivePlanReport } from '@dbsp/types';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import type { Pool, PoolClient, QueryConfig, QueryResult } from 'pg';

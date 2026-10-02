@@ -3,12 +3,8 @@ import {
 	readPgCatalogueIdentity,
 	readTransitionJournal,
 } from '@dbsp/adapter-pgsql';
-import {
-	admitRecordedIdentity,
-	declarationSetFromModel,
-	type ModelIR,
-	type TableIR,
-} from '@dbsp/core';
+import { admitRecordedIdentity, type ModelIR, type TableIR } from '@dbsp/core';
+import { declarationSetFromModel } from '@dbsp/core/internal';
 import { afterAll, afterEach, beforeAll, expect, it } from 'vitest';
 import { runApply } from '../../packages/cli/src/commands/apply.js';
 import { runPlan } from '../../packages/cli/src/commands/plan.js';

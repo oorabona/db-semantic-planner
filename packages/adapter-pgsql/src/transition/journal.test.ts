@@ -1,4 +1,4 @@
-import { transitionPlanDigest } from '@dbsp/core';
+import { transitionPlanDigest } from '@dbsp/core/internal';
 import type {
 	DurableIntentRecord,
 	NormalizedManagedStep,

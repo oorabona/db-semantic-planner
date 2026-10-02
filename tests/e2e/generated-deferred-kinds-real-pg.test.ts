@@ -3,8 +3,10 @@ import {
 	executeGeneratorPlan,
 	lockPgJournalRun,
 } from '@dbsp/adapter-pgsql/internal';
-import { transitionPlanDigest } from '@dbsp/core';
-import { mintDurablyLoadedRun } from '@dbsp/core/internal';
+import {
+	mintDurablyLoadedRun,
+	transitionPlanDigest,
+} from '@dbsp/core/internal';
 import type { Pool, PoolClient } from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { GeneratorDurablePlan } from '../../packages/cli/src/commands/generator-plan.js';

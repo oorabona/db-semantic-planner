@@ -1,12 +1,11 @@
 import { createHash } from 'node:crypto';
-import { createEvidenceView } from '@dbsp/core';
+import { createEvidenceView } from '@dbsp/core/internal';
 import type {
 	AdvisoryObservation,
 	ApplyGuard,
 	Assumption,
 	DurableIntentRecord,
 	EquivalenceContext,
-	EquivalenceResult,
 	EvidenceObservation,
 	FingerprintManifest,
 	IssuedObservation,
@@ -21,6 +20,7 @@ import type {
 	TransactionalCompletionRecord,
 	TransitionSessionClient,
 } from '@dbsp/types';
+import type { EquivalenceResult } from '@dbsp/types/internal';
 import {
 	clampTransactionTimeoutMs,
 	setLocalTransactionTimeoutSql,

@@ -37,17 +37,17 @@ import {
 	type InProcessProvenPlan,
 	type PackRegistry,
 	validateDeclarationModel,
-} from '@dbsp/core';
+} from '@dbsp/core/internal';
 import type {
 	CompareOutcome,
 	ExecutionContract,
 	ModelIR,
 	ObservationContext,
 	PlanAssessment,
-	PostgreSqlObservationTargetIdentity,
 	TransitionRunMetadata,
 	TransitionSessionClient,
 } from '@dbsp/types';
+import type { PostgreSqlObservationTargetIdentity } from '@dbsp/types/internal';
 import { Command } from 'commander';
 import type { Pool, PoolClient } from 'pg';
 import { createDbConnection } from '../utils/db-utils.js';

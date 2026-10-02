@@ -8,8 +8,9 @@ import {
 	type PgReinitializePreflightPool,
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
-import { declarationSetFromModel } from '@dbsp/core';
-import type { DeclarationSet, ReinitializePreflightReport } from '@dbsp/types';
+import { declarationSetFromModel } from '@dbsp/core/internal';
+import type { DeclarationSet } from '@dbsp/types';
+import type { ReinitializePreflightReport } from '@dbsp/types/internal';
 import { Command } from 'commander';
 import { createDbConnection } from '../utils/db-utils.js';
 import { loadSchema } from '../utils/schema-loader.js';

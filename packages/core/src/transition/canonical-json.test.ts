@@ -1,9 +1,9 @@
+import { describe, expect, it } from 'vitest';
 import {
 	CanonicalJsonError,
 	canonicalJson,
 	canonicalJsonDigest,
-} from '@dbsp/core';
-import { describe, expect, it } from 'vitest';
+} from './canonical-json.js';
 
 describe('canonical durable JSON payloads', () => {
 	it('keeps a payload digest stable across a jsonb-style key reorder', () => {

@@ -18,17 +18,15 @@ import {
 	convergePg,
 	PgConvergeRefusalError,
 } from '@dbsp/adapter-pgsql/internal';
+import { resetLogger, setLogger } from '@dbsp/core';
 import {
 	projectLedgerChain,
-	resetLogger,
 	semanticArtifactId,
-	setLogger,
 	transitionPlanDigest,
-} from '@dbsp/core';
+} from '@dbsp/core/internal';
 import type {
 	EnumIR,
 	LedgerAddress,
-	LedgerReservationRow,
 	ModelIR,
 	PhysicalOperation,
 	ProvenPlanShape,
@@ -36,6 +34,7 @@ import type {
 	TableIR,
 	TransitionRunMetadata,
 } from '@dbsp/types';
+import type { LedgerReservationRow } from '@dbsp/types/internal';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {

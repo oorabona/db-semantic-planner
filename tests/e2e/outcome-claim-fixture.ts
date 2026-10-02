@@ -2,12 +2,14 @@
 import { openPgOutcomeClaim } from '@dbsp/adapter-pgsql/internal';
 import {
 	type LedgerAddress,
-	type LedgerRefusal,
-	type LedgerReservationRow,
 	type OutcomeClaimPlan,
-	type RefusalCode,
 	refusalFor,
 } from '@dbsp/types';
+import type {
+	LedgerRefusal,
+	LedgerReservationRow,
+	RefusalCode,
+} from '@dbsp/types/internal';
 
 export interface FixtureOutcomeClaimInput {
 	readonly claimId: string;

@@ -1,17 +1,19 @@
 import type {
 	Assumption,
-	CollationRef,
 	EquivalenceCapability,
 	EquivalenceContext,
-	EquivalenceResult,
 	EvidenceView,
-	ExpressionEquivalenceCategory,
 	ExpressionValue,
 	JsonValue,
 	ProofClaimDraft,
 	ProofObligation,
-	TypeRef,
 } from '@dbsp/types';
+import type {
+	CollationRef,
+	EquivalenceResult,
+	ExpressionEquivalenceCategory,
+	TypeRef,
+} from '@dbsp/types/internal';
 import {
 	EXPRESSION_DEPARSE_OBSERVATION,
 	PG_DEPARSE_ARTIFACT,

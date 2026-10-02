@@ -28,10 +28,9 @@ import type {
 	Cardinality as ModelCardinality,
 	ModelIR,
 	Optionality,
-	RelationIR,
-	RelationType,
 	TableIR,
 } from '../index.js';
+import type { RelationIR, RelationType } from '../internal.js';
 
 // Re-export for backwards compatibility
 export { singularize };

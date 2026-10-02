@@ -6,10 +6,10 @@ import type {
 	EnumIR,
 	ForeignKeyIR,
 	IndexIR,
-	PartitionIR,
 	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
+import type { PartitionIR } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import {
 	compareSchemata as comparePhysicalSchemata,

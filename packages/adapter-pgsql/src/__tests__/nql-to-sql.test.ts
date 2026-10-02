@@ -37,11 +37,11 @@ import type {
 	SetOperationIntent,
 	UpsertFromIntent,
 } from '@dbsp/types';
+import { NQL_SELECT_SCALAR_FUNCTIONS } from '@dbsp/types';
 import {
-	NQL_SELECT_SCALAR_FUNCTIONS,
+	createNqlBindingRef,
 	NQL_SELECT_WINDOW_FUNCTIONS,
-} from '@dbsp/types';
-import { createNqlBindingRef } from '@dbsp/types/internal';
+} from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { intentToDecisions } from '../intent-to-decisions.js';
