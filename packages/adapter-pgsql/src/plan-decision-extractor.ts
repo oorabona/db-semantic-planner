@@ -308,6 +308,8 @@ export function convertWhereToDecisions(
 			];
 		case 'and': {
 			const conditions = w.conditions as unknown[];
+			if (conditions.length === 0)
+				return [{ type: 'whereAnd', conditions: [] }];
 			const subDecisions = conditions.flatMap((c) =>
 				convertWhereToDecisions(c, table),
 			);
@@ -317,6 +319,7 @@ export function convertWhereToDecisions(
 		}
 		case 'or': {
 			const conditions = w.conditions as unknown[];
+			if (conditions.length === 0) return [{ type: 'whereOr', conditions: [] }];
 			const subDecisions = conditions.flatMap((c) =>
 				convertWhereToDecisions(c, table),
 			);

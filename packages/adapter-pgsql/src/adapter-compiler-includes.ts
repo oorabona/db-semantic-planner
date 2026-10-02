@@ -66,6 +66,11 @@ export function compileSubqueryInclude(
 	_options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
+	if (info.where) {
+		throw new Error(
+			`Include where is not supported for strategy subquery at include(${info.relationName}).where (oorabona/db-semantic-planner#892).`,
+		);
+	}
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const schemaName = deps.schemaName;
 	const state = createCompilerState();

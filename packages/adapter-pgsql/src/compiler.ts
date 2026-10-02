@@ -40,8 +40,6 @@ import {
 	integerNode,
 	leftJoin,
 	mapLockToAst,
-	notExpr,
-	orExpr,
 	selectStmt,
 	sortBy,
 	sqlColumnRef,
@@ -325,10 +323,9 @@ export function buildCustomFnFilter(
 	state: HandlerCompilerState,
 ): Node {
 	// Fail loud rather than treat "could not lower" as "no filter": a filter that
-	// lowers to nothing (e.g. an empty or()/and(), or an unsupported condition kind)
-	// must NOT silently drop to an unfiltered aggregate, which would broaden results.
-	// Well-defined degenerate semantics (empty or -> FALSE, empty and -> TRUE) are a
-	// separate condition-compiler concern tracked in #296.
+	// lowers to nothing (a malformed or unsupported condition) must NOT silently
+	// drop to an unfiltered aggregate, which would broaden results. An empty or()
+	// lowers to FALSE and an empty and() to TRUE, so neither reaches this branch.
 	const filterDecision = convertWhereCondition(filterIntent, ctx.rootTable);
 	const filterNode = filterDecision
 		? compileFilterCondition(
@@ -341,7 +338,7 @@ export function buildCustomFnFilter(
 	if (!filterNode) {
 		throw new Error(
 			'fn().filter(): the FILTER (WHERE ...) condition could not be compiled ' +
-				'(e.g. an empty or()/and() or an unsupported condition). ' +
+				'(a malformed or unsupported condition). ' +
 				'Provide a concrete filter condition.',
 		);
 	}
@@ -2805,44 +2802,12 @@ export class PlanCompiler {
 			}
 
 			case 'whereAnd':
-				if (decision.conditions) {
-					const andConditions = decision.conditions.map((c) =>
-						this.dispatchWhere(c),
-					);
-					const combined =
-						andConditions.length === 1
-							? andConditions[0]!
-							: andExpr(...andConditions);
-					return currentWhere ? andExpr(currentWhere, combined) : combined;
-				}
-				return currentWhere;
-
 			case 'whereOr':
-				if (decision.conditions) {
-					const orConditions = decision.conditions.map((c) =>
-						this.dispatchWhere(c),
-					);
-					const combined =
-						orConditions.length === 1
-							? orConditions[0]!
-							: orExpr(...orConditions);
-					return currentWhere ? andExpr(currentWhere, combined) : combined;
-				}
-				return currentWhere;
-
-			case 'whereNot':
-				if (decision.conditions) {
-					const notConditions = decision.conditions.map((c) =>
-						this.dispatchWhere(c),
-					);
-					const innerExpr =
-						notConditions.length === 1
-							? notConditions[0]!
-							: andExpr(...notConditions);
-					const negated = notExpr(innerExpr);
-					return currentWhere ? andExpr(currentWhere, negated) : negated;
-				}
-				return currentWhere;
+			case 'whereNot': {
+				if (!decision.conditions) return currentWhere;
+				const combined = this.dispatchWhere(decision);
+				return currentWhere ? andExpr(currentWhere, combined) : combined;
+			}
 
 			default:
 				return currentWhere;
@@ -3221,6 +3186,14 @@ export class PlanCompiler {
 		decision: PlanDecision,
 		decisions: readonly PlanDecision[],
 	): PlanDecision {
+		if (decision.conditions) {
+			return {
+				...decision,
+				conditions: decision.conditions.map((child) =>
+					this.resolveHavingAggregateAlias(child, decisions),
+				),
+			};
+		}
 		if (!decision.column) return decision;
 		const projection = decisions.find(
 			(candidate) =>
@@ -3230,6 +3203,7 @@ export class PlanCompiler {
 		if (!projection?.function || !projection.column) return decision;
 		return {
 			...decision,
+			type: 'having',
 			column: projection.column,
 			function: projection.function,
 			...(projection.distinct !== undefined && {
@@ -3324,7 +3298,12 @@ export class PlanCompiler {
 
 				case 'having':
 					having = this.dispatchWhere(
-						this.resolveHavingAggregateAlias(decision, decisions),
+						this.resolveHavingAggregateAlias(
+							decision.conditions
+								? { type: 'whereAnd', conditions: decision.conditions }
+								: decision,
+							decisions,
+						),
 					);
 					break;
 

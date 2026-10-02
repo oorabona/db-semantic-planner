@@ -923,7 +923,8 @@ orm.select('users')
 
 ```typescript
 orm.select('users').include('posts', {
-  where: eq('published', true),                          // filter related records
+  join: 'inner',
+  where: eq('published', true),                          // root WHERE predicate on a join include
   select: { type: 'fields', fields: ['title', 'slug'] }, // select specific columns
   via: 'authoredPosts',                                  // disambiguate relation
 })
@@ -931,7 +932,8 @@ orm.select('users').include('posts', {
 
 | Option | Type | Description |
 |--------|------|-------------|
-| `where` | `WhereIntent` | Filter conditions on related records |
+| `join` | `'inner' \| 'left'` | Join type |
+| `where` | `WhereIntent` | Added to the root WHERE; join includes only, other strategies refuse it (#892) |
 | `select` | `SelectSpec` | Select specific columns |
 | `via` | `string` | Disambiguate multiple relations to same table |
 | `recursive` | `boolean` | Enable recursive CTE traversal |

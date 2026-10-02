@@ -175,12 +175,15 @@ describe('#251 fn().filter() in expression positions', () => {
 	});
 
 	it('fails loud instead of dropping FILTER when the condition lowers to nothing', () => {
-		// An empty or() lowers to null; silently omitting the FILTER would broaden a
-		// zero-row aggregate to all rows. It must throw rather than drop.
+		// A malformed leaf still lowers to null; omitting its FILTER would broaden results.
 		expect(() =>
 			buildOrm()
 				.select('tool_metrics')
-				.columns([fn('count', star()).filter(or()).as('c')])
+				.columns([
+					fn('count', star())
+						.filter({ kind: 'subquery' } as WhereIntent)
+						.as('c'),
+				])
 				.dump(),
 		).toThrow(/could not be compiled/);
 	});

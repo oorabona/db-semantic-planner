@@ -12,7 +12,7 @@ Multi-tenant applications add another layer of complexity. Schema-per-tenant iso
 
 ## How dbsp is different
 
-db-semantic-planner is built around an intent-first paradigm. You declare what data you need — `orm.select('users').include('posts').where(eq('active', true))` — and the planner decides how to fetch it. The planner selects the optimal include strategy (`json_agg`, lateral join, correlated subquery, or CTE) based on the query shape, relation cardinality, and dialect capabilities. You do not choose the strategy; the planner does, and it explains why.
+db-semantic-planner is built around an intent-first paradigm. You declare what data you need — `orm.select('users').include('posts').where(eq('active', true))` — and the planner decides how to fetch it. The planner selects the optimal include strategy (`json_agg`, lateral join, correlated subquery, or CTE) based on the query shape, relation cardinality, and dialect capabilities. By default the planner chooses the strategy, and it explains why.
 
 Every decision is observable. `.dump()` returns the full plan with reasoning, the compiled SQL, and the bound parameters — before execution. You can inspect what the planner chose and why, log it, or test it without a database connection. This makes debugging deterministic: same inputs always produce the same plan.
 

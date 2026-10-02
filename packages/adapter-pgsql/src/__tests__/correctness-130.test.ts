@@ -840,8 +840,8 @@ describe('FIX 1 (intent-to-decisions): mode:every emits operator:every NOT opera
 		expect(decision?.conditions ?? []).toHaveLength(0);
 	});
 
-	it('convertWhereCondition mode:every with empty and() emits operator:"every" with no conditions', () => {
-		// Vacuous via empty-and: same as undefined — must still emit operator:'every'
+	it('convertWhereCondition mode:every with empty and() emits operator:"every" with a true condition', () => {
+		// Empty AND stays an explicit true predicate under EVERY.
 		const intent = {
 			kind: 'relationFilter' as const,
 			relation: 'posts',
@@ -851,8 +851,9 @@ describe('FIX 1 (intent-to-decisions): mode:every emits operator:every NOT opera
 		const decision = convertWhereCondition(intent as any, 'users');
 		expect(decision).not.toBeNull();
 		expect(decision?.operator).toBe('every');
-		// convertExistsLike converts and([]) to [] subDecisions → no conditions on decision
-		expect(decision?.conditions ?? []).toHaveLength(0);
+		expect(decision?.conditions).toEqual([
+			{ type: 'whereAnd', conditions: [] },
+		]);
 	});
 
 	it('convertWhereCondition mode:every with real predicate emits conditions (NOT pre-negated)', () => {

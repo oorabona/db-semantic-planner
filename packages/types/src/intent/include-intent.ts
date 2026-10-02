@@ -63,7 +63,10 @@ export interface IncludeIntent {
 	/** What columns to select from related records */
 	readonly select?: SelectIntent | undefined;
 
-	/** Filter conditions on related records */
+	/**
+	 * Added to the root WHERE. Accepted only when the include compiles as a join;
+	 * other include strategies refuse it (#892).
+	 */
 	readonly where?: WhereIntent | undefined;
 
 	/** Nested includes for deep loading */

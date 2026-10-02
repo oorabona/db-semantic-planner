@@ -6,8 +6,8 @@
  * 3. Range with model but table not found       → graceful fallback (no cast)
  * 4. LIKE with escape character                 → SQL with ESCAPE $N
  * 5. Range operator 'between' always uses BETWEEN regardless of model/type
- * 6. Empty AND conditions                       → tautology cast(1 as bool)
- * 7. Empty OR conditions                        → contradiction cast(0 as bool)
+ * 6. Empty AND conditions                       → boolean true
+ * 7. Empty OR conditions                        → boolean false
  * 8. Single-element AND/OR unwraps to the child node
  * 9. NOT wraps child expression
  * 10. Range 'overlaps' on non-range column (no model dataType) → plain &&
@@ -385,24 +385,15 @@ describe('compileWhereIntent — like with escape character', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 6. Empty AND → tautology (cast(1 as bool))
+// 6. Empty AND → tautology (true)
 // ---------------------------------------------------------------------------
 
 describe('compileWhereIntent — empty AND is a tautology', () => {
-	it('should return a truthy constant (TypeCast with ival=1) for empty AND', () => {
+	it('should return a truthy constant (boolean true) for empty AND', () => {
 		const ctx = makeCtx();
 		const node = compileWhereIntent({ kind: 'and', conditions: [] }, ctx);
 
-		// The node must be a TypeCast wrapping Integer ival=1
-		const rec = node as Record<string, unknown>;
-		expect(Object.keys(rec)).toEqual(['TypeCast']);
-
-		const tc = rec.TypeCast as Record<string, unknown>;
-		const arg = tc.arg as Record<string, unknown>;
-		expect(arg).toBeDefined();
-		expect(Object.keys(arg)).toContain('Integer');
-		const integer = arg.Integer as Record<string, unknown>;
-		expect(integer.ival).toBe(1);
+		expect(node).toEqual({ A_Const: { boolval: { boolval: true } } });
 
 		// No params pushed
 		expect(ctx.paramState.parameters).toEqual([]);
@@ -410,23 +401,15 @@ describe('compileWhereIntent — empty AND is a tautology', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 7. Empty OR → contradiction (cast(0 as bool))
+// 7. Empty OR → contradiction (false)
 // ---------------------------------------------------------------------------
 
 describe('compileWhereIntent — empty OR is a contradiction', () => {
-	it('should return a falsy constant (TypeCast with ival=0) for empty OR', () => {
+	it('should return a falsy constant (boolean false) for empty OR', () => {
 		const ctx = makeCtx();
 		const node = compileWhereIntent({ kind: 'or', conditions: [] }, ctx);
 
-		const rec = node as Record<string, unknown>;
-		expect(Object.keys(rec)).toEqual(['TypeCast']);
-
-		const tc = rec.TypeCast as Record<string, unknown>;
-		const arg = tc.arg as Record<string, unknown>;
-		expect(arg).toBeDefined();
-		expect(Object.keys(arg)).toContain('Integer');
-		const integer = arg.Integer as Record<string, unknown>;
-		expect(integer.ival).toBe(0);
+		expect(node).toEqual({ A_Const: { boolval: { boolval: false } } });
 
 		expect(ctx.paramState.parameters).toEqual([]);
 	});

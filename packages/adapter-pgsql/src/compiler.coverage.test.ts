@@ -1429,7 +1429,10 @@ describe('PlanCompiler - Coverage Tests', () => {
 			const compiler = new PlanCompiler();
 			const result = compiler.compile(plan);
 			const sql = normalizeSQL(result.sql);
-			expect(sql).toContain('not');
+			expect(sql).toBe(
+				'select * from users where not (users.role = $1 and users.active = $2)',
+			);
+			expect(result.parameters).toEqual(['guest', false]);
 		});
 	});
 

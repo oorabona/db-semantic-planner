@@ -52,12 +52,14 @@ Each call is independent. Nested paths (like `posts.comments`) automatically tri
 
 ## Include with Options
 
+An include `where` is accepted only when the include compiles as a join, and it is added to the root `WHERE`. Other strategies refuse it. Relation predicates (`exists`, `notExists`, `some`, `every`, `none`) anywhere inside it, including nested query bodies, are also refused. See oorabona/db-semantic-planner#892.
+
 Pass an options object as the second argument to filter, project, or disambiguate the include:
 
 ```typescript
-// Filter related records
+// Keep users with a published post
 const usersFiltered = await orm.select('users')
-  .include('posts', { where: eq('published', true) })
+  .include('posts', { join: 'inner', where: eq('published', true) })
   .dump();
 
 // Select specific columns on the relation
@@ -77,7 +79,8 @@ const posts = await orm.select('posts')
 
 | Option | Type | Description |
 |--------|------|-------------|
-| `where` | `WhereIntent` | Filter conditions applied to related records |
+| `join` | `'inner' \| 'left'` | Join type |
+| `where` | `WhereIntent` | Added to the root WHERE; join includes only |
 | `select` | `SelectSpec` | Columns to select on the related table |
 | `via` | `string` | Relation name hint when multiple FKs point to the same table |
 | `recursive` | `boolean` | Enable recursive CTE traversal (trees/hierarchies) |
@@ -118,12 +121,12 @@ For schema setup with self-referential `ref()` and `roles`, see [Getting Started
 
 ## How the Planner Chooses a Strategy
 
-You never specify the SQL strategy — the planner picks the best one based on query shape:
+The planner picks the SQL strategy from the query shape by default:
 
 | Strategy | When used | Notes |
 |----------|-----------|-------|
 | `json_agg` | Simple 1:N includes on the same root query | Aggregates rows with `json_agg()` + `GROUP BY` |
-| `lateral` | Filtered or ordered sub-collections | Uses `LATERAL` join for per-row subqueries |
+| `lateral` | Flat includes with a per-parent `limit` | Uses `LATERAL` join for per-row subqueries |
 | `subquery` | Large or deeply nested includes | Separate correlated subquery per relation |
 
 Inspect the chosen strategy at any time with `dump()`:

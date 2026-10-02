@@ -205,7 +205,8 @@ export interface IncludeOptions {
 	readonly via?: string;
 
 	/**
-	 * Filter conditions on related records.
+	 * Added to the root WHERE. Accepted only when the include compiles as a join;
+	 * other include strategies refuse it (#892).
 	 */
 	readonly where?: WhereIntent;
 

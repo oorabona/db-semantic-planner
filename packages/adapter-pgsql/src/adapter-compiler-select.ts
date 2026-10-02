@@ -10,6 +10,7 @@ import type {
 	CompiledQuery,
 	CompileOptions,
 	CompileResultWithIncludes,
+	IncludeIntent,
 	JoinIntent,
 	ModelIR,
 	NestedOutputReadHandling,
@@ -1216,6 +1217,70 @@ function buildSimplifiedPlanReport(
 // compile (SELECT)
 // ============================================================================
 
+/** Validate include predicates before lowering or allocating bindings. */
+function assertSupportedIncludeWhere(
+	includes: readonly IncludeIntent[] | undefined,
+	plan: PlanReport,
+	parent = '',
+	intentParent = '',
+): void {
+	for (const [index, include] of (includes ?? []).entries()) {
+		const path = `${parent}include[${index}](${include.relation})`;
+		const intentPath = `${intentParent}include[${index}]`;
+		if (include.where) {
+			const decision = plan.decisions.find(
+				(d) =>
+					d.type === 'include-strategy' &&
+					(d.context.intentPath === intentPath ||
+						(!d.context.intentPath &&
+							(d.context.relation === include.relation ||
+								d.context.includeAlias === include.relation))),
+			);
+			const strategy = decision?.choice ?? (include.join ? 'join' : 'json_agg');
+			// Walk the complete predicate intent, including query and expression bodies.
+			const visit = (node: unknown): void => {
+				if (!node || typeof node !== 'object') return;
+				if (Array.isArray(node)) {
+					for (const child of node) visit(child);
+					return;
+				}
+				const record = node as Record<string, unknown>;
+				if (
+					record.kind === 'exists' ||
+					record.kind === 'notExists' ||
+					record.kind === 'relationFilter'
+				) {
+					throw new Error(
+						`Relation predicates inside an include where are not supported yet at ${path}.where for strategy ${strategy} (oorabona/db-semantic-planner#892).`,
+					);
+				}
+				for (const [key, child] of Object.entries(record)) {
+					// Literal payloads are data, rather than query/expression intent.
+					if (
+						key === 'values' ||
+						(key === 'value' && record.kind !== 'namedArg')
+					)
+						continue;
+					visit(child);
+				}
+			};
+			visit(include.where);
+
+			if (strategy !== 'join') {
+				throw new Error(
+					`Include where is not supported for strategy ${strategy} at ${path}.where (oorabona/db-semantic-planner#892).`,
+				);
+			}
+		}
+		assertSupportedIncludeWhere(
+			include.include,
+			plan,
+			`${path}.`,
+			`${intentPath}.`,
+		);
+	}
+}
+
 /**
  * Compile a PlanReport to a parameterised SELECT query.
  * Extracted body of PgsqlAdapter.compile().
@@ -1286,6 +1351,7 @@ export function compileSelectEnvelope<T = unknown>(
 	let simplifiedPlan: SimplifiedPlanReport;
 
 	if (execIntent) {
+		assertSupportedIncludeWhere(execIntent.include, planForCompilation);
 		// Real usage: convert intent to decisions
 		let decisions = intentToDecisions(execIntent, plan.rootTable);
 		const resolvedModel = options?.model ?? deps.model;

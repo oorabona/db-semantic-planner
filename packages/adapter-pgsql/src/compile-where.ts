@@ -32,6 +32,7 @@ import type { Node, SelectStmt, SubLink } from '@pgsql/types';
 import {
 	andExpr,
 	binaryExpr,
+	booleanConstNode,
 	distinctExpr,
 	funcCall,
 	notExpr,
@@ -897,14 +898,7 @@ function handleLogicalIntent(
 		const conditions = (intent as WhereAndIntent).conditions;
 		const nodes = conditions.map((c) => compileWhereIntent(c, ctx));
 		if (nodes.length === 0) {
-			return {
-				TypeCast: {
-					arg: { Integer: { ival: 1 } },
-					typeName: {
-						TypeName: { names: [{ String: { sval: 'bool' } }], typemod: -1 },
-					},
-				},
-			} as unknown as Node;
+			return booleanConstNode(true);
 		}
 		if (nodes.length === 1) return nodes[0]!;
 		return andExpr(...nodes);
@@ -913,14 +907,7 @@ function handleLogicalIntent(
 		const conditions = (intent as WhereOrIntent).conditions;
 		const nodes = conditions.map((c) => compileWhereIntent(c, ctx));
 		if (nodes.length === 0) {
-			return {
-				TypeCast: {
-					arg: { Integer: { ival: 0 } },
-					typeName: {
-						TypeName: { names: [{ String: { sval: 'bool' } }], typemod: -1 },
-					},
-				},
-			} as unknown as Node;
+			return booleanConstNode(false);
 		}
 		if (nodes.length === 1) return nodes[0]!;
 		return orExpr(...nodes);

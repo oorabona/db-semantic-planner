@@ -222,16 +222,18 @@ describe('PostgreSQL Range Types', () => {
 				.withSchema(SCHEMA)
 				.select('rooms')
 				.include('bookings', {
+					join: 'inner',
 					where: rangeOverlaps('bookingPeriod', {
 						lower: '2024-01-15',
 						upper: '2024-01-20',
 					}),
 				})
 				.columns(['id', 'name'])
+				.orderBy('id')
 				.execute();
 
-			// Should find rooms with matching bookings
-			expect(rooms.length).toBeGreaterThan(0);
+			// Team offsite, Interview and Monthly board meetings overlap Jan 15-20.
+			expect(rooms.map((room) => room.id)).toEqual([1, 2, 3]);
 		});
 	});
 
