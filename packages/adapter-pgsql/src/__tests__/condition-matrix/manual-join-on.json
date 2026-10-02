@@ -1,0 +1,2069 @@
+{
+	"sourceCommit": "94a17bda7ecef508cbcd4653d15940c9fd67544f",
+	"entries": [
+		{
+			"position": "manual-join-on",
+			"kind": "eq",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "eq",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "eq",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 OR users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "eq",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.score = $1)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "eq",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "eq",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "eq",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.score = $2) OR users.score = $3)",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "neq",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score <> $1",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "neq",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score <> $1 AND users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "neq",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score <> $1 OR users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "neq",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.score <> $1)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "neq",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "neq",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "neq",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.score <> $2) OR users.score = $3)",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "gt",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score > $1",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "gt",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score > $1 AND users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "gt",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score > $1 OR users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "gt",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.score > $1)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "gt",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "gt",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "gt",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.score > $2) OR users.score = $3)",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "gte",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score >= $1",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "gte",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score >= $1 AND users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "gte",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score >= $1 OR users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "gte",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.score >= $1)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "gte",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "gte",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "gte",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.score >= $2) OR users.score = $3)",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "lt",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score < $1",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "lt",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score < $1 AND users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "lt",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score < $1 OR users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "lt",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.score < $1)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "lt",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "lt",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "lt",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.score < $2) OR users.score = $3)",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "lte",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score <= $1",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "lte",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score <= $1 AND users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "lte",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score <= $1 OR users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "lte",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.score <= $1)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "lte",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "lte",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "lte",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.score <= $2) OR users.score = $3)",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "isDistinctFrom",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score IS DISTINCT FROM $1",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "isDistinctFrom",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score IS DISTINCT FROM $1 AND users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "isDistinctFrom",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score IS DISTINCT FROM $1 OR users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "isDistinctFrom",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.score IS DISTINCT FROM $1)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "isDistinctFrom",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "isDistinctFrom",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "isDistinctFrom",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.score IS DISTINCT FROM $2) OR users.score = $3)",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "eq-null",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = NULL",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "eq-null",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = NULL AND users.score = $1",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "eq-null",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = NULL OR users.score = $1",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "eq-null",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.score = NULL)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "eq-null",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "eq-null",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "eq-null",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.score = NULL) OR users.score = $2)",
+			"params": [13, 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "like",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.name LIKE $1",
+			"params": ["a%"],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "like",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.name LIKE $1 AND users.score = $2",
+			"params": ["a%", 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "like",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.name LIKE $1 OR users.score = $2",
+			"params": ["a%", 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "like",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.name LIKE $1)",
+			"params": ["a%"],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "like",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "like",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "like",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.name LIKE $2) OR users.score = $3)",
+			"params": [13, "a%", 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "ilike",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.name ILIKE $1",
+			"params": ["B%"],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "ilike",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.name ILIKE $1 AND users.score = $2",
+			"params": ["B%", 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "ilike",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.name ILIKE $1 OR users.score = $2",
+			"params": ["B%", 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "ilike",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.name ILIKE $1)",
+			"params": ["B%"],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "ilike",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "ilike",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "ilike",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.name ILIKE $2) OR users.score = $3)",
+			"params": [13, "B%", 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "like-escape",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.name LIKE $1 ESCAPE $2",
+			"params": ["c!_%", "!"],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "like-escape",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.name LIKE $1 ESCAPE $2 AND users.score = $3",
+			"params": ["c!_%", "!", 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "like-escape",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.name LIKE $1 ESCAPE $2 OR users.score = $3",
+			"params": ["c!_%", "!", 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "like-escape",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.name LIKE $1 ESCAPE $2)",
+			"params": ["c!_%", "!"],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "like-escape",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "like-escape",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "like-escape",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.name LIKE $2 ESCAPE $3) OR users.score = $4)",
+			"params": [13, "c!_%", "!", 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "in-values",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = ANY ($1)",
+			"params": [[3, 5]],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "in-values",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = ANY ($1) AND users.score = $2",
+			"params": [[3, 5], 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "in-values",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = ANY ($1) OR users.score = $2",
+			"params": [[3, 5], 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "in-values",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.score = ANY ($1))",
+			"params": [[3, 5]],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "in-values",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "in-values",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "in-values",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.score = ANY ($2)) OR users.score = $3)",
+			"params": [13, [3, 5], 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "in-empty",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "in-empty",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false AND users.score = $1",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "in-empty",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false OR users.score = $1",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "in-empty",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (false)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "in-empty",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "in-empty",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "in-empty",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (false) OR users.score = $2)",
+			"params": [13, 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "any",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = ANY (CAST($1 AS int4[]))",
+			"params": [[3, 5]],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "any",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = ANY (CAST($1 AS int4[])) AND users.score = $2",
+			"params": [[3, 5], 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "any",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = ANY (CAST($1 AS int4[])) OR users.score = $2",
+			"params": [[3, 5], 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "any",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.score = ANY (CAST($1 AS int4[])))",
+			"params": [[3, 5]],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "any",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "any",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "any",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.score = ANY (CAST($2 AS int4[]))) OR users.score = $3)",
+			"params": [13, [3, 5], 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "any-empty",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = ANY (CAST($1 AS int4[]))",
+			"params": [[]],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "any-empty",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = ANY (CAST($1 AS int4[])) AND users.score = $2",
+			"params": [[], 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "any-empty",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = ANY (CAST($1 AS int4[])) OR users.score = $2",
+			"params": [[], 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "any-empty",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.score = ANY (CAST($1 AS int4[])))",
+			"params": [[]],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "any-empty",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "any-empty",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "any-empty",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.score = ANY (CAST($2 AS int4[]))) OR users.score = $3)",
+			"params": [13, [], 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "isNull",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score IS NULL",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "isNull",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score IS NULL AND users.score = $1",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "isNull",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score IS NULL OR users.score = $1",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "isNull",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.score IS NULL)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "isNull",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "isNull",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "isNull",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.score IS NULL) OR users.score = $2)",
+			"params": [13, 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "isNotNull",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score IS NOT NULL",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "isNotNull",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score IS NOT NULL AND users.score = $1",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "isNotNull",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score IS NOT NULL OR users.score = $1",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "isNotNull",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.score IS NOT NULL)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "isNotNull",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "isNotNull",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "isNotNull",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.score IS NOT NULL) OR users.score = $2)",
+			"params": [13, 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "between",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period BETWEEN $1 AND $2",
+			"params": ["2026-01-01", "2026-02-01"],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "between",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period BETWEEN $1 AND $2 AND users.score = $3",
+			"params": ["2026-01-01", "2026-02-01", 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "between",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period BETWEEN $1 AND $2 OR users.score = $3",
+			"params": ["2026-01-01", "2026-02-01", 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "between",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.period BETWEEN $1 AND $2)",
+			"params": ["2026-01-01", "2026-02-01"],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "between",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "between",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "between",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.period BETWEEN $2 AND $3) OR users.score = $4)",
+			"params": [13, "2026-01-01", "2026-02-01", 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-overlaps",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period && CAST($1 AS daterange)",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-overlaps",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period && CAST($1 AS daterange) AND users.score = $2",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-overlaps",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period && CAST($1 AS daterange) OR users.score = $2",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-overlaps",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.period && CAST($1 AS daterange))",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-overlaps",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-overlaps",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-overlaps",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.period && CAST($2 AS daterange)) OR users.score = $3)",
+			"params": [13, "[2026-01-01,2026-02-01)", 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-contains",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period @> CAST($1 AS daterange)",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-contains",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period @> CAST($1 AS daterange) AND users.score = $2",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-contains",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period @> CAST($1 AS daterange) OR users.score = $2",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-contains",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.period @> CAST($1 AS daterange))",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-contains",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-contains",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-contains",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.period @> CAST($2 AS daterange)) OR users.score = $3)",
+			"params": [13, "[2026-01-01,2026-02-01)", 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-contains-point",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period @> CAST($1 AS date)",
+			"params": ["2026-01-15"],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-contains-point",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period @> CAST($1 AS date) AND users.score = $2",
+			"params": ["2026-01-15", 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-contains-point",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period @> CAST($1 AS date) OR users.score = $2",
+			"params": ["2026-01-15", 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-contains-point",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.period @> CAST($1 AS date))",
+			"params": ["2026-01-15"],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-contains-point",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-contains-point",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-contains-point",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.period @> CAST($2 AS date)) OR users.score = $3)",
+			"params": [13, "2026-01-15", 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-containedBy",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period <@ CAST($1 AS daterange)",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-containedBy",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period <@ CAST($1 AS daterange) AND users.score = $2",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-containedBy",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period <@ CAST($1 AS daterange) OR users.score = $2",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-containedBy",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.period <@ CAST($1 AS daterange))",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-containedBy",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-containedBy",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-containedBy",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.period <@ CAST($2 AS daterange)) OR users.score = $3)",
+			"params": [13, "[2026-01-01,2026-02-01)", 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "jsonContains",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.data @> $1",
+			"params": [
+				{
+					"active": true
+				}
+			],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "jsonContains",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.data @> $1 AND users.score = $2",
+			"params": [
+				{
+					"active": true
+				},
+				13
+			],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "jsonContains",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.data @> $1 OR users.score = $2",
+			"params": [
+				{
+					"active": true
+				},
+				13
+			],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "jsonContains",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.data @> $1)",
+			"params": [
+				{
+					"active": true
+				}
+			],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "jsonContains",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "jsonContains",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "jsonContains",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.data @> $2) OR users.score = $3)",
+			"params": [
+				13,
+				{
+					"active": true
+				},
+				17
+			],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "jsonContainedBy",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.data <@ $1",
+			"params": [
+				{
+					"active": true
+				}
+			],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "jsonContainedBy",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.data <@ $1 AND users.score = $2",
+			"params": [
+				{
+					"active": true
+				},
+				13
+			],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "jsonContainedBy",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.data <@ $1 OR users.score = $2",
+			"params": [
+				{
+					"active": true
+				},
+				13
+			],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "jsonContainedBy",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.data <@ $1)",
+			"params": [
+				{
+					"active": true
+				}
+			],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "jsonContainedBy",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "jsonContainedBy",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "jsonContainedBy",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.data <@ $2) OR users.score = $3)",
+			"params": [
+				13,
+				{
+					"active": true
+				},
+				17
+			],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "jsonExists",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.data ? $1",
+			"params": ["active"],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "jsonExists",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.data ? $1 AND users.score = $2",
+			"params": ["active", 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "jsonExists",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.data ? $1 OR users.score = $2",
+			"params": ["active", 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "jsonExists",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.data ? $1)",
+			"params": ["active"],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "jsonExists",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "jsonExists",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "jsonExists",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.data ? $2) OR users.score = $3)",
+			"params": [13, "active", 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "inSubquery",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.id = ANY (SELECT posts_subq_0.id FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1)",
+			"params": [53],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "inSubquery",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.id = ANY (SELECT posts_subq_0.id FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1) AND users.score = $2",
+			"params": [53, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "inSubquery",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.id = ANY (SELECT posts_subq_0.id FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1) OR users.score = $2",
+			"params": [53, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "inSubquery",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.id = ANY (SELECT posts_subq_0.id FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1))",
+			"params": [53],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "inSubquery",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "inSubquery",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "inSubquery",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.id = ANY (SELECT posts_subq_0.id FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $2)) OR users.score = $3)",
+			"params": [13, 53, 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "scalar-subquery",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Subquery in JOIN ON condition is not supported."
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "scalar-subquery",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Subquery in JOIN ON condition is not supported."
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "scalar-subquery",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Subquery in JOIN ON condition is not supported."
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "scalar-subquery",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Subquery in JOIN ON condition is not supported."
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "scalar-subquery",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "scalar-subquery",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "scalar-subquery",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Subquery in JOIN ON condition is not supported."
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "rawExists",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Subquery in JOIN ON condition is not supported."
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "rawExists",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Subquery in JOIN ON condition is not supported."
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "rawExists",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Subquery in JOIN ON condition is not supported."
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "rawExists",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Subquery in JOIN ON condition is not supported."
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "rawExists",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "rawExists",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "rawExists",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Subquery in JOIN ON condition is not supported."
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "rawNotExists",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Subquery in JOIN ON condition is not supported."
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "rawNotExists",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Subquery in JOIN ON condition is not supported."
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "rawNotExists",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Subquery in JOIN ON condition is not supported."
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "rawNotExists",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Subquery in JOIN ON condition is not supported."
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "rawNotExists",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "rawNotExists",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "rawNotExists",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Subquery in JOIN ON condition is not supported."
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "exists",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "exists",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND users.score = $2",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "exists",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR users.score = $2",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "exists",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "exists",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "exists",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "exists",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR users.score = $3)",
+			"params": [13, 61, 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "notExists",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "notExists",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND users.score = $2",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "notExists",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR users.score = $2",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "notExists",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "notExists",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "notExists",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "notExists",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR users.score = $3)",
+			"params": [13, 61, 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "some",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "some",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND users.score = $2",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "some",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR users.score = $2",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "some",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "some",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "some",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "some",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR users.score = $3)",
+			"params": [13, 61, 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "every",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1)))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "every",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) AND users.score = $2",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "every",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) OR users.score = $2",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "every",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "every",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "every",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "every",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $2)))) OR users.score = $3)",
+			"params": [13, 61, 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "none",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "none",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND users.score = $2",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "none",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR users.score = $2",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "none",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "none",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "none",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "none",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR users.score = $3)",
+			"params": [13, 61, 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "expression",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON length(name) > $1",
+			"params": [2],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "expression",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON length(name) > $1 AND users.score = $2",
+			"params": [2, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "expression",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON length(name) > $1 OR users.score = $2",
+			"params": [2, 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "expression",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (length(name) > $1)",
+			"params": [2],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "expression",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "expression",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "expression",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (length(name) > $2) OR users.score = $3)",
+			"params": [13, 2, 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "raw-expression",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "compileExpressionIntent: unsupported expression kind 'raw'"
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "raw-expression",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "compileExpressionIntent: unsupported expression kind 'raw'"
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "raw-expression",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "compileExpressionIntent: unsupported expression kind 'raw'"
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "raw-expression",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "compileExpressionIntent: unsupported expression kind 'raw'"
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "raw-expression",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "raw-expression",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "raw-expression",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "compileExpressionIntent: unsupported expression kind 'raw'"
+		}
+	]
+}

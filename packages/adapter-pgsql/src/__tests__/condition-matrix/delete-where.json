@@ -1,0 +1,2069 @@
+{
+	"sourceCommit": "94a17bda7ecef508cbcd4653d15940c9fd67544f",
+	"entries": [
+		{
+			"position": "delete-where",
+			"kind": "eq",
+			"shape": "leaf",
+			"sql": "DELETE FROM users WHERE users.score = $1",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "eq",
+			"shape": "and",
+			"sql": "DELETE FROM users WHERE users.score = $1 AND users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "eq",
+			"shape": "or",
+			"sql": "DELETE FROM users WHERE users.score = $1 OR users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "eq",
+			"shape": "not",
+			"sql": "DELETE FROM users WHERE NOT (users.score = $1)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "eq",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "eq",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "eq",
+			"shape": "two-level",
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.score = $2) OR users.score = $3)",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "neq",
+			"shape": "leaf",
+			"sql": "DELETE FROM users WHERE users.score <> $1",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "neq",
+			"shape": "and",
+			"sql": "DELETE FROM users WHERE users.score <> $1 AND users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "neq",
+			"shape": "or",
+			"sql": "DELETE FROM users WHERE users.score <> $1 OR users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "neq",
+			"shape": "not",
+			"sql": "DELETE FROM users WHERE NOT (users.score <> $1)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "neq",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "neq",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "neq",
+			"shape": "two-level",
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.score <> $2) OR users.score = $3)",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "gt",
+			"shape": "leaf",
+			"sql": "DELETE FROM users WHERE users.score > $1",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "gt",
+			"shape": "and",
+			"sql": "DELETE FROM users WHERE users.score > $1 AND users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "gt",
+			"shape": "or",
+			"sql": "DELETE FROM users WHERE users.score > $1 OR users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "gt",
+			"shape": "not",
+			"sql": "DELETE FROM users WHERE NOT (users.score > $1)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "gt",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "gt",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "gt",
+			"shape": "two-level",
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.score > $2) OR users.score = $3)",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "gte",
+			"shape": "leaf",
+			"sql": "DELETE FROM users WHERE users.score >= $1",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "gte",
+			"shape": "and",
+			"sql": "DELETE FROM users WHERE users.score >= $1 AND users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "gte",
+			"shape": "or",
+			"sql": "DELETE FROM users WHERE users.score >= $1 OR users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "gte",
+			"shape": "not",
+			"sql": "DELETE FROM users WHERE NOT (users.score >= $1)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "gte",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "gte",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "gte",
+			"shape": "two-level",
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.score >= $2) OR users.score = $3)",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "lt",
+			"shape": "leaf",
+			"sql": "DELETE FROM users WHERE users.score < $1",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "lt",
+			"shape": "and",
+			"sql": "DELETE FROM users WHERE users.score < $1 AND users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "lt",
+			"shape": "or",
+			"sql": "DELETE FROM users WHERE users.score < $1 OR users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "lt",
+			"shape": "not",
+			"sql": "DELETE FROM users WHERE NOT (users.score < $1)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "lt",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "lt",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "lt",
+			"shape": "two-level",
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.score < $2) OR users.score = $3)",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "lte",
+			"shape": "leaf",
+			"sql": "DELETE FROM users WHERE users.score <= $1",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "lte",
+			"shape": "and",
+			"sql": "DELETE FROM users WHERE users.score <= $1 AND users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "lte",
+			"shape": "or",
+			"sql": "DELETE FROM users WHERE users.score <= $1 OR users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "lte",
+			"shape": "not",
+			"sql": "DELETE FROM users WHERE NOT (users.score <= $1)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "lte",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "lte",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "lte",
+			"shape": "two-level",
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.score <= $2) OR users.score = $3)",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "isDistinctFrom",
+			"shape": "leaf",
+			"sql": "DELETE FROM users WHERE users.score IS DISTINCT FROM $1",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "isDistinctFrom",
+			"shape": "and",
+			"sql": "DELETE FROM users WHERE users.score IS DISTINCT FROM $1 AND users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "isDistinctFrom",
+			"shape": "or",
+			"sql": "DELETE FROM users WHERE users.score IS DISTINCT FROM $1 OR users.score = $2",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "isDistinctFrom",
+			"shape": "not",
+			"sql": "DELETE FROM users WHERE NOT (users.score IS DISTINCT FROM $1)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "isDistinctFrom",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "isDistinctFrom",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "isDistinctFrom",
+			"shape": "two-level",
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.score IS DISTINCT FROM $2) OR users.score = $3)",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "eq-null",
+			"shape": "leaf",
+			"sql": "DELETE FROM users WHERE users.score = NULL",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "eq-null",
+			"shape": "and",
+			"sql": "DELETE FROM users WHERE users.score = NULL AND users.score = $1",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "eq-null",
+			"shape": "or",
+			"sql": "DELETE FROM users WHERE users.score = NULL OR users.score = $1",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "eq-null",
+			"shape": "not",
+			"sql": "DELETE FROM users WHERE NOT (users.score = NULL)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "eq-null",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "eq-null",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "eq-null",
+			"shape": "two-level",
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.score = NULL) OR users.score = $2)",
+			"params": [13, 17],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "like",
+			"shape": "leaf",
+			"sql": "DELETE FROM users WHERE users.name LIKE $1",
+			"params": ["a%"],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "like",
+			"shape": "and",
+			"sql": "DELETE FROM users WHERE users.name LIKE $1 AND users.score = $2",
+			"params": ["a%", 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "like",
+			"shape": "or",
+			"sql": "DELETE FROM users WHERE users.name LIKE $1 OR users.score = $2",
+			"params": ["a%", 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "like",
+			"shape": "not",
+			"sql": "DELETE FROM users WHERE NOT (users.name LIKE $1)",
+			"params": ["a%"],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "like",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "like",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "like",
+			"shape": "two-level",
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.name LIKE $2) OR users.score = $3)",
+			"params": [13, "a%", 17],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "ilike",
+			"shape": "leaf",
+			"sql": "DELETE FROM users WHERE users.name ILIKE $1",
+			"params": ["B%"],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "ilike",
+			"shape": "and",
+			"sql": "DELETE FROM users WHERE users.name ILIKE $1 AND users.score = $2",
+			"params": ["B%", 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "ilike",
+			"shape": "or",
+			"sql": "DELETE FROM users WHERE users.name ILIKE $1 OR users.score = $2",
+			"params": ["B%", 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "ilike",
+			"shape": "not",
+			"sql": "DELETE FROM users WHERE NOT (users.name ILIKE $1)",
+			"params": ["B%"],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "ilike",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "ilike",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "ilike",
+			"shape": "two-level",
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.name ILIKE $2) OR users.score = $3)",
+			"params": [13, "B%", 17],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "like-escape",
+			"shape": "leaf",
+			"sql": "DELETE FROM users WHERE users.name LIKE $1",
+			"params": ["c!_%"],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "like-escape",
+			"shape": "and",
+			"sql": "DELETE FROM users WHERE users.name LIKE $1 AND users.score = $2",
+			"params": ["c!_%", 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "like-escape",
+			"shape": "or",
+			"sql": "DELETE FROM users WHERE users.name LIKE $1 OR users.score = $2",
+			"params": ["c!_%", 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "like-escape",
+			"shape": "not",
+			"sql": "DELETE FROM users WHERE NOT (users.name LIKE $1)",
+			"params": ["c!_%"],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "like-escape",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "like-escape",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "like-escape",
+			"shape": "two-level",
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.name LIKE $2) OR users.score = $3)",
+			"params": [13, "c!_%", 17],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "in-values",
+			"shape": "leaf",
+			"sql": "DELETE FROM users WHERE users.score = ANY ($1)",
+			"params": [[3, 5]],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "in-values",
+			"shape": "and",
+			"sql": "DELETE FROM users WHERE users.score = ANY ($1) AND users.score = $2",
+			"params": [[3, 5], 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "in-values",
+			"shape": "or",
+			"sql": "DELETE FROM users WHERE users.score = ANY ($1) OR users.score = $2",
+			"params": [[3, 5], 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "in-values",
+			"shape": "not",
+			"sql": "DELETE FROM users WHERE NOT (users.score = ANY ($1))",
+			"params": [[3, 5]],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "in-values",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "in-values",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "in-values",
+			"shape": "two-level",
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.score = ANY ($2)) OR users.score = $3)",
+			"params": [13, [3, 5], 17],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "in-empty",
+			"shape": "leaf",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "in-empty",
+			"shape": "and",
+			"sql": "DELETE FROM users WHERE false AND users.score = $1",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "in-empty",
+			"shape": "or",
+			"sql": "DELETE FROM users WHERE false OR users.score = $1",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "in-empty",
+			"shape": "not",
+			"sql": "DELETE FROM users WHERE NOT (false)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "in-empty",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "in-empty",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "in-empty",
+			"shape": "two-level",
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (false) OR users.score = $2)",
+			"params": [13, 17],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "any",
+			"shape": "leaf",
+			"sql": "DELETE FROM users WHERE users.score = ANY (CAST($1 AS int4[]))",
+			"params": [[3, 5]],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "any",
+			"shape": "and",
+			"sql": "DELETE FROM users WHERE users.score = ANY (CAST($1 AS int4[])) AND users.score = $2",
+			"params": [[3, 5], 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "any",
+			"shape": "or",
+			"sql": "DELETE FROM users WHERE users.score = ANY (CAST($1 AS int4[])) OR users.score = $2",
+			"params": [[3, 5], 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "any",
+			"shape": "not",
+			"sql": "DELETE FROM users WHERE NOT (users.score = ANY (CAST($1 AS int4[])))",
+			"params": [[3, 5]],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "any",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "any",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "any",
+			"shape": "two-level",
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.score = ANY (CAST($2 AS int4[]))) OR users.score = $3)",
+			"params": [13, [3, 5], 17],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "any-empty",
+			"shape": "leaf",
+			"sql": "DELETE FROM users WHERE users.score = ANY (CAST($1 AS int4[]))",
+			"params": [[]],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "any-empty",
+			"shape": "and",
+			"sql": "DELETE FROM users WHERE users.score = ANY (CAST($1 AS int4[])) AND users.score = $2",
+			"params": [[], 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "any-empty",
+			"shape": "or",
+			"sql": "DELETE FROM users WHERE users.score = ANY (CAST($1 AS int4[])) OR users.score = $2",
+			"params": [[], 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "any-empty",
+			"shape": "not",
+			"sql": "DELETE FROM users WHERE NOT (users.score = ANY (CAST($1 AS int4[])))",
+			"params": [[]],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "any-empty",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "any-empty",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "any-empty",
+			"shape": "two-level",
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.score = ANY (CAST($2 AS int4[]))) OR users.score = $3)",
+			"params": [13, [], 17],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "isNull",
+			"shape": "leaf",
+			"sql": "DELETE FROM users WHERE users.score IS NULL",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "isNull",
+			"shape": "and",
+			"sql": "DELETE FROM users WHERE users.score IS NULL AND users.score = $1",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "isNull",
+			"shape": "or",
+			"sql": "DELETE FROM users WHERE users.score IS NULL OR users.score = $1",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "isNull",
+			"shape": "not",
+			"sql": "DELETE FROM users WHERE NOT (users.score IS NULL)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "isNull",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "isNull",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "isNull",
+			"shape": "two-level",
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.score IS NULL) OR users.score = $2)",
+			"params": [13, 17],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "isNotNull",
+			"shape": "leaf",
+			"sql": "DELETE FROM users WHERE users.score IS NOT NULL",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "isNotNull",
+			"shape": "and",
+			"sql": "DELETE FROM users WHERE users.score IS NOT NULL AND users.score = $1",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "isNotNull",
+			"shape": "or",
+			"sql": "DELETE FROM users WHERE users.score IS NOT NULL OR users.score = $1",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "isNotNull",
+			"shape": "not",
+			"sql": "DELETE FROM users WHERE NOT (users.score IS NOT NULL)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "isNotNull",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "isNotNull",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "isNotNull",
+			"shape": "two-level",
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.score IS NOT NULL) OR users.score = $2)",
+			"params": [13, 17],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "between",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "BETWEEN handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "between",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "BETWEEN handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "between",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "BETWEEN handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "between",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "BETWEEN handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "between",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "between",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "between",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "BETWEEN handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-overlaps",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Range handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-overlaps",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Range handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-overlaps",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Range handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-overlaps",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Range handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-overlaps",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-overlaps",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-overlaps",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Range handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-contains",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Range handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-contains",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Range handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-contains",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Range handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-contains",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Range handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-contains",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-contains",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-contains",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Range handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-contains-point",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Range handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-contains-point",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Range handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-contains-point",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Range handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-contains-point",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Range handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-contains-point",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-contains-point",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-contains-point",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Range handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-containedBy",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Range handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-containedBy",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Range handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-containedBy",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Range handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-containedBy",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Range handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-containedBy",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-containedBy",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "range-containedBy",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Range handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "jsonContains",
+			"shape": "leaf",
+			"sql": "DELETE FROM users WHERE users.data @> $1",
+			"params": [
+				{
+					"active": true
+				}
+			],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "jsonContains",
+			"shape": "and",
+			"sql": "DELETE FROM users WHERE users.data @> $1 AND users.score = $2",
+			"params": [
+				{
+					"active": true
+				},
+				13
+			],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "jsonContains",
+			"shape": "or",
+			"sql": "DELETE FROM users WHERE users.data @> $1 OR users.score = $2",
+			"params": [
+				{
+					"active": true
+				},
+				13
+			],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "jsonContains",
+			"shape": "not",
+			"sql": "DELETE FROM users WHERE NOT (users.data @> $1)",
+			"params": [
+				{
+					"active": true
+				}
+			],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "jsonContains",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "jsonContains",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "jsonContains",
+			"shape": "two-level",
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.data @> $2) OR users.score = $3)",
+			"params": [
+				13,
+				{
+					"active": true
+				},
+				17
+			],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "jsonContainedBy",
+			"shape": "leaf",
+			"sql": "DELETE FROM users WHERE users.data <@ $1",
+			"params": [
+				{
+					"active": true
+				}
+			],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "jsonContainedBy",
+			"shape": "and",
+			"sql": "DELETE FROM users WHERE users.data <@ $1 AND users.score = $2",
+			"params": [
+				{
+					"active": true
+				},
+				13
+			],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "jsonContainedBy",
+			"shape": "or",
+			"sql": "DELETE FROM users WHERE users.data <@ $1 OR users.score = $2",
+			"params": [
+				{
+					"active": true
+				},
+				13
+			],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "jsonContainedBy",
+			"shape": "not",
+			"sql": "DELETE FROM users WHERE NOT (users.data <@ $1)",
+			"params": [
+				{
+					"active": true
+				}
+			],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "jsonContainedBy",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "jsonContainedBy",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "jsonContainedBy",
+			"shape": "two-level",
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.data <@ $2) OR users.score = $3)",
+			"params": [
+				13,
+				{
+					"active": true
+				},
+				17
+			],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "jsonExists",
+			"shape": "leaf",
+			"sql": "DELETE FROM users WHERE users.data ? $1",
+			"params": ["active"],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "jsonExists",
+			"shape": "and",
+			"sql": "DELETE FROM users WHERE users.data ? $1 AND users.score = $2",
+			"params": ["active", 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "jsonExists",
+			"shape": "or",
+			"sql": "DELETE FROM users WHERE users.data ? $1 OR users.score = $2",
+			"params": ["active", 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "jsonExists",
+			"shape": "not",
+			"sql": "DELETE FROM users WHERE NOT (users.data ? $1)",
+			"params": ["active"],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "jsonExists",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "jsonExists",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "jsonExists",
+			"shape": "two-level",
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.data ? $2) OR users.score = $3)",
+			"params": [13, "active", 17],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "inSubquery",
+			"shape": "leaf",
+			"sql": "DELETE FROM users WHERE users.id = ANY (SELECT posts_subq_0.id FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1)",
+			"params": [53],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "inSubquery",
+			"shape": "and",
+			"sql": "DELETE FROM users WHERE users.id = ANY (SELECT posts_subq_0.id FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1) AND users.score = $2",
+			"params": [53, 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "inSubquery",
+			"shape": "or",
+			"sql": "DELETE FROM users WHERE users.id = ANY (SELECT posts_subq_0.id FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1) OR users.score = $2",
+			"params": [53, 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "inSubquery",
+			"shape": "not",
+			"sql": "DELETE FROM users WHERE NOT (users.id = ANY (SELECT posts_subq_0.id FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1))",
+			"params": [53],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "inSubquery",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "inSubquery",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "inSubquery",
+			"shape": "two-level",
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.id = ANY (SELECT posts_subq_0.id FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $2)) OR users.score = $3)",
+			"params": [13, 53, 17],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "scalar-subquery",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Comparison handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "scalar-subquery",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Comparison handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "scalar-subquery",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Comparison handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "scalar-subquery",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Comparison handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "scalar-subquery",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "scalar-subquery",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "scalar-subquery",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Comparison handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "rawExists",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "rawExists",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "rawExists",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "rawExists",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "rawExists",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "rawExists",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "rawExists",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "rawNotExists",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "rawNotExists",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "rawNotExists",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "rawNotExists",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "rawNotExists",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "rawNotExists",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "rawNotExists",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "exists",
+			"shape": "leaf",
+			"sql": "DELETE FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "exists",
+			"shape": "and",
+			"sql": "DELETE FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND users.score = $2",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "exists",
+			"shape": "or",
+			"sql": "DELETE FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR users.score = $2",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "exists",
+			"shape": "not",
+			"sql": "DELETE FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "exists",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "exists",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "exists",
+			"shape": "two-level",
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR users.score = $3)",
+			"params": [13, 61, 17],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "notExists",
+			"shape": "leaf",
+			"sql": "DELETE FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "notExists",
+			"shape": "and",
+			"sql": "DELETE FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND users.score = $2",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "notExists",
+			"shape": "or",
+			"sql": "DELETE FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR users.score = $2",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "notExists",
+			"shape": "not",
+			"sql": "DELETE FROM users WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "notExists",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "notExists",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "notExists",
+			"shape": "two-level",
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR users.score = $3)",
+			"params": [13, 61, 17],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "some",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "some",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "some",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "some",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "some",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "some",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "some",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "every",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "every",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "every",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "every",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "every",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "every",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "every",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "none",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "none",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "none",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "none",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "none",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "none",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "none",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "expression",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Comparison handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "expression",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Comparison handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "expression",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Comparison handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "expression",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Comparison handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "expression",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "expression",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "expression",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Comparison handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "raw-expression",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Comparison handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "raw-expression",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Comparison handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "raw-expression",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Comparison handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "raw-expression",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Comparison handler requires a column"
+		},
+		{
+			"position": "delete-where",
+			"kind": "raw-expression",
+			"shape": "empty-or",
+			"sql": "DELETE FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "raw-expression",
+			"shape": "empty-and",
+			"sql": "DELETE FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "raw-expression",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Comparison handler requires a column"
+		}
+	]
+}
