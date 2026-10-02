@@ -3,6 +3,7 @@ import {
 	createOrm,
 	eq,
 	exists,
+	inSubquery,
 	like,
 	not,
 	notExists,
@@ -11,6 +12,7 @@ import {
 	ref,
 	schema,
 	some,
+	subquery,
 } from '@dbsp/core';
 import type { WhereIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
@@ -269,4 +271,21 @@ it('treats parameter payloads as opaque in join include where', () => {
 		'SELECT users.*, posts.id AS "posts.id" FROM users JOIN posts AS posts ON users.id = posts."authorId" WHERE posts.id = $1',
 	);
 	expect(result.params).toEqual([value]);
+});
+
+it('keeps a join include IN query body without relation predicates', () => {
+	const result = orm
+		.select('users')
+		.include('posts', {
+			join: 'inner',
+			where: inSubquery(
+				'id',
+				subquery('comments').select('postId').where(eq('published', true)),
+			),
+		})
+		.dump();
+	expect(result.sql).toBe(
+		'SELECT users.*, posts.id AS "posts.id" FROM users JOIN posts AS posts ON users.id = posts."authorId" WHERE posts.id = ANY (SELECT comments_subq_1."postId" FROM comments AS comments_subq_1 WHERE comments_subq_1.published = $1)',
+	);
+	expect(result.params).toEqual([true]);
 });

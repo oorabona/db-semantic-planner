@@ -597,33 +597,25 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 			expect(compiled.parameters).toEqual(['x', 999999]);
 		});
 
-		it('a where-only include (no explicit join) resolves to the default json_agg strategy — a target-list scalar subquery that existsWrap discards, so no effect on the wrapped SQL', () => {
+		it('exists() and existsDump() refuse a default json_agg include where before target-list stripping (#230)', async () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			const orm = createOrm({ adapter, schema: testSchema });
-
-			const dump = orm
+			const query = orm
 				.select('posts')
 				.include('author', { where: eq('id', 999999) })
-				.where(eq('title', 'x'))
-				.existsDump();
+				.where(eq('title', 'x'));
 
-			// buildExistsIntent keeps the include; with no explicit `join` it
-			// resolves to the default json_agg strategy — a scalar subquery in the
-			// TARGET LIST (not a FROM join). existsWrap replaces the whole target
-			// list with `1`, so that hydration (and its inner where) vanishes for
-			// free: the SQL equals the no-include baseline, and the include's where
-			// never filtered root rows to begin with.
-			expect(dump.sql).toBe(
-				'SELECT EXISTS (SELECT 1 FROM posts WHERE posts.title = $1 LIMIT 1) AS "exists"',
-			);
-			expect(dump.params).toEqual(['x']);
+			// #230: existence construction must preserve the include for preflight.
+			const refusal =
+				/Include where is not supported for strategy json_agg.*include\[0\]\(author\)\.where.*#892/;
+			expect(() => query.existsDump()).toThrow(refusal);
+			await expect(query.exists()).rejects.toThrow(refusal);
 		});
 
-		it('a nested inner-join include under a default (json_agg) parent lives inside the parent hydration subquery — discarded by existsWrap, so no effect on the wrapped SQL', () => {
+		it('exists() and existsDump() refuse a nested include where under a default json_agg parent (#230)', async () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			const orm = createOrm({ adapter, schema: nestedSchema });
-
-			const dump = orm
+			const query = orm
 				.select('users')
 				.include('posts', {
 					include: [
@@ -634,20 +626,13 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 						},
 					],
 				})
-				.where(eq('active', true))
-				.existsDump();
+				.where(eq('active', true));
 
-			// The outer 'posts' include has no explicit `join` → default json_agg,
-			// a target-list scalar subquery. Its nested 'comments' inner-join is
-			// hydrated INSIDE that subquery (a correlated nested aggregate), not as
-			// a root FROM join — it filters comments within a post's hydration, not
-			// which users exist. existsWrap replaces the whole target list with
-			// `1`, discarding the entire nested hydration: the SQL equals the
-			// no-include baseline, correctly, since nothing here filtered roots.
-			expect(dump.sql).toBe(
-				'SELECT EXISTS (SELECT 1 FROM users WHERE users.active = $1 LIMIT 1) AS "exists"',
-			);
-			expect(dump.params).toEqual([true]);
+			// #230: preserve nested hydration inputs so preflight can refuse them.
+			const refusal =
+				/Include where is not supported for strategy json_agg.*include\[0\]\(posts\)\.include\[0\]\(comments\)\.where.*#892/;
+			expect(() => query.existsDump()).toThrow(refusal);
+			await expect(query.exists()).rejects.toThrow(refusal);
 		});
 
 		it('a to-many pure-hydration include (default json_agg) has no effect on the wrapped SQL — its target-list scalar subquery is discarded by existsWrap (A6)', () => {

@@ -60,20 +60,23 @@ describe('#888 empty logical groups with rows', () => {
 		}).withSchema(SCHEMA);
 		const published = (await orm
 			.select('users')
-			.include('posts', { join: 'inner', where: eq('published', true) })
+			.include('posts', {
+				join: 'inner',
+				where: eq('published', true),
+			})
 			.orderBy('id')
 			.execute()) as unknown as Array<{
 			id: number;
-			posts: Array<{ id: number }>;
+			posts: { id: number; published: boolean; authorId: number };
 		}>;
 		expect(
 			published.map((user) => ({
 				id: user.id,
-				posts: user.posts.map((post) => post.id),
+				posts: user.posts,
 			})),
 		).toEqual([
-			{ id: 1, posts: [11] },
-			{ id: 2, posts: [22] },
+			{ id: 1, posts: { id: 11, published: true, authorId: 1 } },
+			{ id: 2, posts: { id: 22, published: true, authorId: 2 } },
 		]);
 		const empty = (await orm
 			.select('users')
@@ -81,7 +84,7 @@ describe('#888 empty logical groups with rows', () => {
 			.orderBy('id')
 			.execute()) as unknown as Array<{
 			id: number;
-			posts: Array<{ id: number }>;
+			posts: { id: number; published: boolean; authorId: number };
 		}>;
 		expect(empty).toEqual([]);
 		await expect(
