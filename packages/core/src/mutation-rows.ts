@@ -1,6 +1,6 @@
 import { InvalidOperationError } from './dx/errors.js';
 
-/** Inspect own enumerable mutation keys without consulting model metadata. */
+/** Inspect enumerable own keys without consulting model metadata. */
 export function inspectMutationRows(
 	rows: readonly Record<string, unknown>[],
 	options: {

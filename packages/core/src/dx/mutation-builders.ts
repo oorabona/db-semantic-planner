@@ -698,7 +698,7 @@ export class InsertBuilder<
 	/**
 	 * Set values to insert.
 	 * Accepts a single object or an array for bulk insert.
-	 * Missing own keys use DEFAULT; explicit undefined and null use SQL NULL.
+	 * Missing enumerable own keys use DEFAULT; explicit undefined and null use SQL NULL.
 	 */
 	values<TInput extends Insertable<TRow> | readonly Insertable<TRow>[]>(
 		data: TInput &
@@ -901,7 +901,7 @@ export class UpdateBuilder<
 	 *   .batchSet('id', [{ id: 10, callee_id: 42 }, { id: 20, callee_id: 43 }])
 	 *   .execute();
 	 * ```
-	 * Rows must share own keys and each carry every match key.
+	 * Rows must share enumerable own keys and each carry every match key.
 	 */
 	batchSet<TInput extends BatchUpdateable<TRow>>(
 		matchColumn: MutationKey<TRow> | MutationKey<TRow>[],
@@ -910,6 +910,11 @@ export class UpdateBuilder<
 		const matchColumns = Array.isArray(matchColumn)
 			? matchColumn
 			: [matchColumn];
+		if (matchColumns.length === 0)
+			throw new InvalidOperationError(
+				'update',
+				'batchSet requires at least one match key',
+			);
 		for (const row of data) {
 			assertMutationObjectPayload('update', row);
 		}
@@ -1182,7 +1187,7 @@ export class UpsertBuilder<
 	/**
 	 * Set values to insert.
 	 * Accepts a single object or an array for bulk upsert.
-	 * Batch rows must share own keys; explicit undefined and null use SQL NULL.
+	 * Batch rows must share enumerable own keys; explicit undefined and null use SQL NULL.
 	 */
 	values<TInput extends Insertable<TRow> | readonly Insertable<TRow>[]>(
 		data: TInput &

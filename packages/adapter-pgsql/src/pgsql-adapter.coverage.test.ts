@@ -2113,9 +2113,9 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 		it('refuses INSERT compilation without a model', () => {
 			const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' });
-			expect(() => adapter.compileInsert({ table: 'users' } as any)).toThrow(
-				'requires a ModelIR',
-			);
+			expect(() =>
+				adapter.compileInsert({ table: 'users', values: [{ id: 1 }] } as any),
+			).toThrow('requires a ModelIR');
 		});
 
 		it('refuses INSERT FROM compilation without a model', () => {
@@ -2151,7 +2151,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			expect(() =>
 				adapter.compileUpsert({
 					table: 'users',
-					values: [],
+					values: [{ id: 1 }],
 					onConflict: { columns: [] },
 					action: { type: 'doNothing' },
 				} as any),

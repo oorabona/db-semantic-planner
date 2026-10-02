@@ -77,6 +77,7 @@ import {
 	compileUpdate as compileUpdateImpl,
 	compileUpsertFrom as compileUpsertFromImpl,
 	compileUpsert as compileUpsertImpl,
+	validateMutationRowCount,
 } from './adapter-compiler-mutations.js';
 import {
 	compileCteQuery as compileCteQueryImpl,
@@ -3598,12 +3599,14 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * - rows > batchThreshold OR batchThreshold === 0: SELECT unnest($1::type[]),...
 	 */
 	compileInsert(intent: InsertIntent, options?: CompileOptions): CompiledQuery {
+		validateMutationRowCount('insert', intent.values ?? [], options);
+		const rowShape = inspectMutationRows(intent.values ?? [], {
+			operation: 'insert',
+		});
 		this.assertDeclaredMutationReferences(
 			intent.table,
 			[
-				...inspectMutationRows(intent.values ?? [], {
-					operation: 'insert',
-				}).columns,
+				...rowShape.columns,
 				...(intent.returningItems?.map((item) => item.source) ??
 					intent.returning ??
 					[]),
@@ -3611,7 +3614,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			options,
 		);
 		return guardCompiledQuery(
-			compileInsertImpl(intent, options, this.buildCompileDeps(options)),
+			compileInsertImpl(
+				intent,
+				options,
+				this.buildCompileDeps(options),
+				rowShape,
+			),
 			'insert',
 		);
 	}
@@ -3707,6 +3715,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * Compile an upsert intent to executable SQL (DX-026).
 	 */
 	compileUpsert(intent: UpsertIntent, options?: CompileOptions): CompiledQuery {
+		validateMutationRowCount('upsert', intent.values ?? [], options);
+		const rowShape = inspectMutationRows(intent.values ?? [], {
+			operation: 'upsert',
+			homogeneous: true,
+		});
 		const conflictColumns =
 			'columns' in intent.onConflict ? intent.onConflict.columns : [];
 		const actionColumns =
@@ -3716,10 +3729,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		this.assertDeclaredMutationReferences(
 			intent.table,
 			[
-				...inspectMutationRows(intent.values ?? [], {
-					operation: 'upsert',
-					homogeneous: true,
-				}).columns,
+				...rowShape.columns,
 				...conflictColumns,
 				...actionColumns,
 				...(intent.returningItems?.map((item) => item.source) ??
@@ -3729,7 +3739,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			options,
 		);
 		return guardCompiledQuery(
-			compileUpsertImpl(intent, options, this.buildCompileDeps(options)),
+			compileUpsertImpl(
+				intent,
+				options,
+				this.buildCompileDeps(options),
+				rowShape,
+			),
 			'upsert',
 		);
 	}

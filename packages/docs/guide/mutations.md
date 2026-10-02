@@ -24,7 +24,7 @@ orm.insert('users')
 
 ### Bulk Insert
 
-Pass an array to `.values()` to insert multiple rows in a single statement. Missing own keys use the column DEFAULT in that row, while explicit `undefined` or `null` uses SQL NULL; heterogeneous inserts always use VALUES.
+Pass an array to `.values()` to insert multiple rows in a single statement. Missing enumerable own keys use the column DEFAULT in that row, while explicit `undefined` or `null` uses SQL NULL; heterogeneous inserts always use VALUES.
 
 ```typescript
 orm.insert('users')
@@ -66,7 +66,7 @@ orm.update('users')
 
 ### Batch Update
 
-`batchSet(matchKeys, rows)` requires identical own-key sets and every match key in every row; a mismatch refuses with the zero-based row index and key. Scalar `.set()` assignments apply to every row, including evaluated `sql` raw expressions.
+`batchSet(matchKeys, rows)` requires identical enumerable own keys and every match key in every row; a mismatch refuses with the zero-based row index and key. Scalar `.set()` assignments apply to every row, including evaluated `sql` raw expressions.
 
 ### Update All Rows (Intentional Full-Table)
 
@@ -162,7 +162,7 @@ if (
 
 ## Upsert
 
-Insert a row, or update it on conflict. Batch upsert rows must have identical own-key sets (key order may differ); explicit `undefined` or `null` uses SQL NULL.
+Insert a row, or update it on conflict. Batch upsert rows must have identical enumerable own keys (key order may differ); explicit `undefined` or `null` uses SQL NULL.
 
 ```typescript
 // Auto-update all non-conflict columns
