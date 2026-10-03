@@ -343,21 +343,31 @@ export function plan(
 	const includeDecisions = state.decisions.filter(
 		(d) => d.type === 'include-strategy',
 	);
+	const decisionsByPath = new Map(
+		includeDecisions.map((decision) => [
+			String(decision.context.intentPath),
+			decision,
+		]),
+	);
+	const childrenByPath = new Map<string, PlanDecision[]>();
 	for (const decision of includeDecisions) {
 		const path = String(decision.context.intentPath);
-		const parentPath = path.includes('.')
-			? path.slice(0, path.lastIndexOf('.'))
+		if (!path.includes('.')) continue;
+		const parentPath = path.slice(0, path.lastIndexOf('.'));
+		const children = childrenByPath.get(parentPath) ?? [];
+		children.push(decision);
+		childrenByPath.set(parentPath, children);
+	}
+	state.decisions = state.decisions.map((decision) => {
+		if (decision.type !== 'include-strategy') return decision;
+		const path = String(decision.context.intentPath);
+		const parent = path.includes('.')
+			? decisionsByPath.get(path.slice(0, path.lastIndexOf('.')))
 			: undefined;
-		const parent = includeDecisions.find(
-			(d) => d.context.intentPath === parentPath,
-		);
-		const children = includeDecisions.filter((d) => {
-			const childPath = String(d.context.intentPath);
-			return childPath.slice(0, childPath.lastIndexOf('.')) === path;
-		});
-		state.decisions[state.decisions.indexOf(decision)] = {
+		const children = childrenByPath.get(path) ?? [];
+		return {
 			...decision,
-			alternatives: decision.alternatives?.filter(
+			alternatives: decision.alternatives.filter(
 				(candidate) =>
 					(!parent ||
 						(parent.choice !== 'cte' && candidate === parent.choice)) &&
@@ -366,7 +376,7 @@ export function plan(
 					),
 			),
 		};
-	}
+	});
 
 	// Extract CTEs if enabled
 	if (opts.enableCTEs) {
@@ -1208,21 +1218,21 @@ function processInclude(
 				'include',
 				`Include ${optionPath} orderBy requires limit with 'lateral' strategy`,
 			);
-		const select = include.select;
-		if (
-			select &&
-			select.type !== 'all' &&
-			!(
-				select.type === 'fields' &&
-				select.fields.length === 1 &&
-				select.fields[0] === '*'
-			)
-		)
-			throw new InvalidOperationError(
-				'include',
-				`Include ${optionPath} select must select all columns with 'lateral' strategy`,
-			);
 	}
+	if (
+		include.select !== undefined &&
+		(includeStrategy === 'cte' ||
+			(includeStrategy === 'join' && selectsWholeIncludeRow(include)))
+	)
+		throw new InvalidOperationError(
+			'include',
+			`Include ${optionPath} select is not supported by '${includeStrategy}' strategy.`,
+		);
+	if (includeStrategy === 'lateral' && !selectsWholeIncludeRow(include))
+		throw new InvalidOperationError(
+			'include',
+			`Include ${optionPath} select must select all columns with '${includeStrategy}' strategy`,
+		);
 
 	// Pre-compute join type for include-strategy decision embedding
 	// (only relevant when strategy is 'join')
@@ -1681,9 +1691,19 @@ export class UnsupportedStrategyError extends Error {
 	}
 }
 
-/**
- * Get alternative strategies for a given strategy based on dialect capabilities.
- */
+/** Whether an include requests the entire related row. */
+function selectsWholeIncludeRow(include: IncludeIntent): boolean {
+	const select = include.select;
+	return (
+		!select ||
+		select.type === 'all' ||
+		(select.type === 'fields' &&
+			select.fields.length === 1 &&
+			select.fields[0] === '*')
+	);
+}
+
+/** Get alternatives that honour the include options and dialect capabilities. */
 function getAlternativeStrategies(
 	strategy: ResolvedIncludeStrategy,
 	capabilities: DialectCapabilities | undefined,
@@ -1710,18 +1730,12 @@ function getAlternativeStrategies(
 		if (s === 'lateral') {
 			if (include.orderBy !== undefined && include.limit === undefined)
 				return false;
-			const select = include.select;
-			if (
-				select &&
-				select.type !== 'all' &&
-				!(
-					select.type === 'fields' &&
-					select.fields.length === 1 &&
-					select.fields[0] === '*'
-				)
-			)
-				return false;
 		}
+		if (include.select !== undefined) {
+			if (s === 'cte') return false;
+			if (s === 'join' && selectsWholeIncludeRow(include)) return false;
+		}
+		if (s === 'lateral' && !selectsWholeIncludeRow(include)) return false;
 		if (!capabilities) return s === 'join'; // No capabilities = only basic strategies
 		if (s === 'lateral' && !capabilities.supportsLateralJoin) return false;
 		if (s === 'json_agg' && !capabilities.supportsJsonAgg) return false;

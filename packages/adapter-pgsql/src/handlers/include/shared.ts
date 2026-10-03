@@ -97,7 +97,7 @@ export function resolveIncludeOrder(
 		throw new Error(
 			`Include ${path} orderBy requires fields, asc/desc direction and first/last nulls`,
 		);
-	const order = entries.map((entry) => {
+	const order = Array.from(entries, (entry) => {
 		if (
 			!entry ||
 			typeof entry.field !== 'string' ||

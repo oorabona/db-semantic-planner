@@ -1,4 +1,10 @@
-import { POSTGRESQL_CAPABILITIES, plan, ref, schema } from '@dbsp/core';
+import {
+	createOrm,
+	POSTGRESQL_CAPABILITIES,
+	plan,
+	ref,
+	schema,
+} from '@dbsp/core';
 import type { IncludeIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -336,4 +342,121 @@ it('keeps empty projection hydration metadata empty', () => {
 		select: { type: 'fields', fields: [] },
 	});
 	expect(result.hydrationPlan).toBeUndefined();
+});
+
+for (const strategy of ['join', 'cte'] as const) {
+	for (const select of [
+		{ type: 'all' as const },
+		{ type: 'fields' as const, fields: ['id'] },
+		{ type: 'fields' as const, fields: ['*'] },
+	]) {
+		if (
+			strategy === 'join' &&
+			select.type === 'fields' &&
+			select.fields[0] !== '*'
+		)
+			continue;
+		it(`refuses ${strategy} select ${JSON.stringify(select)}`, () =>
+			exactError(
+				() =>
+					compile(
+						{
+							relation: 'posts',
+							...(strategy === 'join' && { join: 'left' }),
+							select,
+						},
+						strategy === 'cte' ? 'cte' : undefined,
+					),
+				`Invalid include: Include include[0](posts) select is not supported by '${strategy}' strategy.`,
+			));
+	}
+}
+it('refuses sparse order entries', () =>
+	exactError(
+		() => compile({ relation: 'posts', orderBy: new Array(1) }),
+		'Include posts orderBy requires fields, asc/desc direction and first/last nulls',
+	));
+it('preserves the omitted-select join projection', () => {
+	expect(compile({ relation: 'posts', join: 'left' }).sql).toBe(
+		'SELECT users.*, posts.id AS "posts.id" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId"',
+	);
+});
+it('excludes partial-select alternatives', () => {
+	const report = plan(
+		{
+			type: 'select',
+			from: 'users',
+			include: [
+				{ relation: 'posts', select: { type: 'fields', fields: ['id'] } },
+			],
+		},
+		model,
+		{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+	);
+	expect(
+		report.decisions.find((d) => d.type === 'include-strategy')?.alternatives,
+	).toEqual(['join']);
+});
+
+it('refuses builder join all', () => {
+	const orm = createOrm({ model, adapter: createPgCompileOnlyAdapter() });
+	exactError(
+		() =>
+			orm
+				.select('users')
+				.include('posts', { join: 'left', select: { type: 'all' } })
+				.dump(),
+		"Invalid include: Include include[0](posts) select is not supported by 'join' strategy.",
+	);
+});
+for (const strategy of ['join', 'cte'] as const) {
+	it(`names nested all ${strategy} select`, () =>
+		exactError(
+			() =>
+				compile(
+					{
+						relation: 'posts',
+						...(strategy === 'join' && { join: 'left' }),
+						include: [
+							{
+								relation: 'comments',
+								...(strategy === 'join' && { join: 'left' }),
+								select: { type: 'all' },
+							},
+						],
+					},
+					strategy === 'cte' ? 'cte' : undefined,
+				),
+			`Invalid include: Include include[0].include[0](comments) select is not supported by '${strategy}' strategy.`,
+		));
+}
+
+it('names nested cte field selection', () =>
+	exactError(
+		() =>
+			compile(
+				{
+					relation: 'posts',
+					include: [
+						{
+							relation: 'comments',
+							select: { type: 'fields', fields: ['id'] },
+						},
+					],
+				},
+				'cte',
+			),
+		"Invalid include: Include include[0].include[0](comments) select is not supported by 'cte' strategy.",
+	));
+
+it('preserves explicit join field projection', () => {
+	const result = compile({
+		relation: 'posts',
+		join: 'left',
+		select: { type: 'fields', fields: ['title'] },
+	});
+	expect(result.sql).toBe(
+		'SELECT users.*, posts.id AS "posts.id", posts.title AS "posts.title" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId"',
+	);
+	expect(result.parameters).toEqual([]);
 });

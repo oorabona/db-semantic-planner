@@ -1,5 +1,5 @@
 import type { IncludeOptions } from '@dbsp/core';
-import type { IncludeIntent } from '@dbsp/types';
+import type { IncludeIntent, PlanDecision } from '@dbsp/types';
 import { sqlColumnRef } from './ast-helpers.js';
 
 // @ts-expect-error Include emission accepts only identifiers that crossed an authority boundary.
@@ -7,7 +7,7 @@ sqlColumnRef('parent_id');
 
 const expressionOrder = [
 	{
-		expression: { type: 'literal' as const, value: 1 },
+		expression: { kind: 'literal' as const, value: 1 },
 		direction: 'asc' as const,
 	},
 ];
@@ -17,3 +17,7 @@ const intentOrder: IncludeIntent['orderBy'] = expressionOrder;
 const optionOrder: IncludeOptions['orderBy'] = expressionOrder;
 void intentOrder;
 void optionOrder;
+
+// @ts-expect-error Published plan include ordering is field-only.
+const planOrder: PlanDecision['context']['includeOrderBy'] = expressionOrder;
+void planOrder;

@@ -1219,8 +1219,9 @@ describe('#900 flat strategy precedence', () => {
 	for (const [extra, expected] of [
 		[{ where: eq('id', 1) }, []],
 		[{ orderBy: [{ field: 'id', direction: 'asc' }] }, []],
-		[{ select: { type: 'fields', fields: ['id'] } }, ['join', 'cte']],
-		[{ select: { type: 'fields', fields: ['*'] } }, ['join', 'cte', 'lateral']],
+		[{ select: { type: 'fields', fields: ['id'] } }, ['join']],
+		[{ select: { type: 'all' } }, ['lateral']],
+		[{ select: { type: 'fields', fields: ['*'] } }, ['lateral']],
 	] as const) {
 		it(`nested alternatives honour options ${JSON.stringify(extra)}`, () => {
 			const report = plan(

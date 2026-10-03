@@ -80,12 +80,13 @@ Include `select` support by strategy:
 | Strategy | Supported select forms |
 |----------|------------------------|
 | `json_agg` | `fields` (including an empty list) and `all`; other forms, including `expressions` and `aggregate`, are refused |
-| `join` | `fields` and `all` |
+| `join` | Omitted `select` or field selections; `all` and fields `['*']` are refused |
+| `cte` | Omitted `select` only; any explicit `select` is refused |
 | `lateral` | All columns only: omitted select, `all`, or fields `['*']` |
 
-Omitting `select` selects the whole related row. JOIN also selects the primary key
-needed for hydration. Expression and aggregate projections are not implemented
-for JOIN or LATERAL.
+Join includes honour field selections by projecting the requested fields plus the primary key, and omitted `select` retains its existing projection.
+Join includes refuse `select: all` and fields `['*']` with the include path because they currently project only the primary key; the join all-columns form is refused for now.
+CTE includes refuse any explicit `select` with the include path because they add no related targets to the outer `SELECT`.
 
 ### Include Options Reference
 

@@ -72,7 +72,7 @@ export interface PlanDecision {
 		 */
 		readonly targetOrderKey?: readonly JsonAggOrderByEntry[];
 		/** Authored include ordering, preserved separately from the fallback key. */
-		readonly includeOrderBy?: readonly import('./intent/include-intent.js').OrderByIntent[];
+		readonly includeOrderBy?: readonly import('./intent/include-intent.js').IncludeOrderByIntent[];
 		/** True when the target order key is the no-PK deterministic fallback. */
 		readonly orderByFallback?: boolean;
 		/** Adapter-emitted JSON key → model column map for json_agg hydration. */
