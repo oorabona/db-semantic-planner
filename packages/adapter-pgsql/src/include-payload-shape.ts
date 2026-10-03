@@ -73,6 +73,20 @@ export function resolveIncludePayloadShapes(
 		}
 	};
 	visit(decisions);
+	// Refuse unsupported nested select forms before resolving any wildcard payload.
+	// Otherwise an opaque parent masks the child strategy's established refusal.
+	for (const d of all) {
+		if (
+			d.choice === 'json_agg' &&
+			d.includeSelectForm !== undefined &&
+			d.includeSelectForm !== 'fields' &&
+			d.includeSelectForm !== 'all'
+		) {
+			throw new Error(
+				`JSON_AGG include '${d.relationPath ?? d.relationName ?? d.relation}' does not support select form '${d.includeSelectForm}'`,
+			);
+		}
+	}
 	for (const d of all) {
 		const name = d.relationName ?? d.relation;
 		const candidates = name ? requestedPathsByLeaf.get(name) : undefined;

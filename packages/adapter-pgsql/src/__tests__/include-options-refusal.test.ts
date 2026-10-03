@@ -560,7 +560,7 @@ for (const strategy of ['json_agg', 'lateral', 'join', 'cte'] as const) {
 		});
 	}
 }
-it('compiles a primary-key limited include without a model compile option', () => {
+it('refuses a wildcard limited include without an enumerable compile model', () => {
 	const report = plan(
 		{
 			type: 'select',
@@ -570,11 +570,10 @@ it('compiles a primary-key limited include without a model compile option', () =
 		model,
 		{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
 	);
-	const result = createPgCompileOnlyAdapter().compile(report);
-	expect(result.sql).toBe(
-		`SELECT users.*, COALESCE((SELECT json_agg(__lim.__row ORDER BY __lim.__key0 ASC NULLS LAST) FROM (SELECT to_jsonb(__t__) AS __row, __t__.id AS __key0 FROM posts AS __t__ WHERE __t__."authorId" = users.id ORDER BY __t__.id ASC NULLS LAST LIMIT 1) AS __lim), '[]'::json) AS posts_json FROM users`,
+	exactError(
+		() => createPgCompileOnlyAdapter().compile(report),
+		"Include payload 'posts' cannot enumerate wildcard keys for opaque target 'posts'.",
 	);
-	expect(result.parameters).toEqual([]);
 });
 it('builder plan refuses aggregate json_agg select', () => {
 	const orm = createOrm({ model, adapter: createPgCompileOnlyAdapter() });
@@ -642,10 +641,15 @@ for (const strategy of ['json_agg', 'lateral'] as const) {
 					defaultIncludeStrategy: strategy,
 				},
 			);
-		const adapter = createPgCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter({ model });
 		expect(
 			adapter.compile(makePlan({ type: 'fields', fields: ['*'] })).sql,
 		).toBe(adapter.compile(makePlan()).sql);
+		expect(adapter.compile(makePlan()).sql).toBe(
+			strategy === 'json_agg'
+				? `SELECT users.*, COALESCE((SELECT json_agg(__lim.__row ORDER BY __lim.__key0 ASC NULLS LAST) FROM (SELECT jsonb_build_object('id', __t__.id, 'authorId', __t__."authorId", 'rank', __t__.rank, 'title', __t__.title) AS __row, __t__.id AS __key0 FROM posts AS __t__ WHERE __t__."authorId" = users.id ORDER BY __t__.id ASC NULLS LAST LIMIT 1) AS __lim), '[]'::json) AS posts_json FROM users`
+				: `SELECT users.*, posts_lat_0.id AS "posts.id", posts_lat_0."authorId" AS "posts.authorId", posts_lat_0.rank AS "posts.rank", posts_lat_0.title AS "posts.title" FROM users LEFT JOIN LATERAL (SELECT posts_inner_0.id, posts_inner_0."authorId", posts_inner_0.rank, posts_inner_0.title FROM posts AS posts_inner_0 WHERE posts_inner_0."authorId" = users.id ORDER BY posts_inner_0.id ASC NULLS LAST LIMIT 1) AS posts_lat_0 ON true`,
+		);
 	});
 }
 
@@ -667,6 +671,9 @@ it('uses the recorded total order when a compile model has no key', () => {
 	});
 	const adapter = createPgCompileOnlyAdapter();
 	expect(adapter.compile(report, { model: noKey }).sql).toBe(
-		adapter.compile(report).sql,
+		adapter.compile(report, { model }).sql,
+	);
+	expect(adapter.compile(report, { model: noKey }).sql).toBe(
+		`SELECT users.*, COALESCE((SELECT json_agg(__lim.__row ORDER BY __lim.__key0 ASC NULLS LAST) FROM (SELECT jsonb_build_object('id', __t__.id, 'authorId', __t__."authorId", 'rank', __t__.rank, 'title', __t__.title) AS __row, __t__.id AS __key0 FROM posts AS __t__ WHERE __t__."authorId" = users.id ORDER BY __t__.id ASC NULLS LAST LIMIT 1) AS __lim), '[]'::json) AS posts_json FROM users`,
 	);
 });

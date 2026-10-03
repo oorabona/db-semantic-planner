@@ -156,7 +156,7 @@ describe('#911 relation resolution precedence', () => {
 				.map((d) => [d.context.relation, d.context.target, d.choice]),
 		).toEqual([['public_link', 'billingProfile', 'json_agg']]);
 		expect(query.dump().sql).toBe(
-			'SELECT accounts.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM "billingProfile" AS __t__ WHERE __t__.id = accounts.public_id), \'[]\'::json) AS public_link_json FROM accounts',
+			"SELECT accounts.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id) ORDER BY __t__.id ASC NULLS LAST) FROM \"billingProfile\" AS __t__ WHERE __t__.id = accounts.public_id), '[]'::json) AS public_link_json FROM accounts",
 		);
 	});
 
@@ -165,7 +165,7 @@ describe('#911 relation resolution precedence', () => {
 			'billingProfile',
 			'public_link',
 			'billingProfile',
-			'SELECT accounts.*, public_link.id AS "public_link.id" FROM accounts LEFT JOIN "billingProfile" AS public_link ON accounts.public_id = public_link.id',
+			'SELECT accounts.*, public_link.id AS "billingProfile.id" FROM accounts LEFT JOIN "billingProfile" AS public_link ON accounts.public_id = public_link.id',
 			'SELECT accounts.*, "billingProfile".id AS "billingProfile.id" FROM accounts LEFT JOIN "billingProfile" AS "billingProfile" ON accounts.public_id = "billingProfile".id',
 		],
 		[
@@ -179,7 +179,7 @@ describe('#911 relation resolution precedence', () => {
 			'publicLink',
 			'public_link',
 			'billingProfile',
-			'SELECT accounts.*, public_link.id AS "public_link.id" FROM accounts LEFT JOIN "billingProfile" AS public_link ON accounts.public_id = public_link.id',
+			'SELECT accounts.*, public_link.id AS "publicLink.id" FROM accounts LEFT JOIN "billingProfile" AS public_link ON accounts.public_id = public_link.id',
 			'SELECT accounts.*, "publicLink".id AS "publicLink.id" FROM accounts LEFT JOIN "billingProfile" AS "publicLink" ON accounts.public_id = "publicLink".id',
 		],
 	] as const) {
@@ -239,11 +239,11 @@ describe('#911 relation resolution precedence', () => {
 for (const [strategy, expectedSql] of [
 	[
 		'json_agg',
-		'SELECT users.*, COALESCE((SELECT json_agg(__lim.__row ORDER BY __lim.__key0 DESC) FROM (SELECT to_jsonb(__t__) AS __row, __t__.rank AS __key0 FROM posts AS __t__ WHERE __t__."authorId" = users.id ORDER BY __t__.rank DESC LIMIT 1) AS __lim), \'[]\'::json) AS posts_json FROM users',
+		"SELECT users.*, COALESCE((SELECT json_agg(__lim.__row ORDER BY __lim.__key0 DESC) FROM (SELECT jsonb_build_object('authorId', __t__.\"authorId\", 'rank', __t__.rank, 'title', __t__.title) AS __row, __t__.rank AS __key0 FROM posts AS __t__ WHERE __t__.\"authorId\" = users.id ORDER BY __t__.rank DESC LIMIT 1) AS __lim), '[]'::json) AS posts_json FROM users",
 	],
 	[
 		'lateral',
-		'SELECT users.*, posts_lat_0.* FROM users LEFT JOIN LATERAL (SELECT posts_inner_0.* FROM posts AS posts_inner_0 WHERE posts_inner_0."authorId" = users.id ORDER BY posts_inner_0.rank DESC LIMIT 1) AS posts_lat_0 ON true',
+		'SELECT users.*, posts_lat_0."authorId" AS "posts.authorId", posts_lat_0.rank AS "posts.rank", posts_lat_0.title AS "posts.title" FROM users LEFT JOIN LATERAL (SELECT posts_inner_0."authorId", posts_inner_0.rank, posts_inner_0.title FROM posts AS posts_inner_0 WHERE posts_inner_0."authorId" = users.id ORDER BY posts_inner_0.rank DESC LIMIT 1) AS posts_lat_0 ON true',
 	],
 ] as const) {
 	it(`#911 uses authored unique ordering without a PK for ${strategy}`, () => {
