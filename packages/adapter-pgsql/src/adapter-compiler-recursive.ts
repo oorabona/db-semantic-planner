@@ -1,9 +1,13 @@
-import { compileWhereIntent } from './condition-compiler.js';
+import {
+	buildSubqueryFromIntent,
+	compileCondition,
+	compileWhereIntent,
+} from './condition-compiler.js';
 import { createWhereDispatcher } from './handlers/index.js';
 /**
  * Recursive CTE and unnest-CTE compilation.
  * Extracted from PgAdapter.compileRecursive(), compileCteQuery(),
- * buildUnnestCte(), and buildRecursiveAnchorWhere().
+ * and buildUnnestCte().
  *
  * @internal
  */
@@ -28,11 +32,8 @@ import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { compileSelectEnvelope } from './adapter-compiler-select.js';
 import {
 	binaryExpr,
-	booleanConstNode,
-	distinctExpr,
 	funcCall,
 	integerNode,
-	notExpr,
 	sqlColumnRef,
 	stringNode,
 } from './ast-helpers.js';
@@ -46,9 +47,7 @@ import { inferPgArrayType, stripArraySuffix } from './compiler-utils.js';
 import { deparseQuoted } from './deparse.js';
 import type { CompilerContext } from './handlers/index.js';
 import { createCompilerState } from './handlers/index.js';
-import { compileValue } from './handlers/where/utils.js';
 import { createTypeCastParamRef } from './param-ref.js';
-import { mapComparisonOperator } from './plan-decision-extractor.js';
 import {
 	dropPositionalUnion,
 	finalizeEnvelope,
@@ -64,7 +63,10 @@ import {
 	buildRecursiveCte,
 	type RecursiveCteConfig,
 } from './recursive/index.js';
-import { queryScopeForBindingProjections } from './relation-target-projection.js';
+import {
+	bindAliasAuthority,
+	queryScopeForBindingProjections,
+} from './relation-target-projection.js';
 import { queryLocal, resolveDeclaredIdentifier } from './sql-identifier.js';
 import { validateIdentifier } from './validate.js';
 
@@ -460,9 +462,49 @@ export function compileRecursive<T = unknown>(
 		const edgeTo =
 			traversal.direction === 'in' ? traversal.edgeFrom : traversal.edgeTo;
 
+		// Older direct reports omit start.from; their anchor source is the node table.
+		const startTable = intent.start.from ?? table;
+
 		// Build anchor WHERE from intent.start.where
 		const anchorWhere = intent.start.where
-			? buildRecursiveAnchorWhere(intent.start.where, '__n', table, deps, state)
+			? compileCondition(intent.start.where, {
+					position: 'recursive-anchor',
+					logicalSourceTable: startTable,
+					emittedAlias: '__n',
+					visibleAliases: new Map([['__n', startTable]]),
+					paramState: state,
+					defaultPkColumnName: deps.defaultPk,
+					deriveFkColumnName: deps.deriveFk,
+					aliasColumnAuthorities: bindAliasAuthority(
+						undefined,
+						queryLocal('__n'),
+						{
+							target: queryLocal(startTable),
+							logicalTable: startTable,
+						},
+					),
+					...(deps.model !== undefined && { model: deps.model }),
+					...(deps.declaredNames !== undefined && {
+						declaredNames: deps.declaredNames,
+					}),
+					...(schemaName !== undefined && { schemaName }),
+					...(deps.dbCasing !== undefined && { dbCasing: deps.dbCasing }),
+					...(deps.dialectCapabilities !== undefined && {
+						dialectCapabilities: deps.dialectCapabilities,
+					}),
+					...(deps.scope !== undefined && { scope: deps.scope }),
+					compileSubquery: (query, offset) =>
+						buildSubqueryFromIntent(
+							query,
+							offset,
+							deps.declaredNames,
+							schemaName,
+							'rawExists',
+							deps.scope,
+							deps.dialectCapabilities,
+							deps.dbCasing,
+						),
+				})
 			: undefined;
 
 		const base: RecursiveCteConfig = {
@@ -1114,83 +1156,4 @@ function buildRawCte(
 			preserveHydrationPlan: false,
 		}),
 	};
-}
-
-// ============================================================================
-// buildRecursiveAnchorWhere (internal)
-// ============================================================================
-
-/**
- * Build an anchor WHERE clause AST node from a WhereIntent.
- * Used for edge-table recursive CTE anchor queries.
- * Extracted body of PgAdapter.buildRecursiveAnchorWhere().
- */
-function buildRecursiveAnchorWhere(
-	where: unknown,
-	tableAlias: string,
-	table: string,
-	deps: AdapterCompilerDeps,
-	state: ReturnType<typeof createCompilerState>,
-): Node {
-	if (!where || typeof where !== 'object') {
-		return { A_Const: { boolval: { boolval: true } } };
-	}
-	const w = where as Record<string, unknown>;
-
-	switch (w.kind) {
-		case 'comparison': {
-			const operator = w.operator as string;
-			const op = mapComparisonOperator(operator);
-			const field = w.field as string;
-			const dbCol = resolveDeclaredIdentifier(
-				deps.declaredNames,
-				deps.dbCasing ?? 'preserve',
-				{ kind: 'column', table, column: field },
-			);
-			const left: Node = {
-				ColumnRef: {
-					fields: [
-						{ String: { sval: tableAlias } },
-						{ String: { sval: dbCol } },
-					],
-				},
-			};
-			const right: Node = compileValue(w.value, state, undefined, true);
-			if (operator === 'isDistinctFrom') {
-				return distinctExpr(left, right);
-			}
-			return {
-				A_Expr: {
-					kind: 'AEXPR_OP',
-					name: [{ String: { sval: op } }],
-					lexpr: left,
-					rexpr: right,
-				},
-			};
-		}
-		case 'and': {
-			const conditions = (w.conditions as unknown[]).map((c) =>
-				buildRecursiveAnchorWhere(c, tableAlias, table, deps, state),
-			);
-			if (conditions.length === 0) return booleanConstNode(true);
-			if (conditions.length === 1) return conditions[0]!;
-			return { BoolExpr: { boolop: 'AND_EXPR', args: conditions } };
-		}
-		case 'or': {
-			const conditions = (w.conditions as unknown[]).map((c) =>
-				buildRecursiveAnchorWhere(c, tableAlias, table, deps, state),
-			);
-			if (conditions.length === 0) return booleanConstNode(false);
-			if (conditions.length === 1) return conditions[0]!;
-			return { BoolExpr: { boolop: 'OR_EXPR', args: conditions } };
-		}
-		case 'not':
-			return notExpr(
-				buildRecursiveAnchorWhere(w.condition, tableAlias, table, deps, state),
-			);
-		default:
-			throw new Error(
-				`Unsupported recursive start.where predicate kind '${String(w.kind)}'.`,
-			);
-	}
 }

@@ -54,6 +54,7 @@ import type {
 import { resolveWhereOperator } from './handlers/where/operator-resolver.js';
 import {
 	buildColumnRef,
+	compileValue,
 	compileValueOrFieldRef,
 } from './handlers/where/utils.js';
 // Modifier guard and outerRef check used by buildSubqueryFromIntent (direct-path
@@ -497,7 +498,7 @@ export function createConditionCompiler(
 			let singleHopSourceColumn: ColumnListInput;
 			let singleHopTargetColumn: ColumnListInput;
 			if (resolvedRelation) {
-				if (ctx.position === 'filter') {
+				if (ctx.position === 'filter' || ctx.position === 'recursive-anchor') {
 					const keys = resolveRelationKeys(
 						ctx.rootTable,
 						resolvedRelation,
@@ -576,7 +577,7 @@ export function createConditionCompiler(
 			// Resolve explicit FK columns using the same direction logic as deriveFkColumns.
 			// For belongsTo: FK is on the source side (sourceTable.fkCol → targetTable.pk)
 			// For hasMany/hasOne: FK is on the target side (targetTable.fkCol → sourceTable.pk)
-			if (ctx.position === 'filter') {
+			if (ctx.position === 'filter' || ctx.position === 'recursive-anchor') {
 				const keys = resolveRelationKeys(currentSource, rel, ctx);
 				hopSourceColumns.push(keys.sourceColumn);
 				hopTargetColumns.push(keys.targetColumn);
@@ -802,10 +803,37 @@ export function createConditionCompiler(
 		handlerCtx: CompilerContext,
 	): Node {
 		if (
-			ctx.position === 'filter' &&
+			ctx.position === 'recursive-anchor' &&
+			![
+				'comparison',
+				'like',
+				'in',
+				'any',
+				'null',
+				'range',
+				'and',
+				'or',
+				'not',
+				'exists',
+				'notExists',
+				'rawExists',
+				'rawNotExists',
+				'relationFilter',
+				'subquery',
+				'jsonContains',
+				'jsonExists',
+				'expression',
+			].includes(intent.kind)
+		) {
+			throw new Error(
+				`Unsupported recursive start.where predicate kind '${String(intent.kind)}'.`,
+			);
+		}
+		if (
+			(ctx.position === 'filter' || ctx.position === 'recursive-anchor') &&
 			(intent.kind === 'exists' || intent.kind === 'notExists')
 		) {
-			if (intent.recursive !== undefined)
+			if (ctx.position === 'filter' && intent.recursive !== undefined)
 				throw new Error(
 					`FILTER ${intent.kind}('${intent.relation}'): recursive relation predicates are not supported inside FILTER.`,
 				);
@@ -854,7 +882,7 @@ export function createConditionCompiler(
 			);
 		}
 		if (
-			ctx.position === 'filter' &&
+			(ctx.position === 'filter' || ctx.position === 'recursive-anchor') &&
 			(intent.kind === 'subquery' || (intent.kind === 'in' && intent.subquery))
 		) {
 			const decision = convertWhereCondition(intent, ctx.rootTable);
@@ -910,6 +938,12 @@ export function createConditionCompiler(
 				handlerCtx,
 			);
 			if (exprRefResult !== null) return exprRefResult;
+			if (ctx.position === 'recursive-anchor') {
+				return compileMappedComparison(intent.operator)(
+					buildColumnRef(intent.field, handlerCtx),
+					compileValue(intent.value, ctx.paramState, undefined, true),
+				);
+			}
 		}
 
 		// Fallback to dispatcher: comparison, like, in, any, null, exists, notExists,
