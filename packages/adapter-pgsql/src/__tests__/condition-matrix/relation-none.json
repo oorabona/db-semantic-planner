@@ -91,22 +91,6 @@
 		{
 			"position": "relation-none",
 			"kind": "neq",
-			"shape": "empty-or",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND false))",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "relation-none",
-			"kind": "neq",
-			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND true))",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "relation-none",
-			"kind": "neq",
 			"shape": "two-level",
 			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1 AND (NOT (posts_exists_0.score <> $2) OR posts_exists_0.score = $3)))",
 			"params": [13, 7, 17],
@@ -142,22 +126,6 @@
 			"shape": "not",
 			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score > $1)))",
 			"params": [7],
-			"error": null
-		},
-		{
-			"position": "relation-none",
-			"kind": "gt",
-			"shape": "empty-or",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND false))",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "relation-none",
-			"kind": "gt",
-			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND true))",
-			"params": [],
 			"error": null
 		},
 		{
@@ -203,22 +171,6 @@
 		{
 			"position": "relation-none",
 			"kind": "gte",
-			"shape": "empty-or",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND false))",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "relation-none",
-			"kind": "gte",
-			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND true))",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "relation-none",
-			"kind": "gte",
 			"shape": "two-level",
 			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1 AND (NOT (posts_exists_0.score >= $2) OR posts_exists_0.score = $3)))",
 			"params": [13, 7, 17],
@@ -254,22 +206,6 @@
 			"shape": "not",
 			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score < $1)))",
 			"params": [7],
-			"error": null
-		},
-		{
-			"position": "relation-none",
-			"kind": "lt",
-			"shape": "empty-or",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND false))",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "relation-none",
-			"kind": "lt",
-			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND true))",
-			"params": [],
 			"error": null
 		},
 		{
@@ -315,22 +251,6 @@
 		{
 			"position": "relation-none",
 			"kind": "lte",
-			"shape": "empty-or",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND false))",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "relation-none",
-			"kind": "lte",
-			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND true))",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "relation-none",
-			"kind": "lte",
 			"shape": "two-level",
 			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1 AND (NOT (posts_exists_0.score <= $2) OR posts_exists_0.score = $3)))",
 			"params": [13, 7, 17],
@@ -371,22 +291,6 @@
 		{
 			"position": "relation-none",
 			"kind": "isDistinctFrom",
-			"shape": "empty-or",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND false))",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "relation-none",
-			"kind": "isDistinctFrom",
-			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND true))",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "relation-none",
-			"kind": "isDistinctFrom",
 			"shape": "two-level",
 			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1 AND (NOT (posts_exists_0.score IS DISTINCT FROM $2) OR posts_exists_0.score = $3)))",
 			"params": [13, 7, 17],
@@ -421,22 +325,6 @@
 			"kind": "eq-null",
 			"shape": "not",
 			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = NULL)))",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "relation-none",
-			"kind": "eq-null",
-			"shape": "empty-or",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND false))",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "relation-none",
-			"kind": "eq-null",
-			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND true))",
 			"params": [],
 			"error": null
 		},
@@ -483,22 +371,6 @@
 		{
 			"position": "relation-none",
 			"kind": "like",
-			"shape": "empty-or",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND false))",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "relation-none",
-			"kind": "like",
-			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND true))",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "relation-none",
-			"kind": "like",
 			"shape": "two-level",
 			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1 AND (NOT (posts_exists_0.name LIKE $2) OR posts_exists_0.score = $3)))",
 			"params": [13, "a%", 17],
@@ -534,22 +406,6 @@
 			"shape": "not",
 			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.name ILIKE $1)))",
 			"params": ["B%"],
-			"error": null
-		},
-		{
-			"position": "relation-none",
-			"kind": "ilike",
-			"shape": "empty-or",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND false))",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "relation-none",
-			"kind": "ilike",
-			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND true))",
-			"params": [],
 			"error": null
 		},
 		{
@@ -595,22 +451,6 @@
 		{
 			"position": "relation-none",
 			"kind": "like-escape",
-			"shape": "empty-or",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND false))",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "relation-none",
-			"kind": "like-escape",
-			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND true))",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "relation-none",
-			"kind": "like-escape",
 			"shape": "two-level",
 			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1 AND (NOT (posts_exists_0.name LIKE $2 ESCAPE $3) OR posts_exists_0.score = $4)))",
 			"params": [13, "c!_%", "!", 17],
@@ -651,22 +491,6 @@
 		{
 			"position": "relation-none",
 			"kind": "in-values",
-			"shape": "empty-or",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND false))",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "relation-none",
-			"kind": "in-values",
-			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND true))",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "relation-none",
-			"kind": "in-values",
 			"shape": "two-level",
 			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1 AND (NOT (posts_exists_0.score = ANY ($2)) OR posts_exists_0.score = $3)))",
 			"params": [13, [3, 5], 17],
@@ -701,22 +525,6 @@
 			"kind": "in-empty",
 			"shape": "not",
 			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (false)))",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "relation-none",
-			"kind": "in-empty",
-			"shape": "empty-or",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND false))",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "relation-none",
-			"kind": "in-empty",
-			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND true))",
 			"params": [],
 			"error": null
 		},
@@ -763,22 +571,6 @@
 		{
 			"position": "relation-none",
 			"kind": "any",
-			"shape": "empty-or",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND false))",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "relation-none",
-			"kind": "any",
-			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND true))",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "relation-none",
-			"kind": "any",
 			"shape": "two-level",
 			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1 AND (NOT (posts_exists_0.score = ANY (CAST($2 AS int4[]))) OR posts_exists_0.score = $3)))",
 			"params": [13, [3, 5], 17],
@@ -798,6 +590,214 @@
 			"shape": "and",
 			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = ANY (CAST($1 AS int4[])) AND posts_exists_0.score = $2))",
 			"params": [[], 13],
+			"error": null
+		},
+		{
+			"position": "relation-none",
+			"kind": "any-empty",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND (posts_exists_0.score = ANY (CAST($1 AS int4[])) OR posts_exists_0.score = $2)))",
+			"params": [[], 13],
+			"error": null
+		},
+		{
+			"position": "relation-none",
+			"kind": "any-empty",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = ANY (CAST($1 AS int4[])))))",
+			"params": [[]],
+			"error": null
+		},
+		{
+			"position": "relation-none",
+			"kind": "any-empty",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1 AND (NOT (posts_exists_0.score = ANY (CAST($2 AS int4[]))) OR posts_exists_0.score = $3)))",
+			"params": [13, [], 17],
+			"error": null
+		},
+		{
+			"position": "relation-none",
+			"kind": "isNull",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score IS NULL))",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "relation-none",
+			"kind": "isNull",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score IS NULL AND posts_exists_0.score = $1))",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "relation-none",
+			"kind": "isNull",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND (posts_exists_0.score IS NULL OR posts_exists_0.score = $1)))",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "relation-none",
+			"kind": "isNull",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score IS NULL)))",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "relation-none",
+			"kind": "isNull",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1 AND (NOT (posts_exists_0.score IS NULL) OR posts_exists_0.score = $2)))",
+			"params": [13, 17],
+			"error": null
+		},
+		{
+			"position": "relation-none",
+			"kind": "isNotNull",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score IS NOT NULL))",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "relation-none",
+			"kind": "isNotNull",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score IS NOT NULL AND posts_exists_0.score = $1))",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "relation-none",
+			"kind": "isNotNull",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND (posts_exists_0.score IS NOT NULL OR posts_exists_0.score = $1)))",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "relation-none",
+			"kind": "isNotNull",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score IS NOT NULL)))",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "relation-none",
+			"kind": "isNotNull",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1 AND (NOT (posts_exists_0.score IS NOT NULL) OR posts_exists_0.score = $2)))",
+			"params": [13, 17],
+			"error": null
+		},
+		{
+			"position": "relation-none",
+			"kind": "between",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.period BETWEEN $1 AND $2))",
+			"params": ["2026-01-01", "2026-02-01"],
+			"error": null
+		},
+		{
+			"position": "relation-none",
+			"kind": "between",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.period BETWEEN $1 AND $2 AND posts_exists_0.score = $3))",
+			"params": ["2026-01-01", "2026-02-01", 13],
+			"error": null
+		},
+		{
+			"position": "relation-none",
+			"kind": "between",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND (posts_exists_0.period BETWEEN $1 AND $2 OR posts_exists_0.score = $3)))",
+			"params": ["2026-01-01", "2026-02-01", 13],
+			"error": null
+		},
+		{
+			"position": "relation-none",
+			"kind": "between",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.period BETWEEN $1 AND $2)))",
+			"params": ["2026-01-01", "2026-02-01"],
+			"error": null
+		},
+		{
+			"position": "relation-none",
+			"kind": "between",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1 AND (NOT (posts_exists_0.period BETWEEN $2 AND $3) OR posts_exists_0.score = $4)))",
+			"params": [13, "2026-01-01", "2026-02-01", 17],
+			"error": null
+		},
+		{
+			"position": "relation-none",
+			"kind": "range-overlaps",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.period && $1))",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "relation-none",
+			"kind": "range-overlaps",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.period && $1 AND posts_exists_0.score = $2))",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "relation-none",
+			"kind": "range-overlaps",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND (posts_exists_0.period && $1 OR posts_exists_0.score = $2)))",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "relation-none",
+			"kind": "range-overlaps",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.period && $1)))",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "relation-none",
+			"kind": "range-overlaps",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1 AND (NOT (posts_exists_0.period && $2) OR posts_exists_0.score = $3)))",
+			"params": [13, "[2026-01-01,2026-02-01)", 17],
+			"error": null
+		},
+		{
+			"position": "relation-none",
+			"kind": "range-contains",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.period @> $1))",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "relation-none",
+			"kind": "range-contains",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.period @> $1 AND posts_exists_0.score = $2))",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "relation-none",
+			"kind": "range-contains",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND (posts_exists_0.period @> $1 OR posts_exists_0.score = $2)))",
+			"params": ["[2026-01-01,2026-02-01)", 13],
 			"error": null
 		}
 	]

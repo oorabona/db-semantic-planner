@@ -2,635 +2,11 @@
 	"entries": [
 		{
 			"position": "having-alias",
-			"kind": "rawExists-like-escape",
-			"shape": "empty-or",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawExists-like-escape",
-			"shape": "empty-and",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawExists-like-escape",
-			"shape": "two-level",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.name LIKE $2 ESCAPE $3)) OR count(*) = CAST($4 AS bigint))",
-			"params": [13, "c!_%", "!", 17],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawExists-range",
-			"shape": "leaf",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $1)",
-			"params": ["[2026-01-01,2026-02-01)"],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawExists-range",
-			"shape": "and",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $1) AND count(*) = CAST($2 AS bigint)",
-			"params": ["[2026-01-01,2026-02-01)", 13],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawExists-range",
-			"shape": "or",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $1) OR count(*) = CAST($2 AS bigint)",
-			"params": ["[2026-01-01,2026-02-01)", 13],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawExists-range",
-			"shape": "not",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $1))",
-			"params": ["[2026-01-01,2026-02-01)"],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawExists-range",
-			"shape": "empty-or",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawExists-range",
-			"shape": "empty-and",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawExists-range",
-			"shape": "two-level",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $2)) OR count(*) = CAST($3 AS bigint))",
-			"params": [13, "[2026-01-01,2026-02-01)", 17],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "inSubquery-order-limit",
-			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "inSubquery-order-limit",
-			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "inSubquery-order-limit",
-			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "inSubquery-order-limit",
-			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "inSubquery-order-limit",
-			"shape": "empty-or",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "inSubquery-order-limit",
-			"shape": "empty-and",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "inSubquery-order-limit",
-			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawExists-order-limit",
-			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "rawExists subquery with LIMIT, ORDER BY is not supported — it would silently change which rows match; restructure the query or use a CTE."
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawExists-order-limit",
-			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "rawExists subquery with LIMIT, ORDER BY is not supported — it would silently change which rows match; restructure the query or use a CTE."
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawExists-order-limit",
-			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "rawExists subquery with LIMIT, ORDER BY is not supported — it would silently change which rows match; restructure the query or use a CTE."
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawExists-order-limit",
-			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "rawExists subquery with LIMIT, ORDER BY is not supported — it would silently change which rows match; restructure the query or use a CTE."
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawExists-order-limit",
-			"shape": "empty-or",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawExists-order-limit",
-			"shape": "empty-and",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawExists-order-limit",
-			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "rawExists subquery with LIMIT, ORDER BY is not supported — it would silently change which rows match; restructure the query or use a CTE."
-		},
-		{
-			"position": "having-alias",
-			"kind": "scalar-subquery-order-limit",
-			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "scalar-subquery-order-limit",
-			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "scalar-subquery-order-limit",
-			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "scalar-subquery-order-limit",
-			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "scalar-subquery-order-limit",
-			"shape": "empty-or",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "scalar-subquery-order-limit",
-			"shape": "empty-and",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "scalar-subquery-order-limit",
-			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "expression-scalar-subquery",
-			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
-		},
-		{
-			"position": "having-alias",
-			"kind": "expression-scalar-subquery",
-			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
-		},
-		{
-			"position": "having-alias",
-			"kind": "expression-scalar-subquery",
-			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
-		},
-		{
-			"position": "having-alias",
-			"kind": "expression-scalar-subquery",
-			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
-		},
-		{
-			"position": "having-alias",
-			"kind": "expression-scalar-subquery",
-			"shape": "empty-or",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "expression-scalar-subquery",
-			"shape": "empty-and",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "expression-scalar-subquery",
-			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
-		},
-		{
-			"position": "having-alias",
-			"kind": "exists-recursive-up",
-			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "exists-recursive-up",
-			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "exists-recursive-up",
-			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "exists-recursive-up",
-			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "exists-recursive-up",
-			"shape": "empty-or",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "exists-recursive-up",
-			"shape": "empty-and",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "exists-recursive-up",
-			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "exists-recursive-down",
-			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "exists-recursive-down",
-			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "exists-recursive-down",
-			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "exists-recursive-down",
-			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "exists-recursive-down",
-			"shape": "empty-or",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "exists-recursive-down",
-			"shape": "empty-and",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "exists-recursive-down",
-			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "notExists-recursive-up",
-			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "notExists-recursive-up",
-			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "notExists-recursive-up",
-			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "notExists-recursive-up",
-			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "notExists-recursive-up",
-			"shape": "empty-or",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "notExists-recursive-up",
-			"shape": "empty-and",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "notExists-recursive-up",
-			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "notExists-recursive-down",
-			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "notExists-recursive-down",
-			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "notExists-recursive-down",
-			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "notExists-recursive-down",
-			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "notExists-recursive-down",
-			"shape": "empty-or",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "notExists-recursive-down",
-			"shape": "empty-and",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "notExists-recursive-down",
-			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawNotExists",
-			"shape": "leaf",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1))",
-			"params": [53],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawNotExists",
-			"shape": "and",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1)) AND count(*) = CAST($2 AS bigint)",
-			"params": [53, 13],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawNotExists",
-			"shape": "or",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1)) OR count(*) = CAST($2 AS bigint)",
-			"params": [53, 13],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawNotExists",
-			"shape": "not",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1)))",
-			"params": [53],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawNotExists",
-			"shape": "empty-or",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawNotExists",
-			"shape": "empty-and",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawNotExists",
-			"shape": "two-level",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $2))) OR count(*) = CAST($3 AS bigint))",
-			"params": [13, 53, 17],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "exists",
-			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "exists",
-			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "exists",
-			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
 			"kind": "exists",
 			"shape": "not",
 			"sql": null,
 			"params": null,
 			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "exists",
-			"shape": "empty-or",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "exists",
-			"shape": "empty-and",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
-			"params": [],
-			"error": null
 		},
 		{
 			"position": "having-alias",
@@ -671,22 +47,6 @@
 			"sql": null,
 			"params": null,
 			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "notExists",
-			"shape": "empty-or",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "notExists",
-			"shape": "empty-and",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
-			"params": [],
-			"error": null
 		},
 		{
 			"position": "having-alias",
@@ -727,22 +87,6 @@
 			"sql": null,
 			"params": null,
 			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "some",
-			"shape": "empty-or",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "some",
-			"shape": "empty-and",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
-			"params": [],
-			"error": null
 		},
 		{
 			"position": "having-alias",
@@ -787,17 +131,673 @@
 		{
 			"position": "having-alias",
 			"kind": "every",
-			"shape": "empty-or",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
-			"params": [],
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "none",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "none",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "none",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "none",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "none",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "expression",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.n' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "expression",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.n' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "expression",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.n' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "expression",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.n' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "expression",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.n' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "raw-expression",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "compileExpressionIntent: unsupported expression kind 'raw'"
+		},
+		{
+			"position": "having-alias",
+			"kind": "raw-expression",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "compileExpressionIntent: unsupported expression kind 'raw'"
+		},
+		{
+			"position": "having-alias",
+			"kind": "raw-expression",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "compileExpressionIntent: unsupported expression kind 'raw'"
+		},
+		{
+			"position": "having-alias",
+			"kind": "raw-expression",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "compileExpressionIntent: unsupported expression kind 'raw'"
+		},
+		{
+			"position": "having-alias",
+			"kind": "raw-expression",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "compileExpressionIntent: unsupported expression kind 'raw'"
+		},
+		{
+			"position": "having-alias",
+			"kind": "exists-custom-authorities",
+			"shape": "leaf",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1)",
+			"params": [61],
 			"error": null
 		},
 		{
 			"position": "having-alias",
-			"kind": "every",
-			"shape": "empty-and",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
-			"params": [],
+			"kind": "exists-custom-authorities",
+			"shape": "and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1) AND count(*) = CAST($2 AS bigint)",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "exists-custom-authorities",
+			"shape": "or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1) OR count(*) = CAST($2 AS bigint)",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "exists-custom-authorities",
+			"shape": "not",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "exists-custom-authorities",
+			"shape": "two-level",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $2)) OR count(*) = CAST($3 AS bigint))",
+			"params": [13, 61, 17],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "notExists-custom-authorities",
+			"shape": "leaf",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "notExists-custom-authorities",
+			"shape": "and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1)) AND count(*) = CAST($2 AS bigint)",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "notExists-custom-authorities",
+			"shape": "or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1)) OR count(*) = CAST($2 AS bigint)",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "notExists-custom-authorities",
+			"shape": "not",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1)))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "notExists-custom-authorities",
+			"shape": "two-level",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $2))) OR count(*) = CAST($3 AS bigint))",
+			"params": [13, 61, 17],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "some-custom-authorities",
+			"shape": "leaf",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1)",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "some-custom-authorities",
+			"shape": "and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1) AND count(*) = CAST($2 AS bigint)",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "some-custom-authorities",
+			"shape": "or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1) OR count(*) = CAST($2 AS bigint)",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "some-custom-authorities",
+			"shape": "not",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "some-custom-authorities",
+			"shape": "two-level",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $2)) OR count(*) = CAST($3 AS bigint))",
+			"params": [13, 61, 17],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "every-custom-authorities",
+			"shape": "leaf",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND NOT (posts_exists_0.score = $1)))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "every-custom-authorities",
+			"shape": "and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND NOT (posts_exists_0.score = $1))) AND count(*) = CAST($2 AS bigint)",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "every-custom-authorities",
+			"shape": "or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND NOT (posts_exists_0.score = $1))) OR count(*) = CAST($2 AS bigint)",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "every-custom-authorities",
+			"shape": "not",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND NOT (posts_exists_0.score = $1))))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "every-custom-authorities",
+			"shape": "two-level",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND NOT (posts_exists_0.score = $2)))) OR count(*) = CAST($3 AS bigint))",
+			"params": [13, 61, 17],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "none-custom-authorities",
+			"shape": "leaf",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "none-custom-authorities",
+			"shape": "and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1)) AND count(*) = CAST($2 AS bigint)",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "none-custom-authorities",
+			"shape": "or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1)) OR count(*) = CAST($2 AS bigint)",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "none-custom-authorities",
+			"shape": "not",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1)))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "none-custom-authorities",
+			"shape": "two-level",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $2))) OR count(*) = CAST($3 AS bigint))",
+			"params": [13, 61, 17],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "exists-no-pk-default-authorities",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "exists-no-pk-default-authorities",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "exists-no-pk-default-authorities",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "exists-no-pk-default-authorities",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "exists-no-pk-default-authorities",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "notExists-no-pk-default-authorities",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "notExists-no-pk-default-authorities",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "notExists-no-pk-default-authorities",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "notExists-no-pk-default-authorities",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "notExists-no-pk-default-authorities",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "some-no-pk-default-authorities",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "some-no-pk-default-authorities",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "some-no-pk-default-authorities",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "some-no-pk-default-authorities",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "some-no-pk-default-authorities",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "every-no-pk-default-authorities",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "every-no-pk-default-authorities",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "every-no-pk-default-authorities",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "every-no-pk-default-authorities",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "every-no-pk-default-authorities",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "none-no-pk-default-authorities",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "none-no-pk-default-authorities",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "none-no-pk-default-authorities",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "none-no-pk-default-authorities",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "none-no-pk-default-authorities",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'posts.user_id' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "exists-no-pk-custom-authorities",
+			"shape": "leaf",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1)",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "exists-no-pk-custom-authorities",
+			"shape": "and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1) AND count(*) = CAST($2 AS bigint)",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "exists-no-pk-custom-authorities",
+			"shape": "or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1) OR count(*) = CAST($2 AS bigint)",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "exists-no-pk-custom-authorities",
+			"shape": "not",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "exists-no-pk-custom-authorities",
+			"shape": "two-level",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $2)) OR count(*) = CAST($3 AS bigint))",
+			"params": [13, 61, 17],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "notExists-no-pk-custom-authorities",
+			"shape": "leaf",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "notExists-no-pk-custom-authorities",
+			"shape": "and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1)) AND count(*) = CAST($2 AS bigint)",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "notExists-no-pk-custom-authorities",
+			"shape": "or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1)) OR count(*) = CAST($2 AS bigint)",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "notExists-no-pk-custom-authorities",
+			"shape": "not",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1)))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "notExists-no-pk-custom-authorities",
+			"shape": "two-level",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $2))) OR count(*) = CAST($3 AS bigint))",
+			"params": [13, 61, 17],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "some-no-pk-custom-authorities",
+			"shape": "leaf",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1)",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "some-no-pk-custom-authorities",
+			"shape": "and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1) AND count(*) = CAST($2 AS bigint)",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "some-no-pk-custom-authorities",
+			"shape": "or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1) OR count(*) = CAST($2 AS bigint)",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "some-no-pk-custom-authorities",
+			"shape": "not",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "some-no-pk-custom-authorities",
+			"shape": "two-level",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $2)) OR count(*) = CAST($3 AS bigint))",
+			"params": [13, 61, 17],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "every-no-pk-custom-authorities",
+			"shape": "leaf",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND NOT (posts_exists_0.score = $1)))",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "every-no-pk-custom-authorities",
+			"shape": "and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND NOT (posts_exists_0.score = $1))) AND count(*) = CAST($2 AS bigint)",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "every-no-pk-custom-authorities",
+			"shape": "or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND NOT (posts_exists_0.score = $1))) OR count(*) = CAST($2 AS bigint)",
+			"params": [61, 13],
 			"error": null
 		}
 	]

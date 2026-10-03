@@ -579,8 +579,18 @@ export const conditionMatrix = positions.flatMap((position) =>
 			['and', and(predicate, sibling)],
 			['or', or(predicate, sibling)],
 			['not', not(predicate)],
-			['empty-or', or()],
-			['empty-and', and()],
+			// Empty groups have no predicate. Keep one existing key per observable
+			// envelope: custom key authorities affect IN, relation and include bodies.
+			...(kind === 'eq' ||
+			(kind === 'exists-custom-authorities' &&
+				(position.name === 'in-subquery-body' ||
+					position.name.startsWith('relation-') ||
+					position.name.startsWith('include-')))
+				? ([
+						['empty-or', or()],
+						['empty-and', and()],
+					] satisfies [string, WhereIntent][])
+				: []),
 			['two-level', and(sibling, or(not(predicate), eq(field, 17)))],
 		];
 		return shapes.map(([shape, condition]) => ({
