@@ -452,33 +452,33 @@
 			"position": "recursive-start-where",
 			"kind": "like",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'like'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.name LIKE $1 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": ["a%"],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "like",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'like'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.name LIKE $1 AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": ["a%", 13],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "like",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'like'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.name LIKE $1 OR __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": ["a%", 13],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "like",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'like'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (__n.name LIKE $1) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": ["a%"],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
@@ -500,41 +500,41 @@
 			"position": "recursive-start-where",
 			"kind": "like",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'like'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT (__n.name LIKE $2) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [13, "a%", 17],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "ilike",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'like'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.name ILIKE $1 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": ["B%"],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "ilike",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'like'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.name ILIKE $1 AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": ["B%", 13],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "ilike",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'like'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.name ILIKE $1 OR __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": ["B%", 13],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "ilike",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'like'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (__n.name ILIKE $1) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": ["B%"],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
@@ -556,41 +556,41 @@
 			"position": "recursive-start-where",
 			"kind": "ilike",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'like'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT (__n.name ILIKE $2) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [13, "B%", 17],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "like-escape",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'like'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.name LIKE $1 ESCAPE $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": ["c!_%", "!"],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "like-escape",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'like'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.name LIKE $1 ESCAPE $2 AND __n.score = $3 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": ["c!_%", "!", 13],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "like-escape",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'like'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.name LIKE $1 ESCAPE $2 OR __n.score = $3 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": ["c!_%", "!", 13],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "like-escape",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'like'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (__n.name LIKE $1 ESCAPE $2) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": ["c!_%", "!"],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
@@ -612,41 +612,41 @@
 			"position": "recursive-start-where",
 			"kind": "like-escape",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'like'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT (__n.name LIKE $2 ESCAPE $3) OR __n.score = $4) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [13, "c!_%", "!", 17],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "in-values",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'in'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = ANY ($1) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [[3, 5]],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "in-values",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'in'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = ANY ($1) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [[3, 5], 13],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "in-values",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'in'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = ANY ($1) OR __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [[3, 5], 13],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "in-values",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'in'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (__n.score = ANY ($1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [[3, 5]],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
@@ -668,41 +668,41 @@
 			"position": "recursive-start-where",
 			"kind": "in-values",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'in'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT (__n.score = ANY ($2)) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [13, [3, 5], 17],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "in-empty",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'in'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "in-empty",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'in'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE false AND __n.score = $1 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [13],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "in-empty",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'in'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE false OR __n.score = $1 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [13],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "in-empty",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'in'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (false) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
@@ -724,41 +724,41 @@
 			"position": "recursive-start-where",
 			"kind": "in-empty",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'in'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT (false) OR __n.score = $2) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [13, 17],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "any",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'any'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = ANY (CAST($1 AS int4[])) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [[3, 5]],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "any",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'any'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = ANY (CAST($1 AS int4[])) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [[3, 5], 13],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "any",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'any'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = ANY (CAST($1 AS int4[])) OR __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [[3, 5], 13],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "any",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'any'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (__n.score = ANY (CAST($1 AS int4[]))) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [[3, 5]],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
@@ -780,25 +780,25 @@
 			"position": "recursive-start-where",
 			"kind": "any",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'any'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT (__n.score = ANY (CAST($2 AS int4[]))) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [13, [3, 5], 17],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "any-empty",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'any'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = ANY (CAST($1 AS int4[])) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [[]],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "any-empty",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Unsupported recursive start.where predicate kind 'any'."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = ANY (CAST($1 AS int4[])) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [[], 13],
+			"error": null
 		}
 	]
 }

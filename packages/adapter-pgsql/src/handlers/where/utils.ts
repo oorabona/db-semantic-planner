@@ -7,7 +7,11 @@ import { isParamIntent } from '@dbsp/types';
 import { isFieldRef } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import { nullConstNode } from '../../ast-helpers.js';
-import type { RelationBinding } from '../../binding-registry.js';
+import {
+	declaredRelationBindingFor,
+	type RelationBinding,
+	relationBindingFor,
+} from '../../binding-registry.js';
 import { mapModelIRTypeToPgBase } from '../../compiler-utils.js';
 import {
 	dbTypeCastTarget,
@@ -16,7 +20,7 @@ import {
 } from '../../db-type.js';
 import { unwrapParamIntent } from '../../param-intent.js';
 import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
-import type { SqlIdentifier } from '../../sql-identifier.js';
+import { queryLocal, type SqlIdentifier } from '../../sql-identifier.js';
 import type { CompilerContext, CompilerState } from '../types.js';
 import {
 	currentExpressionBinding,
@@ -39,6 +43,37 @@ export function resolvedWhereColumnRef(
 	return expressionResolvedColumnRef(column, binding);
 }
 
+/** Resolve an addressed anchor binding without inventing an invisible range. */
+function anchorQualifiedBinding(
+	qualifier: string,
+	ctx: CompilerContext,
+): RelationBinding {
+	const binding =
+		relationBindingFor(ctx.scope, queryLocal(qualifier)) ??
+		declaredRelationBindingFor(ctx.scope, qualifier);
+	if (!binding)
+		throw new Error(
+			`start.where qualifier '${qualifier}' is not visible in the recursive anchor scope.`,
+		);
+	return binding;
+}
+
+/** Type authority follows the same visible binding as SQL emission. */
+export function resolveWhereModelColumn(
+	columnName: string,
+	ctx: CompilerContext,
+) {
+	let binding = currentExpressionBinding(ctx);
+	if (ctx.position === 'recursive-anchor' && columnName.includes('.')) {
+		const dot = columnName.lastIndexOf('.');
+		binding = anchorQualifiedBinding(columnName.slice(0, dot), ctx);
+		columnName = columnName.slice(dot + 1);
+	}
+	return ctx.model
+		?.getTable(binding.logicalTable ?? ctx.rootTable)
+		?.columns.find((column) => column.name === columnName);
+}
+
 /**
  * Build column reference from decision column, using current alias or root table.
  */
@@ -52,6 +87,12 @@ export function buildColumnRef(column: string, ctx: CompilerContext): Node {
 		const relation = column.substring(0, dotIndex);
 		const table = ctx.aliases?.get(relation) ?? relation;
 		const col = column.substring(dotIndex + 1);
+		if (ctx.position === 'recursive-anchor')
+			return expressionColumnRef(
+				col,
+				ctx,
+				anchorQualifiedBinding(relation, ctx),
+			);
 		return expressionQualifiedColumnRef(col, table, ctx);
 	}
 	return expressionColumnRef(column, ctx, currentExpressionBinding(ctx));
@@ -136,6 +177,13 @@ export function compileValueOrFieldRef(
 	if (isFieldRef(value)) {
 		// A qualified field reference establishes its own addressed binding; the
 		// scope marker only applies to an unqualified field.
+		if (ctx.position === 'recursive-anchor' && value.alias !== undefined) {
+			return expressionColumnRef(
+				value.column,
+				ctx,
+				anchorQualifiedBinding(value.alias, ctx),
+			);
+		}
 		if (value.column.includes('.')) return buildColumnRef(value.column, ctx);
 		const alias =
 			value.scope === 'outer'
@@ -155,11 +203,7 @@ export function resolveColumnPgType(
 	ctx: CompilerContext,
 ): string | undefined {
 	if (!ctx.model) return undefined;
-	const table = ctx.model.getTable(
-		currentExpressionBinding(ctx).logicalTable ?? ctx.rootTable,
-	);
-	if (!table) return undefined;
-	const column = table.columns.find((c) => c.name === columnName);
+	const column = resolveWhereModelColumn(columnName, ctx);
 	if (!column) return undefined;
 	// Only cast when originalDbType is explicitly set (populated by introspection).
 	// Manually defined schemas omit this field — we do not guess the PG type from
@@ -199,11 +243,7 @@ export function resolveColumnAbstractPgBase(
 	ctx: CompilerContext,
 ): string | undefined {
 	if (!ctx.model) return undefined;
-	const table = ctx.model.getTable(
-		currentExpressionBinding(ctx).logicalTable ?? ctx.rootTable,
-	);
-	if (!table) return undefined;
-	const column = table.columns.find((c) => c.name === columnName);
+	const column = resolveWhereModelColumn(columnName, ctx);
 	if (!column) return undefined;
 	return mapModelIRTypeToPgBase(column.type);
 }

@@ -68,7 +68,7 @@ export type WhereCompilerCtx = {
 	readonly currentAlias?: string;
 };
 
-/** Compilation position selects the migrated FILTER path; other callers retain their lowering. */
+/** Compilation position selects the migrated FILTER and recursive-anchor paths; other callers retain their lowering. */
 export type ConditionPosition =
 	| 'where'
 	| 'having'
@@ -85,9 +85,9 @@ export type ConditionPosition =
  * declared names, model and shared parameter state retain their existing types.
  * Logical and relation descendants retain the caller's position; subquery
  * bodies use subquery. Only legacy top-level callers default to where.
- * FILTER enters the condition compiler and bypasses PlanDecision; relation predicates
- * and predicate subqueries still lower through handler decisions during migration.
- * Other positions retain their historical lowering.
+ * FILTER and recursive anchors enter the condition compiler and bypass PlanDecision;
+ * relation predicates and predicate subqueries still lower through handler decisions
+ * during migration. Other positions retain their historical lowering.
  */
 export type ConditionCompilerCtx = Omit<
 	WhereCompilerCtx,
