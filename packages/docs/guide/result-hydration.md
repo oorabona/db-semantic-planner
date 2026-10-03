@@ -45,7 +45,7 @@ to reassemble the rows.
 | `hasMany` / `manyToMany` (to-many) | `json_agg` | Avoids row explosion |
 | Any + explicit override | as specified | User intent wins |
 
-These defaults apply to ordinary non-recursive includes. Recursion requires CTE support; flat output and per-parent limits can change selection. Explicit overrides are validated against dialect capabilities.
+These defaults apply to non-recursive includes with nested output. Recursion requires CTE support. With flat output (`| flat`), the planner selects `lateral` when the include has a limit and the dialect supports it, and `join` otherwise. Explicit overrides are validated against dialect capabilities.
 
 The planner encodes this as:
 ```typescript
@@ -55,8 +55,8 @@ The planner encodes this as:
 
 ### `json_agg` — correlated subquery aggregate
 
-**When used:** to-one and to-many relations when the dialect supports it and the include
-has no `LIMIT` requirement. Also the default for NQL implicit path notation
+**When used:** to-one and to-many relations when the dialect supports it and the
+output is nested (no `| flat`). Also the default for NQL implicit path notation
 (`posts.title` without `| flat`).
 
 **How it works:** The adapter compiles a correlated subquery per included

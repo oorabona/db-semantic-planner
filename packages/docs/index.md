@@ -95,7 +95,7 @@ features:
     <div class="step-content">
       <h3>Inspect everything</h3>
       <p>Every decision is visible via dump() — SQL, parameters, plan reasoning. Debug before you execute.</p>
-      <code class="step-code">SELECT ... FROM "posts" LEFT JOIN LATERAL (...) WHERE $1</code>
+      <code class="step-code">SELECT posts.*, COALESCE((SELECT json_agg(...) FROM users ...), '[]') AS author_json FROM posts WHERE posts.published = $1</code>
     </div>
   </div>
 </div>
