@@ -53,6 +53,17 @@ import type {
 import { buildKeyCorrelation } from '../where/exists.js';
 import { deriveFkColumns } from './shared.js';
 
+// NQL compile-select.ts labels unaliased relation columns `${relationPath}.${column}`.
+// ORM relationColumn aliases must be identifiers, so a dotted default label cannot
+// be a chosen ORM alias and must not become a nested JSON key.
+export function chosenRelationColumnAlias(
+	relationPath: string,
+	column: string,
+	alias: string | undefined,
+): string | undefined {
+	return alias === `${relationPath}.${column}` ? undefined : alias;
+}
+
 interface JsonAggOrderIntent {
 	readonly columns: readonly JsonAggOrderByEntry[];
 	readonly fallback: boolean;
@@ -396,19 +407,79 @@ function compileJsonAggRecursive(
 			),
 	);
 	const shape = jsonAggContainerShape(decision.relationType);
-	const columns = resolveJsonAggProjection(
+	let columns = resolveJsonAggProjection(
 		decision,
 		targetTable,
 		innerCtx,
 		shape,
 	);
-	const columnValueOverrides = buildJsonAggColumnValueOverrides(
+	let columnValueOverrides = buildJsonAggColumnValueOverrides(
 		targetTable,
 		columns,
 		innerAlias,
 		innerCtx,
 		shape,
 	);
+
+	if (decision.columnAliases && columns) {
+		const values = new Map<string, Node>();
+		columns = columns.map((column, index) => {
+			const requested = decision.columns?.[index];
+			const alias = requested
+				? chosenRelationColumnAlias(
+						decision.relationPath ?? relation,
+						requested,
+						decision.columnAliases?.[requested],
+					)
+				: undefined;
+			const key = identifierText(column);
+			const output = alias ?? key;
+			values.set(
+				output,
+				columnValueOverrides?.get(key) ??
+					sqlColumnRef(column, queryLocal(innerAlias)),
+			);
+			return alias ? queryLocal(alias) : column;
+		});
+		columnValueOverrides = values;
+	}
+
+	// Child relation values and projected columns share one JSON object.
+	const projectedKeyNames =
+		columns && !columns.some((column) => identifierText(column) === '*')
+			? columns.map(identifierText)
+			: resolvedTarget.outputs !== undefined
+				? [...resolvedTarget.outputs.keys()]
+				: (ctx.model?.getTable(targetTable)?.columns ?? []).map((column) =>
+						identifierText(
+							resolveDeclaredIdentifier(
+								ctx.declaredNames,
+								ctx.dbCasing ?? 'preserve',
+								{
+									kind: 'column',
+									table: targetTable,
+									column: column.name,
+								},
+							),
+						),
+					);
+	const projectedKeys = new Set<string>();
+	for (const key of projectedKeyNames) {
+		if (projectedKeys.has(key)) {
+			throw new Error(
+				`JSON_AGG relation projection '${decision.relationPath ?? relation}' has conflicting output key '${key}'.`,
+			);
+		}
+		projectedKeys.add(key);
+	}
+	for (const child of childNodes ?? []) {
+		const key = identifierText(child.key);
+		if (projectedKeys.has(key)) {
+			throw new Error(
+				`JSON_AGG relation projection '${decision.relationPath ?? relation}' has conflicting output key '${key}'.`,
+			);
+		}
+	}
 
 	return sqlJsonAggSubquery(
 		resolvedTarget.cteName ??
