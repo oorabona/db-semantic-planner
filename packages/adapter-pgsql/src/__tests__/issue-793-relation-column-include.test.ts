@@ -1,4 +1,12 @@
-import { createOrm, ref, relationColumn, schema } from '@dbsp/core';
+import {
+	createOrm,
+	nqlRaw,
+	POSTGRESQL_CAPABILITIES,
+	plan,
+	ref,
+	relationColumn,
+	schema,
+} from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -42,7 +50,7 @@ describe('#793 exact include consumption', () => {
 			.columns([relationColumn('author', 'name', 'authorName')])
 			.dump();
 		expect(result.sql).toBe(
-			"SELECT COALESCE((SELECT json_agg(jsonb_build_object('name', __t__.name) ORDER BY __t__.id ASC NULLS LAST) FROM users AS __t__ WHERE __t__.id = posts.author_id), '[]'::json) AS author_json FROM posts",
+			"SELECT COALESCE((SELECT json_agg(jsonb_build_object('authorName', __t__.name) ORDER BY __t__.id ASC NULLS LAST) FROM users AS __t__ WHERE __t__.id = posts.author_id), '[]'::json) AS author_json FROM posts",
 		);
 		expect('params' in result && result.params).toEqual([]);
 	});
@@ -223,4 +231,107 @@ it('deduplicates the same relation source column and alias', () => {
 		'SELECT users_lat_0.name AS a FROM posts LEFT JOIN LATERAL (SELECT users_inner_0.name FROM users AS users_inner_0 WHERE users_inner_0.id = posts.author_id) AS users_lat_0 ON true',
 	);
 	expect('params' in result && result.params).toEqual([]);
+});
+
+for (const strategy of ['json_agg', 'lateral', 'join'] as const) {
+	it(`refuses shared relation output aliases with ${strategy}`, () => {
+		expect(() =>
+			orm
+				.select('posts')
+				.withPlanOptions({ defaultIncludeStrategy: strategy })
+				.include('author.file')
+				.columns([
+					relationColumn('author.file', 'path', 'x'),
+					relationColumn('author.file', 'id', 'x'),
+				])
+				.dump(),
+		).toThrow(
+			"Relation column projection 'author.file' requests output name 'x' for conflicting columns 'path' and 'id'.",
+		);
+	});
+	it(`refuses an alias sharing a column-name output with ${strategy}`, () => {
+		expect(() =>
+			orm
+				.select('posts')
+				.withPlanOptions({ defaultIncludeStrategy: strategy })
+				.include('author.file')
+				.columns([
+					relationColumn('author.file', 'path', 'id'),
+					relationColumn('author.file', 'id', 'id'),
+				])
+				.dump(),
+		).toThrow(
+			"Relation column projection 'author.file' requests output name 'id' for conflicting columns 'path' and 'id'.",
+		);
+	});
+}
+
+it('uses JSON_AGG aliases at both top-level and nested includes', () => {
+	const result = orm
+		.select('posts')
+		.withPlanOptions({ defaultIncludeStrategy: 'json_agg' })
+		.include('author.file')
+		.columns([
+			relationColumn('author', 'name', 'authorName'),
+			relationColumn('author.file', 'path', 'fp'),
+		])
+		.dump();
+	expect(result.sql).toBe(
+		"SELECT COALESCE((SELECT json_agg(jsonb_build_object('authorName', __t__.name) || jsonb_build_object('file', COALESCE((SELECT json_agg(jsonb_build_object('fp', __t1__.path) ORDER BY __t1__.id ASC NULLS LAST) FROM files AS __t1__ WHERE __t1__.id = __t__.file_id), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST) FROM users AS __t__ WHERE __t__.id = posts.author_id), '[]'::json) AS author_json FROM posts",
+	);
+	expect('params' in result && result.params).toEqual([]);
+});
+
+it('refuses a top-level JSON_AGG alias that collides with a child key', () => {
+	expect(() =>
+		orm
+			.select('posts')
+			.withPlanOptions({ defaultIncludeStrategy: 'json_agg' })
+			.include('author.file')
+			.columns([relationColumn('author', 'name', 'file')])
+			.dump(),
+	).toThrow(
+		"JSON_AGG relation projection 'author' has conflicting output key 'file'.",
+	);
+});
+
+const departmentDb = schema({
+	departments: { id: { type: 'integer', primaryKey: true } },
+	employees: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		department_id: ref('departments', { inverse: 'employees' }),
+	},
+});
+function compileNqlJsonAgg(query: string, model: typeof db.model) {
+	const nqlOrm = createOrm({
+		model,
+		adapter: createPgCompileOnlyAdapter({ model }),
+	});
+	const intent = nqlOrm.nql`${nqlRaw(query)}`.toIntentIR();
+	if (intent.type !== 'select') throw new Error('Expected a select query');
+	const report = plan(intent, model, {
+		dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		defaultIncludeStrategy: 'json_agg',
+	});
+	return createPgCompileOnlyAdapter({ model }).compile(report, { model });
+}
+
+it('uses the column name for a to-many NQL default JSON key', () => {
+	const result = compileNqlJsonAgg(
+		'departments | select id, employees.name',
+		departmentDb.model,
+	);
+	expect(result.sql).toBe(
+		"SELECT departments.id, COALESCE((SELECT json_agg(jsonb_build_object('name', __t__.name) ORDER BY __t__.id ASC NULLS LAST) FROM employees AS __t__ WHERE __t__.department_id = departments.id), '[]'::json) AS employees_json FROM departments",
+	);
+	expect(result.parameters).toEqual([]);
+});
+
+it('uses the column name for a two-hop NQL default JSON key', () => {
+	const result = compileNqlJsonAgg('posts | select author.file.path', db.model);
+	expect(result.sql).toBe(
+		"SELECT COALESCE((SELECT json_agg(to_jsonb(__t__) || jsonb_build_object('file', COALESCE((SELECT json_agg(jsonb_build_object('path', __t1__.path) ORDER BY __t1__.id ASC NULLS LAST) FROM files AS __t1__ WHERE __t1__.id = __t__.file_id), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST) FROM users AS __t__ WHERE __t__.id = posts.author_id), '[]'::json) AS author_json FROM posts",
+	);
+	expect(result.parameters).toEqual([]);
 });

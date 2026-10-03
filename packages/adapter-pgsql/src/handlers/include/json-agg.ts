@@ -53,6 +53,17 @@ import type {
 import { buildKeyCorrelation } from '../where/exists.js';
 import { deriveFkColumns } from './shared.js';
 
+// NQL compile-select.ts labels unaliased relation columns `${relationPath}.${column}`.
+// ORM relationColumn aliases must be identifiers, so a dotted default label cannot
+// be a chosen ORM alias and must not become a nested JSON key.
+export function chosenRelationColumnAlias(
+	relationPath: string,
+	column: string,
+	alias: string | undefined,
+): string | undefined {
+	return alias === `${relationPath}.${column}` ? undefined : alias;
+}
+
 interface JsonAggOrderIntent {
 	readonly columns: readonly JsonAggOrderByEntry[];
 	readonly fallback: boolean;
@@ -410,15 +421,17 @@ function compileJsonAggRecursive(
 		shape,
 	);
 
-	if (
-		decision.relationPath?.includes('.') &&
-		decision.columnAliases &&
-		columns
-	) {
+	if (decision.columnAliases && columns) {
 		const values = new Map<string, Node>();
 		columns = columns.map((column, index) => {
 			const requested = decision.columns?.[index];
-			const alias = requested ? decision.columnAliases?.[requested] : undefined;
+			const alias = requested
+				? chosenRelationColumnAlias(
+						decision.relationPath ?? relation,
+						requested,
+						decision.columnAliases?.[requested],
+					)
+				: undefined;
 			const key = identifierText(column);
 			const output = alias ?? key;
 			values.set(
