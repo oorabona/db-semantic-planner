@@ -4,6 +4,7 @@ import {
 	getTrustedNqlRelationFilterFields,
 	hasNqlTrustedRelationFilterProof,
 	markNqlTrustedRelationFilter,
+	resolveIncludeRelationName,
 } from './internal.js';
 
 describe('NQL binding include hop allowlist', () => {
@@ -307,5 +308,32 @@ describe('NQL trusted relation-filter proof', () => {
 		expect(hasNqlTrustedRelationFilterProof(dottedWithoutHops)).toBe(false);
 		expect(getTrustedNqlRelationFilterFields(malformedHop)).toBeUndefined();
 		expect(hasNqlTrustedRelationFilterProof(malformedHop)).toBe(false);
+	});
+});
+
+describe('include camelCase resolution', () => {
+	const relations = [
+		{ name: 'foo_b_ar', target: 'secrets' },
+		{ name: 'foo_bAr', target: 'publics' },
+	] as unknown as import('./model-ir.js').RelationIR[];
+	const model = {
+		getRelation: (key: string) =>
+			relations.find((r) => key === `users.${r.name}`),
+		getRelationsFrom: () => relations,
+	} as unknown as import('./model-ir.js').ModelIR;
+
+	it('resolves a single camelCase match', () => {
+		const single = { ...model, getRelationsFrom: () => relations.slice(0, 1) };
+		expect(resolveIncludeRelationName(single, 'users', 'fooBAr')).toBe(
+			relations[0],
+		);
+	});
+	it('preserves exact-name and target-table precedence', () => {
+		expect(resolveIncludeRelationName(model, 'users', 'foo_bAr')).toBe(
+			relations[1],
+		);
+		expect(resolveIncludeRelationName(model, 'users', 'publics')).toBe(
+			relations[1],
+		);
 	});
 });

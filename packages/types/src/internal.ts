@@ -529,6 +529,7 @@ export function resolveIncludeRelationName(
 	sourceTable: string,
 	name: string,
 	disambiguate?: () => RelationIR | undefined,
+	includePath?: string,
 ): RelationIR | undefined {
 	const exact = model.getRelation(`${sourceTable}.${name}`);
 	if (exact) return exact;
@@ -542,14 +543,17 @@ export function resolveIncludeRelationName(
 			`Ambiguous include relation "${name}" from table "${sourceTable}"`,
 		);
 	}
-	return (
-		model
-			.getRelationsFrom(sourceTable)
-			.find(
-				(relation) =>
-					relation.name.replace(/_([a-z])/g, (_, c: string) =>
-						c.toUpperCase(),
-					) === name,
-			) ?? disambiguate?.()
-	);
+	const aliases = model
+		.getRelationsFrom(sourceTable)
+		.filter(
+			(relation) =>
+				relation.name.replace(/_([a-z])/g, (_, c: string) =>
+					c.toUpperCase(),
+				) === name,
+		);
+	if (aliases.length > 1)
+		throw new Error(
+			`Ambiguous include relation "${name}" from table "${sourceTable}"${includePath ? ` at "${includePath}"` : ''}. Use the exact relation name or "via" to specify one of: ${aliases.map((relation) => relation.name).join(', ')}`,
+		);
+	return aliases[0] ?? disambiguate?.();
 }

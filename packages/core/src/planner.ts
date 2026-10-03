@@ -102,9 +102,10 @@ export class AmbiguousPlanError extends Error {
 		sourceTable: string,
 		targetTable: string,
 		options: readonly string[],
+		intentPath?: string,
 	) {
 		super(
-			`Ambiguous relation from "${sourceTable}" to "${targetTable}". ` +
+			`Ambiguous relation from "${sourceTable}" to "${targetTable}"${intentPath ? ` at "${intentPath}"` : ''}. ` +
 				`Use "via" to specify one of: ${options.join(', ')}`,
 		);
 		this.name = 'AmbiguousPlanError';
@@ -1145,9 +1146,10 @@ function processInclude(
 				model,
 				state,
 				opts,
-				intentPath,
+				fullPath,
 				include.via,
 			),
+		fullPath,
 	);
 
 	if (!relation) {
@@ -1328,6 +1330,12 @@ function processInclude(
 			throw new Error(
 				`Include ${fullPath} orderBy requires fields, asc/desc direction and first/last nulls`,
 			);
+		for (const entry of entries) {
+			if (!targetTable?.columns.some((column) => column.name === entry.field))
+				throw new Error(
+					`Include ${fullPath} orderBy field "${entry.field}" is not a column of target table "${relation.target}"`,
+				);
+		}
 		const ordered = new Set(entries.map((entry) => entry.field));
 		const unique =
 			targetTable?.columns.some(
@@ -1499,7 +1507,7 @@ function disambiguateRelation(
 	model: ModelIR,
 	state: PlannerState,
 	opts: Required<PlanOptions>,
-	_intentPath: string,
+	intentPath: string,
 	viaHint?: string,
 ): RelationIR | undefined {
 	// Try direct lookup first
@@ -1563,7 +1571,7 @@ function disambiguateRelation(
 	}
 
 	// Ambiguous - throw error
-	throw new AmbiguousPlanError(sourceTable, relationName, options);
+	throw new AmbiguousPlanError(sourceTable, relationName, options, intentPath);
 }
 
 // ============================================================================
