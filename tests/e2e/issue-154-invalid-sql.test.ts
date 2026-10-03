@@ -86,21 +86,23 @@ describe('FIX-154 invalid SQL regressions', () => {
 		const sql = normalizeSql(dump.sql);
 		const joinCount = (sql.match(/\bJOIN\b/g) ?? []).length;
 		expect(joinCount).toBe(3);
-		expect(sql).toMatch(/JOIN issue_154_e2e\.definitions AS definition\b/);
-		expect(sql).toMatch(/JOIN issue_154_e2e\.files AS file\b/);
-		expect(sql).toMatch(/JOIN issue_154_e2e\.files AS file_1\b/);
-		expect(sql).toContain('definition.file_id = file.id');
-		expect(sql).toContain('uses.file_id = file_1.id');
-		expect(sql).toContain('file.path AS def_file');
-		expect(sql).toContain('file_1.path AS use_file');
+		expect(sql).toBe(
+			'SELECT file.path AS "definition.file.def_file", file_1.path AS "file.use_file" FROM issue_154_e2e.uses JOIN issue_154_e2e.definitions AS definition ON uses.def_id = definition.id JOIN issue_154_e2e.files AS file ON definition.file_id = file.id JOIN issue_154_e2e.files AS file_1 ON uses.file_id = file_1.id ORDER BY uses.id ASC',
+		);
 
 		const rows = (await query.execute()) as unknown as Array<{
-			def_file: string;
-			use_file: string;
+			definition: { file: { def_file: string } };
+			file: { use_file: string };
 		}>;
 		expect(rows).toEqual([
-			{ def_file: '/def.ts', use_file: '/use.ts' },
-			{ def_file: '/def.ts', use_file: '/use.ts' },
+			{
+				definition: { file: { def_file: '/def.ts' } },
+				file: { use_file: '/use.ts' },
+			},
+			{
+				definition: { file: { def_file: '/def.ts' } },
+				file: { use_file: '/use.ts' },
+			},
 		]);
 	});
 

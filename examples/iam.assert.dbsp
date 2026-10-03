@@ -132,7 +132,7 @@ db.rows.equals: 4
 # ─────────────────────────────────────────
 --- query: 14
 success: true
-sql.equals: SELECT users.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM iam_example.user_roles AS __t__ WHERE __t__.user_id = users.id), '[]'::json) AS "userRoles_json" FROM iam_example.users
+sql.equals: SELECT users.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'userId', __t__.user_id, 'roleId', __t__.role_id, 'grantedAt', __t__.granted_at) ORDER BY __t__.id ASC NULLS LAST) FROM iam_example.user_roles AS __t__ WHERE __t__.user_id = users.id), '[]'::json) AS "userRoles_json" FROM iam_example.users
 db.rows.equals: 6
 
 # ─────────────────────────────────────────
@@ -140,7 +140,7 @@ db.rows.equals: 6
 # ─────────────────────────────────────────
 --- query: 15
 success: true
-sql.equals: SELECT roles.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM iam_example.role_permissions AS __t__ WHERE __t__.role_id = roles.id), '[]'::json) AS "rolePermissions_json" FROM iam_example.roles
+sql.equals: SELECT roles.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'roleId', __t__.role_id, 'permissionId', __t__.permission_id) ORDER BY __t__.id ASC NULLS LAST) FROM iam_example.role_permissions AS __t__ WHERE __t__.role_id = roles.id), '[]'::json) AS "rolePermissions_json" FROM iam_example.roles
 db.rows.equals: 9
 
 # ─────────────────────────────────────────
@@ -174,7 +174,7 @@ db.rows.equals: 7
 # ─────────────────────────────────────────
 --- query: 19
 success: true
-sql.equals: SELECT role_edges.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM iam_example.roles AS __t__ WHERE __t__.id = role_edges.parent_role_id), '[]'::json) AS "parentRole_json", COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM iam_example.roles AS __t__ WHERE __t__.id = role_edges.child_role_id), '[]'::json) AS "childRole_json" FROM iam_example.role_edges
+sql.equals: SELECT role_edges.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'name', __t__.name, 'description', __t__.description, 'active', __t__.active) ORDER BY __t__.id ASC NULLS LAST) FROM iam_example.roles AS __t__ WHERE __t__.id = role_edges.parent_role_id), '[]'::json) AS "parentRole_json", COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'name', __t__.name, 'description', __t__.description, 'active', __t__.active) ORDER BY __t__.id ASC NULLS LAST) FROM iam_example.roles AS __t__ WHERE __t__.id = role_edges.child_role_id), '[]'::json) AS "childRole_json" FROM iam_example.role_edges
 db.rows.equals: 7
 
 # ─────────────────────────────────────────
@@ -190,7 +190,7 @@ db.rows.equals: 2
 # ─────────────────────────────────────────
 --- query: 21
 success: true
-sql.equals: SELECT sod_rules.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM iam_example.roles AS __t__ WHERE __t__.id = sod_rules.role_a_id), '[]'::json) AS "roleA_json", COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM iam_example.roles AS __t__ WHERE __t__.id = sod_rules.role_b_id), '[]'::json) AS "roleB_json" FROM iam_example.sod_rules
+sql.equals: SELECT sod_rules.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'name', __t__.name, 'description', __t__.description, 'active', __t__.active) ORDER BY __t__.id ASC NULLS LAST) FROM iam_example.roles AS __t__ WHERE __t__.id = sod_rules.role_a_id), '[]'::json) AS "roleA_json", COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'name', __t__.name, 'description', __t__.description, 'active', __t__.active) ORDER BY __t__.id ASC NULLS LAST) FROM iam_example.roles AS __t__ WHERE __t__.id = sod_rules.role_b_id), '[]'::json) AS "roleB_json" FROM iam_example.sod_rules
 db.rows.equals: 2
 
 # ─────────────────────────────────────────
@@ -240,7 +240,7 @@ db.rows.equals: 5
 # Uses nested json_agg subqueries with depth-based aliases (__t__, __t1__, __t2__, __t3__)
 --- query: 27
 success: true
-sql.equals: SELECT users.*, COALESCE((SELECT json_agg(jsonb_build_object('role_id', __t__.role_id) || jsonb_build_object('role', COALESCE((SELECT json_agg(to_jsonb(__t1__) || jsonb_build_object('rolePermissions', COALESCE((SELECT json_agg(to_jsonb(__t2__) || jsonb_build_object('permission', COALESCE((SELECT json_agg(to_jsonb(__t3__) ORDER BY __t3__.id ASC NULLS LAST) FROM iam_example.permissions AS __t3__ WHERE __t3__.id = __t2__.permission_id), '[]'::json)) ORDER BY __t2__.id ASC NULLS LAST) FROM iam_example.role_permissions AS __t2__ WHERE __t2__.role_id = __t1__.id), '[]'::json)) ORDER BY __t1__.id ASC NULLS LAST) FROM iam_example.roles AS __t1__ WHERE __t1__.id = __t__.role_id), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST) FROM iam_example.user_roles AS __t__ WHERE __t__.user_id = users.id), '[]'::json) AS "userRoles_json" FROM iam_example.users WHERE users.active = $1
+sql.equals: SELECT users.*, COALESCE((SELECT json_agg(jsonb_build_object('roleId', __t__.role_id) || jsonb_build_object('role', COALESCE((SELECT json_agg(jsonb_build_object('id', __t1__.id, 'name', __t1__.name, 'description', __t1__.description, 'active', __t1__.active) || jsonb_build_object('rolePermissions', COALESCE((SELECT json_agg(jsonb_build_object('id', __t2__.id, 'roleId', __t2__.role_id, 'permissionId', __t2__.permission_id) || jsonb_build_object('permission', COALESCE((SELECT json_agg(jsonb_build_object('id', __t3__.id, 'name', __t3__.name, 'resource', __t3__.resource, 'action', __t3__.action, 'description', __t3__.description) ORDER BY __t3__.id ASC NULLS LAST) FROM iam_example.permissions AS __t3__ WHERE __t3__.id = __t2__.permission_id), '[]'::json)) ORDER BY __t2__.id ASC NULLS LAST) FROM iam_example.role_permissions AS __t2__ WHERE __t2__.role_id = __t1__.id), '[]'::json)) ORDER BY __t1__.id ASC NULLS LAST) FROM iam_example.roles AS __t1__ WHERE __t1__.id = __t__.role_id), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST) FROM iam_example.user_roles AS __t__ WHERE __t__.user_id = users.id), '[]'::json) AS "userRoles_json" FROM iam_example.users WHERE users.active = $1
 params.equals: [true]
 db.rows.equals: 5
 
@@ -252,7 +252,7 @@ db.rows.equals: 5
 # Same as query 27 but with | flat — forces JOIN strategy instead of nested json_agg
 --- query: 28
 success: true
-sql.equals: SELECT users.*, "userRoles".role_id AS "userRoles.roleId", permission.* FROM iam_example.users LEFT JOIN iam_example.user_roles AS "userRoles" ON users.id = "userRoles".user_id LEFT JOIN iam_example.roles AS role ON "userRoles".role_id = role.id LEFT JOIN iam_example.role_permissions AS "rolePermissions" ON role.id = "rolePermissions".role_id LEFT JOIN iam_example.permissions AS permission ON "rolePermissions".permission_id = permission.id WHERE users.active = $1
+sql.equals: SELECT users.*, "userRoles".role_id AS "userRoles.roleId", permission.id AS "userRoles.role.rolePermissions.permission.id", permission.name AS "userRoles.role.rolePermissions.permission.name", permission.resource AS "userRoles.role.rolePermissions.permission.resource", permission.action AS "userRoles.role.rolePermissions.permission.action", permission.description AS "userRoles.role.rolePermissions.permission.description" FROM iam_example.users LEFT JOIN iam_example.user_roles AS "userRoles" ON users.id = "userRoles".user_id LEFT JOIN iam_example.roles AS role ON "userRoles".role_id = role.id LEFT JOIN iam_example.role_permissions AS "rolePermissions" ON role.id = "rolePermissions".role_id LEFT JOIN iam_example.permissions AS permission ON "rolePermissions".permission_id = permission.id WHERE users.active = $1
 params.equals: [true]
 
 # ─────────────────────────────────────────
@@ -314,7 +314,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 35
 success: true
-sql.equals: SELECT users.*, "userRoles_lat_0".* FROM iam_example.users LEFT JOIN LATERAL (SELECT "userRoles_inner_0".* FROM iam_example.user_roles AS "userRoles_inner_0" WHERE "userRoles_inner_0".user_id = users.id ORDER BY "userRoles_inner_0".id ASC NULLS LAST LIMIT 2) AS "userRoles_lat_0" ON true
+sql.equals: SELECT users.*, "userRoles_lat_0".id AS "userRoles.id", "userRoles_lat_0".user_id AS "userRoles.userId", "userRoles_lat_0".role_id AS "userRoles.roleId", "userRoles_lat_0".granted_at AS "userRoles.grantedAt" FROM iam_example.users LEFT JOIN LATERAL (SELECT "userRoles_inner_0".id, "userRoles_inner_0".user_id, "userRoles_inner_0".role_id, "userRoles_inner_0".granted_at FROM iam_example.user_roles AS "userRoles_inner_0" WHERE "userRoles_inner_0".user_id = users.id ORDER BY "userRoles_inner_0".id ASC NULLS LAST LIMIT 2) AS "userRoles_lat_0" ON true
 params.equals: []
 db.rows.equals: 8
 
@@ -341,6 +341,6 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 37
 success: true
-sql.equals: SELECT users.*, "userRoles".* FROM iam_example.users LEFT JOIN iam_example.user_roles AS "userRoles" ON users.id = "userRoles".user_id
+sql.equals: SELECT users.*, "userRoles".id AS "userRoles.id", "userRoles".user_id AS "userRoles.userId", "userRoles".role_id AS "userRoles.roleId", "userRoles".granted_at AS "userRoles.grantedAt" FROM iam_example.users LEFT JOIN iam_example.user_roles AS "userRoles" ON users.id = "userRoles".user_id
 params.equals: []
 db.rows.equals: 8
