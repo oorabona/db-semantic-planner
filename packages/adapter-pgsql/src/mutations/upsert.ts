@@ -34,6 +34,8 @@ import {
 	type MutationColumnAddress,
 	type MutationColumnMetadata,
 	type MutationTableMetadata,
+	mutationColumnType,
+	valueToNode,
 } from './mutation-compiler.js';
 
 // ============================================================================
@@ -89,6 +91,8 @@ export interface UpsertConfig {
 	compileActionWhere?: (where: WhereIntent, state: CompilerState) => Node;
 	/** Use EXCLUDED.column for update values (default: true) */
 	useExcluded?: boolean;
+	/** Explicit scalar SET values, independent of INSERT values. */
+	updateValues?: ReadonlyMap<SqlIdentifier, unknown>;
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
 	returningSources?: SqlIdentifier[];
@@ -221,6 +225,20 @@ export function buildOnConflictClause(
 				ResTarget: {
 					name: dbCol,
 					val: parseRawExpression(rawExpr),
+				},
+			};
+		}
+
+		if (config.updateValues?.has(col)) {
+			return {
+				ResTarget: {
+					name: dbCol,
+					val: valueToNode(
+						config.updateValues.get(col),
+						state,
+						mutationColumnType(config.columnTypes, col),
+						true,
+					),
 				},
 			};
 		}

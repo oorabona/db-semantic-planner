@@ -179,7 +179,7 @@ export type MutationColumnTypes = Record<
 	string | MutationColumnMetadata
 >;
 
-function mutationColumnType(
+export function mutationColumnType(
 	columnTypes: MutationColumnTypes | undefined,
 	physicalName: SqlIdentifier,
 ): string | undefined {
@@ -996,7 +996,7 @@ export const RANGE_TYPES = new Set([
 	'numrange',
 ]);
 
-function valueToNode(
+export function valueToNode(
 	value: unknown,
 	state: CompilerState,
 	dbType?: string,

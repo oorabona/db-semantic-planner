@@ -26,7 +26,7 @@ import type {
 	UpsertIntent,
 	WhereIntent,
 } from '@dbsp/types';
-import { toColumnList } from '@dbsp/types';
+import { isParamIntent, toColumnList } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { compileSelect } from './adapter-compiler-select.js';
@@ -1024,35 +1024,29 @@ export function compileUpsert(
 	validateMutationRowCount('upsert', rows, options);
 	const columns = [...inspectedColumns];
 
-	// Separate raw SQL expressions from scalar set values.
-	// Raw expressions are emitted verbatim in ON CONFLICT DO UPDATE SET —
-	// they must NOT be merged into INSERT VALUES rows (they are not values).
-	// Scalar set values are merged so EXCLUDED.column picks them up.
+	// Explicit SET values apply only on conflict; INSERT rows retain their values().
 	const rawExprs: Record<string, string> = {};
 	const scalarSet: Record<string, unknown> = {};
 	if (intent.action.type === 'doUpdate' && intent.action.set) {
 		for (const [key, val] of Object.entries(intent.action.set)) {
-			if (isSqlRaw(val)) {
-				rawExprs[key] = val.sql;
-			} else {
-				scalarSet[key] = val;
+			if (isSqlRaw(val)) rawExprs[key] = val.sql;
+			else {
+				// The public param() factory wraps its ParamIntent in an expression ref.
+				scalarSet[key] =
+					val &&
+					typeof val === 'object' &&
+					'__expr' in val &&
+					val.__expr === true &&
+					'intent' in val &&
+					isParamIntent(val.intent)
+						? val.intent
+						: val;
 			}
 		}
 	}
-
-	// Merge only scalar set values into INSERT VALUES rows so EXCLUDED.column
-	// references resolve correctly.
-	for (const key of Object.keys(scalarSet)) {
-		if (!columns.includes(key)) columns.push(key);
-	}
-	const scalarKeys = new Set(Object.keys(scalarSet));
 	const values = rows.map((row, index) =>
 		columns.map((col) =>
-			scalarKeys.has(col)
-				? (scalarSet[col] ?? null)
-				: rowKeys[index]?.has(col)
-					? (row[col] ?? null)
-					: null,
+			rowKeys[index]?.has(col) ? (row[col] ?? null) : null,
 		),
 	);
 	const batchThreshold = options?.batchThreshold ?? 50;
@@ -1103,7 +1097,7 @@ export function compileUpsert(
 
 	// Determine update columns.
 	// All columns in intent.action.set are update columns (both scalar and raw).
-	// Scalar ones use EXCLUDED.column, raw ones use the parsed SQL expression.
+	// Scalars bind independently; raw values use the parsed SQL expression.
 	let updateColumns: SqlIdentifier[] | undefined;
 	let logicalUpdateColumns: string[] | undefined;
 	if (intent.action.type === 'doUpdate') {
@@ -1128,7 +1122,7 @@ export function compileUpsert(
 
 	const columnTypes = getColumnTypes(
 		intent.table,
-		columns,
+		[...new Set([...columns, ...Object.keys(scalarSet)])],
 		deps,
 		useUnnest ? new Set(columns) : undefined,
 		'upsert',
@@ -1149,6 +1143,15 @@ export function compileUpsert(
 			declaredMutationColumn(deps, intent.table, column),
 		),
 		values,
+		...(intent.action.type === 'doUpdate' &&
+			intent.action.set && {
+				updateValues: new Map(
+					Object.entries(scalarSet).map(([column, value]) => [
+						declaredMutationColumn(deps, intent.table, column),
+						value,
+					]),
+				),
+			}),
 		conflictTarget,
 		conflictAction,
 		...(updateColumns && { updateColumns }),

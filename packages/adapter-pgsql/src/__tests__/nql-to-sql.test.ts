@@ -1381,12 +1381,12 @@ describe('NQL → SQL upsert (ON CONFLICT)', () => {
 		expect(conflictMatch![1]).toContain('email');
 	});
 
-	it('uses EXCLUDED references in DO UPDATE SET', () => {
+	it('binds explicit NQL assignments separately in DO UPDATE SET', () => {
 		const sql = nqlMutationToSQL(
 			"upsert into employees on email set name = 'Alice', email = 'alice@co.com', salary = 90000",
 		);
-		// DO UPDATE SET columns should use EXCLUDED.column
-		expect(sql).toContain('excluded');
+		// NQL assignments are used for both VALUES and explicit SET.
+		expect(sql).toContain('do update set name = $4, email = $5, salary = $6');
 	});
 
 	it('compiles upsert where as ON CONFLICT DO UPDATE WHERE', () => {
@@ -1405,8 +1405,16 @@ describe('NQL → SQL upsert (ON CONFLICT)', () => {
 		const sql = normalizeSQL(result.sql);
 
 		expect(sql).toContain('on conflict (email) do update set');
-		expect(sql).toContain('where employees.salary > $4');
-		expect(result.parameters).toEqual(['Alice', 'alice@co.com', 90000, 80000]);
+		expect(sql).toContain('where employees.salary > $7');
+		expect(result.parameters).toEqual([
+			'Alice',
+			'alice@co.com',
+			90000,
+			'Alice',
+			'alice@co.com',
+			90000,
+			80000,
+		]);
 	});
 
 	it('parameterizes values', () => {
