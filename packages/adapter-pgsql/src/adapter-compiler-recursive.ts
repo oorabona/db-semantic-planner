@@ -434,6 +434,7 @@ export function compileRecursive<T = unknown>(
 			`Recursive start.from '${startTable}' must match traversal.nodeTable '${traversal.nodeTable}'.`,
 		);
 	}
+
 	const anchorBinding = relationBinding({
 		kind: 'declared-table',
 		logicalTable: startTable,
@@ -546,7 +547,7 @@ export function compileRecursive<T = unknown>(
 					column: pkColumn,
 				},
 			),
-			outerAlias: queryLocal('t0'),
+			anchor: { mode: 'standalone' },
 			isAncestors: false,
 			maxDepth: intent.maxDepth,
 			selectColumns,
@@ -588,6 +589,7 @@ export function compileRecursive<T = unknown>(
 			base.bidirectionalStrategy =
 				traversal.edgeStorageHint === 'directed-only' ? 'union-all' : 'union';
 		}
+
 		if (anchorWhere) {
 			base.anchorWhere = anchorWhere;
 		}
@@ -657,7 +659,7 @@ export function compileRecursive<T = unknown>(
 					column: traversal.parentId,
 				},
 			),
-			outerAlias: queryLocal('t0'),
+			anchor: { mode: 'standalone' },
 			isAncestors: traversal.direction === 'ancestors',
 			maxDepth: intent.maxDepth,
 			selectColumns,

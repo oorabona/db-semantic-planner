@@ -60,6 +60,7 @@ import {
 	buildColumnRef,
 	compileValue,
 	compileValueOrFieldRef,
+	resolveWhereModelColumn,
 } from './handlers/where/utils.js';
 // Modifier guard and outerRef check used by buildSubqueryFromIntent (direct-path
 // chokepoint for rawExists / scalar-direct predicate subqueries).
@@ -74,6 +75,45 @@ import { createParamRef } from './param-ref.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
 import { resolveRelationKeys } from './relation-keys.js';
 import { queryLocal } from './sql-identifier.js';
+
+/** Validate before lowering can change position or discard recursive options. */
+function assertNoRecursiveAnchorRelations(intent: WhereIntent): void {
+	if (
+		intent.kind === 'exists' ||
+		intent.kind === 'notExists' ||
+		intent.kind === 'relationFilter'
+	) {
+		const trusted =
+			intent.kind === 'relationFilter'
+				? getTrustedNqlRelationFilterFields(intent)
+				: undefined;
+		if (
+			('recursive' in intent && intent.recursive !== undefined) ||
+			trusted?.recursive !== undefined
+		) {
+			const relation = trusted?.relation ?? intent.relation;
+			throw new Error(
+				`start.where ${intent.kind}('${Array.isArray(relation) ? relation.join('.') : relation}'): recursive relation predicates are not supported in a recursive anchor.`,
+			);
+		}
+		if (intent.where) assertNoRecursiveAnchorRelations(intent.where);
+	} else if (intent.kind === 'and' || intent.kind === 'or') {
+		for (const child of intent.conditions)
+			assertNoRecursiveAnchorRelations(child);
+	} else if (intent.kind === 'not') {
+		assertNoRecursiveAnchorRelations(intent.condition);
+	} else if (
+		intent.kind === 'rawExists' ||
+		intent.kind === 'rawNotExists' ||
+		intent.kind === 'subquery' ||
+		intent.kind === 'in'
+	) {
+		if (intent.subquery?.where)
+			assertNoRecursiveAnchorRelations(intent.subquery.where);
+		if (intent.subquery?.having)
+			assertNoRecursiveAnchorRelations(intent.subquery.having);
+	}
+}
 
 /** Private recursion state, created by the top-level entry and shared by descendants. */
 type InternalConditionCtx = WhereCompilerCtx & {
@@ -221,13 +261,13 @@ export function createConditionCompiler(
 
 		let rangeDataType: string | undefined;
 		if (ctx.model && operator !== 'between') {
-			const table = ctx.model.getTable(ctx.rootTable);
-			if (table) {
-				const col = table.columns.find((c) => c.name === field);
-				if (col?.type.endsWith('range')) {
-					rangeDataType = col.type;
-				}
-			}
+			const col =
+				ctx.position === 'recursive-anchor'
+					? resolveWhereModelColumn(field, handlerCtx)
+					: ctx.model
+							.getTable(ctx.rootTable)
+							?.columns.find((column) => column.name === field);
+			if (col?.type.endsWith('range')) rangeDataType = col.type;
 		}
 
 		if (operator === 'between') {
@@ -377,6 +417,7 @@ export function createConditionCompiler(
 		const rf = intent as WhereRelationFilterIntent;
 		const preResolved = getTrustedNqlRelationFilterFields(rf);
 		const relationPath = preResolved?.relation ?? rf.relation;
+
 		const hops: string[] = Array.isArray(relationPath)
 			? [...relationPath]
 			: [relationPath];
@@ -996,6 +1037,8 @@ export function createConditionCompiler(
 		intent: WhereIntent,
 		ctx: WhereCompilerCtx | ConditionCompilerCtx,
 	): Node {
+		if (ctx.position === 'recursive-anchor')
+			assertNoRecursiveAnchorRelations(intent);
 		const contexts = new WeakMap<InternalConditionCtx, CompilerContext>();
 		const compile = (child: WhereIntent, inner: InternalConditionCtx): Node => {
 			let handlerCtx = contexts.get(inner);

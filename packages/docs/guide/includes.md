@@ -93,6 +93,11 @@ const posts = await orm.select('posts')
 ## Recursive Includes (Hierarchies)
 
 For self-referential tables (categories, org charts, threaded comments), use the `recursive` option. The planner generates a PostgreSQL `WITH RECURSIVE` CTE automatically.
+The hydrator executes a standalone recursive query whose anchor selects the
+starting records by ID (`eq` for one record, `inArray` for several). Both
+directions start from those records; descendants join on the child foreign key
+and ancestors join on the parent primary key. See the
+[standalone adjacency SQL](./recursive-cte#standalone-adjacency-anchors).
 
 ```typescript
 // Ancestors: walk up the tree from node id=5

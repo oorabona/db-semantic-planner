@@ -278,3 +278,34 @@ console.log(params); // [7, 20]
 - **`UNION ALL` (default) does not deduplicate.** For trees this is fine — each path is unique. For graphs where the same node is reachable via multiple paths, use `unionAll: false` to avoid duplicate rows, at the cost of a deduplication pass per iteration.
 - **No adapter = runtime error.** Calling `.dump()` or `.all()` on a builder constructed without an adapter throws `InvalidOperationError`. Always obtain the builder via `orm.recursive()` (which has an adapter bound), not via `createRawCteBuilder()` directly unless you pass an adapter explicitly.
 - **Schema scoping is inherited.** If you obtained the ORM via `orm.withSchema('tenant_123')`, the recursive query will use `"tenant_123"."table"` in the base and step queries automatically.
+
+## Standalone adjacency anchors
+
+`compileRecursive(planRecursive(intent))` anchors adjacency traversal at the node
+rows selected by `start.where`. With no `start.where`, it starts at every node.
+`start.from`, when supplied, must equal `traversal.nodeTable`. Both ancestor and
+descendant walks use the same anchor; direction changes the recursive join.
+The anchor condition uses the normal condition compiler, including its parameters
+and relation key authorities. Recursive relation predicates inside that condition
+are refused rather than compiled as a one-hop check.
+
+For `start.where: eq('id', 1)`, descendants over `categories.parent_id` compile as:
+
+```sql
+WITH RECURSIVE tree AS (
+  SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited
+  FROM categories AS __n WHERE __n.id = $1
+  UNION ALL
+  SELECT __n.id AS id, tree.__depth + 1 AS __depth,
+         tree.__visited || __n.id AS __visited
+  FROM tree JOIN categories AS __n ON __n.parent_id = tree.id
+  WHERE tree.__depth < 100 AND __n.id <> ALL (tree.__visited)
+)
+SELECT tree.id AS id FROM tree
+```
+
+The parameter is `[1]`. `inArray('id', [1, 2])` uses `__n.id = ANY ($1)`
+with `[[1, 2]]`. Ancestors carry `parent_id` inside the CTE and join on
+`__n.id = tree.parent_id`. The internal adjacency builder also supports an explicit
+correlated anchor mode, whose caller must supply an alias bound by the enclosing
+query. Standalone compilation uses no outer alias.

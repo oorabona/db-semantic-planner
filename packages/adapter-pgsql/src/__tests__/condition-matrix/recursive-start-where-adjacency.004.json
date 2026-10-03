@@ -4,7 +4,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "every",
 			"shape": "two-level",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND __n.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $2)))) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $2)))) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [13, 61, 17],
 			"error": null
 		},
@@ -12,7 +12,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "none",
 			"shape": "leaf",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61],
 			"error": null
 		},
@@ -20,7 +20,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "none",
 			"shape": "and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61, 13],
 			"error": null
 		},
@@ -28,7 +28,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "none",
 			"shape": "or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR __n.score = $2) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61, 13],
 			"error": null
 		},
@@ -36,7 +36,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "none",
 			"shape": "not",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61],
 			"error": null
 		},
@@ -44,7 +44,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "none",
 			"shape": "empty-or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -52,7 +52,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "none",
 			"shape": "empty-and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -60,7 +60,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "none",
 			"shape": "two-level",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND __n.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [13, 61, 17],
 			"error": null
 		},
@@ -68,7 +68,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "expression",
 			"shape": "leaf",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND length(name) > $1 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE length(name) > $1 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [2],
 			"error": null
 		},
@@ -76,7 +76,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "expression",
 			"shape": "and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND length(name) > $1 AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE length(name) > $1 AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [2, 13],
 			"error": null
 		},
@@ -84,7 +84,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "expression",
 			"shape": "or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND (length(name) > $1 OR __n.score = $2) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE length(name) > $1 OR __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [2, 13],
 			"error": null
 		},
@@ -92,7 +92,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "expression",
 			"shape": "not",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (length(name) > $1) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (length(name) > $1) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [2],
 			"error": null
 		},
@@ -100,7 +100,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "expression",
 			"shape": "empty-or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -108,7 +108,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "expression",
 			"shape": "empty-and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -116,7 +116,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "expression",
 			"shape": "two-level",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND __n.score = $1 AND (NOT (length(name) > $2) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT (length(name) > $2) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [13, 2, 17],
 			"error": null
 		},
@@ -156,7 +156,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "raw-expression",
 			"shape": "empty-or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -164,7 +164,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "raw-expression",
 			"shape": "empty-and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -180,7 +180,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "exists-custom-authorities",
 			"shape": "leaf",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61],
 			"error": null
 		},
@@ -188,7 +188,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "exists-custom-authorities",
 			"shape": "and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61, 13],
 			"error": null
 		},
@@ -196,7 +196,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "exists-custom-authorities",
 			"shape": "or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR __n.score = $2) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61, 13],
 			"error": null
 		},
@@ -204,7 +204,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "exists-custom-authorities",
 			"shape": "not",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61],
 			"error": null
 		},
@@ -212,7 +212,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "exists-custom-authorities",
 			"shape": "empty-or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -220,7 +220,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "exists-custom-authorities",
 			"shape": "empty-and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -228,7 +228,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "exists-custom-authorities",
 			"shape": "two-level",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND __n.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [13, 61, 17],
 			"error": null
 		},
@@ -236,7 +236,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "notExists-custom-authorities",
 			"shape": "leaf",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61],
 			"error": null
 		},
@@ -244,7 +244,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "notExists-custom-authorities",
 			"shape": "and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61, 13],
 			"error": null
 		},
@@ -252,7 +252,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "notExists-custom-authorities",
 			"shape": "or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR __n.score = $2) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61, 13],
 			"error": null
 		},
@@ -260,7 +260,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "notExists-custom-authorities",
 			"shape": "not",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61],
 			"error": null
 		},
@@ -268,7 +268,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "notExists-custom-authorities",
 			"shape": "empty-or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -276,7 +276,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "notExists-custom-authorities",
 			"shape": "empty-and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -284,7 +284,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "notExists-custom-authorities",
 			"shape": "two-level",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND __n.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [13, 61, 17],
 			"error": null
 		},
@@ -292,7 +292,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "some-custom-authorities",
 			"shape": "leaf",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61],
 			"error": null
 		},
@@ -300,7 +300,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "some-custom-authorities",
 			"shape": "and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61, 13],
 			"error": null
 		},
@@ -308,7 +308,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "some-custom-authorities",
 			"shape": "or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR __n.score = $2) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61, 13],
 			"error": null
 		},
@@ -316,7 +316,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "some-custom-authorities",
 			"shape": "not",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61],
 			"error": null
 		},
@@ -324,7 +324,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "some-custom-authorities",
 			"shape": "empty-or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -332,7 +332,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "some-custom-authorities",
 			"shape": "empty-and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -340,7 +340,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "some-custom-authorities",
 			"shape": "two-level",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND __n.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [13, 61, 17],
 			"error": null
 		},
@@ -348,7 +348,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "every-custom-authorities",
 			"shape": "leaf",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61],
 			"error": null
 		},
@@ -356,7 +356,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "every-custom-authorities",
 			"shape": "and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61, 13],
 			"error": null
 		},
@@ -364,7 +364,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "every-custom-authorities",
 			"shape": "or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) OR __n.score = $2) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) OR __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61, 13],
 			"error": null
 		},
@@ -372,7 +372,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "every-custom-authorities",
 			"shape": "not",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1)))) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1)))) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61],
 			"error": null
 		},
@@ -380,7 +380,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "every-custom-authorities",
 			"shape": "empty-or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -388,7 +388,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "every-custom-authorities",
 			"shape": "empty-and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -396,7 +396,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "every-custom-authorities",
 			"shape": "two-level",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND __n.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $2)))) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $2)))) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [13, 61, 17],
 			"error": null
 		},
@@ -404,7 +404,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "none-custom-authorities",
 			"shape": "leaf",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61],
 			"error": null
 		},
@@ -412,7 +412,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "none-custom-authorities",
 			"shape": "and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61, 13],
 			"error": null
 		},
@@ -420,7 +420,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "none-custom-authorities",
 			"shape": "or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR __n.score = $2) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61, 13],
 			"error": null
 		},
@@ -428,7 +428,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "none-custom-authorities",
 			"shape": "not",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61],
 			"error": null
 		},
@@ -436,7 +436,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "none-custom-authorities",
 			"shape": "empty-or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -444,7 +444,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "none-custom-authorities",
 			"shape": "empty-and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -452,7 +452,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "none-custom-authorities",
 			"shape": "two-level",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND __n.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [13, 61, 17],
 			"error": null
 		},
@@ -460,7 +460,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "exists-no-pk-default-authorities",
 			"shape": "leaf",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61],
 			"error": null
 		},
@@ -468,7 +468,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "exists-no-pk-default-authorities",
 			"shape": "and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61, 13],
 			"error": null
 		},
@@ -476,7 +476,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "exists-no-pk-default-authorities",
 			"shape": "or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR __n.score = $2) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61, 13],
 			"error": null
 		},
@@ -484,7 +484,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "exists-no-pk-default-authorities",
 			"shape": "not",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61],
 			"error": null
 		},
@@ -492,7 +492,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "exists-no-pk-default-authorities",
 			"shape": "empty-or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -500,7 +500,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "exists-no-pk-default-authorities",
 			"shape": "empty-and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -508,7 +508,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "exists-no-pk-default-authorities",
 			"shape": "two-level",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND __n.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [13, 61, 17],
 			"error": null
 		},
@@ -516,7 +516,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "notExists-no-pk-default-authorities",
 			"shape": "leaf",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61],
 			"error": null
 		},
@@ -524,7 +524,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "notExists-no-pk-default-authorities",
 			"shape": "and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61, 13],
 			"error": null
 		},
@@ -532,7 +532,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "notExists-no-pk-default-authorities",
 			"shape": "or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR __n.score = $2) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61, 13],
 			"error": null
 		},
@@ -540,7 +540,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "notExists-no-pk-default-authorities",
 			"shape": "not",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61],
 			"error": null
 		},
@@ -548,7 +548,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "notExists-no-pk-default-authorities",
 			"shape": "empty-or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -556,7 +556,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "notExists-no-pk-default-authorities",
 			"shape": "empty-and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -564,7 +564,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "notExists-no-pk-default-authorities",
 			"shape": "two-level",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND __n.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [13, 61, 17],
 			"error": null
 		},
@@ -572,7 +572,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "some-no-pk-default-authorities",
 			"shape": "leaf",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61],
 			"error": null
 		},
@@ -580,7 +580,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "some-no-pk-default-authorities",
 			"shape": "and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61, 13],
 			"error": null
 		},
@@ -588,7 +588,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "some-no-pk-default-authorities",
 			"shape": "or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR __n.score = $2) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61, 13],
 			"error": null
 		},
@@ -596,7 +596,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "some-no-pk-default-authorities",
 			"shape": "not",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61],
 			"error": null
 		},
@@ -604,7 +604,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "some-no-pk-default-authorities",
 			"shape": "empty-or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -612,7 +612,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "some-no-pk-default-authorities",
 			"shape": "empty-and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -620,7 +620,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "some-no-pk-default-authorities",
 			"shape": "two-level",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND __n.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [13, 61, 17],
 			"error": null
 		},
@@ -628,7 +628,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "every-no-pk-default-authorities",
 			"shape": "leaf",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61],
 			"error": null
 		},
@@ -636,7 +636,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "every-no-pk-default-authorities",
 			"shape": "and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61, 13],
 			"error": null
 		},
@@ -644,7 +644,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "every-no-pk-default-authorities",
 			"shape": "or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) OR __n.score = $2) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) OR __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61, 13],
 			"error": null
 		},
@@ -652,7 +652,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "every-no-pk-default-authorities",
 			"shape": "not",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1)))) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1)))) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61],
 			"error": null
 		},
@@ -660,7 +660,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "every-no-pk-default-authorities",
 			"shape": "empty-or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -668,7 +668,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "every-no-pk-default-authorities",
 			"shape": "empty-and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -676,7 +676,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "every-no-pk-default-authorities",
 			"shape": "two-level",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND __n.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $2)))) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $2)))) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [13, 61, 17],
 			"error": null
 		},
@@ -684,7 +684,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "none-no-pk-default-authorities",
 			"shape": "leaf",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61],
 			"error": null
 		},
@@ -692,7 +692,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "none-no-pk-default-authorities",
 			"shape": "and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61, 13],
 			"error": null
 		},
@@ -700,7 +700,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "none-no-pk-default-authorities",
 			"shape": "or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR __n.score = $2) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61, 13],
 			"error": null
 		},
@@ -708,7 +708,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "none-no-pk-default-authorities",
 			"shape": "not",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61],
 			"error": null
 		},
@@ -716,7 +716,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "none-no-pk-default-authorities",
 			"shape": "empty-or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -724,7 +724,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "none-no-pk-default-authorities",
 			"shape": "empty-and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -732,7 +732,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "none-no-pk-default-authorities",
 			"shape": "two-level",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND __n.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [13, 61, 17],
 			"error": null
 		},
@@ -740,7 +740,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "exists-no-pk-custom-authorities",
 			"shape": "leaf",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61],
 			"error": null
 		},
@@ -748,7 +748,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "exists-no-pk-custom-authorities",
 			"shape": "and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61, 13],
 			"error": null
 		},
@@ -756,7 +756,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "exists-no-pk-custom-authorities",
 			"shape": "or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR __n.score = $2) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61, 13],
 			"error": null
 		},
@@ -764,7 +764,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "exists-no-pk-custom-authorities",
 			"shape": "not",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61],
 			"error": null
 		},
@@ -772,7 +772,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "exists-no-pk-custom-authorities",
 			"shape": "empty-or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE false UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -780,7 +780,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "exists-no-pk-custom-authorities",
 			"shape": "empty-and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE true UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [],
 			"error": null
 		},
@@ -788,7 +788,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "exists-no-pk-custom-authorities",
 			"shape": "two-level",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND __n.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [13, 61, 17],
 			"error": null
 		},
@@ -796,7 +796,7 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "notExists-no-pk-custom-authorities",
 			"shape": "leaf",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
 			"params": [61],
 			"error": null
 		}

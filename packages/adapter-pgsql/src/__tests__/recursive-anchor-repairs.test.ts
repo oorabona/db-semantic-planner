@@ -1,9 +1,11 @@
 import {
 	and,
+	any,
 	createOrm,
 	eq,
 	every,
 	exists,
+	inArray,
 	like,
 	neq,
 	none,
@@ -245,11 +247,167 @@ describe('#891 recursive anchor review repairs', () => {
 		expect(result.sql).toBe(edgeSql('__n.score = $1'));
 		expect(result.parameters).toEqual([7]);
 	});
-	it('CON1 adjacency applies the anchor predicate', () => {
-		const result = compile(eq('score', 9), true);
-		expect(result.sql).toBe(
-			'WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND __n.score = $1 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree',
+	for (const direction of ['descendants', 'ancestors'] as const) {
+		for (const [name, where, condition, params] of [
+			['eq', eq('id', 1), '__n.id = $1', [1]],
+			['inArray', inArray('id', [1, 2]), '__n.id = ANY ($1)', [[1, 2]]],
+			['whole table', undefined, undefined, []],
+		] as const) {
+			it(`COR1 standalone adjacency ${direction} ${name} binds ranges and filters anchor`, () => {
+				const base = intent(eq('id', 1), true);
+				const query: RecursiveIntent = {
+					...base,
+					start: {
+						from: 'users',
+						nodeIdExpr: { kind: 'column', name: 'id' },
+						...(where !== undefined && { where }),
+					},
+					traversal: {
+						kind: 'adjacency',
+						nodeTable: 'users',
+						nodeId: 'id',
+						parentId: 'score',
+						direction,
+					},
+				};
+				const result = adapter.compileRecursive(
+					planRecursive(query, db.model),
+					db.model,
+				);
+				const parent = direction === 'ancestors' ? ', __n.score AS score' : '';
+				const join =
+					direction === 'ancestors'
+						? '__n.id = tree.score'
+						: '__n.score = tree.id';
+				// Ancestor steps need the parent column carried through the CTE.
+				expect(result.sql).toBe(
+					`WITH RECURSIVE tree AS (SELECT __n.id AS id${parent}, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n${condition ? ` WHERE ${condition}` : ''} UNION ALL SELECT __n.id AS id${parent}, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON ${join} WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree`,
+				);
+				expect(result.parameters).toEqual(params);
+			});
+		}
+	}
+	for (const predicate of [exists, notExists]) {
+		const kind = predicate === exists ? 'exists' : 'notExists';
+		for (const nested of [false, true]) {
+			it(`SEC1 ${kind} recursive options refused at depth ${nested ? 2 : 1}`, () => {
+				const leaf = predicate(nested ? 'comments' : 'posts', {
+					recursive: { direction: 'down', through: 'posts', maxDepth: 3 },
+					where: eq('score', 71),
+				});
+				const where = nested
+					? exists('posts', { where: and(not(or(leaf))) })
+					: leaf;
+				expect(() => compile(where)).toThrow(
+					new Error(
+						`start.where ${kind}('${nested ? 'comments' : 'posts'}'): recursive relation predicates are not supported in a recursive anchor.`,
+					),
+				);
+			});
+		}
+	}
+	for (const predicate of [exists, notExists]) {
+		it(`SEC1 ${predicate === exists ? 'exists' : 'notExists'} recursive options refused inside an anchor subquery`, () => {
+			const where = rawExists(
+				subquery('posts')
+					.select('id')
+					.where(
+						predicate('comments', {
+							recursive: {
+								direction: 'down',
+								through: 'comments',
+								maxDepth: 3,
+							},
+							where: eq('score', 71),
+						}),
+					),
+			);
+			expect(() => compile(where)).toThrow(
+				new Error(
+					`start.where ${predicate === exists ? 'exists' : 'notExists'}('comments'): recursive relation predicates are not supported in a recursive anchor.`,
+				),
+			);
+		});
+	}
+	for (const mode of ['some', 'every', 'none'] as const) {
+		for (const nested of [false, true]) {
+			it(`SEC1 ${mode} relation filter recursive options refused at depth ${nested ? 2 : 1}`, () => {
+				const leaf = {
+					kind: 'relationFilter',
+					relation: nested ? 'comments' : 'posts',
+					mode,
+					where: and(),
+					recursive: { direction: 'down', maxDepth: 3 },
+				} as const;
+				expect(() =>
+					compile(nested ? exists('posts', { where: leaf }) : leaf),
+				).toThrow(
+					new Error(
+						`start.where relationFilter('${nested ? 'comments' : 'posts'}'): recursive relation predicates are not supported in a recursive anchor.`,
+					),
+				);
+			});
+		}
+	}
+	for (const [name, predicate, condition, params] of [
+		[
+			'empty ANY',
+			(field: string) => any(field, []),
+			'__n.score = ANY (CAST($1 AS int4[]))',
+			[[]],
+		],
+		[
+			'range',
+			(field: string) =>
+				rangeOverlaps(field, { lower: '2026-01-01', upper: '2026-02-01' }),
+			'__n.period && CAST($1 AS daterange)',
+			['[2026-01-01,2026-02-01)'],
+		],
+	] as const) {
+		it(`EDGE1 qualified ${name} preserves type authority`, () => {
+			const field = name === 'range' ? 'period' : 'score';
+			for (const spelling of [field, `users.${field}`]) {
+				const result = compile(predicate(spelling));
+				expect(result.sql).toBe(edgeSql(condition));
+				expect(result.parameters).toEqual(params);
+			}
+		});
+	}
+	it('EDGE1 invisible qualifier refused', () => {
+		expect(() => compile(any('invisible.score', []))).toThrow(
+			new Error(
+				"start.where qualifier 'invisible' is not visible in the recursive anchor scope.",
+			),
 		);
-		expect(result.parameters).toEqual([9]);
+	});
+	function namedOuter(alias: string) {
+		return exists('posts', {
+			where: exists('comments', {
+				where: eq('score', {
+					kind: 'fieldRef',
+					column: 'id',
+					scope: 'outer',
+					alias,
+				}),
+			}),
+		});
+	}
+	it('CTR1 named outer alias resolves the root binding', () => {
+		const result = compile(namedOuter('users'));
+		expect(result.sql).toBe(
+			edgeSql(
+				postsSql(
+					'EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1."postId" AND comments_exists_1.score = __n.id)',
+				),
+			),
+		);
+		expect(result.parameters).toEqual([]);
+	});
+	it('CTR1 invisible outer alias refused', () => {
+		expect(() => compile(namedOuter('invisible'))).toThrow(
+			new Error(
+				"start.where qualifier 'invisible' is not visible in the recursive anchor scope.",
+			),
+		);
 	});
 });

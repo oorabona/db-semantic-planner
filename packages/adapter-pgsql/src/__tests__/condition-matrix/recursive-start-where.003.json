@@ -308,33 +308,33 @@
 			"position": "recursive-start-where",
 			"kind": "exists-recursive-up",
 			"shape": "leaf",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
-			"params": [71],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "start.where exists('posts'): recursive relation predicates are not supported in a recursive anchor."
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "exists-recursive-up",
 			"shape": "and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
-			"params": [71, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "start.where exists('posts'): recursive relation predicates are not supported in a recursive anchor."
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "exists-recursive-up",
 			"shape": "or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
-			"params": [71, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "start.where exists('posts'): recursive relation predicates are not supported in a recursive anchor."
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "exists-recursive-up",
 			"shape": "not",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
-			"params": [71],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "start.where exists('posts'): recursive relation predicates are not supported in a recursive anchor."
 		},
 		{
 			"position": "recursive-start-where",
@@ -356,41 +356,41 @@
 			"position": "recursive-start-where",
 			"kind": "exists-recursive-up",
 			"shape": "two-level",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
-			"params": [13, 71, 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "start.where exists('posts'): recursive relation predicates are not supported in a recursive anchor."
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "exists-recursive-down",
 			"shape": "leaf",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
-			"params": [71],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "start.where exists('posts'): recursive relation predicates are not supported in a recursive anchor."
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "exists-recursive-down",
 			"shape": "and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
-			"params": [71, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "start.where exists('posts'): recursive relation predicates are not supported in a recursive anchor."
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "exists-recursive-down",
 			"shape": "or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
-			"params": [71, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "start.where exists('posts'): recursive relation predicates are not supported in a recursive anchor."
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "exists-recursive-down",
 			"shape": "not",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
-			"params": [71],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "start.where exists('posts'): recursive relation predicates are not supported in a recursive anchor."
 		},
 		{
 			"position": "recursive-start-where",
@@ -412,41 +412,41 @@
 			"position": "recursive-start-where",
 			"kind": "exists-recursive-down",
 			"shape": "two-level",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
-			"params": [13, 71, 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "start.where exists('posts'): recursive relation predicates are not supported in a recursive anchor."
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "notExists-recursive-up",
 			"shape": "leaf",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
-			"params": [71],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "start.where notExists('posts'): recursive relation predicates are not supported in a recursive anchor."
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "notExists-recursive-up",
 			"shape": "and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
-			"params": [71, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "start.where notExists('posts'): recursive relation predicates are not supported in a recursive anchor."
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "notExists-recursive-up",
 			"shape": "or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
-			"params": [71, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "start.where notExists('posts'): recursive relation predicates are not supported in a recursive anchor."
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "notExists-recursive-up",
 			"shape": "not",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
-			"params": [71],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "start.where notExists('posts'): recursive relation predicates are not supported in a recursive anchor."
 		},
 		{
 			"position": "recursive-start-where",
@@ -468,41 +468,41 @@
 			"position": "recursive-start-where",
 			"kind": "notExists-recursive-up",
 			"shape": "two-level",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
-			"params": [13, 71, 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "start.where notExists('posts'): recursive relation predicates are not supported in a recursive anchor."
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "notExists-recursive-down",
 			"shape": "leaf",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
-			"params": [71],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "start.where notExists('posts'): recursive relation predicates are not supported in a recursive anchor."
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "notExists-recursive-down",
 			"shape": "and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
-			"params": [71, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "start.where notExists('posts'): recursive relation predicates are not supported in a recursive anchor."
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "notExists-recursive-down",
 			"shape": "or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
-			"params": [71, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "start.where notExists('posts'): recursive relation predicates are not supported in a recursive anchor."
 		},
 		{
 			"position": "recursive-start-where",
 			"kind": "notExists-recursive-down",
 			"shape": "not",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
-			"params": [71],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "start.where notExists('posts'): recursive relation predicates are not supported in a recursive anchor."
 		},
 		{
 			"position": "recursive-start-where",
@@ -524,9 +524,9 @@
 			"position": "recursive-start-where",
 			"kind": "notExists-recursive-down",
 			"shape": "two-level",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
-			"params": [13, 71, 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "start.where notExists('posts'): recursive relation predicates are not supported in a recursive anchor."
 		},
 		{
 			"position": "recursive-start-where",
