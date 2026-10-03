@@ -43,7 +43,7 @@ export interface RecursiveCteConfig {
 	pkColumn: SqlIdentifier;
 	/** Foreign key column for self-reference (adjacency mode only) */
 	fkColumn?: SqlIdentifier;
-	/** Adjacency anchor mode. Edge-table anchors always scan the node table. */
+	/** Standalone scans node rows with anchorWhere; correlated adjacency adds the outer-row key. Edge-table anchors scan node rows with anchorWhere. */
 	anchor:
 		| { mode: 'standalone' }
 		| { mode: 'correlated'; outerAlias: SqlIdentifier };

@@ -1,7 +1,7 @@
 /**
  * Unified WHERE compiler: compiles WhereIntent directly to PostgreSQL AST nodes.
  *
- * FILTER enters this compiler and bypasses PlanDecision. Relation predicates
+ * Root WHERE, FILTER and recursive anchors enter this compiler and bypass PlanDecision. Relation predicates
  * and predicate subqueries still lower through handler decisions during migration.
  * Each caller retains its own current SQL and parameter behavior.
  *
@@ -28,6 +28,7 @@ import { toColumnList } from '@dbsp/types';
 import {
 	getTrustedNqlRelationFilterFields,
 	isFieldRef,
+	resolveDeclaredRelationPath,
 } from '@dbsp/types/internal';
 import type { Node, SubLink } from '@pgsql/types';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from './assert-field.js';
@@ -77,6 +78,20 @@ import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
 import { resolveRelationKeys } from './relation-keys.js';
 import { queryLocal } from './sql-identifier.js';
 
+/** Resolve logical names and the unique target aliases exposed by orm.tables. */
+function resolveConditionRelation(
+	model: NonNullable<WhereCompilerCtx['model']>,
+	source: string,
+	name: string,
+) {
+	const declared = resolveDeclaredRelationPath(model, source, [name]);
+	if (declared.ok) return declared.relations[0];
+	const targets = model
+		.getRelationsFrom(source)
+		.filter((rel) => rel.target === name);
+	return targets.length === 1 ? targets[0] : undefined;
+}
+
 /** Validate every condition position before lowering can discard recursive options. */
 function assertNoRecursiveAnchorRelations(intent: WhereIntent): void {
 	const seen = new WeakSet<object>();
@@ -111,6 +126,85 @@ function assertNoRecursiveAnchorRelations(intent: WhereIntent): void {
 				(key === 'value' && (value as { kind?: string }).kind !== 'namedArg') ||
 				key === 'values' ||
 				key === 'pattern'
+			)
+				continue;
+			visit(child);
+		}
+	}
+	visit(intent);
+}
+
+/** Refuse junction-less model relation predicates before either root lowering. */
+export function assertNoManyToManyRootRelations(
+	intent: WhereIntent,
+	source: string,
+	model: WhereCompilerCtx['model'],
+): void {
+	if (!model) return;
+	const visit = (node: WhereIntent, table: string): void => {
+		if (node.kind === 'and' || node.kind === 'or') {
+			for (const child of node.conditions) visit(child, table);
+		} else if (node.kind === 'not') {
+			visit(node.condition, table);
+		} else if (
+			node.kind === 'exists' ||
+			node.kind === 'notExists' ||
+			node.kind === 'relationFilter'
+		) {
+			const path =
+				typeof node.relation === 'string'
+					? node.relation.split('.')
+					: node.relation;
+			let target = table;
+			for (const hop of path) {
+				const relation = resolveConditionRelation(model, target, hop);
+				if (!relation) return;
+				if (relation.type === 'belongsToMany') {
+					throw new Error(
+						`WHERE ${node.kind}('${path.join('.')}'): many-to-many relation predicates need the junction declaration (#787).`,
+					);
+				}
+				target = relation.target;
+			}
+			if (node.where) visit(node.where, target);
+		}
+	};
+	visit(intent, source);
+}
+
+/** Refuse root relation recursion before routing or lowering can discard it. */
+export function assertNoRecursiveRootRelations(intent: WhereIntent): void {
+	const seen = new WeakSet<object>();
+	function visit(value: unknown): void {
+		if (!value || typeof value !== 'object' || seen.has(value)) return;
+		seen.add(value);
+		const node = value as WhereIntent;
+		if (
+			node.kind === 'exists' ||
+			node.kind === 'notExists' ||
+			node.kind === 'relationFilter'
+		) {
+			const trusted =
+				node.kind === 'relationFilter'
+					? getTrustedNqlRelationFilterFields(node)
+					: undefined;
+			if (
+				('recursive' in node && node.recursive !== undefined) ||
+				trusted?.recursive !== undefined
+			) {
+				const relation = trusted?.relation ?? node.relation;
+				throw new Error(
+					`WHERE ${node.kind}('${Array.isArray(relation) ? relation.join('.') : relation}'): recursive relation predicates are not supported inside WHERE.`,
+				);
+			}
+		}
+		for (const [key, child] of Object.entries(value)) {
+			if (
+				(key === 'value' && (value as { kind?: string }).kind !== 'namedArg') ||
+				key === 'values' ||
+				key === 'pattern' ||
+				key === 'subquery' ||
+				key === 'query'
 			)
 				continue;
 			visit(child);
@@ -170,15 +264,6 @@ export function createConditionCompiler(
 	}
 
 	// ============================================================================
-	// Public: WhereCompilerCtx
-	// ============================================================================
-
-	/**
-	 * Context for the unified WHERE compiler.
-	 * Maps to CompilerContext + CompilerState from the handler system.
-	 */
-
-	// ============================================================================
 	// Private: bridge WhereCompilerCtx → CompilerContext
 	// ============================================================================
 
@@ -189,6 +274,9 @@ export function createConditionCompiler(
 		return {
 			rootTable: ctx.rootTable,
 			position: ctx.position,
+			...(ctx.directRootWhere !== undefined && {
+				directRootWhere: ctx.directRootWhere,
+			}),
 			currentAlias: ctx.currentAlias ?? ctx.rootTable,
 			maxRecursiveDepth: MAX_DEPTH_LIMIT,
 			defaultPkColumnName: ctx.defaultPkColumnName,
@@ -434,6 +522,15 @@ export function createConditionCompiler(
 	): Node {
 		const rf = intent as WhereRelationFilterIntent;
 		const preResolved = getTrustedNqlRelationFilterFields(rf);
+		if (
+			ctx.position === 'where' &&
+			ctx.directRootWhere &&
+			(('recursive' in rf && rf.recursive !== undefined) ||
+				preResolved?.recursive !== undefined)
+		)
+			throw new Error(
+				`WHERE relationFilter('${rf.relation}'): recursive relation predicates are not supported inside WHERE.`,
+			);
 		const relationPath = preResolved?.relation ?? rf.relation;
 
 		const hops: string[] = Array.isArray(relationPath)
@@ -480,7 +577,11 @@ export function createConditionCompiler(
 							'Provide a model via WhereCompilerCtx or use the decisions path.',
 					);
 				}
-				const resolved = ctx.model.getRelation(`${ctx.rootTable}.${relation}`);
+				const resolved = resolveConditionRelation(
+					ctx.model,
+					ctx.rootTable,
+					relation,
+				);
 				if (!resolved) {
 					throw new Error(
 						`relationFilter('${relation}'): no relation '${relation}' declared on table '${ctx.rootTable}'. ` +
@@ -497,7 +598,7 @@ export function createConditionCompiler(
 				}
 				let currentSource = ctx.rootTable;
 				for (const hop of hops) {
-					const rel = ctx.model.getRelation(`${currentSource}.${hop}`);
+					const rel = resolveConditionRelation(ctx.model, currentSource, hop);
 					if (!rel) {
 						throw new Error(
 							`relationFilter(${JSON.stringify(hops)}): no relation '${hop}' declared on table '${currentSource}'. ` +
@@ -525,6 +626,27 @@ export function createConditionCompiler(
 			// (DEFECT 1 FIX: before this fix, single-hop always fell back to convention,
 			//  so e.g. posts.author_id was correlated as posts.user_id — wrong.)
 			const relation = hops[0] ?? (rf.relation as string);
+			if (
+				ctx.directRootWhere &&
+				rf.mode === 'some' &&
+				innermostWhere &&
+				ctx.rootWhereJoinRelations?.has(`${ctx.rootTable}.${relation}`)
+			) {
+				const target =
+					preResolved?.targetTable ??
+					(ctx.model
+						? resolveConditionRelation(ctx.model, ctx.rootTable, relation)
+								?.target
+						: undefined);
+				const alias = ctx.aliases?.get(relation);
+				if (target && alias)
+					return ctx.compileCondition(innermostWhere, {
+						...ctx,
+						rootTable: target,
+						currentAlias: alias,
+						outerTable: ctx.currentAlias ?? ctx.rootTable,
+					});
+			}
 			if (preResolved) {
 				return ctx.compileCondition(
 					internalRelationIntent({
@@ -538,9 +660,9 @@ export function createConditionCompiler(
 					ctx,
 				);
 			}
-			const resolvedRelation = ctx.model?.getRelation(
-				`${ctx.rootTable}.${relation}`,
-			);
+			const resolvedRelation = ctx.model
+				? resolveConditionRelation(ctx.model, ctx.rootTable, relation)
+				: undefined;
 
 			// DEFECT 1 FIX (new): when a model IS present but the relation is NOT declared,
 			// fail closed — consistent with the multi-hop path and the vacuous-every path.
@@ -562,7 +684,11 @@ export function createConditionCompiler(
 			let singleHopSourceColumn: ColumnListInput;
 			let singleHopTargetColumn: ColumnListInput;
 			if (resolvedRelation) {
-				if (ctx.position === 'filter' || ctx.position === 'recursive-anchor') {
+				if (
+					(ctx.position === 'where' && ctx.directRootWhere) ||
+					ctx.position === 'filter' ||
+					ctx.position === 'recursive-anchor'
+				) {
 					const keys = resolveRelationKeys(
 						ctx.rootTable,
 						resolvedRelation,
@@ -630,7 +756,7 @@ export function createConditionCompiler(
 		const hopSourceColumns: ColumnListInput[] = [];
 		const hopTargetColumns: ColumnListInput[] = [];
 		for (const hop of hops) {
-			const rel = model.getRelation(`${currentSource}.${hop}`);
+			const rel = resolveConditionRelation(model, currentSource, hop);
 			if (!rel) {
 				throw new Error(
 					`relationFilter(${JSON.stringify(hops)}): no relation '${hop}' declared on table '${currentSource}'. ` +
@@ -641,7 +767,11 @@ export function createConditionCompiler(
 			// Resolve explicit FK columns using the same direction logic as deriveFkColumns.
 			// For belongsTo: FK is on the source side (sourceTable.fkCol → targetTable.pk)
 			// For hasMany/hasOne: FK is on the target side (targetTable.fkCol → sourceTable.pk)
-			if (ctx.position === 'filter' || ctx.position === 'recursive-anchor') {
+			if (
+				(ctx.position === 'where' && ctx.directRootWhere) ||
+				ctx.position === 'filter' ||
+				ctx.position === 'recursive-anchor'
+			) {
 				const keys = resolveRelationKeys(currentSource, rel, ctx);
 				hopSourceColumns.push(keys.sourceColumn);
 				hopTargetColumns.push(keys.targetColumn);
@@ -807,6 +937,8 @@ export function createConditionCompiler(
 		handlerCtx: CompilerContext,
 	): Node | null {
 		const cmpIntent = intent as WhereComparisonIntent;
+		// JSON extraction belongs to the JSON handler, including param expressions.
+		if (ctx.directRootWhere && cmpIntent.jsonPath !== undefined) return null;
 		const v = cmpIntent.value;
 
 		if (v === null || typeof v !== 'object') return null;
@@ -867,7 +999,8 @@ export function createConditionCompiler(
 		handlerCtx: CompilerContext,
 	): Node {
 		if (
-			ctx.position === 'recursive-anchor' &&
+			((ctx.position === 'where' && ctx.directRootWhere) ||
+				ctx.position === 'recursive-anchor') &&
 			![
 				'comparison',
 				'like',
@@ -890,31 +1023,49 @@ export function createConditionCompiler(
 			].includes(intent.kind)
 		) {
 			throw new Error(
-				`Unsupported recursive start.where predicate kind '${String(intent.kind)}'.`,
+				`Unsupported ${ctx.position === 'where' && ctx.directRootWhere ? 'root WHERE' : 'recursive start.where'} predicate kind '${String(intent.kind)}'.`,
 			);
 		}
 		if (
-			(ctx.position === 'filter' || ctx.position === 'recursive-anchor') &&
+			((ctx.position === 'where' && ctx.directRootWhere) ||
+				ctx.position === 'filter' ||
+				ctx.position === 'recursive-anchor') &&
 			(intent.kind === 'exists' || intent.kind === 'notExists')
 		) {
-			if (ctx.position === 'filter' && intent.recursive !== undefined)
+			if (
+				(ctx.position === 'filter' ||
+					(ctx.position === 'where' && ctx.directRootWhere)) &&
+				intent.recursive !== undefined
+			)
 				throw new Error(
-					`FILTER ${intent.kind}('${intent.relation}'): recursive relation predicates are not supported inside FILTER.`,
+					`${ctx.position === 'where' && ctx.directRootWhere ? 'WHERE' : 'FILTER'} ${intent.kind}('${intent.relation}'): recursive relation predicates are not supported inside ${ctx.position === 'where' && ctx.directRootWhere ? 'WHERE' : 'FILTER'}.`,
 				);
-			const resolved = ctx.model?.getRelation(
-				`${ctx.rootTable}.${intent.relation}`,
-			);
-			if (ctx.model && !resolved)
+			// Internal hints come from validated relation paths or frozen NQL proofs.
+			// Projected NQL bindings need not exist in the physical model.
+			const hints = relationHints.get(intent);
+			if (ctx.directRootWhere && !ctx.model && !hints)
+				throw new Error(
+					`${intent.kind}('${intent.relation}'): cannot resolve relation '${intent.relation}' — no model configured. Use rawExists(subquery(...)) for an uncorrelated or undeclared subquery.`,
+				);
+			const resolved = ctx.model
+				? resolveConditionRelation(ctx.model, ctx.rootTable, intent.relation)
+				: undefined;
+			if (ctx.model && !resolved && !(ctx.directRootWhere && hints))
 				throw new Error(
 					`${intent.kind}('${intent.relation}'): no relation '${intent.relation}' is declared on table '${ctx.rootTable}'. Use rawExists(subquery(...)) for an EXISTS over an undeclared or uncorrelated subquery.`,
 				);
 			// Resolve raw intents here. Planner decisions never enter this branch.
-			const hints = relationHints.get(intent);
-			const modelKeys = resolveRelationKeys(
-				ctx.rootTable,
-				resolved ?? { type: 'hasMany', target: intent.relation },
-				ctx,
-			);
+			const keys =
+				hints?.sourceColumn !== undefined && hints.targetColumn !== undefined
+					? {
+							sourceColumn: hints.sourceColumn,
+							targetColumn: hints.targetColumn,
+						}
+					: resolveRelationKeys(
+							ctx.rootTable,
+							resolved ?? { type: 'hasMany', target: intent.relation },
+							ctx,
+						);
 			const targetTable = resolved?.target ?? intent.relation;
 			const supplied = intent as unknown as Partial<Decision>;
 			if (
@@ -923,21 +1074,32 @@ export function createConditionCompiler(
 					supplied.targetTable !== targetTable) ||
 					(supplied.sourceColumn !== undefined &&
 						JSON.stringify(toColumnList(supplied.sourceColumn)) !==
-							JSON.stringify(modelKeys.sourceColumn)) ||
+							JSON.stringify(keys.sourceColumn)) ||
 					(supplied.targetColumn !== undefined &&
 						JSON.stringify(toColumnList(supplied.targetColumn)) !==
-							JSON.stringify(modelKeys.targetColumn)))
+							JSON.stringify(keys.targetColumn)))
 			)
 				throw new Error(
 					`${intent.kind}('${intent.relation}'): supplied relation target or keys differ from the model.`,
 				);
-			const keys =
-				hints?.sourceColumn !== undefined && hints.targetColumn !== undefined
-					? {
-							sourceColumn: hints.sourceColumn,
-							targetColumn: hints.targetColumn,
-						}
-					: modelKeys;
+			const joinRelation = resolved?.name ?? intent.relation;
+			const joinedAlias = ctx.aliases?.get(joinRelation);
+			if (
+				ctx.directRootWhere &&
+				intent.kind === 'exists' &&
+				(!intent.include || Object.keys(intent.include).length === 0) &&
+				joinedAlias &&
+				ctx.rootWhereJoinRelations?.has(`${ctx.rootTable}.${joinRelation}`)
+			) {
+				return intent.where
+					? ctx.compileCondition(intent.where, {
+							...ctx,
+							rootTable: hints?.targetTable ?? targetTable,
+							currentAlias: joinedAlias,
+							outerTable: ctx.currentAlias ?? ctx.rootTable,
+						})
+					: booleanConstNode(true);
+			}
 			return dispatcher(
 				{
 					type: 'exists',
@@ -960,7 +1122,9 @@ export function createConditionCompiler(
 			);
 		}
 		if (
-			(ctx.position === 'filter' || ctx.position === 'recursive-anchor') &&
+			((ctx.position === 'where' && ctx.directRootWhere) ||
+				ctx.position === 'filter' ||
+				ctx.position === 'recursive-anchor') &&
 			(intent.kind === 'subquery' || (intent.kind === 'in' && intent.subquery))
 		) {
 			const decision = convertWhereCondition(intent, ctx.rootTable);
@@ -1042,7 +1206,8 @@ export function createConditionCompiler(
 		const bridged = needsColumn
 			? ({
 					...intent,
-					...((ctx.position === 'filter' ||
+					...(((ctx.position === 'where' && ctx.directRootWhere) ||
+						ctx.position === 'filter' ||
 						ctx.position === 'recursive-anchor') && { type: 'where' }),
 					column: rawIntent.field,
 					...('value' in rawIntent && {
@@ -1051,7 +1216,8 @@ export function createConditionCompiler(
 				} as unknown as Decision)
 			: ({
 					...intent,
-					...((ctx.position === 'filter' ||
+					...(((ctx.position === 'where' && ctx.directRootWhere) ||
+						ctx.position === 'filter' ||
 						ctx.position === 'recursive-anchor') && { type: 'where' }),
 				} as unknown as Decision);
 		return dispatcher(bridged, handlerCtx, ctx.paramState);
@@ -1062,6 +1228,7 @@ export function createConditionCompiler(
 		intent: WhereIntent,
 		ctx: ConditionCompilerCtx,
 	): Node {
+		assertNoManyToManyRootRelations(intent, ctx.logicalSourceTable, ctx.model);
 		return compileTopLevel(intent, ctx);
 	}
 
@@ -1128,6 +1295,7 @@ export function createConditionCompiler(
 				? {
 						...ctx,
 						rootTable: ctx.logicalSourceTable,
+						directRootWhere: ctx.position === 'where',
 						currentAlias: ctx.emittedAlias,
 						aliases: ctx.visibleAliases,
 						compileCondition: recurse,
