@@ -1,7 +1,8 @@
-import { createOrm } from '@dbsp/core';
+import { createOrm, schema } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	blogModel,
+	blogSchema,
 	closeTestDb,
 	createBlogSchema,
 	dropBlogSchema,
@@ -11,20 +12,13 @@ import {
 } from './testkit/index.js';
 
 const SCHEMA = 'include_limit_e2e';
-const rankModel: typeof blogModel = Object.assign(Object.create(blogModel), {
-	getTable(name: string) {
-		const table = blogModel.getTable(name);
-		return table && name === 'posts'
-			? {
-					...table,
-					columns: [
-						...table.columns,
-						{ name: 'rank', type: 'integer' as const, nullable: true },
-					],
-				}
-			: table;
+const rankModel = schema({
+	...blogSchema.definition,
+	posts: {
+		...blogSchema.definition.posts,
+		rank: { type: 'integer', nullable: true },
 	},
-});
+}).model;
 beforeAll(async () => {
 	await dropBlogSchema(SCHEMA);
 	await createBlogSchema(SCHEMA);

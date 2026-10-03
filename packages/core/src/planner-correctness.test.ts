@@ -19,7 +19,7 @@ import {
 	SQLITE_CAPABILITIES,
 } from './dialects/index.js';
 import { InvalidOperationError } from './dx/errors.js';
-import { inSubquery, not } from './dx/filters.js';
+import { eq, inSubquery, not } from './dx/filters.js';
 import { createOrm } from './dx/index.js';
 import { ref, schema } from './dx/schema.js';
 import { subquery } from './dx/subquery-builder.js';
@@ -1026,7 +1026,7 @@ describe('#894 strategy error alternatives', () => {
 		expect(() =>
 			plan(intent, db.model, { defaultIncludeStrategy: 'subquery' as never }),
 		).toThrow(
-			"Strategy 'subquery' is not supported by a dialect without capabilities. Supported strategies: 'join', 'json_agg', 'lateral', 'cte', 'auto'.",
+			"Unknown strategy 'subquery'. Valid strategies: 'join', 'json_agg', 'lateral', 'cte', 'auto'.",
 		);
 		expect(validateIncludeStrategy('auto', undefined)).toBe('join');
 		for (const strategy of ['join', 'json_agg', 'lateral', 'cte']) {
@@ -1119,7 +1119,7 @@ describe('#900 default capability validation at the include consumer', () => {
 			});
 		expect(unknownDefault).toThrow(UnsupportedStrategyError);
 		expect(unknownDefault).toThrow(
-			"Strategy 'subquery' is not supported by sqlite. Supported strategies: 'join', 'json_agg', 'lateral', 'cte', 'auto'.",
+			"Unknown strategy 'subquery'. Valid strategies: 'join', 'json_agg', 'lateral', 'cte', 'auto'.",
 		);
 	});
 });
@@ -1196,6 +1196,66 @@ describe('#900 flat strategy precedence', () => {
 			expect(decision.alternatives).toEqual([
 				strategy === 'join' ? 'lateral' : 'join',
 			]);
+		});
+	}
+	it('flat where under join default has no lateral alternative', () => {
+		const decision = resolve('auto', 'join', {
+			where: eq('id', 1),
+		}).decisions.find((d) => d.type === 'include-strategy')!;
+		expect(decision.alternatives).toEqual([]);
+	});
+	it('limited nested include excludes join and cte alternatives', () => {
+		const decision = plan(
+			{
+				type: 'select',
+				from: 'users',
+				include: [{ relation: 'posts', limit: 2 }],
+			},
+			fixture(),
+			{ dialectCapabilities: FULL_CAPS },
+		).decisions.find((d) => d.type === 'include-strategy')!;
+		expect(decision.alternatives).toEqual(['lateral']);
+	});
+	for (const [extra, expected] of [
+		[{ where: eq('id', 1) }, []],
+		[{ orderBy: [{ field: 'id', direction: 'asc' }] }, []],
+		[{ select: { type: 'fields', fields: ['id'] } }, ['join', 'cte']],
+		[{ select: { type: 'fields', fields: ['*'] } }, ['join', 'cte', 'lateral']],
+	] as const) {
+		it(`nested alternatives honour options ${JSON.stringify(extra)}`, () => {
+			const report = plan(
+				{
+					type: 'select',
+					from: 'users',
+					include: [{ relation: 'posts', ...extra }],
+				},
+				fixture(),
+				{
+					dialectCapabilities: FULL_CAPS,
+					defaultIncludeStrategy: 'where' in extra ? 'join' : 'json_agg',
+				},
+			);
+			expect(
+				report.decisions.find((d) => d.type === 'include-strategy')!
+					.alternatives,
+			).toEqual(expected);
+		});
+	}
+	for (const strategy of ['join', 'lateral', 'json_agg'] as const) {
+		it(`nested ${strategy} chain has no independently substitutable alternatives`, () => {
+			const report = plan(
+				{
+					type: 'select',
+					from: 'users',
+					include: [{ relation: 'posts', include: [{ relation: 'comments' }] }],
+				},
+				fixture(),
+				{ dialectCapabilities: FULL_CAPS, defaultIncludeStrategy: strategy },
+			);
+			for (const decision of report.decisions.filter(
+				(d) => d.type === 'include-strategy',
+			))
+				expect(decision.alternatives).toEqual([]);
 		});
 	}
 	it('flat capability refusal excludes nested strategies even when CTE is supported', () => {

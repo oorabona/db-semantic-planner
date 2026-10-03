@@ -124,7 +124,7 @@ dump.plan.decisions
 // → [{ type: 'include-strategy',
 //      choice: 'json_agg',
 //      context: { relation: 'author', ... },
-//      reasoning: '...using JSON aggregation to avoid row explosion', ... }]
+//      reasoning: 'Relation posts.author (belongsTo, cardinality: one) - using json_agg selected by nested output', ... }]
 ```
 
   </div>

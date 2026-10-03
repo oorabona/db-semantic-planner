@@ -543,7 +543,7 @@ describe('planner: flat strategy with nested limit', () => {
 	});
 
 	it('selects join when flat + PG caps but excludeNested=true + no limit', () => {
-		// flat → selectSmartStrategy(excludeNested=true, hasLimit=false)
+		// flat → determineFlatIncludeStrategy without a per-parent limit
 		// caps.supportsJsonAgg && !excludeNested → false → hasLimit=false → join
 		const intent: QueryIntent = {
 			type: 'select',
@@ -879,15 +879,15 @@ describe('planner: determineJoinType — relation.joinDefault hint (L1392)', () 
 });
 
 // ============================================================================
-// generateIncludeReasoning: case 'cte' branch (L1537)
+// generateIncludeReasoning: CTE selected by planner default
 // ============================================================================
 
-describe('planner: generateIncludeReasoning — cte strategy (L1537)', () => {
+describe('planner: generateIncludeReasoning — cte default', () => {
 	it('produces CTE reasoning string for non-recursive cte include strategy', () => {
 		// defaultIncludeStrategy: 'cte' with a dialect that supports recursive CTE
-		// → determineIncludeStrategy returns 'cte' via validateStrategy
+		// → determineIncludeStrategy resolves the default and validates its capability
 		// → isRecursiveInclude=false (non-self-referential relation)
-		// → generateIncludeReasoning called with 'cte' → hits case 'cte':
+		// → generateIncludeReasoning records the resolved strategy and its authority
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'posts',

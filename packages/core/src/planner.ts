@@ -338,6 +338,36 @@ export function plan(
 		}
 	}
 
+	// An alternative changes one decision only: resolved neighbors must still
+	// form a homogeneous include chain, and CTE cannot have include children.
+	const includeDecisions = state.decisions.filter(
+		(d) => d.type === 'include-strategy',
+	);
+	for (const decision of includeDecisions) {
+		const path = String(decision.context.intentPath);
+		const parentPath = path.includes('.')
+			? path.slice(0, path.lastIndexOf('.'))
+			: undefined;
+		const parent = includeDecisions.find(
+			(d) => d.context.intentPath === parentPath,
+		);
+		const children = includeDecisions.filter((d) => {
+			const childPath = String(d.context.intentPath);
+			return childPath.slice(0, childPath.lastIndexOf('.')) === path;
+		});
+		state.decisions[state.decisions.indexOf(decision)] = {
+			...decision,
+			alternatives: decision.alternatives?.filter(
+				(candidate) =>
+					(!parent ||
+						(parent.choice !== 'cte' && candidate === parent.choice)) &&
+					children.every(
+						(child) => candidate !== 'cte' && candidate === child.choice,
+					),
+			),
+		};
+	}
+
 	// Extract CTEs if enabled
 	if (opts.enableCTEs) {
 		extractCTEs(state, opts.cteThreshold);
@@ -1141,8 +1171,7 @@ function processInclude(
 			);
 		}
 		// FIND-013: Guard recursive → cte against dialect capability.
-		// selectSmartStrategy handles the general case, but processInclude has
-		// an early-exit path that forces 'cte' before reaching it.  A dialect
+		// Recursive resolution requires explicit capability validation. A dialect
 		// that declared supportsRecursiveCTE=false must not silently receive an
 		// invalid plan.
 		if (!opts.dialectCapabilities?.supportsRecursiveCTE) {
@@ -1245,7 +1274,7 @@ function processInclude(
 			: getAlternativeStrategies(
 					includeStrategy,
 					opts.dialectCapabilities,
-					include.strategy === 'flat',
+					include,
 				),
 	});
 
@@ -1501,6 +1530,11 @@ function validateStrategy(
 		...(allowAuto ? ['auto'] : []),
 	];
 	if (!supported.includes(strategy)) {
+		if (!validateCapabilities) {
+			throw new UnsupportedStrategyError(
+				`Unknown strategy '${strategy}'. Valid strategies: ${supported.map((s) => `'${s}'`).join(', ')}.`,
+			);
+		}
 		throw new UnsupportedStrategyError(
 			`Strategy '${strategy}' is not supported by ${capabilities?.name ?? 'a dialect without capabilities'}. Supported strategies: ${supported.map((s) => `'${s}'`).join(', ')}.`,
 		);
@@ -1567,7 +1601,7 @@ function determineIncludeStrategy(
 		opts,
 		intentPath,
 	) ?? {
-		strategy: selectSmartStrategy(relation, opts.dialectCapabilities, false),
+		strategy: selectNestedOutputStrategy(opts.dialectCapabilities),
 		source: 'nested output' as const,
 	};
 	validateIncludeStrategy(resolution.strategy, opts.dialectCapabilities);
@@ -1630,51 +1664,11 @@ function hasNestedLimit(include: IncludeIntent): boolean {
 	return false;
 }
 
-/**
- * Smart strategy selection based on relation characteristics and dialect.
- *
- * Selection algorithm:
- * - Recursive relations → 'cte' (requires recursive CTE support)
- * - All non-recursive cardinalities: json_agg if supported and nested output allowed
- * - Otherwise lateral if a per-parent limit is needed and supported
- * - Otherwise join
- */
-function selectSmartStrategy(
-	relation: RelationIR,
+/** Select nested output when no applicable authority overrides it. */
+function selectNestedOutputStrategy(
 	capabilities: DialectCapabilities | undefined,
-	isRecursive: boolean,
-	excludeNested = false,
-	hasLimit = false,
 ): ResolvedIncludeStrategy {
-	// Recursive relations should use CTE
-	if (isRecursive) {
-		if (capabilities?.supportsRecursiveCTE) {
-			return 'cte';
-		}
-		throw new UnsupportedStrategyError(
-			`Recursive include '${relation.name}' requires a dialect with supportsRecursiveCTE; current dialect (${capabilities?.name ?? 'no capabilities'}) does not support it.`,
-		);
-	}
-
-	// Default strategy for ALL relation types: json_agg
-	// Rationale:
-	// - json_agg: aggregates children into single JSON array, no row explosion
-	// - Works for both to-one (hasOne, belongsTo) and to-many (hasMany)
-	// - User can force JOIN via | flat modifier if data is too large for JSON
-	// - lateral: only when per-row LIMIT is needed (top N children pattern)
-	// - join: simple flat strategy, well-optimized by the database
-
-	if (capabilities?.supportsJsonAgg && !excludeNested) {
-		return 'json_agg';
-	}
-
-	// LATERAL only when per-row LIMIT is needed — otherwise join is simpler and faster
-	if (hasLimit && capabilities?.supportsLateralJoin) {
-		return 'lateral';
-	}
-
-	// Fallback: use join (database optimizer handles it)
-	return 'join';
+	return capabilities?.supportsJsonAgg ? 'json_agg' : 'join';
 }
 
 /**
@@ -1693,15 +1687,41 @@ export class UnsupportedStrategyError extends Error {
 function getAlternativeStrategies(
 	strategy: ResolvedIncludeStrategy,
 	capabilities: DialectCapabilities | undefined,
-	flatOutput: boolean,
+	include: IncludeIntent,
 ): string[] {
-	const allStrategies: ResolvedIncludeStrategy[] = flatOutput
-		? ['join', 'lateral']
-		: ['join', 'cte', 'lateral', 'json_agg'];
+	const allStrategies: ResolvedIncludeStrategy[] =
+		include.strategy === 'flat'
+			? ['join', 'lateral']
+			: ['join', 'cte', 'lateral', 'json_agg'];
 
 	// Filter out current strategy and unsupported ones
 	return allStrategies.filter((s) => {
 		if (s === strategy) return false;
+		if (include.join !== undefined && s !== 'join') return false;
+		if (include.where && s !== 'join') return false;
+		if (
+			(include.limit != null || include.orderBy !== undefined) &&
+			(s === 'join' || s === 'cte')
+		)
+			return false;
+		if (include.strategy === 'flat' && hasNestedLimit(include) && s === 'join')
+			return false;
+		if (s === 'cte' && include.include?.length) return false;
+		if (s === 'lateral') {
+			if (include.orderBy !== undefined && include.limit === undefined)
+				return false;
+			const select = include.select;
+			if (
+				select &&
+				select.type !== 'all' &&
+				!(
+					select.type === 'fields' &&
+					select.fields.length === 1 &&
+					select.fields[0] === '*'
+				)
+			)
+				return false;
+		}
 		if (!capabilities) return s === 'join'; // No capabilities = only basic strategies
 		if (s === 'lateral' && !capabilities.supportsLateralJoin) return false;
 		if (s === 'json_agg' && !capabilities.supportsJsonAgg) return false;

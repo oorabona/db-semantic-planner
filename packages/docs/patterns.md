@@ -230,7 +230,7 @@ The planner must choose how to fetch related data for each `IncludeIntent` witho
 | Role | Location |
 |------|----------|
 | Strategy type | `packages/types/src/model-ir.ts` — `IncludeStrategy` |
-| Strategy selection and capability validation | `packages/core/src/planner.ts` — `determineFlatIncludeStrategy()`, `determineIncludeStrategy()` and `selectSmartStrategy()`; the private `validateStrategy()` function validates an already-selected strategy |
+| Strategy selection and capability validation | `packages/core/src/planner.ts` — `determineFlatIncludeStrategy()`, `determineIncludeStrategy()` and `selectNestedOutputStrategy()`; private `validateStrategy()` shares membership/capability validation, `validateIncludeStrategy()` accepts planner input including `auto`, and `validateResolvedIncludeStrategy()` validates resolved adapter decisions |
 | Handler dispatch | `packages/adapter-pgsql/src/handlers/index.ts` — `getIncludeHandler()` |
 | Concrete handlers | `packages/adapter-pgsql/src/handlers/include/cte.ts`, `join.ts`, `json-agg.ts`, `lateral.ts` (`shared.ts` supplies shared utilities) |
 | Dialect capabilities | `packages/types/src/dialects.ts` — `DialectCapabilities` |
@@ -260,10 +260,10 @@ Auto-resolution (planner, `planner.ts`):
 recursive → 'cte' (requires supportsRecursiveCTE; explicit join refused; default ignored)
 non-recursive → explicit include.join → relation hint → applicable default → shape selection
 flat shape (determineFlatIncludeStrategy) → direct/nested per-parent limit ? 'lateral' : 'join'
-nested shape (selectSmartStrategy) → supportsJsonAgg ? 'json_agg' : 'join'
+nested shape (selectNestedOutputStrategy) → supportsJsonAgg ? 'json_agg' : 'join'
 ```
 
-Flat output runs through `determineFlatIncludeStrategy()`; nested output runs through `selectSmartStrategy()` after authority resolution. `selectSmartStrategy()` does not inspect relation cardinality, so to-one and to-many relations share the nested selection. For every non-recursive include, explicit `include.join` takes precedence, then the relation `includeStrategy` hint, then an applicable `defaultIncludeStrategy`, then shape selection; explicit join conflicts with concrete hints other than `join` (`json_agg`, `lateral`, `cte`) and is refused, while a plan-level default only fills the gap.
+Flat output runs through `determineFlatIncludeStrategy()`; nested output runs through `selectNestedOutputStrategy()` after authority resolution. `selectNestedOutputStrategy()` does not inspect relation cardinality, so to-one and to-many relations share the nested selection. For every non-recursive include, explicit `include.join` takes precedence, then the relation `includeStrategy` hint, then an applicable `defaultIncludeStrategy`, then shape selection; explicit join conflicts with concrete hints other than `join` (`json_agg`, `lateral`, `cte`) and is refused, while a plan-level default only fills the gap.
 
 ### Convention
 

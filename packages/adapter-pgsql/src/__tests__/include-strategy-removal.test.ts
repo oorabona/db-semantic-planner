@@ -33,7 +33,9 @@ describe('#894 removed include strategy refusal', () => {
 				.withPlanOptions({ defaultIncludeStrategy: removed })
 				.include('posts')
 				.dump(),
-		).toThrow(error);
+		).toThrow(
+			"Unknown strategy 'subquery'. Valid strategies: 'join', 'json_agg', 'lateral', 'cte', 'auto'.",
+		);
 	});
 	it('refuses per-include strategy at the public boundary', () => {
 		const options = { strategy: removed } as unknown as Parameters<

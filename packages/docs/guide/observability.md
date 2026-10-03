@@ -66,8 +66,7 @@ const dump = orm.select('users').include('posts').dump();
 for (const decision of dump.plan?.decisions ?? []) {
   console.log(decision.type, decision.choice, decision.reasoning);
 }
-// include-strategy  json_agg  "...using JSON aggregation to avoid row explosion"
-// filter-strategy   where     "eq on scalar column"
+// include-strategy json_agg Relation users.posts (hasMany, cardinality: many) - using json_agg selected by nested output
 ```
 
 Common decision types:
