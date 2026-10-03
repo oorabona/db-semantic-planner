@@ -28,6 +28,7 @@ import { toColumnList } from '@dbsp/types';
 import {
 	getTrustedNqlRelationFilterFields,
 	isFieldRef,
+	resolveDeclaredRelationPath,
 } from '@dbsp/types/internal';
 import type { Node, SubLink } from '@pgsql/types';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from './assert-field.js';
@@ -76,6 +77,20 @@ import { createParamRef } from './param-ref.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
 import { resolveRelationKeys } from './relation-keys.js';
 import { queryLocal } from './sql-identifier.js';
+
+/** Resolve logical names and the unique target aliases exposed by orm.tables. */
+function resolveConditionRelation(
+	model: NonNullable<WhereCompilerCtx['model']>,
+	source: string,
+	name: string,
+) {
+	const declared = resolveDeclaredRelationPath(model, source, [name]);
+	if (declared.ok) return declared.relations[0];
+	const targets = model
+		.getRelationsFrom(source)
+		.filter((rel) => rel.target === name);
+	return targets.length === 1 ? targets[0] : undefined;
+}
 
 /** Validate every condition position before lowering can discard recursive options. */
 function assertNoRecursiveAnchorRelations(intent: WhereIntent): void {
@@ -483,7 +498,11 @@ export function createConditionCompiler(
 							'Provide a model via WhereCompilerCtx or use the decisions path.',
 					);
 				}
-				const resolved = ctx.model.getRelation(`${ctx.rootTable}.${relation}`);
+				const resolved = resolveConditionRelation(
+					ctx.model,
+					ctx.rootTable,
+					relation,
+				);
 				if (!resolved) {
 					throw new Error(
 						`relationFilter('${relation}'): no relation '${relation}' declared on table '${ctx.rootTable}'. ` +
@@ -500,7 +519,7 @@ export function createConditionCompiler(
 				}
 				let currentSource = ctx.rootTable;
 				for (const hop of hops) {
-					const rel = ctx.model.getRelation(`${currentSource}.${hop}`);
+					const rel = resolveConditionRelation(ctx.model, currentSource, hop);
 					if (!rel) {
 						throw new Error(
 							`relationFilter(${JSON.stringify(hops)}): no relation '${hop}' declared on table '${currentSource}'. ` +
@@ -536,7 +555,10 @@ export function createConditionCompiler(
 			) {
 				const target =
 					preResolved?.targetTable ??
-					ctx.model?.getRelation(`${ctx.rootTable}.${relation}`)?.target;
+					(ctx.model
+						? resolveConditionRelation(ctx.model, ctx.rootTable, relation)
+								?.target
+						: undefined);
 				const alias = ctx.aliases?.get(relation);
 				if (target && alias)
 					return ctx.compileCondition(innermostWhere, {
@@ -558,9 +580,9 @@ export function createConditionCompiler(
 					ctx,
 				);
 			}
-			const resolvedRelation = ctx.model?.getRelation(
-				`${ctx.rootTable}.${relation}`,
-			);
+			const resolvedRelation = ctx.model
+				? resolveConditionRelation(ctx.model, ctx.rootTable, relation)
+				: undefined;
 
 			// DEFECT 1 FIX (new): when a model IS present but the relation is NOT declared,
 			// fail closed — consistent with the multi-hop path and the vacuous-every path.
@@ -654,7 +676,7 @@ export function createConditionCompiler(
 		const hopSourceColumns: ColumnListInput[] = [];
 		const hopTargetColumns: ColumnListInput[] = [];
 		for (const hop of hops) {
-			const rel = model.getRelation(`${currentSource}.${hop}`);
+			const rel = resolveConditionRelation(model, currentSource, hop);
 			if (!rel) {
 				throw new Error(
 					`relationFilter(${JSON.stringify(hops)}): no relation '${hop}' declared on table '${currentSource}'. ` +
@@ -945,16 +967,9 @@ export function createConditionCompiler(
 				throw new Error(
 					`${intent.kind}('${intent.relation}'): cannot resolve relation '${intent.relation}' — no model configured. Use rawExists(subquery(...)) for an uncorrelated or undeclared subquery.`,
 				);
-			const named = ctx.model?.getRelation(
-				`${ctx.rootTable}.${intent.relation}`,
-			);
-			const targets =
-				named || !ctx.directRootWhere
-					? []
-					: (ctx.model
-							?.getRelationsFrom(ctx.rootTable)
-							.filter((relation) => relation.target === intent.relation) ?? []);
-			const resolved = named ?? (targets.length === 1 ? targets[0] : undefined);
+			const resolved = ctx.model
+				? resolveConditionRelation(ctx.model, ctx.rootTable, intent.relation)
+				: undefined;
 			if (ctx.model && !resolved && !(ctx.directRootWhere && hints))
 				throw new Error(
 					`${intent.kind}('${intent.relation}'): no relation '${intent.relation}' is declared on table '${ctx.rootTable}'. Use rawExists(subquery(...)) for an EXISTS over an undeclared or uncorrelated subquery.`,
