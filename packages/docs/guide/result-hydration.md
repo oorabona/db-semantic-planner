@@ -45,7 +45,7 @@ to reassemble the rows.
 | `hasMany` / `manyToMany` (to-many) | `json_agg` | Avoids row explosion |
 | Non-recursive include without explicit join + relation `includeStrategy` hint | Requested compatible strategy | The hint is honoured; flat output accepts only `join` or `lateral`, otherwise planning fails |
 
-These defaults apply to non-recursive includes with nested output. Recursive includes always compile as `cte`, require recursive CTE support, ignore `defaultIncludeStrategy`, and accept only `auto` or `cte` as the relation hint. For flat output (`| flat` or `strategy: 'flat'`), a relation hint of `join` or `lateral` is honoured, while `json_agg` or `cte` is refused. A `defaultIncludeStrategy` of `join` or `lateral` applies to flat output; `json_agg`, `cte`, and `auto` do not apply to that branch. If no compatible hint or default applies, the planner selects `lateral` when the include or any nested include has a per-parent limit, and `join` otherwise. When a limit requires `lateral`, planning fails if `join` was selected or the dialect does not support lateral joins; the planner never silently drops the limit or replaces a selected strategy. Selected strategies remain subject to dialect capabilities and existing operation constraints. Mixed parent/child strategies and includes nested under a `cte` include are refused before SQL is generated.
+These defaults apply to non-recursive includes with nested output. Recursive includes always compile as `cte`, require recursive CTE support, ignore `defaultIncludeStrategy`, and accept only `auto` or `cte` as the relation hint. For flat output (`| flat` or `strategy: 'flat'`), a relation hint of `join` or `lateral` is honoured, while `json_agg` or `cte` is refused. A `defaultIncludeStrategy` of `join` or `lateral` applies to flat output; `json_agg`, `cte`, and `auto` do not apply to that branch. If no compatible hint or default applies, the planner selects `lateral` when the include or any nested include has a per-parent limit, and `join` otherwise. When flat output with a limit requires `lateral`, planning fails if `join` was selected or the dialect does not support lateral joins; the planner never silently drops the limit or replaces a selected strategy. Selected strategies remain subject to dialect capabilities and existing operation constraints. Mixed parent/child strategies and includes nested under a `cte` include are refused before SQL is generated.
 
 For every non-recursive include, explicit `include.join` takes precedence, then the relation `includeStrategy` hint, then an applicable `defaultIncludeStrategy`, then shape selection; explicit join conflicts with concrete hints other than `join` (`json_agg`, `lateral`, `cte`) and is refused, while a plan-level default only fills the gap.
 
@@ -332,7 +332,7 @@ orm.select('categories')
 **Wrong:** Forcing `join` on a `hasMany` and then filtering/counting distinct
 parents in application code to undo the duplication.
 
-**Right:** Use `json_agg` (the default) to aggregate child rows in SQL. Override to `lateral` only if you need `LIMIT` per parent.
+**Right:** Use `json_agg` (the default) to aggregate child rows in SQL. Both `json_agg` and `lateral` support `LIMIT` per parent.
 
 ### Stacking multiple json_agg includes on large tables
 

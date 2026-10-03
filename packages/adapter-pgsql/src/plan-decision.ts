@@ -48,7 +48,7 @@ export interface PlanDecision {
 	readonly relationType?: 'belongsTo' | 'hasMany' | 'hasOne';
 	readonly foreignKey?: ColumnListInput;
 	readonly parentKey?: ColumnListInput;
-	readonly includeOrderBy?: readonly import('@dbsp/types').OrderByIntent[];
+	readonly includeOrderBy?: readonly import('@dbsp/types').IncludeOrderByIntent[];
 	readonly orderByFallback?: boolean;
 	// Nested json_agg children (for deep relation traversal)
 	readonly children?: readonly PlanDecision[];
