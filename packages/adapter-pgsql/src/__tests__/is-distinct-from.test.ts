@@ -324,7 +324,7 @@ describe('#462 isDistinctFrom', () => {
 						maxRecursiveDepth: 100,
 					},
 					createCompilerState(),
-					createWhereDispatcher(),
+					createWhereDispatcher(compileWhereIntent),
 				),
 			).toThrow(`No WHERE handler registered for operator: ${unknown}`);
 
@@ -342,7 +342,7 @@ describe('#462 isDistinctFrom', () => {
 						maxRecursiveDepth: 100,
 					},
 					createCompilerState(),
-					createWhereDispatcher(),
+					createWhereDispatcher(compileWhereIntent),
 				),
 			).toThrow(`No WHERE handler registered for operator: ${unknown}`);
 
@@ -361,7 +361,7 @@ describe('#462 isDistinctFrom', () => {
 						maxRecursiveDepth: 100,
 					},
 					createCompilerState(),
-					createWhereDispatcher(),
+					createWhereDispatcher(compileWhereIntent),
 				),
 			).toThrow(`No WHERE handler registered for operator: ${unknown}`);
 
@@ -378,7 +378,7 @@ describe('#462 isDistinctFrom', () => {
 					maxRecursiveDepth: 100,
 				},
 				createCompilerState(),
-				createWhereDispatcher(),
+				createWhereDispatcher(compileWhereIntent),
 			),
 		).toThrow('No WHERE handler registered for operator: undefined');
 	});
@@ -453,7 +453,7 @@ describe('#462 isDistinctFrom', () => {
 			rootTable: 't',
 			maxRecursiveDepth: 100,
 		};
-		const dispatch = createWhereDispatcher();
+		const dispatch = createWhereDispatcher(compileWhereIntent);
 
 		for (const subqueryOperator of [undefined, '']) {
 			const operatorProperty =

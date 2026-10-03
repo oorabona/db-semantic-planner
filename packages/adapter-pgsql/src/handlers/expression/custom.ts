@@ -40,7 +40,6 @@ import type {
 	Decision,
 	ExpressionCompilerContext,
 	ExpressionHandler,
-	WhereDispatcher,
 } from '../types.js';
 import {
 	expressionQualifiedColumnRef,
@@ -48,37 +47,8 @@ import {
 	expressionWholeRowRef,
 } from '../types.js';
 
-// ---------------------------------------------------------------------------
-// Deferred WHERE compiler injection
-// ---------------------------------------------------------------------------
-// custom.ts is loaded early (compile-where.ts imports it). handlers/index.ts
-// is loaded later and has a transitive dep back through custom.ts. To compile
-// CASE WHEN conditions we need createWhereDispatcher (from handlers/index.ts)
-// but cannot import it statically (circular) or via require() (ESM package).
-//
-// Solution: compile-where.ts (which imports BOTH custom.ts and handlers/index.ts)
-// calls registerWhereDispatcherFactory() once after both modules are loaded.
-// By the time any CASE expression is compiled, the factory is always set.
-// ---------------------------------------------------------------------------
-let _whereDispatcherFactory: (() => WhereDispatcher) | undefined;
-
-/** Called by compile-where.ts after both modules are fully initialized. */
-export function registerWhereDispatcherFactory(
-	factory: () => WhereDispatcher,
-): void {
-	_whereDispatcherFactory = factory;
-}
-
-function _createWhereDispatcher(): WhereDispatcher {
-	if (!_whereDispatcherFactory) {
-		throw new Error(
-			'compileExpressionIntent (case): WHERE dispatcher not initialized. ' +
-				'Ensure compile-where.ts is imported before any CASE expression is compiled.',
-		);
-	}
-	return _whereDispatcherFactory();
-}
-
+// The condition compiler supplies the runtime dispatcher factory through context.
+// compile-where.ts preserves the compatibility re-export surface.
 // ---------------------------------------------------------------------------
 // Operator validation helper
 // ---------------------------------------------------------------------------
@@ -406,10 +376,12 @@ export function compileExpressionIntent(
 
 		case 'case': {
 			// CaseExpressionIntent: CASE WHEN condition THEN result [...] [ELSE default] END
-			// createWhereDispatcher is imported at module top level. The circular dep with
-			// handlers/index.ts is safe because ESM live bindings resolve before any function
-			// is called (no top-level calls in either module).
-			const dispatch = _createWhereDispatcher();
+			// The compiler supplies the dispatcher through the runtime context.
+			if (!ctx.createWhereDispatcher)
+				throw new Error(
+					'Condition requires a compiler-supplied WHERE dispatcher',
+				);
+			const dispatch = ctx.createWhereDispatcher();
 
 			const caseIntent = intent as import('@dbsp/types').CaseExpressionIntent;
 

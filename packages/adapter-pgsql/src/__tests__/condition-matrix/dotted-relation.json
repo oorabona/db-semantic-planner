@@ -1,0 +1,804 @@
+{
+	"entries": [
+		{
+			"position": "dotted-relation",
+			"kind": "eq",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "eq",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "eq",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "eq",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "eq",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "eq",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "eq",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)) OR EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND posts_exists_2.score = $3))",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "neq",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score <> $1)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "neq",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score <> $1) AND EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "neq",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score <> $1) OR EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "neq",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score <> $1))",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "neq",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "neq",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "neq",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score <> $2)) OR EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND posts_exists_2.score = $3))",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "gt",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score > $1)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "gt",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score > $1) AND EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "gt",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score > $1) OR EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "gt",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score > $1))",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "gt",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "gt",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "gt",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score > $2)) OR EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND posts_exists_2.score = $3))",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "gte",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score >= $1)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "gte",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score >= $1) AND EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "gte",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score >= $1) OR EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "gte",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score >= $1))",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "gte",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "gte",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "gte",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score >= $2)) OR EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND posts_exists_2.score = $3))",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "lt",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score < $1)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "lt",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score < $1) AND EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "lt",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score < $1) OR EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "lt",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score < $1))",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "lt",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "lt",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "lt",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score < $2)) OR EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND posts_exists_2.score = $3))",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "lte",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score <= $1)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "lte",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score <= $1) AND EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "lte",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score <= $1) OR EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "lte",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score <= $1))",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "lte",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "lte",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "lte",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score <= $2)) OR EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND posts_exists_2.score = $3))",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "isDistinctFrom",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score IS DISTINCT FROM $1)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "isDistinctFrom",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score IS DISTINCT FROM $1) AND EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "isDistinctFrom",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score IS DISTINCT FROM $1) OR EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "isDistinctFrom",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score IS DISTINCT FROM $1))",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "isDistinctFrom",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "isDistinctFrom",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "isDistinctFrom",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score IS DISTINCT FROM $2)) OR EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND posts_exists_2.score = $3))",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "eq-null",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = NULL)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "eq-null",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = NULL) AND EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $1)",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "eq-null",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = NULL) OR EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $1)",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "eq-null",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = NULL))",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "eq-null",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "eq-null",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "eq-null",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = NULL)) OR EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND posts_exists_2.score = $2))",
+			"params": [13, 17],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "like",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.name LIKE $1)",
+			"params": ["a%"],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "like",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.name LIKE $1) AND EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
+			"params": ["a%", 13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "like",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.name LIKE $1) OR EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
+			"params": ["a%", 13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "like",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.name LIKE $1))",
+			"params": ["a%"],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "like",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "like",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "like",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.name LIKE $2)) OR EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND posts_exists_2.score = $3))",
+			"params": [13, "a%", 17],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "ilike",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.name ILIKE $1)",
+			"params": ["B%"],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "ilike",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.name ILIKE $1) AND EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
+			"params": ["B%", 13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "ilike",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.name ILIKE $1) OR EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
+			"params": ["B%", 13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "ilike",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.name ILIKE $1))",
+			"params": ["B%"],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "ilike",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "ilike",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "ilike",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.name ILIKE $2)) OR EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND posts_exists_2.score = $3))",
+			"params": [13, "B%", 17],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "like-escape",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.name LIKE $1 ESCAPE $2)",
+			"params": ["c!_%", "!"],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "like-escape",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.name LIKE $1 ESCAPE $2) AND EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $3)",
+			"params": ["c!_%", "!", 13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "like-escape",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.name LIKE $1 ESCAPE $2) OR EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $3)",
+			"params": ["c!_%", "!", 13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "like-escape",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.name LIKE $1 ESCAPE $2))",
+			"params": ["c!_%", "!"],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "like-escape",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "like-escape",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "like-escape",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.name LIKE $2 ESCAPE $3)) OR EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND posts_exists_2.score = $4))",
+			"params": [13, "c!_%", "!", 17],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "in-values",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = ANY ($1))",
+			"params": [[3, 5]],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "in-values",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = ANY ($1)) AND EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
+			"params": [[3, 5], 13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "in-values",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = ANY ($1)) OR EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
+			"params": [[3, 5], 13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "in-values",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = ANY ($1)))",
+			"params": [[3, 5]],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "in-values",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "in-values",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "in-values",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = ANY ($2))) OR EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND posts_exists_2.score = $3))",
+			"params": [13, [3, 5], 17],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "in-empty",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND false)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "in-empty",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND false) AND EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $1)",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "in-empty",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND false) OR EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $1)",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "in-empty",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND false))",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "in-empty",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "in-empty",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "in-empty",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND false)) OR EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND posts_exists_2.score = $2))",
+			"params": [13, 17],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "any",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = ANY (CAST($1 AS int4[])))",
+			"params": [[3, 5]],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "any",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = ANY (CAST($1 AS int4[]))) AND EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
+			"params": [[3, 5], 13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "any",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = ANY (CAST($1 AS int4[]))) OR EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
+			"params": [[3, 5], 13],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "any",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = ANY (CAST($1 AS int4[]))))",
+			"params": [[3, 5]],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "any",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "any",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "any",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = ANY (CAST($2 AS int4[])))) OR EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND posts_exists_2.score = $3))",
+			"params": [13, [3, 5], 17],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "any-empty",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = ANY (CAST($1 AS int4[])))",
+			"params": [[]],
+			"error": null
+		},
+		{
+			"position": "dotted-relation",
+			"kind": "any-empty",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = ANY (CAST($1 AS int4[]))) AND EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
+			"params": [[], 13],
+			"error": null
+		}
+	]
+}

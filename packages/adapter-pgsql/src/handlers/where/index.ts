@@ -49,7 +49,7 @@ export { likeHandler } from './like.js';
 export { andHandler, notHandler, orHandler } from './logical.js';
 export { nullHandler } from './null.js';
 export { rangeHandler } from './range.js';
-export { rawExistsHandler } from './raw-exists.js';
+export { createRawExistsHandler, rawExistsHandler } from './raw-exists.js';
 export {
 	hasNoRelationHandler,
 	hasRelationHandler,

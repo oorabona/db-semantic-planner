@@ -1,3 +1,4 @@
+import { compileWhereIntent } from '../condition-compiler.js';
 /**
  * Tests for WHERE Handlers (Block 2)
  */
@@ -23,7 +24,7 @@ function compileToSql(
 		...ctx,
 	};
 	const state = createCompilerState();
-	const dispatcher = createWhereDispatcher();
+	const dispatcher = createWhereDispatcher(compileWhereIntent);
 	const node = dispatcher(decision, fullCtx, state);
 	// Deparse just the where clause node directly
 	const sql = deparseSync([{ SelectStmt: { whereClause: node } }])

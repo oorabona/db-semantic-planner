@@ -1,3 +1,5 @@
+import { compileWhereIntent } from './condition-compiler.js';
+import { createWhereDispatcher } from './handlers/index.js';
 /**
  * Recursive CTE and unnest-CTE compilation.
  * Extracted from PgAdapter.compileRecursive(), compileCteQuery(),
@@ -426,6 +428,7 @@ export function compileRecursive<T = unknown>(
 			...(schemaName !== undefined && { schema: schemaName }),
 			maxRecursiveDepth: intent.maxDepth,
 			compileCustomFnFilter: buildCustomFnFilter,
+			createWhereDispatcher: () => createWhereDispatcher(compileWhereIntent),
 		} as CompilerContext;
 
 		// Get columns to select
@@ -537,6 +540,7 @@ export function compileRecursive<T = unknown>(
 			...(schemaName !== undefined && { schema: schemaName }),
 			maxRecursiveDepth: intent.maxDepth,
 			compileCustomFnFilter: buildCustomFnFilter,
+			createWhereDispatcher: () => createWhereDispatcher(compileWhereIntent),
 		} as CompilerContext;
 
 		const startSelect = intent.start.select ?? [];

@@ -19,6 +19,7 @@ import {
 	transposeToColumnArrays,
 	validateBatchCardinality,
 } from '../compiler-utils.js';
+import { compileWhereIntent } from '../condition-compiler.js';
 import { createWhereDispatcher } from '../handlers/index.js';
 import type {
 	CompilerContext,
@@ -119,7 +120,7 @@ function buildWhereClause(
 ): Node | undefined {
 	if (!conditions || conditions.length === 0) return undefined;
 
-	const dispatch = createWhereDispatcher();
+	const dispatch = createWhereDispatcher(compileWhereIntent);
 	if (conditions.length === 1) {
 		return dispatch(conditions[0]!, ctx, state);
 	}

@@ -17,9 +17,9 @@ import {
 	getTrustedNqlRelationFilterFields,
 	type Mutable,
 } from '@dbsp/types/internal';
-import type { PlanDecision } from './compiler.js';
 import type { RangeValue } from './handlers/types.js';
 import { resolveWhereOperator } from './handlers/where/operator-resolver.js';
+import type { PlanDecision } from './plan-decision.js';
 import { EXPRESSION_HANDLERS } from './select-expression-handlers.js';
 
 export class UnknownSelectExpressionKindError extends Error {

@@ -9,11 +9,9 @@
 
 import { InvalidOperationError } from '@dbsp/core';
 import {
-	type ColumnListInput,
 	type DialectCapabilities,
 	type ExpressionIntent,
 	isParamIntent,
-	type ParamIntent,
 	type QueryIntent,
 	toColumnList,
 } from '@dbsp/types';
@@ -21,7 +19,6 @@ import {
 	getNqlBindingRefName,
 	getTrustedNqlRelationFilterFields,
 	isNqlBindingRef,
-	type JsonAggOrderByEntry,
 	NQL_SELECT_SCALAR_FUNCTION_ALLOWLIST,
 	NQL_SELECT_WINDOW_FUNCTION_ALLOWLIST,
 } from '@dbsp/types/internal';
@@ -60,17 +57,15 @@ import {
 	relationBinding,
 	relationBindingFor,
 } from './binding-registry.js';
+import { compileWhereIntent } from './condition-compiler.js';
+import type { DeclaredNameResolver } from './declared-name-resolver.js';
 import { deparseQuoted } from './deparse.js';
 import { assertDialectCapability } from './dialect-capabilities.js';
 import { resolveCaseValue as resolveCaseValueShared } from './handlers/expression/case-value.js';
-import {
-	compileExpressionIntent,
-	registerWhereDispatcherFactory,
-} from './handlers/expression/custom.js';
+import { compileExpressionIntent } from './handlers/expression/custom.js';
 import { bindParameter } from './handlers/expression/param-value.js';
 import { buildRecursiveScalarSubquery } from './handlers/expression/pseudo.js';
 import { genericWindowHandler } from './handlers/expression/window.js';
-import { deriveFkColumns } from './handlers/include/shared.js';
 import {
 	createWhereDispatcher,
 	ensureExpressionHandlersRegistered,
@@ -79,23 +74,6 @@ import {
 	getIncludeHandler,
 	getNqlSafeExpressionHandler,
 } from './handlers/index.js';
-import { buildKeyCorrelation } from './handlers/where/exists.js';
-import {
-	type AliasColumnAuthority,
-	bindAliasAuthority,
-	queryScopeForBindingProjections,
-	type RelationTargetProjectionRegistry,
-	type ResolvedRelationTarget,
-	requireRelationTargetColumns,
-	resolveRelationTarget,
-} from './relation-target-projection.js';
-
-// Register createWhereDispatcher with compileExpressionIntent so CASE expressions
-// can compile their WHEN conditions. compiler.ts is the bridge: it imports both
-// compileExpressionIntent (from custom.ts) and createWhereDispatcher (from handlers/index.ts).
-registerWhereDispatcherFactory(createWhereDispatcher);
-
-import type { DeclaredNameResolver } from './declared-name-resolver.js';
 import type {
 	CompilerContext as HandlerCompilerContext,
 	CompilerState as HandlerCompilerState,
@@ -110,6 +88,7 @@ import {
 	expressionUnqualifiedColumnRef,
 	isSelectWithFields,
 } from './handlers/types.js';
+import { buildKeyCorrelation } from './handlers/where/exists.js';
 import { buildColumnRef, compileValue } from './handlers/where/utils.js';
 import {
 	assertNoUnsupportedSubqueryModifiers,
@@ -124,6 +103,15 @@ import {
 	isAmbiguousRelationAlias,
 	resolveVisibleRelationAlias,
 } from './relation-alias.js';
+import {
+	type AliasColumnAuthority,
+	bindAliasAuthority,
+	queryScopeForBindingProjections,
+	type RelationTargetProjectionRegistry,
+	type ResolvedRelationTarget,
+	requireRelationTargetColumns,
+	resolveRelationTarget,
+} from './relation-target-projection.js';
 import {
 	identifierText,
 	queryLocal,
@@ -176,174 +164,17 @@ function trustedRelationHasMultipleHops(
 // PlanDecision → HandlerDecision mapper
 // ============================================================================
 
-type PlanExpressionOrderBy = readonly {
-	field: string;
-	direction?: 'asc' | 'desc';
-}[];
+import {
+	buildCustomFnFilter,
+	compileFilterCondition,
+	mapToHandlerDecision,
+} from './custom-fn-filter.js';
 
-function isJsonAggOrderBy(
-	orderBy: PlanDecision['orderBy'],
-): orderBy is readonly JsonAggOrderByEntry[] {
-	return (
-		Array.isArray(orderBy) && orderBy.every((item) => typeof item === 'string')
-	);
-}
+export { buildCustomFnFilter } from './custom-fn-filter.js';
 
-function isExpressionOrderBy(
-	orderBy: PlanDecision['orderBy'],
-): orderBy is PlanExpressionOrderBy {
-	return (
-		Array.isArray(orderBy) &&
-		orderBy.every(
-			(item) =>
-				typeof item === 'object' &&
-				item !== null &&
-				'field' in item &&
-				typeof item.field === 'string',
-		)
-	);
-}
+import type { PlanDecision } from './plan-decision.js';
 
-/**
- * Recursively map a PlanDecision tree to a HandlerDecision tree.
- *
- * Both types are structurally similar but nominally distinct. This explicit
- * mapper avoids `as unknown as` double casts by doing the conversion
- * field-by-field, including recursive children/conditions.
- */
-function mapToHandlerDecision(
-	pd: PlanDecision,
-	rootTable: string,
-	defaultPk: string,
-	deriveFk: FkColumnDerivation,
-): HandlerDecision {
-	const jsonAggOrderBy = isJsonAggOrderBy(pd.orderBy) ? pd.orderBy : undefined;
-	const expressionOrderBy = isExpressionOrderBy(pd.orderBy)
-		? pd.orderBy
-		: undefined;
-	const handlerOrderBy =
-		jsonAggOrderBy ??
-		expressionOrderBy?.map((o) => ({
-			column: o.field,
-			direction: (o.direction?.toUpperCase() ?? 'ASC') as 'ASC' | 'DESC',
-		}));
-	const derivedFkColumns = deriveFkColumns(
-		pd,
-		pd.sourceTable ?? rootTable,
-		defaultPk,
-		deriveFk,
-	);
-	const subqueryOperator = pd.subqueryOperator;
-	return {
-		type: pd.type,
-		table: pd.table,
-		column: pd.column ?? pd.field,
-		alias: pd.alias,
-		operator: pd.operator,
-		value: pd.value,
-		paramIndex: pd.paramIndex,
-		direction: pd.direction,
-		joinType: pd.joinType,
-		sourceColumn: pd.sourceColumn ?? derivedFkColumns.sourceColumn,
-		targetColumn: pd.targetColumn ?? derivedFkColumns.targetColumn,
-		targetTable: pd.targetTable,
-		function: pd.function,
-		distinct: pd.distinct,
-		args: pd.args,
-		columns: pd.columns,
-		values: pd.values,
-		set: pd.set,
-		limit: pd.limit,
-		offset: pd.offset,
-		strategy: (pd.choice === 'subquery'
-			? 'json_agg'
-			: pd.choice) as HandlerDecision['strategy'],
-		relation: pd.relation ?? pd.relationName,
-		relationName: pd.relationName,
-		relationPath: pd.relationPath,
-		hydrationPrefix: pd.hydrationPrefix,
-		relationType: pd.relationType,
-		foreignKey: pd.foreignKey,
-		parentKey: pd.parentKey,
-		orderByFallback: pd.orderByFallback,
-		dataType: pd.dataType,
-		traversal: pd.traversal,
-		pkColumn: pd.pkColumn,
-		fkColumn: pd.fkColumn,
-		maxDepth: pd.maxDepth,
-		children: pd.children?.map((c) =>
-			mapToHandlerDecision(c, pd.targetTable ?? rootTable, defaultPk, deriveFk),
-		),
-		conditions: pd.conditions?.map((c) =>
-			mapToHandlerDecision(c, rootTable, defaultPk, deriveFk),
-		),
-		include: pd.include?.map((c) =>
-			mapToHandlerDecision(c, rootTable, defaultPk, deriveFk),
-		),
-		orderBy: handlerOrderBy,
-		partition: pd.partitionBy,
-		jsonPath: pd.jsonPath,
-		jsonMode: pd.jsonMode,
-		expressionIntent: pd.expressionIntent,
-		...(subqueryOperator !== undefined && {
-			subqueryOperator,
-		}),
-		selectColumn: pd.selectColumn,
-		aggregate: pd.aggregate,
-		aggregateDistinct: pd.aggregateDistinct,
-		columnAliases: pd.columnAliases,
-		escape: pd.escape,
-		subqueryIntent: pd.subqueryIntent,
-	} as HandlerDecision;
-}
-
-/**
- * Compile an optional filterCondition (PlanDecision) to an AST Node.
- * Used to hydrate filterWhere on aggregate handler decisions.
- */
-function compileFilterCondition(
-	filterCondition: PlanDecision | undefined,
-	dispatcher: ReturnType<typeof createWhereDispatcher>,
-	ctx: HandlerCompilerContext,
-	state: HandlerCompilerState,
-): import('@pgsql/types').Node | undefined {
-	if (!filterCondition) return undefined;
-	const mapped = mapToHandlerDecision(
-		filterCondition,
-		ctx.rootTable,
-		ctx.defaultPkColumnName ?? 'id',
-		ctx.deriveFkColumnName ?? defaultFkDerivation,
-	);
-	return dispatcher(mapped, ctx, state);
-}
-
-export function buildCustomFnFilter(
-	filterIntent: import('@dbsp/types').WhereIntent,
-	ctx: HandlerCompilerContext,
-	state: HandlerCompilerState,
-): Node {
-	// Fail loud rather than treat "could not lower" as "no filter": a filter that
-	// lowers to nothing (a malformed or unsupported condition) must NOT silently
-	// drop to an unfiltered aggregate, which would broaden results. An empty or()
-	// lowers to FALSE and an empty and() to TRUE, so neither reaches this branch.
-	const filterDecision = convertWhereCondition(filterIntent, ctx.rootTable);
-	const filterNode = filterDecision
-		? compileFilterCondition(
-				filterDecision,
-				createWhereDispatcher(),
-				ctx,
-				state,
-			)
-		: undefined;
-	if (!filterNode) {
-		throw new Error(
-			'fn().filter(): the FILTER (WHERE ...) condition could not be compiled ' +
-				'(a malformed or unsupported condition). ' +
-				'Provide a concrete filter condition.',
-		);
-	}
-	return filterNode;
-}
+export type { PlanDecision } from './plan-decision.js';
 
 // ============================================================================
 // Types (simplified for spike - would import from @dbsp/core)
@@ -353,114 +184,6 @@ export function buildCustomFnFilter(
  * Simplified PlanDecision for the spike
  * (In production, import from @dbsp/core)
  */
-export interface PlanDecision {
-	readonly type: string;
-	readonly table?: string;
-	readonly column?: string;
-	readonly alias?: string;
-	readonly field?: string;
-	readonly operator?: string;
-	readonly value?: unknown;
-	readonly paramIndex?: number;
-	readonly direction?: 'ASC' | 'DESC';
-	readonly nulls?: 'FIRST' | 'LAST';
-	readonly joinType?: 'inner' | 'left';
-	readonly sourceColumn?: ColumnListInput;
-	readonly targetColumn?: ColumnListInput;
-	readonly targetTable?: string;
-	readonly function?: string;
-	readonly distinct?: boolean;
-	readonly args?: readonly unknown[];
-	readonly conditions?: readonly PlanDecision[];
-	readonly columns?: readonly string[];
-	readonly values?: readonly unknown[];
-	readonly set?: readonly { column: string; value: unknown }[];
-	readonly limit?: number | ParamIntent | { paramIndex: number };
-	readonly offset?: number | ParamIntent | { paramIndex: number };
-	// Window function properties
-	readonly partitionBy?: readonly string[];
-	readonly orderBy?: PlanExpressionOrderBy | readonly JsonAggOrderByEntry[];
-	// Column data type (for range type casting, e.g. 'daterange', 'int4range')
-	readonly dataType?: string;
-	// JSON aggregation (include strategy: 'json_agg')
-	readonly sourceTable?: string;
-	readonly relationName?: string;
-	readonly relationPath?: string;
-	readonly hydrationPrefix?: string;
-	readonly relationType?: 'belongsTo' | 'hasMany' | 'hasOne';
-	readonly foreignKey?: ColumnListInput;
-	readonly parentKey?: ColumnListInput;
-	readonly orderByFallback?: boolean;
-	// Nested json_agg children (for deep relation traversal)
-	readonly children?: readonly PlanDecision[];
-	readonly intentPath?: string;
-	// Filter/include strategy choice from planner ('join' | 'exists' | 'json_agg')
-	readonly choice?: string;
-	// IN (subquery) reference
-	readonly subquery?: {
-		readonly from: string;
-		readonly select: string;
-		readonly where?: PlanDecision;
-		readonly limit?: number | ParamIntent;
-		readonly orderBy?: readonly { field: string; direction?: string }[];
-	};
-	// Expression type discriminator (e.g. 'case' for CASE WHEN)
-	readonly expressionType?: string;
-	// Relation column properties
-	readonly relation?: string;
-	// User-supplied aliases for specific relation columns (col -> alias).
-	// Populated when selectRelationColumn decisions carry an `alias` field.
-	readonly columnAliases?: Readonly<Record<string, string>>;
-	// Pseudo-column (recursive traversal) properties
-	readonly traversal?: string;
-	readonly pkColumn?: string;
-	readonly fkColumn?: string;
-	readonly maxDepth?: number;
-	readonly role?: string;
-	// JSON extraction metadata
-	readonly jsonPath?: readonly string[];
-	readonly jsonMode?: 'json' | 'text';
-	// Arithmetic expressions use args: [left, right] instead of dedicated fields
-	// Scalar subquery comparison properties
-	readonly selectColumn?: string;
-	readonly aggregate?: string;
-	/**
-	 * Apply DISTINCT to a scalar subquery's aggregate (e.g. AVG(DISTINCT price)).
-	 * Deliberately NOT named `distinct` — that field means "this decision's own
-	 * query-level DISTINCT modifier" and `assertNoDroppedDecisionModifiers`
-	 * (subquery-emission.ts) rejects it as unsupported on subquery decisions.
-	 */
-	readonly aggregateDistinct?: boolean;
-	readonly subqueryOperator?: string;
-	// FILTER (WHERE ...) condition for aggregate expressions (WhereIntent serialized as PlanDecision)
-	readonly filterCondition?: PlanDecision;
-	// Custom expression intent for selectCustomExpression, WHERE expression, and ORDER BY expression
-	readonly expressionIntent?: unknown;
-	// LIKE escape character
-	readonly escape?: string;
-	// Include declarations (JOIN inside EXISTS subquery)
-	readonly include?: readonly PlanDecision[];
-	// Pre-compiled right-side AST node for table-mode JoinIntent (explicit ON condition).
-	// When set, the 'join' case in compileSelect uses joinRarg + joinOnNode to build
-	// the JoinExpr wrapping from[0] as larg — enabling correct multi-join chaining.
-	readonly joinRarg?: Node;
-	readonly joinOnNode?: Node;
-	// Parameters for BatchValues joins (unnest() source).
-	// When set, these are spliced into this.state.parameters BEFORE other query params.
-	// The joinRarg contains ParamRefs ($1, $2, ...) aligned with these values.
-	readonly batchValuesParams?: readonly unknown[];
-	/**
-	 * Provenance: the ORIGINAL QueryIntent before lowering.
-	 * Carried through every lowering site (convertIn, convertSubquery,
-	 * normalizeToDecision, dispatchWhere, mapInSubqueryCondition) so that
-	 * `buildPredicateSubquerySelect` can validate the true caller intent.
-	 *
-	 * Required for IN / scalar / inSubquery / notInSubquery decisions.
-	 * Optional on other decision types.
-	 */
-	readonly subqueryIntent?: import('@dbsp/types').QueryIntent;
-}
-
 // ============================================================================
 // PlanDecision sub-types (discriminated sub-interfaces + type guards)
 // ============================================================================
@@ -934,6 +657,7 @@ export class PlanCompiler {
 			}),
 			...(this.model != null && { model: this.model }),
 			compileCustomFnFilter: buildCustomFnFilter,
+			createWhereDispatcher: () => createWhereDispatcher(compileWhereIntent),
 		} as HandlerCompilerContext;
 	}
 
@@ -1025,7 +749,7 @@ export class PlanCompiler {
 		decision: PlanDecision,
 		ctxOverrides?: Partial<HandlerCompilerContext>,
 	): Node {
-		const dispatcher = createWhereDispatcher();
+		const dispatcher = createWhereDispatcher(compileWhereIntent);
 
 		// Decision-level guard for already-lowered predicate-subquery decisions
 		// (operator already 'inSubquery'/'notInSubquery'/'scalarSubquery'/...).
@@ -1577,6 +1301,7 @@ export class PlanCompiler {
 				state: HandlerCompilerState,
 			) => this.compileNqlFunctionArg(value, handlerCtx, state),
 			compileCustomFnFilter: buildCustomFnFilter,
+			createWhereDispatcher: () => createWhereDispatcher(compileWhereIntent),
 		} as HandlerCompilerContext;
 	}
 
@@ -2338,7 +2063,7 @@ export class PlanCompiler {
 			throw new Error('NQL CASE expression requires at least one WHEN clause');
 		}
 
-		const dispatcher = createWhereDispatcher();
+		const dispatcher = createWhereDispatcher(compileWhereIntent);
 		const args: Node[] = whenClauses.map((branch) => {
 			const condition = (branch as { condition?: unknown }).condition;
 			const result = (branch as { result?: unknown }).result;
@@ -2441,7 +2166,7 @@ export class PlanCompiler {
 				// Compile FILTER (WHERE ...) clause if present
 				const filterNode = compileFilterCondition(
 					decision.filterCondition,
-					createWhereDispatcher(),
+					createWhereDispatcher(compileWhereIntent),
 					ctx,
 					state,
 				);

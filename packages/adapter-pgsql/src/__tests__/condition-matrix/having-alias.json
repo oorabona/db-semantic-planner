@@ -1,0 +1,804 @@
+{
+	"entries": [
+		{
+			"position": "having-alias",
+			"kind": "eq",
+			"shape": "leaf",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "eq",
+			"shape": "and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND count(*) = CAST($2 AS bigint)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "eq",
+			"shape": "or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) OR count(*) = CAST($2 AS bigint)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "eq",
+			"shape": "not",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (count(*) = CAST($1 AS bigint))",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "eq",
+			"shape": "empty-or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "eq",
+			"shape": "empty-and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "eq",
+			"shape": "two-level",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (count(*) = CAST($2 AS bigint)) OR count(*) = CAST($3 AS bigint))",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "neq",
+			"shape": "leaf",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) <> CAST($1 AS bigint)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "neq",
+			"shape": "and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) <> CAST($1 AS bigint) AND count(*) = CAST($2 AS bigint)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "neq",
+			"shape": "or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) <> CAST($1 AS bigint) OR count(*) = CAST($2 AS bigint)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "neq",
+			"shape": "not",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (count(*) <> CAST($1 AS bigint))",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "neq",
+			"shape": "empty-or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "neq",
+			"shape": "empty-and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "neq",
+			"shape": "two-level",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (count(*) <> CAST($2 AS bigint)) OR count(*) = CAST($3 AS bigint))",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "gt",
+			"shape": "leaf",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) > CAST($1 AS bigint)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "gt",
+			"shape": "and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) > CAST($1 AS bigint) AND count(*) = CAST($2 AS bigint)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "gt",
+			"shape": "or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) > CAST($1 AS bigint) OR count(*) = CAST($2 AS bigint)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "gt",
+			"shape": "not",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (count(*) > CAST($1 AS bigint))",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "gt",
+			"shape": "empty-or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "gt",
+			"shape": "empty-and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "gt",
+			"shape": "two-level",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (count(*) > CAST($2 AS bigint)) OR count(*) = CAST($3 AS bigint))",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "gte",
+			"shape": "leaf",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) >= CAST($1 AS bigint)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "gte",
+			"shape": "and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) >= CAST($1 AS bigint) AND count(*) = CAST($2 AS bigint)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "gte",
+			"shape": "or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) >= CAST($1 AS bigint) OR count(*) = CAST($2 AS bigint)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "gte",
+			"shape": "not",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (count(*) >= CAST($1 AS bigint))",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "gte",
+			"shape": "empty-or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "gte",
+			"shape": "empty-and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "gte",
+			"shape": "two-level",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (count(*) >= CAST($2 AS bigint)) OR count(*) = CAST($3 AS bigint))",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "lt",
+			"shape": "leaf",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) < CAST($1 AS bigint)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "lt",
+			"shape": "and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) < CAST($1 AS bigint) AND count(*) = CAST($2 AS bigint)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "lt",
+			"shape": "or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) < CAST($1 AS bigint) OR count(*) = CAST($2 AS bigint)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "lt",
+			"shape": "not",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (count(*) < CAST($1 AS bigint))",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "lt",
+			"shape": "empty-or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "lt",
+			"shape": "empty-and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "lt",
+			"shape": "two-level",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (count(*) < CAST($2 AS bigint)) OR count(*) = CAST($3 AS bigint))",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "lte",
+			"shape": "leaf",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) <= CAST($1 AS bigint)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "lte",
+			"shape": "and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) <= CAST($1 AS bigint) AND count(*) = CAST($2 AS bigint)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "lte",
+			"shape": "or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) <= CAST($1 AS bigint) OR count(*) = CAST($2 AS bigint)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "lte",
+			"shape": "not",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (count(*) <= CAST($1 AS bigint))",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "lte",
+			"shape": "empty-or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "lte",
+			"shape": "empty-and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "lte",
+			"shape": "two-level",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (count(*) <= CAST($2 AS bigint)) OR count(*) = CAST($3 AS bigint))",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "isDistinctFrom",
+			"shape": "leaf",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) IS DISTINCT FROM CAST($1 AS bigint)",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "isDistinctFrom",
+			"shape": "and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) IS DISTINCT FROM CAST($1 AS bigint) AND count(*) = CAST($2 AS bigint)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "isDistinctFrom",
+			"shape": "or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) IS DISTINCT FROM CAST($1 AS bigint) OR count(*) = CAST($2 AS bigint)",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "isDistinctFrom",
+			"shape": "not",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (count(*) IS DISTINCT FROM CAST($1 AS bigint))",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "isDistinctFrom",
+			"shape": "empty-or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "isDistinctFrom",
+			"shape": "empty-and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "isDistinctFrom",
+			"shape": "two-level",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (count(*) IS DISTINCT FROM CAST($2 AS bigint)) OR count(*) = CAST($3 AS bigint))",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "eq-null",
+			"shape": "leaf",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = NULL",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "eq-null",
+			"shape": "and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = NULL AND count(*) = CAST($1 AS bigint)",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "eq-null",
+			"shape": "or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = NULL OR count(*) = CAST($1 AS bigint)",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "eq-null",
+			"shape": "not",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (count(*) = NULL)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "eq-null",
+			"shape": "empty-or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "eq-null",
+			"shape": "empty-and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "eq-null",
+			"shape": "two-level",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (count(*) = NULL) OR count(*) = CAST($2 AS bigint))",
+			"params": [13, 17],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "like",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "like",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "like",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "like",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "like",
+			"shape": "empty-or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "like",
+			"shape": "empty-and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "like",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "ilike",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "ilike",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "ilike",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "ilike",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "ilike",
+			"shape": "empty-or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "ilike",
+			"shape": "empty-and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "ilike",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "like-escape",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "like-escape",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "like-escape",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "like-escape",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "like-escape",
+			"shape": "empty-or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "like-escape",
+			"shape": "empty-and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "like-escape",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "in-values",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "in-values",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "in-values",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "in-values",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "in-values",
+			"shape": "empty-or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "in-values",
+			"shape": "empty-and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "in-values",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "in-empty",
+			"shape": "leaf",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "in-empty",
+			"shape": "and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false AND count(*) = CAST($1 AS bigint)",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "in-empty",
+			"shape": "or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false OR count(*) = CAST($1 AS bigint)",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "in-empty",
+			"shape": "not",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (false)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "in-empty",
+			"shape": "empty-or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "in-empty",
+			"shape": "empty-and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "in-empty",
+			"shape": "two-level",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (false) OR count(*) = CAST($2 AS bigint))",
+			"params": [13, 17],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "any",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "any",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "any",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "any",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "any",
+			"shape": "empty-or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING false",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "any",
+			"shape": "empty-and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING true",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "any",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "any-empty",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		},
+		{
+			"position": "having-alias",
+			"kind": "any-empty",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'users.*' is absent from the physical model."
+		}
+	]
+}

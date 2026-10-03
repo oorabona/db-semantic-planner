@@ -1,3 +1,5 @@
+import { compileWhereIntent } from './condition-compiler.js';
+import { createWhereDispatcher } from './handlers/index.js';
 /**
  * PgAdapter - Implements the Adapter interface for PostgreSQL using native pg driver.
  *
@@ -3550,6 +3552,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 			rootTable: '',
 			maxRecursiveDepth: MAX_DEPTH_LIMIT,
 			compileCustomFnFilter: buildCustomFnFilter,
+			createWhereDispatcher: () => createWhereDispatcher(compileWhereIntent),
 			// Wire compileSubquery so that SubqueryExpressionIntent nested inside
 			// expr (e.g. op('+', subquery(...).asExpr(), literal(1))) compiles
 			// correctly via a fresh inner PlanCompiler (same pattern as PlanCompiler
