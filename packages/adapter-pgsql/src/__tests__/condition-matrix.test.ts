@@ -1,5 +1,6 @@
 /** Rewriting records the current checkout's output; the resulting diff is what a reviewer judges. A normal run is read-only. */
 import { readdirSync, readFileSync } from 'node:fs';
+import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -37,9 +38,7 @@ describe('condition compilation differential matrix (#891)', () => {
 	});
 	it('pins the complete ordered inventory', () => {
 		expect(readdirSync(baselineDirectory).sort()).toEqual(
-			baselinePaths
-				.map((path) => fileURLToPath(path).split('/').at(-1)!)
-				.sort(),
+			baselinePaths.map((path) => basename(fileURLToPath(path))).sort(),
 		);
 		expect(
 			baselineEntries.map(({ position, kind, shape }) => ({

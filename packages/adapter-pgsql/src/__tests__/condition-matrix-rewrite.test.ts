@@ -15,21 +15,16 @@ import {
 	prepareConditionMatrix,
 } from './condition-matrix.cases.js';
 
-it('rewrites a shrinking position without stale parts and preserves unmanaged files', () => {
+it('rewrites retired and shrinking parts inside the directory and preserves non-JSON files', () => {
 	const directory = mkdtempSync(join(tmpdir(), 'condition-matrix-'));
-	const url = pathToFileURL(`${directory}/`);
+	const url = pathToFileURL(directory);
 	try {
 		const entry = conditionMatrix[0]!;
 		const matrix = Array.from({ length: 201 }, () => entry);
-		const unmanaged = [
-			'notes.txt',
-			'unknown.json',
-			`${entry.position}.01.json`,
-			`${entry.position}.002.json.bak`,
-		];
-		for (const name of unmanaged) writeFileSync(new URL(name, url), 'keep');
+		const unmanaged = ['notes.txt', `${entry.position}.002.json.bak`];
+		for (const name of unmanaged) writeFileSync(join(directory, name), 'keep');
 		const before = unmanaged.map(
-			(name) => statSync(new URL(name, url)).mtimeMs,
+			(name) => statSync(join(directory, name)).mtimeMs,
 		);
 		prepareConditionMatrix(url, matrix, true);
 		expect(readdirSync(url).sort()).toEqual(
@@ -45,8 +40,8 @@ it('rewrites a shrinking position without stale parts and preserves unmanaged fi
 			.sort()
 			.map((name) => ({
 				name,
-				bytes: readFileSync(new URL(name, url), 'utf8'),
-				mtime: statSync(new URL(name, url)).mtimeMs,
+				bytes: readFileSync(join(directory, name), 'utf8'),
+				mtime: statSync(join(directory, name)).mtimeMs,
 			}));
 		prepareConditionMatrix(url, matrix.slice(0, 101), false);
 		expect(
@@ -54,11 +49,18 @@ it('rewrites a shrinking position without stale parts and preserves unmanaged fi
 				.sort()
 				.map((name) => ({
 					name,
-					bytes: readFileSync(new URL(name, url), 'utf8'),
-					mtime: statSync(new URL(name, url)).mtimeMs,
+					bytes: readFileSync(join(directory, name), 'utf8'),
+					mtime: statSync(join(directory, name)).mtimeMs,
 				})),
 		).toEqual(snapshot);
 		for (const count of [101, 1, 0]) {
+			for (const name of [
+				'retired-position.json',
+				'select-where.1000.json',
+				`${entry.position}.01.json`,
+			]) {
+				writeFileSync(join(directory, name), 'stale');
+			}
 			prepareConditionMatrix(url, matrix.slice(0, count), true);
 			const expected =
 				count === 101
@@ -71,10 +73,10 @@ it('rewrites a shrinking position without stale parts and preserves unmanaged fi
 			);
 		}
 		expect(
-			unmanaged.map((name) => readFileSync(new URL(name, url), 'utf8')),
+			unmanaged.map((name) => readFileSync(join(directory, name), 'utf8')),
 		).toEqual(unmanaged.map(() => 'keep'));
 		expect(
-			unmanaged.map((name) => statSync(new URL(name, url)).mtimeMs),
+			unmanaged.map((name) => statSync(join(directory, name)).mtimeMs),
 		).toEqual(before);
 	} finally {
 		rmSync(directory, { recursive: true, force: true });
