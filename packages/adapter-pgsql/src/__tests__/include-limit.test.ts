@@ -138,7 +138,7 @@ describe('limited json_agg includes', () => {
 			model,
 		});
 		expect(compiled.sql).toBe(
-			`SELECT users.*, COALESCE((SELECT json_agg(__lim.__row ORDER BY __lim.__key0 DESC NULLS LAST, __lim.__key1 ASC NULLS LAST) FROM (SELECT to_jsonb(__t__) AS __row, __t__."createdAt" AS __key0, __t__.id AS __key1 FROM posts AS __t__ WHERE __t__."authorId" = users.id ORDER BY __t__."createdAt" DESC NULLS LAST, __t__.id ASC NULLS LAST LIMIT 2) AS __lim), '[]'::json) AS posts_json FROM users`,
+			'SELECT users.*, COALESCE((SELECT json_agg(__lim.__row ORDER BY __lim.__key0 DESC NULLS LAST, __lim.__key1 ASC NULLS LAST) FROM (SELECT jsonb_build_object(\'id\', __t__.id, \'authorId\', __t__."authorId", \'createdAt\', __t__."createdAt", \'title\', __t__.title) AS __row, __t__."createdAt" AS __key0, __t__.id AS __key1 FROM posts AS __t__ WHERE __t__."authorId" = users.id ORDER BY __t__."createdAt" DESC NULLS LAST, __t__.id ASC NULLS LAST LIMIT 2) AS __lim), \'[]\'::json) AS posts_json FROM users',
 		);
 		expect(compiled.parameters).toEqual([]);
 	});
@@ -151,7 +151,7 @@ describe('limited json_agg includes', () => {
 			})
 			.dump();
 		expect(dump.sql).toBe(
-			`SELECT users.*, COALESCE((SELECT json_agg(__lim.__row ORDER BY __lim.__key0 DESC NULLS LAST, __lim.__key1 ASC NULLS LAST) FROM (SELECT to_jsonb(__t__) AS __row, __t__."createdAt" AS __key0, __t__.id AS __key1 FROM posts AS __t__ WHERE __t__."authorId" = users.id ORDER BY __t__."createdAt" DESC NULLS LAST, __t__.id ASC NULLS LAST LIMIT 2) AS __lim), '[]'::json) AS posts_json FROM users`,
+			'SELECT users.*, COALESCE((SELECT json_agg(__lim.__row ORDER BY __lim.__key0 DESC NULLS LAST, __lim.__key1 ASC NULLS LAST) FROM (SELECT jsonb_build_object(\'id\', __t__.id, \'authorId\', __t__."authorId", \'createdAt\', __t__."createdAt", \'title\', __t__.title) AS __row, __t__."createdAt" AS __key0, __t__.id AS __key1 FROM posts AS __t__ WHERE __t__."authorId" = users.id ORDER BY __t__."createdAt" DESC NULLS LAST, __t__.id ASC NULLS LAST LIMIT 2) AS __lim), \'[]\'::json) AS posts_json FROM users',
 		);
 		expect(dump.params).toEqual([]);
 	});
@@ -170,7 +170,7 @@ describe('limited json_agg includes', () => {
 			})
 			.dump();
 		expect(dump.sql).toBe(
-			`SELECT users.*, COALESCE((SELECT json_agg(__lim.__row ORDER BY __lim.__key0 ASC NULLS LAST) FROM (SELECT to_jsonb(__t__) || jsonb_build_object('comments', COALESCE((SELECT json_agg(__lim.__row ORDER BY __lim.__key0 DESC) FROM (SELECT to_jsonb(__t1__) AS __row, __t1__.id AS __key0 FROM comments AS __t1__ WHERE __t1__."postId" = __t__.id ORDER BY __t1__.id DESC LIMIT 1) AS __lim), '[]'::json)) AS __row, __t__.id AS __key0 FROM posts AS __t__ WHERE __t__."authorId" = users.id ORDER BY __t__.id ASC NULLS LAST LIMIT 2) AS __lim), '[]'::json) AS posts_json FROM users`,
+			"SELECT users.*, COALESCE((SELECT json_agg(__lim.__row ORDER BY __lim.__key0 ASC NULLS LAST) FROM (SELECT jsonb_build_object('id', __t__.id, 'authorId', __t__.\"authorId\", 'createdAt', __t__.\"createdAt\", 'title', __t__.title) || jsonb_build_object('comments', COALESCE((SELECT json_agg(__lim.__row ORDER BY __lim.__key0 DESC) FROM (SELECT jsonb_build_object('id', __t1__.id, 'postId', __t1__.\"postId\") AS __row, __t1__.id AS __key0 FROM comments AS __t1__ WHERE __t1__.\"postId\" = __t__.id ORDER BY __t1__.id DESC LIMIT 1) AS __lim), '[]'::json)) AS __row, __t__.id AS __key0 FROM posts AS __t__ WHERE __t__.\"authorId\" = users.id ORDER BY __t__.id ASC NULLS LAST LIMIT 2) AS __lim), '[]'::json) AS posts_json FROM users",
 		);
 		expect(dump.params).toEqual([]);
 	});

@@ -32,8 +32,7 @@ QueryBuilder.all()
 ```
 
 The planner encodes its decision in `PlanReport.decisions[]` as an
-`include-strategy` entry. The hydrator reads those decisions to know how
-to reassemble the rows.
+`include-strategy` entry. The adapter resolves an include payload shape after relation-column injection and carries it in compilation metadata. The hydrator reads that shape to reassemble rows and apply read conversions without renaming keys.
 
 ## Hydration Strategies
 
@@ -62,7 +61,7 @@ output is nested (no `| flat`). Also the default for NQL implicit path notation
 (`posts.title` without `| flat`).
 
 **How it works:** The adapter compiles a correlated subquery per included
-relation using PostgreSQL `json_agg(to_jsonb(...))`. The related rows are
+relation using PostgreSQL `json_agg(jsonb_build_object(...))`. The related rows are
 aggregated into a single JSON column (`relation_json`) in the outer SELECT.
 
 ```sql
@@ -382,3 +381,13 @@ properties independently in chunks of at most 50 key/value pairs joined with
 `['*']`); partial projections are refused with the include path. NQL relation
 selections are root relation columns, so `users | select id, posts.title | flat`
 and `users | select id, posts.title | limit posts 5` retain their behaviour.
+
+## Include payload keys
+
+Each include column uses its explicit alias, or its declared model name when no alias is supplied. Physical database names never become payload keys: `dbCasing` affects SQL references only. This includes aliases that happen to equal a physical name and bigint read conversions, which run under the public key.
+
+A relation uses the requested include name at every depth. For example, `include('posts', { include: [{ relation: 'comments' }] })` returns `posts[].comments`, even when the model resolves that child to a relation named `post_comments`.
+
+NQL's unaliased `relation.column` label is a default flat label, not an explicit alias. Flat SQL keeps that label; nested JSON uses the column's declared name. An explicit `as` supplies the public column key.
+
+Compilation resolves these keys before generating SQL. Exact duplicate source/key requests deduplicate; two different owners of one public key fail with the payload path and key. A wildcard include over a target whose columns cannot be enumerated also fails.

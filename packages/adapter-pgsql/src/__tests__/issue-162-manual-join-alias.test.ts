@@ -93,8 +93,8 @@ describe('FIX-162: manual join aliases reserve include-generated aliases', () =>
 		expect(sql).toMatch(/JOIN files AS file_2\b/);
 		expect(sql).not.toContain('uses.file_id = file_1.id');
 		expect(sql).toContain('uses.file_id = file_2.id');
-		expect(sql).toContain('file.path AS def_file');
-		expect(sql).toContain('file_2.path AS use_file');
+		expect(sql).toContain('file.path AS "definition.file.def_file"');
+		expect(sql).toContain('file_2.path AS "file.use_file"');
 	});
 
 	it('reserves manual aliases in emitted DB-cased alias space', () => {
@@ -115,7 +115,7 @@ describe('FIX-162: manual join aliases reserve include-generated aliases', () =>
 		expect(sql).toMatch(/uses\.def_id = "fileOne"\.id/);
 		expect(sql).toMatch(/JOIN files AS file_one\b/);
 		expect(sql).toContain('uses.file_one_id = file_one.id');
-		expect(sql).toContain('file_one.path AS file_one_path');
+		expect(sql).toContain('file_one.path AS "file_one.file_one_path"');
 	});
 
 	it('uses the final bumped include alias in relationColumn ORDER BY expressions', () => {

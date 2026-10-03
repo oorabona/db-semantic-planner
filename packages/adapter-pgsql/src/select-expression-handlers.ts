@@ -280,6 +280,10 @@ function handleRelationColumnExpression(
 		table: rootTable,
 	};
 	if (expr.as) decision.alias = expr.as as string;
+	if (expr.relationColumnLabelOrigin === 'nql')
+		decision.relationColumnLabelOrigin = 'nql';
+	if (expr.defaultRelationColumnLabel === true)
+		decision.defaultRelationColumnLabel = true;
 	decisions.push(
 		trusted?.selectedColumn !== undefined
 			? markNqlTrustedRelationFilter(decision, trusted)

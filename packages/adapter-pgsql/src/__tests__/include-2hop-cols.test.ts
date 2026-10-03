@@ -158,14 +158,14 @@ describe('INCLUDE-2HOP-COLS: 2nd-hop relation columns resolve to correct include
 		const { sql } = compile(buildPlan());
 		// Alias may be unquoted (plain lowercase identifier) — match both forms
 		expect(sql).toMatch(/callee_name/);
-		expect(sql).toMatch(/callee\.name\s+AS\s+callee_name/);
+		expect(sql).toMatch(/callee\.name\s+AS\s+"callee\.callee_name"/);
 	});
 
 	it('selects file.path with user-supplied alias file_path (2-hop)', () => {
 		const { sql } = compile(buildPlan());
 		// Alias may be unquoted (plain lowercase identifier) — match both forms
 		expect(sql).toMatch(/file_path/);
-		expect(sql).toMatch(/file\.path\s+AS\s+file_path/);
+		expect(sql).toMatch(/file\.path\s+AS\s+"callee\.file\.file_path"/);
 	});
 
 	it('does not cross-contaminate: callee alias never references path, file alias never references name', () => {
@@ -180,7 +180,7 @@ describe('INCLUDE-2HOP-COLS: 2nd-hop relation columns resolve to correct include
 		expect(normalized).toMatch(/left join\s+callees/i);
 		expect(normalized).toMatch(/left join\s+files/i);
 		expect(sql).toMatch(/file_path/);
-		expect(sql).toMatch(/file\.path\s+AS\s+file_path/);
+		expect(sql).toMatch(/file\.path\s+AS\s+"callee\.file\.file_path"/);
 	});
 
 	it('works with only a 2-hop column and no 1-hop column', () => {
@@ -253,7 +253,7 @@ describe('INCLUDE-2HOP-COLS: 2nd-hop relation columns resolve to correct include
 		expect(() => compile(plan)).not.toThrow();
 		const { sql } = compile(plan);
 		expect(sql).toMatch(/file_path/);
-		expect(sql).toMatch(/file\.path\s+AS\s+file_path/);
+		expect(sql).toMatch(/file\.path\s+AS\s+"callee\.file\.file_path"/);
 	});
 
 	it('1-hop-only relationColumn still works (regression guard)', () => {
@@ -308,6 +308,6 @@ describe('INCLUDE-2HOP-COLS: 2nd-hop relation columns resolve to correct include
 		expect(() => compile(plan)).not.toThrow();
 		const { sql } = compile(plan);
 		expect(sql).toMatch(/callee_name/);
-		expect(sql).toMatch(/callee\.name\s+AS\s+callee_name/);
+		expect(sql).toMatch(/callee\.name\s+AS\s+"callee\.callee_name"/);
 	});
 });

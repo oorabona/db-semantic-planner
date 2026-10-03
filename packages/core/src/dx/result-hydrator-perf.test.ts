@@ -56,6 +56,23 @@ function makePlanReport(
 ): PlanReport {
 	return {
 		rootTable: 'users',
+		includePayloads: decisions
+			.filter((d) => d.type === 'include-strategy' && d.choice === 'join')
+			.map((d) => ({
+				path: d.context.relation,
+				publicKey: d.context.relation,
+				strategy: 'join',
+				table: 'users',
+				isToOne: true,
+				outputLabel: '',
+				children: [],
+				columns: ['id', 'name'].map((publicKey) => ({
+					publicKey,
+					logicalName: publicKey,
+					physicalName: publicKey,
+					outputLabel: `${d.context.relation}.${publicKey}`,
+				})),
+			})),
 		decisions: decisions.map((d, i) => ({
 			id: d.id ?? `d${i}`,
 			type: d.type,

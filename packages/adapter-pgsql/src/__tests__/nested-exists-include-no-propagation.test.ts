@@ -117,7 +117,7 @@ describe('nested exists cross-source: inner posts.comments filter must NOT propa
 		expect(
 			sql,
 			`Include subquery must not reference __t__.flag. SQL: ${sql}`,
-		).not.toContain('__t__.flag');
+		).not.toContain('__t__.flag =');
 	});
 });
 
@@ -156,7 +156,7 @@ describe('decoupled include: top-level same-relation exists does NOT filter the 
 		expect(
 			sql,
 			`Include subquery must NOT carry flag predicate after decoupling. SQL: ${sql}`,
-		).not.toContain('__t__.flag');
+		).not.toContain('__t__.flag =');
 	});
 });
 

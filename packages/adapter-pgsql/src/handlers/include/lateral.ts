@@ -15,6 +15,7 @@ import type { JoinExpr, Node, SelectStmt } from '@pgsql/types';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
 import {
 	sortBy,
+	sqlColumnRef,
 	sqlColumnRefStar,
 	sqlRangeAlias,
 	sqlRangeVar,
@@ -162,7 +163,23 @@ function compileLateralCascade(
 	state: CompilerState,
 ): { joins: Node[]; targets: Node[]; lateralAlias: string } {
 	const targetTable = decision.targetTable ?? decision.relation;
-	const columns = decision.columns;
+	const columns = decision.payloadShape
+		? [
+				...new Set([
+					...decision.payloadShape.columns.map((c) => c.logicalName),
+					...(decision.children ?? []).flatMap((child) =>
+						toColumnList(
+							deriveFkColumns(
+								child,
+								targetTable ?? '',
+								ctx.defaultPkColumnName,
+								ctx.deriveFkColumnName,
+							).sourceColumn,
+						),
+					),
+				]),
+			]
+		: decision.columns;
 	const limit = typeof decision.limit === 'number' ? decision.limit : undefined;
 
 	if (!targetTable) {
@@ -240,20 +257,17 @@ function compileLateralCascade(
 	const joins: Node[] = [join];
 
 	// Build outer SELECT targets referencing the lateral alias
-	const targets: Node[] = buildLateralTargets(columns, lateralAlias, scopedCtx);
-	// Alias only the outer projection: child correlations use original keys.
-	if (decision.columnAliases) {
-		for (let i = 0; i < (columns?.length ?? 0); i++) {
-			const column = columns?.[i];
-			const alias = column ? decision.columnAliases[column] : undefined;
-			if (alias && column) {
-				targets[i] = sqlResTarget(
-					expressionQualifiedColumnRef(column, lateralAlias, scopedCtx),
-					queryLocal(alias),
-				);
-			}
-		}
-	}
+	const targets: Node[] = decision.payloadShape
+		? decision.payloadShape.columns.map((column) =>
+				sqlResTarget(
+					sqlColumnRef(
+						queryLocal(column.physicalName),
+						queryLocal(lateralAlias),
+					),
+					queryLocal(column.outputLabel),
+				),
+			)
+		: buildLateralTargets(columns, lateralAlias, scopedCtx);
 
 	// Recursively compile children
 	if (decision.children && decision.children.length > 0) {

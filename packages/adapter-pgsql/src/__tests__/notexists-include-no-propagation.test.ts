@@ -87,7 +87,7 @@ describe('decoupled include — sibling exists/notExists never filters the inclu
 		expect(sql).toMatch(/EXISTS/i);
 
 		// published appears exactly ONCE — in the WHERE EXISTS, NOT in the include
-		const publishedCount = (sql.match(/published/gi) ?? []).length;
+		const publishedCount = (sql.match(/published =/gi) ?? []).length;
 		expect(publishedCount).toBe(1);
 
 		// Plan-level: the includeStrategy for 'posts' must have NO conditions

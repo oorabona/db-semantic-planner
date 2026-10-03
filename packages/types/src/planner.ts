@@ -75,10 +75,6 @@ export interface PlanDecision {
 		readonly includeOrderBy?: readonly import('./intent/include-intent.js').IncludeOrderByIntent[];
 		/** True when the target order key is the no-PK deterministic fallback. */
 		readonly orderByFallback?: boolean;
-		/** Adapter-emitted JSON key → model column map for json_agg hydration. */
-		readonly jsonAggColumnKeyMap?: Readonly<Record<string, string>>;
-		/** Resolver-emitted nested read transforms for json_agg payload columns. */
-		readonly jsonAggNestedReadTransforms?: readonly NestedOutputReadHandling[];
 		/** Whether the relation is self-referential (source === target) */
 		readonly isSelfRef?: boolean;
 	};
@@ -155,7 +151,26 @@ export interface CTEDefinition {
 // Plan Report
 // ============================================================================
 
+/** Adapter-resolved public payload contract, shared by SQL and hydration. */
+export interface IncludePayloadShape {
+	readonly path: string;
+	readonly publicKey: string;
+	readonly strategy: 'json_agg' | 'lateral' | 'join';
+	readonly table: string;
+	readonly isToOne: boolean;
+	readonly outputLabel: string;
+	readonly columns: readonly {
+		readonly logicalName: string;
+		readonly physicalName: string;
+		readonly publicKey: string;
+		readonly outputLabel: string;
+		readonly readHandling?: NestedOutputReadHandling;
+	}[];
+	readonly children: readonly IncludePayloadShape[];
+}
+
 export interface PlanReport {
+	readonly includePayloads?: readonly IncludePayloadShape[];
 	/** Root table for the query */
 	readonly rootTable: string;
 

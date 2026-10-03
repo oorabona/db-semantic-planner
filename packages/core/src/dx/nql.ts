@@ -1928,7 +1928,6 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 						hydrateJsonAggIncludes(
 							finalRows as T[],
 							planForJsonAggHydration(planReport, compiled),
-							this.model,
 						);
 					}
 				}
@@ -2181,7 +2180,6 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 				hydrateJsonAggIncludes(
 					rows,
 					planForJsonAggHydration(planReport, compiled),
-					this.model,
 				);
 			}
 			return rows;

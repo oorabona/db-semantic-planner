@@ -122,7 +122,7 @@ describe('DX-040-SURFACE: orm.from() with include()', () => {
 		const dump = orm.from(posts).include('author').dump();
 		// author is a belongsTo (authorId -> users.id): scalar subquery via json_agg
 		expect(normalizeSQL(dump.sql)).toBe(
-			'select posts.*, coalesce((select json_agg(to_jsonb(__t__) order by __t__.id asc nulls last) from users as __t__ where __t__.id = posts."authorid"), \'[]\'::json) as author_json from posts',
+			"select posts.*, coalesce((select json_agg(jsonb_build_object('id', __t__.id, 'name', __t__.name, 'email', __t__.email, 'active', __t__.active, 'createdat', __t__.\"createdat\") order by __t__.id asc nulls last) from users as __t__ where __t__.id = posts.\"authorid\"), '[]'::json) as author_json from posts",
 		);
 		expect(dump.params).toEqual([]);
 	});

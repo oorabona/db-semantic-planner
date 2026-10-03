@@ -81,8 +81,8 @@ describe('FIX-154: path-based join identity for multi-path includes', () => {
 		expect(sql).toMatch(/JOIN files AS file_1\b/);
 		expect(sql).toContain('definition.file_id = file.id');
 		expect(sql).toContain('uses.file_id = file_1.id');
-		expect(sql).toContain('file.path AS def_file');
-		expect(sql).toContain('file_1.path AS use_file');
+		expect(sql).toContain('file.path AS "definition.file.def_file"');
+		expect(sql).toContain('file_1.path AS "file.use_file"');
 	});
 
 	it('locks fallback hydration keys to relation-dotted paths when relation names collide', () => {
@@ -332,8 +332,8 @@ describe('FIX-154: path-based join identity for multi-path includes', () => {
 		expect(sql).toContain(
 			'JOIN files AS file_1 ON uses.alt_file_id = file_1.id',
 		);
-		expect(sql).toContain('file.path AS use_file');
-		expect(sql).toContain('file_1.path AS alt_file');
+		expect(sql).toContain('file.path AS "file.use_file"');
+		expect(sql).toContain('file_1.path AS "file_1.alt_file"');
 		expect(sql).toContain('file.path = $1');
 		expect(sql).toContain('file_1.path = $2');
 		expect(dump.params).toEqual(['/use.ts', '/alt.ts']);
@@ -377,8 +377,8 @@ describe('FIX-154: path-based join identity for multi-path includes', () => {
 		expect(joinCount(sql)).toBe(3);
 		expect(sql).toContain('uses.file_id = file.id');
 		expect(sql).toContain('definition.file_id = file_1.id');
-		expect(sql).toContain('file_1.path AS def_file');
-		expect(sql).toContain('file.path AS use_file');
+		expect(sql).toContain('file_1.path AS "definition.file.def_file"');
+		expect(sql).toContain('file.path AS "file.use_file"');
 	});
 
 	it('base-vs-generated alias collisions skip occupied generated names', () => {
@@ -417,7 +417,7 @@ describe('FIX-154: path-based join identity for multi-path includes', () => {
 		);
 
 		expect(sql).toBe(
-			'SELECT file.path AS def_file, file_1.path AS use_file FROM tenant_s.uses JOIN tenant_s.definitions AS definition ON uses.def_id = definition.id JOIN tenant_s.files AS file ON definition.file_id = file.id JOIN tenant_s.files AS file_1 ON uses.file_id = file_1.id LIMIT 10 OFFSET 5',
+			'SELECT file.path AS "definition.file.def_file", file_1.path AS "file.use_file" FROM tenant_s.uses JOIN tenant_s.definitions AS definition ON uses.def_id = definition.id JOIN tenant_s.files AS file ON definition.file_id = file.id JOIN tenant_s.files AS file_1 ON uses.file_id = file_1.id LIMIT 10 OFFSET 5',
 		);
 	});
 

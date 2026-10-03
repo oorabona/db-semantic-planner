@@ -87,6 +87,10 @@ export interface ColumnAliasIntent {
  */
 export interface RelationColumnIntent {
 	readonly kind: 'relationColumn';
+	/** NQL supplied the default flat relation.column label rather than an explicit alias. */
+	readonly defaultRelationColumnLabel?: boolean;
+	/** NQL owns this flat label, including explicit aliases. */
+	readonly relationColumnLabelOrigin?: 'nql';
 	/** Relation path to traverse (dot-separated for multi-level) */
 	readonly relation: string;
 	/** Column name to select from the target relation */

@@ -234,7 +234,7 @@ describe('issue 763: relation qualifiers require an emitted SQL alias', () => {
 				.columns([relationColumn('category', 'name', 'categoryName')])
 				.dump().sql,
 		).toBe(
-			'SELECT category.name AS "categoryName" FROM products LEFT JOIN categories AS category ON products.category_id = category.id',
+			'SELECT category.name AS "category.categoryName" FROM products LEFT JOIN categories AS category ON products.category_id = category.id',
 		);
 	});
 
@@ -335,7 +335,7 @@ describe('issue 763: relation qualifiers require an emitted SQL alias', () => {
 				.columns([relationColumn('author', '*', 'authorData')])
 				.dump().sql,
 		).toBe(
-			"SELECT COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM users AS __t__ WHERE __t__.id = posts.author_id), '[]'::json) AS author_json FROM posts",
+			"SELECT COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'name', __t__.name, 'email', __t__.email) ORDER BY __t__.id ASC NULLS LAST) FROM users AS __t__ WHERE __t__.id = posts.author_id), '[]'::json) AS author_json FROM posts",
 		);
 	});
 

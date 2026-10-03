@@ -23,11 +23,8 @@ import {
 	hydrateJsonAggIncludes as hydrateJsonAggIncludesShared,
 	planForJsonAggHydration,
 } from './hydration-utils.js';
+import { hydrateResolvedIncludes } from './include-payload-hydration.js';
 import type { RecursiveIncludeConfig } from './intent-builder.js';
-import {
-	countDistinctRelationPathsByName,
-	deriveRelationPathFromIntentPath,
-} from './relation-paths.js';
 
 // ============================================================================
 // Helper Types
@@ -48,170 +45,6 @@ type ResultRow = Record<string, unknown>;
  * @typeParam TResult - The expected result type
  */
 
-type JoinHydrationInfo = {
-	readonly relationPath: string;
-	readonly segments: readonly string[];
-	readonly keyPrefix: string;
-	readonly keyPrefixWithDot: string;
-};
-
-function stringProp(
-	source: Record<string, unknown> | undefined,
-	key: string,
-): string | undefined {
-	const value = source?.[key];
-	return typeof value === 'string' && value.length > 0 ? value : undefined;
-}
-
-function resolveJoinIncludePath(
-	planReport: PlanReport,
-	decision: PlanReport['decisions'][number],
-): string | undefined {
-	const context = decision.context;
-	const decisionRecord = decision as unknown as Record<string, unknown>;
-	const contextRecord = context as Record<string, unknown> | undefined;
-	const explicitRelationPath =
-		stringProp(decisionRecord, 'relationPath') ??
-		stringProp(contextRecord, 'relationPath');
-	if (explicitRelationPath) return explicitRelationPath;
-
-	const fallbackRelation =
-		stringProp(contextRecord, 'relation') ??
-		stringProp(contextRecord, 'includeAlias') ??
-		stringProp(decisionRecord, 'relationName');
-	const intentPath = stringProp(contextRecord, 'intentPath');
-
-	return deriveRelationPathFromIntentPath(
-		Array.isArray(planReport.intent?.include)
-			? (planReport.intent.include as readonly unknown[])
-			: undefined,
-		intentPath,
-		fallbackRelation,
-	);
-}
-
-function lastRelationSegment(path: string): string {
-	const segments = path.split('.');
-	return segments[segments.length - 1] ?? path;
-}
-
-function resolveJoinRelationName(
-	decision: PlanReport['decisions'][number],
-	relationPath: string,
-): string {
-	const context = decision.context as Record<string, unknown> | undefined;
-	const decisionRecord = decision as unknown as Record<string, unknown>;
-	return (
-		stringProp(context, 'relation') ??
-		stringProp(context, 'includeAlias') ??
-		stringProp(decisionRecord, 'relationName') ??
-		lastRelationSegment(relationPath)
-	);
-}
-
-function collectJoinHydrationInfos(
-	planReport: PlanReport,
-): JoinHydrationInfo[] {
-	const candidates: Array<{
-		relationName: string;
-		relationPath: string;
-		hydrationPrefix?: string;
-	}> = [];
-
-	for (const decision of planReport.decisions) {
-		if (decision.type !== 'include-strategy' || decision.choice !== 'join') {
-			continue;
-		}
-		const relationPath = resolveJoinIncludePath(planReport, decision);
-		if (!relationPath) continue;
-
-		const relationName = resolveJoinRelationName(decision, relationPath);
-		const decisionRecord = decision as unknown as Record<string, unknown>;
-		const contextRecord = decision.context as
-			| Record<string, unknown>
-			| undefined;
-		const hydrationPrefix =
-			stringProp(decisionRecord, 'hydrationPrefix') ??
-			stringProp(contextRecord, 'hydrationPrefix');
-
-		candidates.push({
-			relationName,
-			relationPath,
-			...(hydrationPrefix && { hydrationPrefix }),
-		});
-	}
-
-	const pathCountsByRelationName = countDistinctRelationPathsByName(candidates);
-	const infosByPath = new Map<string, JoinHydrationInfo>();
-	for (const candidate of candidates) {
-		if (infosByPath.has(candidate.relationPath)) continue;
-
-		const usesFullPath =
-			(pathCountsByRelationName.get(candidate.relationName) ?? 0) > 1;
-		const keyPrefix =
-			candidate.hydrationPrefix ??
-			(usesFullPath ? candidate.relationPath : candidate.relationName);
-		if (!keyPrefix) continue;
-
-		infosByPath.set(candidate.relationPath, {
-			relationPath: candidate.relationPath,
-			segments: candidate.relationPath.split('.'),
-			keyPrefix,
-			keyPrefixWithDot: `${keyPrefix}.`,
-		});
-	}
-
-	return [...infosByPath.values()];
-}
-
-function findLongestJoinInfo(
-	key: string,
-	infos: readonly JoinHydrationInfo[],
-): JoinHydrationInfo | undefined {
-	let best: JoinHydrationInfo | undefined;
-	for (const info of infos) {
-		if (!key.startsWith(info.keyPrefixWithDot)) continue;
-		if (!best || info.keyPrefixWithDot.length > best.keyPrefixWithDot.length) {
-			best = info;
-		}
-	}
-	return best;
-}
-
-function assignNestedValue(
-	target: Record<string, unknown>,
-	path: readonly string[],
-	value: unknown,
-): void {
-	let cursor = target;
-	for (let i = 0; i < path.length - 1; i++) {
-		const segment = path[i];
-		if (!segment) return;
-		const existing = cursor[segment];
-		if (existing === null) {
-			// Parent-null precedence: a LEFT JOIN miss for an ancestor must not be
-			// resurrected by deeper fallback keys from the same flat row.
-			return;
-		} else if (typeof existing !== 'object' || Array.isArray(existing)) {
-			cursor[segment] = {};
-		}
-		cursor = cursor[segment] as Record<string, unknown>;
-	}
-
-	const leaf = path[path.length - 1];
-	if (leaf) cursor[leaf] = value;
-}
-
-function assignColumnValue(
-	target: Record<string, unknown>,
-	columnPath: string,
-	value: unknown,
-): void {
-	const segments = columnPath.split('.').filter(Boolean);
-	if (segments.length === 0) return;
-	assignNestedValue(target, segments, value);
-}
-
 export class ResultHydrator<TResult = unknown> {
 	private readonly model: ModelIR;
 	private readonly from: string;
@@ -227,58 +60,20 @@ export class ResultHydrator<TResult = unknown> {
 	 * Hydrate JOIN includes by grouping dot-prefixed columns into nested objects.
 	 * E2E-004: JOIN strategy for to-one relations returns columns like "author.id", "author.name".
 	 */
-	hydrateJoinIncludes(results: TResult[], planReport: PlanReport): void {
-		const joinInfos = collectJoinHydrationInfos(planReport);
-		if (joinInfos.length === 0) return;
-		const infosByDepth = [...joinInfos].sort(
-			(a, b) => a.segments.length - b.segments.length,
+	hydrateJoinIncludes(
+		results: TResult[],
+		planReport: PlanReport,
+		query?: CompiledQuery,
+	): void {
+		hydrateResolvedIncludes(
+			results,
+			(query?.hydrationPlan ?? planReport).includePayloads ?? [],
+			'flat',
 		);
-
-		// Process each result row
-		for (const row of results) {
-			if (typeof row !== 'object' || row === null) {
-				continue;
-			}
-
-			const record = row as Record<string, unknown>;
-			const valuesByPath = new Map<
-				string,
-				{ values: Record<string, unknown>; allNull: boolean }
-			>();
-
-			for (const key of Object.keys(record)) {
-				const info = findLongestJoinInfo(key, joinInfos);
-				if (!info) continue;
-
-				const value = record[key];
-				let entry = valuesByPath.get(info.relationPath);
-				if (!entry) {
-					entry = { values: {}, allNull: true };
-					valuesByPath.set(info.relationPath, entry);
-				}
-				assignColumnValue(
-					entry.values,
-					key.slice(info.keyPrefixWithDot.length),
-					value,
-				);
-				if (value !== null && value !== undefined) entry.allNull = false;
-				delete record[key];
-			}
-
-			for (const info of infosByDepth) {
-				const entry = valuesByPath.get(info.relationPath);
-				if (!entry) continue;
-				assignNestedValue(
-					record,
-					info.segments,
-					entry.allNull ? null : entry.values,
-				);
-			}
-		}
 	}
 
 	/**
-	 * Hydrate json_agg includes by parsing JSON columns and renaming them.
+	 * Hydrate json_agg includes by parsing JSON columns under their resolved public keys.
 	 * E2E-004: json_agg strategy returns data as JSON string in *_json columns.
 	 * STRAT-SIMPLIFY: For to-one relations (belongsTo/hasOne), unwrap array to single object.
 	 */
@@ -290,7 +85,6 @@ export class ResultHydrator<TResult = unknown> {
 		hydrateJsonAggIncludesShared(
 			results,
 			planForJsonAggHydration(planReport, query),
-			this.model,
 		);
 	}
 

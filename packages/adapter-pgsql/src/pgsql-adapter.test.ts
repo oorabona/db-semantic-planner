@@ -3062,7 +3062,7 @@ describe('PgAdapter', () => {
 			expect(compiled.sql).not.toContain('orders_lat_0.*');
 		});
 
-		it('keeps star expansion when column is *', () => {
+		it('refuses star expansion over an opaque relation target', () => {
 			const adapter = new PgAdapter(undefined, {});
 			const plan = buildPlanWithRelationColumns(
 				'customers',
@@ -3077,8 +3077,9 @@ describe('PgAdapter', () => {
 				[lateralInclude('orders', 'orders')],
 			);
 
-			const compiled = adapter.compile(plan);
-			expect(compiled.sql).toContain('orders_lat_0.*');
+			expect(() => adapter.compile(plan)).toThrow(
+				"cannot enumerate wildcard keys for opaque target 'orders'",
+			);
 		});
 
 		it('validates columns against model schema', () => {

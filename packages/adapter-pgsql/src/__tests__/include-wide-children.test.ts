@@ -59,10 +59,10 @@ it('compiles 51 nested child includes in bounded objects', () => {
 		model: wide,
 	});
 	const property = (name: string) =>
-		`'${name}', COALESCE((SELECT json_agg(to_jsonb(__t1__) ORDER BY __t1__.id ASC NULLS LAST) FROM ${name} AS __t1__ WHERE __t1__."postId" = __t__.id), '[]'::json)`;
+		`'${name}', COALESCE((SELECT json_agg(jsonb_build_object('id', __t1__.id, 'postId', __t1__."postId") ORDER BY __t1__.id ASC NULLS LAST) FROM ${name} AS __t1__ WHERE __t1__."postId" = __t__.id), '[]'::json)`;
 	const first = names.slice(0, 50).map(property).join(', ');
 	expect(result.sql).toBe(
-		`SELECT users.*, COALESCE((SELECT json_agg(to_jsonb(__t__) || (jsonb_build_object(${first}) || jsonb_build_object(${property('child50')})) ORDER BY __t__.id ASC NULLS LAST) FROM posts AS __t__ WHERE __t__."authorId" = users.id), '[]'::json) AS posts_json FROM users`,
+		`SELECT users.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'authorId', __t__."authorId") || (jsonb_build_object(${first}) || jsonb_build_object(${property('child50')})) ORDER BY __t__.id ASC NULLS LAST) FROM posts AS __t__ WHERE __t__."authorId" = users.id), '[]'::json) AS posts_json FROM users`,
 	);
 	expect(result.parameters).toEqual([]);
 });

@@ -13,6 +13,7 @@ import { type ColumnListInput, toColumnList } from '@dbsp/types';
 import type { JoinExpr, Node } from '@pgsql/types';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
 import {
+	sqlColumnRef,
 	sqlColumnRefStar,
 	sqlRangeVar,
 	sqlResTarget,
@@ -192,6 +193,21 @@ export const joinIncludeHandler: IncludeHandler = {
 			}
 		}
 
+		if (decision.payloadShape) {
+			targets.splice(
+				0,
+				targets.length,
+				...decision.payloadShape.columns.map((column) =>
+					sqlResTarget(
+						sqlColumnRef(
+							queryLocal(column.physicalName),
+							queryLocal(targetAlias),
+						),
+						queryLocal(column.outputLabel),
+					),
+				),
+			);
+		}
 		return {
 			join,
 			...(targets.length > 0 && { targets }),

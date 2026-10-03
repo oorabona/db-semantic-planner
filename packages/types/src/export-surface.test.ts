@@ -35,9 +35,10 @@ const manifest = JSON.parse(
 const names = (rows: Row[]) => rows.map((row) => row.name);
 const sorted = (values: Iterable<string>) => [...new Set(values)].sort();
 const excluded = new Set([...names(moved), ...names(removed)]);
-const rootNames = names(before.root.declarations).filter(
-	(name) => !excluded.has(name),
-);
+const rootNames = [
+	...names(before.root.declarations).filter((name) => !excluded.has(name)),
+	'IncludePayloadShape',
+];
 const rootRuntime = before.root.runtime.filter((name) => !excluded.has(name));
 const internalNames = [
 	...rootNames,

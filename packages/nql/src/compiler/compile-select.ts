@@ -216,6 +216,7 @@ export function compileSelectClause(
 			}
 			expressions.push({
 				kind: 'relationColumn',
+				relationColumnLabelOrigin: 'nql',
 				relation,
 				column: '*',
 				as: `${relation}.*`,
@@ -325,6 +326,7 @@ function compileSelectExpression(
 		const relation = item.relation.join('.');
 		return {
 			kind: 'relationColumn',
+			relationColumnLabelOrigin: 'nql',
 			relation,
 			column: '*',
 			as: `${relation}.*`,
@@ -665,9 +667,11 @@ function compileMultiSegmentPath(
 		if (bindingRelation) {
 			const relationColumnIntent: ExpressionIntent = {
 				kind: 'relationColumn',
+				relationColumnLabelOrigin: 'nql',
 				relation: bindingRelation.relation,
 				column: targetColumn,
 				as: item.alias ?? `${bindingRelation.relation}.${targetColumn}`,
+				...(item.alias === undefined && { defaultRelationColumnLabel: true }),
 			};
 			return markNqlTrustedRelationFilter(relationColumnIntent, {
 				relation: bindingRelation.relation,
@@ -747,9 +751,11 @@ function compileMultiSegmentPath(
 	}
 	const relationColumnIntent: ExpressionIntent = {
 		kind: 'relationColumn',
+		relationColumnLabelOrigin: 'nql',
 		relation,
 		column,
 		as: item.alias ?? `${relation}.${column}`,
+		...(item.alias === undefined && { defaultRelationColumnLabel: true }),
 	};
 	return bindingRelation
 		? markNqlTrustedRelationFilter(relationColumnIntent, {

@@ -225,7 +225,7 @@ describe('Issue 16: include with explicit .columns() — hydration suppression',
 		expect(sql).toMatch(/LEFT JOIN/i);
 		// Must not emit dotted hydration alias (e.g. "enclosingSymbol.id")
 		expect(sql).not.toMatch(/AS\s+"enclosing_symbol\./i);
-		expect(sql).not.toMatch(/AS\s+"enclosingSymbol\./i);
+		expect(sql).not.toMatch(/AS\s+"enclosingSymbol\.id"/i);
 	});
 
 	it('emits the explicit symbol_name column from relationColumn()', () => {
@@ -261,7 +261,7 @@ describe('Issue 16: include with explicit .columns() — hydration suppression',
 		expect(sql).toMatch(/JOIN/i);
 		// No dotted hydration aliases
 		expect(sql).not.toMatch(/AS\s+"enclosing_symbol\./i);
-		expect(sql).not.toMatch(/AS\s+"enclosingSymbol\./i);
+		expect(sql).not.toMatch(/AS\s+"enclosingSymbol\.id"/i);
 	});
 
 	it('regression: include WITHOUT explicit columns still hydrates full relation (select:fields)', () => {

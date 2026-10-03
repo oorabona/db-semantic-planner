@@ -252,6 +252,7 @@ export {
 export type {
 	CTEDefinition,
 	DecisionType,
+	IncludePayloadShape,
 	PlanDecision,
 	PlanOptions,
 	PlanReport,

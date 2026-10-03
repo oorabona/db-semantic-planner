@@ -445,6 +445,8 @@ export interface Decision {
 	// User-supplied aliases for specific relation columns (col -> alias).
 	// Populated when selectRelationColumn decisions carry an `alias` field.
 	readonly columnAliases?: Readonly<Record<string, string>>;
+	readonly defaultRelationColumnLabels?: Readonly<Record<string, boolean>>;
+	readonly payloadShape?: import('@dbsp/types').IncludePayloadShape;
 	// JSON-specific
 	readonly jsonPath?: readonly unknown[];
 	readonly jsonMode?: 'json' | 'text';

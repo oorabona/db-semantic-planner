@@ -72,22 +72,13 @@ describe('bigint js json_agg SQL projection', () => {
 		const compiled = adapter.compile(plan, {
 			model: longSchema.model,
 		});
-		const physicalColumn = longColumn
-			.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)
-			.slice(0, 63);
-		const hydrationDecision = compiled.hydrationPlan?.decisions.find(
-			(candidate) =>
-				candidate.type === 'include-strategy' &&
-				candidate.context.relation === 'readings',
+		const column = compiled.hydrationPlan?.includePayloads?.[0]?.columns.find(
+			(column) => column.logicalName === longColumn,
 		);
-
-		expect(
-			(
-				hydrationDecision?.context as
-					| { jsonAggColumnKeyMap?: Record<string, string> }
-					| undefined
-			)?.jsonAggColumnKeyMap?.[physicalColumn],
-		).toBe(longColumn);
+		expect(column?.publicKey).toBe(longColumn);
+		expect(column?.physicalName).toBe(
+			longColumn.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`).slice(0, 63),
+		);
 	});
 
 	it('refuses to carry a convertible JSON container through a projected CTE', () => {
@@ -253,34 +244,21 @@ describe('bigint js json_agg SQL projection', () => {
 		expect(compiled.sql).toMatch(/CAST\(__t__\.string_count AS text\)/);
 		expect(compiled.sql).toMatch(/CAST\(__t__\.parse_json AS text\)/);
 		expect(compiled.sql).not.toMatch(/CAST\(__t__\.legacy_count AS text\)/);
-		const decision = plan.decisions.find(
-			(candidate) =>
-				candidate.type === 'include-strategy' &&
-				candidate.context.relation === 'readings',
-		);
-		expect(
-			(
-				decision?.context as
-					| { jsonAggColumnKeyMap?: Record<string, string> }
-					| undefined
-			)?.jsonAggColumnKeyMap,
-		).toBeUndefined();
-		expect(decision?.context.jsonAggNestedReadTransforms).toBeUndefined();
+		expect(plan.includePayloads).toBeUndefined();
 		const hydrationPlan = (compiled as { hydrationPlan?: PlanReport })
 			.hydrationPlan;
-		const hydrationDecision = hydrationPlan?.decisions.find(
-			(candidate) =>
-				candidate.type === 'include-strategy' &&
-				candidate.context.relation === 'readings',
-		);
 		expect(
-			(
-				hydrationDecision?.context as
-					| { jsonAggColumnKeyMap?: Record<string, string> }
-					| undefined
-			)?.jsonAggColumnKeyMap?.parse_json,
+			hydrationPlan?.includePayloads?.[0]?.columns.find(
+				(column) => column.logicalName === 'parseJSON',
+			)?.publicKey,
 		).toBe('parseJSON');
-		expect(hydrationDecision?.context.jsonAggNestedReadTransforms).toEqual([
+		expect(
+			hydrationPlan?.includePayloads?.[0]?.columns.flatMap((column) =>
+				column.readHandling
+					? [{ ...column.readHandling, outputKey: undefined }]
+					: [],
+			),
+		).toEqual([
 			{
 				kind: 'nestedTransform',
 				table: 'readings',
@@ -357,16 +335,22 @@ describe('bigint js json_agg SQL projection', () => {
 		);
 		const hydrationPlan = (compiled as { hydrationPlan?: PlanReport })
 			.hydrationPlan;
-		const hydrationDecision = hydrationPlan?.decisions.find(
-			(candidate) =>
-				candidate.type === 'include-strategy' &&
-				candidate.context.relation === 'readings',
-		);
 
-		expect(hydrationDecision?.context.jsonAggColumnKeyMap).toEqual({
+		expect(
+			Object.fromEntries(
+				(hydrationPlan?.includePayloads?.[0]?.columns ?? []).map((column) => [
+					column.publicKey,
+					column.publicKey,
+				]),
+			),
+		).toEqual({
 			readingValue: 'readingValue',
 		});
-		expect(hydrationDecision?.context.jsonAggNestedReadTransforms).toEqual([
+		expect(
+			hydrationPlan?.includePayloads?.[0]?.columns.flatMap((column) =>
+				column.readHandling ? [column.readHandling] : [],
+			),
+		).toEqual([
 			{
 				kind: 'nestedTransform',
 				table: 'readings',
@@ -432,6 +416,24 @@ describe('bigint js json_agg SQL projection', () => {
 			},
 		] as const;
 		const hydrationPlan: PlanReport = {
+			includePayloads: [
+				{
+					path: 'readings',
+					publicKey: 'readings',
+					strategy: 'json_agg',
+					table: 'readings',
+					isToOne: false,
+					outputLabel: 'readings_json',
+					children: [],
+					columns: jsonAggNestedReadTransforms.map((readHandling) => ({
+						logicalName: readHandling.column,
+						physicalName: readHandling.column,
+						publicKey: readHandling.column,
+						outputLabel: readHandling.column,
+						readHandling,
+					})),
+				},
+			],
 			rootTable: 'parents',
 			decisions: [
 				{
@@ -445,7 +447,6 @@ describe('bigint js json_agg SQL projection', () => {
 						target: 'readings',
 						relation: 'readings',
 						relationType: 'hasMany',
-						jsonAggNestedReadTransforms,
 					},
 				},
 			],
@@ -518,13 +519,12 @@ describe('bigint js json_agg SQL projection', () => {
 		expect(compiled.columnMetadata?.has('readings_json') ?? false).toBe(false);
 		const compiledHydrationPlan = (compiled as { hydrationPlan?: PlanReport })
 			.hydrationPlan;
-		const hydrationDecision = compiledHydrationPlan?.decisions.find(
-			(candidate) =>
-				candidate.type === 'include-strategy' &&
-				candidate.context.relation === 'readings',
-		);
-		expect(hydrationDecision?.context.jsonAggNestedReadTransforms).toEqual(
-			jsonAggNestedReadTransforms,
-		);
+		expect(
+			compiledHydrationPlan?.includePayloads?.[0]?.columns.flatMap((column) =>
+				column.readHandling
+					? [{ ...column.readHandling, outputKey: undefined }]
+					: [],
+			),
+		).toEqual(jsonAggNestedReadTransforms);
 	});
 });

@@ -154,7 +154,7 @@ describe('ordered includes', () => {
 			orderBy: [{ field: 'rank', direction: 'desc' }],
 		});
 		expect(result.sql).toBe(
-			`SELECT users.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.rank DESC, __t__.id ASC NULLS LAST) FROM posts AS __t__ WHERE __t__."authorId" = users.id), '[]'::json) AS posts_json FROM users`,
+			"SELECT users.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'authorId', __t__.\"authorId\", 'rank', __t__.rank, 'title', __t__.title) ORDER BY __t__.rank DESC, __t__.id ASC NULLS LAST) FROM posts AS __t__ WHERE __t__.\"authorId\" = users.id), '[]'::json) AS posts_json FROM users",
 		);
 		expect(result.parameters).toEqual([]);
 	});
@@ -166,7 +166,7 @@ describe('ordered includes', () => {
 			orderBy: [{ field: 'rank', direction: 'desc', nulls: 'last' }],
 		});
 		expect(result.sql).toBe(
-			`SELECT users.*, posts_lat_0.* FROM users LEFT JOIN LATERAL (SELECT posts_inner_0.* FROM posts AS posts_inner_0 WHERE posts_inner_0."authorId" = users.id ORDER BY posts_inner_0.rank DESC NULLS LAST, posts_inner_0.id ASC NULLS LAST LIMIT 1) AS posts_lat_0 ON true`,
+			'SELECT users.*, posts_lat_0.id AS "posts.id", posts_lat_0."authorId" AS "posts.authorId", posts_lat_0.rank AS "posts.rank", posts_lat_0.title AS "posts.title" FROM users LEFT JOIN LATERAL (SELECT posts_inner_0.id, posts_inner_0."authorId", posts_inner_0.rank, posts_inner_0.title FROM posts AS posts_inner_0 WHERE posts_inner_0."authorId" = users.id ORDER BY posts_inner_0.rank DESC NULLS LAST, posts_inner_0.id ASC NULLS LAST LIMIT 1) AS posts_lat_0 ON true',
 		);
 		expect(result.parameters).toEqual([]);
 	});
@@ -273,7 +273,7 @@ it('orders nested lateral limits', () => {
 		include: [{ relation: 'comments', strategy: 'flat', limit: 1 }],
 	});
 	expect(result.sql).toBe(
-		`SELECT users.*, posts_lat_0.*, comments_lat_1.* FROM users LEFT JOIN LATERAL (SELECT posts_inner_0.* FROM posts AS posts_inner_0 WHERE posts_inner_0."authorId" = users.id ORDER BY posts_inner_0.rank DESC, posts_inner_0.id ASC NULLS LAST LIMIT 2) AS posts_lat_0 ON true LEFT JOIN LATERAL (SELECT comments_inner_1.* FROM comments AS comments_inner_1 WHERE comments_inner_1."postId" = posts_lat_0.id ORDER BY comments_inner_1.id ASC NULLS LAST LIMIT 1) AS comments_lat_1 ON true`,
+		'SELECT users.*, posts_lat_0.id AS "posts.id", posts_lat_0."authorId" AS "posts.authorId", posts_lat_0.rank AS "posts.rank", posts_lat_0.title AS "posts.title", comments_lat_1.id AS "posts.comments.id", comments_lat_1."postId" AS "posts.comments.postId" FROM users LEFT JOIN LATERAL (SELECT posts_inner_0.id, posts_inner_0."authorId", posts_inner_0.rank, posts_inner_0.title FROM posts AS posts_inner_0 WHERE posts_inner_0."authorId" = users.id ORDER BY posts_inner_0.rank DESC, posts_inner_0.id ASC NULLS LAST LIMIT 2) AS posts_lat_0 ON true LEFT JOIN LATERAL (SELECT comments_inner_1.id, comments_inner_1."postId" FROM comments AS comments_inner_1 WHERE comments_inner_1."postId" = posts_lat_0.id ORDER BY comments_inner_1.id ASC NULLS LAST LIMIT 1) AS comments_lat_1 ON true',
 	);
 	expect(result.parameters).toEqual([]);
 });
@@ -341,7 +341,7 @@ it('keeps empty projection hydration metadata empty', () => {
 		relation: 'posts',
 		select: { type: 'fields', fields: [] },
 	});
-	expect(result.hydrationPlan).toBeUndefined();
+	expect(result.hydrationPlan?.includePayloads?.[0]?.columns).toEqual([]);
 });
 
 for (const strategy of ['join', 'cte'] as const) {

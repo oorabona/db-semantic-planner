@@ -778,9 +778,7 @@ b | select id, doubled`.dump();
 			expect(() =>
 				nql`users | select id as x, name as x | bind b
 b | select x`.dump(),
-			).toThrow(
-				"Projection output label 'x' is produced by multiple candidates and cannot be returned losslessly.",
-			);
+			).toThrow("Include payload '$' has conflicting public key 'x'");
 			expect(compile).toHaveBeenCalledOnce();
 		});
 
@@ -1361,9 +1359,7 @@ active_users | select *, posts.*`;
 			},
 		});
 		expect(dump.sql).toMatch(/^WITH "active_users" as \(/);
-		expect(dump.sql).toContain(
-			'json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST)',
-		);
+		expect(dump.sql).toContain('json_agg(jsonb_build_object(');
 		expect(dump.sql).toContain('AS posts_json');
 		expect(dump.sql).toMatch(/WHERE __t__\."userId" = active_users\.id/i);
 		expect(rows).toEqual([
@@ -1438,7 +1434,7 @@ active_users | select *, posts.comments.*`;
 				intentPath: 'include[0].include[0]',
 			},
 		});
-		expect(dump.sql).toContain('json_agg(to_jsonb(__t__)');
+		expect(dump.sql).toContain('json_agg(jsonb_build_object(');
 		expect(dump.sql).toContain('ORDER BY __t__.id ASC NULLS LAST');
 		expect(dump.sql).toContain('ORDER BY __t1__.id ASC NULLS LAST');
 		expect(dump.sql).toContain('jsonb_build_object');
@@ -1614,7 +1610,7 @@ active_authors | select *, author_posts.post_comments.*`;
 				intentPath: 'include[0].include[0]',
 			},
 		});
-		expect(dump.sql.match(/json_agg\(to_jsonb/g)).toHaveLength(2);
+		expect(dump.sql.match(/json_agg\(jsonb_build_object/g)).toHaveLength(2);
 		expect(dump.sql).toContain('jsonb_build_object');
 		expect(dump.sql).toContain('ORDER BY __t__.id ASC NULLS LAST');
 		expect(dump.sql).toContain('ORDER BY __t1__.id ASC NULLS LAST');
