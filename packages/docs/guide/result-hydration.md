@@ -361,3 +361,8 @@ foreign keys and measure the query cost for your workload.
 - **LEFT JOIN null propagation.** When a `join` strategy include has no match
   (LEFT JOIN returns all-null columns), the hydrator sets `relation: null`
   rather than an empty object. Check `allNull` logic in `hydrateJoinIncludes()`.
+
+With `json_agg`, an include `limit` applies per parent using the include’s `orderBy`.
+Primary-key columns complete the order as tie-breakers. A limited include without
+a primary key or unique ordering is refused. Nested limited includes each select
+their own ordered, limited rows before aggregation.

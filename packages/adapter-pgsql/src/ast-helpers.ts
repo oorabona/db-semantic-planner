@@ -713,8 +713,14 @@ export function sqlDeleteStmt(options: SqlDeleteOptions): Node {
 export type SqlJsonAggOptions = {
 	innerAlias?: SqlIdentifier;
 	columns?: readonly SqlIdentifier[];
+	emptyProjection?: boolean;
 	childNodes?: readonly { key: SqlIdentifier; node: Node }[];
 	limit?: number;
+	limitedOrder?: readonly {
+		column: SqlIdentifier;
+		direction: 'ASC' | 'DESC';
+		nulls: 'FIRST' | 'LAST';
+	}[];
 	columnValueOverrides?: ReadonlyMap<string, Node>;
 	orderBy?: readonly SqlIdentifier[];
 	orderByFallback?: boolean;
@@ -733,7 +739,7 @@ export function sqlJsonAggSubquery(
 	let row: Node;
 	if (
 		columns !== undefined &&
-		columns.length > 0 &&
+		(columns.length > 0 || options?.emptyProjection === true) &&
 		!(columns.length === 1 && identifierText(columns[0]!) === '*')
 	) {
 		const args: Node[] = [];
@@ -789,20 +795,64 @@ export function sqlJsonAggSubquery(
 			'LAST',
 		),
 	);
+	const limitedAlias = queryLocal('__lim');
+	const keys = options?.limitedOrder?.map((entry, index) => ({
+		...entry,
+		alias: queryLocal(`__key${index}`),
+	}));
+	const limited = options?.limit !== undefined;
 	const aggregate: Node = {
 		FuncCall: {
 			funcname: [stringNode('json_agg')],
-			args: [row],
-			...(order !== undefined && { agg_order: order }),
+			args: [limited ? sqlColumnRef(queryLocal('__row'), limitedAlias) : row],
+			...(limited
+				? {
+						agg_order: keys?.map((entry) =>
+							sortBy(
+								sqlColumnRef(entry.alias, limitedAlias),
+								entry.direction,
+								entry.nulls,
+							),
+						),
+					}
+				: order !== undefined
+					? { agg_order: order }
+					: {}),
 		} as FuncCall,
 	};
+	const rows = limited
+		? selectStmt({
+				targetList: [
+					sqlResTarget(row, queryLocal('__row')),
+					...(keys?.map((entry) =>
+						sqlResTarget(sqlColumnRef(entry.column, innerAlias), entry.alias),
+					) ?? []),
+				],
+				from: [sqlRangeVar(targetTable, innerAlias, schemaName)],
+				where: whereExpr,
+				orderBy: (keys ?? []).map((entry) =>
+					sortBy(
+						sqlColumnRef(entry.column, innerAlias),
+						entry.direction,
+						entry.nulls,
+					),
+				),
+				limit: { A_Const: { ival: { ival: options!.limit! } } },
+			})
+		: undefined;
 	const subselect = selectStmt({
 		targetList: [{ ResTarget: { val: aggregate } }],
-		from: [sqlRangeVar(targetTable, innerAlias, schemaName)],
-		where: whereExpr,
-		...(options?.limit !== undefined && {
-			limit: { A_Const: { ival: { ival: options.limit } } },
-		}),
+		from: rows
+			? [
+					{
+						RangeSubselect: {
+							subquery: rows,
+							alias: { aliasname: identifierText(limitedAlias) },
+						},
+					},
+				]
+			: [sqlRangeVar(targetTable, innerAlias, schemaName)],
+		...(rows === undefined && { where: whereExpr }),
 	});
 	return sqlResTarget(
 		coalesceExpr([

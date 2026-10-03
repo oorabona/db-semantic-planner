@@ -9,7 +9,12 @@
  */
 
 import { deriveRelationPathFromIntentPath } from '@dbsp/core/internal';
-import type { ModelIR, PlanReport, WhereIntent } from '@dbsp/types';
+import type {
+	ModelIR,
+	PlanReport,
+	SelectIntent,
+	WhereIntent,
+} from '@dbsp/types';
 import { type ColumnListInput, toColumnList } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
@@ -106,19 +111,24 @@ export function resolveIncludeAlias(context: {
  */
 function resolveIncludeByPath(
 	includes:
-		| Array<{
+		| ReadonlyArray<{
 				relation: string;
-				via?: string;
-				limit?: number;
-				select?: unknown;
+				via?: string | undefined;
+				limit?: number | undefined;
+				select?: SelectIntent | undefined;
 				where?: unknown;
-				include?: unknown[];
+				include?: readonly unknown[] | undefined;
 		  }>
 		| undefined,
 	intentPath: string | undefined,
 	relationName: string,
 ):
-	| { relation: string; limit?: number; select?: unknown; where?: unknown }
+	| {
+			relation: string;
+			limit?: number | undefined;
+			select?: SelectIntent | undefined;
+			where?: unknown;
+	  }
 	| undefined {
 	if (!includes) return undefined;
 
@@ -126,8 +136,8 @@ function resolveIncludeByPath(
 	if (intentPath) {
 		// Parse path segments like "include[0].include[1]"
 		const indexPattern = /include\[(\d+)\]/g;
-		let current: unknown[] = includes;
-		let resolved: { relation: string; limit?: number } | undefined;
+		let current: readonly unknown[] = includes;
+		let resolved: { relation: string; limit?: number | undefined } | undefined;
 		let execResult = indexPattern.exec(intentPath);
 
 		while (execResult !== null) {
@@ -135,9 +145,9 @@ function resolveIncludeByPath(
 			const item = current[idx] as
 				| {
 						relation: string;
-						via?: string;
-						limit?: number;
-						include?: unknown[];
+						via?: string | undefined;
+						limit?: number | undefined;
+						include?: readonly unknown[] | undefined;
 				  }
 				| undefined;
 			if (!item) break;
@@ -152,6 +162,15 @@ function resolveIncludeByPath(
 	return includes.find(
 		(i) => i.relation === relationName || i.via === relationName,
 	);
+}
+
+/** Shared include field projection; JOIN adds its hydration key separately. */
+function includeSelectedColumns(
+	select: SelectIntent | undefined,
+): readonly string[] | undefined {
+	if (!select || select.type === 'all') return undefined;
+	if (select.type === 'fields') return select.fields;
+	return undefined;
 }
 
 /**
@@ -1719,23 +1738,32 @@ function toIncludeDecision(
 	// intentPath is e.g. "include[0]" or "include[0].include[0]" for nested
 	const includeIntent = resolveIncludeByPath(
 		plan.intent?.include as
-			| Array<{
+			| ReadonlyArray<{
 					relation: string;
-					via?: string;
-					limit?: number;
-					select?: unknown;
+					via?: string | undefined;
+					limit?: number | undefined;
+					select?: SelectIntent | undefined;
 					where?: unknown;
-					include?: unknown[];
+					include?: readonly unknown[] | undefined;
 			  }>
 			| undefined,
 		context.intentPath,
 		relationName,
 	);
 	const limit = includeIntent?.limit;
+	const columns =
+		choice === 'json_agg'
+			? includeSelectedColumns(includeIntent?.select)
+			: undefined;
 
 	return {
 		type: 'includeStrategy',
 		choice,
+		...(columns !== undefined && { columns }),
+		...(columns?.length === 0 && { emptyProjection: true }),
+		...(includeIntent?.select && {
+			includeSelectForm: includeIntent.select.type,
+		}),
 		relationName,
 		relationPath:
 			deriveRelationPathFromIntentPath(
@@ -1754,6 +1782,7 @@ function toIncludeDecision(
 			? { orderBy: context.targetOrderKey }
 			: {}),
 		...(context.orderByFallback ? { orderByFallback: true } : {}),
+		...(context.includeOrderBy && { includeOrderBy: context.includeOrderBy }),
 		...(context.intentPath && { intentPath: context.intentPath }),
 		...(limit != null && { limit }),
 	};
@@ -1788,12 +1817,12 @@ function toJoinIncludeDecision(
 		) ?? (relationName as string);
 	const includeIntent = resolveIncludeByPath(
 		plan.intent?.include as
-			| Array<{
+			| ReadonlyArray<{
 					relation: string;
-					via?: string;
-					select?: { type: string; fields?: readonly string[] };
+					via?: string | undefined;
+					select?: SelectIntent | undefined;
 					where?: unknown;
-					include?: unknown[];
+					include?: readonly unknown[] | undefined;
 			  }>
 			| undefined,
 		intentPath,
@@ -1801,14 +1830,16 @@ function toJoinIncludeDecision(
 	) as
 		| {
 				relation: string;
-				select?: { type: string; fields?: readonly string[] };
+				select?: SelectIntent | undefined;
 				where?: unknown;
 		  }
 		| undefined;
 
 	let columns: string[] = [defaultPk];
 	if (includeIntent?.select?.type === 'fields' && includeIntent.select.fields) {
-		const fields = includeIntent.select.fields.filter((f) => f !== defaultPk);
+		const fields = includeSelectedColumns(includeIntent.select)!.filter(
+			(f) => f !== defaultPk,
+		);
 		columns = [defaultPk, ...fields];
 	}
 
@@ -1893,10 +1924,10 @@ export function synthesizeMissingJoinDecisions(
 	deriveFk: FkColumnDerivation = defaultFkDerivation,
 ): SimplifiedPlanReport['decisions'] {
 	const includes = plan.intent?.include as
-		| Array<{
+		| ReadonlyArray<{
 				relation: string;
 				join?: 'inner' | 'left';
-				select?: { type: string; fields?: readonly string[] };
+				select?: SelectIntent | undefined;
 				where?: unknown;
 		  }>
 		| undefined;
@@ -1940,7 +1971,9 @@ export function synthesizeMissingJoinDecisions(
 		// Build column list (PK always included for NULL-detection)
 		let columns: string[] = [defaultPk];
 		if (inc.select?.type === 'fields' && inc.select.fields) {
-			const extraFields = inc.select.fields.filter((f) => f !== defaultPk);
+			const extraFields = includeSelectedColumns(inc.select)!.filter(
+				(f) => f !== defaultPk,
+			);
 			columns = [defaultPk, ...extraFields];
 		}
 
@@ -2031,6 +2064,7 @@ function buildIncludeTree(
  */
 function toJsonAggDecision(
 	d: PlanReport['decisions'][number],
+	plan: PlanReport,
 	defaultPk: string = DEFAULT_PK_COLUMN,
 	deriveFk: FkColumnDerivation = defaultFkDerivation,
 ): PlanDecision | undefined {
@@ -2047,8 +2081,21 @@ function toJsonAggDecision(
 		| 'hasOne'
 		| undefined;
 
+	const includeIntent = resolveIncludeByPath(
+		plan.intent?.include,
+		context.intentPath,
+		relationName,
+	);
+	const limit = includeIntent?.limit;
+	const columns = includeSelectedColumns(includeIntent?.select);
 	return {
 		type: 'selectJsonAgg',
+		...(columns !== undefined && { columns }),
+		...(columns?.length === 0 && { emptyProjection: true }),
+		...(includeIntent?.select && {
+			includeSelectForm: includeIntent.select.type,
+		}),
+		...(limit != null && { limit }),
 		relationName,
 		targetTable: context.target,
 		...(context.sourceTable && { sourceTable: context.sourceTable }),
@@ -2059,6 +2106,7 @@ function toJsonAggDecision(
 			? { orderBy: context.targetOrderKey }
 			: {}),
 		...(context.orderByFallback ? { orderByFallback: true } : {}),
+		...(context.includeOrderBy && { includeOrderBy: context.includeOrderBy }),
 		...(context.intentPath && { intentPath: context.intentPath }),
 	};
 }
@@ -2085,7 +2133,7 @@ export function extractJsonAggDecisions(
 	// Convert all to flat decisions with intentPath
 	const allDecisions: (PlanDecision & { intentPath?: string })[] = [];
 	for (const d of jsonAggIncludeDecisions) {
-		const decision = toJsonAggDecision(d, defaultPk, deriveFk);
+		const decision = toJsonAggDecision(d, plan, defaultPk, deriveFk);
 		if (decision) allDecisions.push(decision);
 	}
 
@@ -2161,9 +2209,9 @@ export function extractLeftJoinIncludeDecisions(
 		// Find matching include intent to get column list
 		const includeIntent = (
 			plan.intent?.include as
-				| Array<{
+				| ReadonlyArray<{
 						relation: string;
-						select?: { type: string; fields?: readonly string[] };
+						select?: SelectIntent | undefined;
 				  }>
 				| undefined
 		)?.find(
@@ -2177,7 +2225,9 @@ export function extractLeftJoinIncludeDecisions(
 			includeIntent?.select?.type === 'fields' &&
 			includeIntent.select.fields
 		) {
-			const fields = includeIntent.select.fields.filter((f) => f !== defaultPk);
+			const fields = includeSelectedColumns(includeIntent.select)!.filter(
+				(f) => f !== defaultPk,
+			);
 			columns = [defaultPk, ...fields];
 		}
 

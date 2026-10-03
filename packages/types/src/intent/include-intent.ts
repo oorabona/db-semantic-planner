@@ -81,7 +81,9 @@ export interface IncludeIntent {
 
 	/**
 	 * Maximum number of related records to include per parent.
-	 * Only effective with LATERAL JOIN strategy (PostgreSQL/DuckDB/MSSQL).
+	 * JSON_AGG limits ordered related rows per parent, appending primary-key
+	 * tie-breakers; without a primary key or unique ordering it refuses the limit.
+	 * LATERAL also supports per-parent limits. JOIN refuses them.
 	 * @example limit: 5 - fetch at most 5 related records per parent
 	 */
 	readonly limit?: number | undefined;

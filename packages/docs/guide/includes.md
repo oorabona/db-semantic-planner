@@ -75,13 +75,27 @@ const posts = await orm.select('posts')
   .dump();
 ```
 
+Include `select` support by strategy:
+
+| Strategy | Supported select forms |
+|----------|------------------------|
+| `json_agg` | `fields` (including an empty list) and `all`; other forms, including `expressions` and `aggregate`, are refused |
+| `join` | `fields` and `all` |
+| `lateral` | `fields` and `all` |
+
+Omitting `select` selects the whole related row. JOIN also selects the primary key
+needed for hydration. Expression and aggregate projections are not implemented
+for JOIN or LATERAL.
+
 ### Include Options Reference
 
 | Option | Type | Description |
 |--------|------|-------------|
 | `join` | `'inner' \| 'left'` | Join type |
+| `limit` | `number` | Maximum related rows per parent; supported by `json_agg` and LATERAL, refused by JOIN |
+| `orderBy` | `readonly OrderByIntent[]` | Related-row ordering for each parent's limited selection; primary-key columns complete ties |
 | `where` | `WhereIntent` | Added to the root WHERE; join includes only |
-| `select` | `SelectSpec` | Columns to select on the related table |
+| `select` | `SelectSpec` | Related-table projection; see supported forms below |
 | `via` | `string` | Relation name hint when multiple FKs point to the same table |
 | `recursive` | `boolean` | Enable recursive CTE traversal (trees/hierarchies) |
 | `direction` | `'ancestors' \| 'descendants'` | Traversal direction — required when `recursive: true` |
@@ -139,3 +153,8 @@ console.log(dump.plan?.decisions);
 ```
 
 If the planner emits a performance warning (e.g., potential N+1), it appears in `dump.plan?.warnings`.
+
+With `json_agg`, an include `limit` applies per parent using the include’s `orderBy`.
+Primary-key columns complete the order as tie-breakers. A limited include without
+a primary key or unique ordering is refused. Nested limited includes each select
+their own ordered, limited rows before aggregation.

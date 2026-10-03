@@ -1214,6 +1214,7 @@ function processInclude(
 					targetOrderKey: targetOrder.columns,
 				}),
 			...(targetOrder?.fallback && { orderByFallback: true }),
+			...(include.orderBy && { includeOrderBy: include.orderBy }),
 		},
 		choice: includeStrategy,
 		// Embed joinType so the adapter's join handler can use it directly

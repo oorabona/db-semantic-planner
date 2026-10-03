@@ -363,9 +363,8 @@ describe('bigint js json_agg SQL projection', () => {
 				candidate.context.relation === 'readings',
 		);
 
-		expect(hydrationDecision?.context.jsonAggColumnKeyMap).toMatchObject({
-			id: 'id',
-			parentId: 'parentId',
+		expect(hydrationDecision?.context.jsonAggColumnKeyMap).toEqual({
+			readingValue: 'readingValue',
 		});
 		expect(hydrationDecision?.context.jsonAggNestedReadTransforms).toEqual([
 			{
@@ -381,8 +380,6 @@ describe('bigint js json_agg SQL projection', () => {
 			{
 				readings_json: JSON.stringify([
 					{
-						id: 'reading-1',
-						parentId: 'parent-1',
 						readingValue: '9007199254740993',
 					},
 				]),
@@ -397,8 +394,6 @@ describe('bigint js json_agg SQL projection', () => {
 			{
 				readings: [
 					{
-						id: 'reading-1',
-						parentId: 'parent-1',
 						readingValue: 9007199254740993n,
 					},
 				],

@@ -98,8 +98,8 @@ function resolveJsonAggProjection(
 ): readonly SqlIdentifier[] | undefined {
 	const requested = decision.columns;
 	const hasExplicitProjection =
-		requested &&
-		requested.length > 0 &&
+		requested !== undefined &&
+		(requested.length > 0 || decision.emptyProjection === true) &&
 		!(requested.length === 1 && requested[0] === '*');
 	const target = resolveRelationTarget(queryLocal(targetTable), ctx);
 	if (hasExplicitProjection) {
@@ -262,6 +262,16 @@ function compileJsonAggRecursive(
 		throw new Error('JSON_AGG include requires relation name');
 	}
 
+	if (
+		decision.includeSelectForm !== undefined &&
+		decision.includeSelectForm !== 'fields' &&
+		decision.includeSelectForm !== 'all'
+	) {
+		throw new Error(
+			`JSON_AGG include '${relation}' does not support select form '${decision.includeSelectForm}'`,
+		);
+	}
+
 	// Build correlation WHERE based on relation type
 	const { sourceColumn, targetColumn } = deriveFkColumns(
 		decision,
@@ -372,12 +382,66 @@ function compileJsonAggRecursive(
 	}
 
 	const limit = typeof decision.limit === 'number' ? decision.limit : undefined;
-	const orderBy = resolveJsonAggOrderBy(decision, targetTable, innerCtx);
+	const orderBy =
+		limit === undefined
+			? resolveJsonAggOrderBy(decision, targetTable, innerCtx)
+			: undefined;
+	const limitedOrder =
+		limit === undefined
+			? undefined
+			: (decision.includeOrderBy ?? []).map((entry) => {
+					if (!entry.field || entry.expression)
+						throw new Error(
+							`Limited include '${relation}' requires column ordering`,
+						);
+					return {
+						field: entry.field,
+						direction: entry.direction,
+						nulls: entry.nulls ?? 'last',
+					};
+				});
+	if (limitedOrder) {
+		const table = innerCtx.model?.getTable(targetTable);
+		const pk = toColumnList(table?.primaryKey);
+		const ordered = new Set(limitedOrder.map((entry) => entry.field));
+		const unique =
+			table?.columns.some(
+				(column) =>
+					column.unique && !column.nullable && ordered.has(column.name),
+			) ||
+			table?.indexes.some(
+				(index) =>
+					index.unique &&
+					index.valid !== false &&
+					index.ready !== false &&
+					index.where === undefined &&
+					!index.expressions?.length &&
+					index.columns.length > 0 &&
+					index.columns.every(
+						(column) =>
+							ordered.has(column) &&
+							(index.nullsNotDistinct ||
+								table.columns.some(
+									(entry) => entry.name === column && !entry.nullable,
+								)),
+					),
+			);
+		if (pk.length === 0 && !unique)
+			throw new Error(
+				`Limited include '${relation}' requires a primary key or unique ordering for a total order`,
+			);
+		for (const field of pk)
+			if (!ordered.has(field))
+				limitedOrder.push({ field, direction: 'asc', nulls: 'last' });
+	}
+
 	const resolvedTarget = resolveRelationTarget(
 		queryLocal(targetTable),
 		innerCtx,
 	);
-	const orderByIdentifiers = orderBy?.columns.map(
+	const orderByIdentifiers = (
+		limit === undefined ? orderBy?.columns : undefined
+	)?.map(
 		(column) =>
 			requireRelationTargetColumn(
 				resolvedTarget,
@@ -426,12 +490,29 @@ function compileJsonAggRecursive(
 			innerAlias: queryLocal(innerAlias),
 			...(limit !== undefined && { limit }),
 			...(columns && { columns }),
-			...(resolvedTarget.outputs !== undefined && { columnsAreEmitted: true }),
-			...(innerCtx.aliasColumnAuthorities !== undefined && {
-				aliasColumnAuthorities: innerCtx.aliasColumnAuthorities,
-			}),
+			...(decision.emptyProjection && { emptyProjection: true }),
 			...(columnValueOverrides && { columnValueOverrides }),
 			...(orderByIdentifiers && { orderBy: orderByIdentifiers }),
+			...(limitedOrder && {
+				limitedOrder: limitedOrder.map((entry) => ({
+					column:
+						requireRelationTargetColumn(
+							resolvedTarget,
+							queryLocal(entry.field),
+							'order key',
+							relation,
+						)?.outputKey ??
+						resolveDeclaredIdentifier(
+							innerCtx.declaredNames,
+							innerCtx.dbCasing ?? 'preserve',
+							{ kind: 'column', table: targetTable, column: entry.field },
+						),
+					direction:
+						entry.direction === 'desc' ? ('DESC' as const) : ('ASC' as const),
+					nulls:
+						entry.nulls === 'first' ? ('FIRST' as const) : ('LAST' as const),
+				})),
+			}),
 			...(orderBy?.fallback && { orderByFallback: true }),
 		},
 	);

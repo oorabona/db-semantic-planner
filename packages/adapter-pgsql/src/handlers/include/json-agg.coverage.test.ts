@@ -90,7 +90,12 @@ describe('jsonAggIncludeHandler', () => {
 
 	it('compiles with limit', () => {
 		const state = createCompilerState();
-		const ctx = makeCtx();
+		const ctx = makeCtx({
+			model: {
+				getTable: () => ({ primaryKey: 'id', columns: [], indexes: [] }),
+				getRelation: () => undefined,
+			},
+		});
 		const decision = {
 			type: 'include',
 			strategy: 'json_agg',
@@ -392,7 +397,12 @@ describe('jsonAggIncludeHandler', () => {
 
 	it('compiles nested child with limit', () => {
 		const state = createCompilerState();
-		const ctx = makeCtx();
+		const ctx = makeCtx({
+			model: {
+				getTable: () => ({ primaryKey: 'id', columns: [], indexes: [] }),
+				getRelation: () => undefined,
+			},
+		});
 		const decision = {
 			type: 'include',
 			strategy: 'json_agg',
