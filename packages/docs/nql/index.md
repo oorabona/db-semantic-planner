@@ -512,7 +512,7 @@ NQL supports three include strategies, automatically chosen by the planner.
 
 Including related data is NQL's strongest feature. Just use dotted syntax: `relation.*`. The planner uses `json_agg` by default, embedding related rows as a JSON array — one parent row = one result row, no duplication.
 
-If you prefer flat, denormalized rows (one row per parent-child combination), append `| flat` to switch to a LEFT JOIN strategy instead. See the [flat (LEFT JOIN)](#flat-left-join) section below.
+If you prefer flat, denormalized rows (one row per parent-child combination), append `| flat` to request flat output using `join` or `lateral` instead. See the [flat (LEFT JOIN)](#flat-left-join) section below.
 
 ```nql
 customers | select *, orders.*
@@ -544,7 +544,7 @@ Each customer row contains an `orders_json` array with all their orders as neste
 
 ### flat (LEFT JOIN)
 
-When you need denormalized rows (for CSV export, spreadsheets, or tools that don't handle nested JSON), append `| flat`. The planner switches from `json_agg` to a standard LEFT JOIN — one row per parent-child combination.
+When you need denormalized rows (for CSV export, spreadsheets, or tools that don't handle nested JSON), append `| flat`. Flat output honours relation hints and applicable defaults of `join` or `lateral`, refuses `json_agg` or `cte` hints, and skips defaults of `json_agg`, `cte`, or `auto`. Without an applicable override, it selects `lateral` for direct or nested per-parent limits and `join` otherwise. A selected `join` with limits or a dialect without required lateral support fails planning. Selected strategies remain subject to existing operation constraints. See [result hydration](../guide/result-hydration.md) for the full strategy contract. For every non-recursive include, explicit `include.join` takes precedence, then the relation `includeStrategy` hint, then an applicable `defaultIncludeStrategy`, then shape selection; explicit join conflicts with concrete hints other than `join` (`json_agg`, `lateral`, `cte`) and is refused, while a plan-level default only fills the gap.
 
 ```nql
 categories | select *, products.* | flat
@@ -2219,7 +2219,7 @@ table                              -- table scan
   | where <condition>              -- filter rows
   | select <columns>               -- project columns
   | select *, relation.*           -- include related data
-  | flat                           -- force LEFT JOIN (no json_agg)
+  | flat                           -- flat join/lateral output (no json_agg)
   | group by <columns>             -- aggregate grouping
   | order by <col> [asc|desc]      -- sort results
   | limit N                        -- top-N rows
@@ -2290,7 +2290,7 @@ The multi-row example compiles to `INSERT INTO table (a, b) VALUES ($1, DEFAULT)
 | Strategy | Trigger | SQL Pattern |
 |----------|---------|-------------|
 | json_agg | `select *, rel.*` (default) | Correlated subquery with `json_agg` |
-| flat | `\| flat` | LEFT JOIN |
+| flat | `\| flat` | Flat `join` or `lateral` output |
 | LATERAL | `\| limit rel N` | LEFT JOIN LATERAL with LIMIT |
 | CTE | Recursive pseudo-columns | WITH RECURSIVE |
 

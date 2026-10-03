@@ -901,8 +901,8 @@ describe('planner: generateIncludeReasoning — cte strategy (L1537)', () => {
 			(d) => d.type === 'include-strategy',
 		);
 		expect(stratDecision?.choice).toBe('cte');
-		expect(stratDecision?.reasoning).toMatch(
-			/CTE for recursive\/hierarchical traversal/i,
+		expect(stratDecision?.reasoning).toBe(
+			'Relation posts.author (belongsTo, cardinality: one) - using cte selected by defaultIncludeStrategy',
 		);
 	});
 });

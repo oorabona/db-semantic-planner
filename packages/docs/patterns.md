@@ -230,7 +230,7 @@ The planner must choose how to fetch related data for each `IncludeIntent` witho
 | Role | Location |
 |------|----------|
 | Strategy type | `packages/types/src/model-ir.ts` — `IncludeStrategy` |
-| Strategy selection and capability validation | `packages/core/src/planner.ts` — `determineIncludeStrategy()` and `selectSmartStrategy()`; its private `validateStrategy()` closure validates an already-selected strategy |
+| Strategy selection and capability validation | `packages/core/src/planner.ts` — `determineFlatIncludeStrategy()`, `determineIncludeStrategy()` and `selectSmartStrategy()`; the private `validateStrategy()` function validates an already-selected strategy |
 | Handler dispatch | `packages/adapter-pgsql/src/handlers/index.ts` — `getIncludeHandler()` |
 | Concrete handlers | `packages/adapter-pgsql/src/handlers/include/cte.ts`, `join.ts`, `json-agg.ts`, `lateral.ts` (`shared.ts` supplies shared utilities) |
 | Dialect capabilities | `packages/types/src/dialects.ts` — `DialectCapabilities` |
@@ -257,13 +257,13 @@ const plan = orm.select('users').include('posts', { limit: 10 }).plan();
 Auto-resolution (planner, `planner.ts`):
 
 ```
-recursive → capabilities.supportsRecursiveCTE ? 'cte' : explicit error
-otherwise → capabilities.supportsJsonAgg && !excludeNested ? 'json_agg'
-          → hasLimit && capabilities.supportsLateralJoin ? 'lateral'
-          → 'join' (fallback)
+recursive → 'cte' (requires supportsRecursiveCTE; explicit join refused; default ignored)
+non-recursive → explicit include.join → relation hint → applicable default → shape selection
+flat shape (determineFlatIncludeStrategy) → direct/nested per-parent limit ? 'lateral' : 'join'
+nested shape (selectSmartStrategy) → supportsJsonAgg ? 'json_agg' : 'join'
 ```
 
-`selectSmartStrategy()` does not inspect relation cardinality. Both to-one and to-many relations therefore take the same non-recursive path above.
+Flat output runs through `determineFlatIncludeStrategy()`; nested output runs through `selectSmartStrategy()` after authority resolution. `selectSmartStrategy()` does not inspect relation cardinality, so to-one and to-many relations share the nested selection. For every non-recursive include, explicit `include.join` takes precedence, then the relation `includeStrategy` hint, then an applicable `defaultIncludeStrategy`, then shape selection; explicit join conflicts with concrete hints other than `join` (`json_agg`, `lateral`, `cte`) and is refused, while a plan-level default only fills the gap.
 
 ### Convention
 
@@ -404,7 +404,7 @@ const { plan, sql, params } = await orm.select('users').where(eq('active', true)
 
 - IntentAST is the canonical exchange format between core and adapter — never pass NQL AST to the adapter
 - `PlanReport.intent` preserves the original `QueryIntent` for debugging
-- `PlanDecision` records: `kind`, `strategy`, `reasoning`, `alternatives[]` — never omit reasoning
+- `PlanDecision` records: `type`, `choice`, `context`, `reasoning`, `alternatives[]` — never omit reasoning
 - Mutations bypass the planner (no `PlanReport`) — they go IntentAST → adapter compiler directly
 
 ### When to use

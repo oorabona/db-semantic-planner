@@ -90,6 +90,7 @@ export { inspectMutationRows } from './mutation-rows.js';
 export {
 	type RecursivePlanReport,
 	validateIncludeStrategy,
+	validateResolvedIncludeStrategy,
 } from './planner.js';
 export {
 	type AdmittedDestructiveOutcomeClaim,
