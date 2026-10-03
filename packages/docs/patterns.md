@@ -404,7 +404,7 @@ const { plan, sql, params } = await orm.select('users').where(eq('active', true)
 
 - IntentAST is the canonical exchange format between core and adapter — never pass NQL AST to the adapter
 - `PlanReport.intent` preserves the original `QueryIntent` for debugging
-- `PlanDecision` records: `kind`, `strategy`, `reasoning`, `alternatives[]` — never omit reasoning
+- `PlanDecision` records: `type`, `choice`, `context`, `reasoning`, `alternatives[]` — never omit reasoning
 - Mutations bypass the planner (no `PlanReport`) — they go IntentAST → adapter compiler directly
 
 ### When to use
