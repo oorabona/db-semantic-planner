@@ -4,6 +4,9 @@
  * Custom authorities enter through createPgCompileOnlyAdapter constructor options;
  * the same position builders exercise every entry it can reach, including errors.
  */
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import {
 	and,
 	any,
@@ -572,3 +575,62 @@ export const conditionMatrix = positions.flatMap((position) =>
 		}));
 	}),
 );
+
+/** Prepare the inventory; only the explicit rewrite mode mutates files. */
+export function prepareConditionMatrix(
+	baselineDirectory: URL,
+	matrix: typeof conditionMatrix,
+	rewrite = process.env.CONDITION_MATRIX_REWRITE === '1',
+) {
+	const matrixPositions = [...new Set(matrix.map(({ position }) => position))];
+	// Fixed-size ordered shards keep every artifact below 200 KB, even for long SQL.
+	const shards = matrixPositions.flatMap((position) => {
+		const entries = matrix.filter((entry) => entry.position === position);
+		return Array.from(
+			{ length: Math.ceil(entries.length / 100) },
+			(_, index) => ({
+				path: new URL(
+					`${position}${index === 0 ? '' : `.${String(index + 1).padStart(3, '0')}`}.json`,
+					baselineDirectory,
+				),
+				entries: entries.slice(index * 100, (index + 1) * 100),
+			}),
+		);
+	});
+
+	// Explicit opt-in only.
+	if (rewrite) {
+		mkdirSync(baselineDirectory, { recursive: true });
+		shards.forEach(({ path, entries }) => {
+			writeFileSync(
+				path,
+				`${JSON.stringify({ entries: entries.map(({ position, kind, shape, run }) => ({ position, kind, shape, ...run() })) }, null, 2)}\n`,
+			);
+		});
+
+		const inventory = new Set(
+			shards.map(({ path }) => fileURLToPath(path).split('/').at(-1)!),
+		);
+		for (const name of readdirSync(baselineDirectory)) {
+			const managed = positions.some(
+				({ name: position }) =>
+					name === `${position}.json` ||
+					(name.startsWith(`${position}.`) &&
+						/^\d{3}\.json$/.test(name.slice(position.length + 1))),
+			);
+			if (managed && !inventory.has(name)) {
+				unlinkSync(new URL(name, baselineDirectory));
+			}
+		}
+
+		if (shards.length > 0)
+			execFileSync(
+				fileURLToPath(
+					new URL('../../../../node_modules/.bin/biome', import.meta.url),
+				),
+				['format', '--write', ...shards.map(({ path }) => fileURLToPath(path))],
+				{ cwd: fileURLToPath(baselineDirectory) },
+			);
+	}
+	return shards;
+}
