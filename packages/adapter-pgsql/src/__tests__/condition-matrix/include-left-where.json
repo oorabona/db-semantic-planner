@@ -300,7 +300,7 @@
 			"position": "include-left-where",
 			"kind": "eq-null",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = NULL",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score IS NULL",
 			"params": [31],
 			"error": null
 		},
@@ -308,7 +308,7 @@
 			"position": "include-left-where",
 			"kind": "eq-null",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = NULL AND posts.score = $2",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score IS NULL AND posts.score = $2",
 			"params": [31, 13],
 			"error": null
 		},
@@ -316,7 +316,7 @@
 			"position": "include-left-where",
 			"kind": "eq-null",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.score = NULL OR posts.score = $2)",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.score IS NULL OR posts.score = $2)",
 			"params": [31, 13],
 			"error": null
 		},
@@ -324,7 +324,7 @@
 			"position": "include-left-where",
 			"kind": "eq-null",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.score = NULL)",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.score IS NULL)",
 			"params": [31],
 			"error": null
 		},
@@ -332,7 +332,87 @@
 			"position": "include-left-where",
 			"kind": "eq-null",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.score = NULL) OR posts.score = $3)",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.score IS NULL) OR posts.score = $3)",
+			"params": [31, 13, 17],
+			"error": null
+		},
+		{
+			"position": "include-left-where",
+			"kind": "neq-null",
+			"shape": "leaf",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score IS NOT NULL",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-left-where",
+			"kind": "neq-null",
+			"shape": "and",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score IS NOT NULL AND posts.score = $2",
+			"params": [31, 13],
+			"error": null
+		},
+		{
+			"position": "include-left-where",
+			"kind": "neq-null",
+			"shape": "or",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.score IS NOT NULL OR posts.score = $2)",
+			"params": [31, 13],
+			"error": null
+		},
+		{
+			"position": "include-left-where",
+			"kind": "neq-null",
+			"shape": "not",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.score IS NOT NULL)",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-left-where",
+			"kind": "neq-null",
+			"shape": "two-level",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.score IS NOT NULL) OR posts.score = $3)",
+			"params": [31, 13, 17],
+			"error": null
+		},
+		{
+			"position": "include-left-where",
+			"kind": "isDistinctFrom-null",
+			"shape": "leaf",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score IS DISTINCT FROM NULL",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-left-where",
+			"kind": "isDistinctFrom-null",
+			"shape": "and",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score IS DISTINCT FROM NULL AND posts.score = $2",
+			"params": [31, 13],
+			"error": null
+		},
+		{
+			"position": "include-left-where",
+			"kind": "isDistinctFrom-null",
+			"shape": "or",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.score IS DISTINCT FROM NULL OR posts.score = $2)",
+			"params": [31, 13],
+			"error": null
+		},
+		{
+			"position": "include-left-where",
+			"kind": "isDistinctFrom-null",
+			"shape": "not",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.score IS DISTINCT FROM NULL)",
+			"params": [31],
+			"error": null
+		},
+		{
+			"position": "include-left-where",
+			"kind": "isDistinctFrom-null",
+			"shape": "two-level",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.score IS DISTINCT FROM NULL) OR posts.score = $3)",
 			"params": [31, 13, 17],
 			"error": null
 		},
@@ -718,86 +798,6 @@
 			"shape": "or",
 			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.period BETWEEN $2 AND $3 OR posts.score = $4)",
 			"params": [31, "2026-01-01", "2026-02-01", 13],
-			"error": null
-		},
-		{
-			"position": "include-left-where",
-			"kind": "between",
-			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.period BETWEEN $2 AND $3)",
-			"params": [31, "2026-01-01", "2026-02-01"],
-			"error": null
-		},
-		{
-			"position": "include-left-where",
-			"kind": "between",
-			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.period BETWEEN $3 AND $4) OR posts.score = $5)",
-			"params": [31, 13, "2026-01-01", "2026-02-01", 17],
-			"error": null
-		},
-		{
-			"position": "include-left-where",
-			"kind": "range-overlaps",
-			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.period && $2",
-			"params": [31, "[2026-01-01,2026-02-01)"],
-			"error": null
-		},
-		{
-			"position": "include-left-where",
-			"kind": "range-overlaps",
-			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.period && $2 AND posts.score = $3",
-			"params": [31, "[2026-01-01,2026-02-01)", 13],
-			"error": null
-		},
-		{
-			"position": "include-left-where",
-			"kind": "range-overlaps",
-			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.period && $2 OR posts.score = $3)",
-			"params": [31, "[2026-01-01,2026-02-01)", 13],
-			"error": null
-		},
-		{
-			"position": "include-left-where",
-			"kind": "range-overlaps",
-			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.period && $2)",
-			"params": [31, "[2026-01-01,2026-02-01)"],
-			"error": null
-		},
-		{
-			"position": "include-left-where",
-			"kind": "range-overlaps",
-			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.period && $3) OR posts.score = $4)",
-			"params": [31, 13, "[2026-01-01,2026-02-01)", 17],
-			"error": null
-		},
-		{
-			"position": "include-left-where",
-			"kind": "range-contains",
-			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.period @> $2",
-			"params": [31, "[2026-01-01,2026-02-01)"],
-			"error": null
-		},
-		{
-			"position": "include-left-where",
-			"kind": "range-contains",
-			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.period @> $2 AND posts.score = $3",
-			"params": [31, "[2026-01-01,2026-02-01)", 13],
-			"error": null
-		},
-		{
-			"position": "include-left-where",
-			"kind": "range-contains",
-			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.period @> $2 OR posts.score = $3)",
-			"params": [31, "[2026-01-01,2026-02-01)", 13],
 			"error": null
 		}
 	]

@@ -4,6 +4,7 @@
  * Handles: =, !=, <, <=, >, >=
  */
 
+import { isParamIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
 	distinctExpr,
@@ -23,6 +24,7 @@ import type {
 	WhereHandler,
 } from '../types.js';
 import { COMPARISON_OPERATORS } from '../types.js';
+import { compileLiteralNullComparison } from './literal-null.js';
 import { resolveWhereOperator } from './operator-resolver.js';
 import {
 	buildColumnRef,
@@ -66,7 +68,18 @@ export const comparisonHandler: WhereHandler = {
 			COMPARISON_OPERATOR_MAP,
 		);
 		const column = decision.column;
-		const value = decision.value;
+		// ExpressionSpec is the public duck type returned by core param().
+		// Preserve the parameter node rather than inspecting its opaque value.
+		const rawValue = decision.value;
+		const value =
+			rawValue !== null &&
+			typeof rawValue === 'object' &&
+			'__expr' in rawValue &&
+			rawValue.__expr === true &&
+			'intent' in rawValue &&
+			isParamIntent(rawValue.intent)
+				? rawValue.intent
+				: rawValue;
 
 		if (!column) {
 			throw new Error('Comparison handler requires a column');
@@ -85,6 +98,8 @@ export const comparisonHandler: WhereHandler = {
 						},
 					)
 				: buildColumnRef(column, ctx);
+		const nullComparison = compileLiteralNullComparison(operator, left, value);
+		if (nullComparison) return nullComparison;
 		const columnType =
 			decision.type === 'having' && decision.function
 				? resolveHavingAggregatePgType(decision.function, column, ctx)

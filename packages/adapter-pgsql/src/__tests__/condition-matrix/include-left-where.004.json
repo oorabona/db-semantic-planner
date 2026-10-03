@@ -2,6 +2,86 @@
 	"entries": [
 		{
 			"position": "include-left-where",
+			"kind": "notExists-no-pk-custom-authorities",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-left-where",
+			"kind": "notExists-no-pk-custom-authorities",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-left-where",
+			"kind": "notExists-no-pk-custom-authorities",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-left-where",
+			"kind": "notExists-no-pk-custom-authorities",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-left-where",
+			"kind": "some-no-pk-custom-authorities",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-left-where",
+			"kind": "some-no-pk-custom-authorities",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-left-where",
+			"kind": "some-no-pk-custom-authorities",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-left-where",
+			"kind": "some-no-pk-custom-authorities",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-left-where",
+			"kind": "some-no-pk-custom-authorities",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-left-where",
+			"kind": "every-no-pk-custom-authorities",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+		},
+		{
+			"position": "include-left-where",
 			"kind": "every-no-pk-custom-authorities",
 			"shape": "and",
 			"sql": null,

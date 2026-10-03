@@ -2,6 +2,86 @@
 	"entries": [
 		{
 			"position": "upsert-guard",
+			"kind": "between",
+			"shape": "not",
+			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = excluded.score WHERE NOT (users.period BETWEEN $3 AND $4)",
+			"params": [1, 47, "2026-01-01", "2026-02-01"],
+			"error": null
+		},
+		{
+			"position": "upsert-guard",
+			"kind": "between",
+			"shape": "two-level",
+			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = excluded.score WHERE users.score = $3 AND (NOT (users.period BETWEEN $4 AND $5) OR users.score = $6)",
+			"params": [1, 47, 13, "2026-01-01", "2026-02-01", 17],
+			"error": null
+		},
+		{
+			"position": "upsert-guard",
+			"kind": "range-overlaps",
+			"shape": "leaf",
+			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = excluded.score WHERE users.period && CAST($3 AS daterange)",
+			"params": [1, 47, "[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "upsert-guard",
+			"kind": "range-overlaps",
+			"shape": "and",
+			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = excluded.score WHERE users.period && CAST($3 AS daterange) AND users.score = $4",
+			"params": [1, 47, "[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "upsert-guard",
+			"kind": "range-overlaps",
+			"shape": "or",
+			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = excluded.score WHERE users.period && CAST($3 AS daterange) OR users.score = $4",
+			"params": [1, 47, "[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "upsert-guard",
+			"kind": "range-overlaps",
+			"shape": "not",
+			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = excluded.score WHERE NOT (users.period && CAST($3 AS daterange))",
+			"params": [1, 47, "[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "upsert-guard",
+			"kind": "range-overlaps",
+			"shape": "two-level",
+			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = excluded.score WHERE users.score = $3 AND (NOT (users.period && CAST($4 AS daterange)) OR users.score = $5)",
+			"params": [1, 47, 13, "[2026-01-01,2026-02-01)", 17],
+			"error": null
+		},
+		{
+			"position": "upsert-guard",
+			"kind": "range-contains",
+			"shape": "leaf",
+			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = excluded.score WHERE users.period @> CAST($3 AS daterange)",
+			"params": [1, 47, "[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "upsert-guard",
+			"kind": "range-contains",
+			"shape": "and",
+			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = excluded.score WHERE users.period @> CAST($3 AS daterange) AND users.score = $4",
+			"params": [1, 47, "[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "upsert-guard",
+			"kind": "range-contains",
+			"shape": "or",
+			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = excluded.score WHERE users.period @> CAST($3 AS daterange) OR users.score = $4",
+			"params": [1, 47, "[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "upsert-guard",
 			"kind": "range-contains",
 			"shape": "not",
 			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = excluded.score WHERE NOT (users.period @> CAST($3 AS daterange))",
@@ -786,86 +866,6 @@
 			"shape": "or",
 			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = excluded.score WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $3)) OR users.score = $4",
 			"params": [1, 47, 71, 13],
-			"error": null
-		},
-		{
-			"position": "upsert-guard",
-			"kind": "notExists-recursive-down",
-			"shape": "not",
-			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = excluded.score WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $3)))",
-			"params": [1, 47, 71],
-			"error": null
-		},
-		{
-			"position": "upsert-guard",
-			"kind": "notExists-recursive-down",
-			"shape": "two-level",
-			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = excluded.score WHERE users.score = $3 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $4))) OR users.score = $5)",
-			"params": [1, 47, 13, 71, 17],
-			"error": null
-		},
-		{
-			"position": "upsert-guard",
-			"kind": "rawNotExists",
-			"shape": "leaf",
-			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = excluded.score WHERE NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $3))",
-			"params": [1, 47, 53],
-			"error": null
-		},
-		{
-			"position": "upsert-guard",
-			"kind": "rawNotExists",
-			"shape": "and",
-			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = excluded.score WHERE NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $3)) AND users.score = $4",
-			"params": [1, 47, 53, 13],
-			"error": null
-		},
-		{
-			"position": "upsert-guard",
-			"kind": "rawNotExists",
-			"shape": "or",
-			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = excluded.score WHERE NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $3)) OR users.score = $4",
-			"params": [1, 47, 53, 13],
-			"error": null
-		},
-		{
-			"position": "upsert-guard",
-			"kind": "rawNotExists",
-			"shape": "not",
-			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = excluded.score WHERE NOT (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $3)))",
-			"params": [1, 47, 53],
-			"error": null
-		},
-		{
-			"position": "upsert-guard",
-			"kind": "rawNotExists",
-			"shape": "two-level",
-			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = excluded.score WHERE users.score = $3 AND (NOT (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $4))) OR users.score = $5)",
-			"params": [1, 47, 13, 53, 17],
-			"error": null
-		},
-		{
-			"position": "upsert-guard",
-			"kind": "exists",
-			"shape": "leaf",
-			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = excluded.score WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $3)",
-			"params": [1, 47, 61],
-			"error": null
-		},
-		{
-			"position": "upsert-guard",
-			"kind": "exists",
-			"shape": "and",
-			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = excluded.score WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $3) AND users.score = $4",
-			"params": [1, 47, 61, 13],
-			"error": null
-		},
-		{
-			"position": "upsert-guard",
-			"kind": "exists",
-			"shape": "or",
-			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = excluded.score WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $3) OR users.score = $4",
-			"params": [1, 47, 61, 13],
 			"error": null
 		}
 	]

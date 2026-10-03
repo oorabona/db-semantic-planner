@@ -2,6 +2,86 @@
 	"entries": [
 		{
 			"position": "raw-exists-body",
+			"kind": "notExists-recursive-down",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+		},
+		{
+			"position": "raw-exists-body",
+			"kind": "notExists-recursive-down",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+		},
+		{
+			"position": "raw-exists-body",
+			"kind": "rawNotExists",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "buildSubqueryFromIntent: nested subquery not supported"
+		},
+		{
+			"position": "raw-exists-body",
+			"kind": "rawNotExists",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "buildSubqueryFromIntent: nested subquery not supported"
+		},
+		{
+			"position": "raw-exists-body",
+			"kind": "rawNotExists",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "buildSubqueryFromIntent: nested subquery not supported"
+		},
+		{
+			"position": "raw-exists-body",
+			"kind": "rawNotExists",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "buildSubqueryFromIntent: nested subquery not supported"
+		},
+		{
+			"position": "raw-exists-body",
+			"kind": "rawNotExists",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "buildSubqueryFromIntent: nested subquery not supported"
+		},
+		{
+			"position": "raw-exists-body",
+			"kind": "exists",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+		},
+		{
+			"position": "raw-exists-body",
+			"kind": "exists",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+		},
+		{
+			"position": "raw-exists-body",
+			"kind": "exists",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+		},
+		{
+			"position": "raw-exists-body",
 			"kind": "exists",
 			"shape": "not",
 			"sql": null,
@@ -715,86 +795,6 @@
 		{
 			"position": "raw-exists-body",
 			"kind": "notExists-no-pk-custom-authorities",
-			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
-		},
-		{
-			"position": "raw-exists-body",
-			"kind": "notExists-no-pk-custom-authorities",
-			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
-		},
-		{
-			"position": "raw-exists-body",
-			"kind": "notExists-no-pk-custom-authorities",
-			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
-		},
-		{
-			"position": "raw-exists-body",
-			"kind": "some-no-pk-custom-authorities",
-			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
-		},
-		{
-			"position": "raw-exists-body",
-			"kind": "some-no-pk-custom-authorities",
-			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
-		},
-		{
-			"position": "raw-exists-body",
-			"kind": "some-no-pk-custom-authorities",
-			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
-		},
-		{
-			"position": "raw-exists-body",
-			"kind": "some-no-pk-custom-authorities",
-			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
-		},
-		{
-			"position": "raw-exists-body",
-			"kind": "some-no-pk-custom-authorities",
-			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
-		},
-		{
-			"position": "raw-exists-body",
-			"kind": "every-no-pk-custom-authorities",
-			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
-		},
-		{
-			"position": "raw-exists-body",
-			"kind": "every-no-pk-custom-authorities",
-			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
-		},
-		{
-			"position": "raw-exists-body",
-			"kind": "every-no-pk-custom-authorities",
 			"shape": "or",
 			"sql": null,
 			"params": null,

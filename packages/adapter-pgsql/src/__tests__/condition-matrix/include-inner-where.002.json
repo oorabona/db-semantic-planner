@@ -2,6 +2,86 @@
 	"entries": [
 		{
 			"position": "include-inner-where",
+			"kind": "between",
+			"shape": "not",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.period BETWEEN $2 AND $3)",
+			"params": [31, "2026-01-01", "2026-02-01"],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "between",
+			"shape": "two-level",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.period BETWEEN $3 AND $4) OR posts.score = $5)",
+			"params": [31, 13, "2026-01-01", "2026-02-01", 17],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "range-overlaps",
+			"shape": "leaf",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.period && $2",
+			"params": [31, "[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "range-overlaps",
+			"shape": "and",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.period && $2 AND posts.score = $3",
+			"params": [31, "[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "range-overlaps",
+			"shape": "or",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.period && $2 OR posts.score = $3)",
+			"params": [31, "[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "range-overlaps",
+			"shape": "not",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.period && $2)",
+			"params": [31, "[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "range-overlaps",
+			"shape": "two-level",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.period && $3) OR posts.score = $4)",
+			"params": [31, 13, "[2026-01-01,2026-02-01)", 17],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "range-contains",
+			"shape": "leaf",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.period @> $2",
+			"params": [31, "[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "range-contains",
+			"shape": "and",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.period @> $2 AND posts.score = $3",
+			"params": [31, "[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
+			"kind": "range-contains",
+			"shape": "or",
+			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.period @> $2 OR posts.score = $3)",
+			"params": [31, "[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "include-inner-where",
 			"kind": "range-contains",
 			"shape": "not",
 			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.period @> $2)",
@@ -773,86 +853,6 @@
 		{
 			"position": "include-inner-where",
 			"kind": "notExists-recursive-down",
-			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
-		},
-		{
-			"position": "include-inner-where",
-			"kind": "notExists-recursive-down",
-			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
-		},
-		{
-			"position": "include-inner-where",
-			"kind": "notExists-recursive-down",
-			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
-		},
-		{
-			"position": "include-inner-where",
-			"kind": "rawNotExists",
-			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $2))",
-			"params": [31, 53],
-			"error": null
-		},
-		{
-			"position": "include-inner-where",
-			"kind": "rawNotExists",
-			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $2)) AND posts.score = $3",
-			"params": [31, 53, 13],
-			"error": null
-		},
-		{
-			"position": "include-inner-where",
-			"kind": "rawNotExists",
-			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $2)) OR posts.score = $3)",
-			"params": [31, 53, 13],
-			"error": null
-		},
-		{
-			"position": "include-inner-where",
-			"kind": "rawNotExists",
-			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $2)))",
-			"params": [31, 53],
-			"error": null
-		},
-		{
-			"position": "include-inner-where",
-			"kind": "rawNotExists",
-			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $3))) OR posts.score = $4)",
-			"params": [31, 13, 53, 17],
-			"error": null
-		},
-		{
-			"position": "include-inner-where",
-			"kind": "exists",
-			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
-		},
-		{
-			"position": "include-inner-where",
-			"kind": "exists",
-			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
-		},
-		{
-			"position": "include-inner-where",
-			"kind": "exists",
 			"shape": "or",
 			"sql": null,
 			"params": null,

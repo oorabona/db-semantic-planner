@@ -74,6 +74,8 @@ orm.select('users').where(not(eq('deleted', true)))
 
 An empty `or()` matches no row, and an empty `and()` matches every row.
 
+`eq(col, null)` and `neq(col, null)` compile to `IS NULL` and `IS NOT NULL` without binding null, while `eq(col, param(null))` keeps `= $n` with a bound null value. Literal null is refused for `gt`, `gte`, `lt`, `lte`, `like`, and `ilike`; `isDistinctFrom(col, null)` retains its null-safe comparison.
+
 | Helper | SQL | Helper | SQL |
 |--------|-----|--------|-----|
 | `eq` | `=` | `neq` | `!=` |
