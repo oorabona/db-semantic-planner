@@ -1,5 +1,34 @@
 # Changelog
 
+## [6.0.0](https://github.com/oorabona/db-semantic-planner/compare/types-v5.0.0...types-v6.0.0) (2026-10-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* **core:** include ordering accepts field orderings only (IncludeOrderByIntent); strategy conflicts and unsupported include options are refused instead of ignored.
+* **core:** the subquery include strategy is removed. IncludeStrategy no longer has 'subquery'; SubqueryIncludeInfo, CompileResultWithIncludes, PgAdapter.compileSubqueryInclude and ResultHydrator.hydrateIncludes are removed. 'subquery' as a default, per-include strategy or plan decision is refused, and a recursive include on a dialect without recursive CTEs is refused. SQL subqueries are unchanged.
+* **core:** names used only by adapters and the CLI are importable from @dbsp/core/internal and @dbsp/types/internal, no longer from the roots, and root exports no consumer referenced are removed.
+* **adapter-pgsql:** result keys follow the declared logical name, with no camel/snake inference; an undeclared table, column or ON CONFLICT ON CONSTRAINT name refuses compilation; compiling without a model works only under dbCasing 'preserve'; recursive edgeTable takes the logical table name; alias and CTE SQL text changes under non-preserve casing; NamingPlugin no longer serves query compilation.
+
+### Features
+
+* **adapter-pgsql:** Query compilation resolves names through the physical model ([#875](https://github.com/oorabona/db-semantic-planner/issues/875)) ([1b3c383](https://github.com/oorabona/db-semantic-planner/commit/1b3c3838d1d88698ca2759b5c5995e3cddacc86f))
+* **core:** Include limit, orderBy and select are honoured or refused per strategy, with one strategy precedence ([#912](https://github.com/oorabona/db-semantic-planner/issues/912)) ([e30dd38](https://github.com/oorabona/db-semantic-planner/commit/e30dd38249248a78211aad11327db2d9496d12bd))
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** Empty condition groups are constants on every path ([#896](https://github.com/oorabona/db-semantic-planner/issues/896)) ([9b0e401](https://github.com/oorabona/db-semantic-planner/commit/9b0e401e75d52449dfc06543308090728582ac81)), closes [#888](https://github.com/oorabona/db-semantic-planner/issues/888)
+* **adapter-pgsql:** Expression text is physical SQL; generated policies put AS before FOR ([#882](https://github.com/oorabona/db-semantic-planner/issues/882)) ([c2f6aa6](https://github.com/oorabona/db-semantic-planner/commit/c2f6aa6cbb06ef669887815ac9f50ef3f6119126)), closes [#318](https://github.com/oorabona/db-semantic-planner/issues/318)
+* **core:** Plan(), public types and the adapter agree on every include option ([#918](https://github.com/oorabona/db-semantic-planner/issues/918)) ([a0a1492](https://github.com/oorabona/db-semantic-planner/commit/a0a1492fab6c85ad2285b3688a1b7ab11f47e203)), closes [#911](https://github.com/oorabona/db-semantic-planner/issues/911)
+* **nql:** Relation columns are validated against the final target of their path ([#913](https://github.com/oorabona/db-semantic-planner/issues/913)) ([8b8e84f](https://github.com/oorabona/db-semantic-planner/commit/8b8e84ff1f64563117fb01cfe8e39a7f167a8e17))
+
+
+### Code Refactoring
+
+* **core:** Keep adapter-only exports behind /internal and drop unused ones ([#898](https://github.com/oorabona/db-semantic-planner/issues/898)) ([94a17bd](https://github.com/oorabona/db-semantic-planner/commit/94a17bda7ecef508cbcd4653d15940c9fd67544f)), closes [#860](https://github.com/oorabona/db-semantic-planner/issues/860)
+* **core:** Remove the subquery include strategy; nested includes keep one strategy per branch ([#901](https://github.com/oorabona/db-semantic-planner/issues/901)) ([3e423ff](https://github.com/oorabona/db-semantic-planner/commit/3e423ff155f9f9d03fe199bec893b5d8979f46e2))
+
 ## [5.0.0](https://github.com/oorabona/db-semantic-planner/compare/types-v4.0.0...types-v5.0.0) (2026-10-01)
 
 
