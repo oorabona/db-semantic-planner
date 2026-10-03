@@ -12,6 +12,7 @@
  * would cause it to fail.
  */
 
+import type { IncludeIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
 	createDialectCapabilities,
@@ -1215,6 +1216,27 @@ describe('#900 flat strategy precedence', () => {
 			{ dialectCapabilities: FULL_CAPS },
 		).decisions.find((d) => d.type === 'include-strategy')!;
 		expect(decision.alternatives).toEqual(['lateral']);
+	});
+	it('refuses an unknown runtime join selection form', () => {
+		expect(() =>
+			plan(
+				{
+					type: 'select',
+					from: 'users',
+					include: [
+						{
+							relation: 'posts',
+							join: 'left',
+							select: { type: 'future' } as unknown as IncludeIntent['select'],
+						},
+					],
+				},
+				fixture(),
+				{ dialectCapabilities: FULL_CAPS },
+			),
+		).toThrowError(
+			"Invalid include: Include include[0](posts) select is not supported by 'join' strategy. Received select form: future.",
+		);
 	});
 	for (const [extra, expected] of [
 		[{ where: eq('id', 1) }, []],

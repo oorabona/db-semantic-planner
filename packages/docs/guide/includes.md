@@ -85,7 +85,7 @@ Include `select` support by strategy:
 | `lateral` | All columns only: omitted select, `all`, or fields `['*']` |
 
 Join includes honour field selections by projecting the requested fields plus the primary key, and omitted `select` retains its existing projection.
-Join includes refuse `select: all` and fields `['*']` with the include path because they currently project only the primary key; the join all-columns form is refused for now.
+Join includes accept only omitted `select` or `select: { type: 'fields', fields: [...] }` with plain column names and no `'*'`.
 CTE includes refuse any explicit `select` with the include path because they add no related targets to the outer `SELECT`.
 
 ### Include Options Reference

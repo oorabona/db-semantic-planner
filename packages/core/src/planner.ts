@@ -1233,11 +1233,14 @@ function processInclude(
 	if (
 		include.select !== undefined &&
 		(includeStrategy === 'cte' ||
-			(includeStrategy === 'join' && selectsWholeIncludeRow(include)))
+			(includeStrategy === 'join' && !supportsJoinIncludeSelect(include)))
 	)
 		throw new InvalidOperationError(
 			'include',
-			`Include ${optionPath} select is not supported by '${includeStrategy}' strategy.`,
+			`Include ${optionPath} select is not supported by '${includeStrategy}' strategy.` +
+				(includeStrategy === 'join'
+					? ` Received select form: ${include.select.type}${include.select.type === 'fields' ? ` ${JSON.stringify(include.select.fields)}` : ''}.`
+					: ''),
 		);
 	if (includeStrategy === 'lateral' && !selectsWholeIncludeRow(include))
 		throw new InvalidOperationError(
@@ -1702,6 +1705,15 @@ export class UnsupportedStrategyError extends Error {
 	}
 }
 
+/** Join includes honour only omitted select or plain field selections. */
+function supportsJoinIncludeSelect(include: IncludeIntent): boolean {
+	const select = include.select;
+	return (
+		select === undefined ||
+		(select.type === 'fields' && !select.fields.includes('*'))
+	);
+}
+
 /** Whether an include requests the entire related row. */
 function selectsWholeIncludeRow(include: IncludeIntent): boolean {
 	const select = include.select;
@@ -1744,7 +1756,7 @@ function getAlternativeStrategies(
 		}
 		if (include.select !== undefined) {
 			if (s === 'cte') return false;
-			if (s === 'join' && selectsWholeIncludeRow(include)) return false;
+			if (s === 'join' && !supportsJoinIncludeSelect(include)) return false;
 		}
 		if (s === 'lateral' && !selectsWholeIncludeRow(include)) return false;
 		if (!capabilities) return s === 'join'; // No capabilities = only basic strategies

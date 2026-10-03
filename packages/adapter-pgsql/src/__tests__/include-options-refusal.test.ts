@@ -367,7 +367,7 @@ for (const strategy of ['join', 'cte'] as const) {
 						},
 						strategy === 'cte' ? 'cte' : undefined,
 					),
-				`Invalid include: Include include[0](posts) select is not supported by '${strategy}' strategy.`,
+				`Invalid include: Include include[0](posts) select is not supported by '${strategy}' strategy.${strategy === 'join' ? ` Received select form: ${select.type}${select.type === 'fields' ? ` ${JSON.stringify(select.fields)}` : ''}.` : ''}`,
 			));
 	}
 }
@@ -406,7 +406,7 @@ it('refuses builder join all', () => {
 				.select('users')
 				.include('posts', { join: 'left', select: { type: 'all' } })
 				.dump(),
-		"Invalid include: Include include[0](posts) select is not supported by 'join' strategy.",
+		"Invalid include: Include include[0](posts) select is not supported by 'join' strategy. Received select form: all.",
 	);
 });
 for (const strategy of ['join', 'cte'] as const) {
@@ -427,7 +427,7 @@ for (const strategy of ['join', 'cte'] as const) {
 					},
 					strategy === 'cte' ? 'cte' : undefined,
 				),
-			`Invalid include: Include include[0].include[0](comments) select is not supported by '${strategy}' strategy.`,
+			`Invalid include: Include include[0].include[0](comments) select is not supported by '${strategy}' strategy.${strategy === 'join' ? ' Received select form: all.' : ''}`,
 		));
 }
 
@@ -460,3 +460,35 @@ it('preserves explicit join field projection', () => {
 	);
 	expect(result.parameters).toEqual([]);
 });
+
+for (const select of [
+	{ type: 'expressions', columns: [] },
+	{
+		type: 'aggregate',
+		aggregates: [{ function: 'count', field: '*', as: 'n' }],
+	},
+	{ type: 'fields', fields: ['*', 'id'] },
+] as const) {
+	it(`refuses join select form ${JSON.stringify(select)}`, () => {
+		const orm = createOrm({ model, adapter: createPgCompileOnlyAdapter() });
+		exactError(
+			() =>
+				orm.select('users').include('posts', { join: 'left', select }).dump(),
+			`Invalid include: Include include[0](posts) select is not supported by 'join' strategy. Received select form: ${select.type}${select.type === 'fields' ? ` ${JSON.stringify(select.fields)}` : ''}.`,
+		);
+	});
+	it(`excludes join alternative for ${JSON.stringify(select)}`, () => {
+		const report = plan(
+			{
+				type: 'select',
+				from: 'users',
+				include: [{ relation: 'posts', select }],
+			},
+			model,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
+		expect(
+			report.decisions.find((d) => d.type === 'include-strategy')?.alternatives,
+		).toEqual([]);
+	});
+}
