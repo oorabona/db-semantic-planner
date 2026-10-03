@@ -18,7 +18,7 @@ import {
 	renderColumnDbType,
 	validateDbType,
 } from '../../db-type.js';
-import { unwrapParamIntent } from '../../param-intent.js';
+import { normalizeParamIntent, unwrapParamIntent } from '../../param-intent.js';
 import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
 import { queryLocal, type SqlIdentifier } from '../../sql-identifier.js';
 import type { CompilerContext, CompilerState } from '../types.js';
@@ -124,6 +124,7 @@ export function compileValue(
 	columnType?: string,
 	forceParam = false,
 ): Node {
+	value = normalizeParamIntent(value);
 	const boundValue = unwrapParamIntent(value);
 	if (isParamIntent(value)) {
 		const idx = ++state.paramIndex;

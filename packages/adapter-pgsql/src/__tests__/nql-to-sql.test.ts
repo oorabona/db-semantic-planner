@@ -780,10 +780,10 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(result.parameters).toEqual([fieldRefShaped]);
 	});
 
-	it('keeps source literal null comparisons as SQL NULL literals', () => {
+	it('rewrites source literal null equality as IS NULL', () => {
 		const { sql, params } = nqlToSQLWithParams('users | where name = null');
 
-		expect(sql).toContain('users.name = null');
+		expect(sql).toBe('select users.* from users where users.name is null');
 		expect(params).toEqual([]);
 	});
 
@@ -3733,6 +3733,52 @@ describe('NQL → SQL: row-level locking (E15)', () => {
 		const sql = nqlToSQL('employees');
 		expect(sql).not.toContain('for update');
 		expect(sql).not.toContain('for share');
+	});
+});
+
+describe('literal null comparisons (#891)', () => {
+	it.each([
+		['=', 'is null'],
+		['!=', 'is not null'],
+		['<>', 'is not null'],
+	])('%s null', (operator, sqlOperator) => {
+		const result = nqlToSQLWithParams(
+			`users | where status ${operator} null | select id`,
+		);
+		expect(result.sql).toBe(
+			`select users.id from users where users.status ${sqlOperator}`,
+		);
+		expect(result.params).toEqual([]);
+	});
+	it('named null stays bound', () => {
+		const result = nqlToSQLWithNamedParams(
+			'users | where status = :value | select id',
+			{ value: null },
+		);
+		expect(result.sql).toBe(
+			'select users.id from users where users.status = $1',
+		);
+		expect(result.params).toEqual([null]);
+	});
+});
+
+describe('NQL literal null refusal (#891)', () => {
+	it.each(['>', '>=', '<', '<='])('refuses %s null', (operator) => {
+		let thrown: unknown;
+		try {
+			nqlToSQLWithParams(`users | where id ${operator} null`);
+		} catch (error) {
+			thrown = error;
+		}
+		expect(thrown).toBeInstanceOf(Error);
+		expect((thrown as Error).message).toBe(
+			`Operator ${operator} cannot compare with literal null; use isNull/isNotNull`,
+		);
+	});
+	it('LIKE already refuses null during NQL lowering', () => {
+		expect(() =>
+			nqlToSQLWithParams('users | where name like null'),
+		).toThrowError('LIKE pattern must be a string literal');
 	});
 });
 

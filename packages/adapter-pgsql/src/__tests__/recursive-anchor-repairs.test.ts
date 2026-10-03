@@ -210,7 +210,7 @@ describe('#891 recursive anchor review repairs', () => {
 			'__n.score = __n.id',
 			[],
 		],
-		['legacy null', eq('score', null), '__n.score = $1', [null]],
+		['literal null', eq('score', null), '__n.score IS NULL', []],
 		['legacy inequality', neq('score', 7), '__n.score != $1', [7]],
 		['qualified root', eq('users.score', 7), '__n.score = $1', [7]],
 	] as const) {

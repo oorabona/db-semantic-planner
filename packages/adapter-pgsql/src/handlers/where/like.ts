@@ -13,6 +13,7 @@ import type {
 	WhereHandler,
 } from '../types.js';
 import { PATTERN_OPERATORS } from '../types.js';
+import { compileLiteralNullComparison } from './literal-null.js';
 import { buildColumnRef, buildParamRef } from './utils.js';
 
 /** A_Expr with optional ESCAPE clause for LIKE operator */
@@ -40,6 +41,8 @@ export const likeHandler: WhereHandler = {
 		}
 
 		const left = buildColumnRef(column, ctx);
+		const nullComparison = compileLiteralNullComparison(operator, left, value);
+		if (nullComparison) return nullComparison;
 		const right = buildParamRef(value, state);
 
 		let exprNode: Node;

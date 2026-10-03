@@ -257,6 +257,8 @@ WHERE resources.parent_id IS NULL
 
 *Schema: blog-extended*
 
+`col = null` and `col != null` compile to `IS NULL` and `IS NOT NULL` without binding null.
+
 All standard comparison operators are supported: `>`, `<`, `>=`, `<=`, `!=`. NQL compiles them directly to their SQL equivalents.
 
 ```nql

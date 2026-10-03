@@ -50,7 +50,7 @@ describe('condition compilation differential matrix (#891)', () => {
 				position.startsWith('include-')
 			)
 				kinds.push('exists-custom-authorities');
-			expect(entries).toHaveLength(kinds.length === 2 ? 309 : 307);
+			expect(entries).toHaveLength(kinds.length === 2 ? 319 : 317);
 			for (const shape of ['empty-or', 'empty-and']) {
 				expect(
 					entries

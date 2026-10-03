@@ -80,13 +80,16 @@ db.output:
 
 # ─────────────────────────────────────────
 # Query 8: employees | where managerId = null | select name, title
-# Top-level employees (no manager — CEO)
-# NOTE: = NULL compiles to SQL `= NULL` (not IS NULL); returns 0 rows
+# Top-level employees (no manager — CEO); `= null` compiles to IS NULL
 # ─────────────────────────────────────────
 --- query: 8
 success: true
-sql.equals: SELECT employees.name, employees.title FROM hierarchy.employees WHERE employees.manager_id = NULL
+sql.equals: SELECT employees.name, employees.title FROM hierarchy.employees WHERE employees.manager_id IS NULL
 params.length: 0
+db.output:
+| name | title |
+| --- | --- |
+| Alice | CEO |
 
 # ─────────────────────────────────────────
 # Query 9: employees | select name, managementChain.*
