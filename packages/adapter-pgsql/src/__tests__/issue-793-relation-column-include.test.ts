@@ -3,6 +3,7 @@ import {
 	nqlRaw,
 	POSTGRESQL_CAPABILITIES,
 	plan,
+	ResultHydrator,
 	ref,
 	relationColumn,
 	schema,
@@ -312,6 +313,46 @@ function compileNqlIncludes(
 	});
 }
 
+it('preserves distinct declared and explicit public keys under snake_case', () => {
+	const query = compileNqlIncludes(
+		'posts | select author.firstName, author.lastName as first_name',
+		db.model,
+		'json_agg',
+		'snake_case',
+	);
+	expect(query.sql).toBe(
+		"SELECT COALESCE((SELECT json_agg(jsonb_build_object('firstName', __t__.first_name, 'first_name', __t__.last_name) ORDER BY __t__.id ASC NULLS LAST) FROM users AS __t__ WHERE __t__.id = posts.author_id), '[]'::json) AS author_json FROM posts",
+	);
+	const rows = [
+		{ author_json: [{ firstName: 'Ada', first_name: 'Lovelace' }] },
+	];
+	const report =
+		orm.nql`posts | select author.firstName, author.lastName as first_name`.plan();
+	new ResultHydrator(db.model, 'posts').hydrateJsonAggIncludes(
+		rows,
+		report,
+		query,
+	);
+	expect(rows).toEqual([
+		{ author: { firstName: 'Ada', first_name: 'Lovelace' } },
+	]);
+});
+
+it('retains correlation keys needed by nested lateral consumers', () => {
+	const result = orm
+		.select('posts')
+		.withPlanOptions({ defaultIncludeStrategy: 'lateral' })
+		.include('author.file')
+		.columns([
+			relationColumn('author', 'name', 'authorName'),
+			relationColumn('author.file', 'path', 'fp'),
+		])
+		.dump();
+	expect(result.sql).toBe(
+		'SELECT users_lat_0.name AS "author.authorName", files_lat_1.path AS "author.file.fp" FROM posts LEFT JOIN LATERAL (SELECT users_inner_0.name, users_inner_0.file_id FROM users AS users_inner_0 WHERE users_inner_0.id = posts.author_id) AS users_lat_0 ON true LEFT JOIN LATERAL (SELECT files_inner_1.path FROM files AS files_inner_1 WHERE files_inner_1.id = users_lat_0.file_id) AS files_lat_1 ON true',
+	);
+});
+
 it('uses the column name for a to-many NQL default JSON key', () => {
 	const result = compileNqlIncludes(
 		'departments | select id, employees.name',
@@ -359,4 +400,53 @@ it('keeps declared names distinct from aliases equal to physical names', () => {
 			'snake_case',
 		),
 	).not.toThrow();
+});
+
+it('returns both public aliases of one source without ambiguous lateral columns', () => {
+	const result = orm
+		.select('posts')
+		.withPlanOptions({ defaultIncludeStrategy: 'lateral' })
+		.include('author')
+		.columns([
+			relationColumn('author', 'name', 'a'),
+			relationColumn('author', 'name', 'b'),
+		])
+		.dump();
+	expect(result.sql).toBe(
+		'SELECT users_lat_0.name AS "author.a", users_lat_0.name AS "author.b" FROM posts LEFT JOIN LATERAL (SELECT users_inner_0.name FROM users AS users_inner_0 WHERE users_inner_0.id = posts.author_id) AS users_lat_0 ON true',
+	);
+});
+
+it('retains correlation keys at intermediate lateral depths', () => {
+	const result = orm
+		.select('posts')
+		.withPlanOptions({ defaultIncludeStrategy: 'lateral' })
+		.include('author.file.users')
+		.columns([
+			relationColumn('author.file', 'path', 'fp'),
+			relationColumn('author.file.users', 'name', 'nestedName'),
+		])
+		.dump();
+	expect(result.sql).toBe(
+		thirdDepthSql.lateral
+			.replace(
+				'files_lat_1.id AS "author.file.id", files_lat_1.path AS "author.file.path"',
+				'files_lat_1.path AS "author.file.fp"',
+			)
+			.replace(
+				'SELECT files_inner_1.id, files_inner_1.path',
+				'SELECT files_inner_1.path, files_inner_1.id',
+			),
+	);
+});
+it('retains correlation keys when a root lateral payload is projected', () => {
+	const result = orm
+		.select('posts')
+		.withPlanOptions({ defaultIncludeStrategy: 'lateral' })
+		.include('author.file')
+		.columns([relationColumn('author', 'name', 'authorName')])
+		.dump();
+	expect(result.sql).toBe(
+		'SELECT users_lat_0.name AS "author.authorName", files_lat_1.id AS "author.file.id", files_lat_1.path AS "author.file.path" FROM posts LEFT JOIN LATERAL (SELECT users_inner_0.name, users_inner_0.file_id FROM users AS users_inner_0 WHERE users_inner_0.id = posts.author_id) AS users_lat_0 ON true LEFT JOIN LATERAL (SELECT files_inner_1.id, files_inner_1.path FROM files AS files_inner_1 WHERE files_inner_1.id = users_lat_0.file_id) AS files_lat_1 ON true',
+	);
 });
