@@ -134,6 +134,44 @@ function assertNoRecursiveAnchorRelations(intent: WhereIntent): void {
 	visit(intent);
 }
 
+/** Refuse junction-less model relation predicates before either root lowering. */
+export function assertNoManyToManyRootRelations(
+	intent: WhereIntent,
+	source: string,
+	model: WhereCompilerCtx['model'],
+): void {
+	if (!model) return;
+	const visit = (node: WhereIntent, table: string): void => {
+		if (node.kind === 'and' || node.kind === 'or') {
+			for (const child of node.conditions) visit(child, table);
+		} else if (node.kind === 'not') {
+			visit(node.condition, table);
+		} else if (
+			node.kind === 'exists' ||
+			node.kind === 'notExists' ||
+			node.kind === 'relationFilter'
+		) {
+			const path =
+				typeof node.relation === 'string'
+					? node.relation.split('.')
+					: node.relation;
+			let target = table;
+			for (const hop of path) {
+				const relation = resolveConditionRelation(model, target, hop);
+				if (!relation) return;
+				if (relation.type === 'belongsToMany') {
+					throw new Error(
+						`WHERE ${node.kind}('${path.join('.')}'): many-to-many relation predicates need the junction declaration (#787).`,
+					);
+				}
+				target = relation.target;
+			}
+			if (node.where) visit(node.where, target);
+		}
+	};
+	visit(intent, source);
+}
+
 /** Refuse root relation recursion before routing or lowering can discard it. */
 export function assertNoRecursiveRootRelations(intent: WhereIntent): void {
 	const seen = new WeakSet<object>();
@@ -1190,6 +1228,7 @@ export function createConditionCompiler(
 		intent: WhereIntent,
 		ctx: ConditionCompilerCtx,
 	): Node {
+		assertNoManyToManyRootRelations(intent, ctx.logicalSourceTable, ctx.model);
 		return compileTopLevel(intent, ctx);
 	}
 
