@@ -354,6 +354,20 @@ export function resolveBindingRelationColumn(
 			firstHopReason,
 		);
 	}
+	const tailPath = ctx.validator.resolveDeclaredPath(
+		virtualRelation.targetTable,
+		relationPath.slice(1),
+	);
+	if (!tailPath.ok) {
+		throwBindingRelationColumn182(
+			actualBindingName,
+			relationName,
+			tailPath.segment
+				? `tail relation '${tailPath.segment}' is not declared on table '${tailPath.sourceTable}' (ref-#192)`
+				: `relation path segment ${tailPath.segmentIndex + 2} is empty (ref-#192)`,
+		);
+	}
+
 	let sourceTable = virtualRelation.targetTable;
 	const hops: NqlBindingVirtualRelation['hops'][number][] = [];
 	for (let i = 1; i < relationPath.length; i++) {
@@ -365,7 +379,7 @@ export function resolveBindingRelationColumn(
 				`relation path segment ${i + 1} is empty (ref-#192)`,
 			);
 		}
-		const resolvedTail = ctx.validator.getRelation(sourceTable, tailRelation);
+		const resolvedTail = tailPath.relations[i - 1];
 		if (!resolvedTail) {
 			throwBindingRelationColumn182(
 				actualBindingName,

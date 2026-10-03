@@ -13,6 +13,7 @@ import { toColumnList } from '@dbsp/types';
 import {
 	explainUnsupportedNqlBindingIncludeHop,
 	type NqlBindingIncludeRelationShape,
+	resolveDeclaredRelationPath,
 } from '@dbsp/types/internal';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/index.js';
 import { DEFAULT_RELATION_TARGET_COLUMN } from './binding-relation-utils.js';
@@ -149,12 +150,8 @@ export class ColumnValidator {
 		sourceTable: string,
 		relationName: string,
 	): ColumnValidatorRelation | undefined {
-		return (
-			this.schema.getRelation?.(`${sourceTable}.${relationName}`) ??
-			this.schema
-				.getRelationsFrom(sourceTable)
-				.find((relation) => relation.name === relationName)
-		);
+		const path = this.resolveDeclaredPath(sourceTable, [relationName]);
+		return path.ok ? path.relations[0] : undefined;
 	}
 
 	getRelationsFrom(sourceTable: string): readonly ColumnValidatorRelation[] {
@@ -232,6 +229,20 @@ export class ColumnValidator {
 					`Query '${bindingName}' reads from an NQL binding and cannot use relation include '${relationName}' (ref-#192): ${unsupportedFirstHopReason}.`,
 				);
 			}
+			const tailPath = this.resolveDeclaredPath(
+				virtualRelation.targetTable,
+				relationPath.slice(1),
+			);
+			if (!tailPath.ok) {
+				const reason = tailPath.segment
+					? `tail relation '${tailPath.segment}' is not declared on table '${tailPath.sourceTable}'`
+					: `relation path segment ${tailPath.segmentIndex + 2} is empty`;
+				throw new NqlSemanticException(
+					NqlErrorCodes.SEM_INVALID_SYNTAX,
+					`Query '${bindingName}' reads from an NQL binding and cannot use relation include '${relationName}' (ref-#192): ${reason}.`,
+				);
+			}
+
 			let sourceTable = virtualRelation.targetTable;
 			for (let i = 1; i < relationPath.length; i++) {
 				const tailRelation = relationPath[i];
@@ -241,7 +252,9 @@ export class ColumnValidator {
 						`Query '${bindingName}' reads from an NQL binding and cannot use relation include '${relationName}' (ref-#192): relation path segment ${i + 1} is empty.`,
 					);
 				}
-				const resolvedTail = this.getRelation(sourceTable, tailRelation);
+				const resolvedTail = tailPath.ok
+					? tailPath.relations[i - 1]
+					: undefined;
 				if (!resolvedTail) {
 					throw new NqlSemanticException(
 						NqlErrorCodes.SEM_INVALID_SYNTAX,
@@ -601,6 +614,24 @@ export class ColumnValidator {
 				`Table '${table}' does not exist in the schema`,
 			);
 		}
+	}
+
+	resolveDeclaredPath(sourceTable: string, segments: readonly string[]) {
+		return resolveDeclaredRelationPath(this.schema, sourceTable, segments);
+	}
+
+	resolveRelationPathTarget(
+		sourceTable: string,
+		segments: readonly string[],
+	): string {
+		const result = this.resolveDeclaredPath(sourceTable, segments);
+		if (!result.ok) {
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				`Relation '${result.segment}' is not declared on table '${result.sourceTable}'.`,
+			);
+		}
+		return result.targetTable;
 	}
 
 	resolveRelationTarget(
