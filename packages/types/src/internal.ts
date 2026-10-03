@@ -9,7 +9,11 @@
  */
 
 import { toColumnList } from './column-list.js';
-import type { NqlBindingRelationType } from './model-ir.js';
+import type {
+	ModelIR,
+	NqlBindingRelationType,
+	RelationIR,
+} from './model-ir.js';
 
 // Internal-only build utilities (NOT part of public API)
 export type { IntentBuilder, Mutable } from './builders.js';
@@ -508,3 +512,28 @@ export {
 	REFUSAL_VOCABULARY,
 	type RefusalCode,
 } from './transition/refusal.js';
+
+/**
+ * Resolve a declared include name, preserving direct lookup precedence and the
+ * adapter's first-match snake_case-to-camelCase fallback.
+ * Target-table disambiguation and virtual relations remain planner concerns.
+ * @internal
+ */
+export function resolveIncludeRelationName(
+	model: ModelIR,
+	sourceTable: string,
+	name: string,
+): RelationIR | undefined {
+	return (
+		model.getRelation(`${sourceTable}.${name}`) ??
+		model
+			.getRelationsFrom(sourceTable)
+			.find(
+				(relation) =>
+					relation.name === name ||
+					relation.name.replace(/_([a-z])/g, (_, c: string) =>
+						c.toUpperCase(),
+					) === name,
+			)
+	);
+}

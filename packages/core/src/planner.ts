@@ -20,6 +20,7 @@ import type {
 	ResolvedIncludeStrategy,
 } from '@dbsp/types';
 import { resolveJsonAggOrderKey, toColumnList } from '@dbsp/types';
+import { resolveIncludeRelationName } from '@dbsp/types/internal';
 import { InvalidOperationError } from './dx/errors.js';
 import { validateLimit } from './dx/limit-validation.js';
 import {
@@ -1108,9 +1109,15 @@ function processInclude(
 	parentIncludePath = '',
 ): void {
 	state.relationsAnalyzed++;
+	const pathSegment = include.via || include.relation;
 	const fullPath = parentIncludePath
-		? `${parentIncludePath}.${include.relation}`
-		: include.relation;
+		? `${parentIncludePath}.${pathSegment}`
+		: pathSegment;
+	if (
+		include.select?.type === 'fields' &&
+		!Array.isArray(include.select.fields)
+	)
+		throw new Error(`Include ${fullPath} select fields must be an array`);
 	if (include.limit !== undefined)
 		validateLimit(include.limit, `Include ${intentPath}(${fullPath}) limit`);
 
@@ -1127,15 +1134,17 @@ function processInclude(
 	const relationName = include.via ?? include.relation;
 
 	// Resolve the relation
-	const relation = disambiguateRelation(
-		relationName,
-		sourceTable,
-		model,
-		state,
-		opts,
-		intentPath,
-		include.via,
-	);
+	const relation =
+		resolveIncludeRelationName(model, sourceTable, relationName) ??
+		disambiguateRelation(
+			relationName,
+			sourceTable,
+			model,
+			state,
+			opts,
+			intentPath,
+			include.via,
+		);
 
 	if (!relation) {
 		return;

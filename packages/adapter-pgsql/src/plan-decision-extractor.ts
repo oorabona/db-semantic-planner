@@ -16,6 +16,7 @@ import type {
 	WhereIntent,
 } from '@dbsp/types';
 import { type ColumnListInput, toColumnList } from '@dbsp/types';
+import { resolveIncludeRelationName } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import {
 	DEFAULT_PK_COLUMN,
@@ -1912,26 +1913,9 @@ function toJoinIncludeDecision(
 // ============================================================================
 
 /**
- * Convert a snake_case identifier to camelCase.
- * e.g. 'enclosing_symbol' → 'enclosingSymbol'
- */
-function snakeToCamel(s: string): string {
-	return s.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
-}
-
-/**
- * Synthesize join includeStrategy decisions for intent-based includes that the planner
- * failed to emit decisions for (e.g. when the include alias is camelCase but the model
- * relation is snake_case: `include('enclosingSymbol')` while model has `enclosing_symbol`).
- *
- * This is an adapter-level fallback: when the planner's `disambiguateRelation` cannot
- * match the camelCase alias to a registered relation, no `include-strategy` decision is
- * emitted. The adapter detects the gap and synthesizes the join decision directly from
- * the model by scanning `getRelationsFrom(sourceTable)` and matching
- * `snakeToCamel(rel.name) === alias`.
- *
- * Only synthesizes decisions for `{ join: 'inner' | 'left' }` includes that are not
- * already covered by an existing includeStrategy decision.
+ * Recover explicit join decisions from legacy/incomplete plan reports. Current
+ * planner reports resolve declared include names with the same shared helper,
+ * so their camelCase includes are already covered and need no synthesis.
  */
 export function synthesizeMissingJoinDecisions(
 	plan: PlanReport,
@@ -1952,7 +1936,6 @@ export function synthesizeMissingJoinDecisions(
 	if (!includes || includes.length === 0) return [];
 
 	const sourceTable = plan.rootTable;
-	const relationsFromSource = model.getRelationsFrom(sourceTable);
 
 	const synthesized: PlanDecision[] = [];
 
@@ -1963,14 +1946,18 @@ export function synthesizeMissingJoinDecisions(
 		if (inc.join !== 'inner' && inc.join !== 'left') continue;
 
 		// Already covered by a planner-emitted decision
-		if (coveredRelations.has(alias)) continue;
+		if (
+			coveredRelations.has(alias) ||
+			plan.decisions.some(
+				(decision) =>
+					decision.type === 'include-strategy' &&
+					decision.context.sourceTable === sourceTable &&
+					decision.context.includeAlias === alias,
+			)
+		)
+			continue;
 
-		// Try to find the relation in the model by:
-		// 1. Direct name match (alias === rel.name)
-		// 2. camelCase conversion (snakeToCamel(rel.name) === alias)
-		const rel = relationsFromSource.find(
-			(r) => r.name === alias || snakeToCamel(r.name) === alias,
-		);
+		const rel = resolveIncludeRelationName(model, sourceTable, alias);
 		if (!rel) continue;
 
 		// Derive FK from RelationIR

@@ -12,6 +12,11 @@ export interface JsonAggOrderKey {
 	readonly fallback: boolean;
 }
 
+/**
+ * Use the declared primary-key columns when present (fallback: false).
+ * Otherwise use every declared column in table order (fallback: true), which
+ * adapters realize as their dialect's deterministic all-column ordering.
+ */
 export function resolveJsonAggOrderKey(table: TableIR): JsonAggOrderKey {
 	const pkColumns = toColumnList(table.primaryKey);
 	return pkColumns.length > 0
