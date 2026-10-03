@@ -108,6 +108,74 @@ function targetsToSQL(targets: import('@pgsql/types').Node[]): string {
 }
 
 describe('json-agg handler', () => {
+	it('refuses a limited include without a total order', () => {
+		const ctx = {
+			...makeCtx('users'),
+			model: makeModel({ posts: { columns: ['user_id', 'title'] } }),
+		};
+		expect(() =>
+			jsonAggIncludeHandler.compile(
+				buildDecision({ limit: 2 }),
+				ctx,
+				createCompilerState(),
+			),
+		).toThrow(
+			'Include posts limit requires a primary key or unique ordering for a total order',
+		);
+	});
+	it('appends every composite primary-key column to limited ordering', () => {
+		const ctx = {
+			...makeCtx('users'),
+			model: makeModel({
+				posts: {
+					columns: ['user_id', 'tenant_id', 'id', 'created_at'],
+					primaryKey: ['tenant_id', 'id'],
+				},
+			}),
+		};
+		const result = jsonAggIncludeHandler.compile(
+			buildDecision({
+				limit: 2,
+				includeOrderBy: [
+					{ field: 'created_at', direction: 'desc', nulls: 'first' },
+				],
+			}),
+			ctx,
+			createCompilerState(),
+		);
+		expect(targetsToSQL(result.targets!)).toBe(
+			"select coalesce((select json_agg(__lim.__row order by __lim.__key0 desc nulls first, __lim.__key1 asc nulls last, __lim.__key2 asc nulls last) from (select to_jsonb(__t__) as __row, __t__.created_at as __key0, __t__.tenant_id as __key1, __t__.id as __key2 from posts as __t__ where __t__.user_id = users.id order by __t__.created_at desc nulls first, __t__.tenant_id asc nulls last, __t__.id asc nulls last limit 2) as __lim), '[]'::json) as posts_json from dummy",
+		);
+	});
+	it('allows unique nonnullable ordering without a primary key', () => {
+		const model = makeModel({ posts: { columns: ['user_id', 'slug'] } });
+		const table = model.getTable('posts')!;
+		const ctx = {
+			...makeCtx('users'),
+			model: {
+				...model,
+				getTable: () => ({
+					...table,
+					indexes: [{ columns: ['slug'], unique: true }],
+					columns: table.columns.map((column) => ({
+						...column,
+						nullable: false,
+					})),
+				}),
+			},
+		};
+		const result = jsonAggIncludeHandler.compile(
+			buildDecision({
+				limit: 1,
+				includeOrderBy: [{ field: 'slug', direction: 'asc' }],
+			}),
+			ctx,
+			createCompilerState(),
+		);
+		expect(targetsToSQL(result.targets!)).toBe(
+			"select coalesce((select json_agg(__lim.__row order by __lim.__key0 asc) from (select to_jsonb(__t__) as __row, __t__.slug as __key0 from posts as __t__ where __t__.user_id = users.id order by __t__.slug asc limit 1) as __lim), '[]'::json) as posts_json from dummy",
+		);
+	});
 	it('keeps extra projected outputs when the physical columns are also present', () => {
 		const model = makeModel({ posts: { columns: ['id', 'title'] } });
 		const projectedPosts = fromOutputDescriptors({

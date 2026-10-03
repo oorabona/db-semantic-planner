@@ -8,12 +8,7 @@
  * Produces: COALESCE((SELECT json_agg(to_jsonb(__t__) [|| jsonb_build_object(...)] ORDER BY __t__.pk ASC NULLS LAST) FROM target AS __t__ WHERE ...), '[]'::json) AS relation
  */
 
-import {
-	resolveJsonAggOrderKey,
-	resolveOutputReadHandling,
-	toColumnList,
-} from '@dbsp/types';
-import type { JsonAggOrderByEntry } from '@dbsp/types/internal';
+import { resolveOutputReadHandling, toColumnList } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
 	andExpr,
@@ -51,7 +46,7 @@ import type {
 	ResTargetNode,
 } from '../types.js';
 import { buildKeyCorrelation } from '../where/exists.js';
-import { deriveFkColumns } from './shared.js';
+import { deriveFkColumns, resolveIncludeOrder } from './shared.js';
 
 // NQL compile-select.ts labels unaliased relation columns `${relationPath}.${column}`.
 // ORM relationColumn aliases must be identifiers, so a dotted default label cannot
@@ -64,43 +59,6 @@ export function chosenRelationColumnAlias(
 	return alias === `${relationPath}.${column}` ? undefined : alias;
 }
 
-interface JsonAggOrderIntent {
-	readonly columns: readonly JsonAggOrderByEntry[];
-	readonly fallback: boolean;
-}
-
-function isJsonAggOrderBy(
-	orderBy: Decision['orderBy'],
-): orderBy is readonly JsonAggOrderByEntry[] {
-	return (
-		Array.isArray(orderBy) && orderBy.every((item) => typeof item === 'string')
-	);
-}
-
-function resolveJsonAggOrderBy(
-	decision: Decision,
-	targetTable: string,
-	ctx: CompilerContext,
-): JsonAggOrderIntent | undefined {
-	const table = ctx.model?.getTable(targetTable);
-	if (table) {
-		// ctx.model is authoritative: with schema metadata available, resolve the
-		// order key from the model rather than trusting decision-carried fallbacks.
-		const orderKey = resolveJsonAggOrderKey(table);
-		return orderKey.columns.length > 0 ? orderKey : undefined;
-	}
-
-	const decisionOrderBy = isJsonAggOrderBy(decision.orderBy)
-		? decision.orderBy
-		: undefined;
-	return decisionOrderBy && decisionOrderBy.length > 0
-		? {
-				columns: decisionOrderBy,
-				fallback: decision.orderByFallback === true,
-			}
-		: undefined;
-}
-
 function resolveJsonAggProjection(
 	decision: Decision,
 	targetTable: string,
@@ -109,8 +67,8 @@ function resolveJsonAggProjection(
 ): readonly SqlIdentifier[] | undefined {
 	const requested = decision.columns;
 	const hasExplicitProjection =
-		requested &&
-		requested.length > 0 &&
+		requested !== undefined &&
+		(requested.length > 0 || decision.emptyProjection === true) &&
 		!(requested.length === 1 && requested[0] === '*');
 	const target = resolveRelationTarget(queryLocal(targetTable), ctx);
 	if (hasExplicitProjection) {
@@ -273,6 +231,16 @@ function compileJsonAggRecursive(
 		throw new Error('JSON_AGG include requires relation name');
 	}
 
+	if (
+		decision.includeSelectForm !== undefined &&
+		decision.includeSelectForm !== 'fields' &&
+		decision.includeSelectForm !== 'all'
+	) {
+		throw new Error(
+			`JSON_AGG include '${relation}' does not support select form '${decision.includeSelectForm}'`,
+		);
+	}
+
 	// Build correlation WHERE based on relation type
 	const { sourceColumn, targetColumn } = deriveFkColumns(
 		decision,
@@ -383,28 +351,12 @@ function compileJsonAggRecursive(
 	}
 
 	const limit = typeof decision.limit === 'number' ? decision.limit : undefined;
-	const orderBy = resolveJsonAggOrderBy(decision, targetTable, innerCtx);
+	const resolvedOrder = resolveIncludeOrder(decision, targetTable, innerCtx);
+	const limitedOrder = resolvedOrder.entries;
+
 	const resolvedTarget = resolveRelationTarget(
 		queryLocal(targetTable),
 		innerCtx,
-	);
-	const orderByIdentifiers = orderBy?.columns.map(
-		(column) =>
-			requireRelationTargetColumn(
-				resolvedTarget,
-				queryLocal(column),
-				'order key',
-				relation,
-			)?.outputKey ??
-			resolveDeclaredIdentifier(
-				innerCtx.declaredNames,
-				innerCtx.dbCasing ?? 'preserve',
-				{
-					kind: 'column',
-					table: targetTable,
-					column,
-				},
-			),
 	);
 	const shape = jsonAggContainerShape(decision.relationType);
 	let columns = resolveJsonAggProjection(
@@ -497,13 +449,27 @@ function compileJsonAggRecursive(
 			innerAlias: queryLocal(innerAlias),
 			...(limit !== undefined && { limit }),
 			...(columns && { columns }),
-			...(resolvedTarget.outputs !== undefined && { columnsAreEmitted: true }),
-			...(innerCtx.aliasColumnAuthorities !== undefined && {
-				aliasColumnAuthorities: innerCtx.aliasColumnAuthorities,
-			}),
+			...(decision.emptyProjection && { emptyProjection: true }),
 			...(columnValueOverrides && { columnValueOverrides }),
-			...(orderByIdentifiers && { orderBy: orderByIdentifiers }),
-			...(orderBy?.fallback && { orderByFallback: true }),
+			...(limitedOrder && {
+				limitedOrder: limitedOrder.map((entry) => ({
+					column:
+						requireRelationTargetColumn(
+							resolvedTarget,
+							queryLocal(entry.field),
+							'order key',
+							relation,
+						)?.outputKey ??
+						resolveDeclaredIdentifier(
+							innerCtx.declaredNames,
+							innerCtx.dbCasing ?? 'preserve',
+							{ kind: 'column', table: targetTable, column: entry.field },
+						),
+					direction: entry.direction,
+					nulls: entry.nulls,
+				})),
+			}),
+			...(resolvedOrder.fallback && { orderByFallback: true }),
 		},
 	);
 }

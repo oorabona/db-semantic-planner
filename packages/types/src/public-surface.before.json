@@ -635,6 +635,10 @@
 				"kind": "type"
 			},
 			{
+				"name": "IncludeOrderByIntent",
+				"kind": "type"
+			},
+			{
 				"name": "IncludeRecursiveOptions",
 				"kind": "type"
 			},
@@ -2844,6 +2848,10 @@
 			},
 			{
 				"name": "IncludeIntent",
+				"kind": "type"
+			},
+			{
+				"name": "IncludeOrderByIntent",
 				"kind": "type"
 			},
 			{

@@ -713,12 +713,40 @@ export function sqlDeleteStmt(options: SqlDeleteOptions): Node {
 export type SqlJsonAggOptions = {
 	innerAlias?: SqlIdentifier;
 	columns?: readonly SqlIdentifier[];
+	emptyProjection?: boolean;
 	childNodes?: readonly { key: SqlIdentifier; node: Node }[];
 	limit?: number;
+	limitedOrder?: readonly {
+		column: SqlIdentifier;
+		direction: 'ASC' | 'DESC';
+		nulls: 'FIRST' | 'LAST' | 'DEFAULT';
+	}[];
 	columnValueOverrides?: ReadonlyMap<string, Node>;
 	orderBy?: readonly SqlIdentifier[];
 	orderByFallback?: boolean;
 };
+
+function jsonObjectChunks(args: Node[]): Node {
+	const chunks: Node[] = [];
+	for (let i = 0; i < Math.max(args.length, 1); i += 100)
+		chunks.push({
+			FuncCall: {
+				funcname: [stringNode('jsonb_build_object')],
+				args: args.slice(i, i + 100),
+			} as FuncCall,
+		});
+	return chunks.slice(1).reduce(
+		(left, right) => ({
+			A_Expr: {
+				kind: 'AEXPR_OP',
+				name: [stringNode('||')],
+				lexpr: left,
+				rexpr: right,
+			},
+		}),
+		chunks[0]!,
+	);
+}
 
 /** Build a JSON aggregate using only established relation and output identifiers. */
 export function sqlJsonAggSubquery(
@@ -733,7 +761,7 @@ export function sqlJsonAggSubquery(
 	let row: Node;
 	if (
 		columns !== undefined &&
-		columns.length > 0 &&
+		(columns.length > 0 || options?.emptyProjection === true) &&
 		!(columns.length === 1 && identifierText(columns[0]!) === '*')
 	) {
 		const args: Node[] = [];
@@ -745,12 +773,7 @@ export function sqlJsonAggSubquery(
 					sqlColumnRef(column, innerAlias),
 			);
 		}
-		row = {
-			FuncCall: {
-				funcname: [stringNode('jsonb_build_object')],
-				args,
-			} as FuncCall,
-		};
+		row = jsonObjectChunks(args);
 	} else {
 		row = {
 			FuncCall: {
@@ -771,38 +794,88 @@ export function sqlJsonAggSubquery(
 				kind: 'AEXPR_OP',
 				name: [stringNode('||')],
 				lexpr: row,
-				rexpr: {
-					FuncCall: {
-						funcname: [stringNode('jsonb_build_object')],
-						args,
-					} as FuncCall,
-				},
+				rexpr: jsonObjectChunks(args),
 			},
 		};
 	}
-	const order = options?.orderBy?.map((entry) =>
+	const explicitOrder = options?.limitedOrder?.map((entry) =>
 		sortBy(
-			options.orderByFallback
-				? typeCast(sqlColumnRef(entry, innerAlias), 'text')
-				: sqlColumnRef(entry, innerAlias),
-			'ASC',
-			'LAST',
+			options?.orderByFallback
+				? typeCast(sqlColumnRef(entry.column, innerAlias), 'text')
+				: sqlColumnRef(entry.column, innerAlias),
+			entry.direction,
+			entry.nulls,
 		),
 	);
+	const order =
+		explicitOrder ??
+		options?.orderBy?.map((entry) =>
+			sortBy(
+				options.orderByFallback
+					? typeCast(sqlColumnRef(entry, innerAlias), 'text')
+					: sqlColumnRef(entry, innerAlias),
+				'ASC',
+				'LAST',
+			),
+		);
+	const limitedAlias = queryLocal('__lim');
+	const keys = options?.limitedOrder?.map((entry, index) => ({
+		...entry,
+		alias: queryLocal(`__key${index}`),
+	}));
+	const limited = options?.limit !== undefined;
 	const aggregate: Node = {
 		FuncCall: {
 			funcname: [stringNode('json_agg')],
-			args: [row],
-			...(order !== undefined && { agg_order: order }),
+			args: [limited ? sqlColumnRef(queryLocal('__row'), limitedAlias) : row],
+			...(limited
+				? {
+						agg_order: keys?.map((entry) =>
+							sortBy(
+								sqlColumnRef(entry.alias, limitedAlias),
+								entry.direction,
+								entry.nulls,
+							),
+						),
+					}
+				: order !== undefined
+					? { agg_order: order }
+					: {}),
 		} as FuncCall,
 	};
+	const rows = limited
+		? selectStmt({
+				targetList: [
+					sqlResTarget(row, queryLocal('__row')),
+					...(keys?.map((entry) =>
+						sqlResTarget(sqlColumnRef(entry.column, innerAlias), entry.alias),
+					) ?? []),
+				],
+				from: [sqlRangeVar(targetTable, innerAlias, schemaName)],
+				where: whereExpr,
+				orderBy: (keys ?? []).map((entry) =>
+					sortBy(
+						sqlColumnRef(entry.column, innerAlias),
+						entry.direction,
+						entry.nulls,
+					),
+				),
+				limit: { A_Const: { ival: { ival: options!.limit! } } },
+			})
+		: undefined;
 	const subselect = selectStmt({
 		targetList: [{ ResTarget: { val: aggregate } }],
-		from: [sqlRangeVar(targetTable, innerAlias, schemaName)],
-		where: whereExpr,
-		...(options?.limit !== undefined && {
-			limit: { A_Const: { ival: { ival: options.limit } } },
-		}),
+		from: rows
+			? [
+					{
+						RangeSubselect: {
+							subquery: rows,
+							alias: { aliasname: identifierText(limitedAlias) },
+						},
+					},
+				]
+			: [sqlRangeVar(targetTable, innerAlias, schemaName)],
+		...(rows === undefined && { where: whereExpr }),
 	});
 	return sqlResTarget(
 		coalesceExpr([

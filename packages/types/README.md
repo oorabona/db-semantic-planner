@@ -23,7 +23,7 @@ const myAdapter: Adapter = { ... };
 // Annotate plan report handlers
 function inspect(report: PlanReport): void {
   for (const decision of report.decisions) {
-    console.log(decision.kind, decision.reason);
+    console.log(decision.type, decision.choice, decision.reasoning);
   }
 }
 ```

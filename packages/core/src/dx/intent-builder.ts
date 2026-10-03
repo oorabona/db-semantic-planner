@@ -75,6 +75,8 @@ export function includeOptionsToIntent(
 
 	const intent: Mutable<IncludeIntent> = { relation };
 
+	if (options.limit !== undefined) intent.limit = options.limit;
+	if (options.orderBy !== undefined) intent.orderBy = options.orderBy;
 	if (options.via !== undefined) {
 		intent.via = options.via;
 	}
@@ -120,6 +122,8 @@ export function nestedIncludeToIntent(nested: NestedInclude): IncludeIntent {
 		intent.join = nested.join;
 	}
 
+	if (nested.limit !== undefined) intent.limit = nested.limit;
+	if (nested.orderBy !== undefined) intent.orderBy = nested.orderBy;
 	if (nested.via !== undefined) {
 		intent.via = nested.via;
 	}

@@ -90,7 +90,12 @@ describe('jsonAggIncludeHandler', () => {
 
 	it('compiles with limit', () => {
 		const state = createCompilerState();
-		const ctx = makeCtx();
+		const ctx = makeCtx({
+			model: {
+				getTable: () => ({ primaryKey: 'id', columns: [], indexes: [] }),
+				getRelation: () => undefined,
+			},
+		});
 		const decision = {
 			type: 'include',
 			strategy: 'json_agg',
@@ -103,7 +108,7 @@ describe('jsonAggIncludeHandler', () => {
 		expect(result.targets).toHaveLength(1);
 	});
 
-	it('ignores limit when not a number', () => {
+	it('refuses a limited decision without total-order authority', () => {
 		const state = createCompilerState();
 		const ctx = makeCtx();
 		const decision = {
@@ -114,8 +119,9 @@ describe('jsonAggIncludeHandler', () => {
 			relationType: 'hasMany',
 			limit: 'invalid',
 		} as unknown as Decision;
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
-		expect(result.targets).toHaveLength(1);
+		expect(() => jsonAggIncludeHandler.compile(decision, ctx, state)).toThrow(
+			'Include posts limit requires a primary key or unique ordering for a total order',
+		);
 	});
 
 	it('compiles with specific columns', () => {
@@ -392,7 +398,12 @@ describe('jsonAggIncludeHandler', () => {
 
 	it('compiles nested child with limit', () => {
 		const state = createCompilerState();
-		const ctx = makeCtx();
+		const ctx = makeCtx({
+			model: {
+				getTable: () => ({ primaryKey: 'id', columns: [], indexes: [] }),
+				getRelation: () => undefined,
+			},
+		});
 		const decision = {
 			type: 'include',
 			strategy: 'json_agg',

@@ -1317,7 +1317,7 @@ describe('planner coverage', () => {
 	});
 
 	// ==================================================================
-	// NEW: selectSmartStrategy — recursive without CTE support
+	// NEW: recursive resolution without CTE support
 	// ==================================================================
 
 	it('should throw UnsupportedStrategyError for recursive relation on dialect without CTE support', () => {
@@ -1459,7 +1459,7 @@ describe('planner coverage', () => {
 	});
 
 	// ==================================================================
-	// NEW: selectSmartStrategy fallback to join when no capabilities
+	// NEW: selectNestedOutputStrategy fallback to join when no capabilities
 	// ==================================================================
 
 	it('should use join as fallback when no dialect capabilities and no limit', () => {

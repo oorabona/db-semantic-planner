@@ -123,7 +123,8 @@ const dump = orm.select('posts')
 dump.plan.decisions
 // → [{ type: 'include-strategy',
 //      choice: 'json_agg',
-//      reason: 'using JSON aggregation to avoid row explosion' }]
+//      context: { relation: 'author', ... },
+//      reasoning: 'Relation posts.author (belongsTo, cardinality: one) - using json_agg selected by nested output', ... }]
 ```
 
   </div>
@@ -132,7 +133,7 @@ dump.plan.decisions
 <div class="why-row reverse">
   <div class="why-text">
     <h3>vs Drizzle</h3>
-    <p>Automatic include strategy selection — no manual JOINs for relations. The planner picks join, json_agg, lateral, or cte based on recursion, query shape, and dialect capabilities. Built-in pgvector and ParadeDB helpers.</p>
+    <p>Automatic include strategy selection — no manual JOINs for relations. The planner resolves explicit include joins, relation hints, and applicable defaults before query shape and dialect capabilities; flat output uses join or lateral, nested output defaults to json_agg when supported, and recursive includes use cte. Built-in pgvector and ParadeDB helpers.</p>
   </div>
   <div class="why-code">
 

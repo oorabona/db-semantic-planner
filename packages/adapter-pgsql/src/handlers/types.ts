@@ -385,6 +385,10 @@ export interface Decision {
 	readonly args?: readonly unknown[];
 	readonly conditions?: readonly Decision[];
 	readonly columns?: readonly string[];
+	/** An include explicitly selected zero fields, distinct from legacy empty columns. */
+	readonly emptyProjection?: boolean;
+	/** Original include select form, retained for strategy validation. */
+	readonly includeSelectForm?: string;
 	readonly values?: readonly unknown[];
 	readonly set?: readonly { column: string; value: unknown }[];
 	readonly limit?: number | ParamIntent | { paramIndex: number };
@@ -400,6 +404,7 @@ export interface Decision {
 	readonly relationType?: 'belongsTo' | 'hasMany' | 'hasOne';
 	readonly foreignKey?: ColumnListInput;
 	readonly parentKey?: ColumnListInput;
+	readonly includeOrderBy?: readonly import('@dbsp/types').OrderByIntent[];
 	readonly orderByFallback?: boolean;
 	readonly children?: readonly Decision[];
 	// Window function specific

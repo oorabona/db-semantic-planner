@@ -14,6 +14,7 @@ import { type ColumnListInput, toColumnList } from '@dbsp/types';
 import type { JoinExpr, Node, SelectStmt } from '@pgsql/types';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
 import {
+	sortBy,
 	sqlColumnRefStar,
 	sqlRangeAlias,
 	sqlRangeVar,
@@ -36,7 +37,7 @@ import type {
 } from '../types.js';
 import { expressionQualifiedColumnRef } from '../types.js';
 import { buildKeyCorrelation } from '../where/exists.js';
-import { deriveFkColumns } from './shared.js';
+import { deriveFkColumns, resolveIncludeOrder } from './shared.js';
 
 /**
  * Build column targets for the LATERAL subquery
@@ -71,6 +72,7 @@ function buildLateralSubquery(
 	targetColumn: ColumnListInput,
 	columns: readonly string[] | undefined,
 	limit: number | undefined,
+	decision: Decision,
 	ctx: CompilerContext,
 ): Node {
 	// Build the correlation condition
@@ -104,6 +106,16 @@ function buildLateralSubquery(
 		],
 		whereClause,
 		...(limit !== undefined && {
+			sortClause: resolveIncludeOrder(decision, targetTable, ctx).entries.map(
+				(entry) =>
+					sortBy(
+						expressionQualifiedColumnRef(entry.field, innerAlias, ctx),
+						entry.direction,
+						entry.nulls,
+					),
+			),
+		}),
+		...(limit !== undefined && {
 			limitCount: { A_Const: { ival: { ival: limit } } },
 		}),
 	};
@@ -114,11 +126,7 @@ function buildLateralSubquery(
 /**
  * Build a LEFT JOIN LATERAL expression
  */
-function buildLateralJoin(
-	subquery: Node,
-	lateralAlias: string,
-	_ctx: CompilerContext,
-): Node {
+function buildLateralJoin(subquery: Node, lateralAlias: string): Node {
 	// Wrap subquery as a RangeSubselect
 	const rangeSubselect: Node = {
 		RangeSubselect: {
@@ -223,11 +231,12 @@ function compileLateralCascade(
 		targetColumn,
 		columns,
 		limit,
+		decision,
 		scopedCtx,
 	);
 
 	// Build the JOIN LATERAL
-	const join = buildLateralJoin(subquery, lateralAlias, scopedCtx);
+	const join = buildLateralJoin(subquery, lateralAlias);
 	const joins: Node[] = [join];
 
 	// Build outer SELECT targets referencing the lateral alias

@@ -506,7 +506,7 @@ LIMIT 10 OFFSET 20
 
 ## Relations and Includes
 
-NQL supports three include strategies, automatically chosen by the planner.
+NQL requests nested or flat output; the planner resolves the physical include strategy (`json_agg`, `join`, `lateral`, or `cte`).
 
 ### json_agg (Default — Nested JSON)
 
@@ -514,7 +514,7 @@ NQL supports three include strategies, automatically chosen by the planner.
 
 Including related data is NQL's strongest feature. Just use dotted syntax: `relation.*`. The planner uses `json_agg` by default, embedding related rows as a JSON array — one parent row = one result row, no duplication.
 
-If you prefer flat, denormalized rows (one row per parent-child combination), append `| flat` to switch to a LEFT JOIN strategy instead. See the [flat (LEFT JOIN)](#flat-left-join) section below.
+If you prefer flat, denormalized rows (one row per parent-child combination), append `| flat` to request flat output using `join` or `lateral` instead. See the [flat output](#flat-output) section below.
 
 ```nql
 customers | select *, orders.*
@@ -544,9 +544,11 @@ Each customer row contains an `orders_json` array with all their orders as neste
 | 4  | david@example.com | David      | Brown     | [{"id":5,"total":179.97,"status":"delivered",...}] |
 | 5  | emma@example.com  | Emma       | Davis     | [{"id":6,"total":1099.98,"status":"shipped",...}] |
 
-### flat (LEFT JOIN)
+<a id="flat-left-join"></a>
 
-When you need denormalized rows (for CSV export, spreadsheets, or tools that don't handle nested JSON), append `| flat`. The planner switches from `json_agg` to a standard LEFT JOIN — one row per parent-child combination.
+### flat output
+
+When you need denormalized rows (for CSV export, spreadsheets, or tools that don't handle nested JSON), append `| flat`. Flat output honours relation hints and applicable defaults of `join` or `lateral`, refuses `json_agg` or `cte` hints, and skips defaults of `json_agg`, `cte`, or `auto`. Without an applicable override, it selects `lateral` for direct or nested per-parent limits and `join` otherwise. A selected `join` with limits or a dialect without required lateral support fails planning. Selected strategies remain subject to existing operation constraints. See [result hydration](../guide/result-hydration.md) for the full strategy contract. For every non-recursive include, explicit `include.join` takes precedence, then the relation `includeStrategy` hint, then an applicable `defaultIncludeStrategy`, then shape selection; explicit join conflicts with concrete hints other than `join` (`json_agg`, `lateral`, `cte`) and is refused, while a plan-level default only fills the gap.
 
 ```nql
 categories | select *, products.* | flat
@@ -585,14 +587,7 @@ users | select *, userRoles.* | limit userRoles 2
 <details><summary>SQL</summary>
 
 ```sql
-SELECT users.*, "userRoles_lat_0".*
-FROM iam_example.users
-LEFT JOIN LATERAL (
-  SELECT "userRoles_inner_0".*
-  FROM iam_example.user_roles AS "userRoles_inner_0"
-  WHERE "userRoles_inner_0".user_id = users.id
-  LIMIT 2
-) AS "userRoles_lat_0" ON true
+SELECT users.*, "userRoles_lat_0".* FROM iam_example.users LEFT JOIN LATERAL (SELECT "userRoles_inner_0".* FROM iam_example.user_roles AS "userRoles_inner_0" WHERE "userRoles_inner_0".user_id = users.id ORDER BY "userRoles_inner_0".id ASC NULLS LAST LIMIT 2) AS "userRoles_lat_0" ON true
 ```
 </details>
 
@@ -2221,7 +2216,7 @@ table                              -- table scan
   | where <condition>              -- filter rows
   | select <columns>               -- project columns
   | select *, relation.*           -- include related data
-  | flat                           -- force LEFT JOIN (no json_agg)
+  | flat                           -- flat join/lateral output (no json_agg)
   | group by <columns>             -- aggregate grouping
   | order by <col> [asc|desc]      -- sort results
   | limit N                        -- top-N rows
@@ -2289,10 +2284,10 @@ The multi-row example compiles to `INSERT INTO table (a, b) VALUES ($1, DEFAULT)
 
 ### Include Strategies
 
-| Strategy | Trigger | SQL Pattern |
+| Output mode or operation | Trigger | Resolved SQL pattern |
 |----------|---------|-------------|
 | json_agg | `select *, rel.*` (default) | Correlated subquery with `json_agg` |
-| flat | `\| flat` | LEFT JOIN |
+| flat | `\| flat` | `join` (JOIN), or `lateral` (LEFT JOIN LATERAL) with a per-relation limit |
 | LATERAL | `\| limit rel N` | LEFT JOIN LATERAL with LIMIT |
 | CTE | Recursive pseudo-columns | WITH RECURSIVE |
 

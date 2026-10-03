@@ -12,13 +12,15 @@
  * would cause it to fail.
  */
 
+import type { IncludeIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
 	createDialectCapabilities,
 	POSTGRESQL_CAPABILITIES,
+	SQLITE_CAPABILITIES,
 } from './dialects/index.js';
 import { InvalidOperationError } from './dx/errors.js';
-import { inSubquery, not } from './dx/filters.js';
+import { eq, inSubquery, not } from './dx/filters.js';
 import { createOrm } from './dx/index.js';
 import { ref, schema } from './dx/schema.js';
 import { subquery } from './dx/subquery-builder.js';
@@ -28,6 +30,7 @@ import {
 	plan,
 	UnsupportedStrategyError,
 	validateIncludeStrategy,
+	validateResolvedIncludeStrategy,
 } from './planner.js';
 
 // ============================================================================
@@ -1024,8 +1027,9 @@ describe('#894 strategy error alternatives', () => {
 		expect(() =>
 			plan(intent, db.model, { defaultIncludeStrategy: 'subquery' as never }),
 		).toThrow(
-			"Strategy 'subquery' is not supported by a dialect without capabilities. Supported strategies: 'join', 'json_agg', 'lateral', 'cte'.",
+			"Unknown strategy 'subquery'. Valid strategies: 'join', 'json_agg', 'lateral', 'cte', 'auto'.",
 		);
+		expect(validateIncludeStrategy('auto', undefined)).toBe('join');
 		for (const strategy of ['join', 'json_agg', 'lateral', 'cte']) {
 			expect(validateIncludeStrategy(strategy, undefined)).toBe(strategy);
 		}
@@ -1037,8 +1041,489 @@ describe('#894 strategy error alternatives', () => {
 				dialectCapabilities: NO_CTE_CAPS,
 			}),
 		).toThrow(
-			"Strategy 'lateral' is not supported by test-no-cte. Supported strategies: 'join'.",
+			"Strategy 'lateral' is not supported by test-no-cte. Supported strategies: 'join', 'auto'.",
 		);
 		expect(validateIncludeStrategy('join', NO_CTE_CAPS)).toBe('join');
+	});
+});
+
+describe('#900 resolved validator accepted lists', () => {
+	it('accepts exactly the resolved list with no capabilities', () => {
+		for (const s of ['join', 'json_agg', 'lateral', 'cte'])
+			expect(validateResolvedIncludeStrategy(s, undefined)).toBe(s);
+		expect(() => validateResolvedIncludeStrategy('auto', undefined)).toThrow(
+			"Strategy 'auto' is not supported by a dialect without capabilities. Supported strategies: 'join', 'json_agg', 'lateral', 'cte'.",
+		);
+	});
+	it('lists only join with restricted capabilities', () => {
+		expect(validateResolvedIncludeStrategy('join', NO_CTE_CAPS)).toBe('join');
+		expect(validateIncludeStrategy('auto', NO_CTE_CAPS)).toBe('join');
+		for (const s of ['auto', 'json_agg', 'lateral', 'cte'])
+			expect(() => validateResolvedIncludeStrategy(s, NO_CTE_CAPS)).toThrow(
+				`Strategy '${s}' is not supported by test-no-cte. Supported strategies: 'join'.`,
+			);
+	});
+});
+
+describe('#900 default capability validation at the include consumer', () => {
+	const db = schema({
+		categories: {
+			id: { type: 'integer', primaryKey: true },
+			parentId: ref('categories', {
+				nullable: true,
+				roles: { parent: 'parent', children: 'children' },
+			}),
+		},
+	});
+
+	for (const defaultIncludeStrategy of ['json_agg', 'lateral'] as const) {
+		it(`plans recursive children as cte with unsupported ${defaultIncludeStrategy} default`, () => {
+			const report = plan(
+				{
+					type: 'select',
+					from: 'categories',
+					include: [{ relation: 'children', recursive: { maxDepth: 5 } }],
+				},
+				db.model,
+				{ defaultIncludeStrategy, dialectCapabilities: SQLITE_CAPABILITIES },
+			);
+			const decision = report.decisions.find(
+				(d) => d.type === 'include-strategy',
+			);
+			expect(decision?.choice).toBe('cte');
+			expect(decision?.alternatives).toEqual([]);
+		});
+
+		it(`refuses a non-recursive consumer of unsupported ${defaultIncludeStrategy} default`, () => {
+			const consumeDefault = () =>
+				plan(
+					{
+						type: 'select',
+						from: 'categories',
+						include: [{ relation: 'children' }],
+					},
+					db.model,
+					{ defaultIncludeStrategy, dialectCapabilities: SQLITE_CAPABILITIES },
+				);
+			expect(consumeDefault).toThrow(UnsupportedStrategyError);
+			expect(consumeDefault).toThrow(
+				`Strategy '${defaultIncludeStrategy}' is not supported by sqlite. Supported strategies: 'join', 'cte', 'auto'.`,
+			);
+		});
+	}
+
+	it('refuses an unknown default at entry even without includes', () => {
+		const unknownDefault = () =>
+			plan({ type: 'select', from: 'categories' }, db.model, {
+				defaultIncludeStrategy: 'subquery' as never,
+				dialectCapabilities: SQLITE_CAPABILITIES,
+			});
+		expect(unknownDefault).toThrow(UnsupportedStrategyError);
+		expect(unknownDefault).toThrow(
+			"Unknown strategy 'subquery'. Valid strategies: 'join', 'json_agg', 'lateral', 'cte', 'auto'.",
+		);
+	});
+});
+
+describe('#900 flat strategy precedence', () => {
+	function fixture(hint: string = 'auto') {
+		const db = schema({
+			users: { id: { type: 'integer', primaryKey: true } },
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				authorId: ref('users', { as: 'author', inverse: 'posts' }),
+			},
+			comments: {
+				id: { type: 'integer', primaryKey: true },
+				postId: ref('posts', { as: 'post', inverse: 'comments' }),
+			},
+		});
+		Object.assign(db.model.getRelation('users.posts')!, {
+			includeStrategy: hint,
+		});
+		return db.model;
+	}
+
+	for (const strategy of ['flat', 'auto'] as const) {
+		for (const hint of ['json_agg', 'lateral', 'cte']) {
+			it(`refuses explicit join conflicting with ${hint} on ${strategy}`, () => {
+				expect(() =>
+					plan(
+						{
+							type: 'select',
+							from: 'users',
+							include: [{ relation: 'posts', strategy, join: 'left' }],
+						},
+						fixture(hint),
+						{ dialectCapabilities: FULL_CAPS },
+					),
+				).toThrow(
+					new UnsupportedStrategyError(
+						`Include at include[0](posts) cannot use explicit join because relation 'posts' declares includeStrategy '${hint}'. Use 'auto' or 'join', or remove include.join.`,
+					),
+				);
+			});
+		}
+		for (const hint of ['auto', 'join']) {
+			it(`explicit join beats lateral default with ${hint} hint on ${strategy}`, () => {
+				const report = plan(
+					{
+						type: 'select',
+						from: 'users',
+						include: [{ relation: 'posts', strategy, join: 'left' }],
+					},
+					fixture(hint),
+					{ defaultIncludeStrategy: 'lateral', dialectCapabilities: FULL_CAPS },
+				);
+				const decision = report.decisions.find(
+					(d) => d.type === 'include-strategy',
+				)!;
+				expect(decision.choice).toBe('join');
+				expect(decision.reasoning).toBe(
+					'Relation users.posts (hasMany, cardinality: many) - using join selected by explicit join',
+				);
+			});
+		}
+	}
+	for (const strategy of ['join', 'lateral'] as const) {
+		it(`flat ${strategy} decision reports default and admissible alternatives`, () => {
+			const decision = resolve('auto', strategy).decisions.find(
+				(d) => d.type === 'include-strategy',
+			)!;
+			expect(decision.choice).toBe(strategy);
+			expect(decision.reasoning).toBe(
+				`Relation users.posts (hasMany, cardinality: many) - using ${strategy} selected by defaultIncludeStrategy`,
+			);
+			expect(decision.alternatives).toEqual([
+				strategy === 'join' ? 'lateral' : 'join',
+			]);
+		});
+	}
+	it('flat where under join default has no lateral alternative', () => {
+		const decision = resolve('auto', 'join', {
+			where: eq('id', 1),
+		}).decisions.find((d) => d.type === 'include-strategy')!;
+		expect(decision.alternatives).toEqual([]);
+	});
+	it('limited nested include excludes join and cte alternatives', () => {
+		const decision = plan(
+			{
+				type: 'select',
+				from: 'users',
+				include: [{ relation: 'posts', limit: 2 }],
+			},
+			fixture(),
+			{ dialectCapabilities: FULL_CAPS },
+		).decisions.find((d) => d.type === 'include-strategy')!;
+		expect(decision.alternatives).toEqual(['lateral']);
+	});
+	it('refuses an unknown runtime join selection form', () => {
+		expect(() =>
+			plan(
+				{
+					type: 'select',
+					from: 'users',
+					include: [
+						{
+							relation: 'posts',
+							join: 'left',
+							select: { type: 'future' } as unknown as IncludeIntent['select'],
+						},
+					],
+				},
+				fixture(),
+				{ dialectCapabilities: FULL_CAPS },
+			),
+		).toThrowError(
+			"Invalid include: Include include[0](posts) select is not supported by 'join' strategy. Received select form: future.",
+		);
+	});
+	for (const [extra, expected] of [
+		[{ where: eq('id', 1) }, []],
+		[{ orderBy: [{ field: 'id', direction: 'asc' }] }, []],
+		[{ select: { type: 'fields', fields: ['id'] } }, ['join']],
+		[{ select: { type: 'all' } }, ['lateral']],
+		[{ select: { type: 'fields', fields: ['*'] } }, ['lateral']],
+	] as const) {
+		it(`nested alternatives honour options ${JSON.stringify(extra)}`, () => {
+			const report = plan(
+				{
+					type: 'select',
+					from: 'users',
+					include: [{ relation: 'posts', ...extra }],
+				},
+				fixture(),
+				{
+					dialectCapabilities: FULL_CAPS,
+					defaultIncludeStrategy: 'where' in extra ? 'join' : 'json_agg',
+				},
+			);
+			expect(
+				report.decisions.find((d) => d.type === 'include-strategy')!
+					.alternatives,
+			).toEqual(expected);
+		});
+	}
+	for (const strategy of ['join', 'lateral', 'json_agg'] as const) {
+		it(`nested ${strategy} chain has no independently substitutable alternatives`, () => {
+			const report = plan(
+				{
+					type: 'select',
+					from: 'users',
+					include: [{ relation: 'posts', include: [{ relation: 'comments' }] }],
+				},
+				fixture(),
+				{ dialectCapabilities: FULL_CAPS, defaultIncludeStrategy: strategy },
+			);
+			for (const decision of report.decisions.filter(
+				(d) => d.type === 'include-strategy',
+			))
+				expect(decision.alternatives).toEqual([]);
+		});
+	}
+	it('flat capability refusal excludes nested strategies even when CTE is supported', () => {
+		expect(() =>
+			resolve(
+				'auto',
+				'lateral',
+				{},
+				{ ...FULL_CAPS, supportsLateralJoin: false },
+			),
+		).toThrow(
+			new UnsupportedStrategyError(
+				`Flat output for relation 'posts' requires a dialect with supportsLateralJoin; current dialect (${FULL_CAPS.name}) does not support it. Accepted strategies for flat output: 'join', 'lateral'.`,
+			),
+		);
+	});
+
+	for (const [hint, fallback, extra, expected, source] of [
+		['auto', 'auto', {}, 'join', 'flat output'],
+		['auto', 'auto', { limit: 0 }, 'lateral', 'per-parent limit'],
+		[
+			'auto',
+			'auto',
+			{ include: [{ relation: 'comments', strategy: 'flat', limit: 2 }] },
+			'lateral',
+			'per-parent limit',
+		],
+		['lateral', 'join', {}, 'lateral', 'relation hint'],
+	] as const) {
+		it(`reports ${source} for ${hint}/${fallback}/${JSON.stringify(extra)}`, () => {
+			const decision = resolve(hint, fallback, extra).decisions.find(
+				(d) => d.type === 'include-strategy',
+			)!;
+			expect(decision.choice).toBe(expected);
+			expect(decision.reasoning).toBe(
+				`Relation users.posts (hasMany, cardinality: many) - using ${expected} selected by ${source}`,
+			);
+		});
+	}
+	it('reports nested output shape selection', () => {
+		const decision = plan(
+			{ type: 'select', from: 'users', include: [{ relation: 'posts' }] },
+			fixture(),
+			{ dialectCapabilities: FULL_CAPS },
+		).decisions.find((d) => d.type === 'include-strategy')!;
+		expect(decision.reasoning).toBe(
+			'Relation users.posts (hasMany, cardinality: many) - using json_agg selected by nested output',
+		);
+	});
+	it('flat alternatives respect dialect capabilities', () => {
+		const decision = resolve('auto', 'auto', {}, NO_CTE_CAPS).decisions.find(
+			(d) => d.type === 'include-strategy',
+		)!;
+		expect(decision.alternatives).toEqual([]);
+	});
+	it('flat explicit join with limit lists only flat accepted strategies', () => {
+		expect(() =>
+			resolve('auto', 'lateral', { join: 'left', limit: 2 }),
+		).toThrow(
+			new InvalidOperationError(
+				'include',
+				"Flat output for relation 'posts' cannot use 'join' selected by explicit join because the include or a nested include has a per-parent limit. Accepted strategies for flat output: 'join', 'lateral'; per-parent limits require 'lateral' with a dialect that supports lateral joins.",
+			),
+		);
+	});
+	for (const strategy of ['flat', 'auto'] as const) {
+		it(`conflict reports the full nested include path on ${strategy}`, () => {
+			const model = fixture('join');
+			Object.assign(model.getRelation('posts.comments')!, {
+				includeStrategy: 'lateral',
+			});
+			expect(() =>
+				plan(
+					{
+						type: 'select',
+						from: 'users',
+						include: [
+							{
+								relation: 'posts',
+								strategy,
+								include: [{ relation: 'comments', strategy, join: 'left' }],
+							},
+						],
+					},
+					model,
+					{ dialectCapabilities: FULL_CAPS },
+				),
+			).toThrow(
+				new UnsupportedStrategyError(
+					"Include at include[0].include[0](comments) cannot use explicit join because relation 'comments' declares includeStrategy 'lateral'. Use 'auto' or 'join', or remove include.join.",
+				),
+			);
+		});
+	}
+	const limited = [
+		{ limit: 2 },
+		{
+			include: [{ relation: 'comments', strategy: 'flat' as const, limit: 2 }],
+		},
+	];
+	function resolve(
+		hint = 'auto',
+		defaultIncludeStrategy:
+			| 'auto'
+			| 'join'
+			| 'lateral'
+			| 'json_agg'
+			| 'cte' = 'auto',
+		extra = {},
+		dialectCapabilities = FULL_CAPS,
+	) {
+		return plan(
+			{
+				type: 'select',
+				from: 'users',
+				include: [{ relation: 'posts', strategy: 'flat', ...extra }],
+			},
+			fixture(hint),
+			{ defaultIncludeStrategy, dialectCapabilities },
+		);
+	}
+	function choices(report: ReturnType<typeof plan>) {
+		return report.decisions
+			.filter((d) => d.type === 'include-strategy')
+			.map((d) => d.choice);
+	}
+	for (const [hint, fallback, expected] of [
+		['join', 'lateral', 'join'],
+		['lateral', 'join', 'lateral'],
+	] as const) {
+		it(`hint ${hint} beats default ${fallback}`, () =>
+			expect(choices(resolve(hint, fallback))).toEqual([expected]));
+	}
+	for (const hint of ['json_agg', 'cte']) {
+		it(`refuses ${hint} hint for flat output`, () =>
+			expect(() => resolve(hint)).toThrow(
+				new UnsupportedStrategyError(
+					`Flat output for relation 'posts' cannot use relation includeStrategy hint '${hint}'. Use 'auto', 'join', or 'lateral'.`,
+				),
+			));
+	}
+	for (const [index, extra] of limited.entries()) {
+		for (const source of [
+			'relation includeStrategy hint',
+			'defaultIncludeStrategy',
+		]) {
+			it(`refuses ${source} join with ${index === 0 ? 'direct' : 'nested'} limit`, () =>
+				expect(() =>
+					resolve(
+						source === 'relation includeStrategy hint' ? 'join' : 'auto',
+						source === 'defaultIncludeStrategy' ? 'join' : 'lateral',
+						extra,
+					),
+				).toThrow(
+					new InvalidOperationError(
+						'include',
+						`Flat output for relation 'posts' cannot use 'join' selected by ${source} because the include or a nested include has a per-parent limit. Accepted strategies for flat output: 'join', 'lateral'; per-parent limits require 'lateral' with a dialect that supports lateral joins.`,
+					),
+				));
+		}
+	}
+	for (const fallback of ['join', 'lateral'] as const) {
+		it(`honours ${fallback} default without limit`, () =>
+			expect(choices(resolve('auto', fallback))).toEqual([fallback]));
+	}
+	for (const fallback of ['json_agg', 'cte', 'auto'] as const) {
+		it(`skips ${fallback} default without limit`, () =>
+			expect(choices(resolve('auto', fallback))).toEqual(['join']));
+		it(`skips ${fallback} default with limit`, () =>
+			expect(choices(resolve('auto', fallback, { limit: 2 }))).toEqual([
+				'lateral',
+			]));
+	}
+	for (const [hint, fallback, extra] of [
+		['auto', 'auto', { limit: 2 }],
+		['lateral', 'join', {}],
+		['auto', 'lateral', {}],
+	] as const) {
+		it(`refuses required lateral without capability (${hint}/${fallback})`, () =>
+			expect(() => resolve(hint, fallback, extra, NO_CTE_CAPS)).toThrow(
+				new UnsupportedStrategyError(
+					"Flat output for relation 'posts' requires a dialect with supportsLateralJoin; current dialect (test-no-cte) does not support it. Accepted strategies for flat output: 'join', 'lateral'.",
+				),
+			));
+	}
+	it('refuses a nested limit without lateral support', () =>
+		expect(() => resolve('auto', 'auto', limited[1], NO_CTE_CAPS)).toThrow(
+			new UnsupportedStrategyError(
+				"Flat output for relation 'posts' requires a dialect with supportsLateralJoin; current dialect (test-no-cte) does not support it. Accepted strategies for flat output: 'join', 'lateral'.",
+			),
+		));
+	it('skips json_agg default on a non-JSON dialect', () =>
+		expect(choices(resolve('auto', 'json_agg', {}, NO_CTE_CAPS))).toEqual([
+			'join',
+		]));
+	it('honours lateral default throughout nested flat chain', () =>
+		expect(
+			choices(
+				resolve('auto', 'lateral', {
+					include: [{ relation: 'comments', strategy: 'flat' }],
+				}),
+			),
+		).toEqual(['lateral', 'lateral']));
+	it('refuses a limit when no dialect capabilities are supplied', () => {
+		expect(() =>
+			plan(
+				{
+					type: 'select',
+					from: 'users',
+					include: [{ relation: 'posts', strategy: 'flat', limit: 0 }],
+				},
+				fixture(),
+			),
+		).toThrow(
+			new UnsupportedStrategyError(
+				"Flat output for relation 'posts' requires a dialect with supportsLateralJoin; current dialect (no capabilities) does not support it. Accepted strategies for flat output: 'join', 'lateral'.",
+			),
+		);
+	});
+	it('recursive stale hint uses recursive-specific accepted list', () => {
+		const db = schema({
+			categories: {
+				id: { type: 'integer', primaryKey: true },
+				parentId: ref('categories', {
+					roles: { parent: 'parent', children: 'children' },
+				}),
+			},
+		});
+		Object.assign(db.model.getRelation('categories.children')!, {
+			includeStrategy: 'subquery',
+		});
+		expect(() =>
+			plan(
+				{
+					type: 'select',
+					from: 'categories',
+					include: [{ relation: 'children', recursive: {} }],
+				},
+				db.model,
+				{ dialectCapabilities: FULL_CAPS },
+			),
+		).toThrow(
+			new UnsupportedStrategyError(
+				"Recursive include at include[0](children) requires strategy 'cte', but relation 'children' declares includeStrategy 'subquery'. Use 'auto' or 'cte'.",
+			),
+		);
 	});
 });

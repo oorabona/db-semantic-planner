@@ -3781,3 +3781,37 @@ describe('NQL literal null refusal (#891)', () => {
 		).toThrowError('LIKE pattern must be a string literal');
 	});
 });
+
+const include899Model = schema({
+	users: { id: { type: 'integer', primaryKey: true } },
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		authorId: ref('users', { inverse: 'posts' }),
+		title: 'text',
+	},
+}).model;
+for (const suffix of ['flat', 'limit posts 5']) {
+	it(`pins NQL relation projection with ${suffix}`, () => {
+		const nql = compile(
+			`users | select id, posts.title | ${suffix}`,
+			include899Model,
+		);
+		expect(nql.success).toBe(true);
+		if (!nql.ast?.query) throw new Error('Missing query');
+		expect(nql.ast.query.include?.[0]?.select).toBeUndefined();
+		const report = plan(nql.ast.query, include899Model, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
+		const result = createPgCompileOnlyAdapter({
+			model: include899Model,
+		}).compile(report, {
+			model: include899Model,
+		});
+		expect(result.sql).toBe(
+			suffix === 'flat'
+				? `SELECT users.id, posts.title AS "posts.title" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId"`
+				: `SELECT users.id, posts_lat_0.title AS "posts.title" FROM users LEFT JOIN LATERAL (SELECT posts_inner_0.title FROM posts AS posts_inner_0 WHERE posts_inner_0."authorId" = users.id ORDER BY posts_inner_0.id ASC NULLS LAST LIMIT 5) AS posts_lat_0 ON true`,
+		);
+		expect(result.parameters).toEqual([]);
+	});
+}

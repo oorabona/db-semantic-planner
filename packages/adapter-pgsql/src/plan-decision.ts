@@ -27,6 +27,10 @@ export interface PlanDecision {
 	readonly args?: readonly unknown[];
 	readonly conditions?: readonly PlanDecision[];
 	readonly columns?: readonly string[];
+	/** An include explicitly selected zero fields, distinct from legacy empty columns. */
+	readonly emptyProjection?: boolean;
+	/** Original include select form, retained for strategy validation. */
+	readonly includeSelectForm?: string;
 	readonly values?: readonly unknown[];
 	readonly set?: readonly { column: string; value: unknown }[];
 	readonly limit?: number | ParamIntent | { paramIndex: number };
@@ -44,6 +48,7 @@ export interface PlanDecision {
 	readonly relationType?: 'belongsTo' | 'hasMany' | 'hasOne';
 	readonly foreignKey?: ColumnListInput;
 	readonly parentKey?: ColumnListInput;
+	readonly includeOrderBy?: readonly import('@dbsp/types').OrderByIntent[];
 	readonly orderByFallback?: boolean;
 	// Nested json_agg children (for deep relation traversal)
 	readonly children?: readonly PlanDecision[];

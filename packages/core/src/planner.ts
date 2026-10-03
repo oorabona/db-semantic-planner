@@ -21,6 +21,7 @@ import type {
 } from '@dbsp/types';
 import { resolveJsonAggOrderKey, toColumnList } from '@dbsp/types';
 import { InvalidOperationError } from './dx/errors.js';
+import { validateLimit } from './dx/limit-validation.js';
 import {
 	getNodeIdAlias,
 	type IncludeIntent,
@@ -288,6 +289,7 @@ export function plan(
 	validateIncludeStrategy(
 		opts.defaultIncludeStrategy,
 		opts.dialectCapabilities,
+		false,
 	);
 
 	// Validate root table — skip when the FROM is a BatchValues unnest() source
@@ -335,6 +337,46 @@ export function plan(
 			}
 		}
 	}
+
+	// An alternative changes one decision only: resolved neighbors must still
+	// form a homogeneous include chain, and CTE cannot have include children.
+	const includeDecisions = state.decisions.filter(
+		(d) => d.type === 'include-strategy',
+	);
+	const decisionsByPath = new Map(
+		includeDecisions.map((decision) => [
+			String(decision.context.intentPath),
+			decision,
+		]),
+	);
+	const childrenByPath = new Map<string, PlanDecision[]>();
+	for (const decision of includeDecisions) {
+		const path = String(decision.context.intentPath);
+		if (!path.includes('.')) continue;
+		const parentPath = path.slice(0, path.lastIndexOf('.'));
+		const children = childrenByPath.get(parentPath) ?? [];
+		children.push(decision);
+		childrenByPath.set(parentPath, children);
+	}
+	state.decisions = state.decisions.map((decision) => {
+		if (decision.type !== 'include-strategy') return decision;
+		const path = String(decision.context.intentPath);
+		const parent = path.includes('.')
+			? decisionsByPath.get(path.slice(0, path.lastIndexOf('.')))
+			: undefined;
+		const children = childrenByPath.get(path) ?? [];
+		return {
+			...decision,
+			alternatives: decision.alternatives.filter(
+				(candidate) =>
+					(!parent ||
+						(parent.choice !== 'cte' && candidate === parent.choice)) &&
+					children.every(
+						(child) => candidate !== 'cte' && candidate === child.choice,
+					),
+			),
+		};
+	});
 
 	// Extract CTEs if enabled
 	if (opts.enableCTEs) {
@@ -1065,6 +1107,11 @@ function processInclude(
 	ancestorIsLeftJoin = false,
 ): void {
 	state.relationsAnalyzed++;
+	if (include.limit !== undefined)
+		validateLimit(
+			include.limit,
+			`Include ${intentPath}(${include.relation}) limit`,
+		);
 
 	// Check depth
 	if (depth > opts.maxIncludeDepth) {
@@ -1116,19 +1163,28 @@ function processInclude(
 	const isRecursiveInclude =
 		(!!include.recursive || !!relation.recursive) && isSelfReferentialRelation;
 
-	// Reject stale relation hints before recursive/join shortcuts can discard them.
-	validateIncludeStrategy(
-		relation.includeStrategy,
-		opts.dialectCapabilities,
-		false,
-	);
+	// Recursive hints have a narrower contract than generic include strategies.
+	if (isRecursiveInclude) {
+		if (
+			relation.includeStrategy !== 'auto' &&
+			relation.includeStrategy !== 'cte'
+		) {
+			throw new UnsupportedStrategyError(
+				`Recursive include at ${intentPath}(${include.relation}) requires strategy 'cte', but relation '${relation.name}' declares includeStrategy '${relation.includeStrategy}'. Use 'auto' or 'cte'.`,
+			);
+		}
+	} else {
+		validateIncludeStrategy(
+			relation.includeStrategy,
+			opts.dialectCapabilities,
+			false,
+		);
+	}
 	// Validate runtime strategy inputs before recursive/join shortcuts can discard them.
 	if (include.strategy !== undefined && include.strategy !== 'flat') {
 		validateIncludeStrategy(include.strategy, opts.dialectCapabilities);
 	}
-	// Determine include strategy
-	// Priority: 1) recursive → cte (if dialect supports it), 2) include.join → forces join strategy, 3) include.strategy override, 4) auto-detect
-	let includeStrategy: ResolvedIncludeStrategy;
+	let resolution: IncludeStrategyResolution;
 	if (isRecursiveInclude) {
 		if (include.join !== undefined) {
 			throw new UnsupportedStrategyError(
@@ -1136,8 +1192,7 @@ function processInclude(
 			);
 		}
 		// FIND-013: Guard recursive → cte against dialect capability.
-		// selectSmartStrategy handles the general case, but processInclude has
-		// an early-exit path that forces 'cte' before reaching it.  A dialect
+		// Recursive resolution requires explicit capability validation. A dialect
 		// that declared supportsRecursiveCTE=false must not silently receive an
 		// invalid plan.
 		if (!opts.dialectCapabilities?.supportsRecursiveCTE) {
@@ -1145,46 +1200,53 @@ function processInclude(
 				`Recursive include at ${intentPath}(${include.relation}) requires a dialect with supportsRecursiveCTE; current dialect (${opts.dialectCapabilities?.name ?? 'no capabilities'}) does not support it.`,
 			);
 		}
-		includeStrategy = 'cte';
-	} else if (include.join !== undefined) {
-		// Explicit join type forces the 'join' strategy (inner or left JOIN)
-		if (include.limit != null) {
-			throw new InvalidOperationError(
-				'include',
-				`include.limit cannot be applied with the 'join' strategy because join ` +
-					`cannot enforce per-parent-row limits. ` +
-					`Use strategy: 'flat' (→ LATERAL) or strategy: 'cte' explicitly.`,
-			);
-		}
-		includeStrategy = 'join';
-	} else if (include.strategy === 'flat') {
-		// NQL v2.1: flat = exclude nested output (json_agg), planner picks best flat strategy
-		// lateral only when per-row LIMIT is needed; otherwise join is simpler
-		// Also use lateral when any nested child has a limit (LATERAL cascade required)
-		const needsLateral = include.limit != null || hasNestedLimit(include);
-		includeStrategy = selectSmartStrategy(
-			relation,
-			opts.dialectCapabilities,
-			false,
-			/* excludeNested */ true,
-			/* hasLimit */ needsLateral,
-		);
+		resolution = { strategy: 'cte', source: 'recursive' };
 	} else {
-		includeStrategy = determineIncludeStrategy(relation, opts);
-		// FIND-014: include.limit cannot be enforced by the join strategy (which
-		// performs a flat JOIN without per-parent-row limiting).  Silently
-		// dropping the limit produces unlimited children — incorrect behaviour.
-		// Callers must explicitly request 'flat' (→ lateral) or 'cte' to get
-		// per-parent limiting.
-		if (include.limit != null && includeStrategy === 'join') {
-			throw new InvalidOperationError(
-				'include',
-				`include.limit cannot be applied with the 'join' strategy because join ` +
-					`cannot enforce per-parent-row limits. ` +
-					`Use strategy: 'flat' (→ LATERAL) or strategy: 'cte' explicitly.`,
-			);
+		resolution =
+			include.strategy === 'flat'
+				? determineFlatIncludeStrategy(relation, include, opts, intentPath)
+				: determineIncludeStrategy(relation, include, opts, intentPath);
+	}
+	const includeStrategy = resolution.strategy;
+
+	const optionPath = `${intentPath}(${include.relation})`;
+	if (includeStrategy === 'cte' || includeStrategy === 'join') {
+		for (const option of ['limit', 'orderBy'] as const) {
+			if (include[option] !== undefined) {
+				throw new InvalidOperationError(
+					'include',
+					`Include ${optionPath} ${option} is not supported by '${includeStrategy}' strategy.` +
+						(includeStrategy === 'join' && option === 'limit'
+							? ' Remove the explicit join or use a strategy that limits per parent (json_agg, lateral).'
+							: ''),
+				);
+			}
 		}
 	}
+	if (includeStrategy === 'lateral') {
+		if (include.orderBy !== undefined && include.limit === undefined)
+			throw new InvalidOperationError(
+				'include',
+				`Include ${optionPath} orderBy requires limit with 'lateral' strategy`,
+			);
+	}
+	if (
+		include.select !== undefined &&
+		(includeStrategy === 'cte' ||
+			(includeStrategy === 'join' && !supportsJoinIncludeSelect(include)))
+	)
+		throw new InvalidOperationError(
+			'include',
+			`Include ${optionPath} select is not supported by '${includeStrategy}' strategy.` +
+				(includeStrategy === 'join'
+					? ` Received select form: ${include.select.type}${include.select.type === 'fields' ? ` ${JSON.stringify(include.select.fields)}` : ''}.`
+					: ''),
+		);
+	if (includeStrategy === 'lateral' && !selectsWholeIncludeRow(include))
+		throw new InvalidOperationError(
+			'include',
+			`Include ${optionPath} select must select all columns with '${includeStrategy}' strategy`,
+		);
 
 	// Pre-compute join type for include-strategy decision embedding
 	// (only relevant when strategy is 'join')
@@ -1225,17 +1287,19 @@ function processInclude(
 					targetOrderKey: targetOrder.columns,
 				}),
 			...(targetOrder?.fallback && { orderByFallback: true }),
+			...(include.orderBy && { includeOrderBy: include.orderBy }),
 		},
 		choice: includeStrategy,
 		// Embed joinType so the adapter's join handler can use it directly
 		...(explicitJoinType !== undefined && { joinType: explicitJoinType }),
-		reasoning: isRecursiveInclude
-			? `Recursive include on self-referential relation "${relation.name}" → forced CTE strategy`
-			: generateIncludeReasoning(relation, includeStrategy),
-		alternatives: getAlternativeStrategies(
-			includeStrategy,
-			opts.dialectCapabilities,
-		),
+		reasoning: generateIncludeReasoning(relation, resolution),
+		alternatives: isRecursiveInclude
+			? []
+			: getAlternativeStrategies(
+					includeStrategy,
+					opts.dialectCapabilities,
+					include,
+				),
 	});
 
 	// CLI-012c: Warn if recursive is set but relation is not self-referential
@@ -1447,23 +1511,37 @@ function determineFilterStrategy(
  * Determine the include strategy for a relation.
  *
  * Strategy selection logic (CORE-006):
- * 1. If relation has explicit strategy (not 'auto'), use it (after validation)
- * 2. If planner option has explicit strategy (not 'auto'), use it
- * 3. Smart auto selection based on:
+ * 1. Explicit include.join (refuse conflicting concrete relation hints)
+ * 2. Concrete relation hint, then applicable planner default
+ * 3. Shape selection based on:
  *    - Query shape (flat output and per-parent limits)
  *    - Dialect capabilities (json_agg, lateral support)
  *    - Recursive relations → cte
  *
  * @throws {UnsupportedStrategyError} if requested strategy not supported by dialect
  */
-/**
- * Validate include strategies at planner and adapter entry points.
- * Adapters validate membership here and keep their existing handler capability checks.
- */
+/** Validate planner-facing inputs, including the unresolved 'auto' choice. */
 export function validateIncludeStrategy(
 	strategy: string,
 	capabilities: DialectCapabilities | undefined,
 	validateCapabilities = true,
+): ResolvedIncludeStrategy {
+	return validateStrategy(strategy, capabilities, validateCapabilities, true);
+}
+
+/** Validate adapter-facing decisions: only resolved strategies are accepted. */
+export function validateResolvedIncludeStrategy(
+	strategy: string,
+	capabilities: DialectCapabilities | undefined,
+): ResolvedIncludeStrategy {
+	return validateStrategy(strategy, capabilities, true, false);
+}
+
+function validateStrategy(
+	strategy: string,
+	capabilities: DialectCapabilities | undefined,
+	validateCapabilities: boolean,
+	allowAuto: boolean,
 ): ResolvedIncludeStrategy {
 	const checkCapabilities = validateCapabilities && capabilities !== undefined;
 	const supported = [
@@ -1473,36 +1551,128 @@ export function validateIncludeStrategy(
 			? ['lateral']
 			: []),
 		...(!checkCapabilities || capabilities.supportsRecursiveCTE ? ['cte'] : []),
+		...(allowAuto ? ['auto'] : []),
 	];
-	if (strategy === 'auto') return 'join';
 	if (!supported.includes(strategy)) {
+		if (!validateCapabilities) {
+			throw new UnsupportedStrategyError(
+				`Unknown strategy '${strategy}'. Valid strategies: ${supported.map((s) => `'${s}'`).join(', ')}.`,
+			);
+		}
 		throw new UnsupportedStrategyError(
 			`Strategy '${strategy}' is not supported by ${capabilities?.name ?? 'a dialect without capabilities'}. Supported strategies: ${supported.map((s) => `'${s}'`).join(', ')}.`,
 		);
 	}
+	return strategy === 'auto' ? 'join' : (strategy as ResolvedIncludeStrategy);
+}
 
-	return strategy as ResolvedIncludeStrategy;
+type IncludeStrategySource =
+	| 'explicit join'
+	| 'relation hint'
+	| 'defaultIncludeStrategy'
+	| 'per-parent limit'
+	| 'nested output'
+	| 'flat output'
+	| 'recursive';
+interface IncludeStrategyResolution {
+	strategy: ResolvedIncludeStrategy;
+	source: IncludeStrategySource;
+}
+
+/** Shared precedence for non-recursive includes, before branch selection. */
+function resolveIncludeAuthority(
+	relation: RelationIR,
+	include: IncludeIntent,
+	opts: Required<PlanOptions>,
+	intentPath: string,
+): IncludeStrategyResolution | undefined {
+	if (include.join !== undefined) {
+		if (
+			relation.includeStrategy !== 'auto' &&
+			relation.includeStrategy !== 'join'
+		) {
+			throw new UnsupportedStrategyError(
+				`Include at ${intentPath}(${include.relation}) cannot use explicit join because relation '${relation.name}' declares includeStrategy '${relation.includeStrategy}'. Use 'auto' or 'join', or remove include.join.`,
+			);
+		}
+		return { strategy: 'join', source: 'explicit join' };
+	}
+	if (relation.includeStrategy !== 'auto') {
+		return { strategy: relation.includeStrategy, source: 'relation hint' };
+	}
+	const strategy = opts.defaultIncludeStrategy;
+	if (
+		strategy &&
+		strategy !== 'auto' &&
+		(include.strategy !== 'flat' ||
+			strategy === 'join' ||
+			strategy === 'lateral')
+	) {
+		return { strategy, source: 'defaultIncludeStrategy' };
+	}
+	return undefined;
 }
 
 function determineIncludeStrategy(
 	relation: RelationIR,
+	include: IncludeIntent,
 	opts: Required<PlanOptions>,
-	isRecursive = false,
-): ResolvedIncludeStrategy {
-	const capabilities = opts.dialectCapabilities;
+	intentPath: string,
+): IncludeStrategyResolution {
+	const resolution = resolveIncludeAuthority(
+		relation,
+		include,
+		opts,
+		intentPath,
+	) ?? {
+		strategy: selectNestedOutputStrategy(opts.dialectCapabilities),
+		source: 'nested output' as const,
+	};
+	validateIncludeStrategy(resolution.strategy, opts.dialectCapabilities);
+	return resolution;
+}
 
-	// 1. Use relation hint if not auto (explicit override)
-	if (relation.includeStrategy !== 'auto') {
-		return validateIncludeStrategy(relation.includeStrategy, capabilities);
+/** Resolve applicable authority inputs before validating flat output and limits. */
+function determineFlatIncludeStrategy(
+	relation: RelationIR,
+	include: IncludeIntent,
+	opts: Required<PlanOptions>,
+	intentPath: string,
+): IncludeStrategyResolution {
+	const needsLateral = include.limit != null || hasNestedLimit(include);
+	const resolution = resolveIncludeAuthority(
+		relation,
+		include,
+		opts,
+		intentPath,
+	) ?? {
+		strategy: needsLateral ? ('lateral' as const) : ('join' as const),
+		source: needsLateral
+			? ('per-parent limit' as const)
+			: ('flat output' as const),
+	};
+	const { strategy: selected, source } = resolution;
+	if (selected === 'json_agg' || selected === 'cte') {
+		throw new UnsupportedStrategyError(
+			`Flat output for relation '${relation.name}' cannot use relation includeStrategy hint '${selected}'. Use 'auto', 'join', or 'lateral'.`,
+		);
 	}
-
-	// 2. Use planner option if specified (CLI-010: runtime override)
-	if (opts.defaultIncludeStrategy && opts.defaultIncludeStrategy !== 'auto') {
-		return validateIncludeStrategy(opts.defaultIncludeStrategy, capabilities);
+	if (selected === 'join' && needsLateral) {
+		throw new InvalidOperationError(
+			'include',
+			`Flat output for relation '${relation.name}' cannot use 'join' selected by ${source === 'relation hint' ? 'relation includeStrategy hint' : source} because the include or a nested include has a per-parent limit. Accepted strategies for flat output: 'join', 'lateral'; per-parent limits require 'lateral' with a dialect that supports lateral joins.`,
+		);
 	}
-
-	// 3. Auto selection based on recursion, query shape, and dialect capabilities
-	return selectSmartStrategy(relation, capabilities, isRecursive);
+	if (
+		selected === 'lateral' &&
+		!opts.dialectCapabilities?.supportsLateralJoin
+	) {
+		throw new UnsupportedStrategyError(
+			`Flat output for relation '${relation.name}' requires a dialect with supportsLateralJoin; current dialect (${opts.dialectCapabilities?.name ?? 'no capabilities'}) does not support it. Accepted strategies for flat output: 'join', 'lateral'.`,
+		);
+	}
+	validateIncludeStrategy(selected, opts.dialectCapabilities);
+	return resolution;
 }
 
 /**
@@ -1518,51 +1688,11 @@ function hasNestedLimit(include: IncludeIntent): boolean {
 	return false;
 }
 
-/**
- * Smart strategy selection based on relation characteristics and dialect.
- *
- * Selection algorithm:
- * - Recursive relations → 'cte' (requires recursive CTE support)
- * - All non-recursive cardinalities: json_agg if supported and nested output allowed
- * - Otherwise lateral if a per-parent limit is needed and supported
- * - Otherwise join
- */
-function selectSmartStrategy(
-	relation: RelationIR,
+/** Select nested output when no applicable authority overrides it. */
+function selectNestedOutputStrategy(
 	capabilities: DialectCapabilities | undefined,
-	isRecursive: boolean,
-	excludeNested = false,
-	hasLimit = false,
 ): ResolvedIncludeStrategy {
-	// Recursive relations should use CTE
-	if (isRecursive) {
-		if (capabilities?.supportsRecursiveCTE) {
-			return 'cte';
-		}
-		throw new UnsupportedStrategyError(
-			`Recursive include '${relation.name}' requires a dialect with supportsRecursiveCTE; current dialect (${capabilities?.name ?? 'no capabilities'}) does not support it.`,
-		);
-	}
-
-	// Default strategy for ALL relation types: json_agg
-	// Rationale:
-	// - json_agg: aggregates children into single JSON array, no row explosion
-	// - Works for both to-one (hasOne, belongsTo) and to-many (hasMany)
-	// - User can force JOIN via | flat modifier if data is too large for JSON
-	// - lateral: only when per-row LIMIT is needed (top N children pattern)
-	// - join: simple flat strategy, well-optimized by the database
-
-	if (capabilities?.supportsJsonAgg && !excludeNested) {
-		return 'json_agg';
-	}
-
-	// LATERAL only when per-row LIMIT is needed — otherwise join is simpler and faster
-	if (hasLimit && capabilities?.supportsLateralJoin) {
-		return 'lateral';
-	}
-
-	// Fallback: use join (database optimizer handles it)
-	return 'join';
+	return capabilities?.supportsJsonAgg ? 'json_agg' : 'join';
 }
 
 /**
@@ -1575,23 +1705,60 @@ export class UnsupportedStrategyError extends Error {
 	}
 }
 
-/**
- * Get alternative strategies for a given strategy based on dialect capabilities.
- */
+/** Join includes honour only omitted select or plain field selections. */
+function supportsJoinIncludeSelect(include: IncludeIntent): boolean {
+	const select = include.select;
+	return (
+		select === undefined ||
+		(select.type === 'fields' && !select.fields.includes('*'))
+	);
+}
+
+/** Whether an include requests the entire related row. */
+function selectsWholeIncludeRow(include: IncludeIntent): boolean {
+	const select = include.select;
+	return (
+		!select ||
+		select.type === 'all' ||
+		(select.type === 'fields' &&
+			select.fields.length === 1 &&
+			select.fields[0] === '*')
+	);
+}
+
+/** Get alternatives that honour the include options and dialect capabilities. */
 function getAlternativeStrategies(
 	strategy: ResolvedIncludeStrategy,
 	capabilities: DialectCapabilities | undefined,
+	include: IncludeIntent,
 ): string[] {
-	const allStrategies: ResolvedIncludeStrategy[] = [
-		'join',
-		'cte',
-		'lateral',
-		'json_agg',
-	];
+	const allStrategies: ResolvedIncludeStrategy[] =
+		include.strategy === 'flat'
+			? ['join', 'lateral']
+			: ['join', 'cte', 'lateral', 'json_agg'];
 
 	// Filter out current strategy and unsupported ones
 	return allStrategies.filter((s) => {
 		if (s === strategy) return false;
+		if (include.join !== undefined && s !== 'join') return false;
+		if (include.where && s !== 'join') return false;
+		if (
+			(include.limit != null || include.orderBy !== undefined) &&
+			(s === 'join' || s === 'cte')
+		)
+			return false;
+		if (include.strategy === 'flat' && hasNestedLimit(include) && s === 'join')
+			return false;
+		if (s === 'cte' && include.include?.length) return false;
+		if (s === 'lateral') {
+			if (include.orderBy !== undefined && include.limit === undefined)
+				return false;
+		}
+		if (include.select !== undefined) {
+			if (s === 'cte') return false;
+			if (s === 'join' && !supportsJoinIncludeSelect(include)) return false;
+		}
+		if (s === 'lateral' && !selectsWholeIncludeRow(include)) return false;
 		if (!capabilities) return s === 'join'; // No capabilities = only basic strategies
 		if (s === 'lateral' && !capabilities.supportsLateralJoin) return false;
 		if (s === 'json_agg' && !capabilities.supportsJsonAgg) return false;
@@ -1758,20 +1925,13 @@ function generateFilterReasoning(
 
 function generateIncludeReasoning(
 	relation: RelationIR,
-	strategy: ResolvedIncludeStrategy,
+	resolution: IncludeStrategyResolution,
 ): string {
-	const prefix = `Relation ${relation.source}.${relation.name} (${relation.type}, cardinality: ${relation.cardinality})`;
-
-	switch (strategy) {
-		case 'join':
-			return `${prefix} - using JOIN for efficient single-query fetch`;
-		case 'cte':
-			return `${prefix} - using CTE for recursive/hierarchical traversal`;
-		case 'lateral':
-			return `${prefix} - using LATERAL JOIN for per-row correlated subquery (LIMIT per parent)`;
-		case 'json_agg':
-			return `${prefix} - using JSON aggregation to avoid row explosion`;
+	if (resolution.source === 'recursive') {
+		return `Recursive include on self-referential relation "${relation.name}" → forced CTE strategy`;
 	}
+	const prefix = `Relation ${relation.source}.${relation.name} (${relation.type}, cardinality: ${relation.cardinality})`;
+	return `${prefix} - using ${resolution.strategy} selected by ${resolution.source}`;
 }
 
 function generateJoinReasoning(
