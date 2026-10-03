@@ -822,15 +822,16 @@ app.get('/health/ready', async (req, res) => {
 
 ### Include Strategy Selection
 
-DBSP automatically selects include strategies, but you can optimize:
+For non-recursive includes, the planner resolves explicit `include.join`, then the relation `includeStrategy` hint, then an applicable `defaultIncludeStrategy`, then query shape. Explicit join refuses conflicting `json_agg`, `lateral`, or `cte` hints; a default only fills the gap.
 
-| Relation | Best Strategy | When |
-|----------|---------------|------|
-| belongsTo | `join` | Always (single row) |
-| hasOne | `join` | Always (single row) |
-| hasMany (few) | `lateral` | < 100 related rows |
-| hasMany (many) | `separate` | > 100 related rows |
-| manyToMany | `separate` | Usually |
+| Output shape | Automatic strategy | When |
+|--------------|--------------------|------|
+| Nested, any cardinality | `json_agg` | Dialect supports JSON aggregation; otherwise `join` |
+| Flat | `lateral` | Direct or nested per-parent limit; requires lateral support |
+| Flat | `join` | No per-parent limit |
+| Recursive | `cte` | Requires recursive CTE support; default ignored and explicit join refused |
+
+Flat output accepts only `join` or `lateral`; incompatible hints fail planning and defaults of `json_agg`, `cte`, or `auto` are skipped. Selected strategies remain subject to dialect capabilities and operation constraints. See [result hydration](./result-hydration.md) for the full contract.
 
 ### Query Batching
 

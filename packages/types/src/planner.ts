@@ -71,6 +71,8 @@ export interface PlanDecision {
 		 * Uses the target table primary key, or all target columns when no PK is declared.
 		 */
 		readonly targetOrderKey?: readonly JsonAggOrderByEntry[];
+		/** Authored include ordering, preserved separately from the fallback key. */
+		readonly includeOrderBy?: readonly import('./intent/include-intent.js').IncludeOrderByIntent[];
 		/** True when the target order key is the no-PK deterministic fallback. */
 		readonly orderByFallback?: boolean;
 		/** Adapter-emitted JSON key → model column map for json_agg hydration. */
@@ -237,6 +239,8 @@ export interface PlanOptions {
 	 * - 'lateral': Use LATERAL JOIN (PostgreSQL) / CROSS APPLY (MSSQL)
 	 * - 'json_agg': Use JSON aggregation (PostgreSQL/MySQL/DuckDB)
 	 * - 'auto': Smart selection based on relation type + dialect capabilities
+	 * Applies only to non-recursive includes. Recursive includes always use 'cte',
+	 * regardless of this default; their relation hint must be 'auto' or 'cte'.
 	 * @default 'auto'
 	 */
 	defaultIncludeStrategy?: IncludeStrategy;

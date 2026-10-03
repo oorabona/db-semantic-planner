@@ -20,8 +20,10 @@ const adapter = createPgCompileOnlyAdapter({ model: db.model });
 const orm = createOrm({ schema: db, adapter });
 // Stale values cross the runtime API boundary despite the removed type member.
 const removed = 'subquery' as unknown as IncludeStrategy;
-const error =
+const resolvedError =
 	"Strategy 'subquery' is not supported by postgresql. Supported strategies: 'join', 'json_agg', 'lateral', 'cte'.";
+
+const error = resolvedError.replace("'cte'.", "'cte', 'auto'.");
 
 describe('#894 removed include strategy refusal', () => {
 	it('refuses defaultIncludeStrategy at the public boundary', () => {
@@ -31,7 +33,9 @@ describe('#894 removed include strategy refusal', () => {
 				.withPlanOptions({ defaultIncludeStrategy: removed })
 				.include('posts')
 				.dump(),
-		).toThrow(error);
+		).toThrow(
+			"Unknown strategy 'subquery'. Valid strategies: 'join', 'json_agg', 'lateral', 'cte', 'auto'.",
+		);
 	});
 	it('refuses per-include strategy at the public boundary', () => {
 		const options = { strategy: removed } as unknown as Parameters<
@@ -49,7 +53,7 @@ describe('#894 removed include strategy refusal', () => {
 				d.type === 'include-strategy' ? { ...d, choice: removed } : d,
 			),
 		} as PlanReport;
-		expect(() => adapter.compile(stale)).toThrow(error);
+		expect(() => adapter.compile(stale)).toThrow(resolvedError);
 	});
 	for (const missing of [false, true]) {
 		it(`refuses recursive include with ${missing ? 'no capabilities' : 'no recursive CTE support'}`, () => {
@@ -74,4 +78,70 @@ describe('#894 removed include strategy refusal', () => {
 			);
 		});
 	}
+});
+
+describe('#900 recursive strategy contract', () => {
+	it('ignores the non-recursive default for recursion and lists no alternatives', () => {
+		const dump = orm
+			.select('categories')
+			.withPlanOptions({ defaultIncludeStrategy: 'join' })
+			.include('children', { recursive: true, direction: 'descendants' })
+			.dump();
+		const decision = dump.plan?.decisions.find(
+			(d) => d.type === 'include-strategy',
+		);
+		expect(decision?.choice).toBe('cte');
+		expect(decision?.alternatives).toEqual([]);
+	});
+	for (const hint of ['join', 'json_agg', 'lateral'] as const) {
+		it(`refuses recursive relation hint ${hint}`, () => {
+			const model: typeof db.model = Object.assign(
+				Object.create(Object.getPrototypeOf(db.model)),
+				{
+					...db.model,
+					relations: new Map(
+						[...db.model.relations].map(([key, r]) => [
+							key,
+							r.name === 'children' ? { ...r, includeStrategy: hint } : r,
+						]),
+					),
+				},
+			);
+			const localAdapter = createPgCompileOnlyAdapter({ model });
+			const localOrm = createOrm({
+				schema: { ...db, model },
+				adapter: localAdapter,
+			});
+			expect(() =>
+				localOrm
+					.select('categories')
+					.include('children', { recursive: true, direction: 'descendants' })
+					.dump(),
+			).toThrow(
+				`Recursive include at include[0](children) requires strategy 'cte', but relation 'children' declares includeStrategy '${hint}'. Use 'auto' or 'cte'.`,
+			);
+		});
+	}
+	it('accepts auto as a planner input', () => {
+		expect(
+			orm
+				.select('users')
+				.withPlanOptions({ defaultIncludeStrategy: 'auto' })
+				.include('posts')
+				.dump()
+				.plan?.decisions.find((d) => d.type === 'include-strategy')?.choice,
+		).toBe('json_agg');
+	});
+	it('refuses auto as an adapter decision and lists only resolved strategies', () => {
+		const p = orm.select('users').include('posts').dump().plan!;
+		const unresolved = {
+			...p,
+			decisions: p.decisions.map((d) =>
+				d.type === 'include-strategy' ? { ...d, choice: 'auto' } : d,
+			),
+		} as PlanReport;
+		expect(() => adapter.compile(unresolved)).toThrow(
+			"Strategy 'auto' is not supported by postgresql. Supported strategies: 'join', 'json_agg', 'lateral', 'cte'.",
+		);
+	});
 });

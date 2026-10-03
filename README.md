@@ -33,7 +33,8 @@ const result = await orm
 
 // result.plan.decisions
 // → [{ type: 'include-strategy', choice: 'json_agg',
-//      reason: 'using JSON aggregation to avoid row explosion' }]
+//      context: { relation: 'posts', ... },
+//      reasoning: 'Relation users.posts (hasMany, cardinality: many) - using json_agg selected by nested output', ... }]
 
 // result.params → [true]
 ```

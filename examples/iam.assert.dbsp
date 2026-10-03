@@ -314,7 +314,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 35
 success: true
-sql.equals: SELECT users.*, "userRoles_lat_0".* FROM iam_example.users LEFT JOIN LATERAL ( SELECT "userRoles_inner_0".* FROM iam_example.user_roles AS "userRoles_inner_0" WHERE "userRoles_inner_0".user_id = users.id LIMIT 2 ) AS "userRoles_lat_0" ON true
+sql.equals: SELECT users.*, "userRoles_lat_0".* FROM iam_example.users LEFT JOIN LATERAL (SELECT "userRoles_inner_0".* FROM iam_example.user_roles AS "userRoles_inner_0" WHERE "userRoles_inner_0".user_id = users.id ORDER BY "userRoles_inner_0".id ASC NULLS LAST LIMIT 2) AS "userRoles_lat_0" ON true
 params.equals: []
 db.rows.equals: 8
 

@@ -81,16 +81,20 @@ export interface IncludeIntent {
 
 	/**
 	 * Maximum number of related records to include per parent.
-	 * Only effective with LATERAL JOIN strategy (PostgreSQL/DuckDB/MSSQL).
+	 * JSON_AGG limits ordered related rows per parent, appending primary-key
+	 * tie-breakers; without a primary key or unique ordering it refuses the limit.
+	 * LATERAL also supports ordered per-parent limits. JOIN and CTE refuse them.
+	 * Values must be non-negative safe integers.
 	 * @example limit: 5 - fetch at most 5 related records per parent
 	 */
 	readonly limit?: number | undefined;
 
 	/**
-	 * Order by for related records (used with limit).
+	 * Field-only total ordering: json_agg with or without limit; lateral with limit.
+	 * Join and CTE refuse ordering. Omitted nulls use database defaults.
 	 * @example orderBy: [{ field: 'createdAt', direction: 'desc' }]
 	 */
-	readonly orderBy?: readonly OrderByIntent[] | undefined;
+	readonly orderBy?: readonly IncludeOrderByIntent[] | undefined;
 
 	/**
 	 * CLI-012c: Enable recursive CTE for self-referential relations.
@@ -112,12 +116,15 @@ export interface IncludeIntent {
 	 * based on recursion, query shape, and dialect capabilities.
 	 *
 	 * - 'auto': Let planner decide freely, including json_agg (default)
-	 * - 'flat': Exclude json_agg from candidates; planner picks best flat strategy
+	 * - 'flat': Honour join/lateral hints and defaults; refuse json_agg/cte hints.
+	 *   Defaults of auto, json_agg, and cte do not apply to flat output.
+	 *   Otherwise pick lateral for direct or nested limits, join without limits.
+	 *   Selected join with limits or unsupported lateral is refused.
 	 *
 	 * @example
 	 * // NQL: orders | select *, customer.* | flat
 	 * // Results in: include: [{ relation: 'customer', strategy: 'flat' }]
-	 * // Planner then picks lateral, join, or cte (never json_agg)
+	 * // Planner then picks lateral or join (never json_agg or cte)
 	 */
 	readonly strategy?: 'auto' | 'flat' | undefined;
 
@@ -126,7 +133,9 @@ export interface IncludeIntent {
 	 * - 'left' (default): LEFT JOIN — all root rows returned, NULL for unmatched relations
 	 * - 'inner': INNER JOIN — only root rows WITH a matching related record are returned
 	 *
-	 * Forces the 'join' include strategy (overrides auto-selection).
+	 * Forces 'join' before the relation hint, applicable defaultIncludeStrategy, and shape selection.
+	 * Conflicts with concrete relation hints other than 'join'; 'auto' and 'join' are accepted.
+	 * A plan-level default only fills the gap and never conflicts with explicit join.
 	 * Recursive includes compile as a CTE and refuse join (#894).
 	 *
 	 * @example
@@ -182,3 +191,6 @@ export interface OrderByExpressionIntent {
  * XOR: exactly one of `field` or `expression` must be present.
  */
 export type OrderByIntent = OrderByFieldIntent | OrderByExpressionIntent;
+
+/** Field-only ordering for includes. Expressions are refused at runtime. */
+export type IncludeOrderByIntent = OrderByFieldIntent;

@@ -3577,7 +3577,15 @@ describe('PlanCompiler - Coverage Tests', () => {
 					} as any,
 				],
 			};
-			const compiler = new PlanCompiler();
+			const compiler = new PlanCompiler({
+				model: schema({
+					posts: { id: { type: 'integer', primaryKey: true } },
+					comments: {
+						id: { type: 'integer', primaryKey: true },
+						post_id: 'integer',
+					},
+				}).model,
+			});
 			const result = compiler.compile(plan);
 			const sql = normalizeSQL(result.sql);
 			expect(sql).toContain('lateral');

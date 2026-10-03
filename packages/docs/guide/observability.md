@@ -31,7 +31,7 @@ console.log(dump.params);
 // [true]
 
 console.log(dump.plan?.decisions);
-// [{ type: 'include-strategy', relation: 'posts', choice: 'json_agg', reason: '...' }]
+// [{ type: 'include-strategy', context: { relation: 'posts', ... }, choice: 'json_agg', reasoning: '...', ... }]
 
 console.log(dump.plan?.warnings);
 // [] — empty means no performance concerns
@@ -64,10 +64,9 @@ The `plan.decisions` array records every choice the planner made and why. Use it
 const dump = orm.select('users').include('posts').dump();
 
 for (const decision of dump.plan?.decisions ?? []) {
-  console.log(decision.type, decision.choice, decision.reason);
+  console.log(decision.type, decision.choice, decision.reasoning);
 }
-// include-strategy  json_agg  "simple 1:N with no filter on relation"
-// filter-strategy   where     "eq on scalar column"
+// include-strategy json_agg Relation users.posts (hasMany, cardinality: many) - using json_agg selected by nested output
 ```
 
 Common decision types:

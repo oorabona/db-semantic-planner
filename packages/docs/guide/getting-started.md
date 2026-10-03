@@ -286,7 +286,7 @@ console.log(dump.params);
 // [true]
 
 console.log(dump.plan?.decisions);
-// [{ type: 'include-strategy', relation: 'posts', choice: 'json_agg', reason: '...' }]
+// [{ type: 'include-strategy', context: { relation: 'posts', ... }, choice: 'json_agg', reasoning: '...', ... }]
 
 console.log(dump.plan?.warnings);
 // [] — empty means no performance concerns

@@ -96,6 +96,7 @@ export {
 	type FieldRef,
 	getNodeIdAlias,
 	type IncludeIntent,
+	type IncludeOrderByIntent,
 	type IncludeRecursiveOptions,
 	type InsertFromIntent,
 	type InsertIntent,

@@ -43,9 +43,11 @@ to reassemble the rows.
 |----------------------|-----------------|-----------|
 | `belongsTo` / `hasOne` (to-one) | `json_agg` | Same capability-based selection as to-many |
 | `hasMany` / `manyToMany` (to-many) | `json_agg` | Avoids row explosion |
-| Any + explicit override | as specified | User intent wins |
+| Non-recursive include without explicit join + relation `includeStrategy` hint | Requested compatible strategy | The hint is honoured; flat output accepts only `join` or `lateral`, otherwise planning fails |
 
-These defaults apply to non-recursive includes with nested output. Recursion requires CTE support. With flat output (`| flat`), the planner selects `lateral` when the include has a limit and the dialect supports it, and `join` otherwise. Explicit overrides are validated against dialect capabilities.
+These defaults apply to non-recursive includes with nested output. Recursive includes always compile as `cte`, require recursive CTE support, ignore `defaultIncludeStrategy`, and accept only `auto` or `cte` as the relation hint. For flat output (`| flat` or `strategy: 'flat'`), a relation hint of `join` or `lateral` is honoured, while `json_agg` or `cte` is refused. A `defaultIncludeStrategy` of `join` or `lateral` applies to flat output; `json_agg`, `cte`, and `auto` do not apply to that branch. If no compatible hint or default applies, the planner selects `lateral` when the include or any nested include has a per-parent limit, and `join` otherwise. When a limit requires `lateral`, planning fails if `join` was selected or the dialect does not support lateral joins; the planner never silently drops the limit or replaces a selected strategy. Selected strategies remain subject to dialect capabilities and existing operation constraints. Mixed parent/child strategies and includes nested under a `cte` include are refused before SQL is generated.
+
+For every non-recursive include, explicit `include.join` takes precedence, then the relation `includeStrategy` hint, then an applicable `defaultIncludeStrategy`, then shape selection; explicit join conflicts with concrete hints other than `join` (`json_agg`, `lateral`, `cte`) and is refused, while a plan-level default only fills the gap.
 
 The planner encodes this as:
 ```typescript
@@ -361,3 +363,22 @@ foreign keys and measure the query cost for your workload.
 - **LEFT JOIN null propagation.** When a `join` strategy include has no match
   (LEFT JOIN returns all-null columns), the hydrator sets `relation: null`
   rather than an empty object. Check `allNull` logic in `hydrateJoinIncludes()`.
+
+Include options are honoured or refused at every depth. Limits must be non-negative
+safe integers. `json_agg` honours field-only `orderBy` with or without a limit;
+its array follows that order, with primary-key tie-breakers last. Ordered includes
+require a provable total order. JSON aggregation limits ordered rows per parent
+before aggregation, independently at each nested depth. Omitted null placement uses PostgreSQL defaults
+(ASC: NULLS LAST; DESC: NULLS FIRST); explicit `first`/`last` is preserved.
+Lateral limits order rows inside the subquery before limiting each parent;
+lateral `orderBy` without a limit is refused because flat row order is not
+observable without root ordering. Join refuses `orderBy` and `limit`; remove an
+explicit join or use `json_agg` or lateral for per-parent limits. Ordinary and
+recursive CTE includes refuse `limit` and `orderBy`, including nested includes.
+Include ordering accepts fields only; runtime expressions are refused with the
+include path and option. `json_agg` builds wide field projections and child
+properties independently in chunks of at most 50 key/value pairs joined with
+`||`. Lateral include `select` must select all columns (omitted, `all`, or fields
+`['*']`); partial projections are refused with the include path. NQL relation
+selections are root relation columns, so `users | select id, posts.title | flat`
+and `users | select id, posts.title | limit posts 5` retain their behaviour.
