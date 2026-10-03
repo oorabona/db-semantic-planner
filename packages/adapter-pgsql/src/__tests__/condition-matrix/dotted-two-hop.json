@@ -91,22 +91,6 @@
 		{
 			"position": "dotted-two-hop",
 			"kind": "neq",
-			"shape": "empty-or",
-			"sql": "SELECT users.* FROM users WHERE false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "dotted-two-hop",
-			"kind": "neq",
-			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE true",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "dotted-two-hop",
-			"kind": "neq",
 			"shape": "two-level",
 			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score = $1)) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_3 WHERE posts_exists_2.id = comments_exists_3.\"postId\" AND comments_exists_3.score <> $2))) OR EXISTS (SELECT 1 FROM posts AS posts_exists_4 WHERE users.id = posts_exists_4.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_5 WHERE posts_exists_4.id = comments_exists_5.\"postId\" AND comments_exists_5.score = $3)))",
 			"params": [13, 7, 17],
@@ -142,22 +126,6 @@
 			"shape": "not",
 			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score > $1)))",
 			"params": [7],
-			"error": null
-		},
-		{
-			"position": "dotted-two-hop",
-			"kind": "gt",
-			"shape": "empty-or",
-			"sql": "SELECT users.* FROM users WHERE false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "dotted-two-hop",
-			"kind": "gt",
-			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE true",
-			"params": [],
 			"error": null
 		},
 		{
@@ -203,22 +171,6 @@
 		{
 			"position": "dotted-two-hop",
 			"kind": "gte",
-			"shape": "empty-or",
-			"sql": "SELECT users.* FROM users WHERE false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "dotted-two-hop",
-			"kind": "gte",
-			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE true",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "dotted-two-hop",
-			"kind": "gte",
 			"shape": "two-level",
 			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score = $1)) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_3 WHERE posts_exists_2.id = comments_exists_3.\"postId\" AND comments_exists_3.score >= $2))) OR EXISTS (SELECT 1 FROM posts AS posts_exists_4 WHERE users.id = posts_exists_4.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_5 WHERE posts_exists_4.id = comments_exists_5.\"postId\" AND comments_exists_5.score = $3)))",
 			"params": [13, 7, 17],
@@ -254,22 +206,6 @@
 			"shape": "not",
 			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score < $1)))",
 			"params": [7],
-			"error": null
-		},
-		{
-			"position": "dotted-two-hop",
-			"kind": "lt",
-			"shape": "empty-or",
-			"sql": "SELECT users.* FROM users WHERE false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "dotted-two-hop",
-			"kind": "lt",
-			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE true",
-			"params": [],
 			"error": null
 		},
 		{
@@ -315,22 +251,6 @@
 		{
 			"position": "dotted-two-hop",
 			"kind": "lte",
-			"shape": "empty-or",
-			"sql": "SELECT users.* FROM users WHERE false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "dotted-two-hop",
-			"kind": "lte",
-			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE true",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "dotted-two-hop",
-			"kind": "lte",
 			"shape": "two-level",
 			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score = $1)) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_3 WHERE posts_exists_2.id = comments_exists_3.\"postId\" AND comments_exists_3.score <= $2))) OR EXISTS (SELECT 1 FROM posts AS posts_exists_4 WHERE users.id = posts_exists_4.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_5 WHERE posts_exists_4.id = comments_exists_5.\"postId\" AND comments_exists_5.score = $3)))",
 			"params": [13, 7, 17],
@@ -371,22 +291,6 @@
 		{
 			"position": "dotted-two-hop",
 			"kind": "isDistinctFrom",
-			"shape": "empty-or",
-			"sql": "SELECT users.* FROM users WHERE false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "dotted-two-hop",
-			"kind": "isDistinctFrom",
-			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE true",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "dotted-two-hop",
-			"kind": "isDistinctFrom",
 			"shape": "two-level",
 			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score = $1)) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_3 WHERE posts_exists_2.id = comments_exists_3.\"postId\" AND comments_exists_3.score IS DISTINCT FROM $2))) OR EXISTS (SELECT 1 FROM posts AS posts_exists_4 WHERE users.id = posts_exists_4.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_5 WHERE posts_exists_4.id = comments_exists_5.\"postId\" AND comments_exists_5.score = $3)))",
 			"params": [13, 7, 17],
@@ -421,22 +325,6 @@
 			"kind": "eq-null",
 			"shape": "not",
 			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score = NULL)))",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "dotted-two-hop",
-			"kind": "eq-null",
-			"shape": "empty-or",
-			"sql": "SELECT users.* FROM users WHERE false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "dotted-two-hop",
-			"kind": "eq-null",
-			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE true",
 			"params": [],
 			"error": null
 		},
@@ -483,22 +371,6 @@
 		{
 			"position": "dotted-two-hop",
 			"kind": "like",
-			"shape": "empty-or",
-			"sql": "SELECT users.* FROM users WHERE false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "dotted-two-hop",
-			"kind": "like",
-			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE true",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "dotted-two-hop",
-			"kind": "like",
 			"shape": "two-level",
 			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score = $1)) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_3 WHERE posts_exists_2.id = comments_exists_3.\"postId\" AND comments_exists_3.name LIKE $2))) OR EXISTS (SELECT 1 FROM posts AS posts_exists_4 WHERE users.id = posts_exists_4.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_5 WHERE posts_exists_4.id = comments_exists_5.\"postId\" AND comments_exists_5.score = $3)))",
 			"params": [13, "a%", 17],
@@ -534,22 +406,6 @@
 			"shape": "not",
 			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.name ILIKE $1)))",
 			"params": ["B%"],
-			"error": null
-		},
-		{
-			"position": "dotted-two-hop",
-			"kind": "ilike",
-			"shape": "empty-or",
-			"sql": "SELECT users.* FROM users WHERE false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "dotted-two-hop",
-			"kind": "ilike",
-			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE true",
-			"params": [],
 			"error": null
 		},
 		{
@@ -595,22 +451,6 @@
 		{
 			"position": "dotted-two-hop",
 			"kind": "like-escape",
-			"shape": "empty-or",
-			"sql": "SELECT users.* FROM users WHERE false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "dotted-two-hop",
-			"kind": "like-escape",
-			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE true",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "dotted-two-hop",
-			"kind": "like-escape",
 			"shape": "two-level",
 			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score = $1)) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_3 WHERE posts_exists_2.id = comments_exists_3.\"postId\" AND comments_exists_3.name LIKE $2 ESCAPE $3))) OR EXISTS (SELECT 1 FROM posts AS posts_exists_4 WHERE users.id = posts_exists_4.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_5 WHERE posts_exists_4.id = comments_exists_5.\"postId\" AND comments_exists_5.score = $4)))",
 			"params": [13, "c!_%", "!", 17],
@@ -651,22 +491,6 @@
 		{
 			"position": "dotted-two-hop",
 			"kind": "in-values",
-			"shape": "empty-or",
-			"sql": "SELECT users.* FROM users WHERE false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "dotted-two-hop",
-			"kind": "in-values",
-			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE true",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "dotted-two-hop",
-			"kind": "in-values",
 			"shape": "two-level",
 			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score = $1)) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_3 WHERE posts_exists_2.id = comments_exists_3.\"postId\" AND comments_exists_3.score = ANY ($2)))) OR EXISTS (SELECT 1 FROM posts AS posts_exists_4 WHERE users.id = posts_exists_4.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_5 WHERE posts_exists_4.id = comments_exists_5.\"postId\" AND comments_exists_5.score = $3)))",
 			"params": [13, [3, 5], 17],
@@ -701,22 +525,6 @@
 			"kind": "in-empty",
 			"shape": "not",
 			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND false)))",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "dotted-two-hop",
-			"kind": "in-empty",
-			"shape": "empty-or",
-			"sql": "SELECT users.* FROM users WHERE false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "dotted-two-hop",
-			"kind": "in-empty",
-			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE true",
 			"params": [],
 			"error": null
 		},
@@ -763,22 +571,6 @@
 		{
 			"position": "dotted-two-hop",
 			"kind": "any",
-			"shape": "empty-or",
-			"sql": "SELECT users.* FROM users WHERE false",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "dotted-two-hop",
-			"kind": "any",
-			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE true",
-			"params": [],
-			"error": null
-		},
-		{
-			"position": "dotted-two-hop",
-			"kind": "any",
 			"shape": "two-level",
 			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score = $1)) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_3 WHERE posts_exists_2.id = comments_exists_3.\"postId\" AND comments_exists_3.score = ANY (CAST($2 AS int4[]))))) OR EXISTS (SELECT 1 FROM posts AS posts_exists_4 WHERE users.id = posts_exists_4.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_5 WHERE posts_exists_4.id = comments_exists_5.\"postId\" AND comments_exists_5.score = $3)))",
 			"params": [13, [3, 5], 17],
@@ -798,6 +590,214 @@
 			"shape": "and",
 			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score = ANY (CAST($1 AS int4[])))) AND EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_3 WHERE posts_exists_2.id = comments_exists_3.\"postId\" AND comments_exists_3.score = $2))",
 			"params": [[], 13],
+			"error": null
+		},
+		{
+			"position": "dotted-two-hop",
+			"kind": "any-empty",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score = ANY (CAST($1 AS int4[])))) OR EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_3 WHERE posts_exists_2.id = comments_exists_3.\"postId\" AND comments_exists_3.score = $2))",
+			"params": [[], 13],
+			"error": null
+		},
+		{
+			"position": "dotted-two-hop",
+			"kind": "any-empty",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score = ANY (CAST($1 AS int4[])))))",
+			"params": [[]],
+			"error": null
+		},
+		{
+			"position": "dotted-two-hop",
+			"kind": "any-empty",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score = $1)) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_3 WHERE posts_exists_2.id = comments_exists_3.\"postId\" AND comments_exists_3.score = ANY (CAST($2 AS int4[]))))) OR EXISTS (SELECT 1 FROM posts AS posts_exists_4 WHERE users.id = posts_exists_4.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_5 WHERE posts_exists_4.id = comments_exists_5.\"postId\" AND comments_exists_5.score = $3)))",
+			"params": [13, [], 17],
+			"error": null
+		},
+		{
+			"position": "dotted-two-hop",
+			"kind": "isNull",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score IS NULL))",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-two-hop",
+			"kind": "isNull",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score IS NULL)) AND EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_3 WHERE posts_exists_2.id = comments_exists_3.\"postId\" AND comments_exists_3.score = $1))",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "dotted-two-hop",
+			"kind": "isNull",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score IS NULL)) OR EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_3 WHERE posts_exists_2.id = comments_exists_3.\"postId\" AND comments_exists_3.score = $1))",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "dotted-two-hop",
+			"kind": "isNull",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score IS NULL)))",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-two-hop",
+			"kind": "isNull",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score = $1)) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_3 WHERE posts_exists_2.id = comments_exists_3.\"postId\" AND comments_exists_3.score IS NULL))) OR EXISTS (SELECT 1 FROM posts AS posts_exists_4 WHERE users.id = posts_exists_4.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_5 WHERE posts_exists_4.id = comments_exists_5.\"postId\" AND comments_exists_5.score = $2)))",
+			"params": [13, 17],
+			"error": null
+		},
+		{
+			"position": "dotted-two-hop",
+			"kind": "isNotNull",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score IS NOT NULL))",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-two-hop",
+			"kind": "isNotNull",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score IS NOT NULL)) AND EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_3 WHERE posts_exists_2.id = comments_exists_3.\"postId\" AND comments_exists_3.score = $1))",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "dotted-two-hop",
+			"kind": "isNotNull",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score IS NOT NULL)) OR EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_3 WHERE posts_exists_2.id = comments_exists_3.\"postId\" AND comments_exists_3.score = $1))",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "dotted-two-hop",
+			"kind": "isNotNull",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score IS NOT NULL)))",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "dotted-two-hop",
+			"kind": "isNotNull",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score = $1)) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_3 WHERE posts_exists_2.id = comments_exists_3.\"postId\" AND comments_exists_3.score IS NOT NULL))) OR EXISTS (SELECT 1 FROM posts AS posts_exists_4 WHERE users.id = posts_exists_4.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_5 WHERE posts_exists_4.id = comments_exists_5.\"postId\" AND comments_exists_5.score = $2)))",
+			"params": [13, 17],
+			"error": null
+		},
+		{
+			"position": "dotted-two-hop",
+			"kind": "between",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.period BETWEEN $1 AND $2))",
+			"params": ["2026-01-01", "2026-02-01"],
+			"error": null
+		},
+		{
+			"position": "dotted-two-hop",
+			"kind": "between",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.period BETWEEN $1 AND $2)) AND EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_3 WHERE posts_exists_2.id = comments_exists_3.\"postId\" AND comments_exists_3.score = $3))",
+			"params": ["2026-01-01", "2026-02-01", 13],
+			"error": null
+		},
+		{
+			"position": "dotted-two-hop",
+			"kind": "between",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.period BETWEEN $1 AND $2)) OR EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_3 WHERE posts_exists_2.id = comments_exists_3.\"postId\" AND comments_exists_3.score = $3))",
+			"params": ["2026-01-01", "2026-02-01", 13],
+			"error": null
+		},
+		{
+			"position": "dotted-two-hop",
+			"kind": "between",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.period BETWEEN $1 AND $2)))",
+			"params": ["2026-01-01", "2026-02-01"],
+			"error": null
+		},
+		{
+			"position": "dotted-two-hop",
+			"kind": "between",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score = $1)) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_3 WHERE posts_exists_2.id = comments_exists_3.\"postId\" AND comments_exists_3.period BETWEEN $2 AND $3))) OR EXISTS (SELECT 1 FROM posts AS posts_exists_4 WHERE users.id = posts_exists_4.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_5 WHERE posts_exists_4.id = comments_exists_5.\"postId\" AND comments_exists_5.score = $4)))",
+			"params": [13, "2026-01-01", "2026-02-01", 17],
+			"error": null
+		},
+		{
+			"position": "dotted-two-hop",
+			"kind": "range-overlaps",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.period && $1))",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "dotted-two-hop",
+			"kind": "range-overlaps",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.period && $1)) AND EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_3 WHERE posts_exists_2.id = comments_exists_3.\"postId\" AND comments_exists_3.score = $2))",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "dotted-two-hop",
+			"kind": "range-overlaps",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.period && $1)) OR EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_3 WHERE posts_exists_2.id = comments_exists_3.\"postId\" AND comments_exists_3.score = $2))",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "dotted-two-hop",
+			"kind": "range-overlaps",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.period && $1)))",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "dotted-two-hop",
+			"kind": "range-overlaps",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score = $1)) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_3 WHERE posts_exists_2.id = comments_exists_3.\"postId\" AND comments_exists_3.period && $2))) OR EXISTS (SELECT 1 FROM posts AS posts_exists_4 WHERE users.id = posts_exists_4.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_5 WHERE posts_exists_4.id = comments_exists_5.\"postId\" AND comments_exists_5.score = $3)))",
+			"params": [13, "[2026-01-01,2026-02-01)", 17],
+			"error": null
+		},
+		{
+			"position": "dotted-two-hop",
+			"kind": "range-contains",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.period @> $1))",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "dotted-two-hop",
+			"kind": "range-contains",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.period @> $1)) AND EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_3 WHERE posts_exists_2.id = comments_exists_3.\"postId\" AND comments_exists_3.score = $2))",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "dotted-two-hop",
+			"kind": "range-contains",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.period @> $1)) OR EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_3 WHERE posts_exists_2.id = comments_exists_3.\"postId\" AND comments_exists_3.score = $2))",
+			"params": ["[2026-01-01,2026-02-01)", 13],
 			"error": null
 		}
 	]
