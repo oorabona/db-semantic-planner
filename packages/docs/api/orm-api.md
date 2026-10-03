@@ -218,9 +218,10 @@ Relations are auto-inferred from `ref()` calls. The planner detects:
 - **hasMany** (1:N) — the target table
 - **hasOne** (1:1) — the inverse of a unique FK
 
-A junction table is reached through its declared relations, as in the iam example.
-`schema()` + `ref()` does not automatically declare many-to-many relations; an
-explicit many-to-many declaration is needed for direct junction traversal.
+`schema()` + `ref()` declares no many-to-many relation: a junction table is
+reached through its own relations, one hop at a time (`userRoles.role` in the
+iam example), and a path that skips the junction (`posts.tags` over `postTags`)
+is refused.
 
 ```typescript
 const db = schema({
