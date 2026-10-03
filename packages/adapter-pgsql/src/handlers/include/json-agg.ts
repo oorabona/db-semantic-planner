@@ -396,19 +396,40 @@ function compileJsonAggRecursive(
 			),
 	);
 	const shape = jsonAggContainerShape(decision.relationType);
-	const columns = resolveJsonAggProjection(
+	let columns = resolveJsonAggProjection(
 		decision,
 		targetTable,
 		innerCtx,
 		shape,
 	);
-	const columnValueOverrides = buildJsonAggColumnValueOverrides(
+	let columnValueOverrides = buildJsonAggColumnValueOverrides(
 		targetTable,
 		columns,
 		innerAlias,
 		innerCtx,
 		shape,
 	);
+
+	if (
+		decision.relationPath?.includes('.') &&
+		decision.columnAliases &&
+		columns
+	) {
+		const values = new Map<string, Node>();
+		columns = columns.map((column, index) => {
+			const requested = decision.columns?.[index];
+			const alias = requested ? decision.columnAliases?.[requested] : undefined;
+			const key = identifierText(column);
+			const output = alias ?? key;
+			values.set(
+				output,
+				columnValueOverrides?.get(key) ??
+					sqlColumnRef(column, queryLocal(innerAlias)),
+			);
+			return alias ? queryLocal(alias) : column;
+		});
+		columnValueOverrides = values;
+	}
 
 	return sqlJsonAggSubquery(
 		resolvedTarget.cteName ??

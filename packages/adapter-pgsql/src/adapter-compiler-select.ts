@@ -545,20 +545,25 @@ function stripJoinColumnsForAggregation(
 	}
 }
 
-/** Include trees retain consumers below the top-level SQL decisions. */
+/** Visit the exact-path consumers retained in include decision trees. */
+function* includeDecisions(
+	decisions: readonly PlanDecision[],
+): Generator<PlanDecision> {
+	for (const decision of decisions) {
+		if (decision.type !== 'includeStrategy') continue;
+		yield decision;
+		yield* includeDecisions(decision.children ?? []);
+	}
+}
+
 function includedRelationPaths(
 	decisions: readonly PlanDecision[],
 ): Set<string> {
 	const paths = new Set<string>();
-	function visit(decision: PlanDecision): void {
-		if (decision.type !== 'includeStrategy') return;
-		const path = (decision.relationPath ?? decision.relationName) as
-			| string
-			| undefined;
+	for (const decision of includeDecisions(decisions)) {
+		const path = decision.relationPath ?? decision.relationName;
 		if (path) paths.add(path);
-		for (const child of decision.children ?? []) visit(child);
 	}
-	for (const decision of decisions) visit(decision);
 	return paths;
 }
 
@@ -620,7 +625,7 @@ function injectAndValidateRelationColumns(
 	if (relationColumnsMap.size === 0) return;
 
 	// Inject collected columns and aliases into matching includeStrategy decisions
-	for (const d of enrichedUnifiedDecisions) {
+	for (const d of includeDecisions(enrichedUnifiedDecisions)) {
 		if (d.type === 'includeStrategy' && d.relationName) {
 			const mapKey = (d.relationPath as string | undefined) ?? d.relationName;
 			const entries = mapKey ? relationColumnsMap.get(mapKey) : undefined;
@@ -642,7 +647,7 @@ function injectAndValidateRelationColumns(
 
 	// Validate injected columns exist in target table schema
 	if (!model) return;
-	for (const d of enrichedUnifiedDecisions) {
+	for (const d of includeDecisions(enrichedUnifiedDecisions)) {
 		if (
 			d.type === 'includeStrategy' &&
 			d.columns &&
@@ -667,6 +672,43 @@ function injectAndValidateRelationColumns(
 							`Available: ${[...validColumnNames].join(', ')}`,
 					);
 				}
+			}
+		}
+	}
+	// LATERAL children correlate through the parent's projected subquery.
+	// Refuse a nested relationColumn projection that removes that authority.
+	for (const d of includeDecisions(enrichedUnifiedDecisions)) {
+		const path = d.relationPath;
+		const entries = path ? relationColumnsMap.get(path) : undefined;
+		if (
+			d.choice !== 'lateral' ||
+			!path ||
+			(!path.includes('.') &&
+				![...relationColumnsMap.keys()].some((key) =>
+					key.startsWith(`${path}.`),
+				)) ||
+			!entries ||
+			entries.some(({ col }) => col === '*') ||
+			!d.targetTable
+		)
+			continue;
+		const table = model.getTable(d.targetTable);
+		for (const child of d.children ?? []) {
+			const relation = model.getRelation(
+				`${d.targetTable}.${child.relationName}`,
+			);
+			const keys = toColumnList(
+				relation?.type === 'belongsTo'
+					? relation.foreignKey
+					: (relation?.sourceKey ?? table?.primaryKey),
+			);
+			const missing = keys.filter(
+				(key) => !entries.some(({ col }) => col === key),
+			);
+			if (missing.length > 0) {
+				throw new Error(
+					`Nested relation column projection '${path}' cannot be compiled with lateral: child '${child.relationPath ?? child.relationName}' requires column(s) ${missing.map((key) => `'${key}'`).join(', ')}.`,
+				);
 			}
 		}
 	}
