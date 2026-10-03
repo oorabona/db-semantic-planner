@@ -299,3 +299,48 @@ describe('#894 pathless include assignments', () => {
 		);
 	});
 });
+
+describe('#900 flat strategy precedence', () => {
+	it('compiles lateral default throughout a limit-free nested flat chain', () => {
+		const p = plan(
+			{
+				type: 'select',
+				from: 'users',
+				include: [
+					{
+						relation: 'posts',
+						strategy: 'flat',
+						include: [{ relation: 'comments', strategy: 'flat' }],
+					},
+				],
+			},
+			db.model,
+			{
+				defaultIncludeStrategy: 'lateral',
+				dialectCapabilities: adapter.dialectCapabilities,
+			},
+		);
+		const result = adapter.compile(p);
+		expect(result.sql).toBe(sameSql.lateral);
+		expect(result.parameters).toEqual([]);
+	});
+	it('preserves include.where refusal with applicable lateral default', () => {
+		const p = plan(
+			{
+				type: 'select',
+				from: 'users',
+				include: [{ relation: 'posts', strategy: 'flat', where: or() }],
+			},
+			db.model,
+			{
+				defaultIncludeStrategy: 'lateral',
+				dialectCapabilities: adapter.dialectCapabilities,
+			},
+		);
+		expect(() => adapter.compile(p)).toThrow(
+			new Error(
+				'Include where is not supported for strategy lateral at include[0](posts).where (oorabona/db-semantic-planner#892).',
+			),
+		);
+	});
+});

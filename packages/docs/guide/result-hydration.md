@@ -43,9 +43,9 @@ to reassemble the rows.
 |----------------------|-----------------|-----------|
 | `belongsTo` / `hasOne` (to-one) | `json_agg` | Same capability-based selection as to-many |
 | `hasMany` / `manyToMany` (to-many) | `json_agg` | Avoids row explosion |
-| Any + compatible explicit override | Requested strategy | Honoured when compatible with its branch |
+| Any non-recursive include + relation `includeStrategy` hint | Requested compatible strategy | The hint is honoured; flat output accepts only `join` or `lateral`, otherwise planning fails |
 
-These defaults apply to non-recursive includes with nested output. Recursion requires CTE support. With flat output (`| flat`), the planner selects `lateral` when the include has a limit and the dialect supports it, and `join` otherwise. Explicit overrides are validated against dialect capabilities and honoured when compatible with their branch. Mixed parent/child strategies and includes nested under a `cte` include are refused before SQL is generated. `defaultIncludeStrategy` applies only to non-recursive includes; recursive includes always compile as `cte`.
+These defaults apply to non-recursive includes with nested output. Recursive includes always compile as `cte`, require recursive CTE support, ignore `defaultIncludeStrategy`, and accept only `auto` or `cte` as the relation hint. For flat output (`| flat` or `strategy: 'flat'`), a relation hint of `join` or `lateral` is honoured, while `json_agg` or `cte` is refused. A `defaultIncludeStrategy` of `join` or `lateral` applies to flat output; `json_agg`, `cte`, and `auto` do not apply to that branch. If no compatible hint or default applies, the planner selects `lateral` when the include or any nested include has a per-parent limit, and `join` otherwise. When a limit requires `lateral`, planning fails if `join` was selected or the dialect does not support lateral joins; the planner never silently drops the limit or replaces a selected strategy. Selected strategies remain subject to dialect capabilities and existing operation constraints. Mixed parent/child strategies and includes nested under a `cte` include are refused before SQL is generated.
 
 The planner encodes this as:
 ```typescript

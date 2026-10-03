@@ -112,12 +112,15 @@ export interface IncludeIntent {
 	 * based on recursion, query shape, and dialect capabilities.
 	 *
 	 * - 'auto': Let planner decide freely, including json_agg (default)
-	 * - 'flat': Exclude json_agg from candidates; planner picks best flat strategy
+	 * - 'flat': Honour join/lateral hints and defaults; refuse json_agg/cte hints.
+	 *   Defaults of auto, json_agg, and cte do not apply to flat output.
+	 *   Otherwise pick lateral for direct or nested limits, join without limits.
+	 *   Selected join with limits or unsupported lateral is refused.
 	 *
 	 * @example
 	 * // NQL: orders | select *, customer.* | flat
 	 * // Results in: include: [{ relation: 'customer', strategy: 'flat' }]
-	 * // Planner then picks lateral, join, or cte (never json_agg)
+	 * // Planner then picks lateral or join (never json_agg or cte)
 	 */
 	readonly strategy?: 'auto' | 'flat' | undefined;
 

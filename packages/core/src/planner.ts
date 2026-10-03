@@ -1106,19 +1106,7 @@ function processInclude(
 	const isRecursiveInclude =
 		(!!include.recursive || !!relation.recursive) && isSelfReferentialRelation;
 
-	// Reject stale relation hints before recursive/join shortcuts can discard them.
-	validateIncludeStrategy(
-		relation.includeStrategy,
-		opts.dialectCapabilities,
-		false,
-	);
-	// Validate runtime strategy inputs before recursive/join shortcuts can discard them.
-	if (include.strategy !== undefined && include.strategy !== 'flat') {
-		validateIncludeStrategy(include.strategy, opts.dialectCapabilities);
-	}
-	// Determine include strategy
-	// Priority: 1) recursive → cte (if dialect supports it), 2) include.join → forces join strategy, 3) include.strategy override, 4) auto-detect
-	let includeStrategy: ResolvedIncludeStrategy;
+	// Recursive hints have a narrower contract than generic include strategies.
 	if (isRecursiveInclude) {
 		if (
 			relation.includeStrategy !== 'auto' &&
@@ -1128,6 +1116,19 @@ function processInclude(
 				`Recursive include at ${intentPath}(${include.relation}) requires strategy 'cte', but relation '${relation.name}' declares includeStrategy '${relation.includeStrategy}'. Use 'auto' or 'cte'.`,
 			);
 		}
+	} else {
+		validateIncludeStrategy(
+			relation.includeStrategy,
+			opts.dialectCapabilities,
+			false,
+		);
+	}
+	// Validate runtime strategy inputs before recursive/join shortcuts can discard them.
+	if (include.strategy !== undefined && include.strategy !== 'flat') {
+		validateIncludeStrategy(include.strategy, opts.dialectCapabilities);
+	}
+	let includeStrategy: ResolvedIncludeStrategy;
+	if (isRecursiveInclude) {
 		if (include.join !== undefined) {
 			throw new UnsupportedStrategyError(
 				`Recursive include at ${intentPath}(${include.relation}) cannot use join: recursive includes compile as a CTE (oorabona/db-semantic-planner#894).`,
@@ -1156,17 +1157,7 @@ function processInclude(
 		}
 		includeStrategy = 'join';
 	} else if (include.strategy === 'flat') {
-		// NQL v2.1: flat = exclude nested output (json_agg), planner picks best flat strategy
-		// lateral only when per-row LIMIT is needed; otherwise join is simpler
-		// Also use lateral when any nested child has a limit (LATERAL cascade required)
-		const needsLateral = include.limit != null || hasNestedLimit(include);
-		includeStrategy = selectSmartStrategy(
-			relation,
-			opts.dialectCapabilities,
-			false,
-			/* excludeNested */ true,
-			/* hasLimit */ needsLateral,
-		);
+		includeStrategy = determineFlatIncludeStrategy(relation, include, opts);
 	} else {
 		includeStrategy = determineIncludeStrategy(relation, opts);
 		// FIND-014: include.limit cannot be enforced by the join strategy (which
@@ -1513,6 +1504,46 @@ function determineIncludeStrategy(
 
 	// 3. Auto selection based on recursion, query shape, and dialect capabilities
 	return selectSmartStrategy(relation, capabilities, isRecursive);
+}
+
+/** Resolve applicable authority inputs before validating flat output and limits. */
+function determineFlatIncludeStrategy(
+	relation: RelationIR,
+	include: IncludeIntent,
+	opts: Required<PlanOptions>,
+): ResolvedIncludeStrategy {
+	const needsLateral = include.limit != null || hasNestedLimit(include);
+	const hint = relation.includeStrategy;
+	if (hint === 'json_agg' || hint === 'cte') {
+		throw new UnsupportedStrategyError(
+			`Flat output for relation '${relation.name}' cannot use relation includeStrategy hint '${hint}'. Use 'auto', 'join', or 'lateral'.`,
+		);
+	}
+	const defaultStrategy = opts.defaultIncludeStrategy;
+	const selected =
+		hint !== 'auto'
+			? hint
+			: defaultStrategy === 'join' || defaultStrategy === 'lateral'
+				? defaultStrategy
+				: needsLateral
+					? 'lateral'
+					: 'join';
+	if (selected === 'join' && needsLateral) {
+		const source =
+			hint === 'join'
+				? 'relation includeStrategy hint'
+				: 'defaultIncludeStrategy';
+		throw new InvalidOperationError(
+			'include',
+			`Flat output for relation '${relation.name}' cannot use 'join' selected by ${source} because the include or a nested include has a per-parent limit. Use 'lateral' with a dialect that supports lateral joins.`,
+		);
+	}
+	if (selected === 'lateral' && !opts.dialectCapabilities) {
+		throw new UnsupportedStrategyError(
+			`Flat output for relation '${relation.name}' requires a dialect with supportsLateralJoin; current dialect (no capabilities) does not support it.`,
+		);
+	}
+	return validateIncludeStrategy(selected, opts.dialectCapabilities);
 }
 
 /**
