@@ -2,6 +2,86 @@
 	"entries": [
 		{
 			"position": "having-alias",
+			"kind": "between",
+			"shape": "not",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (users.period BETWEEN $1 AND $2)",
+			"params": ["2026-01-01", "2026-02-01"],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "between",
+			"shape": "two-level",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (users.period BETWEEN $2 AND $3) OR count(*) = CAST($4 AS bigint))",
+			"params": [13, "2026-01-01", "2026-02-01", 17],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "range-overlaps",
+			"shape": "leaf",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING users.period && $1",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "range-overlaps",
+			"shape": "and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING users.period && $1 AND count(*) = CAST($2 AS bigint)",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "range-overlaps",
+			"shape": "or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING users.period && $1 OR count(*) = CAST($2 AS bigint)",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "range-overlaps",
+			"shape": "not",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (users.period && $1)",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "range-overlaps",
+			"shape": "two-level",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (users.period && $2) OR count(*) = CAST($3 AS bigint))",
+			"params": [13, "[2026-01-01,2026-02-01)", 17],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "range-contains",
+			"shape": "leaf",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING users.period @> $1",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "range-contains",
+			"shape": "and",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING users.period @> $1 AND count(*) = CAST($2 AS bigint)",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
+			"kind": "range-contains",
+			"shape": "or",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING users.period @> $1 OR count(*) = CAST($2 AS bigint)",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "having-alias",
 			"kind": "range-contains",
 			"shape": "not",
 			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (users.period @> $1)",
@@ -763,86 +843,6 @@
 		{
 			"position": "having-alias",
 			"kind": "notExists-recursive-down",
-			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "notExists-recursive-down",
-			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "notExists-recursive-down",
-			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawNotExists",
-			"shape": "leaf",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1))",
-			"params": [53],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawNotExists",
-			"shape": "and",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1)) AND count(*) = CAST($2 AS bigint)",
-			"params": [53, 13],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawNotExists",
-			"shape": "or",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1)) OR count(*) = CAST($2 AS bigint)",
-			"params": [53, 13],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawNotExists",
-			"shape": "not",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1)))",
-			"params": [53],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "rawNotExists",
-			"shape": "two-level",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $2))) OR count(*) = CAST($3 AS bigint))",
-			"params": [13, 53, 17],
-			"error": null
-		},
-		{
-			"position": "having-alias",
-			"kind": "exists",
-			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "exists",
-			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
-		},
-		{
-			"position": "having-alias",
-			"kind": "exists",
 			"shape": "or",
 			"sql": null,
 			"params": null,

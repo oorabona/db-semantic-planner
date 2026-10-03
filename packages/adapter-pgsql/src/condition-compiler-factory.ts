@@ -55,6 +55,7 @@ import type {
 	Decision,
 	WhereDispatcher,
 } from './handlers/types.js';
+import { compileLiteralNullComparison } from './handlers/where/literal-null.js';
 import { resolveWhereOperator } from './handlers/where/operator-resolver.js';
 import {
 	buildColumnRef,
@@ -357,6 +358,13 @@ export function createConditionCompiler(
 			handlerCtx,
 			ctx.paramState,
 		);
+
+		const nullComparison = compileLiteralNullComparison(
+			exprIntent.operator,
+			leftNode,
+			exprIntent.value,
+		);
+		if (nullComparison) return nullComparison;
 
 		const idx = ++ctx.paramState.paramIndex;
 		ctx.paramState.parameters.push(unwrapParamIntent(exprIntent.value));
@@ -1013,8 +1021,15 @@ export function createConditionCompiler(
 				intent.jsonPath === undefined &&
 				!isFieldRef(intent.value)
 			) {
+				const left = buildColumnRef(intent.field, handlerCtx);
+				const nullComparison = compileLiteralNullComparison(
+					intent.operator,
+					left,
+					intent.value,
+				);
+				if (nullComparison) return nullComparison;
 				return compileMappedComparison(intent.operator)(
-					buildColumnRef(intent.field, handlerCtx),
+					left,
 					compileValue(intent.value, ctx.paramState, undefined, true),
 				);
 			}

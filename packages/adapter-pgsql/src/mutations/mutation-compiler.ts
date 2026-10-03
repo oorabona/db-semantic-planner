@@ -46,7 +46,7 @@ import type {
 	Decision,
 	InsertStmtNode,
 } from '../handlers/types.js';
-import { unwrapParamIntent } from '../param-intent.js';
+import { normalizeParamIntent, unwrapParamIntent } from '../param-intent.js';
 import { createTypeCastParamRef } from '../param-ref.js';
 import {
 	queryLocal,
@@ -1002,11 +1002,12 @@ export function valueToNode(
 	dbType?: string,
 	forceParam = false,
 ): Node {
-	const isParam = isParamIntent(value);
-	const boundValue = unwrapParamIntent(value);
+	const normalizedValue = normalizeParamIntent(value);
+	const isParam = isParamIntent(normalizedValue);
+	const boundValue = unwrapParamIntent(normalizedValue);
 	if (boundValue === null || boundValue === undefined) {
 		if (forceParam || isParam) {
-			state.parameters.push(boundValue);
+			state.parameters.push(boundValue ?? null);
 			state.paramIndex++;
 			return dbType && RANGE_TYPES.has(dbType)
 				? typeCast({ ParamRef: { number: state.paramIndex } }, dbType)

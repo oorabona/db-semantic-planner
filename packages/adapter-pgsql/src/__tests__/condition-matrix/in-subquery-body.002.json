@@ -2,6 +2,86 @@
 	"entries": [
 		{
 			"position": "in-subquery-body",
+			"kind": "between",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.period BETWEEN $1 AND $2))",
+			"params": ["2026-01-01", "2026-02-01"],
+			"error": null
+		},
+		{
+			"position": "in-subquery-body",
+			"kind": "between",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1 AND (NOT (posts_exists_0.period BETWEEN $2 AND $3) OR posts_exists_0.score = $4))",
+			"params": [13, "2026-01-01", "2026-02-01", 17],
+			"error": null
+		},
+		{
+			"position": "in-subquery-body",
+			"kind": "range-overlaps",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.period && $1)",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "in-subquery-body",
+			"kind": "range-overlaps",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.period && $1 AND posts_exists_0.score = $2)",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "in-subquery-body",
+			"kind": "range-overlaps",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND (posts_exists_0.period && $1 OR posts_exists_0.score = $2))",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "in-subquery-body",
+			"kind": "range-overlaps",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.period && $1))",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "in-subquery-body",
+			"kind": "range-overlaps",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1 AND (NOT (posts_exists_0.period && $2) OR posts_exists_0.score = $3))",
+			"params": [13, "[2026-01-01,2026-02-01)", 17],
+			"error": null
+		},
+		{
+			"position": "in-subquery-body",
+			"kind": "range-contains",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.period @> $1)",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "in-subquery-body",
+			"kind": "range-contains",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.period @> $1 AND posts_exists_0.score = $2)",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "in-subquery-body",
+			"kind": "range-contains",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND (posts_exists_0.period @> $1 OR posts_exists_0.score = $2))",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "in-subquery-body",
 			"kind": "range-contains",
 			"shape": "not",
 			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.period @> $1))",
@@ -766,86 +846,6 @@
 			"shape": "or",
 			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score = $1)) OR posts_exists_0.score = $2))",
 			"params": [71, 13],
-			"error": null
-		},
-		{
-			"position": "in-subquery-body",
-			"kind": "notExists-recursive-down",
-			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score = $1))))",
-			"params": [71],
-			"error": null
-		},
-		{
-			"position": "in-subquery-body",
-			"kind": "notExists-recursive-down",
-			"shape": "two-level",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score = $2))) OR posts_exists_0.score = $3))",
-			"params": [13, 71, 17],
-			"error": null
-		},
-		{
-			"position": "in-subquery-body",
-			"kind": "rawNotExists",
-			"shape": "leaf",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1)))",
-			"params": [53],
-			"error": null
-		},
-		{
-			"position": "in-subquery-body",
-			"kind": "rawNotExists",
-			"shape": "and",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1)) AND posts_exists_0.score = $2)",
-			"params": [53, 13],
-			"error": null
-		},
-		{
-			"position": "in-subquery-body",
-			"kind": "rawNotExists",
-			"shape": "or",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1)) OR posts_exists_0.score = $2))",
-			"params": [53, 13],
-			"error": null
-		},
-		{
-			"position": "in-subquery-body",
-			"kind": "rawNotExists",
-			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1))))",
-			"params": [53],
-			"error": null
-		},
-		{
-			"position": "in-subquery-body",
-			"kind": "rawNotExists",
-			"shape": "two-level",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1 AND (NOT (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $2))) OR posts_exists_0.score = $3))",
-			"params": [13, 53, 17],
-			"error": null
-		},
-		{
-			"position": "in-subquery-body",
-			"kind": "exists",
-			"shape": "leaf",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score = $1))",
-			"params": [61],
-			"error": null
-		},
-		{
-			"position": "in-subquery-body",
-			"kind": "exists",
-			"shape": "and",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score = $1) AND posts_exists_0.score = $2)",
-			"params": [61, 13],
-			"error": null
-		},
-		{
-			"position": "in-subquery-body",
-			"kind": "exists",
-			"shape": "or",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND (EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score = $1) OR posts_exists_0.score = $2))",
-			"params": [61, 13],
 			"error": null
 		}
 	]

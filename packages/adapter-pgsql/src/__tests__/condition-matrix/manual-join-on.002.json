@@ -2,6 +2,86 @@
 	"entries": [
 		{
 			"position": "manual-join-on",
+			"kind": "between",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.period BETWEEN $1 AND $2)",
+			"params": ["2026-01-01", "2026-02-01"],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "between",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.period BETWEEN $2 AND $3) OR users.score = $4)",
+			"params": [13, "2026-01-01", "2026-02-01", 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-overlaps",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period && CAST($1 AS daterange)",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-overlaps",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period && CAST($1 AS daterange) AND users.score = $2",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-overlaps",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period && CAST($1 AS daterange) OR users.score = $2",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-overlaps",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.period && CAST($1 AS daterange))",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-overlaps",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.period && CAST($2 AS daterange)) OR users.score = $3)",
+			"params": [13, "[2026-01-01,2026-02-01)", 17],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-contains",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period @> CAST($1 AS daterange)",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-contains",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period @> CAST($1 AS daterange) AND users.score = $2",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
+			"kind": "range-contains",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period @> CAST($1 AS daterange) OR users.score = $2",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "manual-join-on",
 			"kind": "range-contains",
 			"shape": "not",
 			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.period @> CAST($1 AS daterange))",
@@ -766,86 +846,6 @@
 			"shape": "or",
 			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR users.score = $2",
 			"params": [71, 13],
-			"error": null
-		},
-		{
-			"position": "manual-join-on",
-			"kind": "notExists-recursive-down",
-			"shape": "not",
-			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)))",
-			"params": [71],
-			"error": null
-		},
-		{
-			"position": "manual-join-on",
-			"kind": "notExists-recursive-down",
-			"shape": "two-level",
-			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR users.score = $3)",
-			"params": [13, 71, 17],
-			"error": null
-		},
-		{
-			"position": "manual-join-on",
-			"kind": "rawNotExists",
-			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Subquery in JOIN ON condition is not supported."
-		},
-		{
-			"position": "manual-join-on",
-			"kind": "rawNotExists",
-			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Subquery in JOIN ON condition is not supported."
-		},
-		{
-			"position": "manual-join-on",
-			"kind": "rawNotExists",
-			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Subquery in JOIN ON condition is not supported."
-		},
-		{
-			"position": "manual-join-on",
-			"kind": "rawNotExists",
-			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Subquery in JOIN ON condition is not supported."
-		},
-		{
-			"position": "manual-join-on",
-			"kind": "rawNotExists",
-			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Subquery in JOIN ON condition is not supported."
-		},
-		{
-			"position": "manual-join-on",
-			"kind": "exists",
-			"shape": "leaf",
-			"sql": "SELECT users.* FROM users JOIN posts AS p ON EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)",
-			"params": [61],
-			"error": null
-		},
-		{
-			"position": "manual-join-on",
-			"kind": "exists",
-			"shape": "and",
-			"sql": "SELECT users.* FROM users JOIN posts AS p ON EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND users.score = $2",
-			"params": [61, 13],
-			"error": null
-		},
-		{
-			"position": "manual-join-on",
-			"kind": "exists",
-			"shape": "or",
-			"sql": "SELECT users.* FROM users JOIN posts AS p ON EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR users.score = $2",
-			"params": [61, 13],
 			"error": null
 		}
 	]

@@ -19,6 +19,7 @@ import type {
 	WhereDispatcher,
 	WhereHandler,
 } from '../types.js';
+import { compileLiteralNullComparison } from './literal-null.js';
 import { resolveWhereOperator } from './operator-resolver.js';
 
 /**
@@ -71,6 +72,13 @@ export const customExpressionWhereHandler: WhereHandler = {
 		if (isStandalone) {
 			return leftNode;
 		}
+
+		const nullComparison = compileLiteralNullComparison(
+			rawOp,
+			leftNode,
+			decision.value,
+		);
+		if (nullComparison) return nullComparison;
 
 		// Right side: bind the comparison value as a parameter
 		const idx = ++state.paramIndex;

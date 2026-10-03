@@ -77,6 +77,18 @@ describe('Q5: Blog Scenario', () => {
 	});
 
 	describe('Filtered queries', () => {
+		it('literal null equality returns the null rows (#891)', async () => {
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
+			const authors = await orm
+				.withSchema(SCHEMA)
+				.select('authors')
+				.columns(['id', 'name'])
+				.where(eq('companyId', null))
+				.execute();
+			expect(authors).toEqual([{ id: 2, name: 'Bob Smith' }]);
+		});
+
 		it('should filter published posts', async () => {
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: blogModel, adapter });

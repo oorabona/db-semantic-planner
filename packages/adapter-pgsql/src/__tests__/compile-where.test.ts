@@ -397,15 +397,17 @@ describe('compileWhereIntent', () => {
 			expect(sql).toContain('active');
 		});
 
-		it('binds undefined for isDistinctFrom comparisons', () => {
-			const { sql, params } = compile({
-				kind: 'expression',
-				expr: { kind: 'literal', value: false },
-				operator: 'isDistinctFrom',
-				value: undefined,
-			});
-			expect(sql).toContain('IS DISTINCT FROM $1');
-			expect(params).toEqual([undefined]);
+		it('refuses bare undefined for isDistinctFrom comparisons', () => {
+			expect(() =>
+				compile({
+					kind: 'expression',
+					expr: { kind: 'literal', value: false },
+					operator: 'isDistinctFrom',
+					value: undefined,
+				}),
+			).toThrowError(
+				'Right comparison operand is undefined; use isNull or param(...)',
+			);
 		});
 
 		it('expression compared to value (eq)', () => {

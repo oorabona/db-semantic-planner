@@ -12,6 +12,7 @@ import type {
 	Decision,
 	WhereHandler,
 } from '../types.js';
+import { compileLiteralNullComparison } from './literal-null.js';
 import { resolveWhereOperator } from './operator-resolver.js';
 import { buildColumnRef, compileValue } from './utils.js';
 
@@ -151,6 +152,12 @@ export const jsonComparisonHandler: WhereHandler = {
 			};
 		}
 
+		const nullComparison = compileLiteralNullComparison(
+			operator,
+			node,
+			decision.value,
+		);
+		if (nullComparison) return nullComparison;
 		const right = compileValue(decision.value, state);
 
 		if (operator === 'isDistinctFrom') {
