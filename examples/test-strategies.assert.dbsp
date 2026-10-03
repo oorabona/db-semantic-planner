@@ -287,8 +287,8 @@ db.success: true
 # ─────────────────────────────────────────
 --- query: 26
 success: true
-sql.equals: INSERT INTO test_strategies.employees ( name, email, department_id, salary, hire_date, active ) VALUES ( $1, $2, $3, $4, $5, $6 ) ON CONFLICT (email) DO UPDATE SET name = excluded.name, email = excluded.email, department_id = excluded.department_id, salary = excluded.salary, hire_date = excluded.hire_date, active = excluded.active
-params.equals: ["Jane","jane@test.com",1,75000,"2024-01-15",true]
+sql.equals: INSERT INTO test_strategies.employees (name, email, department_id, salary, hire_date, active) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (email) DO UPDATE SET name = $7, email = $8, department_id = $9, salary = $10, hire_date = $11, active = $12
+params.equals: ["Jane","jane@test.com",1,75000,"2024-01-15",true,"Jane","jane@test.com",1,75000,"2024-01-15",true]
 db.success: true
 
 # =============================================================================

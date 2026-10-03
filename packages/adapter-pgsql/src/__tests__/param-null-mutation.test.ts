@@ -101,9 +101,9 @@ describe('explicit null mutation parameters (#891)', () => {
 			.doUpdate({ j: null })
 			.dump();
 		expect(upsert.sql).toBe(
-			'INSERT INTO t (id, j) VALUES ($1, NULL) ON CONFLICT (id) DO UPDATE SET j = excluded.j',
+			'INSERT INTO t (id, j) VALUES ($1, NULL) ON CONFLICT (id) DO UPDATE SET j = $2',
 		);
-		expect(upsert.parameters).toEqual([1]);
+		expect(upsert.parameters).toEqual([1, null]);
 	});
 });
 

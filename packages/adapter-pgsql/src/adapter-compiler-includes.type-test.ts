@@ -21,3 +21,8 @@ void optionOrder;
 // @ts-expect-error Published plan include ordering is field-only.
 const planOrder: PlanDecision['context']['includeOrderBy'] = expressionOrder;
 void planOrder;
+
+// @ts-expect-error Adapter PlanDecision include ordering is field-only.
+const adapterOrder: import('./plan-decision.js').PlanDecision['includeOrderBy'] =
+	expressionOrder;
+void adapterOrder;

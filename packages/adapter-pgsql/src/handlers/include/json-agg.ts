@@ -237,7 +237,7 @@ function compileJsonAggRecursive(
 		decision.includeSelectForm !== 'all'
 	) {
 		throw new Error(
-			`JSON_AGG include '${relation}' does not support select form '${decision.includeSelectForm}'`,
+			`JSON_AGG include '${decision.relationPath ?? relation}' does not support select form '${decision.includeSelectForm}'`,
 		);
 	}
 

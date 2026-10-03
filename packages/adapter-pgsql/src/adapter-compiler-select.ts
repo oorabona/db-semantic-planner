@@ -1553,8 +1553,7 @@ export function compileSelectEnvelope<T = unknown>(
 			deps.deriveFk,
 		);
 
-		// Synthesize join decisions for intent-based includes the planner couldn't resolve
-		// (e.g. camelCase alias 'enclosingSymbol' for model relation 'enclosing_symbol').
+		// Synthesis recovers joins from legacy or externally incomplete reports.
 		const coveredByPlanner = new Set(
 			unifiedIncludeDecisions
 				.filter((d) => d.type === 'includeStrategy')

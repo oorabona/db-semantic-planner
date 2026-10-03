@@ -3963,6 +3963,10 @@
 				"kind": "type"
 			},
 			{
+				"name": "resolveIncludeRelationName",
+				"kind": "value"
+			},
+			{
 				"name": "resolveJsonAggOrderKey",
 				"kind": "value"
 			},
@@ -4484,6 +4488,7 @@
 			"ledgerAddressParentJson",
 			"markNqlTrustedRelationFilter",
 			"refusalFor",
+			"resolveIncludeRelationName",
 			"resolveJsonAggOrderKey",
 			"resolveOutputReadHandling",
 			"sameControllerIdentity",

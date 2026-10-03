@@ -80,6 +80,32 @@ describe('Issue #160 — conditional upsert', () => {
 		await closeTestDb();
 	});
 
+	it('#914 inserts values() and applies SET only on conflict', async () => {
+		const pool = await getTestPool();
+		const adapter = createPgAdapter(pool, { schemaName: SCHEMA });
+		const orm = createOrm({ schema: conditionalUpsertSchema, adapter });
+		const upsert = () =>
+			orm
+				.upsert('widgets')
+				.values({ sku: 'ISSUE_914', name: 'a', active: true })
+				.onConflict(['sku'])
+				.doUpdate({ name: 'b' })
+				.returning(['name']);
+		try {
+			for (const name of ['a', 'b']) {
+				expect(await upsert().execute()).toEqual([{ name }]);
+				const stored = await sql<{ name: string }>`
+					SELECT name FROM ${sql.ref(SCHEMA)}.widgets WHERE sku = 'ISSUE_914'
+				`.execute(pool);
+				expect(stored.rows).toEqual([{ name }]);
+			}
+		} finally {
+			await sql`
+				DELETE FROM ${sql.ref(SCHEMA)}.widgets WHERE sku = 'ISSUE_914'
+			`.execute(pool);
+		}
+	});
+
 	it('updates conflicting rows only when the DO UPDATE WHERE predicate matches', async () => {
 		const pool = await getTestPool();
 
@@ -87,7 +113,7 @@ describe('Issue #160 — conditional upsert', () => {
 			"upsert into widgets on sku set sku = 'LOCKED', name = 'new locked', active = false where active = true",
 		);
 		expect(locked.sql.toLowerCase()).toContain('do update set');
-		expect(locked.sql.toLowerCase()).toContain('where widgets.active = $4');
+		expect(locked.sql.toLowerCase()).toContain('where widgets.active = $7');
 
 		const lockedResult = await pool.query(
 			locked.sql,
@@ -147,10 +173,13 @@ describe('Issue #160 — conditional upsert', () => {
 			'TAG_LOCKED',
 			'tag new locked',
 			false,
+			'TAG_LOCKED',
+			'tag new locked',
+			false,
 			true,
 		]);
 		expect(lockedDump.sql.toLowerCase()).toContain('do update set');
-		expect(lockedDump.sql.toLowerCase()).toContain('where widgets.active = $4');
+		expect(lockedDump.sql.toLowerCase()).toContain('where widgets.active = $7');
 
 		const lockedRows = await locked.all();
 		expect(lockedRows).toEqual([]);
