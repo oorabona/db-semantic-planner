@@ -9,6 +9,7 @@
  */
 
 import type {
+	ColumnListInput,
 	ExpressionIntent,
 	QueryIntent,
 	RefExpressionIntent,
@@ -23,7 +24,7 @@ import type {
 	WhereRawNotExistsIntent,
 	WhereRelationFilterIntent,
 } from '@dbsp/types';
-import { type ColumnListInput, toColumnList } from '@dbsp/types';
+import { toColumnList } from '@dbsp/types';
 import { getTrustedNqlRelationFilterFields } from '@dbsp/types/internal';
 import type { Node, SubLink } from '@pgsql/types';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from './assert-field.js';
@@ -40,7 +41,10 @@ import type {
 	WhereCompilerCtx,
 } from './condition-context.js';
 import { createSubqueryBuilder } from './condition-subquery.js';
-import type { buildCustomFnFilter as FilterCompiler } from './custom-fn-filter.js';
+import {
+	type buildCustomFnFilter as FilterCompiler,
+	mapToHandlerDecision,
+} from './custom-fn-filter.js';
 import { compileExpressionIntent } from './handlers/expression/custom.js';
 import type {
 	CompilerContext,
@@ -54,10 +58,12 @@ import { buildColumnRef } from './handlers/where/utils.js';
 import {
 	assertNoUnsupportedSubqueryModifiers,
 	containsOuterRef,
+	convertWhereCondition,
 } from './intent-to-decisions.js';
 import { unwrapParamIntent } from './param-intent.js';
 import { createParamRef } from './param-ref.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
+import { resolveRelationKeys } from './relation-keys.js';
 
 /** Private recursion state, created by the top-level entry and shared by descendants. */
 type InternalConditionCtx = WhereCompilerCtx & {
@@ -124,6 +130,9 @@ export function createConditionCompiler(
 			position: ctx.position,
 			currentAlias: ctx.currentAlias ?? ctx.rootTable,
 			maxRecursiveDepth: MAX_DEPTH_LIMIT,
+			defaultPkColumnName: ctx.defaultPkColumnName,
+			deriveFkColumnName: ctx.deriveFkColumnName,
+			compileSubquery: ctx.compileExpressionSubquery,
 			...(ctx.schemaName !== undefined && { schema: ctx.schemaName }),
 			...(ctx.dialectCapabilities !== undefined && {
 				dialectCapabilities: ctx.dialectCapabilities,
@@ -144,7 +153,13 @@ export function createConditionCompiler(
 			}),
 			...(ctx.model !== undefined && { model: ctx.model }),
 			...(ctx.outerTable !== undefined && { outerAlias: ctx.outerTable }),
-			compileCustomFnFilter: buildCustomFnFilter,
+			compileCustomFnFilter: (intent, handlerCtx, state) =>
+				buildCustomFnFilter(
+					intent,
+					{ ...handlerCtx, aliases: ctx.aliases },
+					state,
+					compileCondition,
+				),
 			createWhereDispatcher: () => dispatcher,
 		} as CompilerContext;
 	}
@@ -478,25 +493,36 @@ export function createConditionCompiler(
 			let singleHopSourceColumn: ColumnListInput;
 			let singleHopTargetColumn: ColumnListInput;
 			if (resolvedRelation) {
-				const rel = resolvedRelation;
-				const fk = toColumnList(rel.foreignKey);
-				const defaultPk = DEFAULT_PK_COLUMN;
-				if (rel.type === 'belongsTo') {
-					// FK is on the source side: sourceTable.fkCol → targetTable.pk
-					singleHopSourceColumn =
-						fk.length > 0 ? fk : [defaultFkDerivation(rel.target, defaultPk)];
-					const targetKey = toColumnList(rel.targetKey);
-					singleHopTargetColumn =
-						targetKey.length > 0 ? targetKey : [defaultPk];
+				if (ctx.position === 'filter') {
+					const keys = resolveRelationKeys(
+						ctx.rootTable,
+						resolvedRelation,
+						ctx,
+					);
+					singleHopSourceColumn = keys.sourceColumn;
+					singleHopTargetColumn = keys.targetColumn;
 				} else {
-					// hasMany / hasOne: FK is on the target side: targetTable.fkCol → sourceTable.pk
-					const sourceKey = toColumnList(rel.sourceKey);
-					singleHopSourceColumn =
-						sourceKey.length > 0 ? sourceKey : [defaultPk];
-					singleHopTargetColumn =
-						fk.length > 0
-							? fk
-							: [defaultFkDerivation(ctx.rootTable, defaultPk)];
+					// Preserve historical non-FILTER direct lowering until its migration.
+					const rel = resolvedRelation;
+					const fk = toColumnList(rel.foreignKey);
+					const defaultPk = DEFAULT_PK_COLUMN;
+					if (rel.type === 'belongsTo') {
+						// FK is on the source side: sourceTable.fkCol → targetTable.pk
+						singleHopSourceColumn =
+							fk.length > 0 ? fk : [defaultFkDerivation(rel.target, defaultPk)];
+						const targetKey = toColumnList(rel.targetKey);
+						singleHopTargetColumn =
+							targetKey.length > 0 ? targetKey : [defaultPk];
+					} else {
+						// hasMany / hasOne: FK is on the target side: targetTable.fkCol → sourceTable.pk
+						const sourceKey = toColumnList(rel.sourceKey);
+						singleHopSourceColumn =
+							sourceKey.length > 0 ? sourceKey : [defaultPk];
+						singleHopTargetColumn =
+							fk.length > 0
+								? fk
+								: [defaultFkDerivation(ctx.rootTable, defaultPk)];
+					}
 				}
 			}
 
@@ -546,21 +572,29 @@ export function createConditionCompiler(
 			// Resolve explicit FK columns using the same direction logic as deriveFkColumns.
 			// For belongsTo: FK is on the source side (sourceTable.fkCol → targetTable.pk)
 			// For hasMany/hasOne: FK is on the target side (targetTable.fkCol → sourceTable.pk)
-			const fk = toColumnList(rel.foreignKey);
-			const defaultPk = DEFAULT_PK_COLUMN;
-			if (rel.type === 'belongsTo') {
-				hopSourceColumns.push(
-					fk.length > 0 ? fk : [defaultFkDerivation(rel.target, defaultPk)],
-				);
-				const targetKey = toColumnList(rel.targetKey);
-				hopTargetColumns.push(targetKey.length > 0 ? targetKey : [defaultPk]);
+			if (ctx.position === 'filter') {
+				const keys = resolveRelationKeys(currentSource, rel, ctx);
+				hopSourceColumns.push(keys.sourceColumn);
+				hopTargetColumns.push(keys.targetColumn);
 			} else {
-				// hasMany / hasOne: FK lives on the target table
-				const sourceKey = toColumnList(rel.sourceKey);
-				hopSourceColumns.push(sourceKey.length > 0 ? sourceKey : [defaultPk]);
-				hopTargetColumns.push(
-					fk.length > 0 ? fk : [defaultFkDerivation(currentSource, defaultPk)],
-				);
+				const fk = toColumnList(rel.foreignKey);
+				const defaultPk = DEFAULT_PK_COLUMN;
+				if (rel.type === 'belongsTo') {
+					hopSourceColumns.push(
+						fk.length > 0 ? fk : [defaultFkDerivation(rel.target, defaultPk)],
+					);
+					const targetKey = toColumnList(rel.targetKey);
+					hopTargetColumns.push(targetKey.length > 0 ? targetKey : [defaultPk]);
+				} else {
+					// hasMany / hasOne: FK lives on the target table
+					const sourceKey = toColumnList(rel.sourceKey);
+					hopSourceColumns.push(sourceKey.length > 0 ? sourceKey : [defaultPk]);
+					hopTargetColumns.push(
+						fk.length > 0
+							? fk
+							: [defaultFkDerivation(currentSource, defaultPk)],
+					);
+				}
 			}
 			currentSource = rel.target;
 		}
@@ -753,6 +787,78 @@ export function createConditionCompiler(
 		dispatcher: WhereDispatcher,
 		handlerCtx: CompilerContext,
 	): Node {
+		if (
+			ctx.position === 'filter' &&
+			(intent.kind === 'exists' || intent.kind === 'notExists')
+		) {
+			if (intent.recursive !== undefined)
+				throw new Error(
+					`FILTER exists('${intent.relation}'): recursive relation predicates are not supported inside FILTER.`,
+				);
+			const resolved = ctx.model?.getRelation(
+				`${ctx.rootTable}.${intent.relation}`,
+			);
+			if (ctx.model && !resolved)
+				throw new Error(
+					`exists('${intent.relation}'): no relation '${intent.relation}' is declared on table '${ctx.rootTable}'. Use rawExists(subquery(...)) for an EXISTS over an undeclared or uncorrelated subquery.`,
+				);
+			// Resolve raw intents here. Planner decisions never enter this branch.
+			const hints = intent as unknown as Partial<Decision>;
+			const keys =
+				hints.sourceColumn !== undefined && hints.targetColumn !== undefined
+					? {
+							sourceColumn: hints.sourceColumn,
+							targetColumn: hints.targetColumn,
+						}
+					: resolveRelationKeys(
+							ctx.rootTable,
+							resolved ?? {
+								type: 'hasMany',
+								target: intent.relation,
+							},
+							ctx,
+						);
+			return dispatcher(
+				{
+					type: 'exists',
+					operator: intent.kind,
+					relation: intent.relation,
+					targetTable: hints.targetTable ?? resolved?.target ?? intent.relation,
+					sourceColumn: keys.sourceColumn,
+					targetColumn: keys.targetColumn,
+					conditions: intent.where ? [intent.where as unknown as Decision] : [],
+					include: intent.include
+						? Object.entries(intent.include).map(([relation, options]) => ({
+								type: 'existsInclude',
+								relation,
+								joinType: options.join ?? 'inner',
+							}))
+						: undefined,
+				} as Decision,
+				handlerCtx,
+				ctx.paramState,
+			);
+		}
+		if (
+			ctx.position === 'filter' &&
+			(intent.kind === 'subquery' || (intent.kind === 'in' && intent.subquery))
+		) {
+			const decision = convertWhereCondition(intent, ctx.rootTable);
+			if (!decision)
+				throw new Error(
+					'fn().filter(): the FILTER (WHERE ...) condition could not be compiled (kind: subquery).',
+				);
+			return dispatcher(
+				mapToHandlerDecision(
+					decision,
+					ctx.rootTable,
+					ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
+					ctx.deriveFkColumnName ?? defaultFkDerivation,
+				),
+				handlerCtx,
+				ctx.paramState,
+			);
+		}
 		if (intent.kind === 'range') {
 			return handleRangeIntent(intent, ctx, dispatcher, handlerCtx);
 		}
@@ -799,12 +905,16 @@ export function createConditionCompiler(
 		const bridged = needsColumn
 			? ({
 					...intent,
+					...(ctx.position === 'filter' && { type: 'where' }),
 					column: rawIntent.field,
 					...('value' in rawIntent && {
 						value: rawIntent.value,
 					}),
 				} as unknown as Decision)
-			: (intent as unknown as Decision);
+			: ({
+					...intent,
+					...(ctx.position === 'filter' && { type: 'where' }),
+				} as unknown as Decision);
 		return dispatcher(bridged, handlerCtx, ctx.paramState);
 	}
 
