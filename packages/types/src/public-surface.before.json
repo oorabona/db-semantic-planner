@@ -4393,6 +4393,26 @@
 			{
 				"name": "WindowOrderBy",
 				"kind": "type"
+			},
+			{
+				"name": "resolveDeclaredRelationPath",
+				"kind": "value"
+			},
+			{
+				"name": "DeclaredRelationPathRelation",
+				"kind": "type"
+			},
+			{
+				"name": "DeclaredRelationPathModel",
+				"kind": "type"
+			},
+			{
+				"name": "DeclaredRelationPathHop",
+				"kind": "type"
+			},
+			{
+				"name": "DeclaredRelationPathResult",
+				"kind": "type"
 			}
 		],
 		"runtime": [
@@ -4473,7 +4493,8 @@
 			"resolveOutputReadHandling",
 			"sameControllerIdentity",
 			"sameLedgerAddress",
-			"toColumnList"
+			"toColumnList",
+			"resolveDeclaredRelationPath"
 		],
 		"built": true
 	}
