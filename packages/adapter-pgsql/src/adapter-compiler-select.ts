@@ -545,6 +545,23 @@ function stripJoinColumnsForAggregation(
 	}
 }
 
+/** Include trees retain consumers below the top-level SQL decisions. */
+function includedRelationPaths(
+	decisions: readonly PlanDecision[],
+): Set<string> {
+	const paths = new Set<string>();
+	function visit(decision: PlanDecision): void {
+		if (decision.type !== 'includeStrategy') return;
+		const path = (decision.relationPath ?? decision.relationName) as
+			| string
+			| undefined;
+		if (path) paths.add(path);
+		for (const child of decision.children ?? []) visit(child);
+	}
+	for (const decision of decisions) visit(decision);
+	return paths;
+}
+
 type RelationColumnEntry = { col: string; alias?: string };
 
 /**
@@ -567,8 +584,7 @@ function buildRelationColumnsMap(
 		const col = d.column as string;
 		const alias = d.alias as string | undefined;
 		const fullRelation = d.relation as string;
-		const rootRelation = fullRelation.split('.')[0] ?? '';
-		if (!includedRelations.has(rootRelation)) continue;
+		if (!includedRelations.has(fullRelation)) continue;
 
 		// Use full path as map key so 'callee.file' is stored separately
 		// from 'callee' — avoids injecting 2-hop columns into 1-hop includes.
@@ -590,10 +606,6 @@ function buildRelationColumnsMap(
 	}
 
 	return map;
-}
-
-function rootRelationName(relation: string): string {
-	return relation.split('.')[0] ?? relation;
 }
 
 /**
@@ -1498,18 +1510,13 @@ export function compileSelectEnvelope<T = unknown>(
 		applyJoinHydrationPrefixes(enrichedUnifiedDecisions);
 
 		// Deduplicate: remove selectRelationColumn decisions for relations
-		// already covered by an include strategy.
+		// whose exact path is consumed by an include strategy.
 		// Include handlers (json_agg, lateral, CTE, join) already compile the
 		// relation's columns — emitting both would produce duplicate columns.
 		// Standalone relation expressions (no matching include) are kept.
 		// Note: selectPseudoColumn (recursive traversals like manager.name)
 		// are never covered by includes — they always compile independently.
-		const includedRelations = new Set(
-			enrichedUnifiedDecisions
-				.filter((d) => d.type === 'includeStrategy')
-				.map((d) => d.relationName as string)
-				.filter(Boolean),
-		);
+		const includedRelations = includedRelationPaths(enrichedUnifiedDecisions);
 
 		if (includedRelations.size > 0) {
 			// Collect specific columns from selectRelationColumn decisions and inject
@@ -1529,11 +1536,7 @@ export function compileSelectEnvelope<T = unknown>(
 			includedRelations.size > 0
 				? decisions.filter((d) => {
 						if (d.type === 'selectRelationColumn' && d.relation) {
-							// relation may be a dotted path (e.g. "userRoles.role.permissions")
-							// — check if the root segment is covered by an include
-							const rel = d.relation as string;
-							const rootRelation = rootRelationName(rel);
-							if (includedRelations.has(rootRelation)) {
+							if (includedRelations.has(d.relation as string)) {
 								return false; // covered by include strategy
 							}
 						}
