@@ -6,9 +6,10 @@ import type {
 	QueryIntent,
 } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
+import type { FkColumnDerivation } from './assert-field.js';
 import type { QueryScope, RelationBinding } from './binding-registry.js';
 import type { DeclaredNameResolver } from './declared-name-resolver.js';
-import type { CompilerState } from './handlers/types.js';
+import type { CompilerContext, CompilerState } from './handlers/types.js';
 import type {
 	AliasColumnAuthority,
 	RelationTargetProjectionRegistry,
@@ -32,6 +33,9 @@ export type WhereCompilerCtx = {
 	/** Addressed authority for all declared relation and column references. */
 	readonly declaredNames?: DeclaredNameResolver;
 	readonly dbCasing?: DbCasing;
+	readonly defaultPkColumnName?: string;
+	readonly deriveFkColumnName?: FkColumnDerivation;
+	readonly compileExpressionSubquery?: CompilerContext['compileSubquery'];
 	/** Lexically visible relation bindings. */
 	readonly scope?: QueryScope;
 	/** Binding that owns unqualified columns in this WHERE expression. */
@@ -64,7 +68,7 @@ export type WhereCompilerCtx = {
 	readonly currentAlias?: string;
 };
 
-/** Compilation position is metadata in step 1; no position changes its lowering yet. */
+/** Compilation position selects the migrated FILTER path; other callers retain their lowering. */
 export type ConditionPosition =
 	| 'where'
 	| 'having'
@@ -81,7 +85,9 @@ export type ConditionPosition =
  * declared names, model and shared parameter state retain their existing types.
  * Logical and relation descendants retain the caller's position; subquery
  * bodies use subquery. Only legacy top-level callers default to where.
- * Position is metadata and does not select a different lowering in step 1.
+ * FILTER enters the condition compiler and bypasses PlanDecision; relation predicates
+ * and predicate subqueries still lower through handler decisions during migration.
+ * Other positions retain their historical lowering.
  */
 export type ConditionCompilerCtx = Omit<
 	WhereCompilerCtx,

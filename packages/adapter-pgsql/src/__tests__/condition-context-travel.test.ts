@@ -75,6 +75,7 @@ it('retains relation descendant position and explicitly marks subquery bodies', 
 		rawExists(subquery('posts').select('id').where(eq('id', 2))),
 		ctx,
 	);
-	expect(observed).toEqual(['filter', 'subquery']);
+	// FILTER relation children now enter the condition compiler before dispatch.
+	expect(observed).toEqual(['filter', 'filter', 'subquery']);
 	expect(bodyPositions).toEqual(['subquery']);
 });

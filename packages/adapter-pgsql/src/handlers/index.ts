@@ -5,9 +5,10 @@
  * Each family's built-in handlers are registered lazily on that family's first use and looked up by operator/type.
  */
 
-import type { ColumnListInput } from '@dbsp/types';
+import type { ColumnListInput, WhereIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { SubqueryConditionCompiler } from '../condition-subquery.js';
+import { buildCustomFnFilter } from '../custom-fn-filter.js';
 import { assertNoUnsupportedSubqueryModifiers } from '../intent-to-decisions.js';
 import { escapeDiagnosticText } from '../validate.js';
 import { allExpressionHandlers } from './expression/index.js';
@@ -660,6 +661,19 @@ export function createWhereDispatcher(
 ): WhereDispatcher {
 	const rawExistsHandler = createRawExistsHandler(compiler);
 	const contexts = new WeakMap<CompilerContext, CompilerContext>();
+	const compileFilter = (
+		intent: WhereIntent,
+		ctx: CompilerContext,
+		state: CompilerState,
+	): Node =>
+		buildCustomFnFilter(intent, ctx, state, (condition, inner) =>
+			compiler(condition, {
+				...inner,
+				rootTable: inner.logicalSourceTable,
+				currentAlias: inner.emittedAlias,
+				aliases: inner.visibleAliases,
+			}),
+		);
 
 	const dispatch: WhereDispatcher = (
 		decision: Decision,
@@ -667,6 +681,15 @@ export function createWhereDispatcher(
 		state: CompilerState,
 	): Node => {
 		ensureHandlersRegistered();
+		// Raw FILTER descendants retain their intent until the condition compiler
+		// resolves them in the EXISTS emitter's child scope. Decisions stay intact.
+		if (
+			ctx.position === 'filter' &&
+			'kind' in decision &&
+			!('type' in decision)
+		) {
+			return compileFilter(decision as unknown as WhereIntent, ctx, state);
+		}
 		const normalized = normalizeToDecision(decision, ctx);
 		const rawOperator = normalized.operator;
 		const operator = resolveWhereOperator(
@@ -687,6 +710,11 @@ export function createWhereDispatcher(
 			runtimeCtx = ctx.createWhereDispatcher
 				? ctx
 				: { ...ctx, createWhereDispatcher: () => dispatch };
+			runtimeCtx = {
+				...runtimeCtx,
+				compileCustomFnFilter:
+					runtimeCtx.compileCustomFnFilter ?? compileFilter,
+			};
 			contexts.set(ctx, runtimeCtx);
 			contexts.set(runtimeCtx, runtimeCtx);
 		}

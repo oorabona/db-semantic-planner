@@ -310,7 +310,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"error": "FILTER exists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -318,7 +318,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"error": "FILTER exists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -326,7 +326,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"error": "FILTER exists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -334,7 +334,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"error": "FILTER exists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -358,7 +358,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"error": "FILTER exists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -366,7 +366,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"error": "FILTER exists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -374,7 +374,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"error": "FILTER exists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -382,7 +382,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"error": "FILTER exists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -390,7 +390,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"error": "FILTER exists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -414,7 +414,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"error": "FILTER exists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -422,7 +422,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"error": "FILTER notExists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -430,7 +430,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"error": "FILTER notExists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -438,7 +438,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"error": "FILTER notExists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -446,7 +446,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"error": "FILTER notExists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -470,7 +470,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"error": "FILTER notExists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -478,7 +478,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"error": "FILTER notExists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -486,7 +486,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"error": "FILTER notExists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -494,7 +494,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"error": "FILTER notExists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -502,7 +502,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"error": "FILTER notExists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -526,7 +526,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"error": "FILTER notExists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -588,33 +588,33 @@
 			"position": "having-filter",
 			"kind": "exists",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) > $2",
+			"params": [61, 19],
+			"error": null
 		},
 		{
 			"position": "having-filter",
 			"kind": "exists",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND users.score = $2) > $3",
+			"params": [61, 13, 19],
+			"error": null
 		},
 		{
 			"position": "having-filter",
 			"kind": "exists",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR users.score = $2) > $3",
+			"params": [61, 13, 19],
+			"error": null
 		},
 		{
 			"position": "having-filter",
 			"kind": "exists",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))) > $2",
+			"params": [61, 19],
+			"error": null
 		},
 		{
 			"position": "having-filter",
@@ -636,41 +636,41 @@
 			"position": "having-filter",
 			"kind": "exists",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR users.score = $3)) > $4",
+			"params": [13, 61, 17, 19],
+			"error": null
 		},
 		{
 			"position": "having-filter",
 			"kind": "notExists",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))) > $2",
+			"params": [61, 19],
+			"error": null
 		},
 		{
 			"position": "having-filter",
 			"kind": "notExists",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND users.score = $2) > $3",
+			"params": [61, 13, 19],
+			"error": null
 		},
 		{
 			"position": "having-filter",
 			"kind": "notExists",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR users.score = $2) > $3",
+			"params": [61, 13, 19],
+			"error": null
 		},
 		{
 			"position": "having-filter",
 			"kind": "notExists",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)))) > $2",
+			"params": [61, 19],
+			"error": null
 		},
 		{
 			"position": "having-filter",
@@ -692,41 +692,41 @@
 			"position": "having-filter",
 			"kind": "notExists",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR users.score = $3)) > $4",
+			"params": [13, 61, 17, 19],
+			"error": null
 		},
 		{
 			"position": "having-filter",
 			"kind": "some",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) > $2",
+			"params": [61, 19],
+			"error": null
 		},
 		{
 			"position": "having-filter",
 			"kind": "some",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND users.score = $2) > $3",
+			"params": [61, 13, 19],
+			"error": null
 		},
 		{
 			"position": "having-filter",
 			"kind": "some",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR users.score = $2) > $3",
+			"params": [61, 13, 19],
+			"error": null
 		},
 		{
 			"position": "having-filter",
 			"kind": "some",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))) > $2",
+			"params": [61, 19],
+			"error": null
 		},
 		{
 			"position": "having-filter",
@@ -748,41 +748,41 @@
 			"position": "having-filter",
 			"kind": "some",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR users.score = $3)) > $4",
+			"params": [13, 61, 17, 19],
+			"error": null
 		},
 		{
 			"position": "having-filter",
 			"kind": "every",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1)))) > $2",
+			"params": [61, 19],
+			"error": null
 		},
 		{
 			"position": "having-filter",
 			"kind": "every",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) AND users.score = $2) > $3",
+			"params": [61, 13, 19],
+			"error": null
 		},
 		{
 			"position": "having-filter",
 			"kind": "every",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) OR users.score = $2) > $3",
+			"params": [61, 13, 19],
+			"error": null
 		},
 		{
 			"position": "having-filter",
 			"kind": "every",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))))) > $2",
+			"params": [61, 19],
+			"error": null
 		},
 		{
 			"position": "having-filter",

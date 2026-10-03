@@ -1,4 +1,4 @@
-/** Legacy FILTER lowering, shared without importing the plan compiler. */
+/** FILTER bridge and legacy decision helpers, without compiler import cycles. */
 import type { WhereIntent } from '@dbsp/types';
 import type { JsonAggOrderByEntry } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
@@ -6,13 +6,14 @@ import {
 	defaultFkDerivation,
 	type FkColumnDerivation,
 } from './assert-field.js';
+import type { ConditionCompilerCtx } from './condition-context.js';
+import { createSubqueryBuilder } from './condition-subquery.js';
 import { deriveFkColumns } from './handlers/include/shared.js';
 import type {
 	CompilerContext as HandlerCompilerContext,
 	CompilerState as HandlerCompilerState,
 	Decision as HandlerDecision,
 } from './handlers/types.js';
-import { convertWhereCondition } from './intent-to-decisions.js';
 import type { PlanDecision, PlanExpressionOrderBy } from './plan-decision.js';
 
 function isJsonAggOrderBy(
@@ -149,26 +150,75 @@ export function compileFilterCondition(
 	return dispatcher(mapped, ctx, state);
 }
 
+export type FilterConditionCompiler = (
+	intent: WhereIntent,
+	ctx: ConditionCompilerCtx,
+) => Node;
+
 export function buildCustomFnFilter(
 	filterIntent: WhereIntent,
 	ctx: HandlerCompilerContext,
 	state: HandlerCompilerState,
+	conditionCompiler: FilterConditionCompiler,
 ): Node {
 	// Fail loud rather than treat "could not lower" as "no filter": a filter that
 	// lowers to nothing (a malformed or unsupported condition) must NOT silently
 	// drop to an unfiltered aggregate, which would broaden results. An empty or()
 	// lowers to FALSE and an empty and() to TRUE, so neither reaches this branch.
-	if (!ctx.createWhereDispatcher)
-		throw new Error('FILTER requires a compiler-supplied WHERE dispatcher');
-	const filterDecision = convertWhereCondition(filterIntent, ctx.rootTable);
-	const filterNode = filterDecision
-		? compileFilterCondition(
-				filterDecision,
-				ctx.createWhereDispatcher(),
-				ctx,
-				state,
-			)
-		: undefined;
+	const filterNode = conditionCompiler(filterIntent, {
+		logicalSourceTable: ctx.rootTable,
+		emittedAlias: ctx.currentAlias ?? ctx.rootTable,
+		visibleAliases: new Map(ctx.aliases ?? state.aliases),
+		position: 'filter',
+		...(ctx.defaultPkColumnName !== undefined && {
+			defaultPkColumnName: ctx.defaultPkColumnName,
+		}),
+		...(ctx.deriveFkColumnName !== undefined && {
+			deriveFkColumnName: ctx.deriveFkColumnName,
+		}),
+		compileExpressionSubquery: ctx.compileSubquery,
+		paramState: state,
+		...(ctx.model !== undefined && { model: ctx.model }),
+		...(ctx.declaredNames !== undefined && {
+			declaredNames: ctx.declaredNames,
+		}),
+		...(ctx.dbCasing !== undefined && { dbCasing: ctx.dbCasing }),
+		...(ctx.schema !== undefined && { schemaName: ctx.schema }),
+		...(ctx.dialectCapabilities !== undefined && {
+			dialectCapabilities: ctx.dialectCapabilities,
+		}),
+		...(ctx.scope !== undefined && { scope: ctx.scope }),
+		...(ctx.currentBinding !== undefined && {
+			currentBinding: ctx.currentBinding,
+		}),
+		...(ctx.relationTargetProjections !== undefined && {
+			relationTargetProjections: ctx.relationTargetProjections,
+		}),
+		...(ctx.aliasColumnAuthorities !== undefined && {
+			aliasColumnAuthorities: ctx.aliasColumnAuthorities,
+		}),
+		...(ctx.outerAlias !== undefined && { outerTable: ctx.outerAlias }),
+		compileSubquery: (intent, offset) => {
+			return createSubqueryBuilder((innerIntent, inner) =>
+				conditionCompiler(innerIntent, {
+					...inner,
+					logicalSourceTable: inner.rootTable,
+					emittedAlias: inner.currentAlias ?? inner.rootTable,
+					visibleAliases: inner.aliases,
+					position: inner.position ?? 'subquery',
+				}),
+			)(
+				intent,
+				offset,
+				ctx.declaredNames,
+				ctx.schema,
+				'rawExists',
+				ctx.scope,
+				ctx.dialectCapabilities,
+				ctx.dbCasing,
+			);
+		},
+	});
 	if (!filterNode) {
 		throw new Error(
 			'fn().filter(): the FILTER (WHERE ...) condition could not be compiled ' +
