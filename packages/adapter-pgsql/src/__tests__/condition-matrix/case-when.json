@@ -1,0 +1,804 @@
+{
+	"entries": [
+		{
+			"position": "case-when",
+			"kind": "eq",
+			"shape": "leaf",
+			"sql": "SELECT CASE WHEN users.score = $1 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "eq",
+			"shape": "and",
+			"sql": "SELECT CASE WHEN users.score = $1 AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "eq",
+			"shape": "or",
+			"sql": "SELECT CASE WHEN users.score = $1 OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "eq",
+			"shape": "not",
+			"sql": "SELECT CASE WHEN NOT (users.score = $1) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "eq",
+			"shape": "empty-or",
+			"sql": "SELECT CASE WHEN false THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "eq",
+			"shape": "empty-and",
+			"sql": "SELECT CASE WHEN true THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "eq",
+			"shape": "two-level",
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (users.score = $2) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "neq",
+			"shape": "leaf",
+			"sql": "SELECT CASE WHEN users.score <> $1 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "neq",
+			"shape": "and",
+			"sql": "SELECT CASE WHEN users.score <> $1 AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "neq",
+			"shape": "or",
+			"sql": "SELECT CASE WHEN users.score <> $1 OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "neq",
+			"shape": "not",
+			"sql": "SELECT CASE WHEN NOT (users.score <> $1) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "neq",
+			"shape": "empty-or",
+			"sql": "SELECT CASE WHEN false THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "neq",
+			"shape": "empty-and",
+			"sql": "SELECT CASE WHEN true THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "neq",
+			"shape": "two-level",
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (users.score <> $2) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "gt",
+			"shape": "leaf",
+			"sql": "SELECT CASE WHEN users.score > $1 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "gt",
+			"shape": "and",
+			"sql": "SELECT CASE WHEN users.score > $1 AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "gt",
+			"shape": "or",
+			"sql": "SELECT CASE WHEN users.score > $1 OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "gt",
+			"shape": "not",
+			"sql": "SELECT CASE WHEN NOT (users.score > $1) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "gt",
+			"shape": "empty-or",
+			"sql": "SELECT CASE WHEN false THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "gt",
+			"shape": "empty-and",
+			"sql": "SELECT CASE WHEN true THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "gt",
+			"shape": "two-level",
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (users.score > $2) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "gte",
+			"shape": "leaf",
+			"sql": "SELECT CASE WHEN users.score >= $1 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "gte",
+			"shape": "and",
+			"sql": "SELECT CASE WHEN users.score >= $1 AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "gte",
+			"shape": "or",
+			"sql": "SELECT CASE WHEN users.score >= $1 OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "gte",
+			"shape": "not",
+			"sql": "SELECT CASE WHEN NOT (users.score >= $1) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "gte",
+			"shape": "empty-or",
+			"sql": "SELECT CASE WHEN false THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "gte",
+			"shape": "empty-and",
+			"sql": "SELECT CASE WHEN true THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "gte",
+			"shape": "two-level",
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (users.score >= $2) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "lt",
+			"shape": "leaf",
+			"sql": "SELECT CASE WHEN users.score < $1 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "lt",
+			"shape": "and",
+			"sql": "SELECT CASE WHEN users.score < $1 AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "lt",
+			"shape": "or",
+			"sql": "SELECT CASE WHEN users.score < $1 OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "lt",
+			"shape": "not",
+			"sql": "SELECT CASE WHEN NOT (users.score < $1) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "lt",
+			"shape": "empty-or",
+			"sql": "SELECT CASE WHEN false THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "lt",
+			"shape": "empty-and",
+			"sql": "SELECT CASE WHEN true THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "lt",
+			"shape": "two-level",
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (users.score < $2) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "lte",
+			"shape": "leaf",
+			"sql": "SELECT CASE WHEN users.score <= $1 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "lte",
+			"shape": "and",
+			"sql": "SELECT CASE WHEN users.score <= $1 AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "lte",
+			"shape": "or",
+			"sql": "SELECT CASE WHEN users.score <= $1 OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "lte",
+			"shape": "not",
+			"sql": "SELECT CASE WHEN NOT (users.score <= $1) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "lte",
+			"shape": "empty-or",
+			"sql": "SELECT CASE WHEN false THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "lte",
+			"shape": "empty-and",
+			"sql": "SELECT CASE WHEN true THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "lte",
+			"shape": "two-level",
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (users.score <= $2) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "isDistinctFrom",
+			"shape": "leaf",
+			"sql": "SELECT CASE WHEN users.score IS DISTINCT FROM $1 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "isDistinctFrom",
+			"shape": "and",
+			"sql": "SELECT CASE WHEN users.score IS DISTINCT FROM $1 AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "isDistinctFrom",
+			"shape": "or",
+			"sql": "SELECT CASE WHEN users.score IS DISTINCT FROM $1 OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7, 13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "isDistinctFrom",
+			"shape": "not",
+			"sql": "SELECT CASE WHEN NOT (users.score IS DISTINCT FROM $1) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [7],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "isDistinctFrom",
+			"shape": "empty-or",
+			"sql": "SELECT CASE WHEN false THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "isDistinctFrom",
+			"shape": "empty-and",
+			"sql": "SELECT CASE WHEN true THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "isDistinctFrom",
+			"shape": "two-level",
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (users.score IS DISTINCT FROM $2) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "eq-null",
+			"shape": "leaf",
+			"sql": "SELECT CASE WHEN users.score = NULL THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "eq-null",
+			"shape": "and",
+			"sql": "SELECT CASE WHEN users.score = NULL AND users.score = $1 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "eq-null",
+			"shape": "or",
+			"sql": "SELECT CASE WHEN users.score = NULL OR users.score = $1 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "eq-null",
+			"shape": "not",
+			"sql": "SELECT CASE WHEN NOT (users.score = NULL) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "eq-null",
+			"shape": "empty-or",
+			"sql": "SELECT CASE WHEN false THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "eq-null",
+			"shape": "empty-and",
+			"sql": "SELECT CASE WHEN true THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "eq-null",
+			"shape": "two-level",
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (users.score = NULL) OR users.score = $2) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13, 17],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "like",
+			"shape": "leaf",
+			"sql": "SELECT CASE WHEN users.name LIKE $1 THEN 11 ELSE 22 END AS label FROM users",
+			"params": ["a%"],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "like",
+			"shape": "and",
+			"sql": "SELECT CASE WHEN users.name LIKE $1 AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": ["a%", 13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "like",
+			"shape": "or",
+			"sql": "SELECT CASE WHEN users.name LIKE $1 OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": ["a%", 13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "like",
+			"shape": "not",
+			"sql": "SELECT CASE WHEN NOT (users.name LIKE $1) THEN 11 ELSE 22 END AS label FROM users",
+			"params": ["a%"],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "like",
+			"shape": "empty-or",
+			"sql": "SELECT CASE WHEN false THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "like",
+			"shape": "empty-and",
+			"sql": "SELECT CASE WHEN true THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "like",
+			"shape": "two-level",
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (users.name LIKE $2) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13, "a%", 17],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "ilike",
+			"shape": "leaf",
+			"sql": "SELECT CASE WHEN users.name ILIKE $1 THEN 11 ELSE 22 END AS label FROM users",
+			"params": ["B%"],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "ilike",
+			"shape": "and",
+			"sql": "SELECT CASE WHEN users.name ILIKE $1 AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": ["B%", 13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "ilike",
+			"shape": "or",
+			"sql": "SELECT CASE WHEN users.name ILIKE $1 OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": ["B%", 13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "ilike",
+			"shape": "not",
+			"sql": "SELECT CASE WHEN NOT (users.name ILIKE $1) THEN 11 ELSE 22 END AS label FROM users",
+			"params": ["B%"],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "ilike",
+			"shape": "empty-or",
+			"sql": "SELECT CASE WHEN false THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "ilike",
+			"shape": "empty-and",
+			"sql": "SELECT CASE WHEN true THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "ilike",
+			"shape": "two-level",
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (users.name ILIKE $2) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13, "B%", 17],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "like-escape",
+			"shape": "leaf",
+			"sql": "SELECT CASE WHEN users.name LIKE $1 ESCAPE $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": ["c!_%", "!"],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "like-escape",
+			"shape": "and",
+			"sql": "SELECT CASE WHEN users.name LIKE $1 ESCAPE $2 AND users.score = $3 THEN 11 ELSE 22 END AS label FROM users",
+			"params": ["c!_%", "!", 13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "like-escape",
+			"shape": "or",
+			"sql": "SELECT CASE WHEN users.name LIKE $1 ESCAPE $2 OR users.score = $3 THEN 11 ELSE 22 END AS label FROM users",
+			"params": ["c!_%", "!", 13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "like-escape",
+			"shape": "not",
+			"sql": "SELECT CASE WHEN NOT (users.name LIKE $1 ESCAPE $2) THEN 11 ELSE 22 END AS label FROM users",
+			"params": ["c!_%", "!"],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "like-escape",
+			"shape": "empty-or",
+			"sql": "SELECT CASE WHEN false THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "like-escape",
+			"shape": "empty-and",
+			"sql": "SELECT CASE WHEN true THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "like-escape",
+			"shape": "two-level",
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (users.name LIKE $2 ESCAPE $3) OR users.score = $4) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13, "c!_%", "!", 17],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "in-values",
+			"shape": "leaf",
+			"sql": "SELECT CASE WHEN users.score = ANY ($1) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [[3, 5]],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "in-values",
+			"shape": "and",
+			"sql": "SELECT CASE WHEN users.score = ANY ($1) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [[3, 5], 13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "in-values",
+			"shape": "or",
+			"sql": "SELECT CASE WHEN users.score = ANY ($1) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [[3, 5], 13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "in-values",
+			"shape": "not",
+			"sql": "SELECT CASE WHEN NOT (users.score = ANY ($1)) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [[3, 5]],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "in-values",
+			"shape": "empty-or",
+			"sql": "SELECT CASE WHEN false THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "in-values",
+			"shape": "empty-and",
+			"sql": "SELECT CASE WHEN true THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "in-values",
+			"shape": "two-level",
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (users.score = ANY ($2)) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13, [3, 5], 17],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "in-empty",
+			"shape": "leaf",
+			"sql": "SELECT CASE WHEN false THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "in-empty",
+			"shape": "and",
+			"sql": "SELECT CASE WHEN false AND users.score = $1 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "in-empty",
+			"shape": "or",
+			"sql": "SELECT CASE WHEN false OR users.score = $1 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "in-empty",
+			"shape": "not",
+			"sql": "SELECT CASE WHEN NOT (false) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "in-empty",
+			"shape": "empty-or",
+			"sql": "SELECT CASE WHEN false THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "in-empty",
+			"shape": "empty-and",
+			"sql": "SELECT CASE WHEN true THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "in-empty",
+			"shape": "two-level",
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (false) OR users.score = $2) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13, 17],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "any",
+			"shape": "leaf",
+			"sql": "SELECT CASE WHEN users.score = ANY (CAST($1 AS int4[])) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [[3, 5]],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "any",
+			"shape": "and",
+			"sql": "SELECT CASE WHEN users.score = ANY (CAST($1 AS int4[])) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [[3, 5], 13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "any",
+			"shape": "or",
+			"sql": "SELECT CASE WHEN users.score = ANY (CAST($1 AS int4[])) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [[3, 5], 13],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "any",
+			"shape": "not",
+			"sql": "SELECT CASE WHEN NOT (users.score = ANY (CAST($1 AS int4[]))) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [[3, 5]],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "any",
+			"shape": "empty-or",
+			"sql": "SELECT CASE WHEN false THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "any",
+			"shape": "empty-and",
+			"sql": "SELECT CASE WHEN true THEN 11 ELSE 22 END AS label FROM users",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "any",
+			"shape": "two-level",
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (users.score = ANY (CAST($2 AS int4[]))) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13, [3, 5], 17],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "any-empty",
+			"shape": "leaf",
+			"sql": "SELECT CASE WHEN users.score = ANY (CAST($1 AS int4[])) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [[]],
+			"error": null
+		},
+		{
+			"position": "case-when",
+			"kind": "any-empty",
+			"shape": "and",
+			"sql": "SELECT CASE WHEN users.score = ANY (CAST($1 AS int4[])) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [[], 13],
+			"error": null
+		}
+	]
+}

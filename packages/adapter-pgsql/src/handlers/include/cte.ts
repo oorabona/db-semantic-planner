@@ -23,7 +23,6 @@ import {
 	resolveRelationTarget,
 } from '../../relation-target-projection.js';
 import { queryLocal, resolveDeclaredIdentifier } from '../../sql-identifier.js';
-import { createWhereDispatcher } from '../index.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -73,7 +72,11 @@ function buildCteSelect(
 	// Build WHERE if conditions exist
 	let whereClause: Node | undefined;
 	if (whereConditions && whereConditions.length > 0) {
-		const dispatch = createWhereDispatcher();
+		if (!ctx.createWhereDispatcher)
+			throw new Error(
+				'Condition requires a compiler-supplied WHERE dispatcher',
+			);
+		const dispatch = ctx.createWhereDispatcher();
 
 		const subCtx: CompilerContext = {
 			...ctx,

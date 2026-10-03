@@ -1,3 +1,4 @@
+import { createWhereDispatcher } from './handlers/index.js';
 /**
  * Mutation compilation: INSERT, UPDATE, DELETE, UPSERT.
  * Extracted from PgAdapter.compileInsert/Update/Delete/Upsert/etc.
@@ -332,6 +333,7 @@ function mutationContext(
 		...(deps.schemaName !== undefined && { schema: deps.schemaName }),
 		maxRecursiveDepth,
 		compileCustomFnFilter: buildCustomFnFilter,
+		createWhereDispatcher: () => createWhereDispatcher(compileWhereIntent),
 	} as CompilerContext;
 }
 

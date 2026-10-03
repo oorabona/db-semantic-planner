@@ -362,7 +362,7 @@ describe('anyHandler — branch coverage', () => {
 				{ type: 'where', operator: 'any' } as Decision,
 				ctx,
 				state,
-				createWhereDispatcher(),
+				createWhereDispatcher(compileWhereIntent),
 			),
 		).toThrow('ANY handler requires a column');
 	});
@@ -381,7 +381,7 @@ describe('anyHandler — branch coverage', () => {
 			} as Decision,
 			ctx,
 			state,
-			createWhereDispatcher(),
+			createWhereDispatcher(compileWhereIntent),
 		);
 		const sql = deparseNode(node);
 		expect(sql).toEqual('items.score = ANY (CAST($1 AS int4[]))');
@@ -401,7 +401,7 @@ describe('anyHandler — branch coverage', () => {
 			} as Decision,
 			ctx,
 			state,
-			createWhereDispatcher(),
+			createWhereDispatcher(compileWhereIntent),
 		);
 		const sql = deparseNode(node);
 		expect(sql).toEqual('items.tags = ANY (CAST($1 AS my_custom_enum[]))');
@@ -420,7 +420,7 @@ describe('anyHandler — branch coverage', () => {
 			} as Decision,
 			ctx,
 			state,
-			createWhereDispatcher(),
+			createWhereDispatcher(compileWhereIntent),
 		);
 		const sql = deparseNode(node);
 		expect(sql).toEqual('items.label = ANY (CAST($1 AS text[]))');
@@ -439,7 +439,7 @@ describe('anyHandler — branch coverage', () => {
 			} as unknown as Decision,
 			ctx,
 			state,
-			createWhereDispatcher(),
+			createWhereDispatcher(compileWhereIntent),
 		);
 		const sql = deparseNode(node);
 		expect(sql).toEqual('items.tag = ANY (CAST($1 AS text[]))');
@@ -457,7 +457,7 @@ describe('anyHandler — branch coverage', () => {
 			} as Decision,
 			ctx,
 			state,
-			createWhereDispatcher(),
+			createWhereDispatcher(compileWhereIntent),
 		);
 		const sql = deparseNode(node);
 		expect(sql).toEqual('items.active = ANY (CAST($1 AS bool[]))');
@@ -475,7 +475,7 @@ describe('anyHandler — branch coverage', () => {
 			} as Decision,
 			ctx,
 			state,
-			createWhereDispatcher(),
+			createWhereDispatcher(compileWhereIntent),
 		);
 		const sql = deparseNode(node);
 		expect(sql).toEqual('items.qty = ANY (CAST($1 AS int4[]))');
@@ -493,7 +493,7 @@ describe('anyHandler — branch coverage', () => {
 			} as Decision,
 			ctx,
 			state,
-			createWhereDispatcher(),
+			createWhereDispatcher(compileWhereIntent),
 		);
 		const sql = deparseNode(node);
 		expect(sql).toEqual('items.price = ANY (CAST($1 AS float8[]))');
@@ -511,7 +511,7 @@ describe('anyHandler — branch coverage', () => {
 			} as unknown as Decision,
 			ctx,
 			state,
-			createWhereDispatcher(),
+			createWhereDispatcher(compileWhereIntent),
 		);
 		const sql = deparseNode(node);
 		expect(sql).toEqual('items.user_id = ANY (CAST($1 AS int8[]))');
@@ -530,7 +530,7 @@ describe('anyHandler — branch coverage', () => {
 			} as unknown as Decision,
 			ctx,
 			state,
-			createWhereDispatcher(),
+			createWhereDispatcher(compileWhereIntent),
 		);
 		const sql = deparseNode(node);
 		expect(sql).toEqual('items.tag = ANY (CAST($1 AS text[]))');
@@ -551,7 +551,7 @@ describe('betweenHandler — branch coverage', () => {
 				{ type: 'where', operator: 'between', value: [1, 10] } as Decision,
 				ctx,
 				state,
-				createWhereDispatcher(),
+				createWhereDispatcher(compileWhereIntent),
 			),
 		).toThrow('BETWEEN handler requires a column');
 	});
@@ -569,7 +569,7 @@ describe('betweenHandler — branch coverage', () => {
 				} as Decision,
 				ctx,
 				state,
-				createWhereDispatcher(),
+				createWhereDispatcher(compileWhereIntent),
 			),
 		).toThrow('BETWEEN condition requires [min, max] array');
 	});
@@ -587,7 +587,7 @@ describe('betweenHandler — branch coverage', () => {
 				} as Decision,
 				ctx,
 				state,
-				createWhereDispatcher(),
+				createWhereDispatcher(compileWhereIntent),
 			),
 		).toThrow('BETWEEN condition requires [min, max] array');
 	});
@@ -605,7 +605,7 @@ describe('betweenHandler — branch coverage', () => {
 				} as Decision,
 				ctx,
 				state,
-				createWhereDispatcher(),
+				createWhereDispatcher(compileWhereIntent),
 			),
 		).toThrow('BETWEEN condition requires [min, max] array');
 	});
@@ -622,7 +622,7 @@ describe('betweenHandler — branch coverage', () => {
 			} as Decision,
 			ctx,
 			state,
-			createWhereDispatcher(),
+			createWhereDispatcher(compileWhereIntent),
 		);
 		const sql = deparseNode(node);
 		expect(sql).toEqual('items.price BETWEEN $1 AND $2');
@@ -641,7 +641,7 @@ describe('betweenHandler — branch coverage', () => {
 			} as Decision,
 			ctx,
 			state,
-			createWhereDispatcher(),
+			createWhereDispatcher(compileWhereIntent),
 		);
 		const sql = deparseNode(node);
 		expect(sql).toEqual('items.created_at BETWEEN $1 AND $2');
@@ -666,7 +666,7 @@ describe('jsonContainsHandler — branch coverage', () => {
 				} as Decision,
 				ctx,
 				state,
-				createWhereDispatcher(),
+				createWhereDispatcher(compileWhereIntent),
 			),
 		).toThrow('JSON contains handler requires a column');
 	});
@@ -683,7 +683,7 @@ describe('jsonContainsHandler — branch coverage', () => {
 			} as Decision,
 			ctx,
 			state,
-			createWhereDispatcher(),
+			createWhereDispatcher(compileWhereIntent),
 		);
 		const sql = deparseNode(node);
 		expect(sql).toEqual('items.meta @> $1');
@@ -702,7 +702,7 @@ describe('jsonContainsHandler — branch coverage', () => {
 			} as Decision,
 			ctx,
 			state,
-			createWhereDispatcher(),
+			createWhereDispatcher(compileWhereIntent),
 		);
 		const sql = deparseNode(node);
 		expect(sql).toEqual('items.tags <@ $1');
@@ -723,7 +723,7 @@ describe('jsonExistsHandler — branch coverage', () => {
 				} as Decision,
 				ctx,
 				state,
-				createWhereDispatcher(),
+				createWhereDispatcher(compileWhereIntent),
 			),
 		).toThrow('JSON exists handler requires a column');
 	});
@@ -740,7 +740,7 @@ describe('jsonExistsHandler — branch coverage', () => {
 			} as Decision,
 			ctx,
 			state,
-			createWhereDispatcher(),
+			createWhereDispatcher(compileWhereIntent),
 		);
 		const sql = deparseNode(node);
 		expect(sql).toEqual('items.config ? $1');
@@ -762,7 +762,7 @@ describe('jsonComparisonHandler — branch coverage', () => {
 				} as Decision,
 				ctx,
 				state,
-				createWhereDispatcher(),
+				createWhereDispatcher(compileWhereIntent),
 			),
 		).toThrow('JSON comparison handler requires a column');
 	});
@@ -780,7 +780,7 @@ describe('jsonComparisonHandler — branch coverage', () => {
 				} as Decision,
 				ctx,
 				state,
-				createWhereDispatcher(),
+				createWhereDispatcher(compileWhereIntent),
 			),
 		).toThrow('JSON comparison handler requires jsonPath');
 	});
@@ -799,7 +799,7 @@ describe('jsonComparisonHandler — branch coverage', () => {
 				} as Decision,
 				ctx,
 				state,
-				createWhereDispatcher(),
+				createWhereDispatcher(compileWhereIntent),
 			),
 		).toThrow('JSON comparison handler requires jsonPath');
 	});
@@ -820,7 +820,7 @@ describe('jsonComparisonHandler — branch coverage', () => {
 			} as Decision,
 			ctx,
 			state,
-			createWhereDispatcher(),
+			createWhereDispatcher(compileWhereIntent),
 		);
 		const sql = deparseNode(node);
 		expect(sql).toEqual('(items.props ->> $1) = $2');
@@ -842,7 +842,7 @@ describe('jsonComparisonHandler — branch coverage', () => {
 			} as Decision,
 			ctx,
 			state,
-			createWhereDispatcher(),
+			createWhereDispatcher(compileWhereIntent),
 		);
 		const sql = deparseNode(node);
 		expect(sql).toEqual('(items.data -> $1) = $2');
@@ -865,7 +865,7 @@ describe('jsonComparisonHandler — branch coverage', () => {
 			} as Decision,
 			ctx,
 			state,
-			createWhereDispatcher(),
+			createWhereDispatcher(compileWhereIntent),
 		);
 		const sql = deparseNode(node);
 		expect(sql).toEqual('((items.config -> $1) ->> $2) = $3');
@@ -895,7 +895,7 @@ describe('jsonComparisonHandler — branch coverage', () => {
 				} as unknown as Decision,
 				ctx,
 				state,
-				createWhereDispatcher(),
+				createWhereDispatcher(compileWhereIntent),
 			);
 			const sql = deparseNode(node);
 			expect(sql).toEqual(`(items.meta ->> $1) ${expectedOp} $2`);
@@ -918,7 +918,7 @@ describe('jsonComparisonHandler — branch coverage', () => {
 				} as unknown as Decision,
 				ctx,
 				state,
-				createWhereDispatcher(),
+				createWhereDispatcher(compileWhereIntent),
 			),
 		).toThrow('No WHERE handler registered for operator: unknown_op');
 	});
@@ -938,7 +938,7 @@ describe('jsonComparisonHandler — branch coverage', () => {
 				} as unknown as Decision,
 				ctx,
 				state,
-				createWhereDispatcher(),
+				createWhereDispatcher(compileWhereIntent),
 			),
 		).toThrow('No WHERE handler registered for operator: undefined');
 	});
@@ -966,7 +966,7 @@ describe('customExpressionWhereHandler — branch coverage', () => {
 			} as Decision,
 			ctx,
 			state,
-			createWhereDispatcher(),
+			createWhereDispatcher(compileWhereIntent),
 		);
 		const sql = deparseNode(node);
 		// Should be just the column ref, no comparison
@@ -991,7 +991,7 @@ describe('customExpressionWhereHandler — branch coverage', () => {
 				} as Decision,
 				ctx,
 				state,
-				createWhereDispatcher(),
+				createWhereDispatcher(compileWhereIntent),
 			),
 		).toThrow('No WHERE handler registered for operator: unsupported_op');
 	});
@@ -1012,7 +1012,7 @@ describe('customExpressionWhereHandler — branch coverage', () => {
 			} as Decision,
 			ctx,
 			state,
-			createWhereDispatcher(),
+			createWhereDispatcher(compileWhereIntent),
 		);
 		const sql = deparseNode(node);
 		expect(sql).toEqual('score >= $1');
@@ -1047,7 +1047,7 @@ describe('customExpressionWhereHandler — branch coverage', () => {
 				} as Decision,
 				ctx,
 				state,
-				createWhereDispatcher(),
+				createWhereDispatcher(compileWhereIntent),
 			);
 			const sql = deparseNode(node);
 			expect(sql).toEqual(`x ${sqlOp} $1`);

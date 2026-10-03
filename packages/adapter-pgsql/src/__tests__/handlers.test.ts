@@ -1,3 +1,4 @@
+import { compileWhereIntent } from '../condition-compiler.js';
 /**
  * Tests for Handler Infrastructure (Block 1)
  */
@@ -268,7 +269,7 @@ describe('Handler Infrastructure', () => {
 		it('returns correct counts after registration', () => {
 			const whereOperator = '__handlers_test_where__';
 			const expressionType = '__handlers_test_expression__';
-			createWhereDispatcher()(
+			createWhereDispatcher(compileWhereIntent)(
 				{ type: 'where', column: 'id', operator: '=', value: 1 },
 				{
 					naming: {

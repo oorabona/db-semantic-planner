@@ -1,0 +1,804 @@
+{
+	"entries": [
+		{
+			"position": "update-where",
+			"kind": "eq",
+			"shape": "leaf",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2",
+			"params": [41, 7],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "eq",
+			"shape": "and",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND users.score = $3",
+			"params": [41, 7, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "eq",
+			"shape": "or",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 OR users.score = $3",
+			"params": [41, 7, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "eq",
+			"shape": "not",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (users.score = $2)",
+			"params": [41, 7],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "eq",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "eq",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "eq",
+			"shape": "two-level",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (users.score = $3) OR users.score = $4)",
+			"params": [41, 13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "neq",
+			"shape": "leaf",
+			"sql": "UPDATE users SET score = $1 WHERE users.score <> $2",
+			"params": [41, 7],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "neq",
+			"shape": "and",
+			"sql": "UPDATE users SET score = $1 WHERE users.score <> $2 AND users.score = $3",
+			"params": [41, 7, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "neq",
+			"shape": "or",
+			"sql": "UPDATE users SET score = $1 WHERE users.score <> $2 OR users.score = $3",
+			"params": [41, 7, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "neq",
+			"shape": "not",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (users.score <> $2)",
+			"params": [41, 7],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "neq",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "neq",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "neq",
+			"shape": "two-level",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (users.score <> $3) OR users.score = $4)",
+			"params": [41, 13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "gt",
+			"shape": "leaf",
+			"sql": "UPDATE users SET score = $1 WHERE users.score > $2",
+			"params": [41, 7],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "gt",
+			"shape": "and",
+			"sql": "UPDATE users SET score = $1 WHERE users.score > $2 AND users.score = $3",
+			"params": [41, 7, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "gt",
+			"shape": "or",
+			"sql": "UPDATE users SET score = $1 WHERE users.score > $2 OR users.score = $3",
+			"params": [41, 7, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "gt",
+			"shape": "not",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (users.score > $2)",
+			"params": [41, 7],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "gt",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "gt",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "gt",
+			"shape": "two-level",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (users.score > $3) OR users.score = $4)",
+			"params": [41, 13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "gte",
+			"shape": "leaf",
+			"sql": "UPDATE users SET score = $1 WHERE users.score >= $2",
+			"params": [41, 7],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "gte",
+			"shape": "and",
+			"sql": "UPDATE users SET score = $1 WHERE users.score >= $2 AND users.score = $3",
+			"params": [41, 7, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "gte",
+			"shape": "or",
+			"sql": "UPDATE users SET score = $1 WHERE users.score >= $2 OR users.score = $3",
+			"params": [41, 7, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "gte",
+			"shape": "not",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (users.score >= $2)",
+			"params": [41, 7],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "gte",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "gte",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "gte",
+			"shape": "two-level",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (users.score >= $3) OR users.score = $4)",
+			"params": [41, 13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "lt",
+			"shape": "leaf",
+			"sql": "UPDATE users SET score = $1 WHERE users.score < $2",
+			"params": [41, 7],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "lt",
+			"shape": "and",
+			"sql": "UPDATE users SET score = $1 WHERE users.score < $2 AND users.score = $3",
+			"params": [41, 7, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "lt",
+			"shape": "or",
+			"sql": "UPDATE users SET score = $1 WHERE users.score < $2 OR users.score = $3",
+			"params": [41, 7, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "lt",
+			"shape": "not",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (users.score < $2)",
+			"params": [41, 7],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "lt",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "lt",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "lt",
+			"shape": "two-level",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (users.score < $3) OR users.score = $4)",
+			"params": [41, 13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "lte",
+			"shape": "leaf",
+			"sql": "UPDATE users SET score = $1 WHERE users.score <= $2",
+			"params": [41, 7],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "lte",
+			"shape": "and",
+			"sql": "UPDATE users SET score = $1 WHERE users.score <= $2 AND users.score = $3",
+			"params": [41, 7, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "lte",
+			"shape": "or",
+			"sql": "UPDATE users SET score = $1 WHERE users.score <= $2 OR users.score = $3",
+			"params": [41, 7, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "lte",
+			"shape": "not",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (users.score <= $2)",
+			"params": [41, 7],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "lte",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "lte",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "lte",
+			"shape": "two-level",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (users.score <= $3) OR users.score = $4)",
+			"params": [41, 13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "isDistinctFrom",
+			"shape": "leaf",
+			"sql": "UPDATE users SET score = $1 WHERE users.score IS DISTINCT FROM $2",
+			"params": [41, 7],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "isDistinctFrom",
+			"shape": "and",
+			"sql": "UPDATE users SET score = $1 WHERE users.score IS DISTINCT FROM $2 AND users.score = $3",
+			"params": [41, 7, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "isDistinctFrom",
+			"shape": "or",
+			"sql": "UPDATE users SET score = $1 WHERE users.score IS DISTINCT FROM $2 OR users.score = $3",
+			"params": [41, 7, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "isDistinctFrom",
+			"shape": "not",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (users.score IS DISTINCT FROM $2)",
+			"params": [41, 7],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "isDistinctFrom",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "isDistinctFrom",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "isDistinctFrom",
+			"shape": "two-level",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (users.score IS DISTINCT FROM $3) OR users.score = $4)",
+			"params": [41, 13, 7, 17],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "eq-null",
+			"shape": "leaf",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = NULL",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "eq-null",
+			"shape": "and",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = NULL AND users.score = $2",
+			"params": [41, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "eq-null",
+			"shape": "or",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = NULL OR users.score = $2",
+			"params": [41, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "eq-null",
+			"shape": "not",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (users.score = NULL)",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "eq-null",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "eq-null",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "eq-null",
+			"shape": "two-level",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (users.score = NULL) OR users.score = $3)",
+			"params": [41, 13, 17],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "like",
+			"shape": "leaf",
+			"sql": "UPDATE users SET score = $1 WHERE users.name LIKE $2",
+			"params": [41, "a%"],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "like",
+			"shape": "and",
+			"sql": "UPDATE users SET score = $1 WHERE users.name LIKE $2 AND users.score = $3",
+			"params": [41, "a%", 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "like",
+			"shape": "or",
+			"sql": "UPDATE users SET score = $1 WHERE users.name LIKE $2 OR users.score = $3",
+			"params": [41, "a%", 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "like",
+			"shape": "not",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (users.name LIKE $2)",
+			"params": [41, "a%"],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "like",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "like",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "like",
+			"shape": "two-level",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (users.name LIKE $3) OR users.score = $4)",
+			"params": [41, 13, "a%", 17],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "ilike",
+			"shape": "leaf",
+			"sql": "UPDATE users SET score = $1 WHERE users.name ILIKE $2",
+			"params": [41, "B%"],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "ilike",
+			"shape": "and",
+			"sql": "UPDATE users SET score = $1 WHERE users.name ILIKE $2 AND users.score = $3",
+			"params": [41, "B%", 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "ilike",
+			"shape": "or",
+			"sql": "UPDATE users SET score = $1 WHERE users.name ILIKE $2 OR users.score = $3",
+			"params": [41, "B%", 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "ilike",
+			"shape": "not",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (users.name ILIKE $2)",
+			"params": [41, "B%"],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "ilike",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "ilike",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "ilike",
+			"shape": "two-level",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (users.name ILIKE $3) OR users.score = $4)",
+			"params": [41, 13, "B%", 17],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "like-escape",
+			"shape": "leaf",
+			"sql": "UPDATE users SET score = $1 WHERE users.name LIKE $2",
+			"params": [41, "c!_%"],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "like-escape",
+			"shape": "and",
+			"sql": "UPDATE users SET score = $1 WHERE users.name LIKE $2 AND users.score = $3",
+			"params": [41, "c!_%", 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "like-escape",
+			"shape": "or",
+			"sql": "UPDATE users SET score = $1 WHERE users.name LIKE $2 OR users.score = $3",
+			"params": [41, "c!_%", 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "like-escape",
+			"shape": "not",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (users.name LIKE $2)",
+			"params": [41, "c!_%"],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "like-escape",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "like-escape",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "like-escape",
+			"shape": "two-level",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (users.name LIKE $3) OR users.score = $4)",
+			"params": [41, 13, "c!_%", 17],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "in-values",
+			"shape": "leaf",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = ANY ($2)",
+			"params": [41, [3, 5]],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "in-values",
+			"shape": "and",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = ANY ($2) AND users.score = $3",
+			"params": [41, [3, 5], 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "in-values",
+			"shape": "or",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = ANY ($2) OR users.score = $3",
+			"params": [41, [3, 5], 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "in-values",
+			"shape": "not",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (users.score = ANY ($2))",
+			"params": [41, [3, 5]],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "in-values",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "in-values",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "in-values",
+			"shape": "two-level",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (users.score = ANY ($3)) OR users.score = $4)",
+			"params": [41, 13, [3, 5], 17],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "in-empty",
+			"shape": "leaf",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "in-empty",
+			"shape": "and",
+			"sql": "UPDATE users SET score = $1 WHERE false AND users.score = $2",
+			"params": [41, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "in-empty",
+			"shape": "or",
+			"sql": "UPDATE users SET score = $1 WHERE false OR users.score = $2",
+			"params": [41, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "in-empty",
+			"shape": "not",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (false)",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "in-empty",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "in-empty",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "in-empty",
+			"shape": "two-level",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (false) OR users.score = $3)",
+			"params": [41, 13, 17],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "any",
+			"shape": "leaf",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = ANY (CAST($2 AS int4[]))",
+			"params": [41, [3, 5]],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "any",
+			"shape": "and",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = ANY (CAST($2 AS int4[])) AND users.score = $3",
+			"params": [41, [3, 5], 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "any",
+			"shape": "or",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = ANY (CAST($2 AS int4[])) OR users.score = $3",
+			"params": [41, [3, 5], 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "any",
+			"shape": "not",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (users.score = ANY (CAST($2 AS int4[])))",
+			"params": [41, [3, 5]],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "any",
+			"shape": "empty-or",
+			"sql": "UPDATE users SET score = $1 WHERE false",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "any",
+			"shape": "empty-and",
+			"sql": "UPDATE users SET score = $1 WHERE true",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "any",
+			"shape": "two-level",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (users.score = ANY (CAST($3 AS int4[]))) OR users.score = $4)",
+			"params": [41, 13, [3, 5], 17],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "any-empty",
+			"shape": "leaf",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = ANY (CAST($2 AS int4[]))",
+			"params": [41, []],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "any-empty",
+			"shape": "and",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = ANY (CAST($2 AS int4[])) AND users.score = $3",
+			"params": [41, [], 13],
+			"error": null
+		}
+	]
+}

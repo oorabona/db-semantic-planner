@@ -15,6 +15,7 @@
 import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it, vi } from 'vitest';
 import { compilePlan } from '../compiler.js';
+import { compileWhereIntent } from '../condition-compiler.js';
 import {
 	clearHandlers,
 	createCompilerState,
@@ -33,7 +34,7 @@ import {
 import * as whereHandlerModule from './where/index.js';
 
 function ensureRegistered() {
-	const dispatch = createWhereDispatcher();
+	const dispatch = createWhereDispatcher(compileWhereIntent);
 	const state = createCompilerState();
 	const ctx = {
 		naming: { toDatabase: (s) => s, toModel: (s) => s },
@@ -110,7 +111,7 @@ describe('handlers/index - Coverage Tests', () => {
 			clearHandlers();
 			try {
 				registerWhereHandler(handler as any);
-				const dispatch = createWhereDispatcher();
+				const dispatch = createWhereDispatcher(compileWhereIntent);
 				const state = createCompilerState();
 				const ctx = {
 					naming: { toDatabase: (s) => s, toModel: (s) => s },
@@ -139,7 +140,7 @@ describe('handlers/index - Coverage Tests', () => {
 		});
 
 		it('dispatches a simple comparison', () => {
-			const dispatch = createWhereDispatcher();
+			const dispatch = createWhereDispatcher(compileWhereIntent);
 			const state = createCompilerState();
 			const ctx = {
 				naming: { toDatabase: (s) => s, toModel: (s) => s },
@@ -158,7 +159,7 @@ describe('handlers/index - Coverage Tests', () => {
 		});
 
 		it('dispatches with operator alias (eq → =)', () => {
-			const dispatch = createWhereDispatcher();
+			const dispatch = createWhereDispatcher(compileWhereIntent);
 			const state = createCompilerState();
 			const ctx = {
 				naming: { toDatabase: (s) => s, toModel: (s) => s },
@@ -176,7 +177,7 @@ describe('handlers/index - Coverage Tests', () => {
 		});
 
 		it('dispatches with operator alias (ne → !=)', () => {
-			const dispatch = createWhereDispatcher();
+			const dispatch = createWhereDispatcher(compileWhereIntent);
 			const state = createCompilerState();
 			const ctx = {
 				naming: { toDatabase: (s) => s, toModel: (s) => s },
@@ -192,7 +193,7 @@ describe('handlers/index - Coverage Tests', () => {
 		});
 
 		it('dispatches with operator alias (neq → !=)', () => {
-			const dispatch = createWhereDispatcher();
+			const dispatch = createWhereDispatcher(compileWhereIntent);
 			const state = createCompilerState();
 			const ctx = {
 				naming: { toDatabase: (s) => s, toModel: (s) => s },
@@ -208,7 +209,7 @@ describe('handlers/index - Coverage Tests', () => {
 		});
 
 		it('dispatches with operator alias (lt → <)', () => {
-			const dispatch = createWhereDispatcher();
+			const dispatch = createWhereDispatcher(compileWhereIntent);
 			const state = createCompilerState();
 			const ctx = {
 				naming: { toDatabase: (s) => s, toModel: (s) => s },
@@ -224,7 +225,7 @@ describe('handlers/index - Coverage Tests', () => {
 		});
 
 		it('dispatches with operator alias (lte → <=)', () => {
-			const dispatch = createWhereDispatcher();
+			const dispatch = createWhereDispatcher(compileWhereIntent);
 			const state = createCompilerState();
 			const ctx = {
 				naming: { toDatabase: (s) => s, toModel: (s) => s },
@@ -240,7 +241,7 @@ describe('handlers/index - Coverage Tests', () => {
 		});
 
 		it('dispatches with operator alias (gt → >)', () => {
-			const dispatch = createWhereDispatcher();
+			const dispatch = createWhereDispatcher(compileWhereIntent);
 			const state = createCompilerState();
 			const ctx = {
 				naming: { toDatabase: (s) => s, toModel: (s) => s },
@@ -256,7 +257,7 @@ describe('handlers/index - Coverage Tests', () => {
 		});
 
 		it('dispatches with operator alias (gte → >=)', () => {
-			const dispatch = createWhereDispatcher();
+			const dispatch = createWhereDispatcher(compileWhereIntent);
 			const state = createCompilerState();
 			const ctx = {
 				naming: { toDatabase: (s) => s, toModel: (s) => s },
@@ -348,7 +349,7 @@ describe('handlers/index - Coverage Tests', () => {
 	});
 
 	describe('normalizeToDecision via dispatcher (WhereIntent kinds)', () => {
-		const dispatch = createWhereDispatcher();
+		const dispatch = createWhereDispatcher(compileWhereIntent);
 		const state = () => createCompilerState();
 		const ctx = {
 			naming: { toDatabase: (s) => s, toModel: (s) => s },
@@ -854,7 +855,7 @@ describe('handlers/index - Coverage Tests', () => {
 				},
 			});
 			const reentrantHandler = { operators, compile: () => ({}) };
-			const dispatch = createWhereDispatcher();
+			const dispatch = createWhereDispatcher(compileWhereIntent);
 			const state = createCompilerState();
 			const ctx = {
 				naming: { toDatabase: (value) => value, toModel: (value) => value },
@@ -908,7 +909,7 @@ describe('handlers/index - Coverage Tests', () => {
 				},
 			});
 			const resetHandler = { operators, compile: () => ({}) };
-			const dispatch = createWhereDispatcher();
+			const dispatch = createWhereDispatcher(compileWhereIntent);
 			const state = createCompilerState();
 			const ctx = {
 				naming: { toDatabase: (value) => value, toModel: (value) => value },
@@ -968,7 +969,7 @@ describe('handlers/index - Coverage Tests', () => {
 				},
 			});
 			const resetHandler = { operators, compile: () => ({}) };
-			const dispatch = createWhereDispatcher();
+			const dispatch = createWhereDispatcher(compileWhereIntent);
 			const state = createCompilerState();
 			const ctx = {
 				naming: { toDatabase: (value) => value, toModel: (value) => value },
@@ -1027,7 +1028,7 @@ describe('handlers/index - Coverage Tests', () => {
 				},
 			});
 			const reentrantHandler = { operators, compile: () => ({}) };
-			const dispatch = createWhereDispatcher();
+			const dispatch = createWhereDispatcher(compileWhereIntent);
 			const state = createCompilerState();
 			const ctx = {
 				naming: { toDatabase: (value) => value, toModel: (value) => value },
@@ -1071,7 +1072,7 @@ describe('handlers/index - Coverage Tests', () => {
 			const customHandler = { operators: ['__custom__', '@>'], compile };
 			registerWhereHandler(customHandler as any);
 
-			const dispatch = createWhereDispatcher();
+			const dispatch = createWhereDispatcher(compileWhereIntent);
 			const state = createCompilerState();
 			const node = dispatch(
 				{ type: 'where', column: 'id', operator: '=', value: 42 },
@@ -1123,7 +1124,7 @@ describe('handlers/index - Coverage Tests', () => {
 			).toThrow(/already registered/);
 
 			const state = createCompilerState();
-			const node = createWhereDispatcher()(
+			const node = createWhereDispatcher(compileWhereIntent)(
 				{
 					type: 'where',
 					column: 'left_value',

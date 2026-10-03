@@ -1,0 +1,852 @@
+{
+	"entries": [
+		{
+			"position": "scalar-subquery-body",
+			"kind": "any-empty",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = ANY (CAST($1 AS int4[])) OR posts_subq_0.score = $2)",
+			"params": [[], 13],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "any-empty",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE NOT (posts_subq_0.score = ANY (CAST($1 AS int4[]))))",
+			"params": [[]],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "any-empty",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE false)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "any-empty",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE true)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "any-empty",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 AND (NOT (posts_subq_0.score = ANY (CAST($2 AS int4[]))) OR posts_subq_0.score = $3))",
+			"params": [13, [], 17],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "isNull",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score IS NULL)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "isNull",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score IS NULL AND posts_subq_0.score = $1)",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "isNull",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score IS NULL OR posts_subq_0.score = $1)",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "isNull",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE NOT (posts_subq_0.score IS NULL))",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "isNull",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE false)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "isNull",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE true)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "isNull",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 AND (NOT (posts_subq_0.score IS NULL) OR posts_subq_0.score = $2))",
+			"params": [13, 17],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "isNotNull",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score IS NOT NULL)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "isNotNull",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score IS NOT NULL AND posts_subq_0.score = $1)",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "isNotNull",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score IS NOT NULL OR posts_subq_0.score = $1)",
+			"params": [13],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "isNotNull",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE NOT (posts_subq_0.score IS NOT NULL))",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "isNotNull",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE false)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "isNotNull",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE true)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "isNotNull",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 AND (NOT (posts_subq_0.score IS NOT NULL) OR posts_subq_0.score = $2))",
+			"params": [13, 17],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "between",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period BETWEEN $1 AND $2)",
+			"params": ["2026-01-01", "2026-02-01"],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "between",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period BETWEEN $1 AND $2 AND posts_subq_0.score = $3)",
+			"params": ["2026-01-01", "2026-02-01", 13],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "between",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period BETWEEN $1 AND $2 OR posts_subq_0.score = $3)",
+			"params": ["2026-01-01", "2026-02-01", 13],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "between",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE NOT (posts_subq_0.period BETWEEN $1 AND $2))",
+			"params": ["2026-01-01", "2026-02-01"],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "between",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE false)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "between",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE true)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "between",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 AND (NOT (posts_subq_0.period BETWEEN $2 AND $3) OR posts_subq_0.score = $4))",
+			"params": [13, "2026-01-01", "2026-02-01", 17],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-overlaps",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period && $1)",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-overlaps",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period && $1 AND posts_subq_0.score = $2)",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-overlaps",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period && $1 OR posts_subq_0.score = $2)",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-overlaps",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE NOT (posts_subq_0.period && $1))",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-overlaps",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE false)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-overlaps",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE true)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-overlaps",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 AND (NOT (posts_subq_0.period && $2) OR posts_subq_0.score = $3))",
+			"params": [13, "[2026-01-01,2026-02-01)", 17],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-contains",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period @> $1)",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-contains",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period @> $1 AND posts_subq_0.score = $2)",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-contains",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period @> $1 OR posts_subq_0.score = $2)",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-contains",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE NOT (posts_subq_0.period @> $1))",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-contains",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE false)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-contains",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE true)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-contains",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 AND (NOT (posts_subq_0.period @> $2) OR posts_subq_0.score = $3))",
+			"params": [13, "[2026-01-01,2026-02-01)", 17],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-contains-point",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period @> $1)",
+			"params": ["2026-01-15"],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-contains-point",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period @> $1 AND posts_subq_0.score = $2)",
+			"params": ["2026-01-15", 13],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-contains-point",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period @> $1 OR posts_subq_0.score = $2)",
+			"params": ["2026-01-15", 13],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-contains-point",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE NOT (posts_subq_0.period @> $1))",
+			"params": ["2026-01-15"],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-contains-point",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE false)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-contains-point",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE true)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-contains-point",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 AND (NOT (posts_subq_0.period @> $2) OR posts_subq_0.score = $3))",
+			"params": [13, "2026-01-15", 17],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-containedBy",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period <@ $1)",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-containedBy",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period <@ $1 AND posts_subq_0.score = $2)",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-containedBy",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period <@ $1 OR posts_subq_0.score = $2)",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-containedBy",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE NOT (posts_subq_0.period <@ $1))",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-containedBy",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE false)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-containedBy",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE true)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "range-containedBy",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 AND (NOT (posts_subq_0.period <@ $2) OR posts_subq_0.score = $3))",
+			"params": [13, "[2026-01-01,2026-02-01)", 17],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "jsonContains",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.data @> $1)",
+			"params": [
+				{
+					"active": true
+				}
+			],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "jsonContains",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.data @> $1 AND posts_subq_0.score = $2)",
+			"params": [
+				{
+					"active": true
+				},
+				13
+			],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "jsonContains",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.data @> $1 OR posts_subq_0.score = $2)",
+			"params": [
+				{
+					"active": true
+				},
+				13
+			],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "jsonContains",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE NOT (posts_subq_0.data @> $1))",
+			"params": [
+				{
+					"active": true
+				}
+			],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "jsonContains",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE false)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "jsonContains",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE true)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "jsonContains",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 AND (NOT (posts_subq_0.data @> $2) OR posts_subq_0.score = $3))",
+			"params": [
+				13,
+				{
+					"active": true
+				},
+				17
+			],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "jsonContainedBy",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.data <@ $1)",
+			"params": [
+				{
+					"active": true
+				}
+			],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "jsonContainedBy",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.data <@ $1 AND posts_subq_0.score = $2)",
+			"params": [
+				{
+					"active": true
+				},
+				13
+			],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "jsonContainedBy",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.data <@ $1 OR posts_subq_0.score = $2)",
+			"params": [
+				{
+					"active": true
+				},
+				13
+			],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "jsonContainedBy",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE NOT (posts_subq_0.data <@ $1))",
+			"params": [
+				{
+					"active": true
+				}
+			],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "jsonContainedBy",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE false)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "jsonContainedBy",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE true)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "jsonContainedBy",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 AND (NOT (posts_subq_0.data <@ $2) OR posts_subq_0.score = $3))",
+			"params": [
+				13,
+				{
+					"active": true
+				},
+				17
+			],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "jsonExists",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.data ? $1)",
+			"params": ["active"],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "jsonExists",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.data ? $1 AND posts_subq_0.score = $2)",
+			"params": ["active", 13],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "jsonExists",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.data ? $1 OR posts_subq_0.score = $2)",
+			"params": ["active", 13],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "jsonExists",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE NOT (posts_subq_0.data ? $1))",
+			"params": ["active"],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "jsonExists",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE false)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "jsonExists",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE true)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "jsonExists",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 AND (NOT (posts_subq_0.data ? $2) OR posts_subq_0.score = $3))",
+			"params": [13, "active", 17],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "inSubquery",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.id = ANY (SELECT posts_subq_1.id FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $1))",
+			"params": [53],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "inSubquery",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.id = ANY (SELECT posts_subq_1.id FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $1) AND posts_subq_0.score = $2)",
+			"params": [53, 13],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "inSubquery",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.id = ANY (SELECT posts_subq_1.id FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $1) OR posts_subq_0.score = $2)",
+			"params": [53, 13],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "inSubquery",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE NOT (posts_subq_0.id = ANY (SELECT posts_subq_1.id FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $1)))",
+			"params": [53],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "inSubquery",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE false)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "inSubquery",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE true)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "inSubquery",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 AND (NOT (posts_subq_0.id = ANY (SELECT posts_subq_1.id FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2)) OR posts_subq_0.score = $3))",
+			"params": [13, 53, 17],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "scalar-subquery",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $1))",
+			"params": [59],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "scalar-subquery",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $1) AND posts_subq_0.score = $2)",
+			"params": [59, 13],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "scalar-subquery",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $1) OR posts_subq_0.score = $2)",
+			"params": [59, 13],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "scalar-subquery",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE NOT (posts_subq_0.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $1)))",
+			"params": [59],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "scalar-subquery",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE false)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "scalar-subquery",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE true)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "scalar-subquery",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 AND (NOT (posts_subq_0.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2)) OR posts_subq_0.score = $3))",
+			"params": [13, 59, 17],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "rawExists",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1))",
+			"params": [53],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "rawExists",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1) AND posts_subq_0.score = $2)",
+			"params": [53, 13],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "rawExists",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1) OR posts_subq_0.score = $2)",
+			"params": [53, 13],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "rawExists",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1)))",
+			"params": [53],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "rawExists",
+			"shape": "empty-or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE false)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "rawExists",
+			"shape": "empty-and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE true)",
+			"params": [],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "rawExists",
+			"shape": "two-level",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $2)) OR posts_subq_0.score = $3))",
+			"params": [13, 53, 17],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "rawExists-like-escape",
+			"shape": "leaf",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.name LIKE $1 ESCAPE $2))",
+			"params": ["c!_%", "!"],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "rawExists-like-escape",
+			"shape": "and",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.name LIKE $1 ESCAPE $2) AND posts_subq_0.score = $3)",
+			"params": ["c!_%", "!", 13],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "rawExists-like-escape",
+			"shape": "or",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.name LIKE $1 ESCAPE $2) OR posts_subq_0.score = $3)",
+			"params": ["c!_%", "!", 13],
+			"error": null
+		},
+		{
+			"position": "scalar-subquery-body",
+			"kind": "rawExists-like-escape",
+			"shape": "not",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.name LIKE $1 ESCAPE $2)))",
+			"params": ["c!_%", "!"],
+			"error": null
+		}
+	]
+}
