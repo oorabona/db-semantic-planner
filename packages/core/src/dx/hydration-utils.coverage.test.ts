@@ -105,3 +105,19 @@ describe('metadata-owned JSON hydration', () => {
 		expect(planForJsonAggHydration(original)).toBe(original);
 	});
 });
+
+it('utilities refuse hydratable planner reports without compiled shapes', () => {
+	const planned = {
+		decisions: [
+			{
+				type: 'include-strategy',
+				choice: 'json_agg',
+				context: { relation: 'posts' },
+			},
+		],
+	} as unknown as PlanReport;
+	const message =
+		"Include hydration 'posts' requires compiled includePayloads; supply the compiled query hydrationPlan.";
+	expect(() => hydrateJsonAggIncludes([], planned)).toThrow(message);
+	expect(() => planForJsonAggHydration(planned)).toThrow(message);
+});

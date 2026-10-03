@@ -171,6 +171,7 @@ export interface IncludePayloadShape {
 }
 
 export interface PlanReport {
+	/** Required at hydration time for json_agg, join and lateral include decisions. */
 	readonly includePayloads?: readonly IncludePayloadShape[];
 	/** Root table for the query */
 	readonly rootTable: string;

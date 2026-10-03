@@ -18,6 +18,7 @@ import {
 	queryLocal,
 	resolveDeclaredIdentifier,
 } from './sql-identifier.js';
+import { stableJson } from './transition/stable-json.js';
 
 /** One ownership check for each public object; identical requests collapse. */
 export function claimPayloadKey(
@@ -112,20 +113,42 @@ export function resolveIncludePayloadShapes(
 		if (previous) {
 			const requests = (decision: PlanDecision) =>
 				decision.payloadColumnRequests ??
-				(decision.columns ?? []).map((col) => ({
-					col,
-					alias: decision.columnAliases?.[col],
-					defaultLabel: decision.defaultRelationColumnLabels?.[col],
-				}));
+				(decision.columns ?? (decision.emptyProjection ? [] : ['*'])).map(
+					(col) => ({
+						col,
+						alias: decision.columnAliases?.[col],
+						defaultLabel: decision.defaultRelationColumnLabels?.[col],
+					}),
+				);
 			byPath.set(path, {
 				...previous,
+				emptyProjection:
+					previous.emptyProjection === true && d.emptyProjection === true,
 				columns: [
-					...new Set([...(previous.columns ?? []), ...(d.columns ?? [])]),
+					...new Set([
+						...(previous.columns ?? (previous.emptyProjection ? [] : ['*'])),
+						...(d.columns ?? (d.emptyProjection ? [] : ['*'])),
+					]),
 				],
 				payloadColumnRequests: [...requests(previous), ...requests(d)],
 			});
 		} else byPath.set(path, d);
 	}
+	const select = plan.intent?.select;
+	const rootColumns = () => {
+		const table = model?.getTable(plan.rootTable);
+		if (table) return table.columns.map((column) => column.name);
+		const target = resolveRelationTarget(queryLocal(plan.rootTable), deps);
+		if (target.outputs)
+			return [...target.outputs.values()].map(
+				(column) => column.logicalKey ?? identifierText(column.outputKey),
+			);
+		if (byPath.size > 0)
+			throw new Error(
+				`Include payload '${byPath.keys().next().value!}' cannot establish root wildcard ownership for '${plan.rootTable}' without a compile model.`,
+			);
+		return [];
+	};
 	const resolved = new Map<string, IncludePayloadShape>();
 	const resolvePayload = (d: PlanDecision): IncludePayloadShape => {
 		const path = d.relationPath ?? d.relationName ?? d.relation ?? '';
@@ -177,6 +200,15 @@ export function resolveIncludePayloadShapes(
 				path,
 			);
 			const declared = table?.columns.find((c) => c.name === logicalName);
+			if (
+				!model &&
+				(!descriptor ||
+					descriptor.source.kind === 'unresolved' ||
+					descriptor.source.kind === 'ambiguous')
+			)
+				throw new Error(
+					`Include payload '${path}' cannot establish read conversions for column '${logicalName}' without a compile model.`,
+				);
 			const physicalName = descriptor
 				? identifierText(descriptor.outputKey)
 				: identifierText(
@@ -268,20 +300,21 @@ export function resolveIncludePayloadShapes(
 	for (const d of all) resolvePayload(d);
 	const owners = new Map<string, string>();
 	if (plan.intent?.existsWrap) return roots;
-	const select = plan.intent?.select;
+
 	if (!select || select.type === 'all')
-		for (const column of model?.getTable(plan.rootTable)?.columns ?? [])
-			claimPayloadKey(owners, '$', column.name, `column:${column.name}`);
+		for (const column of rootColumns())
+			claimPayloadKey(owners, '$', column, `column:${column}`);
 	else if (select.type === 'fields' || select.type === 'aggregate') {
 		for (const field of select.fields ?? [])
-			claimPayloadKey(owners, '$', field, `column:${field}`);
+			for (const key of field === '*' ? rootColumns() : [field])
+				claimPayloadKey(owners, '$', key, `column:${key}`);
 		if (select.type === 'aggregate')
 			for (const aggregate of select.aggregates)
 				claimPayloadKey(
 					owners,
 					'$',
 					aggregate.as ?? aggregate.function,
-					`aggregate:${JSON.stringify(aggregate)}`,
+					`aggregate:${stableJson(aggregate)}`,
 				);
 	} else if (select.type === 'expressions' && Array.isArray(select.columns))
 		for (const expr of select.columns) {
@@ -295,8 +328,8 @@ export function resolveIncludePayloadShapes(
 							? expr.alias
 							: undefined;
 			if (key === '*') {
-				for (const column of model?.getTable(plan.rootTable)?.columns ?? [])
-					claimPayloadKey(owners, '$', column.name, `column:${column.name}`);
+				for (const column of rootColumns())
+					claimPayloadKey(owners, '$', column, `column:${column}`);
 			} else if (key)
 				claimPayloadKey(
 					owners,
@@ -304,7 +337,7 @@ export function resolveIncludePayloadShapes(
 					key,
 					expr.kind === 'column' || expr.kind === 'columnAlias'
 						? `column:${expr.column}`
-						: `expression:${JSON.stringify(expr)}`,
+						: `expression:${stableJson(expr)}`,
 				);
 		}
 	for (const shape of roots.filter(

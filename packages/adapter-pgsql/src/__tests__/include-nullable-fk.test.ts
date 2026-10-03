@@ -15,9 +15,6 @@
 import { createOrm, eq, plan, ref, schema } from '@dbsp/core';
 import type { PlanReport } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import type { AdapterCompilerDeps } from '../adapter-compiler-deps.js';
-import { compileSelect } from '../adapter-compiler-select.js';
-import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../assert-field.js';
 import { normalizeSQL } from '../ast-helpers.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -40,18 +37,15 @@ const testSchema = schema({
 // ---------------------------------------------------------------------------
 // Strategy A: low-level PlanReport approach (no planner, direct compile)
 // ---------------------------------------------------------------------------
-const deps: AdapterCompilerDeps = {
-	schemaName: undefined,
-	model: undefined,
-	defaultPk: DEFAULT_PK_COLUMN,
-	deriveFk: defaultFkDerivation,
-};
+const compileModel = testSchema.model;
 
 function compileFromPlan(planReport: PlanReport): {
 	sql: string;
 	parameters: readonly unknown[];
 } {
-	return compileSelect(planReport, undefined, deps);
+	return createPgCompileOnlyAdapter({ model: compileModel }).compile(
+		planReport,
+	);
 }
 
 /**

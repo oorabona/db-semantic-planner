@@ -158,7 +158,7 @@ describe('ResultHydrator', () => {
 	// -----------------------------------------------------------------------
 
 	describe('include hydration metadata', () => {
-		it('does not infer includes from planner decisions without compile metadata', () => {
+		it('refuses includes from planner decisions without compile metadata', () => {
 			const model = createMockModel();
 			const rows = [{ 'author.id': 1, author_json: '[]' }];
 			const report = makePlanReport([
@@ -169,8 +169,12 @@ describe('ResultHydrator', () => {
 				},
 			]);
 			const hydrator = new ResultHydrator(model, 'posts');
-			hydrator.hydrateJoinIncludes(rows, report);
-			hydrator.hydrateJsonAggIncludes(rows, report);
+			expect(() => hydrator.hydrateJoinIncludes(rows, report)).toThrow(
+				"Include hydration 'author' requires compiled includePayloads; supply the compiled query hydrationPlan.",
+			);
+			expect(() => hydrator.hydrateJsonAggIncludes(rows, report)).toThrow(
+				"Include hydration 'author' requires compiled includePayloads; supply the compiled query hydrationPlan.",
+			);
 			expect(rows).toEqual([{ 'author.id': 1, author_json: '[]' }]);
 			expect(model.getTable).not.toHaveBeenCalled();
 		});

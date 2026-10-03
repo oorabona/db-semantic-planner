@@ -5,14 +5,6 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
-
-### Breaking changes
-
-- Include payloads consistently use explicit column aliases or declared model names and requested relation names at every depth. Physical names no longer appear in JSON payload keys; bigint reads follow aliases.
-- Lateral and nested join output columns use owned path labels instead of unlabelled wildcards or unqualified aliases. Flat NQL output preserves its requested labels.
-- Compilation refuses conflicting public payload keys and wildcard includes over opaque targets. Exact duplicate source/key requests deduplicate.
-
 ## [1.0.0] - 2026-04-24
 
 ### Features

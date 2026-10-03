@@ -47,3 +47,11 @@ See the [architecture overview](../../ARCHITECTURE.md) and [guides](https://oora
 ## License
 
 MIT
+
+## Adapter SDK include hydration
+
+Adapters compiling hydratable `json_agg`, `join` or `lateral` includes must provide
+`CompiledQuery.hydrationPlan.includePayloads`. Resolve final public keys and read
+conversions before SQL handlers; hydration consumes those shapes without renaming.
+Direct `ResultHydrator` callers must pass the compiled query or its hydration plan.
+Missing shapes throw `MissingIncludePayloadShapeError`, including for empty rows.

@@ -22,6 +22,7 @@ import { RelationNotFoundError } from './errors.js';
 import {
 	hydrateJsonAggIncludes as hydrateJsonAggIncludesShared,
 	planForJsonAggHydration,
+	requireIncludePayloads,
 } from './hydration-utils.js';
 import { hydrateResolvedIncludes } from './include-payload-hydration.js';
 import type { RecursiveIncludeConfig } from './intent-builder.js';
@@ -67,7 +68,7 @@ export class ResultHydrator<TResult = unknown> {
 	): void {
 		hydrateResolvedIncludes(
 			results,
-			(query?.hydrationPlan ?? planReport).includePayloads ?? [],
+			requireIncludePayloads(query?.hydrationPlan ?? planReport, planReport),
 			'flat',
 		);
 	}

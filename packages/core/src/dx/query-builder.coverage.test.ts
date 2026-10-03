@@ -50,8 +50,10 @@ const testSchema = schema({
 
 function createSpyAdapter(executeResult: unknown[] = []) {
 	const base = createMockAdapter();
-	const compileSpy = vi.fn((_plan: unknown, _opts?: unknown) => ({
+	const compileSpy = vi.fn((report: PlanReport, _opts?: unknown) => ({
 		sql: 'SELECT * FROM "users"',
+		// This chaining-only spy emits no include projections.
+		hydrationPlan: { ...report, includePayloads: [] },
 		parameters: [] as readonly unknown[],
 	}));
 	const executeSpy = vi.fn(() => Promise.resolve([...executeResult]));

@@ -72,6 +72,7 @@ import {
 	resolveRelationTarget,
 } from './relation-target-projection.js';
 import { queryLocal, resolveDeclaredIdentifier } from './sql-identifier.js';
+import { stableJson } from './transition/stable-json.js';
 
 /** Exact source/key duplicates have one SQL projection, including at the root. */
 function deduplicateRootProjection(
@@ -94,11 +95,11 @@ function deduplicateRootProjection(
 			columns: select.columns.filter((expr) => {
 				const identity =
 					expr.kind === 'column' || expr.kind === 'columnAlias'
-						? JSON.stringify([
+						? stableJson([
 								expr.column,
 								expr.kind === 'column' ? (expr.as ?? expr.column) : expr.alias,
 							])
-						: JSON.stringify(expr);
+						: stableJson(expr);
 				if (seen.has(identity)) return false;
 				seen.add(identity);
 				return true;
