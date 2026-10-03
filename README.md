@@ -29,16 +29,16 @@ const result = await orm
 // result.sql
 // → SELECT "u".*, COALESCE(...) AS "posts"
 //     FROM "users" "u"
-//     LEFT JOIN LATERAL (SELECT ... FROM "posts" WHERE "posts"."authorId" = "u"."id") ...
+//     -- COALESCE wraps a correlated json_agg subquery for posts
 
 // result.plan.decisions
-// → [{ type: 'include-strategy', choice: 'lateral-join',
-//      reason: 'to-many relation, optimal for N+1 prevention' }]
+// → [{ type: 'include-strategy', choice: 'json_agg',
+//      reason: 'using JSON aggregation to avoid row explosion' }]
 
 // result.params → [true]
 ```
 
-The planner picks the right strategy (EXISTS, JOIN, lateral subquery) based on cardinality, then surfaces every decision via `dump()`. Nothing is hidden.
+The planner selects relation filters (EXISTS or JOIN) by cardinality and include strategies by query shape and dialect capabilities, then surfaces every decision via `dump()`. Nothing is hidden.
 
 ---
 
@@ -137,7 +137,7 @@ See the [Getting Started guide](https://oorabona.github.io/db-semantic-planner/g
 
 ## Features
 
-**Semantic Planning** — The planner chooses between EXISTS, JOIN, and lateral subqueries based on cardinality. No configuration required.
+**Semantic Planning** — The planner chooses relation filters by cardinality and include strategies by query shape and dialect capabilities. No configuration required.
 
 ```typescript
 import { Pool } from 'pg';

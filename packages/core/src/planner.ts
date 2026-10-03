@@ -1439,8 +1439,8 @@ function determineFilterStrategy(
  * 1. If relation has explicit strategy (not 'auto'), use it (after validation)
  * 2. If planner option has explicit strategy (not 'auto'), use it
  * 3. Smart auto selection based on:
- *    - Relation type (hasOne/belongsTo → join, hasMany/belongsToMany → depends)
- *    - Dialect capabilities (lateral, json_agg support)
+ *    - Query shape (flat output and per-parent limits)
+ *    - Dialect capabilities (json_agg, lateral support)
  *    - Recursive relations → cte
  *
  * @throws {UnsupportedStrategyError} if requested strategy not supported by dialect
@@ -1454,45 +1454,20 @@ export function validateIncludeStrategy(
 	capabilities: DialectCapabilities | undefined,
 	validateCapabilities = true,
 ): ResolvedIncludeStrategy {
+	const checkCapabilities = validateCapabilities && capabilities !== undefined;
 	const supported = [
 		'join',
-		...(capabilities?.supportsJsonAgg ? ['json_agg'] : []),
-		...(capabilities?.supportsLateralJoin ? ['lateral'] : []),
-		...(capabilities?.supportsRecursiveCTE ? ['cte'] : []),
+		...(!checkCapabilities || capabilities.supportsJsonAgg ? ['json_agg'] : []),
+		...(!checkCapabilities || capabilities.supportsLateralJoin
+			? ['lateral']
+			: []),
+		...(!checkCapabilities || capabilities.supportsRecursiveCTE ? ['cte'] : []),
 	];
-	if (
-		strategy !== 'auto' &&
-		!['join', 'json_agg', 'lateral', 'cte'].includes(strategy)
-	) {
+	if (strategy === 'auto') return 'join';
+	if (!supported.includes(strategy)) {
 		throw new UnsupportedStrategyError(
 			`Strategy '${strategy}' is not supported by ${capabilities?.name ?? 'a dialect without capabilities'}. Supported strategies: ${supported.map((s) => `'${s}'`).join(', ')}.`,
 		);
-	}
-	if (strategy === 'auto') {
-		// Should not happen, but fallback to join
-		return 'join';
-	}
-
-	// Validate against dialect capabilities if available
-	if (validateCapabilities && capabilities) {
-		if (strategy === 'lateral' && !capabilities.supportsLateralJoin) {
-			throw new UnsupportedStrategyError(
-				`Strategy 'lateral' is not supported by ${capabilities.name}. ` +
-					`Use 'join' or 'json_agg' instead.`,
-			);
-		}
-		if (strategy === 'json_agg' && !capabilities.supportsJsonAgg) {
-			throw new UnsupportedStrategyError(
-				`Strategy 'json_agg' is not supported by ${capabilities.name}. ` +
-					`Use 'join' or 'lateral' instead.`,
-			);
-		}
-		if (strategy === 'cte' && !capabilities.supportsRecursiveCTE) {
-			throw new UnsupportedStrategyError(
-				`Strategy 'cte' is not supported by ${capabilities.name}. ` +
-					`Use 'join' instead.`,
-			);
-		}
 	}
 
 	return strategy as ResolvedIncludeStrategy;
@@ -1515,7 +1490,7 @@ function determineIncludeStrategy(
 		return validateIncludeStrategy(opts.defaultIncludeStrategy, capabilities);
 	}
 
-	// 3. Smart auto selection based on relation type + dialect
+	// 3. Auto selection based on recursion, query shape, and dialect capabilities
 	return selectSmartStrategy(relation, capabilities, isRecursive);
 }
 
@@ -1537,11 +1512,9 @@ function hasNestedLimit(include: IncludeIntent): boolean {
  *
  * Selection algorithm:
  * - Recursive relations → 'cte' (requires recursive CTE support)
- * - hasOne/belongsTo (to-one) → 'join' (always safe, single row)
- * - hasMany/belongsToMany (to-many):
- *   - If dialect supports json_agg → 'json_agg' (single row per parent, no explosion)
- *   - Else if dialect supports lateral → 'lateral' (good with LIMIT)
- *   - Else → 'join' (let DB optimize)
+ * - All non-recursive cardinalities: json_agg if supported and nested output allowed
+ * - Otherwise lateral if a per-parent limit is needed and supported
+ * - Otherwise join
  */
 function selectSmartStrategy(
 	relation: RelationIR,

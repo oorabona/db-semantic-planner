@@ -1368,8 +1368,11 @@ export function compileSelectEnvelope<T = unknown>(
 	if (execIntent) {
 		const strategies = new Map<string, string>();
 		// Older externally constructed plans may omit intentPath. Index their
-		// aliases once, preserving the previous first matching decision fallback.
-		const legacyStrategies = new Map<string, string>();
+		// aliases once; refuse assignments that cannot identify a unique include.
+		const legacyStrategies = new Map<
+			string,
+			{ strategy: string; decision: object }
+		>();
 		for (const decision of planForCompilation.decisions) {
 			if (decision.type !== 'include-strategy') continue;
 			const strategy = validateIncludeStrategy(
@@ -1380,24 +1383,38 @@ export function compileSelectEnvelope<T = unknown>(
 			if (decision.context.intentPath) {
 				strategies.set(decision.context.intentPath, strategy);
 			} else {
-				for (const alias of [
+				for (const alias of new Set([
 					decision.context.relation,
 					decision.context.includeAlias,
-				]) {
-					if (alias && !legacyStrategies.has(alias))
-						legacyStrategies.set(alias, strategy);
+				])) {
+					if (!alias) continue;
+					if (legacyStrategies.has(alias)) {
+						throw new Error(
+							`Ambiguous include relation '${alias}': context.intentPath is required for unique strategy assignment (#894).`,
+						);
+					}
+					legacyStrategies.set(alias, { strategy, decision });
 				}
 			}
 		}
 		if (legacyStrategies.size > 0) {
+			const assignedDecisions = new Set<object>();
 			const indexLegacy = (
 				includes: readonly IncludeIntent[] | undefined,
 				parent = '',
 			): void => {
 				for (const [index, include] of (includes ?? []).entries()) {
 					const path = `${parent}include[${index}]`;
-					const strategy = legacyStrategies.get(include.relation);
-					if (!strategies.has(path) && strategy) strategies.set(path, strategy);
+					const legacy = legacyStrategies.get(include.relation);
+					if (!strategies.has(path) && legacy) {
+						if (assignedDecisions.has(legacy.decision)) {
+							throw new Error(
+								`Ambiguous include relation '${include.relation}': context.intentPath is required for unique strategy assignment (#894).`,
+							);
+						}
+						assignedDecisions.add(legacy.decision);
+						strategies.set(path, legacy.strategy);
+					}
 					indexLegacy(include.include, `${path}.`);
 				}
 			};

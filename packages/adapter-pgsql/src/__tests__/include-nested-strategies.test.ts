@@ -207,3 +207,95 @@ it('#895 preflight accesses include predicates linearly', () => {
 	expect(accesses(10)).toBe(10);
 	expect(accesses(20)).toBe(20);
 });
+
+describe('#894 pathless include assignments', () => {
+	const pathless = (p: PlanReport): PlanReport => ({
+		...p,
+		decisions: p.decisions.map((d) => {
+			if (d.type !== 'include-strategy') return d;
+			const context = { ...d.context };
+			delete context.intentPath;
+			return { ...d, context };
+		}),
+	});
+	it('refuses nested same-name json_agg→join before extraction', () => {
+		const repeated = schema({
+			users: { id: { type: 'integer', primaryKey: true } },
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				authorId: ref('users', { as: 'author', inverse: 'children' }),
+			},
+			comments: {
+				id: { type: 'integer', primaryKey: true },
+				postId: ref('posts', { as: 'post', inverse: 'children' }),
+			},
+		} as const);
+		const p = plan(
+			{
+				type: 'select',
+				from: 'users',
+				include: [
+					{
+						relation: 'children',
+						include: [{ relation: 'children', join: 'inner' }],
+					},
+				],
+			},
+			repeated.model,
+			{ defaultIncludeStrategy: 'json_agg' },
+		);
+		expect(
+			p.decisions
+				.filter((d) => d.type === 'include-strategy')
+				.map((d) => d.choice),
+		).toEqual(['json_agg', 'join']);
+		expect(() =>
+			createPgCompileOnlyAdapter({ model: repeated.model }).compile(
+				pathless(p),
+			),
+		).toThrow(
+			"Ambiguous include relation 'children': context.intentPath is required for unique strategy assignment (#894).",
+		);
+	});
+	it('refuses sibling same-name includes sharing one pathless decision', () => {
+		const p = pathless(nestedPlan('join', 'join'));
+		const decision = p.decisions.find((d) => d.type === 'include-strategy');
+		expect(decision).toBeDefined();
+		expect(() =>
+			adapter.compile({
+				...p,
+				intent: {
+					type: 'select',
+					from: 'users',
+					include: [{ relation: 'posts' }, { relation: 'posts' }],
+				},
+				decisions: [decision!],
+			}),
+		).toThrow(
+			"Ambiguous include relation 'posts': context.intentPath is required for unique strategy assignment (#894).",
+		);
+	});
+	it('refuses reusing one decision through its relation and alias', () => {
+		const p = pathless(nestedPlan('join', 'join'));
+		const decision = p.decisions.find((d) => d.type === 'include-strategy');
+		expect(decision).toBeDefined();
+		expect(() =>
+			adapter.compile({
+				...p,
+				decisions: [
+					{
+						...decision!,
+						context: { ...decision!.context, includeAlias: 'comments' },
+					},
+				],
+			}),
+		).toThrow(
+			"Ambiguous include relation 'comments': context.intentPath is required for unique strategy assignment (#894).",
+		);
+	});
+	it('preserves full SQL for unique pathless assignments', () => {
+		expect(adapter.compile(pathless(nestedPlan('join', 'join'))).sql).toBe(
+			sameSql.join,
+		);
+	});
+});

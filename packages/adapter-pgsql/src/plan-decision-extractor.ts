@@ -1646,7 +1646,7 @@ export function enrichExistsDecisionsInPlace(
 /**
  * Extract ALL include decisions from include-strategy plan decisions.
  * Produces decisions with type 'includeStrategy' for all strategies:
- * - json_agg, subquery → tree-structured with children (like extractJsonAggDecisions)
+ * - json_agg → tree-structured with children (like extractJsonAggDecisions)
  * - join → flat decisions with columns (like extractLeftJoinIncludeDecisions)
  * - lateral → tree-structured with children
  * - cte → flat decisions

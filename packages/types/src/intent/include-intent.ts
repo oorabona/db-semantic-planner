@@ -108,8 +108,8 @@ export interface IncludeIntent {
 	 * NQL v2.1: Override include output strategy for this relation.
 	 *
 	 * This is an **output strategy** (flat vs nested), not an implementation strategy.
-	 * The planner decides the best implementation (join, subquery, lateral, cte)
-	 * based on relation type and dialect capabilities.
+	 * The planner decides the best implementation (join, json_agg, lateral, cte)
+	 * based on recursion, query shape, and dialect capabilities.
 	 *
 	 * - 'auto': Let planner decide freely, including json_agg (default)
 	 * - 'flat': Exclude json_agg from candidates; planner picks best flat strategy
@@ -117,7 +117,7 @@ export interface IncludeIntent {
 	 * @example
 	 * // NQL: orders | select *, customer.* | flat
 	 * // Results in: include: [{ relation: 'customer', strategy: 'flat' }]
-	 * // Planner then picks lateral, join, subquery, or cte (never json_agg)
+	 * // Planner then picks lateral, join, or cte (never json_agg)
 	 */
 	readonly strategy?: 'auto' | 'flat' | undefined;
 

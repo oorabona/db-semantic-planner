@@ -39,11 +39,13 @@ to reassemble the rows.
 
 ### Strategy selection rules
 
-| Relation cardinality | Default strategy | Rationale |
+| Relation cardinality | PostgreSQL default strategy | Rationale |
 |----------------------|-----------------|-----------|
-| `belongsTo` / `hasOne` (to-one) | `join` | Single row per parent — safe to LEFT JOIN |
+| `belongsTo` / `hasOne` (to-one) | `json_agg` | Same capability-based selection as to-many |
 | `hasMany` / `manyToMany` (to-many) | `json_agg` | Avoids row explosion |
 | Any + explicit override | as specified | User intent wins |
+
+These defaults apply to ordinary non-recursive includes. Recursion requires CTE support; flat output and per-parent limits can change selection. Explicit overrides are validated against dialect capabilities.
 
 The planner encodes this as:
 ```typescript
@@ -53,7 +55,7 @@ The planner encodes this as:
 
 ### `json_agg` — correlated subquery aggregate
 
-**When used:** to-many relations when the dialect supports it and the include
+**When used:** to-one and to-many relations when the dialect supports it and the include
 has no `LIMIT` requirement. Also the default for NQL implicit path notation
 (`posts.title` without `| flat`).
 
@@ -94,8 +96,9 @@ plain object; it does not infer camel/snake spellings from returned keys.
 
 ### `join` — LEFT JOIN (flat columns)
 
-**When used:** to-one relations (`belongsTo`, `hasOne`) where a single related
-row is expected. Safe because there is at most one matching row per parent.
+**When used:** explicit join overrides or the automatic fallback when JSON
+aggregation is excluded or unavailable and no supported lateral limit applies.
+For to-one relations, at most one matching row per parent avoids row explosion.
 
 **How it works:** The handler adds a `LEFT JOIN` to the main query and emits
 column targets aliased as `"relation.column"` using the dot-separator

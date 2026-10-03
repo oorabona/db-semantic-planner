@@ -20,7 +20,7 @@ features:
       width: 24
       height: 24
     title: Semantic Planning
-    details: The planner chooses between EXISTS, JOIN, and lateral subqueries based on relation cardinality. You describe what, it decides how.
+    details: The planner chooses relation filters by cardinality and include strategies by query shape and dialect capabilities. You describe what, it decides how.
   - icon:
       src: /icons/search.svg
       width: 24
@@ -85,8 +85,8 @@ features:
     <div class="step-number">2</div>
     <div class="step-content">
       <h3>Planner decides</h3>
-      <p>The semantic planner analyzes cardinality, chooses JOIN strategy, extracts CTEs, optimizes.</p>
-      <code class="step-code">include-strategy: lateral-join (to-one relation)</code>
+      <p>The semantic planner selects relation filters by cardinality, selects includes by query shape and capabilities, extracts CTEs, optimizes.</p>
+      <code class="step-code">include-strategy: json_agg (PostgreSQL default)</code>
     </div>
   </div>
   <div class="pipeline-arrow">&rarr;</div>
@@ -122,8 +122,8 @@ const dump = orm.select('posts')
 
 dump.plan.decisions
 // → [{ type: 'include-strategy',
-//      choice: 'lateral-join',
-//      reason: 'to-one relation' }]
+//      choice: 'json_agg',
+//      reason: 'using JSON aggregation to avoid row explosion' }]
 ```
 
   </div>
@@ -132,7 +132,7 @@ dump.plan.decisions
 <div class="why-row reverse">
   <div class="why-text">
     <h3>vs Drizzle</h3>
-    <p>Automatic include strategy selection — no manual JOINs for relations. The planner picks join, json_agg, lateral, or cte based on cardinality. Built-in pgvector and ParadeDB helpers.</p>
+    <p>Automatic include strategy selection — no manual JOINs for relations. The planner picks join, json_agg, lateral, or cte based on recursion, query shape, and dialect capabilities. Built-in pgvector and ParadeDB helpers.</p>
   </div>
   <div class="why-code">
 
