@@ -77,7 +77,10 @@ export function hydrateResolvedIncludes(
 	): unknown => {
 		const value: Record<string, unknown> = {};
 		let present = false;
+		let owned = false;
 		for (const column of shape.columns) {
+			if (!Object.hasOwn(row, column.outputLabel)) continue;
+			owned = true;
 			const raw = row[column.outputLabel];
 			if (raw !== null && raw !== undefined) present = true;
 			setValue(value, column.publicKey, readColumn(raw, column));
@@ -85,10 +88,12 @@ export function hydrateResolvedIncludes(
 		}
 		for (const child of shape.children) {
 			const childValue = assembleFlat(row, child);
+			if (childValue === undefined) continue;
+			owned = true;
 			setValue(value, child.publicKey, childValue);
 			if (shape.columns.length === 0 && childValue !== null) present = true;
 		}
-		return present ? value : null;
+		return owned ? (present ? value : null) : undefined;
 	};
 	for (const row of rows) {
 		if (!record(row)) continue;
@@ -105,8 +110,10 @@ export function hydrateResolvedIncludes(
 				strategy === 'flat' &&
 				shape.strategy !== 'json_agg' &&
 				(shape.columns.length > 0 || shape.children.length > 0)
-			)
-				setValue(row, shape.publicKey, assembleFlat(row, shape));
+			) {
+				const value = assembleFlat(row, shape);
+				if (value !== undefined) setValue(row, shape.publicKey, value);
+			}
 		}
 	}
 }

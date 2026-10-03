@@ -144,3 +144,37 @@ describe('public-key bigint reads', () => {
 		).toEqual({ constructor: 42n });
 	});
 });
+
+describe('owned flat transport labels', () => {
+	const payload: IncludePayloadShape = {
+		path: 'children',
+		publicKey: 'children',
+		strategy: 'join',
+		table: 'children',
+		isToOne: true,
+		outputLabel: 'children',
+		columns: [
+			{
+				logicalName: 'id',
+				physicalName: 'id',
+				publicKey: 'id',
+				outputLabel: 'children.id',
+			},
+		],
+		children: [],
+	};
+	it('ignores inherited flat labels without creating a relation', () => {
+		const prototype = { 'children.id': 7 };
+		const row = Object.create(prototype);
+		hydrateResolvedIncludes([row], [payload], 'flat');
+		expect(row).toEqual({});
+		expect(Object.hasOwn(row, 'children')).toBe(false);
+		expect(Object.getPrototypeOf(row)).toBe(prototype);
+		expect(prototype).toEqual({ 'children.id': 7 });
+	});
+	it('hydrates an owned null flat label as a null relation', () => {
+		const row = { 'children.id': null };
+		hydrateResolvedIncludes([row], [payload], 'flat');
+		expect(row).toEqual({ children: null });
+	});
+});

@@ -223,7 +223,7 @@ describe('Issue 16: include with explicit .columns() — hydration suppression',
 		const { sql } = compile(buildExplicitColumnsPlan());
 		// Must still JOIN
 		expect(sql).toMatch(/LEFT JOIN/i);
-		// Must not emit dotted hydration alias (e.g. "enclosingSymbol.id")
+		// The compiled shape hydrates only the explicitly projected relation columns.
 		expect(sql).not.toMatch(/AS\s+"enclosing_symbol\./i);
 		expect(sql).not.toMatch(/AS\s+"enclosingSymbol\.id"/i);
 	});
@@ -235,7 +235,7 @@ describe('Issue 16: include with explicit .columns() — hydration suppression',
 
 	it('does not produce a full hydration object alongside symbol_name (synthesized join)', () => {
 		const { sql } = compile(buildExplicitColumnsPlan());
-		// No "id" column from relation should appear with the dotted alias convention
+		// The compiled shape omits the unselected relation id.
 		expect(sql).not.toMatch(
 			/"enclosing_symbol"\."id"\s+AS\s+"enclosing_symbol\.id"/i,
 		);
@@ -259,7 +259,7 @@ describe('Issue 16: include with explicit .columns() — hydration suppression',
 		);
 		// Still JOINs
 		expect(sql).toMatch(/JOIN/i);
-		// No dotted hydration aliases
+		// The compiled shape uses the projected public keys for relation hydration.
 		expect(sql).not.toMatch(/AS\s+"enclosing_symbol\./i);
 		expect(sql).not.toMatch(/AS\s+"enclosingSymbol\.id"/i);
 	});
