@@ -36,6 +36,30 @@ describe('condition compilation differential matrix (#891)', () => {
 			before,
 		);
 	});
+	it('emits empty groups once per position and observable key-authority profile', () => {
+		for (const position of new Set(
+			conditionMatrix.map((entry) => entry.position),
+		)) {
+			const entries = conditionMatrix.filter(
+				(entry) => entry.position === position,
+			);
+			const kinds = ['eq'];
+			if (
+				position === 'in-subquery-body' ||
+				position.startsWith('relation-') ||
+				position.startsWith('include-')
+			)
+				kinds.push('exists-custom-authorities');
+			expect(entries).toHaveLength(kinds.length === 2 ? 309 : 307);
+			for (const shape of ['empty-or', 'empty-and']) {
+				expect(
+					entries
+						.filter((entry) => entry.shape === shape)
+						.map((entry) => entry.kind),
+				).toEqual(kinds);
+			}
+		}
+	});
 	it('pins the complete ordered inventory', () => {
 		expect(readdirSync(baselineDirectory).sort()).toEqual(
 			baselinePaths.map((path) => basename(fileURLToPath(path))).sort(),
