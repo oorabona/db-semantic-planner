@@ -2,14 +2,17 @@ import { isParamIntent } from '@dbsp/types';
 
 /** Normalize the public param() ExpressionSpec without inspecting its bound value. */
 export function normalizeParamIntent(value: unknown): unknown {
-	return value !== null &&
+	if (
+		value !== null &&
 		typeof value === 'object' &&
 		'__expr' in value &&
 		value.__expr === true &&
-		'intent' in value &&
-		isParamIntent(value.intent)
-		? value.intent
-		: value;
+		'intent' in value
+	) {
+		const intent = value.intent;
+		return isParamIntent(intent) ? intent : value;
+	}
+	return value;
 }
 
 /**

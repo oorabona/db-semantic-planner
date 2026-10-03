@@ -410,9 +410,7 @@ export function compileUnnestUpsert(
  */
 function valueToParam(state: CompilerState, value?: unknown): Node {
 	if (value === null) return { A_Const: { isnull: true } };
-	if (value !== undefined) {
-		state.parameters.push(unwrapParamIntent(value));
-	}
+	state.parameters.push(unwrapParamIntent(value) ?? null);
 	state.paramIndex++;
 
 	return {
