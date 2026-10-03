@@ -665,7 +665,7 @@ function compileRelationFilter(
 	const nestedOuterAliases = aliasContext
 		? [...(outerAliases ?? []), aliasContext]
 		: (outerAliases ?? []);
-	// Resolve relation target for inner scope validation (first segment of relation path)
+	// Resolve the final relation target for inner scope validation.
 	const prevRelationTarget = ctx.currentRelationTarget;
 	const bindingRelation =
 		ctx.currentFromTable && relFilter.relation[0]
@@ -677,10 +677,12 @@ function compileRelationFilter(
 			: undefined;
 	if (ctx.currentFromTable && relFilter.relation[0]) {
 		if (ctx.validator) {
-			ctx.currentRelationTarget = ctx.validator.resolveRelationTarget(
-				ctx.currentFromTable,
-				relFilter.relation[0],
-			);
+			ctx.currentRelationTarget =
+				bindingRelation?.targetTable ??
+				ctx.validator.resolveRelationPathTarget(
+					ctx.currentFromTable,
+					relFilter.relation,
+				);
 		}
 	}
 	const where = compileExpression(

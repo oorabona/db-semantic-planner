@@ -430,6 +430,13 @@ export type {
 	ConnectionAvailability,
 	IntrospectionOptions,
 } from './adapter.js';
+export {
+	type DeclaredRelationPathHop,
+	type DeclaredRelationPathModel,
+	type DeclaredRelationPathRelation,
+	type DeclaredRelationPathResult,
+	resolveDeclaredRelationPath,
+} from './declared-relation-path.js';
 // Re-export all public types for convenience
 export * from './index.js';
 export type { SubqueryExpressionIntent } from './intent/expression-intent.js';
