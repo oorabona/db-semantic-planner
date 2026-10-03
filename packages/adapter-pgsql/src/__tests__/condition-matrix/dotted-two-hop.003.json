@@ -4,9 +4,9 @@
 			"position": "dotted-two-hop",
 			"kind": "notExists-recursive-down",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)))",
-			"params": [71],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "dotted-two-hop",
@@ -340,7 +340,7 @@
 			"position": "dotted-two-hop",
 			"kind": "exists-custom-authorities",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)",
 			"params": [61],
 			"error": null
 		},
@@ -364,7 +364,7 @@
 			"position": "dotted-two-hop",
 			"kind": "exists-custom-authorities",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
 			"params": [61],
 			"error": null
 		},
@@ -380,7 +380,7 @@
 			"position": "dotted-two-hop",
 			"kind": "notExists-custom-authorities",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
 			"params": [61],
 			"error": null
 		},
@@ -404,7 +404,7 @@
 			"position": "dotted-two-hop",
 			"kind": "notExists-custom-authorities",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)))",
+			"sql": "SELECT users.* FROM users WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)))",
 			"params": [61],
 			"error": null
 		},
@@ -420,7 +420,7 @@
 			"position": "dotted-two-hop",
 			"kind": "some-custom-authorities",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)",
 			"params": [61],
 			"error": null
 		},
@@ -444,7 +444,7 @@
 			"position": "dotted-two-hop",
 			"kind": "some-custom-authorities",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
 			"params": [61],
 			"error": null
 		},
@@ -460,7 +460,7 @@
 			"position": "dotted-two-hop",
 			"kind": "every-custom-authorities",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1)))",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1)))",
 			"params": [61],
 			"error": null
 		},
@@ -484,7 +484,7 @@
 			"position": "dotted-two-hop",
 			"kind": "every-custom-authorities",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))))",
+			"sql": "SELECT users.* FROM users WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))))",
 			"params": [61],
 			"error": null
 		},
@@ -500,7 +500,7 @@
 			"position": "dotted-two-hop",
 			"kind": "none-custom-authorities",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
 			"params": [61],
 			"error": null
 		},
@@ -524,7 +524,7 @@
 			"position": "dotted-two-hop",
 			"kind": "none-custom-authorities",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)))",
+			"sql": "SELECT users.* FROM users WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)))",
 			"params": [61],
 			"error": null
 		},

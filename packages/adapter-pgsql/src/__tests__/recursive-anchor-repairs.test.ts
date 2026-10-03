@@ -35,11 +35,6 @@ const columns = {
 	score: { type: 'integer' },
 	period: { type: 'daterange' },
 	data: { type: 'jsonb' },
-	__depth: { type: 'integer' },
-	__visited: { type: 'integer' },
-	__path: { type: 'integer' },
-	is_cycle: { type: 'integer' },
-	__cycle_path: { type: 'integer' },
 } as const;
 const db = schema({
 	users: columns,
@@ -505,4 +500,14 @@ describe('#891 recursive anchor review repairs', () => {
 			),
 		);
 	});
+});
+it('unknown traversal kinds retain their named refusal', () => {
+	const report = planRecursive(intent(eq('id', 1)), db.model);
+	const unknown = {
+		...report.intent,
+		traversal: { kind: 'unknownTraversal' },
+	} as unknown as RecursiveIntent;
+	expect(() =>
+		adapter.compileRecursive({ ...report, intent: unknown }, db.model),
+	).toThrow("Unsupported traversal kind 'unknownTraversal'");
 });

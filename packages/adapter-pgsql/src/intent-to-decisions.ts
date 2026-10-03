@@ -45,6 +45,7 @@ export class UnknownSelectExpressionKindError extends Error {
 export function intentToDecisions(
 	intent: QueryIntent,
 	rootTable: string,
+	options?: { readonly omitRootWhere?: boolean },
 ): PlanDecision[] {
 	const decisions: PlanDecision[] = [];
 
@@ -57,7 +58,7 @@ export function intentToDecisions(
 	}
 
 	// 2. WHERE clause
-	if (intent.where) {
+	if (intent.where && !options?.omitRootWhere) {
 		decisions.push(...convertWhere(intent.where, rootTable));
 	}
 

@@ -58,7 +58,11 @@ import {
 	relationBinding,
 	relationBindingFor,
 } from './binding-registry.js';
-import { compileCondition, compileWhereIntent } from './condition-compiler.js';
+import {
+	buildSubqueryFromIntent,
+	compileCondition,
+	compileWhereIntent,
+} from './condition-compiler.js';
 import type { DeclaredNameResolver } from './declared-name-resolver.js';
 import { deparseQuoted } from './deparse.js';
 import { assertDialectCapability } from './dialect-capabilities.js';
@@ -104,6 +108,7 @@ import {
 	isAmbiguousRelationAlias,
 	resolveVisibleRelationAlias,
 } from './relation-alias.js';
+import { resolveRelationKeys } from './relation-keys.js';
 import {
 	type AliasColumnAuthority,
 	bindAliasAuthority,
@@ -188,10 +193,6 @@ export type { PlanDecision } from './plan-decision.js';
 // Types (simplified for spike - would import from @dbsp/core)
 // ============================================================================
 
-/**
- * Simplified PlanDecision for the spike
- * (In production, import from @dbsp/core)
- */
 // ============================================================================
 // PlanDecision sub-types (discriminated sub-interfaces + type guards)
 // ============================================================================
@@ -390,6 +391,9 @@ function mergeDuplicateJoinIncludeDecisions(
  * Simplified PlanReport for the spike
  */
 export interface SimplifiedPlanReport {
+	/** Executable root predicate, compiled after visible alias allocation. */
+	readonly rawWhere?: WhereIntent;
+	readonly rootWhereJoinRelations?: ReadonlySet<string>;
 	readonly rootTable: string;
 	readonly decisions: readonly PlanDecision[];
 	readonly schema?: string;
@@ -2943,6 +2947,81 @@ export class PlanCompiler {
 		};
 	}
 
+	private compileRootWhere(
+		intent: WhereIntent,
+		plan: SimplifiedPlanReport,
+	): Node | undefined {
+		// Schedule only structural JOINs chosen by the planner. The predicate itself
+		// remains raw and enters compileCondition below.
+		for (const path of plan.rootWhereJoinRelations ?? []) {
+			const prefix = `${plan.rootTable}.`;
+			if (!path.startsWith(prefix)) continue;
+			const relationName = path.slice(prefix.length);
+			if (this.visibleSqlQualifiers.has(relationName)) continue;
+			const relation = this.model?.getRelation(path);
+			if (relation?.type !== 'belongsTo') continue;
+			const keys = resolveRelationKeys(plan.rootTable, relation, {
+				model: this.model!,
+				defaultPkColumnName: this.defaultPk,
+				deriveFkColumnName: this.deriveFk,
+			});
+			this.registerJoinFilter({
+				type: 'join',
+				targetTable: relation.target,
+				relationName,
+				foreignKey: keys.sourceColumn,
+				parentKey: keys.targetColumn,
+			});
+			this.visibleSqlQualifiers = new Map([
+				...this.visibleSqlQualifiers,
+				[relationName, relationName],
+			]);
+			this.state.aliases = new Map(this.visibleSqlQualifiers);
+		}
+		const handlerCtx = this.createHandlerContext(
+			plan,
+			this.tableIdentifier(plan.rootTable),
+		);
+		const condition = compileCondition(intent, {
+			...handlerCtx,
+			position: 'where',
+			...(plan.rootWhereJoinRelations !== undefined && {
+				rootWhereJoinRelations: plan.rootWhereJoinRelations,
+			}),
+			logicalSourceTable: plan.rootTable,
+			emittedAlias:
+				plan.batchValuesFromAlias ?? handlerCtx.currentAlias ?? plan.rootTable,
+			visibleAliases: new Map(this.visibleSqlQualifiers),
+			paramState: this.state,
+			...(handlerCtx.schema !== undefined && { schemaName: handlerCtx.schema }),
+			compileSubquery: (query, offset) =>
+				buildSubqueryFromIntent(
+					query,
+					offset,
+					this.declaredNames,
+					handlerCtx.schema,
+					'rawExists',
+					handlerCtx.scope,
+					this.dialectCapabilities,
+					this.dbCasing,
+				),
+		});
+		// A positive planned JOIN without an inner predicate already supplies the
+		// complete filter. Keep the existing SELECT shape without WHERE true.
+		if (
+			(intent.kind === 'exists' ||
+				(intent.kind === 'relationFilter' && intent.mode === 'some')) &&
+			intent.where === undefined &&
+			[...(plan.rootWhereJoinRelations ?? [])].some(
+				(path) =>
+					path.startsWith(`${plan.rootTable}.`) &&
+					this.visibleSqlQualifiers.has(path.slice(plan.rootTable.length + 1)),
+			)
+		)
+			return undefined;
+		return condition;
+	}
+
 	private compileSelect(plan: SimplifiedPlanReport): Node {
 		const decisions = mergeDuplicateJoinIncludeDecisions(
 			plan.decisions,
@@ -2981,7 +3060,13 @@ export class PlanCompiler {
 		let offset: Node | undefined;
 		let distinct: boolean | Node[] = false;
 
+		let rootWherePending = plan.rawWhere;
 		for (const decision of decisions) {
+			if (rootWherePending && !decision.type.startsWith('select')) {
+				const root = this.compileRootWhere(rootWherePending, plan);
+				if (root) where = where ? andExpr(where, root) : root;
+				rootWherePending = undefined;
+			}
 			switch (decision.type) {
 				case 'select':
 				case 'selectFunction':
@@ -3076,6 +3161,11 @@ export class PlanCompiler {
 					}
 					break;
 			}
+		}
+
+		if (rootWherePending) {
+			const root = this.compileRootWhere(rootWherePending, plan);
+			if (root) where = where ? andExpr(where, root) : root;
 		}
 
 		for (const decision of orderByDecisions) {

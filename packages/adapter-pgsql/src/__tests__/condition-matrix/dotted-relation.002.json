@@ -708,9 +708,9 @@
 			"position": "dotted-relation",
 			"kind": "exists-recursive-up",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)",
-			"params": [71],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "dotted-relation",
@@ -732,9 +732,9 @@
 			"position": "dotted-relation",
 			"kind": "exists-recursive-up",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
-			"params": [71],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "dotted-relation",
@@ -748,9 +748,9 @@
 			"position": "dotted-relation",
 			"kind": "exists-recursive-down",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)",
-			"params": [71],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "dotted-relation",
@@ -772,9 +772,9 @@
 			"position": "dotted-relation",
 			"kind": "exists-recursive-down",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
-			"params": [71],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "dotted-relation",
@@ -788,9 +788,9 @@
 			"position": "dotted-relation",
 			"kind": "notExists-recursive-up",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
-			"params": [71],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "dotted-relation",
@@ -812,9 +812,9 @@
 			"position": "dotted-relation",
 			"kind": "notExists-recursive-up",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)))",
-			"params": [71],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "dotted-relation",
@@ -828,9 +828,9 @@
 			"position": "dotted-relation",
 			"kind": "notExists-recursive-down",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
-			"params": [71],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "dotted-relation",

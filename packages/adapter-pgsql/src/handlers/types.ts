@@ -54,6 +54,7 @@ export type IncludeHandlerStrategy = (typeof INCLUDE_STRATEGIES)[number];
  * Immutable context passed to all handlers during compilation.
  */
 export interface CompilerContext {
+	readonly directRootWhere?: boolean;
 	readonly position?: import('../condition-context.js').ConditionPosition;
 	readonly createWhereDispatcher?: () => WhereDispatcher;
 	/** Addressed authority for model-backed identifiers. */

@@ -19,6 +19,7 @@ import type {
 	OutputDescriptor,
 	OutputValueShape,
 	PlanReport,
+	WhereIntent,
 } from '@dbsp/types';
 import { resolveOutputReadHandling, toColumnList } from '@dbsp/types';
 import {
@@ -1352,6 +1353,27 @@ function assertSupportedIncludeWhere(
 	}
 }
 
+/** Dotted fields remain on the legacy lowering until step 5. Inspect predicates,
+ * not bound values or unmoved expression/subquery bodies. */
+function hasDottedRootField(where: WhereIntent): boolean {
+	if (
+		'field' in where &&
+		typeof where.field === 'string' &&
+		where.field.includes('.')
+	)
+		return true;
+	if (where.kind === 'and' || where.kind === 'or')
+		return where.conditions.some(hasDottedRootField);
+	if (where.kind === 'not') return hasDottedRootField(where.condition);
+	if (
+		where.kind === 'exists' ||
+		where.kind === 'notExists' ||
+		where.kind === 'relationFilter'
+	)
+		return where.where !== undefined && hasDottedRootField(where.where);
+	return false;
+}
+
 /**
  * Compile a PlanReport to a parameterised SELECT query.
  * Extracted body of PgAdapter.compile().
@@ -1486,7 +1508,15 @@ export function compileSelectEnvelope<T = unknown>(
 		}
 		assertSupportedIncludeWhere(execIntent.include, strategies);
 		// Real usage: convert intent to decisions
-		let decisions = intentToDecisions(execIntent, plan.rootTable);
+		const rawWhere =
+			execIntent.where &&
+			!hasDottedRootField(execIntent.where) &&
+			(!plan.intent?.where || !hasDottedRootField(plan.intent.where))
+				? execIntent.where
+				: undefined;
+		let decisions = intentToDecisions(execIntent, plan.rootTable, {
+			omitRootWhere: rawWhere !== undefined,
+		});
 		const resolvedModel = options?.model ?? deps.model;
 
 		// Convert dotted-field comparisons (e.g., "parent.name") to EXISTS subqueries
@@ -1509,11 +1539,12 @@ export function compileSelectEnvelope<T = unknown>(
 		// planForCompilation has .intent = executableIntent (post-optimization WHERE)
 		// so findExistsIntents finds 'exists' intents rather than the original 'in'.
 		// Side-effect: modifies `decisions` in-place (stub → enriched for each match).
-		enrichExistsDecisionsInPlace(
-			decisions,
-			planForCompilation,
-			options?.model ?? deps.model,
-		);
+		if (!rawWhere)
+			enrichExistsDecisionsInPlace(
+				decisions,
+				planForCompilation,
+				options?.model ?? deps.model,
+			);
 
 		// Phase 3: Extract ALL include decisions (json_agg, join, lateral, cte)
 		const unifiedIncludeDecisions = extractAllIncludeDecisions(
@@ -1642,6 +1673,33 @@ export function compileSelectEnvelope<T = unknown>(
 			allDecisions,
 			schemaName,
 		);
+		if (rawWhere)
+			simplifiedPlan = {
+				...simplifiedPlan,
+				rawWhere,
+				rootWhereJoinRelations: new Set(
+					planForCompilation.decisions
+						.filter(
+							(decision) =>
+								decision.type === 'filter-strategy' &&
+								decision.choice === 'join' &&
+								(rawWhere.kind === 'exists' ||
+									(rawWhere.kind === 'relationFilter' &&
+										rawWhere.mode === 'some')) &&
+								(decision.context.sourceTable ?? plan.rootTable) ===
+									plan.rootTable &&
+								(decision.context.relation === rawWhere.relation ||
+									decision.context.target === rawWhere.relation ||
+									(Array.isArray(rawWhere.relation) &&
+										rawWhere.relation.length === 1 &&
+										decision.context.relation === rawWhere.relation[0])),
+						)
+						.map(
+							(decision) =>
+								`${decision.context.sourceTable ?? plan.rootTable}.${decision.context.relation}`,
+						),
+				),
+			};
 	} else {
 		// Unit test with mock data: use decisions directly (legacy format).
 		// Tests supply adapter-format PlanDecisions inside a core PlanReport,
