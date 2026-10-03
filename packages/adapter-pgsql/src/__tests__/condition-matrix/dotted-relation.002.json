@@ -716,17 +716,17 @@
 			"position": "dotted-relation",
 			"kind": "exists-recursive-up",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
-			"params": [71, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "dotted-relation",
 			"kind": "exists-recursive-up",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
-			"params": [71, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "dotted-relation",
@@ -740,9 +740,9 @@
 			"position": "dotted-relation",
 			"kind": "exists-recursive-up",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)) OR EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND posts_exists_2.score = $3))",
-			"params": [13, 71, 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "dotted-relation",
@@ -756,17 +756,17 @@
 			"position": "dotted-relation",
 			"kind": "exists-recursive-down",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
-			"params": [71, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "dotted-relation",
 			"kind": "exists-recursive-down",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
-			"params": [71, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "dotted-relation",
@@ -780,9 +780,9 @@
 			"position": "dotted-relation",
 			"kind": "exists-recursive-down",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)) OR EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND posts_exists_2.score = $3))",
-			"params": [13, 71, 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "dotted-relation",
@@ -796,17 +796,17 @@
 			"position": "dotted-relation",
 			"kind": "notExists-recursive-up",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
-			"params": [71, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "dotted-relation",
 			"kind": "notExists-recursive-up",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
-			"params": [71, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "dotted-relation",
@@ -820,9 +820,9 @@
 			"position": "dotted-relation",
 			"kind": "notExists-recursive-up",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2))) OR EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND posts_exists_2.score = $3))",
-			"params": [13, 71, 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "dotted-relation",
@@ -836,17 +836,17 @@
 			"position": "dotted-relation",
 			"kind": "notExists-recursive-down",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
-			"params": [71, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "dotted-relation",
 			"kind": "notExists-recursive-down",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $2)",
-			"params": [71, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
 		}
 	]
 }

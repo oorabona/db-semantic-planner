@@ -134,6 +134,47 @@ function assertNoRecursiveAnchorRelations(intent: WhereIntent): void {
 	visit(intent);
 }
 
+/** Refuse root relation recursion before routing or lowering can discard it. */
+export function assertNoRecursiveRootRelations(intent: WhereIntent): void {
+	const seen = new WeakSet<object>();
+	function visit(value: unknown): void {
+		if (!value || typeof value !== 'object' || seen.has(value)) return;
+		seen.add(value);
+		const node = value as WhereIntent;
+		if (
+			node.kind === 'exists' ||
+			node.kind === 'notExists' ||
+			node.kind === 'relationFilter'
+		) {
+			const trusted =
+				node.kind === 'relationFilter'
+					? getTrustedNqlRelationFilterFields(node)
+					: undefined;
+			if (
+				('recursive' in node && node.recursive !== undefined) ||
+				trusted?.recursive !== undefined
+			) {
+				const relation = trusted?.relation ?? node.relation;
+				throw new Error(
+					`WHERE ${node.kind}('${Array.isArray(relation) ? relation.join('.') : relation}'): recursive relation predicates are not supported inside WHERE.`,
+				);
+			}
+		}
+		for (const [key, child] of Object.entries(value)) {
+			if (
+				(key === 'value' && (value as { kind?: string }).kind !== 'namedArg') ||
+				key === 'values' ||
+				key === 'pattern' ||
+				key === 'subquery' ||
+				key === 'query'
+			)
+				continue;
+			visit(child);
+		}
+	}
+	visit(intent);
+}
+
 /** Private recursion state, created by the top-level entry and shared by descendants. */
 type InternalConditionCtx = WhereCompilerCtx & {
 	readonly compileCondition: (
@@ -565,6 +606,7 @@ export function createConditionCompiler(
 						...ctx,
 						rootTable: target,
 						currentAlias: alias,
+						outerTable: ctx.currentAlias ?? ctx.rootTable,
 					});
 			}
 			if (preResolved) {
@@ -1007,6 +1049,7 @@ export function createConditionCompiler(
 			if (
 				ctx.directRootWhere &&
 				intent.kind === 'exists' &&
+				(!intent.include || Object.keys(intent.include).length === 0) &&
 				joinedAlias &&
 				ctx.rootWhereJoinRelations?.has(`${ctx.rootTable}.${joinRelation}`)
 			) {

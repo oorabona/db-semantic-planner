@@ -1,3 +1,4 @@
+import { assertNoRecursiveRootRelations } from './condition-compiler-factory.js';
 /**
  * SELECT compilation: converts PlanReport to CompiledQuery.
  * Extracted from PgAdapter.compile().
@@ -1507,6 +1508,7 @@ export function compileSelectEnvelope<T = unknown>(
 			indexLegacy(execIntent.include);
 		}
 		assertSupportedIncludeWhere(execIntent.include, strategies);
+		if (execIntent.where) assertNoRecursiveRootRelations(execIntent.where);
 		// Real usage: convert intent to decisions
 		const rawWhere =
 			execIntent.where &&

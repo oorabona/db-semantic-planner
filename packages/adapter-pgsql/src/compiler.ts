@@ -2951,6 +2951,7 @@ export class PlanCompiler {
 		intent: WhereIntent,
 		plan: SimplifiedPlanReport,
 	): Node | undefined {
+		const provenJoins = new Set<string>();
 		// Schedule only structural JOINs chosen by the planner. The predicate itself
 		// remains raw and enters compileCondition below.
 		for (const path of plan.rootWhereJoinRelations ?? []) {
@@ -2965,6 +2966,7 @@ export class PlanCompiler {
 				defaultPkColumnName: this.defaultPk,
 				deriveFkColumnName: this.deriveFk,
 			});
+			provenJoins.add(path);
 			this.registerJoinFilter({
 				type: 'join',
 				targetTable: relation.target,
@@ -2986,7 +2988,7 @@ export class PlanCompiler {
 			...handlerCtx,
 			position: 'where',
 			...(plan.rootWhereJoinRelations !== undefined && {
-				rootWhereJoinRelations: plan.rootWhereJoinRelations,
+				rootWhereJoinRelations: provenJoins,
 			}),
 			logicalSourceTable: plan.rootTable,
 			emittedAlias:
@@ -3012,7 +3014,10 @@ export class PlanCompiler {
 			(intent.kind === 'exists' ||
 				(intent.kind === 'relationFilter' && intent.mode === 'some')) &&
 			intent.where === undefined &&
-			[...(plan.rootWhereJoinRelations ?? [])].some(
+			(!('include' in intent) ||
+				!intent.include ||
+				Object.keys(intent.include).length === 0) &&
+			[...provenJoins].some(
 				(path) =>
 					path.startsWith(`${plan.rootTable}.`) &&
 					this.visibleSqlQualifiers.has(path.slice(plan.rootTable.length + 1)),

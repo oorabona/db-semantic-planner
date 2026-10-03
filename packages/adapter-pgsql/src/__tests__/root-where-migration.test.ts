@@ -8,6 +8,7 @@ import {
 	not,
 	notExists,
 	or,
+	outerRef,
 	rangeOverlaps,
 	ref,
 	schema,
@@ -32,6 +33,10 @@ const db = schema({
 		id: { type: 'integer', primaryKey: true },
 		score: { type: 'integer' },
 		period: { type: 'daterange' },
+	},
+	profiles: {
+		id: { type: 'integer', primaryKey: true },
+		userId: ref('users', { inverse: 'profiles' }),
 	},
 	posts: {
 		id: { type: 'integer', primaryKey: true },
@@ -368,5 +373,66 @@ it('only a positive root relation leaf reuses its planned JOIN', () => {
 		const result = orm.select('posts').where(predicate).dump();
 		expect(result.sql).not.toContain('JOIN users');
 		expect(result.sql).toContain('EXISTS');
+	}
+});
+
+const reuseOrm = createOrm({
+	schema: db,
+	adapter: createPgCompileOnlyAdapter({ model: db.model }),
+});
+it('4a item 1 preserves the outer row during relationFilter join reuse', () => {
+	const result = reuseOrm
+		.select('posts')
+		.where({
+			kind: 'relationFilter',
+			relation: 'author',
+			mode: 'some',
+			where: eq('id', outerRef('id')),
+		})
+		.dump();
+	expect(result.sql).toBe(
+		'SELECT posts.* FROM posts JOIN users AS author ON author.id = posts."authorId" WHERE author.id = posts.id',
+	);
+	expect(result.params).toEqual([]);
+});
+it('4a item 2 requires a predicate join rather than a matching visible alias', () => {
+	for (const query of [
+		reuseOrm.select('posts').include('author', { join: 'left' }),
+		reuseOrm.select('posts').include('author', { join: 'inner' }),
+		reuseOrm.select('posts').join('users', { as: 'author', on: eq('id', 1) }),
+	]) {
+		const result = query.where(exists('author')).dump();
+		expect(result.sql).toMatch(
+			/WHERE EXISTS \(SELECT 1 FROM users AS users_exists_\d+ WHERE posts\."authorId" = users_exists_\d+\.id\)/,
+		);
+	}
+});
+it('4a item 3 retains nested includes in EXISTS', () => {
+	const result = reuseOrm
+		.select('posts')
+		.where(exists('author', { include: { profiles: { join: 'inner' } } }))
+		.dump();
+	expect(result.sql).toContain('WHERE EXISTS');
+	expect(result.sql).toContain('JOIN profiles');
+	expect(result.params).toEqual([]);
+});
+it('4a item 4 refuses recursive relations before dotted sibling routing', () => {
+	for (const kind of ['exists', 'notExists', 'relationFilter'] as const) {
+		for (const field of ['posts.score', 'score']) {
+			const condition = {
+				kind,
+				relation: 'posts',
+				mode: 'some',
+				recursive: { direction: 'down', through: 'posts', maxDepth: 3 },
+			} as WhereIntent;
+			expect(() =>
+				reuseOrm
+					.select('users')
+					.where(and(condition, eq(field, 2)))
+					.dump(),
+			).toThrow(
+				`WHERE ${kind}('posts'): recursive relation predicates are not supported inside WHERE.`,
+			);
+		}
 	}
 });

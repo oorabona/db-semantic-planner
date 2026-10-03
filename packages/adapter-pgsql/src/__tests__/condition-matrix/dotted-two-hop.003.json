@@ -12,9 +12,9 @@
 			"position": "dotted-two-hop",
 			"kind": "notExists-recursive-down",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.\"postId\" AND comments_exists_1.score = $1)) AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_2 WHERE users.id = posts_exists_2.\"authorId\" AND posts_exists_2.score = $2))) OR EXISTS (SELECT 1 FROM posts AS posts_exists_3 WHERE users.id = posts_exists_3.\"authorId\" AND EXISTS (SELECT 1 FROM comments AS comments_exists_4 WHERE posts_exists_3.id = comments_exists_4.\"postId\" AND comments_exists_4.score = $3)))",
-			"params": [13, 71, 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "dotted-two-hop",
