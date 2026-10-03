@@ -81,7 +81,7 @@ Include `select` support by strategy:
 |----------|------------------------|
 | `json_agg` | `fields` (including an empty list) and `all`; other forms, including `expressions` and `aggregate`, are refused |
 | `join` | `fields` and `all` |
-| `lateral` | `fields` and `all` |
+| `lateral` | All columns only: omitted select, `all`, or fields `['*']` |
 
 Omitting `select` selects the whole related row. JOIN also selects the primary key
 needed for hydration. Expression and aggregate projections are not implemented
@@ -92,8 +92,8 @@ for JOIN or LATERAL.
 | Option | Type | Description |
 |--------|------|-------------|
 | `join` | `'inner' \| 'left'` | Join type |
-| `limit` | `number` | Maximum related rows per parent; supported by `json_agg` and LATERAL, refused by JOIN |
-| `orderBy` | `readonly OrderByIntent[]` | Related-row ordering for each parent's limited selection; primary-key columns complete ties |
+| `limit` | `number` | Non-negative safe integer per-parent limit; supported by `json_agg` and LATERAL, refused by JOIN and CTE |
+| `orderBy` | `readonly IncludeOrderByIntent[]` | Field-only total ordering: `json_agg` with or without limit, LATERAL with limit; JOIN and CTE refuse |
 | `where` | `WhereIntent` | Added to the root WHERE; join includes only |
 | `select` | `SelectSpec` | Related-table projection; see supported forms below |
 | `via` | `string` | Relation name hint when multiple FKs point to the same table |
@@ -154,7 +154,21 @@ console.log(dump.plan?.decisions);
 
 If the planner emits a performance warning (e.g., potential N+1), it appears in `dump.plan?.warnings`.
 
-With `json_agg`, an include `limit` applies per parent using the include’s `orderBy`.
-Primary-key columns complete the order as tie-breakers. A limited include without
-a primary key or unique ordering is refused. Nested limited includes each select
-their own ordered, limited rows before aggregation.
+Include options are honoured or refused at every depth. Limits must be non-negative
+safe integers. `json_agg` honours field-only `orderBy` with or without a limit;
+its array follows that order, with primary-key tie-breakers last. Ordered includes
+require a provable total order. JSON aggregation limits ordered rows per parent
+before aggregation, independently at each nested depth. Omitted null placement uses PostgreSQL defaults
+(ASC: NULLS LAST; DESC: NULLS FIRST); explicit `first`/`last` is preserved.
+Lateral limits order rows inside the subquery before limiting each parent;
+lateral `orderBy` without a limit is refused because flat row order is not
+observable without root ordering. Join refuses `orderBy` and `limit`; remove an
+explicit join or use `json_agg` or lateral for per-parent limits. Ordinary and
+recursive CTE includes refuse `limit` and `orderBy`, including nested includes.
+Include ordering accepts fields only; runtime expressions are refused with the
+include path and option. `json_agg` builds wide field projections and child
+properties independently in chunks of at most 50 key/value pairs joined with
+`||`. Lateral include `select` must select all columns (omitted, `all`, or fields
+`['*']`); partial projections are refused with the include path. NQL relation
+selections are root relation columns, so `users | select id, posts.title | flat`
+and `users | select id, posts.title | limit posts 5` retain their behaviour.

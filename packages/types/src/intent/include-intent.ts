@@ -83,16 +83,18 @@ export interface IncludeIntent {
 	 * Maximum number of related records to include per parent.
 	 * JSON_AGG limits ordered related rows per parent, appending primary-key
 	 * tie-breakers; without a primary key or unique ordering it refuses the limit.
-	 * LATERAL also supports per-parent limits. JOIN refuses them.
+	 * LATERAL also supports ordered per-parent limits. JOIN and CTE refuse them.
+	 * Values must be non-negative safe integers.
 	 * @example limit: 5 - fetch at most 5 related records per parent
 	 */
 	readonly limit?: number | undefined;
 
 	/**
-	 * Order by for related records (used with limit).
+	 * Field-only total ordering: json_agg with or without limit; lateral with limit.
+	 * Join and CTE refuse ordering. Omitted nulls use database defaults.
 	 * @example orderBy: [{ field: 'createdAt', direction: 'desc' }]
 	 */
-	readonly orderBy?: readonly OrderByIntent[] | undefined;
+	readonly orderBy?: readonly IncludeOrderByIntent[] | undefined;
 
 	/**
 	 * CLI-012c: Enable recursive CTE for self-referential relations.
@@ -184,3 +186,6 @@ export interface OrderByExpressionIntent {
  * XOR: exactly one of `field` or `expression` must be present.
  */
 export type OrderByIntent = OrderByFieldIntent | OrderByExpressionIntent;
+
+/** Field-only ordering for includes. Expressions are refused at runtime. */
+export type IncludeOrderByIntent = OrderByFieldIntent;

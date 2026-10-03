@@ -120,7 +120,7 @@ describe('json-agg handler', () => {
 				createCompilerState(),
 			),
 		).toThrow(
-			"Limited include 'posts' requires a primary key or unique ordering for a total order",
+			'Include posts limit requires a primary key or unique ordering for a total order',
 		);
 	});
 	it('appends every composite primary-key column to limited ordering', () => {
@@ -173,7 +173,7 @@ describe('json-agg handler', () => {
 			createCompilerState(),
 		);
 		expect(targetsToSQL(result.targets!)).toBe(
-			"select coalesce((select json_agg(__lim.__row order by __lim.__key0 asc nulls last) from (select to_jsonb(__t__) as __row, __t__.slug as __key0 from posts as __t__ where __t__.user_id = users.id order by __t__.slug asc nulls last limit 1) as __lim), '[]'::json) as posts_json from dummy",
+			"select coalesce((select json_agg(__lim.__row order by __lim.__key0 asc) from (select to_jsonb(__t__) as __row, __t__.slug as __key0 from posts as __t__ where __t__.user_id = users.id order by __t__.slug asc limit 1) as __lim), '[]'::json) as posts_json from dummy",
 		);
 	});
 	it('keeps extra projected outputs when the physical columns are also present', () => {

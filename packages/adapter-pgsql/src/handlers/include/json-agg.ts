@@ -8,12 +8,7 @@
  * Produces: COALESCE((SELECT json_agg(to_jsonb(__t__) [|| jsonb_build_object(...)] ORDER BY __t__.pk ASC NULLS LAST) FROM target AS __t__ WHERE ...), '[]'::json) AS relation
  */
 
-import {
-	resolveJsonAggOrderKey,
-	resolveOutputReadHandling,
-	toColumnList,
-} from '@dbsp/types';
-import type { JsonAggOrderByEntry } from '@dbsp/types/internal';
+import { resolveOutputReadHandling, toColumnList } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
 	andExpr,
@@ -51,44 +46,7 @@ import type {
 	ResTargetNode,
 } from '../types.js';
 import { buildKeyCorrelation } from '../where/exists.js';
-import { deriveFkColumns } from './shared.js';
-
-interface JsonAggOrderIntent {
-	readonly columns: readonly JsonAggOrderByEntry[];
-	readonly fallback: boolean;
-}
-
-function isJsonAggOrderBy(
-	orderBy: Decision['orderBy'],
-): orderBy is readonly JsonAggOrderByEntry[] {
-	return (
-		Array.isArray(orderBy) && orderBy.every((item) => typeof item === 'string')
-	);
-}
-
-function resolveJsonAggOrderBy(
-	decision: Decision,
-	targetTable: string,
-	ctx: CompilerContext,
-): JsonAggOrderIntent | undefined {
-	const table = ctx.model?.getTable(targetTable);
-	if (table) {
-		// ctx.model is authoritative: with schema metadata available, resolve the
-		// order key from the model rather than trusting decision-carried fallbacks.
-		const orderKey = resolveJsonAggOrderKey(table);
-		return orderKey.columns.length > 0 ? orderKey : undefined;
-	}
-
-	const decisionOrderBy = isJsonAggOrderBy(decision.orderBy)
-		? decision.orderBy
-		: undefined;
-	return decisionOrderBy && decisionOrderBy.length > 0
-		? {
-				columns: decisionOrderBy,
-				fallback: decision.orderByFallback === true,
-			}
-		: undefined;
-}
+import { deriveFkColumns, resolveIncludeOrder } from './shared.js';
 
 function resolveJsonAggProjection(
 	decision: Decision,
@@ -382,82 +340,12 @@ function compileJsonAggRecursive(
 	}
 
 	const limit = typeof decision.limit === 'number' ? decision.limit : undefined;
-	const orderBy =
-		limit === undefined
-			? resolveJsonAggOrderBy(decision, targetTable, innerCtx)
-			: undefined;
-	const limitedOrder =
-		limit === undefined
-			? undefined
-			: (decision.includeOrderBy ?? []).map((entry) => {
-					if (!entry.field || entry.expression)
-						throw new Error(
-							`Limited include '${relation}' requires column ordering`,
-						);
-					return {
-						field: entry.field,
-						direction: entry.direction,
-						nulls: entry.nulls ?? 'last',
-					};
-				});
-	if (limitedOrder) {
-		const table = innerCtx.model?.getTable(targetTable);
-		const pk = toColumnList(table?.primaryKey);
-		const ordered = new Set(limitedOrder.map((entry) => entry.field));
-		const unique =
-			table?.columns.some(
-				(column) =>
-					column.unique && !column.nullable && ordered.has(column.name),
-			) ||
-			table?.indexes.some(
-				(index) =>
-					index.unique &&
-					index.valid !== false &&
-					index.ready !== false &&
-					index.where === undefined &&
-					!index.expressions?.length &&
-					index.columns.length > 0 &&
-					index.columns.every(
-						(column) =>
-							ordered.has(column) &&
-							(index.nullsNotDistinct ||
-								table.columns.some(
-									(entry) => entry.name === column && !entry.nullable,
-								)),
-					),
-			);
-		if (pk.length === 0 && !unique)
-			throw new Error(
-				`Limited include '${relation}' requires a primary key or unique ordering for a total order`,
-			);
-		for (const field of pk)
-			if (!ordered.has(field))
-				limitedOrder.push({ field, direction: 'asc', nulls: 'last' });
-	}
+	const resolvedOrder = resolveIncludeOrder(decision, targetTable, innerCtx);
+	const limitedOrder = resolvedOrder.entries;
 
 	const resolvedTarget = resolveRelationTarget(
 		queryLocal(targetTable),
 		innerCtx,
-	);
-	const orderByIdentifiers = (
-		limit === undefined ? orderBy?.columns : undefined
-	)?.map(
-		(column) =>
-			requireRelationTargetColumn(
-				resolvedTarget,
-				queryLocal(column),
-				'order key',
-				relation,
-			)?.outputKey ??
-			resolveDeclaredIdentifier(
-				innerCtx.declaredNames,
-				innerCtx.dbCasing ?? 'preserve',
-				{
-					kind: 'column',
-					table: targetTable,
-					column,
-				},
-			),
 	);
 	const shape = jsonAggContainerShape(decision.relationType);
 	const columns = resolveJsonAggProjection(
@@ -492,7 +380,6 @@ function compileJsonAggRecursive(
 			...(columns && { columns }),
 			...(decision.emptyProjection && { emptyProjection: true }),
 			...(columnValueOverrides && { columnValueOverrides }),
-			...(orderByIdentifiers && { orderBy: orderByIdentifiers }),
 			...(limitedOrder && {
 				limitedOrder: limitedOrder.map((entry) => ({
 					column:
@@ -507,13 +394,11 @@ function compileJsonAggRecursive(
 							innerCtx.dbCasing ?? 'preserve',
 							{ kind: 'column', table: targetTable, column: entry.field },
 						),
-					direction:
-						entry.direction === 'desc' ? ('DESC' as const) : ('ASC' as const),
-					nulls:
-						entry.nulls === 'first' ? ('FIRST' as const) : ('LAST' as const),
+					direction: entry.direction,
+					nulls: entry.nulls,
 				})),
 			}),
-			...(orderBy?.fallback && { orderByFallback: true }),
+			...(resolvedOrder.fallback && { orderByFallback: true }),
 		},
 	);
 }

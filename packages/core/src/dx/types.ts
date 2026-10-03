@@ -16,6 +16,7 @@
 import type {
 	ExpressionIntent,
 	IncludeIntent,
+	IncludeOrderByIntent,
 	SelectIntent,
 	WhereIntent,
 } from '../intent-ast.js';
@@ -193,10 +194,10 @@ export type OrderByInput =
  * Maps to IncludeIntent fields with developer-friendly naming.
  */
 export interface IncludeOptions {
-	/** Maximum related rows per parent. */
+	/** Non-negative safe integer per-parent limit; json_agg/lateral only. */
 	readonly limit?: IncludeIntent['limit'];
-	/** Ordering for the related rows selected by limit. */
-	readonly orderBy?: IncludeIntent['orderBy'];
+	/** Field-only total order: json_agg, or lateral with limit; join/CTE refuse. */
+	readonly orderBy?: readonly IncludeOrderByIntent[];
 	/**
 	 * Explicit relation name for disambiguation.
 	 * Use when multiple relations exist between same tables.

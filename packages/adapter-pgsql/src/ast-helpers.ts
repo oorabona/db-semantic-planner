@@ -719,12 +719,34 @@ export type SqlJsonAggOptions = {
 	limitedOrder?: readonly {
 		column: SqlIdentifier;
 		direction: 'ASC' | 'DESC';
-		nulls: 'FIRST' | 'LAST';
+		nulls: 'FIRST' | 'LAST' | 'DEFAULT';
 	}[];
 	columnValueOverrides?: ReadonlyMap<string, Node>;
 	orderBy?: readonly SqlIdentifier[];
 	orderByFallback?: boolean;
 };
+
+function jsonObjectChunks(args: Node[]): Node {
+	const chunks: Node[] = [];
+	for (let i = 0; i < Math.max(args.length, 1); i += 100)
+		chunks.push({
+			FuncCall: {
+				funcname: [stringNode('jsonb_build_object')],
+				args: args.slice(i, i + 100),
+			} as FuncCall,
+		});
+	return chunks.slice(1).reduce(
+		(left, right) => ({
+			A_Expr: {
+				kind: 'AEXPR_OP',
+				name: [stringNode('||')],
+				lexpr: left,
+				rexpr: right,
+			},
+		}),
+		chunks[0]!,
+	);
+}
 
 /** Build a JSON aggregate using only established relation and output identifiers. */
 export function sqlJsonAggSubquery(
@@ -751,12 +773,7 @@ export function sqlJsonAggSubquery(
 					sqlColumnRef(column, innerAlias),
 			);
 		}
-		row = {
-			FuncCall: {
-				funcname: [stringNode('jsonb_build_object')],
-				args,
-			} as FuncCall,
-		};
+		row = jsonObjectChunks(args);
 	} else {
 		row = {
 			FuncCall: {
@@ -777,24 +794,30 @@ export function sqlJsonAggSubquery(
 				kind: 'AEXPR_OP',
 				name: [stringNode('||')],
 				lexpr: row,
-				rexpr: {
-					FuncCall: {
-						funcname: [stringNode('jsonb_build_object')],
-						args,
-					} as FuncCall,
-				},
+				rexpr: jsonObjectChunks(args),
 			},
 		};
 	}
-	const order = options?.orderBy?.map((entry) =>
+	const explicitOrder = options?.limitedOrder?.map((entry) =>
 		sortBy(
-			options.orderByFallback
-				? typeCast(sqlColumnRef(entry, innerAlias), 'text')
-				: sqlColumnRef(entry, innerAlias),
-			'ASC',
-			'LAST',
+			options?.orderByFallback
+				? typeCast(sqlColumnRef(entry.column, innerAlias), 'text')
+				: sqlColumnRef(entry.column, innerAlias),
+			entry.direction,
+			entry.nulls,
 		),
 	);
+	const order =
+		explicitOrder ??
+		options?.orderBy?.map((entry) =>
+			sortBy(
+				options.orderByFallback
+					? typeCast(sqlColumnRef(entry, innerAlias), 'text')
+					: sqlColumnRef(entry, innerAlias),
+				'ASC',
+				'LAST',
+			),
+		);
 	const limitedAlias = queryLocal('__lim');
 	const keys = options?.limitedOrder?.map((entry, index) => ({
 		...entry,

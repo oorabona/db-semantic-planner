@@ -2097,6 +2097,12 @@ function toJsonAggDecision(
 		}),
 		...(limit != null && { limit }),
 		relationName,
+		relationPath:
+			deriveRelationPathFromIntentPath(
+				Array.isArray(plan.intent?.include) ? plan.intent.include : undefined,
+				context.intentPath,
+				relationName,
+			) ?? relationName,
 		targetTable: context.target,
 		...(context.sourceTable && { sourceTable: context.sourceTable }),
 		...(relationType && { relationType }),

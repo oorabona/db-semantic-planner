@@ -739,6 +739,7 @@ function jsonAggProjectedColumns(
 	model: ModelIR | undefined,
 	deps?: AdapterCompilerDeps,
 ): readonly string[] | undefined {
+	if (decision.emptyProjection === true) return [];
 	const requested = decision.columns;
 	const hasExplicitProjection =
 		requested &&

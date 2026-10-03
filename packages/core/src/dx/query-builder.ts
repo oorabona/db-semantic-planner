@@ -64,6 +64,7 @@ import {
 	type RecursiveIncludeConfig,
 	validateRecursiveInclude,
 } from './intent-builder.js';
+import { validateLimit } from './limit-validation.js';
 import { emitWarning } from './logger.js';
 import {
 	isWhereIntent,
@@ -556,12 +557,7 @@ export class QueryBuilderImpl<TResult = unknown>
 	}
 
 	limit(count: number): QueryBuilder<TResult> {
-		if (!Number.isSafeInteger(count) || count < 0) {
-			throw new InvalidOperationError(
-				'limit',
-				'limit must be a non-negative safe integer',
-			);
-		}
+		validateLimit(count);
 		const builder = this.clone();
 		builder.limitValue = count;
 		return builder;

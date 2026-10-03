@@ -1,3 +1,4 @@
+import { schema } from '@dbsp/core';
 /**
  * LATERAL handler tests
  *
@@ -204,7 +205,15 @@ describe('lateral handler', () => {
 	});
 
 	it('applies LIMIT in lateral subquery', () => {
-		const ctx = makeCtx('users');
+		const ctx = {
+			...makeCtx('users'),
+			model: schema({
+				posts: {
+					id: { type: 'integer', primaryKey: true },
+					user_id: 'integer',
+				},
+			}).model,
+		};
 		const state = createCompilerState();
 		const decision = buildDecision({ limit: 5 });
 

@@ -362,7 +362,21 @@ foreign keys and measure the query cost for your workload.
   (LEFT JOIN returns all-null columns), the hydrator sets `relation: null`
   rather than an empty object. Check `allNull` logic in `hydrateJoinIncludes()`.
 
-With `json_agg`, an include `limit` applies per parent using the include’s `orderBy`.
-Primary-key columns complete the order as tie-breakers. A limited include without
-a primary key or unique ordering is refused. Nested limited includes each select
-their own ordered, limited rows before aggregation.
+Include options are honoured or refused at every depth. Limits must be non-negative
+safe integers. `json_agg` honours field-only `orderBy` with or without a limit;
+its array follows that order, with primary-key tie-breakers last. Ordered includes
+require a provable total order. JSON aggregation limits ordered rows per parent
+before aggregation, independently at each nested depth. Omitted null placement uses PostgreSQL defaults
+(ASC: NULLS LAST; DESC: NULLS FIRST); explicit `first`/`last` is preserved.
+Lateral limits order rows inside the subquery before limiting each parent;
+lateral `orderBy` without a limit is refused because flat row order is not
+observable without root ordering. Join refuses `orderBy` and `limit`; remove an
+explicit join or use `json_agg` or lateral for per-parent limits. Ordinary and
+recursive CTE includes refuse `limit` and `orderBy`, including nested includes.
+Include ordering accepts fields only; runtime expressions are refused with the
+include path and option. `json_agg` builds wide field projections and child
+properties independently in chunks of at most 50 key/value pairs joined with
+`||`. Lateral include `select` must select all columns (omitted, `all`, or fields
+`['*']`); partial projections are refused with the include path. NQL relation
+selections are root relation columns, so `users | select id, posts.title | flat`
+and `users | select id, posts.title | limit posts 5` retain their behaviour.

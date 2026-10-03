@@ -21,6 +21,7 @@ import type {
 } from '@dbsp/types';
 import { resolveJsonAggOrderKey, toColumnList } from '@dbsp/types';
 import { InvalidOperationError } from './dx/errors.js';
+import { validateLimit } from './dx/limit-validation.js';
 import {
 	getNodeIdAlias,
 	type IncludeIntent,
@@ -1054,6 +1055,11 @@ function processInclude(
 	ancestorIsLeftJoin = false,
 ): void {
 	state.relationsAnalyzed++;
+	if (include.limit !== undefined)
+		validateLimit(
+			include.limit,
+			`Include ${intentPath}(${include.relation}) limit`,
+		);
 
 	// Check depth
 	if (depth > opts.maxIncludeDepth) {
@@ -1137,14 +1143,6 @@ function processInclude(
 		includeStrategy = 'cte';
 	} else if (include.join !== undefined) {
 		// Explicit join type forces the 'join' strategy (inner or left JOIN)
-		if (include.limit != null) {
-			throw new InvalidOperationError(
-				'include',
-				`include.limit cannot be applied with the 'join' strategy because join ` +
-					`cannot enforce per-parent-row limits. ` +
-					`Use strategy: 'flat' (→ LATERAL) or strategy: 'cte' explicitly.`,
-			);
-		}
 		includeStrategy = 'join';
 	} else if (include.strategy === 'flat') {
 		// NQL v2.1: flat = exclude nested output (json_agg), planner picks best flat strategy
@@ -1160,19 +1158,42 @@ function processInclude(
 		);
 	} else {
 		includeStrategy = determineIncludeStrategy(relation, opts);
-		// FIND-014: include.limit cannot be enforced by the join strategy (which
-		// performs a flat JOIN without per-parent-row limiting).  Silently
-		// dropping the limit produces unlimited children — incorrect behaviour.
-		// Callers must explicitly request 'flat' (→ lateral) or 'cte' to get
-		// per-parent limiting.
-		if (include.limit != null && includeStrategy === 'join') {
+	}
+
+	const optionPath = `${intentPath}(${include.relation})`;
+	if (includeStrategy === 'cte' || includeStrategy === 'join') {
+		for (const option of ['limit', 'orderBy'] as const) {
+			if (include[option] !== undefined) {
+				throw new InvalidOperationError(
+					'include',
+					`Include ${optionPath} ${option} is not supported by '${includeStrategy}' strategy.` +
+						(includeStrategy === 'join' && option === 'limit'
+							? ' Remove the explicit join or use a strategy that limits per parent (json_agg, lateral).'
+							: ''),
+				);
+			}
+		}
+	}
+	if (includeStrategy === 'lateral') {
+		if (include.orderBy !== undefined && include.limit === undefined)
 			throw new InvalidOperationError(
 				'include',
-				`include.limit cannot be applied with the 'join' strategy because join ` +
-					`cannot enforce per-parent-row limits. ` +
-					`Use strategy: 'flat' (→ LATERAL) or strategy: 'cte' explicitly.`,
+				`Include ${optionPath} orderBy requires limit with 'lateral' strategy`,
 			);
-		}
+		const select = include.select;
+		if (
+			select &&
+			select.type !== 'all' &&
+			!(
+				select.type === 'fields' &&
+				select.fields.length === 1 &&
+				select.fields[0] === '*'
+			)
+		)
+			throw new InvalidOperationError(
+				'include',
+				`Include ${optionPath} select must select all columns with 'lateral' strategy`,
+			);
 	}
 
 	// Pre-compute join type for include-strategy decision embedding
