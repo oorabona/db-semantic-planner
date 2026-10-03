@@ -101,7 +101,11 @@ export function hydrateResolvedIncludes(
 					readPayload(row[shape.outputLabel], shape),
 				);
 				delete row[shape.outputLabel];
-			} else if (strategy === 'flat' && shape.strategy !== 'json_agg')
+			} else if (
+				strategy === 'flat' &&
+				shape.strategy !== 'json_agg' &&
+				(shape.columns.length > 0 || shape.children.length > 0)
+			)
 				setValue(row, shape.publicKey, assembleFlat(row, shape));
 		}
 	}

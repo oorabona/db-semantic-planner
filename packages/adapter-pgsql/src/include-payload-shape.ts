@@ -368,10 +368,6 @@ export function resolveIncludePayloadShapes(
 		};
 		claimLabels(shape);
 	}
-	return roots.filter(
-		(shape) =>
-			shape.strategy !== 'join' ||
-			shape.columns.length > 0 ||
-			shape.children.length > 0,
-	);
+	// Empty join payloads still certify that compilation resolved the include.
+	return roots;
 }

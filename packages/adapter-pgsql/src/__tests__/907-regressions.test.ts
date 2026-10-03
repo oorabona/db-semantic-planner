@@ -2,6 +2,9 @@ import {
 	col,
 	createOrm,
 	eq,
+	exprRef,
+	fn,
+	isNotNull,
 	ResultHydrator,
 	ref,
 	relationColumn,
@@ -164,4 +167,52 @@ it('907 item 4 hydration refuses absent compiled shapes', () => {
 			expect((error as Error).name).toBe('MissingIncludePayloadShapeError');
 		}
 	}
+});
+
+it('907 omitted include payload retains an empty compiled shape and exact rows', () => {
+	const model = schema({
+		definitions: { id: { type: 'integer', primaryKey: true } },
+		uses: {
+			id: { type: 'integer', primaryKey: true },
+			defId: ref('definitions', { as: 'definition', inverse: 'uses' }),
+		},
+	}).model;
+	const adapter = createPgCompileOnlyAdapter({ model });
+	const orm = createOrm({ model, adapter });
+	const query = orm
+		.withSchema('issue_154_e2e')
+		.select('definitions')
+		.include('uses', { join: 'left' })
+		.columns([
+			'id',
+			fn('array_agg', exprRef('uses.id'))
+				.filter(isNotNull('uses.id'))
+				.as('use_ids'),
+		])
+		.groupBy(['id'])
+		.orderBy('id');
+	const plan = query.plan();
+	const compiled = adapter.withSchema('issue_154_e2e').compile(plan);
+	expect(compiled.sql.replace(/\s+/g, ' ').trim()).toBe(
+		'SELECT definitions.id, array_agg(uses.id) FILTER (WHERE uses.id IS NOT NULL) AS use_ids FROM issue_154_e2e.definitions LEFT JOIN issue_154_e2e.uses AS uses ON definitions.id = uses."defId" GROUP BY definitions.id ORDER BY definitions.id ASC',
+	);
+	expect(compiled.hydrationPlan?.includePayloads).toEqual([
+		expect.objectContaining({
+			path: 'uses',
+			strategy: 'join',
+			columns: [],
+			children: [],
+		}),
+	]);
+	const rows = [
+		{ id: 100, use_ids: [1000, 1001] },
+		{ id: 200, use_ids: null },
+	];
+	const hydrator = new ResultHydrator(model, 'definitions');
+	hydrator.hydrateJsonAggIncludes(rows, plan, compiled);
+	hydrator.hydrateJoinIncludes(rows, plan, compiled);
+	expect(rows).toEqual([
+		{ id: 100, use_ids: [1000, 1001] },
+		{ id: 200, use_ids: null },
+	]);
 });
