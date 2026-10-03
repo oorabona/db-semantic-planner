@@ -3188,6 +3188,10 @@
 			{
 				"name": "validateIncludeStrategy",
 				"kind": "value"
+			},
+			{
+				"name": "validateResolvedIncludeStrategy",
+				"kind": "value"
 			}
 		],
 		"runtime": [
@@ -3207,7 +3211,8 @@
 			"mintClaimToken",
 			"mintDurablyLoadedRun",
 			"transitionPhysicalSessionIsCompromised",
-			"validateIncludeStrategy"
+			"validateIncludeStrategy",
+			"validateResolvedIncludeStrategy"
 		],
 		"built": true
 	}

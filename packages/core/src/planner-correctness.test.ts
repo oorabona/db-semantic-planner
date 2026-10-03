@@ -28,6 +28,7 @@ import {
 	plan,
 	UnsupportedStrategyError,
 	validateIncludeStrategy,
+	validateResolvedIncludeStrategy,
 } from './planner.js';
 
 // ============================================================================
@@ -1024,8 +1025,9 @@ describe('#894 strategy error alternatives', () => {
 		expect(() =>
 			plan(intent, db.model, { defaultIncludeStrategy: 'subquery' as never }),
 		).toThrow(
-			"Strategy 'subquery' is not supported by a dialect without capabilities. Supported strategies: 'join', 'json_agg', 'lateral', 'cte'.",
+			"Strategy 'subquery' is not supported by a dialect without capabilities. Supported strategies: 'join', 'json_agg', 'lateral', 'cte', 'auto'.",
 		);
+		expect(validateIncludeStrategy('auto', undefined)).toBe('join');
 		for (const strategy of ['join', 'json_agg', 'lateral', 'cte']) {
 			expect(validateIncludeStrategy(strategy, undefined)).toBe(strategy);
 		}
@@ -1037,8 +1039,26 @@ describe('#894 strategy error alternatives', () => {
 				dialectCapabilities: NO_CTE_CAPS,
 			}),
 		).toThrow(
-			"Strategy 'lateral' is not supported by test-no-cte. Supported strategies: 'join'.",
+			"Strategy 'lateral' is not supported by test-no-cte. Supported strategies: 'join', 'auto'.",
 		);
 		expect(validateIncludeStrategy('join', NO_CTE_CAPS)).toBe('join');
+	});
+});
+
+describe('#900 resolved validator accepted lists', () => {
+	it('accepts exactly the resolved list with no capabilities', () => {
+		for (const s of ['join', 'json_agg', 'lateral', 'cte'])
+			expect(validateResolvedIncludeStrategy(s, undefined)).toBe(s);
+		expect(() => validateResolvedIncludeStrategy('auto', undefined)).toThrow(
+			"Strategy 'auto' is not supported by a dialect without capabilities. Supported strategies: 'join', 'json_agg', 'lateral', 'cte'.",
+		);
+	});
+	it('lists only join with restricted capabilities', () => {
+		expect(validateResolvedIncludeStrategy('join', NO_CTE_CAPS)).toBe('join');
+		expect(validateIncludeStrategy('auto', NO_CTE_CAPS)).toBe('join');
+		for (const s of ['auto', 'json_agg', 'lateral', 'cte'])
+			expect(() => validateResolvedIncludeStrategy(s, NO_CTE_CAPS)).toThrow(
+				`Strategy '${s}' is not supported by test-no-cte. Supported strategies: 'join'.`,
+			);
 	});
 });

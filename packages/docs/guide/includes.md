@@ -135,7 +135,9 @@ Inspect the chosen strategy at any time with `dump()`:
 ```typescript
 const dump = orm.select('users').include('posts').dump();
 console.log(dump.plan?.decisions);
-// [{ type: 'include-strategy', relation: 'posts', choice: 'json_agg', reason: '...' }]
+// [{ type: 'include-strategy', context: { relation: 'posts', ... }, choice: 'json_agg', reasoning: '...', ... }]
 ```
 
 If the planner emits a performance warning (e.g., potential N+1), it appears in `dump.plan?.warnings`.
+
+`defaultIncludeStrategy` applies only to non-recursive includes. Recursive includes always use `cte`; a recursive relation hint must be `auto` or `cte`.

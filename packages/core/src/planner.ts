@@ -1119,6 +1119,14 @@ function processInclude(
 	// Priority: 1) recursive → cte (if dialect supports it), 2) include.join → forces join strategy, 3) include.strategy override, 4) auto-detect
 	let includeStrategy: ResolvedIncludeStrategy;
 	if (isRecursiveInclude) {
+		if (
+			relation.includeStrategy !== 'auto' &&
+			relation.includeStrategy !== 'cte'
+		) {
+			throw new UnsupportedStrategyError(
+				`Recursive include at ${intentPath}(${include.relation}) requires strategy 'cte', but relation '${relation.name}' declares includeStrategy '${relation.includeStrategy}'. Use 'auto' or 'cte'.`,
+			);
+		}
 		if (include.join !== undefined) {
 			throw new UnsupportedStrategyError(
 				`Recursive include at ${intentPath}(${include.relation}) cannot use join: recursive includes compile as a CTE (oorabona/db-semantic-planner#894).`,
@@ -1221,10 +1229,9 @@ function processInclude(
 		reasoning: isRecursiveInclude
 			? `Recursive include on self-referential relation "${relation.name}" → forced CTE strategy`
 			: generateIncludeReasoning(relation, includeStrategy),
-		alternatives: getAlternativeStrategies(
-			includeStrategy,
-			opts.dialectCapabilities,
-		),
+		alternatives: isRecursiveInclude
+			? []
+			: getAlternativeStrategies(includeStrategy, opts.dialectCapabilities),
 	});
 
 	// CLI-012c: Warn if recursive is set but relation is not self-referential
@@ -1445,14 +1452,28 @@ function determineFilterStrategy(
  *
  * @throws {UnsupportedStrategyError} if requested strategy not supported by dialect
  */
-/**
- * Validate include strategies at planner and adapter entry points.
- * Adapters validate membership here and keep their existing handler capability checks.
- */
+/** Validate planner-facing inputs, including the unresolved 'auto' choice. */
 export function validateIncludeStrategy(
 	strategy: string,
 	capabilities: DialectCapabilities | undefined,
 	validateCapabilities = true,
+): ResolvedIncludeStrategy {
+	return validateStrategy(strategy, capabilities, validateCapabilities, true);
+}
+
+/** Validate adapter-facing decisions: only resolved strategies are accepted. */
+export function validateResolvedIncludeStrategy(
+	strategy: string,
+	capabilities: DialectCapabilities | undefined,
+): ResolvedIncludeStrategy {
+	return validateStrategy(strategy, capabilities, true, false);
+}
+
+function validateStrategy(
+	strategy: string,
+	capabilities: DialectCapabilities | undefined,
+	validateCapabilities: boolean,
+	allowAuto: boolean,
 ): ResolvedIncludeStrategy {
 	const checkCapabilities = validateCapabilities && capabilities !== undefined;
 	const supported = [
@@ -1462,15 +1483,14 @@ export function validateIncludeStrategy(
 			? ['lateral']
 			: []),
 		...(!checkCapabilities || capabilities.supportsRecursiveCTE ? ['cte'] : []),
+		...(allowAuto ? ['auto'] : []),
 	];
-	if (strategy === 'auto') return 'join';
 	if (!supported.includes(strategy)) {
 		throw new UnsupportedStrategyError(
 			`Strategy '${strategy}' is not supported by ${capabilities?.name ?? 'a dialect without capabilities'}. Supported strategies: ${supported.map((s) => `'${s}'`).join(', ')}.`,
 		);
 	}
-
-	return strategy as ResolvedIncludeStrategy;
+	return strategy === 'auto' ? 'join' : (strategy as ResolvedIncludeStrategy);
 }
 
 function determineIncludeStrategy(

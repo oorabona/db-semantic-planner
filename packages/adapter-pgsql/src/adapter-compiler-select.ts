@@ -7,7 +7,7 @@
 
 import {
 	countDistinctRelationPathsByName,
-	validateIncludeStrategy,
+	validateResolvedIncludeStrategy,
 } from '@dbsp/core/internal';
 import type {
 	CompiledQuery,
@@ -1347,10 +1347,9 @@ export function compileSelectEnvelope<T = unknown>(
 	if (!execIntent) {
 		for (const decision of plan.decisions) {
 			if (decision.type === 'include-strategy')
-				validateIncludeStrategy(
+				validateResolvedIncludeStrategy(
 					decision.choice,
 					deps.dialectCapabilities,
-					false,
 				);
 		}
 	}
@@ -1375,10 +1374,9 @@ export function compileSelectEnvelope<T = unknown>(
 		>();
 		for (const decision of planForCompilation.decisions) {
 			if (decision.type !== 'include-strategy') continue;
-			const strategy = validateIncludeStrategy(
+			const strategy = validateResolvedIncludeStrategy(
 				decision.choice,
 				deps.dialectCapabilities,
-				false,
 			);
 			if (decision.context.intentPath) {
 				strategies.set(decision.context.intentPath, strategy);

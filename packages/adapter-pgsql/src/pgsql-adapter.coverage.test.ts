@@ -2506,6 +2506,8 @@ describe('synthetic binding includes', () => {
 					supportsJsonAgg: false,
 				},
 			}),
-		).toThrow(/JSON aggregation for relation includes not supported/);
+		).toThrow(
+			"Strategy 'json_agg' is not supported by postgresql. Supported strategies: 'join', 'lateral', 'cte'.",
+		);
 	});
 });

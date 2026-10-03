@@ -43,9 +43,9 @@ to reassemble the rows.
 |----------------------|-----------------|-----------|
 | `belongsTo` / `hasOne` (to-one) | `json_agg` | Same capability-based selection as to-many |
 | `hasMany` / `manyToMany` (to-many) | `json_agg` | Avoids row explosion |
-| Any + explicit override | as specified | User intent wins |
+| Any + compatible explicit override | Requested strategy | Honoured when compatible with its branch |
 
-These defaults apply to non-recursive includes with nested output. Recursion requires CTE support. With flat output (`| flat`), the planner selects `lateral` when the include has a limit and the dialect supports it, and `join` otherwise. Explicit overrides are validated against dialect capabilities.
+These defaults apply to non-recursive includes with nested output. Recursion requires CTE support. With flat output (`| flat`), the planner selects `lateral` when the include has a limit and the dialect supports it, and `join` otherwise. Explicit overrides are validated against dialect capabilities and honoured when compatible with their branch. Mixed parent/child strategies and includes nested under a `cte` include are refused before SQL is generated. `defaultIncludeStrategy` applies only to non-recursive includes; recursive includes always compile as `cte`.
 
 The planner encodes this as:
 ```typescript

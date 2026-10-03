@@ -123,7 +123,8 @@ const dump = orm.select('posts')
 dump.plan.decisions
 // → [{ type: 'include-strategy',
 //      choice: 'json_agg',
-//      reason: 'using JSON aggregation to avoid row explosion' }]
+//      context: { relation: 'author', ... },
+//      reasoning: '...using JSON aggregation to avoid row explosion', ... }]
 ```
 
   </div>
