@@ -288,6 +288,7 @@ export function plan(
 	validateIncludeStrategy(
 		opts.defaultIncludeStrategy,
 		opts.dialectCapabilities,
+		false,
 	);
 
 	// Validate root table — skip when the FROM is a BatchValues unnest() source

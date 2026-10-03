@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	createDialectCapabilities,
 	POSTGRESQL_CAPABILITIES,
+	SQLITE_CAPABILITIES,
 } from './dialects/index.js';
 import { InvalidOperationError } from './dx/errors.js';
 import { inSubquery, not } from './dx/filters.js';
@@ -1060,5 +1061,65 @@ describe('#900 resolved validator accepted lists', () => {
 			expect(() => validateResolvedIncludeStrategy(s, NO_CTE_CAPS)).toThrow(
 				`Strategy '${s}' is not supported by test-no-cte. Supported strategies: 'join'.`,
 			);
+	});
+});
+
+describe('#900 default capability validation at the include consumer', () => {
+	const db = schema({
+		categories: {
+			id: { type: 'integer', primaryKey: true },
+			parentId: ref('categories', {
+				nullable: true,
+				roles: { parent: 'parent', children: 'children' },
+			}),
+		},
+	});
+
+	for (const defaultIncludeStrategy of ['json_agg', 'lateral'] as const) {
+		it(`plans recursive children as cte with unsupported ${defaultIncludeStrategy} default`, () => {
+			const report = plan(
+				{
+					type: 'select',
+					from: 'categories',
+					include: [{ relation: 'children', recursive: { maxDepth: 5 } }],
+				},
+				db.model,
+				{ defaultIncludeStrategy, dialectCapabilities: SQLITE_CAPABILITIES },
+			);
+			const decision = report.decisions.find(
+				(d) => d.type === 'include-strategy',
+			);
+			expect(decision?.choice).toBe('cte');
+			expect(decision?.alternatives).toEqual([]);
+		});
+
+		it(`refuses a non-recursive consumer of unsupported ${defaultIncludeStrategy} default`, () => {
+			const consumeDefault = () =>
+				plan(
+					{
+						type: 'select',
+						from: 'categories',
+						include: [{ relation: 'children' }],
+					},
+					db.model,
+					{ defaultIncludeStrategy, dialectCapabilities: SQLITE_CAPABILITIES },
+				);
+			expect(consumeDefault).toThrow(UnsupportedStrategyError);
+			expect(consumeDefault).toThrow(
+				`Strategy '${defaultIncludeStrategy}' is not supported by sqlite. Supported strategies: 'join', 'cte', 'auto'.`,
+			);
+		});
+	}
+
+	it('refuses an unknown default at entry even without includes', () => {
+		const unknownDefault = () =>
+			plan({ type: 'select', from: 'categories' }, db.model, {
+				defaultIncludeStrategy: 'subquery' as never,
+				dialectCapabilities: SQLITE_CAPABILITIES,
+			});
+		expect(unknownDefault).toThrow(UnsupportedStrategyError);
+		expect(unknownDefault).toThrow(
+			"Strategy 'subquery' is not supported by sqlite. Supported strategies: 'join', 'json_agg', 'lateral', 'cte', 'auto'.",
+		);
 	});
 });
