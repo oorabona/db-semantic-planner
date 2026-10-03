@@ -1368,7 +1368,7 @@ describe('#900 flat strategy precedence', () => {
 				),
 			).toThrow(
 				new UnsupportedStrategyError(
-					"Include at include[0].include[0](comments) cannot use explicit join because relation 'comments' declares includeStrategy 'lateral'. Use 'auto' or 'join', or remove include.join.",
+					"Include at include[0].include[0](posts.comments) cannot use explicit join because relation 'comments' declares includeStrategy 'lateral'. Use 'auto' or 'join', or remove include.join.",
 				),
 			);
 		});

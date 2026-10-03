@@ -176,3 +176,9 @@ properties independently in chunks of at most 50 key/value pairs joined with
 `['*']`); partial projections are refused with the include path. NQL relation
 selections are root relation columns, so `users | select id, posts.title | flat`
 and `users | select id, posts.title | limit posts 5` retain their behaviour.
+
+Include `select` forms are checked during planning: `json_agg` accepts fields or
+all columns, `lateral` accepts only all columns, `join` accepts plain fields,
+and `cte` refuses explicit selection. Mixed wildcard lists such as `['*', 'id']`
+are refused for every strategy; `['*']` is the all-columns form. Both `json_agg`
+and `lateral` limit rows per parent. Refusals identify the full nested include path.

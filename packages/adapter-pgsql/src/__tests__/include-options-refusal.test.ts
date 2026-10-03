@@ -58,7 +58,7 @@ describe('include option refusals', () => {
 					relation: 'posts',
 					include: [{ relation: 'comments', limit: -1 }],
 				}),
-			'Invalid Include include[0].include[0](comments) limit: Include include[0].include[0](comments) limit must be a non-negative safe integer',
+			'Invalid Include include[0].include[0](posts.comments) limit: Include include[0].include[0](posts.comments) limit must be a non-negative safe integer',
 		));
 	it('refuses join orderBy', () =>
 		exactError(
@@ -131,7 +131,7 @@ describe('include option refusals', () => {
 						},
 						'cte',
 					),
-				`Invalid include: Include include[0].include[0](comments) ${option} is not supported by 'cte' strategy.`,
+				`Invalid include: Include include[0].include[0](posts.comments) ${option} is not supported by 'cte' strategy.`,
 			));
 	}
 	it('refuses runtime expression order', () =>
@@ -315,7 +315,7 @@ for (const option of ['limit', 'orderBy'] as const) {
 					tree,
 					{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
 				),
-			`Invalid include: Include include[0].include[0](children) ${option} is not supported by 'cte' strategy.`,
+			`Invalid include: Include include[0].include[0](children.children) ${option} is not supported by 'cte' strategy.`,
 		);
 	});
 }
@@ -427,7 +427,7 @@ for (const strategy of ['join', 'cte'] as const) {
 					},
 					strategy === 'cte' ? 'cte' : undefined,
 				),
-			`Invalid include: Include include[0].include[0](comments) select is not supported by '${strategy}' strategy.${strategy === 'join' ? ' Received select form: all.' : ''}`,
+			`Invalid include: Include include[0].include[0](posts.comments) select is not supported by '${strategy}' strategy.${strategy === 'join' ? ' Received select form: all.' : ''}`,
 		));
 }
 
@@ -446,7 +446,7 @@ it('names nested cte field selection', () =>
 				},
 				'cte',
 			),
-		"Invalid include: Include include[0].include[0](comments) select is not supported by 'cte' strategy.",
+		"Invalid include: Include include[0].include[0](posts.comments) select is not supported by 'cte' strategy.",
 	));
 
 it('preserves explicit join field projection', () => {
@@ -474,21 +474,199 @@ for (const select of [
 		exactError(
 			() =>
 				orm.select('users').include('posts', { join: 'left', select }).dump(),
-			`Invalid include: Include include[0](posts) select is not supported by 'join' strategy. Received select form: ${select.type}${select.type === 'fields' ? ` ${JSON.stringify(select.fields)}` : ''}.`,
+			select.type === 'fields'
+				? "Include posts select cannot mix '*' with other fields"
+				: `Invalid include: Include include[0](posts) select is not supported by 'join' strategy. Received select form: ${select.type}.`,
 		);
 	});
-	it(`excludes join alternative for ${JSON.stringify(select)}`, () => {
-		const report = plan(
+	it(`refuses default json_agg select form ${JSON.stringify(select)} during planning`, () => {
+		expect(() =>
+			plan(
+				{
+					type: 'select',
+					from: 'users',
+					include: [{ relation: 'posts', select }],
+				},
+				model,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			),
+		).toThrow(
+			select.type === 'fields'
+				? "Include posts select cannot mix '*' with other fields"
+				: `JSON_AGG include 'posts' does not support select form '${select.type}'`,
+		);
+	});
+}
+
+for (const strategy of ['json_agg', 'lateral', 'join', 'cte'] as const) {
+	it(`planning refuses nested mixed wildcards for ${strategy}`, () => {
+		exactError(
+			() =>
+				plan(
+					{
+						type: 'select',
+						from: 'users',
+						include: [
+							{
+								relation: 'posts',
+								include: [
+									{
+										relation: 'comments',
+										select: { type: 'fields', fields: ['*', 'id'] },
+									},
+								],
+							},
+						],
+					},
+					model,
+					{
+						dialectCapabilities: POSTGRESQL_CAPABILITIES,
+						defaultIncludeStrategy: strategy,
+					},
+				),
+			"Include posts.comments select cannot mix '*' with other fields",
+		);
+	});
+	for (const select of [
+		{ type: 'aggregate', aggregates: [{ function: 'count' }] },
+		{ type: 'expressions', columns: [] },
+	] as const) {
+		it(`planning refuses nested ${select.type} for ${strategy}`, () => {
+			expect(() =>
+				plan(
+					{
+						type: 'select',
+						from: 'users',
+						include: [
+							{
+								relation: 'posts',
+								include: [{ relation: 'comments', select }],
+							},
+						],
+					},
+					model,
+					{
+						dialectCapabilities: POSTGRESQL_CAPABILITIES,
+						defaultIncludeStrategy: strategy,
+					},
+				),
+			).toThrow(
+				strategy === 'json_agg'
+					? `JSON_AGG include 'posts.comments' does not support select form '${select.type}'`
+					: strategy === 'lateral'
+						? "Invalid include: Include include[0].include[0](posts.comments) select must select all columns with 'lateral' strategy"
+						: `Invalid include: Include include[0].include[0](posts.comments) select is not supported by '${strategy}' strategy.`,
+			);
+		});
+	}
+}
+it('compiles a primary-key limited include without a model compile option', () => {
+	const report = plan(
+		{
+			type: 'select',
+			from: 'users',
+			include: [{ relation: 'posts', limit: 1 }],
+		},
+		model,
+		{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+	);
+	const result = createPgCompileOnlyAdapter().compile(report);
+	expect(result.sql).toBe(
+		`SELECT users.*, COALESCE((SELECT json_agg(__lim.__row ORDER BY __lim.__key0 ASC NULLS LAST) FROM (SELECT to_jsonb(__t__) AS __row, __t__.id AS __key0 FROM posts AS __t__ WHERE __t__."authorId" = users.id ORDER BY __t__.id ASC NULLS LAST LIMIT 1) AS __lim), '[]'::json) AS posts_json FROM users`,
+	);
+	expect(result.parameters).toEqual([]);
+});
+it('builder plan refuses aggregate json_agg select', () => {
+	const orm = createOrm({ model, adapter: createPgCompileOnlyAdapter() });
+	exactError(
+		() =>
+			orm
+				.select('users')
+				.include('posts', {
+					select: { type: 'aggregate', aggregates: [{ function: 'count' }] },
+				})
+				.plan(),
+		"JSON_AGG include 'posts' does not support select form 'aggregate'",
+	);
+});
+
+for (const select of [
+	{ type: 'aggregate', aggregates: [{ function: 'count' }] },
+	{ type: 'expressions', columns: [] },
+	{ type: 'fields', fields: ['*', 'id'] },
+] as const) {
+	it(`adapter defence matches planning for nested ${JSON.stringify(select)}`, () => {
+		const intent = {
+			type: 'select' as const,
+			from: 'users',
+			include: [
+				{ relation: 'posts', include: [{ relation: 'comments', select }] },
+			],
+		};
+		const message =
+			select.type === 'fields'
+				? "Include posts.comments select cannot mix '*' with other fields"
+				: `JSON_AGG include 'posts.comments' does not support select form '${select.type}'`;
+		exactError(
+			() =>
+				plan(intent, model, { dialectCapabilities: POSTGRESQL_CAPABILITIES }),
+			message,
+		);
+		const valid = plan(
 			{
 				type: 'select',
 				from: 'users',
-				include: [{ relation: 'posts', select }],
+				include: [{ relation: 'posts', include: [{ relation: 'comments' }] }],
 			},
 			model,
 			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
 		);
-		expect(
-			report.decisions.find((d) => d.type === 'include-strategy')?.alternatives,
-		).toEqual([]);
+		exactError(
+			() => createPgCompileOnlyAdapter().compile({ ...valid, intent }),
+			message,
+		);
 	});
 }
+for (const strategy of ['json_agg', 'lateral'] as const) {
+	it(`keeps singleton wildcard as all columns for ${strategy}`, () => {
+		const makePlan = (select?: IncludeIntent['select']) =>
+			plan(
+				{
+					type: 'select',
+					from: 'users',
+					include: [{ relation: 'posts', limit: 1, ...(select && { select }) }],
+				},
+				model,
+				{
+					dialectCapabilities: POSTGRESQL_CAPABILITIES,
+					defaultIncludeStrategy: strategy,
+				},
+			);
+		const adapter = createPgCompileOnlyAdapter();
+		expect(
+			adapter.compile(makePlan({ type: 'fields', fields: ['*'] })).sql,
+		).toBe(adapter.compile(makePlan()).sql);
+	});
+}
+
+it('uses the recorded total order when a compile model has no key', () => {
+	const report = plan(
+		{
+			type: 'select',
+			from: 'users',
+			include: [{ relation: 'posts', limit: 1 }],
+		},
+		model,
+		{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+	);
+	const noKey: typeof model = Object.assign(Object.create(model), {
+		getTable(name: string) {
+			const table = model.getTable(name);
+			return name === 'posts' && table ? { ...table, primaryKey: [] } : table;
+		},
+	});
+	const adapter = createPgCompileOnlyAdapter();
+	expect(adapter.compile(report, { model: noKey }).sql).toBe(
+		adapter.compile(report).sql,
+	);
+});

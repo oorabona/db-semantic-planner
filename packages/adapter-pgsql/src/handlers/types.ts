@@ -404,7 +404,7 @@ export interface Decision {
 	readonly relationType?: 'belongsTo' | 'hasMany' | 'hasOne';
 	readonly foreignKey?: ColumnListInput;
 	readonly parentKey?: ColumnListInput;
-	readonly includeOrderBy?: readonly import('@dbsp/types').OrderByIntent[];
+	readonly includeOrderBy?: readonly import('@dbsp/types').IncludeOrderByIntent[];
 	readonly orderByFallback?: boolean;
 	readonly children?: readonly Decision[];
 	// Window function specific

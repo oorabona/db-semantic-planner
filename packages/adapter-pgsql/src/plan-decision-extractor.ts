@@ -167,9 +167,16 @@ function resolveIncludeByPath(
 /** Shared include field projection; JOIN adds its hydration key separately. */
 function includeSelectedColumns(
 	select: SelectIntent | undefined,
+	path: string,
 ): readonly string[] | undefined {
 	if (!select || select.type === 'all') return undefined;
-	if (select.type === 'fields') return select.fields;
+	if (select.type === 'fields') {
+		if (select.fields.length > 1 && select.fields.includes('*'))
+			throw new Error(
+				`Include ${path} select cannot mix '*' with other fields`,
+			);
+		return select.fields;
+	}
 	return undefined;
 }
 
@@ -1753,7 +1760,16 @@ function toIncludeDecision(
 	const limit = includeIntent?.limit;
 	const columns =
 		choice === 'json_agg'
-			? includeSelectedColumns(includeIntent?.select)
+			? includeSelectedColumns(
+					includeIntent?.select,
+					deriveRelationPathFromIntentPath(
+						Array.isArray(plan.intent?.include)
+							? plan.intent.include
+							: undefined,
+						context.intentPath,
+						relationName,
+					) ?? relationName,
+				)
 			: undefined;
 
 	return {
@@ -1837,9 +1853,10 @@ function toJoinIncludeDecision(
 
 	let columns: string[] = [defaultPk];
 	if (includeIntent?.select?.type === 'fields' && includeIntent.select.fields) {
-		const fields = includeSelectedColumns(includeIntent.select)!.filter(
-			(f) => f !== defaultPk,
-		);
+		const fields = includeSelectedColumns(
+			includeIntent.select,
+			relationPath,
+		)!.filter((f) => f !== defaultPk);
 		columns = [defaultPk, ...fields];
 	}
 
@@ -1971,7 +1988,7 @@ export function synthesizeMissingJoinDecisions(
 		// Build column list (PK always included for NULL-detection)
 		let columns: string[] = [defaultPk];
 		if (inc.select?.type === 'fields' && inc.select.fields) {
-			const extraFields = includeSelectedColumns(inc.select)!.filter(
+			const extraFields = includeSelectedColumns(inc.select, alias)!.filter(
 				(f) => f !== defaultPk,
 			);
 			columns = [defaultPk, ...extraFields];
@@ -2087,7 +2104,14 @@ function toJsonAggDecision(
 		relationName,
 	);
 	const limit = includeIntent?.limit;
-	const columns = includeSelectedColumns(includeIntent?.select);
+	const columns = includeSelectedColumns(
+		includeIntent?.select,
+		deriveRelationPathFromIntentPath(
+			Array.isArray(plan.intent?.include) ? plan.intent.include : undefined,
+			context.intentPath,
+			relationName,
+		) ?? relationName,
+	);
 	return {
 		type: 'selectJsonAgg',
 		...(columns !== undefined && { columns }),
@@ -2231,9 +2255,10 @@ export function extractLeftJoinIncludeDecisions(
 			includeIntent?.select?.type === 'fields' &&
 			includeIntent.select.fields
 		) {
-			const fields = includeSelectedColumns(includeIntent.select)!.filter(
-				(f) => f !== defaultPk,
-			);
+			const fields = includeSelectedColumns(
+				includeIntent.select,
+				relationName,
+			)!.filter((f) => f !== defaultPk);
 			columns = [defaultPk, ...fields];
 		}
 
