@@ -1,8 +1,8 @@
 /**
  * Unified WHERE compiler: compiles WhereIntent directly to PostgreSQL AST nodes.
  *
- * This is the new direct path that eliminates the intermediate
- * Decision/PlanDecision representation for WHERE clauses.
+ * FILTER enters this compiler and bypasses PlanDecision. Relation predicates
+ * and predicate subqueries still lower through handler decisions during migration.
  * Each caller retains its own current SQL and parameter behavior.
  *
  * @internal
@@ -148,6 +148,13 @@ export function createConditionCompiler(
 		'<': '<',
 		'<=': '<=',
 	};
+
+	// Private channel for relation-filter lowering; raw intent fields are not authority.
+	const relationHints = new WeakMap<WhereIntent, Partial<Decision>>();
+	function internalRelationIntent(intent: WhereIntent): WhereIntent {
+		relationHints.set(intent, intent as unknown as Partial<Decision>);
+		return intent;
+	}
 
 	function compileMappedComparison(
 		operator: string | undefined,
@@ -509,14 +516,14 @@ export function createConditionCompiler(
 			const relation = hops[0] ?? (rf.relation as string);
 			if (preResolved) {
 				return ctx.compileCondition(
-					{
+					internalRelationIntent({
 						kind: existsKind,
 						relation,
 						targetTable: preResolved.targetTable,
 						sourceColumn: preResolved.sourceColumn,
 						targetColumn: preResolved.targetColumn,
 						where: innermostWhere,
-					} as unknown as WhereIntent,
+					} as unknown as WhereIntent),
 					ctx,
 				);
 			}
@@ -578,7 +585,7 @@ export function createConditionCompiler(
 			}
 
 			return ctx.compileCondition(
-				{
+				internalRelationIntent({
 					kind: existsKind,
 					relation,
 					targetTable,
@@ -589,7 +596,7 @@ export function createConditionCompiler(
 						targetColumn: singleHopTargetColumn,
 					}),
 					where: innermostWhere,
-				} as unknown as WhereIntent,
+				} as unknown as WhereIntent),
 				ctx,
 			);
 		}
@@ -661,14 +668,14 @@ export function createConditionCompiler(
 			const targetTable = hopTargets[i] ?? hop;
 			// All inner hops use 'exists'; outermost uses existsKind.
 			const hopKind = i === 0 ? existsKind : 'exists';
-			innerIntent = {
+			innerIntent = internalRelationIntent({
 				kind: hopKind,
 				relation: hop,
 				targetTable,
 				sourceColumn: hopSourceColumns[i],
 				targetColumn: hopTargetColumns[i],
 				where: innerIntent,
-			} as unknown as WhereIntent;
+			} as unknown as WhereIntent);
 		}
 
 		// Compile the outermost intent in the chain.
@@ -888,30 +895,44 @@ export function createConditionCompiler(
 			);
 			if (ctx.model && !resolved)
 				throw new Error(
-					`exists('${intent.relation}'): no relation '${intent.relation}' is declared on table '${ctx.rootTable}'. Use rawExists(subquery(...)) for an EXISTS over an undeclared or uncorrelated subquery.`,
+					`${intent.kind}('${intent.relation}'): no relation '${intent.relation}' is declared on table '${ctx.rootTable}'. Use rawExists(subquery(...)) for an EXISTS over an undeclared or uncorrelated subquery.`,
 				);
 			// Resolve raw intents here. Planner decisions never enter this branch.
-			const hints = intent as unknown as Partial<Decision>;
+			const hints = relationHints.get(intent);
+			const modelKeys = resolveRelationKeys(
+				ctx.rootTable,
+				resolved ?? { type: 'hasMany', target: intent.relation },
+				ctx,
+			);
+			const targetTable = resolved?.target ?? intent.relation;
+			const supplied = intent as unknown as Partial<Decision>;
+			if (
+				!hints &&
+				((supplied.targetTable !== undefined &&
+					supplied.targetTable !== targetTable) ||
+					(supplied.sourceColumn !== undefined &&
+						JSON.stringify(toColumnList(supplied.sourceColumn)) !==
+							JSON.stringify(modelKeys.sourceColumn)) ||
+					(supplied.targetColumn !== undefined &&
+						JSON.stringify(toColumnList(supplied.targetColumn)) !==
+							JSON.stringify(modelKeys.targetColumn)))
+			)
+				throw new Error(
+					`${intent.kind}('${intent.relation}'): supplied relation target or keys differ from the model.`,
+				);
 			const keys =
-				hints.sourceColumn !== undefined && hints.targetColumn !== undefined
+				hints?.sourceColumn !== undefined && hints.targetColumn !== undefined
 					? {
 							sourceColumn: hints.sourceColumn,
 							targetColumn: hints.targetColumn,
 						}
-					: resolveRelationKeys(
-							ctx.rootTable,
-							resolved ?? {
-								type: 'hasMany',
-								target: intent.relation,
-							},
-							ctx,
-						);
+					: modelKeys;
 			return dispatcher(
 				{
 					type: 'exists',
 					operator: intent.kind,
 					relation: intent.relation,
-					targetTable: hints.targetTable ?? resolved?.target ?? intent.relation,
+					targetTable: hints?.targetTable ?? targetTable,
 					sourceColumn: keys.sourceColumn,
 					targetColumn: keys.targetColumn,
 					conditions: intent.where ? [intent.where as unknown as Decision] : [],

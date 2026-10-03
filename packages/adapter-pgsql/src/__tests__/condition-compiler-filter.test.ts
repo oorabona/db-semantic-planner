@@ -18,6 +18,8 @@ import {
 import type { WhereIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { compilePlan } from '../compiler.js';
+import { compileCondition } from '../condition-compiler.js';
+import { createCompilerState } from '../handlers/types.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const db = schema({
@@ -545,4 +547,83 @@ it('FILTER include refuses an undeclared model relation', () => {
 			"FILTER include('typo'): no relation 'typo' is declared on table 'posts'.",
 		),
 	);
+});
+
+describe('third review FILTER repairs', () => {
+	const keysDb = schema({
+		users: {
+			uuid: { type: 'uuid', primaryKey: true },
+			code: { type: 'text', unique: true },
+		},
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			authorCode: ref('users', {
+				references: ['code'],
+				as: 'author',
+				inverse: 'posts',
+			}),
+		},
+	} as const);
+	const keysOrm = createOrm({
+		schema: keysDb,
+		adapter: createPgCompileOnlyAdapter({ model: keysDb.model }),
+	});
+	it('uses authored references before the primary key for inverse FILTER relations', () => {
+		const result = keysOrm
+			.select('users')
+			.columns([aggregate(exists('posts')).as('n')])
+			.dump();
+		expect(result.sql).toBe(
+			'SELECT count(*) FILTER (WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.code = posts_exists_0."authorCode")) AS n FROM users',
+		);
+		expect(result.params).toEqual([]);
+	});
+	it('uses authored references before the primary key for belongs-to FILTER relations', () => {
+		const result = keysOrm
+			.select('posts')
+			.columns([aggregate(notExists('author')).as('n')])
+			.dump();
+		expect(result.sql).toBe(
+			'SELECT count(*) FILTER (WHERE NOT (EXISTS (SELECT 1 FROM users AS users_exists_0 WHERE posts."authorCode" = users_exists_0.code))) AS n FROM posts',
+		);
+		expect(result.params).toEqual([]);
+	});
+	it('names notExists in the undeclared relation refusal', () => {
+		expect(() =>
+			orm
+				.select('users')
+				.columns([aggregate(notExists('typo')).as('n')])
+				.dump(),
+		).toThrow(
+			new Error(
+				"notExists('typo'): no relation 'typo' is declared on table 'users'. Use rawExists(subquery(...)) for an EXISTS over an undeclared or uncorrelated subquery.",
+			),
+		);
+	});
+	it.each([
+		{ targetTable: 'secrets' },
+		{ sourceColumn: ['uuid'] },
+		{ targetColumn: ['id'] },
+	])('refuses conflicting raw relation hints: %j', (hint) => {
+		const state = createCompilerState();
+		expect(() =>
+			compileCondition({ ...exists('posts'), ...hint } as WhereIntent, {
+				logicalSourceTable: 'users',
+				emittedAlias: 'users',
+				visibleAliases: new Map(),
+				position: 'filter',
+				model: keysDb.model,
+				paramState: state,
+				compileSubquery: () => {
+					throw new Error('unexpected subquery');
+				},
+			}),
+		).toThrow(
+			new Error(
+				"exists('posts'): supplied relation target or keys differ from the model.",
+			),
+		);
+		expect(state.parameters).toEqual([]);
+		expect(state.paramIndex).toBe(0);
+	});
 });
