@@ -317,5 +317,5 @@ db.output.contains: foreign key constraint
 # ─────────────────────────────────────────
 --- query: 25
 success: true
-sql.equals: INSERT INTO ch3_blog_extended.authors ( name, email, active ) VALUES ( $1, $2, $3 ) ON CONFLICT (email) DO UPDATE SET name = excluded.name, email = excluded.email, active = excluded.active
+sql.equals: INSERT INTO ch3_blog_extended.authors (name, email, active) VALUES ($1, $2, $3) ON CONFLICT (email) DO UPDATE SET name = $4, email = $5, active = $6
 db.rows.equals: 1

@@ -317,7 +317,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 24
 success: true
-sql.equals: INSERT INTO ch5_ecommerce.products ( name, sku, price, category_id, active ) VALUES ( $1, $2, $3, $4, $5 ) ON CONFLICT (sku) DO UPDATE SET name = excluded.name, sku = excluded.sku, price = excluded.price, category_id = excluded.category_id, active = excluded.active
+sql.equals: INSERT INTO ch5_ecommerce.products (name, sku, price, category_id, active) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (sku) DO UPDATE SET name = $6, sku = $7, price = $8, category_id = $9, active = $10
 db.rows.equals: 1
 
 # ─────────────────────────────────────────

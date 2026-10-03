@@ -186,7 +186,7 @@ describe('nql`...` mutation support', () => {
 			],
 			onConflict: { columns: ['id'] },
 		});
-		expect(dump.parameters).toEqual([4, 'Charlie', false]);
+		expect(dump.parameters).toEqual([4, 'Charlie', false, 4, 'Charlie', false]);
 		expect(dump.sql).toMatch(/on conflict/i);
 	});
 
