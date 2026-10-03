@@ -1,5 +1,6 @@
 /** Only syntactic null is rewritten; bound parameter values stay opaque. */
 import type { Node } from '@pgsql/types';
+import { distinctExpr, nullConstNode } from '../../ast-helpers.js';
 import { escapeDiagnosticText } from '../../validate.js';
 
 export function compileLiteralNullComparison(
@@ -7,7 +8,13 @@ export function compileLiteralNullComparison(
 	left: Node,
 	value: unknown,
 ): Node | undefined {
-	if (value !== null || operator === 'isDistinctFrom') return undefined;
+	if (value === undefined) {
+		throw new Error(
+			'Right comparison operand is undefined; use isNull or param(...)',
+		);
+	}
+	if (value !== null) return undefined;
+	if (operator === 'isDistinctFrom') return distinctExpr(left, nullConstNode());
 	if (operator === 'eq' || operator === '=') {
 		return { NullTest: { arg: left, nulltesttype: 'IS_NULL' } };
 	}

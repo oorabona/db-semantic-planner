@@ -380,40 +380,40 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "isDistinctFrom-null",
 			"shape": "leaf",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score IS DISTINCT FROM $1 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
-			"params": [null],
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score IS DISTINCT FROM NULL UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [],
 			"error": null
 		},
 		{
 			"position": "recursive-start-where-adjacency",
 			"kind": "isDistinctFrom-null",
 			"shape": "and",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score IS DISTINCT FROM $1 AND __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
-			"params": [null, 13],
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score IS DISTINCT FROM NULL AND __n.score = $1 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [13],
 			"error": null
 		},
 		{
 			"position": "recursive-start-where-adjacency",
 			"kind": "isDistinctFrom-null",
 			"shape": "or",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score IS DISTINCT FROM $1 OR __n.score = $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
-			"params": [null, 13],
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score IS DISTINCT FROM NULL OR __n.score = $1 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [13],
 			"error": null
 		},
 		{
 			"position": "recursive-start-where-adjacency",
 			"kind": "isDistinctFrom-null",
 			"shape": "not",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (__n.score IS DISTINCT FROM $1) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
-			"params": [null],
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT (__n.score IS DISTINCT FROM NULL) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [],
 			"error": null
 		},
 		{
 			"position": "recursive-start-where-adjacency",
 			"kind": "isDistinctFrom-null",
 			"shape": "two-level",
-			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT (__n.score IS DISTINCT FROM $2) OR __n.score = $3) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
-			"params": [13, null, 17],
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT (__n.score IS DISTINCT FROM NULL) OR __n.score = $2) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [13, 17],
 			"error": null
 		},
 		{

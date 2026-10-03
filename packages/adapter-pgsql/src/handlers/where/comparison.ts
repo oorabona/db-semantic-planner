@@ -4,7 +4,6 @@
  * Handles: =, !=, <, <=, >, >=
  */
 
-import { isParamIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
 	distinctExpr,
@@ -16,6 +15,7 @@ import {
 	lteExpr,
 	neExpr,
 } from '../../ast-helpers.js';
+import { normalizeParamIntent } from '../../param-intent.js';
 import { escapeDiagnosticText } from '../../validate.js';
 import type {
 	CompilerContext,
@@ -68,18 +68,7 @@ export const comparisonHandler: WhereHandler = {
 			COMPARISON_OPERATOR_MAP,
 		);
 		const column = decision.column;
-		// ExpressionSpec is the public duck type returned by core param().
-		// Preserve the parameter node rather than inspecting its opaque value.
-		const rawValue = decision.value;
-		const value =
-			rawValue !== null &&
-			typeof rawValue === 'object' &&
-			'__expr' in rawValue &&
-			rawValue.__expr === true &&
-			'intent' in rawValue &&
-			isParamIntent(rawValue.intent)
-				? rawValue.intent
-				: rawValue;
+		const value = normalizeParamIntent(decision.value);
 
 		if (!column) {
 			throw new Error('Comparison handler requires a column');
