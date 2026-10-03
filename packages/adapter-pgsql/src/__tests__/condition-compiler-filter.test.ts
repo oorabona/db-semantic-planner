@@ -7,6 +7,7 @@ import {
 	inSubquery,
 	not,
 	notExists,
+	outerRef,
 	rangeOverlaps,
 	rawExists,
 	ref,
@@ -316,7 +317,7 @@ describe('FILTER context repair regressions', () => {
 						.dump(),
 				).toThrow(
 					new Error(
-						"FILTER exists('posts'): recursive relation predicates are not supported inside FILTER.",
+						`FILTER ${predicate === exists ? 'exists' : 'notExists'}('posts'): recursive relation predicates are not supported inside FILTER.`,
 					),
 				);
 			}
@@ -414,4 +415,134 @@ it('belongsTo FILTER resolves the referenced table key and source foreign key', 
 		'SELECT count(*) FILTER (WHERE EXISTS (SELECT 1 FROM users AS users_exists_0 WHERE posts."authorId" = users_exists_0.id AND users_exists_0.score = $1)) AS n FROM posts',
 	);
 	expect(result.params).toEqual([7]);
+});
+
+for (const [operator, sql] of [
+	['eq', '='],
+	['neq', '!='],
+	['gt', '>'],
+	['gte', '>='],
+	['lt', '<'],
+	['lte', '<='],
+	['isDistinctFrom', 'IS DISTINCT FROM'],
+	['=', '='],
+	['!=', '!='],
+	['>', '>'],
+	['>=', '>='],
+	['<', '<'],
+	['<=', '<='],
+] as const) {
+	it(`FILTER outerRef ${operator} is a column without parameters`, () => {
+		const condition = {
+			kind: 'comparison',
+			field: 'authorId',
+			operator,
+			value: outerRef('id'),
+		} as WhereIntent;
+		const result = orm
+			.select('users')
+			.columns([aggregate(exists('posts', { where: condition })).as('n')])
+			.dump();
+		expect(result.sql).toBe(
+			`SELECT count(*) FILTER (WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0."authorId" AND posts_exists_0."authorId" ${sql} users.id)) AS n FROM users`,
+		);
+		expect(result.params).toEqual([]);
+	});
+}
+for (const predicate of [exists, notExists]) {
+	it(`nested FILTER ${predicate.name} outerRef uses its immediate outer scope`, () => {
+		const condition = exists('posts', {
+			where: predicate('children', { where: eq('parentId', outerRef('id')) }),
+		});
+		const result = orm
+			.select('users')
+			.columns([aggregate(condition).as('n')])
+			.dump();
+		const inner =
+			'EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE posts_exists_0.id = posts_exists_1."parentId" AND posts_exists_1."parentId" = posts_exists_0.id)';
+		expect(result.sql).toBe(
+			`SELECT count(*) FILTER (WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0."authorId" AND ${predicate === exists ? inner : `NOT (${inner})`})) AS n FROM users`,
+		);
+		expect(result.params).toEqual([]);
+	});
+}
+it('multi-hop FILTER relationFilter preserves outerRef', () => {
+	const result = orm
+		.select('users')
+		.columns([
+			aggregate({
+				kind: 'relationFilter',
+				relation: ['posts', 'children'],
+				mode: 'some',
+				where: eq('parentId', outerRef('id')),
+			}).as('n'),
+		])
+		.dump();
+	expect(result.sql).toBe(
+		'SELECT count(*) FILTER (WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0."authorId" AND EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE posts_exists_0.id = posts_exists_1."parentId" AND posts_exists_1."parentId" = posts_exists_0.id))) AS n FROM users',
+	);
+	expect(result.params).toEqual([]);
+});
+
+const includeDb = schema({
+	users: { id: { type: 'integer', primaryKey: true } },
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		authorId: ref('users', { as: 'author', inverse: 'posts' }),
+		categoryId: ref('categories', { as: 'category', inverse: 'posts' }),
+	},
+	categories: { id: { type: 'integer', primaryKey: true } },
+} as const);
+const includeOrm = createOrm({
+	schema: includeDb,
+	adapter: createPgCompileOnlyAdapter({
+		model: includeDb.model,
+		defaultPkColumnName: 'custom_pk',
+	}),
+});
+it('FILTER include belongsTo uses the declared target PK', () => {
+	const result = includeOrm
+		.select('users')
+		.columns([
+			aggregate(
+				exists('posts', { include: { category: { join: 'inner' } } }),
+			).as('n'),
+		])
+		.dump();
+	expect(result.sql).toBe(
+		'SELECT count(*) FILTER (WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 JOIN categories AS category ON posts_exists_0."categoryId" = category.id WHERE users.id = posts_exists_0."authorId")) AS n FROM users',
+	);
+	expect(result.params).toEqual([]);
+});
+it('FILTER include hasMany resolves keys from the intermediate source table', () => {
+	const result = includeOrm
+		.select('users')
+		.columns([
+			aggregate(
+				exists('posts', {
+					include: { category: { join: 'inner' }, posts: { join: 'inner' } },
+				}),
+			).as('n'),
+		])
+		.dump();
+	expect(result.sql).toBe(
+		'SELECT count(*) FILTER (WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 JOIN categories AS category ON posts_exists_0."categoryId" = category.id JOIN posts AS posts ON category.id = posts."categoryId" WHERE users.id = posts_exists_0."authorId")) AS n FROM users',
+	);
+	expect(result.params).toEqual([]);
+});
+it('FILTER include refuses an undeclared model relation', () => {
+	expect(() =>
+		includeOrm
+			.select('users')
+			.columns([
+				aggregate(exists('posts', { include: { typo: { join: 'inner' } } })).as(
+					'n',
+				),
+			])
+			.dump(),
+	).toThrow(
+		new Error(
+			"FILTER include('typo'): no relation 'typo' is declared on table 'posts'.",
+		),
+	);
 });

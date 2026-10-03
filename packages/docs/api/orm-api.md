@@ -1433,8 +1433,8 @@ const adapter = createPgAdapter(pool, {
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `defaultPkColumnName` | `string` | `'id'` | Fallback only when the referenced table lacks a declared primary key; a declared relation key or table primary key wins |
-| `deriveFkColumnName` | `(table: string, pk: string) => string` | `singularize(table)_pk` | Fallback only when the relation lacks a declared foreign key; derives from the referenced table and its resolved key |
+| `defaultPkColumnName` | `string` | `'id'` | Convention fallback when schema metadata doesn't provide an explicit PK column |
+| `deriveFkColumnName` | `(table: string, pk: string) => string` | `singularize(table)_pk` | Derives FK column names from the referenced table and its PK |
 
 ### NamingPlugin — Physical Column Names
 

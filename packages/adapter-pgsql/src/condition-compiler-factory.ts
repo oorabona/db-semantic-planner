@@ -52,13 +52,17 @@ import type {
 	WhereDispatcher,
 } from './handlers/types.js';
 import { resolveWhereOperator } from './handlers/where/operator-resolver.js';
-import { buildColumnRef } from './handlers/where/utils.js';
+import {
+	buildColumnRef,
+	compileValueOrFieldRef,
+} from './handlers/where/utils.js';
 // Modifier guard and outerRef check used by buildSubqueryFromIntent (direct-path
 // chokepoint for rawExists / scalar-direct predicate subqueries).
 import {
 	assertNoUnsupportedSubqueryModifiers,
 	containsOuterRef,
 	convertWhereCondition,
+	isOuterRef,
 } from './intent-to-decisions.js';
 import { unwrapParamIntent } from './param-intent.js';
 import { createParamRef } from './param-ref.js';
@@ -743,6 +747,16 @@ export function createConditionCompiler(
 		if (v === null || typeof v !== 'object') return null;
 
 		const rec = v as Record<string, unknown>;
+		if (isOuterRef(v)) {
+			return compileMappedComparison(cmpIntent.operator)(
+				buildColumnRef(cmpIntent.field, handlerCtx),
+				compileValueOrFieldRef(
+					{ kind: 'fieldRef', scope: 'outer', column: rec.column },
+					handlerCtx,
+					ctx.paramState,
+				),
+			);
+		}
 
 		// ExpressionRef path: already has a compiled ExpressionIntent — delegate directly.
 		// ExpressionRef implements the `ExpressionSpec` duck type: __expr === true.
@@ -793,7 +807,7 @@ export function createConditionCompiler(
 		) {
 			if (intent.recursive !== undefined)
 				throw new Error(
-					`FILTER exists('${intent.relation}'): recursive relation predicates are not supported inside FILTER.`,
+					`FILTER ${intent.kind}('${intent.relation}'): recursive relation predicates are not supported inside FILTER.`,
 				);
 			const resolved = ctx.model?.getRelation(
 				`${ctx.rootTable}.${intent.relation}`,

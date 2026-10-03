@@ -422,7 +422,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "FILTER exists('posts'): recursive relation predicates are not supported inside FILTER."
+			"error": "FILTER notExists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -430,7 +430,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "FILTER exists('posts'): recursive relation predicates are not supported inside FILTER."
+			"error": "FILTER notExists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -438,7 +438,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "FILTER exists('posts'): recursive relation predicates are not supported inside FILTER."
+			"error": "FILTER notExists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -446,7 +446,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "FILTER exists('posts'): recursive relation predicates are not supported inside FILTER."
+			"error": "FILTER notExists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -470,7 +470,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "FILTER exists('posts'): recursive relation predicates are not supported inside FILTER."
+			"error": "FILTER notExists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -478,7 +478,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "FILTER exists('posts'): recursive relation predicates are not supported inside FILTER."
+			"error": "FILTER notExists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -486,7 +486,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "FILTER exists('posts'): recursive relation predicates are not supported inside FILTER."
+			"error": "FILTER notExists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -494,7 +494,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "FILTER exists('posts'): recursive relation predicates are not supported inside FILTER."
+			"error": "FILTER notExists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -502,7 +502,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "FILTER exists('posts'): recursive relation predicates are not supported inside FILTER."
+			"error": "FILTER notExists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -526,7 +526,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "FILTER exists('posts'): recursive relation predicates are not supported inside FILTER."
+			"error": "FILTER notExists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
