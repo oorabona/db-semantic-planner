@@ -177,6 +177,13 @@ properties independently in chunks of at most 50 key/value pairs joined with
 selections are root relation columns, so `users | select id, posts.title | flat`
 and `users | select id, posts.title | limit posts 5` retain their behaviour.
 
+Every resolved include, including camelCase names for snake_case relations, is
+validated during planning. Include `select` forms are checked during planning:
+`json_agg` accepts fields or all columns, `lateral` accepts only all columns, `join` accepts plain fields,
+and `cte` refuses explicit selection. Mixed wildcard lists such as `['*', 'id']`
+are refused for every strategy; `['*']` is the all-columns form. Both `json_agg`
+and `lateral` limit rows per parent. Refusals identify the full nested include path.
+
 ## Include payload keys
 
 Each include column uses its explicit alias, or its declared model name when no alias is supplied. Physical database names never become payload keys: `dbCasing` affects SQL references only. This includes aliases that happen to equal a physical name and bigint read conversions, which run under the public key.

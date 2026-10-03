@@ -300,7 +300,7 @@
 			"position": "update-where",
 			"kind": "eq-null",
 			"shape": "leaf",
-			"sql": "UPDATE users SET score = $1 WHERE users.score = NULL",
+			"sql": "UPDATE users SET score = $1 WHERE users.score IS NULL",
 			"params": [41],
 			"error": null
 		},
@@ -308,7 +308,7 @@
 			"position": "update-where",
 			"kind": "eq-null",
 			"shape": "and",
-			"sql": "UPDATE users SET score = $1 WHERE users.score = NULL AND users.score = $2",
+			"sql": "UPDATE users SET score = $1 WHERE users.score IS NULL AND users.score = $2",
 			"params": [41, 13],
 			"error": null
 		},
@@ -316,7 +316,7 @@
 			"position": "update-where",
 			"kind": "eq-null",
 			"shape": "or",
-			"sql": "UPDATE users SET score = $1 WHERE users.score = NULL OR users.score = $2",
+			"sql": "UPDATE users SET score = $1 WHERE users.score IS NULL OR users.score = $2",
 			"params": [41, 13],
 			"error": null
 		},
@@ -324,7 +324,7 @@
 			"position": "update-where",
 			"kind": "eq-null",
 			"shape": "not",
-			"sql": "UPDATE users SET score = $1 WHERE NOT (users.score = NULL)",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (users.score IS NULL)",
 			"params": [41],
 			"error": null
 		},
@@ -332,7 +332,87 @@
 			"position": "update-where",
 			"kind": "eq-null",
 			"shape": "two-level",
-			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (users.score = NULL) OR users.score = $3)",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (users.score IS NULL) OR users.score = $3)",
+			"params": [41, 13, 17],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "neq-null",
+			"shape": "leaf",
+			"sql": "UPDATE users SET score = $1 WHERE users.score IS NOT NULL",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "neq-null",
+			"shape": "and",
+			"sql": "UPDATE users SET score = $1 WHERE users.score IS NOT NULL AND users.score = $2",
+			"params": [41, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "neq-null",
+			"shape": "or",
+			"sql": "UPDATE users SET score = $1 WHERE users.score IS NOT NULL OR users.score = $2",
+			"params": [41, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "neq-null",
+			"shape": "not",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (users.score IS NOT NULL)",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "neq-null",
+			"shape": "two-level",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (users.score IS NOT NULL) OR users.score = $3)",
+			"params": [41, 13, 17],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "isDistinctFrom-null",
+			"shape": "leaf",
+			"sql": "UPDATE users SET score = $1 WHERE users.score IS DISTINCT FROM NULL",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "isDistinctFrom-null",
+			"shape": "and",
+			"sql": "UPDATE users SET score = $1 WHERE users.score IS DISTINCT FROM NULL AND users.score = $2",
+			"params": [41, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "isDistinctFrom-null",
+			"shape": "or",
+			"sql": "UPDATE users SET score = $1 WHERE users.score IS DISTINCT FROM NULL OR users.score = $2",
+			"params": [41, 13],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "isDistinctFrom-null",
+			"shape": "not",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (users.score IS DISTINCT FROM NULL)",
+			"params": [41],
+			"error": null
+		},
+		{
+			"position": "update-where",
+			"kind": "isDistinctFrom-null",
+			"shape": "two-level",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (users.score IS DISTINCT FROM NULL) OR users.score = $3)",
 			"params": [41, 13, 17],
 			"error": null
 		},
@@ -719,86 +799,6 @@
 			"sql": null,
 			"params": null,
 			"error": "BETWEEN handler requires a column"
-		},
-		{
-			"position": "update-where",
-			"kind": "between",
-			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "BETWEEN handler requires a column"
-		},
-		{
-			"position": "update-where",
-			"kind": "between",
-			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "BETWEEN handler requires a column"
-		},
-		{
-			"position": "update-where",
-			"kind": "range-overlaps",
-			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Range handler requires a column"
-		},
-		{
-			"position": "update-where",
-			"kind": "range-overlaps",
-			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Range handler requires a column"
-		},
-		{
-			"position": "update-where",
-			"kind": "range-overlaps",
-			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Range handler requires a column"
-		},
-		{
-			"position": "update-where",
-			"kind": "range-overlaps",
-			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Range handler requires a column"
-		},
-		{
-			"position": "update-where",
-			"kind": "range-overlaps",
-			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Range handler requires a column"
-		},
-		{
-			"position": "update-where",
-			"kind": "range-contains",
-			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Range handler requires a column"
-		},
-		{
-			"position": "update-where",
-			"kind": "range-contains",
-			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Range handler requires a column"
-		},
-		{
-			"position": "update-where",
-			"kind": "range-contains",
-			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Range handler requires a column"
 		}
 	]
 }

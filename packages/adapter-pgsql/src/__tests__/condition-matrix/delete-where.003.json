@@ -2,6 +2,86 @@
 	"entries": [
 		{
 			"position": "delete-where",
+			"kind": "notExists-recursive-down",
+			"shape": "not",
+			"sql": "DELETE FROM users WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)))",
+			"params": [71],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "notExists-recursive-down",
+			"shape": "two-level",
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR users.score = $3)",
+			"params": [13, 71, 17],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "rawNotExists",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "rawNotExists",
+			"shape": "and",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "rawNotExists",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "rawNotExists",
+			"shape": "not",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "rawNotExists",
+			"shape": "two-level",
+			"sql": null,
+			"params": null,
+			"error": "No WHERE handler registered for operator: undefined"
+		},
+		{
+			"position": "delete-where",
+			"kind": "exists",
+			"shape": "leaf",
+			"sql": "DELETE FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)",
+			"params": [61],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "exists",
+			"shape": "and",
+			"sql": "DELETE FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND users.score = $2",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
+			"kind": "exists",
+			"shape": "or",
+			"sql": "DELETE FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR users.score = $2",
+			"params": [61, 13],
+			"error": null
+		},
+		{
+			"position": "delete-where",
 			"kind": "exists",
 			"shape": "not",
 			"sql": "DELETE FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
@@ -719,86 +799,6 @@
 			"sql": "DELETE FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR users.score = $2",
 			"params": [61, 13],
 			"error": null
-		},
-		{
-			"position": "delete-where",
-			"kind": "notExists-no-pk-custom-authorities",
-			"shape": "not",
-			"sql": "DELETE FROM users WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)))",
-			"params": [61],
-			"error": null
-		},
-		{
-			"position": "delete-where",
-			"kind": "notExists-no-pk-custom-authorities",
-			"shape": "two-level",
-			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR users.score = $3)",
-			"params": [13, 61, 17],
-			"error": null
-		},
-		{
-			"position": "delete-where",
-			"kind": "some-no-pk-custom-authorities",
-			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "No WHERE handler registered for operator: undefined"
-		},
-		{
-			"position": "delete-where",
-			"kind": "some-no-pk-custom-authorities",
-			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "No WHERE handler registered for operator: undefined"
-		},
-		{
-			"position": "delete-where",
-			"kind": "some-no-pk-custom-authorities",
-			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "No WHERE handler registered for operator: undefined"
-		},
-		{
-			"position": "delete-where",
-			"kind": "some-no-pk-custom-authorities",
-			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "No WHERE handler registered for operator: undefined"
-		},
-		{
-			"position": "delete-where",
-			"kind": "some-no-pk-custom-authorities",
-			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "No WHERE handler registered for operator: undefined"
-		},
-		{
-			"position": "delete-where",
-			"kind": "every-no-pk-custom-authorities",
-			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "No WHERE handler registered for operator: undefined"
-		},
-		{
-			"position": "delete-where",
-			"kind": "every-no-pk-custom-authorities",
-			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "No WHERE handler registered for operator: undefined"
-		},
-		{
-			"position": "delete-where",
-			"kind": "every-no-pk-custom-authorities",
-			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "No WHERE handler registered for operator: undefined"
 		}
 	]
 }

@@ -15,6 +15,7 @@ import {
 	lteExpr,
 	neExpr,
 } from '../../ast-helpers.js';
+import { normalizeParamIntent } from '../../param-intent.js';
 import { escapeDiagnosticText } from '../../validate.js';
 import type {
 	CompilerContext,
@@ -23,6 +24,7 @@ import type {
 	WhereHandler,
 } from '../types.js';
 import { COMPARISON_OPERATORS } from '../types.js';
+import { compileLiteralNullComparison } from './literal-null.js';
 import { resolveWhereOperator } from './operator-resolver.js';
 import {
 	buildColumnRef,
@@ -66,7 +68,7 @@ export const comparisonHandler: WhereHandler = {
 			COMPARISON_OPERATOR_MAP,
 		);
 		const column = decision.column;
-		const value = decision.value;
+		const value = normalizeParamIntent(decision.value);
 
 		if (!column) {
 			throw new Error('Comparison handler requires a column');
@@ -85,6 +87,8 @@ export const comparisonHandler: WhereHandler = {
 						},
 					)
 				: buildColumnRef(column, ctx);
+		const nullComparison = compileLiteralNullComparison(operator, left, value);
+		if (nullComparison) return nullComparison;
 		const columnType =
 			decision.type === 'having' && decision.function
 				? resolveHavingAggregatePgType(decision.function, column, ctx)

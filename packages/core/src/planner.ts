@@ -20,6 +20,7 @@ import type {
 	ResolvedIncludeStrategy,
 } from '@dbsp/types';
 import { resolveJsonAggOrderKey, toColumnList } from '@dbsp/types';
+import { resolveIncludeRelationName } from '@dbsp/types/internal';
 import { InvalidOperationError } from './dx/errors.js';
 import { validateLimit } from './dx/limit-validation.js';
 import {
@@ -101,9 +102,10 @@ export class AmbiguousPlanError extends Error {
 		sourceTable: string,
 		targetTable: string,
 		options: readonly string[],
+		intentPath?: string,
 	) {
 		super(
-			`Ambiguous relation from "${sourceTable}" to "${targetTable}". ` +
+			`Ambiguous relation from "${sourceTable}" to "${targetTable}"${intentPath ? ` at "${intentPath}"` : ''}. ` +
 				`Use "via" to specify one of: ${options.join(', ')}`,
 		);
 		this.name = 'AmbiguousPlanError';
@@ -1105,13 +1107,20 @@ function processInclude(
 	intentPath: string,
 	depth: number,
 	ancestorIsLeftJoin = false,
+	parentIncludePath = '',
 ): void {
 	state.relationsAnalyzed++;
+	const pathSegment = include.via || include.relation;
+	const fullPath = parentIncludePath
+		? `${parentIncludePath}.${pathSegment}`
+		: pathSegment;
+	if (
+		include.select?.type === 'fields' &&
+		!Array.isArray(include.select.fields)
+	)
+		throw new Error(`Include ${fullPath} select fields must be an array`);
 	if (include.limit !== undefined)
-		validateLimit(
-			include.limit,
-			`Include ${intentPath}(${include.relation}) limit`,
-		);
+		validateLimit(include.limit, `Include ${intentPath}(${fullPath}) limit`);
 
 	// Check depth
 	if (depth > opts.maxIncludeDepth) {
@@ -1125,15 +1134,22 @@ function processInclude(
 	// Use via hint if provided, otherwise use relation name
 	const relationName = include.via ?? include.relation;
 
-	// Resolve the relation
-	const relation = disambiguateRelation(
-		relationName,
-		sourceTable,
+	// Resolve exact names, target-table names, then camelCase aliases through the shared helper.
+	const relation = resolveIncludeRelationName(
 		model,
-		state,
-		opts,
-		intentPath,
-		include.via,
+		sourceTable,
+		relationName,
+		() =>
+			disambiguateRelation(
+				relationName,
+				sourceTable,
+				model,
+				state,
+				opts,
+				fullPath,
+				include.via,
+			),
+		fullPath,
 	);
 
 	if (!relation) {
@@ -1170,7 +1186,7 @@ function processInclude(
 			relation.includeStrategy !== 'cte'
 		) {
 			throw new UnsupportedStrategyError(
-				`Recursive include at ${intentPath}(${include.relation}) requires strategy 'cte', but relation '${relation.name}' declares includeStrategy '${relation.includeStrategy}'. Use 'auto' or 'cte'.`,
+				`Recursive include at ${intentPath}(${fullPath}) requires strategy 'cte', but relation '${relation.name}' declares includeStrategy '${relation.includeStrategy}'. Use 'auto' or 'cte'.`,
 			);
 		}
 	} else {
@@ -1188,7 +1204,7 @@ function processInclude(
 	if (isRecursiveInclude) {
 		if (include.join !== undefined) {
 			throw new UnsupportedStrategyError(
-				`Recursive include at ${intentPath}(${include.relation}) cannot use join: recursive includes compile as a CTE (oorabona/db-semantic-planner#894).`,
+				`Recursive include at ${intentPath}(${fullPath}) cannot use join: recursive includes compile as a CTE (oorabona/db-semantic-planner#894).`,
 			);
 		}
 		// FIND-013: Guard recursive → cte against dialect capability.
@@ -1197,19 +1213,31 @@ function processInclude(
 		// invalid plan.
 		if (!opts.dialectCapabilities?.supportsRecursiveCTE) {
 			throw new UnsupportedStrategyError(
-				`Recursive include at ${intentPath}(${include.relation}) requires a dialect with supportsRecursiveCTE; current dialect (${opts.dialectCapabilities?.name ?? 'no capabilities'}) does not support it.`,
+				`Recursive include at ${intentPath}(${fullPath}) requires a dialect with supportsRecursiveCTE; current dialect (${opts.dialectCapabilities?.name ?? 'no capabilities'}) does not support it.`,
 			);
 		}
 		resolution = { strategy: 'cte', source: 'recursive' };
 	} else {
 		resolution =
 			include.strategy === 'flat'
-				? determineFlatIncludeStrategy(relation, include, opts, intentPath)
-				: determineIncludeStrategy(relation, include, opts, intentPath);
+				? determineFlatIncludeStrategy(
+						relation,
+						include,
+						opts,
+						intentPath,
+						fullPath,
+					)
+				: determineIncludeStrategy(
+						relation,
+						include,
+						opts,
+						intentPath,
+						fullPath,
+					);
 	}
 	const includeStrategy = resolution.strategy;
 
-	const optionPath = `${intentPath}(${include.relation})`;
+	const optionPath = `${intentPath}(${fullPath})`;
 	if (includeStrategy === 'cte' || includeStrategy === 'join') {
 		for (const option of ['limit', 'orderBy'] as const) {
 			if (include[option] !== undefined) {
@@ -1230,6 +1258,23 @@ function processInclude(
 				`Include ${optionPath} orderBy requires limit with 'lateral' strategy`,
 			);
 	}
+	if (
+		include.select?.type === 'fields' &&
+		include.select.fields.length > 1 &&
+		include.select.fields.includes('*')
+	)
+		throw new Error(
+			`Include ${fullPath} select cannot mix '*' with other fields`,
+		);
+	if (
+		includeStrategy === 'json_agg' &&
+		include.select !== undefined &&
+		include.select.type !== 'fields' &&
+		include.select.type !== 'all'
+	)
+		throw new Error(
+			`JSON_AGG include '${fullPath}' does not support select form '${include.select.type}'`,
+		);
 	if (
 		include.select !== undefined &&
 		(includeStrategy === 'cte' ||
@@ -1263,9 +1308,64 @@ function processInclude(
 	const parentKey =
 		relation.type === 'belongsTo' ? relation.targetKey : relation.sourceKey;
 	const targetTable = model.getTable(relation.target);
-	const targetOrder = targetTable
+	let targetOrder = targetTable
 		? resolveJsonAggOrderKey(targetTable)
 		: undefined;
+
+	if (include.orderBy !== undefined || include.limit !== undefined) {
+		const entries = include.orderBy ?? [];
+		if (
+			!Array.isArray(entries) ||
+			Array.from(entries).some(
+				(entry) =>
+					!entry ||
+					typeof entry.field !== 'string' ||
+					!entry.field ||
+					entry.expression !== undefined ||
+					!['asc', 'desc'].includes(entry.direction) ||
+					(entry.nulls !== undefined &&
+						!['first', 'last'].includes(entry.nulls)),
+			)
+		)
+			throw new Error(
+				`Include ${fullPath} orderBy requires fields, asc/desc direction and first/last nulls`,
+			);
+		for (const entry of entries) {
+			if (!targetTable?.columns.some((column) => column.name === entry.field))
+				throw new Error(
+					`Include ${fullPath} orderBy field "${entry.field}" is not a column of target table "${relation.target}"`,
+				);
+		}
+		const ordered = new Set(entries.map((entry) => entry.field));
+		const unique =
+			targetTable?.columns.some(
+				(column) =>
+					column.unique && !column.nullable && ordered.has(column.name),
+			) ||
+			targetTable?.indexes.some(
+				(index) =>
+					index.unique &&
+					index.valid !== false &&
+					index.ready !== false &&
+					index.where === undefined &&
+					!index.expressions?.length &&
+					index.columns.length > 0 &&
+					index.columns.every(
+						(column) =>
+							ordered.has(column) &&
+							(index.nullsNotDistinct ||
+								targetTable.columns.some(
+									(entry) => entry.name === column && !entry.nullable,
+								)),
+					),
+			);
+		if (!toColumnList(targetTable?.primaryKey).length && !unique)
+			throw new Error(
+				`Include ${fullPath} ${include.limit !== undefined ? 'limit' : 'orderBy'} requires a primary key or unique ordering for a total order`,
+			);
+		if (unique && targetOrder?.fallback)
+			targetOrder = { columns: [...ordered], fallback: false };
+	}
 
 	state.decisions.push({
 		id: includeDecisionId,
@@ -1387,6 +1487,7 @@ function processInclude(
 					`${intentPath}.include[${i}]`,
 					depth + 1,
 					nextAncestorIsLeftJoin,
+					fullPath,
 				);
 			}
 		}
@@ -1406,7 +1507,7 @@ function disambiguateRelation(
 	model: ModelIR,
 	state: PlannerState,
 	opts: Required<PlanOptions>,
-	_intentPath: string,
+	intentPath: string,
 	viaHint?: string,
 ): RelationIR | undefined {
 	// Try direct lookup first
@@ -1470,7 +1571,7 @@ function disambiguateRelation(
 	}
 
 	// Ambiguous - throw error
-	throw new AmbiguousPlanError(sourceTable, relationName, options);
+	throw new AmbiguousPlanError(sourceTable, relationName, options, intentPath);
 }
 
 // ============================================================================
@@ -1585,6 +1686,7 @@ function resolveIncludeAuthority(
 	include: IncludeIntent,
 	opts: Required<PlanOptions>,
 	intentPath: string,
+	fullPath = include.relation,
 ): IncludeStrategyResolution | undefined {
 	if (include.join !== undefined) {
 		if (
@@ -1592,7 +1694,7 @@ function resolveIncludeAuthority(
 			relation.includeStrategy !== 'join'
 		) {
 			throw new UnsupportedStrategyError(
-				`Include at ${intentPath}(${include.relation}) cannot use explicit join because relation '${relation.name}' declares includeStrategy '${relation.includeStrategy}'. Use 'auto' or 'join', or remove include.join.`,
+				`Include at ${intentPath}(${fullPath}) cannot use explicit join because relation '${relation.name}' declares includeStrategy '${relation.includeStrategy}'. Use 'auto' or 'join', or remove include.join.`,
 			);
 		}
 		return { strategy: 'join', source: 'explicit join' };
@@ -1618,12 +1720,14 @@ function determineIncludeStrategy(
 	include: IncludeIntent,
 	opts: Required<PlanOptions>,
 	intentPath: string,
+	fullPath = include.relation,
 ): IncludeStrategyResolution {
 	const resolution = resolveIncludeAuthority(
 		relation,
 		include,
 		opts,
 		intentPath,
+		fullPath,
 	) ?? {
 		strategy: selectNestedOutputStrategy(opts.dialectCapabilities),
 		source: 'nested output' as const,
@@ -1638,6 +1742,7 @@ function determineFlatIncludeStrategy(
 	include: IncludeIntent,
 	opts: Required<PlanOptions>,
 	intentPath: string,
+	fullPath = include.relation,
 ): IncludeStrategyResolution {
 	const needsLateral = include.limit != null || hasNestedLimit(include);
 	const resolution = resolveIncludeAuthority(
@@ -1645,6 +1750,7 @@ function determineFlatIncludeStrategy(
 		include,
 		opts,
 		intentPath,
+		fullPath,
 	) ?? {
 		strategy: needsLateral ? ('lateral' as const) : ('join' as const),
 		source: needsLateral
@@ -1654,13 +1760,13 @@ function determineFlatIncludeStrategy(
 	const { strategy: selected, source } = resolution;
 	if (selected === 'json_agg' || selected === 'cte') {
 		throw new UnsupportedStrategyError(
-			`Flat output for relation '${relation.name}' cannot use relation includeStrategy hint '${selected}'. Use 'auto', 'join', or 'lateral'.`,
+			`Flat output for relation '${fullPath}' cannot use relation includeStrategy hint '${selected}'. Use 'auto', 'join', or 'lateral'.`,
 		);
 	}
 	if (selected === 'join' && needsLateral) {
 		throw new InvalidOperationError(
 			'include',
-			`Flat output for relation '${relation.name}' cannot use 'join' selected by ${source === 'relation hint' ? 'relation includeStrategy hint' : source} because the include or a nested include has a per-parent limit. Accepted strategies for flat output: 'join', 'lateral'; per-parent limits require 'lateral' with a dialect that supports lateral joins.`,
+			`Flat output for relation '${fullPath}' cannot use 'join' selected by ${source === 'relation hint' ? 'relation includeStrategy hint' : source} because the include or a nested include has a per-parent limit. Accepted strategies for flat output: 'join', 'lateral'; per-parent limits require 'lateral' with a dialect that supports lateral joins.`,
 		);
 	}
 	if (
@@ -1668,7 +1774,7 @@ function determineFlatIncludeStrategy(
 		!opts.dialectCapabilities?.supportsLateralJoin
 	) {
 		throw new UnsupportedStrategyError(
-			`Flat output for relation '${relation.name}' requires a dialect with supportsLateralJoin; current dialect (${opts.dialectCapabilities?.name ?? 'no capabilities'}) does not support it. Accepted strategies for flat output: 'join', 'lateral'.`,
+			`Flat output for relation '${fullPath}' requires a dialect with supportsLateralJoin; current dialect (${opts.dialectCapabilities?.name ?? 'no capabilities'}) does not support it. Accepted strategies for flat output: 'join', 'lateral'.`,
 		);
 	}
 	validateIncludeStrategy(selected, opts.dialectCapabilities);

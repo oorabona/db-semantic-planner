@@ -3963,6 +3963,10 @@
 				"kind": "type"
 			},
 			{
+				"name": "resolveIncludeRelationName",
+				"kind": "value"
+			},
+			{
 				"name": "resolveJsonAggOrderKey",
 				"kind": "value"
 			},
@@ -4389,6 +4393,26 @@
 			{
 				"name": "WindowOrderBy",
 				"kind": "type"
+			},
+			{
+				"name": "resolveDeclaredRelationPath",
+				"kind": "value"
+			},
+			{
+				"name": "DeclaredRelationPathRelation",
+				"kind": "type"
+			},
+			{
+				"name": "DeclaredRelationPathModel",
+				"kind": "type"
+			},
+			{
+				"name": "DeclaredRelationPathHop",
+				"kind": "type"
+			},
+			{
+				"name": "DeclaredRelationPathResult",
+				"kind": "type"
 			}
 		],
 		"runtime": [
@@ -4464,11 +4488,13 @@
 			"ledgerAddressParentJson",
 			"markNqlTrustedRelationFilter",
 			"refusalFor",
+			"resolveIncludeRelationName",
 			"resolveJsonAggOrderKey",
 			"resolveOutputReadHandling",
 			"sameControllerIdentity",
 			"sameLedgerAddress",
-			"toColumnList"
+			"toColumnList",
+			"resolveDeclaredRelationPath"
 		],
 		"built": true
 	}

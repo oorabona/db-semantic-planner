@@ -9,7 +9,11 @@
  */
 
 import { toColumnList } from './column-list.js';
-import type { NqlBindingRelationType } from './model-ir.js';
+import type {
+	ModelIR,
+	NqlBindingRelationType,
+	RelationIR,
+} from './model-ir.js';
 
 // Internal-only build utilities (NOT part of public API)
 export type { IntentBuilder, Mutable } from './builders.js';
@@ -430,6 +434,13 @@ export type {
 	ConnectionAvailability,
 	IntrospectionOptions,
 } from './adapter.js';
+export {
+	type DeclaredRelationPathHop,
+	type DeclaredRelationPathModel,
+	type DeclaredRelationPathRelation,
+	type DeclaredRelationPathResult,
+	resolveDeclaredRelationPath,
+} from './declared-relation-path.js';
 // Re-export all public types for convenience
 export * from './index.js';
 export type { SubqueryExpressionIntent } from './intent/expression-intent.js';
@@ -508,3 +519,41 @@ export {
 	REFUSAL_VOCABULARY,
 	type RefusalCode,
 } from './transition/refusal.js';
+
+/**
+ * Resolve includes by exact name, target-table disambiguation, then camelCase fallback.
+ * @internal
+ */
+export function resolveIncludeRelationName(
+	model: ModelIR,
+	sourceTable: string,
+	name: string,
+	disambiguate?: () => RelationIR | undefined,
+	includePath?: string,
+): RelationIR | undefined {
+	const exact = model.getRelation(`${sourceTable}.${name}`);
+	if (exact) return exact;
+	const targets = model
+		.getRelationsFrom(sourceTable)
+		.filter((r) => r.target === name);
+	if (targets.length > 0) {
+		if (disambiguate) return disambiguate();
+		if (targets.length === 1) return targets[0];
+		throw new Error(
+			`Ambiguous include relation "${name}" from table "${sourceTable}"`,
+		);
+	}
+	const aliases = model
+		.getRelationsFrom(sourceTable)
+		.filter(
+			(relation) =>
+				relation.name.replace(/_([a-z])/g, (_, c: string) =>
+					c.toUpperCase(),
+				) === name,
+		);
+	if (aliases.length > 1)
+		throw new Error(
+			`Ambiguous include relation "${name}" from table "${sourceTable}"${includePath ? ` at "${includePath}"` : ''}. Use the exact relation name or "via" to specify one of: ${aliases.map((relation) => relation.name).join(', ')}`,
+		);
+	return aliases[0] ?? disambiguate?.();
+}

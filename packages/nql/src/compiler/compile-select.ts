@@ -158,9 +158,9 @@ function validateSelectPathExpression(
 
 	assertNoBindingRelationPath(ctx, ctx.currentFromTable, segments.join('.'));
 	if (!ctx.validator) return;
-	const targetTable = ctx.validator.resolveRelationTarget(
+	const targetTable = ctx.validator.resolveRelationPathTarget(
 		ctx.currentFromTable,
-		segments[0]!,
+		segments.slice(0, -1),
 	);
 	if (targetTable) {
 		ctx.validator.validateColumn(targetTable, segments[segments.length - 1]!);
@@ -744,7 +744,10 @@ function compileMultiSegmentPath(
 		const targetTable =
 			lastBindingHop?.target ??
 			bindingRelation?.targetTable ??
-			ctx.validator.resolveRelationTarget(ctx.currentFromTable, segments[0]!);
+			ctx.validator.resolveRelationPathTarget(
+				ctx.currentFromTable,
+				segments.slice(0, -1),
+			);
 		if (targetTable) {
 			ctx.validator.validateColumn(targetTable, column);
 		}

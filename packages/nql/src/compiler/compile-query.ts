@@ -1488,18 +1488,16 @@ export function getQueryOutputSchema(
 		if (relationPath.length === 0 || relationPath.some((part) => part === '')) {
 			return undefined;
 		}
-		let targetTable = intent.from;
-		for (const relationName of relationPath) {
-			const relation = ctx.validator.getRelation(targetTable, relationName);
-			if (relation === undefined) return undefined;
+		const path = ctx.validator.resolveDeclaredPath(intent.from, relationPath);
+		if (!path.ok) return undefined;
+		for (const relation of path.relations) {
 			if (
 				(relation.type !== 'belongsTo' && relation.type !== 'hasOne') ||
 				relation.recursive !== undefined
-			) {
+			)
 				return undefined;
-			}
-			targetTable = relation.target;
 		}
+		const targetTable = path.targetTable;
 		const resolvedColumn = ctx.validator.resolvePhysicalColumnName(
 			targetTable,
 			expr.column,

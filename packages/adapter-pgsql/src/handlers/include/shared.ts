@@ -115,7 +115,14 @@ export function resolveIncludeOrder(
 			...(entry.nulls !== undefined && { nulls: entry.nulls }),
 		};
 	});
-	const pk = toColumnList(table?.primaryKey);
+	const modelKey = toColumnList(table?.primaryKey);
+	const decisionKey =
+		decision.orderByFallback !== true &&
+		Array.isArray(decision.orderBy) &&
+		decision.orderBy.every((item) => typeof item === 'string')
+			? (decision.orderBy as readonly string[])
+			: [];
+	const pk = modelKey.length ? modelKey : decisionKey;
 	const ordered = new Set(order.map((entry) => entry.field));
 	const unique =
 		table?.columns.some(

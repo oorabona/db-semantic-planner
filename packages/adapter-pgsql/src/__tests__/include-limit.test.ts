@@ -51,7 +51,7 @@ describe('limited json_agg includes', () => {
 					})
 					.dump(),
 			).toThrow(
-				`JSON_AGG include 'comments' does not support select form '${select.type}'`,
+				`JSON_AGG include 'posts.comments' does not support select form '${select.type}'`,
 			);
 		});
 	}

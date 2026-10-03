@@ -405,6 +405,8 @@ function predicates(
 			],
 		),
 		['eq-null', eq(field('score'), null)],
+		['neq-null', neq(field('score'), null)],
+		['isDistinctFrom-null', isDistinctFrom(field('score'), null)],
 		['like', like(field('name'), 'a%')],
 		['ilike', like(field('name'), 'B%', true)],
 		['like-escape', like(field('name'), 'c!_%', { escape: '!' })],

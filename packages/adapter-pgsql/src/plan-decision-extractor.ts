@@ -16,6 +16,7 @@ import type {
 	WhereIntent,
 } from '@dbsp/types';
 import { type ColumnListInput, toColumnList } from '@dbsp/types';
+import { resolveIncludeRelationName } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import {
 	DEFAULT_PK_COLUMN,
@@ -167,9 +168,18 @@ function resolveIncludeByPath(
 /** Shared include field projection; JOIN adds its hydration key separately. */
 function includeSelectedColumns(
 	select: SelectIntent | undefined,
+	path: string,
 ): readonly string[] | undefined {
 	if (!select || select.type === 'all') return undefined;
-	if (select.type === 'fields') return select.fields;
+	if (select.type === 'fields') {
+		if (!Array.isArray(select.fields))
+			throw new Error(`Include ${path} select fields must be an array`);
+		if (select.fields.length > 1 && select.fields.includes('*'))
+			throw new Error(
+				`Include ${path} select cannot mix '*' with other fields`,
+			);
+		return select.fields;
+	}
 	return undefined;
 }
 
@@ -1753,7 +1763,16 @@ function toIncludeDecision(
 	const limit = includeIntent?.limit;
 	const columns =
 		choice === 'json_agg'
-			? includeSelectedColumns(includeIntent?.select)
+			? includeSelectedColumns(
+					includeIntent?.select,
+					deriveRelationPathFromIntentPath(
+						Array.isArray(plan.intent?.include)
+							? plan.intent.include
+							: undefined,
+						context.intentPath,
+						relationName,
+					) ?? relationName,
+				)
 			: undefined;
 
 	return {
@@ -1836,10 +1855,11 @@ function toJoinIncludeDecision(
 		| undefined;
 
 	let columns: string[] = [defaultPk];
-	if (includeIntent?.select?.type === 'fields' && includeIntent.select.fields) {
-		const fields = includeSelectedColumns(includeIntent.select)!.filter(
-			(f) => f !== defaultPk,
-		);
+	if (includeIntent?.select?.type === 'fields') {
+		const fields = includeSelectedColumns(
+			includeIntent.select,
+			relationPath,
+		)!.filter((f) => f !== defaultPk);
 		columns = [defaultPk, ...fields];
 	}
 
@@ -1895,26 +1915,7 @@ function toJoinIncludeDecision(
 // ============================================================================
 
 /**
- * Convert a snake_case identifier to camelCase.
- * e.g. 'enclosing_symbol' → 'enclosingSymbol'
- */
-function snakeToCamel(s: string): string {
-	return s.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
-}
-
-/**
- * Synthesize join includeStrategy decisions for intent-based includes that the planner
- * failed to emit decisions for (e.g. when the include alias is camelCase but the model
- * relation is snake_case: `include('enclosingSymbol')` while model has `enclosing_symbol`).
- *
- * This is an adapter-level fallback: when the planner's `disambiguateRelation` cannot
- * match the camelCase alias to a registered relation, no `include-strategy` decision is
- * emitted. The adapter detects the gap and synthesizes the join decision directly from
- * the model by scanning `getRelationsFrom(sourceTable)` and matching
- * `snakeToCamel(rel.name) === alias`.
- *
- * Only synthesizes decisions for `{ join: 'inner' | 'left' }` includes that are not
- * already covered by an existing includeStrategy decision.
+ * Recover explicit joins from legacy/incomplete reports using the planner's shared exact-name, target-table, then camelCase resolution order.
  */
 export function synthesizeMissingJoinDecisions(
 	plan: PlanReport,
@@ -1935,7 +1936,6 @@ export function synthesizeMissingJoinDecisions(
 	if (!includes || includes.length === 0) return [];
 
 	const sourceTable = plan.rootTable;
-	const relationsFromSource = model.getRelationsFrom(sourceTable);
 
 	const synthesized: PlanDecision[] = [];
 
@@ -1946,14 +1946,18 @@ export function synthesizeMissingJoinDecisions(
 		if (inc.join !== 'inner' && inc.join !== 'left') continue;
 
 		// Already covered by a planner-emitted decision
-		if (coveredRelations.has(alias)) continue;
+		if (
+			coveredRelations.has(alias) ||
+			plan.decisions.some(
+				(decision) =>
+					decision.type === 'include-strategy' &&
+					decision.context.sourceTable === sourceTable &&
+					decision.context.includeAlias === alias,
+			)
+		)
+			continue;
 
-		// Try to find the relation in the model by:
-		// 1. Direct name match (alias === rel.name)
-		// 2. camelCase conversion (snakeToCamel(rel.name) === alias)
-		const rel = relationsFromSource.find(
-			(r) => r.name === alias || snakeToCamel(r.name) === alias,
-		);
+		const rel = resolveIncludeRelationName(model, sourceTable, alias);
 		if (!rel) continue;
 
 		// Derive FK from RelationIR
@@ -1970,8 +1974,8 @@ export function synthesizeMissingJoinDecisions(
 
 		// Build column list (PK always included for NULL-detection)
 		let columns: string[] = [defaultPk];
-		if (inc.select?.type === 'fields' && inc.select.fields) {
-			const extraFields = includeSelectedColumns(inc.select)!.filter(
+		if (inc.select?.type === 'fields') {
+			const extraFields = includeSelectedColumns(inc.select, alias)!.filter(
 				(f) => f !== defaultPk,
 			);
 			columns = [defaultPk, ...extraFields];
@@ -2087,7 +2091,14 @@ function toJsonAggDecision(
 		relationName,
 	);
 	const limit = includeIntent?.limit;
-	const columns = includeSelectedColumns(includeIntent?.select);
+	const columns = includeSelectedColumns(
+		includeIntent?.select,
+		deriveRelationPathFromIntentPath(
+			Array.isArray(plan.intent?.include) ? plan.intent.include : undefined,
+			context.intentPath,
+			relationName,
+		) ?? relationName,
+	);
 	return {
 		type: 'selectJsonAgg',
 		...(columns !== undefined && { columns }),
@@ -2227,13 +2238,11 @@ export function extractLeftJoinIncludeDecisions(
 		// Extract columns from include intent's select
 		// PK is always included for NULL-detection (missing relation)
 		let columns: string[] = [defaultPk];
-		if (
-			includeIntent?.select?.type === 'fields' &&
-			includeIntent.select.fields
-		) {
-			const fields = includeSelectedColumns(includeIntent.select)!.filter(
-				(f) => f !== defaultPk,
-			);
+		if (includeIntent?.select?.type === 'fields') {
+			const fields = includeSelectedColumns(
+				includeIntent.select,
+				relationName,
+			)!.filter((f) => f !== defaultPk);
 			columns = [defaultPk, ...fields];
 		}
 

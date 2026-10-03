@@ -115,7 +115,7 @@ describe('json-agg handler', () => {
 		};
 		expect(() =>
 			jsonAggIncludeHandler.compile(
-				buildDecision({ limit: 2 }),
+				buildDecision({ limit: 2, orderBy: [] }),
 				ctx,
 				createCompilerState(),
 			),
@@ -167,6 +167,7 @@ describe('json-agg handler', () => {
 		const result = jsonAggIncludeHandler.compile(
 			buildDecision({
 				limit: 1,
+				orderBy: [],
 				includeOrderBy: [{ field: 'slug', direction: 'asc' }],
 			}),
 			ctx,

@@ -285,3 +285,42 @@ describe('Issue 16: include with explicit .columns() — hydration suppression',
 		expect(sql).toContain('enclosing_symbol_id');
 	});
 });
+
+describe('legacy synthesis camelCase collisions', () => {
+	it('refuses every colliding candidate with an exact message', () => {
+		const collisionModel = {
+			...mockModel,
+			getRelationsFrom: () => [
+				{
+					...mockModel.getRelationsFrom('variable_defs')[0],
+					name: 'foo_b_ar',
+					target: 'secrets',
+				},
+				{
+					...mockModel.getRelationsFrom('variable_defs')[0],
+					name: 'foo_bAr',
+					target: 'publics',
+				},
+			],
+		} as unknown as ModelIR;
+		const base = buildExplicitColumnsPlan();
+		const report: PlanReport = {
+			...base,
+			intent: {
+				...base.intent,
+				select: { type: 'all' },
+				include: [{ relation: 'fooBAr', join: 'left' }],
+			},
+		};
+		let error: unknown;
+		try {
+			compileSelect(report, undefined, { ...deps, model: collisionModel });
+		} catch (caught) {
+			error = caught;
+		}
+		expect(error).toBeInstanceOf(Error);
+		expect((error as Error).message).toBe(
+			'Ambiguous include relation "fooBAr" from table "variable_defs". Use the exact relation name or "via" to specify one of: foo_b_ar, foo_bAr',
+		);
+	});
+});
