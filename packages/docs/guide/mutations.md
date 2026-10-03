@@ -172,7 +172,7 @@ orm.upsert('users')
   .doUpdate()
   .dump();
 
-// Update only specific columns on conflict
+// Insert the values() row unchanged; apply only the specified doUpdate() values on conflict.
 orm.upsert('users')
   .values({ name: 'Alice', email: 'alice@example.com', active: true })
   .onConflict(['email'])
@@ -255,8 +255,8 @@ orm.upsert('products')
   .doUpdate({ price: 99.99 }, eq('active', true))
   .dump();
 // SQL: INSERT INTO "products" ("sku", "price", "active") VALUES ($1, $2, $3)
-// ON CONFLICT ("sku") DO UPDATE SET "price" = excluded."price"
-// WHERE "products"."active" = $4
+// ON CONFLICT ("sku") DO UPDATE SET "price" = $4
+// WHERE "products"."active" = $5
 ```
 
 This `WHERE` belongs to the `DO UPDATE` action. If it evaluates to false, PostgreSQL leaves the existing conflicting row unchanged.

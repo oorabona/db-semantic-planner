@@ -133,22 +133,20 @@ describe('UPSERT-RAW: raw SQL in doUpdate() set', () => {
 		const result = adapter.compileUpsert(intent as any);
 		const normalized = normalizeSQL(result.sql);
 
-		// name uses EXCLUDED (scalar merged into INSERT row)
-		expect(normalized).toContain('name = excluded.name');
+		// name binds separately from the INSERT row
+		expect(normalized).toContain('name = $3');
 		// last_parsed uses raw now()
 		expect(normalized).toContain('last_parsed = now()');
 		expect(normalized).toContain('DO UPDATE SET');
-		// INSERT parameters: id + name (scalar "updated.ts" merged in)
-		expect(result.parameters).toHaveLength(2);
-		expect(result.parameters[0]).toBe(1);
-		expect(result.parameters[1]).toBe('updated.ts');
+		// INSERT parameters remain intact; SET adds one parameter
+		expect(result.parameters).toEqual([1, 'original.ts', 'updated.ts']);
 	});
 
 	// ---------------------------------------------------------------------------
-	// AC-4: existing scalar doUpdate behavior preserved
+	// AC-4: explicit scalar doUpdate binding
 	// ---------------------------------------------------------------------------
 
-	it('AC-4: existing scalar doUpdate still uses EXCLUDED.column', () => {
+	it('AC-4: scalar doUpdate binds its own value', () => {
 		const adapter = createRawMutationAdapter();
 		const intent = makeUpsertIntent([{ id: 1, name: 'test.ts' }], ['id'], {
 			name: 'updated.ts',
@@ -157,10 +155,10 @@ describe('UPSERT-RAW: raw SQL in doUpdate() set', () => {
 		const result = adapter.compileUpsert(intent as any);
 		const normalized = normalizeSQL(result.sql);
 
-		expect(normalized).toContain('name = excluded.name');
+		expect(normalized).toContain('name = $3');
 		expect(normalized).toContain('DO UPDATE SET');
-		// Scalar set value merged into INSERT row
-		expect(result.parameters).toEqual([1, 'updated.ts']);
+		// SET values do not overwrite INSERT parameters
+		expect(result.parameters).toEqual([1, 'test.ts', 'updated.ts']);
 	});
 
 	// ---------------------------------------------------------------------------
