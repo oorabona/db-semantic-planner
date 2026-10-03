@@ -424,58 +424,6 @@ describe('#891 recursive anchor review repairs', () => {
 		};
 		expect(compile(eq('data', value)).parameters).toEqual([value]);
 	});
-	for (const reserved of [
-		'__depth',
-		'__visited',
-		'__path',
-		'is_cycle',
-		'__cycle_path',
-	]) {
-		for (const field of [
-			'nodeId',
-			'parentId',
-			'edgeFrom',
-			'edgeTo',
-			'select',
-		] as const) {
-			it(`EDGE1 reserved ${field} ${reserved}`, () => {
-				const base = intent(
-					eq('id', 1),
-					field === 'parentId' || field === 'nodeId',
-				);
-				const query = {
-					...base,
-					start: {
-						...base.start,
-						...(field === 'select' ? { select: [reserved] } : {}),
-					},
-					traversal: {
-						...base.traversal,
-						...(base.traversal.kind === 'adjacency'
-							? { direction: 'ancestors' as const }
-							: {}),
-						...(field !== 'select' ? { [field]: reserved } : {}),
-					},
-				} as RecursiveIntent;
-				expect(() =>
-					adapter.compileRecursive(planRecursive(query, db.model), db.model),
-				).toThrow(
-					new Error(
-						`Recursive column '${reserved}' conflicts with reserved CTE output name '${reserved}'.`,
-					),
-				);
-				// Direct reports exercise compiler validation independently of planning.
-				const report = planRecursive(base, db.model);
-				expect(() =>
-					adapter.compileRecursive({ ...report, intent: query }, db.model),
-				).toThrow(
-					new Error(
-						`Recursive column '${reserved}' conflicts with reserved CTE output name '${reserved}'.`,
-					),
-				);
-			});
-		}
-	}
 	for (const mode of ['some', 'every', 'none'] as const) {
 		for (const nested of [false, true]) {
 			it(`SEC1 ${mode} relation filter recursive options refused at depth ${nested ? 2 : 1}`, () => {

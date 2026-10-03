@@ -278,8 +278,3 @@ console.log(params); // [7, 20]
 - **`UNION ALL` (default) does not deduplicate.** For trees this is fine — each path is unique. For graphs where the same node is reachable via multiple paths, use `unionAll: false` to avoid duplicate rows, at the cost of a deduplication pass per iteration.
 - **No adapter = runtime error.** Calling `.dump()` or `.all()` on a builder constructed without an adapter throws `InvalidOperationError`. Always obtain the builder via `orm.recursive()` (which has an adapter bound), not via `createRawCteBuilder()` directly unless you pass an adapter explicitly.
 - **Schema scoping is inherited.** If you obtained the ORM via `orm.withSchema('tenant_123')`, the recursive query will use `"tenant_123"."table"` in the base and step queries automatically.
-
-Recursive relation predicates with recursive options anywhere inside `start.where` are refused.
-Recursive node IDs, adjacency parent IDs, edge columns, and projected start columns
-using reserved CTE output names (`__depth`, `__visited`, `__path`, `is_cycle`,
-`__cycle_path`) are refused.

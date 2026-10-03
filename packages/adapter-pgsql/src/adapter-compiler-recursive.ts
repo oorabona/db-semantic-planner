@@ -427,48 +427,6 @@ export function compileRecursive<T = unknown>(
 			`PgAdapter.compileRecursive: Unsupported traversal kind '${traversal.kind}'`,
 		);
 	}
-	// These are outputs emitted by the CTE builder and its CYCLE clause.
-	const reserved = new Set([
-		'__depth',
-		'__visited',
-		'__path',
-		'is_cycle',
-		'__cycle_path',
-	]);
-	const columns = [
-		{ table: traversal.nodeTable, column: traversal.nodeId },
-		...(traversal.kind === 'adjacency'
-			? [{ table: traversal.nodeTable, column: traversal.parentId }]
-			: [traversal.edgeFrom, traversal.edgeTo].map((column) => ({
-					table: traversal.edgeTable,
-					column,
-				}))),
-		...(intent.start.nodeIdExpr.kind === 'column'
-			? [intent.start.nodeIdExpr.name]
-			: []),
-		...(intent.start.select ?? []),
-	].map((entry) =>
-		typeof entry === 'string'
-			? { table: traversal.nodeTable, column: entry }
-			: entry,
-	);
-	for (const { table, column } of columns) {
-		const emitted = resolveDeclaredIdentifier(
-			deps.declaredNames,
-			deps.dbCasing ?? 'preserve',
-			{
-				kind: 'column',
-				table,
-				column,
-			},
-		);
-		if (reserved.has(column) || reserved.has(emitted)) {
-			const name = reserved.has(column) ? column : emitted;
-			throw new Error(
-				`Recursive column '${column}' conflicts with reserved CTE output name '${name}'.`,
-			);
-		}
-	}
 	const startTable = intent.start.from ?? traversal.nodeTable;
 
 	if (startTable !== traversal.nodeTable) {
