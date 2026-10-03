@@ -1,12 +1,15 @@
 import {
 	and,
 	any,
+	caseWhen,
 	createOrm,
 	eq,
 	every,
 	exists,
+	fn,
 	inArray,
 	like,
+	namedArg,
 	neq,
 	none,
 	not,
@@ -19,8 +22,10 @@ import {
 	schema,
 	some,
 	subquery,
+	unsafeAsPredicate,
 } from '@dbsp/core';
 import type { RecursiveIntent, WhereIntent } from '@dbsp/types';
+import { markNqlTrustedRelationFilter } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -30,6 +35,11 @@ const columns = {
 	score: { type: 'integer' },
 	period: { type: 'daterange' },
 	data: { type: 'jsonb' },
+	__depth: { type: 'integer' },
+	__visited: { type: 'integer' },
+	__path: { type: 'integer' },
+	is_cycle: { type: 'integer' },
+	__cycle_path: { type: 'integer' },
 } as const;
 const db = schema({
 	users: columns,
@@ -43,6 +53,7 @@ const db = schema({
 	},
 	seeds: columns,
 	edges: {
+		...columns,
 		id: { type: 'integer', primaryKey: true },
 		from_id: { type: 'integer' },
 		to_id: { type: 'integer' },
@@ -328,6 +339,142 @@ describe('#891 recursive anchor review repairs', () => {
 				),
 			);
 		});
+	}
+	for (const predicate of [exists, notExists]) {
+		for (const nested of [false, true]) {
+			it(`SEC1 CASE ${predicate === exists ? 'exists' : 'notExists'} nested=${nested}`, () => {
+				const leaf = predicate('posts', {
+					recursive: { direction: 'down', through: 'posts', maxDepth: 3 },
+					where: eq('score', 71),
+				});
+				const condition: WhereIntent = nested
+					? {
+							kind: 'expression',
+							expr: unsafeAsPredicate(caseWhen(leaf, true).else(false)).intent,
+						}
+					: leaf;
+				expect(() =>
+					compile({
+						kind: 'expression',
+						expr: unsafeAsPredicate(caseWhen(condition, true).else(false))
+							.intent,
+					}),
+				).toThrow(
+					new Error(
+						`start.where ${predicate === exists ? 'exists' : 'notExists'}('posts'): recursive relation predicates are not supported in a recursive anchor.`,
+					),
+				);
+			});
+		}
+	}
+	it('SEC1 CASE inside named function argument and subquery HAVING refuses trusted recursion', () => {
+		const leaf = markNqlTrustedRelationFilter(
+			{
+				kind: 'relationFilter' as const,
+				relation: 'posts',
+				mode: 'some' as const,
+				where: and(),
+			},
+			{
+				relation: 'posts',
+				targetTable: 'posts',
+				sourceColumn: ['id'],
+				targetColumn: ['authorId'],
+				hops: [],
+				selectedColumn: 'id',
+				cardinality: 'many',
+				relationType: 'hasMany',
+				recursive: {
+					direction: 'down',
+					maxDepth: 3,
+					selfRefColumn: 'authorId',
+					targetKeyColumn: 'id',
+				},
+			},
+		);
+		const expr = fn(
+			'coalesce',
+			namedArg('arg', caseWhen(leaf, true).else(false)),
+		);
+		const condition: WhereIntent = {
+			kind: 'expression',
+			expr: expr.intent,
+			operator: 'eq',
+			value: true,
+		};
+		for (const where of [
+			condition,
+			{
+				kind: 'rawExists',
+				subquery: { type: 'select', from: 'posts', having: condition },
+			},
+		] as WhereIntent[]) {
+			expect(() => compile(where)).toThrow(
+				new Error(
+					"start.where relationFilter('posts'): recursive relation predicates are not supported in a recursive anchor.",
+				),
+			);
+		}
+	});
+	it('SEC1 bound JSON resembling a recursive predicate remains data', () => {
+		const value = {
+			kind: 'exists',
+			relation: 'posts',
+			recursive: { maxDepth: 3 },
+		};
+		expect(compile(eq('data', value)).parameters).toEqual([value]);
+	});
+	for (const reserved of [
+		'__depth',
+		'__visited',
+		'__path',
+		'is_cycle',
+		'__cycle_path',
+	]) {
+		for (const field of [
+			'nodeId',
+			'parentId',
+			'edgeFrom',
+			'edgeTo',
+			'select',
+		] as const) {
+			it(`EDGE1 reserved ${field} ${reserved}`, () => {
+				const base = intent(
+					eq('id', 1),
+					field === 'parentId' || field === 'nodeId',
+				);
+				const query = {
+					...base,
+					start: {
+						...base.start,
+						...(field === 'select' ? { select: [reserved] } : {}),
+					},
+					traversal: {
+						...base.traversal,
+						...(base.traversal.kind === 'adjacency'
+							? { direction: 'ancestors' as const }
+							: {}),
+						...(field !== 'select' ? { [field]: reserved } : {}),
+					},
+				} as RecursiveIntent;
+				expect(() =>
+					adapter.compileRecursive(planRecursive(query, db.model), db.model),
+				).toThrow(
+					new Error(
+						`Recursive column '${reserved}' conflicts with reserved CTE output name '${reserved}'.`,
+					),
+				);
+				// Direct reports exercise compiler validation independently of planning.
+				const report = planRecursive(base, db.model);
+				expect(() =>
+					adapter.compileRecursive({ ...report, intent: query }, db.model),
+				).toThrow(
+					new Error(
+						`Recursive column '${reserved}' conflicts with reserved CTE output name '${reserved}'.`,
+					),
+				);
+			});
+		}
 	}
 	for (const mode of ['some', 'every', 'none'] as const) {
 		for (const nested of [false, true]) {
