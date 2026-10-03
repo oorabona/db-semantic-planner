@@ -212,7 +212,7 @@
 			"position": "having-filter",
 			"kind": "range-overlaps",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.period && $1) > $2",
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.period && CAST($1 AS daterange)) > $2",
 			"params": ["[2026-01-01,2026-02-01)", 19],
 			"error": null
 		},
@@ -220,7 +220,7 @@
 			"position": "having-filter",
 			"kind": "range-overlaps",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.period && $1 AND users.score = $2) > $3",
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.period && CAST($1 AS daterange) AND users.score = $2) > $3",
 			"params": ["[2026-01-01,2026-02-01)", 13, 19],
 			"error": null
 		},
@@ -228,7 +228,7 @@
 			"position": "having-filter",
 			"kind": "range-overlaps",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.period && $1 OR users.score = $2) > $3",
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.period && CAST($1 AS daterange) OR users.score = $2) > $3",
 			"params": ["[2026-01-01,2026-02-01)", 13, 19],
 			"error": null
 		},
@@ -236,7 +236,7 @@
 			"position": "having-filter",
 			"kind": "range-overlaps",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE NOT (users.period && $1)) > $2",
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE NOT (users.period && CAST($1 AS daterange))) > $2",
 			"params": ["[2026-01-01,2026-02-01)", 19],
 			"error": null
 		},
@@ -260,7 +260,7 @@
 			"position": "having-filter",
 			"kind": "range-overlaps",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.score = $1 AND (NOT (users.period && $2) OR users.score = $3)) > $4",
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.score = $1 AND (NOT (users.period && CAST($2 AS daterange)) OR users.score = $3)) > $4",
 			"params": [13, "[2026-01-01,2026-02-01)", 17, 19],
 			"error": null
 		},
@@ -268,7 +268,7 @@
 			"position": "having-filter",
 			"kind": "range-contains",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.period @> $1) > $2",
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.period @> CAST($1 AS daterange)) > $2",
 			"params": ["[2026-01-01,2026-02-01)", 19],
 			"error": null
 		},
@@ -276,7 +276,7 @@
 			"position": "having-filter",
 			"kind": "range-contains",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.period @> $1 AND users.score = $2) > $3",
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.period @> CAST($1 AS daterange) AND users.score = $2) > $3",
 			"params": ["[2026-01-01,2026-02-01)", 13, 19],
 			"error": null
 		},
@@ -284,7 +284,7 @@
 			"position": "having-filter",
 			"kind": "range-contains",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.period @> $1 OR users.score = $2) > $3",
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.period @> CAST($1 AS daterange) OR users.score = $2) > $3",
 			"params": ["[2026-01-01,2026-02-01)", 13, 19],
 			"error": null
 		},
@@ -292,7 +292,7 @@
 			"position": "having-filter",
 			"kind": "range-contains",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE NOT (users.period @> $1)) > $2",
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE NOT (users.period @> CAST($1 AS daterange))) > $2",
 			"params": ["[2026-01-01,2026-02-01)", 19],
 			"error": null
 		},
@@ -316,7 +316,7 @@
 			"position": "having-filter",
 			"kind": "range-contains",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.score = $1 AND (NOT (users.period @> $2) OR users.score = $3)) > $4",
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.score = $1 AND (NOT (users.period @> CAST($2 AS daterange)) OR users.score = $3)) > $4",
 			"params": [13, "[2026-01-01,2026-02-01)", 17, 19],
 			"error": null
 		},
@@ -324,7 +324,7 @@
 			"position": "having-filter",
 			"kind": "range-contains-point",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.period @> $1) > $2",
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.period @> CAST($1 AS date)) > $2",
 			"params": ["2026-01-15", 19],
 			"error": null
 		},
@@ -332,7 +332,7 @@
 			"position": "having-filter",
 			"kind": "range-contains-point",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.period @> $1 AND users.score = $2) > $3",
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.period @> CAST($1 AS date) AND users.score = $2) > $3",
 			"params": ["2026-01-15", 13, 19],
 			"error": null
 		},
@@ -340,7 +340,7 @@
 			"position": "having-filter",
 			"kind": "range-contains-point",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.period @> $1 OR users.score = $2) > $3",
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.period @> CAST($1 AS date) OR users.score = $2) > $3",
 			"params": ["2026-01-15", 13, 19],
 			"error": null
 		},
@@ -348,7 +348,7 @@
 			"position": "having-filter",
 			"kind": "range-contains-point",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE NOT (users.period @> $1)) > $2",
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE NOT (users.period @> CAST($1 AS date))) > $2",
 			"params": ["2026-01-15", 19],
 			"error": null
 		},
@@ -372,7 +372,7 @@
 			"position": "having-filter",
 			"kind": "range-contains-point",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.score = $1 AND (NOT (users.period @> $2) OR users.score = $3)) > $4",
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.score = $1 AND (NOT (users.period @> CAST($2 AS date)) OR users.score = $3)) > $4",
 			"params": [13, "2026-01-15", 17, 19],
 			"error": null
 		},
@@ -380,7 +380,7 @@
 			"position": "having-filter",
 			"kind": "range-containedBy",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.period <@ $1) > $2",
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.period <@ CAST($1 AS daterange)) > $2",
 			"params": ["[2026-01-01,2026-02-01)", 19],
 			"error": null
 		},
@@ -388,7 +388,7 @@
 			"position": "having-filter",
 			"kind": "range-containedBy",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.period <@ $1 AND users.score = $2) > $3",
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.period <@ CAST($1 AS daterange) AND users.score = $2) > $3",
 			"params": ["[2026-01-01,2026-02-01)", 13, 19],
 			"error": null
 		},
@@ -396,7 +396,7 @@
 			"position": "having-filter",
 			"kind": "range-containedBy",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.period <@ $1 OR users.score = $2) > $3",
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.period <@ CAST($1 AS daterange) OR users.score = $2) > $3",
 			"params": ["[2026-01-01,2026-02-01)", 13, 19],
 			"error": null
 		},
@@ -404,7 +404,7 @@
 			"position": "having-filter",
 			"kind": "range-containedBy",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE NOT (users.period <@ $1)) > $2",
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE NOT (users.period <@ CAST($1 AS daterange))) > $2",
 			"params": ["[2026-01-01,2026-02-01)", 19],
 			"error": null
 		},
@@ -428,7 +428,7 @@
 			"position": "having-filter",
 			"kind": "range-containedBy",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.score = $1 AND (NOT (users.period <@ $2) OR users.score = $3)) > $4",
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.score = $1 AND (NOT (users.period <@ CAST($2 AS daterange)) OR users.score = $3)) > $4",
 			"params": [13, "[2026-01-01,2026-02-01)", 17, 19],
 			"error": null
 		},

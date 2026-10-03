@@ -3764,7 +3764,7 @@ for (const suffix of ['flat', 'limit posts 5']) {
 		expect(result.sql).toBe(
 			suffix === 'flat'
 				? `SELECT users.id, posts.title AS "posts.title" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId"`
-				: `SELECT users.id, posts_lat_0.title FROM users LEFT JOIN LATERAL (SELECT posts_inner_0.title FROM posts AS posts_inner_0 WHERE posts_inner_0."authorId" = users.id ORDER BY posts_inner_0.id ASC NULLS LAST LIMIT 5) AS posts_lat_0 ON true`,
+				: `SELECT users.id, posts_lat_0.title AS "posts.title" FROM users LEFT JOIN LATERAL (SELECT posts_inner_0.title FROM posts AS posts_inner_0 WHERE posts_inner_0."authorId" = users.id ORDER BY posts_inner_0.id ASC NULLS LAST LIMIT 5) AS posts_lat_0 ON true`,
 		);
 		expect(result.parameters).toEqual([]);
 	});

@@ -11,7 +11,7 @@
  */
 
 import type { CommonTableExpr, Node, SelectStmt } from '@pgsql/types';
-import { binaryExpr, eqExpr, integerNode } from '../ast-helpers.js';
+import { andExpr, binaryExpr, eqExpr, integerNode } from '../ast-helpers.js';
 import type { CompilerContext } from '../handlers/types.js';
 import { queryLocal, type SqlIdentifier } from '../sql-identifier.js';
 import {
@@ -43,8 +43,10 @@ export interface RecursiveCteConfig {
 	pkColumn: SqlIdentifier;
 	/** Foreign key column for self-reference (adjacency mode only) */
 	fkColumn?: SqlIdentifier;
-	/** Outer query alias to correlate with */
-	outerAlias: SqlIdentifier;
+	/** Adjacency anchor mode. Edge-table anchors always scan the node table. */
+	anchor:
+		| { mode: 'standalone' }
+		| { mode: 'correlated'; outerAlias: SqlIdentifier };
 	/** true = traverse up (ancestors), false = traverse down (descendants) */
 	isAncestors: boolean;
 	/** Maximum recursion depth (default: {@link MAX_DEPTH_LIMIT}) */
@@ -71,7 +73,7 @@ export interface RecursiveCteConfig {
 	/** Bidirectional strategy: 'union' (safe, dedup) or 'union-all' (no dedup) */
 	bidirectionalStrategy?: 'union' | 'union-all';
 
-	// Anchor filter (for edge-table mode — WHERE on anchor node)
+	// Anchor filter on the node table for either traversal
 	/** Anchor WHERE clause node (pre-built AST) */
 	anchorWhere?: Node;
 }
@@ -122,7 +124,6 @@ export function buildRecursiveCte(config: RecursiveCteConfig): {
 		table,
 		pkColumn,
 		fkColumn,
-		outerAlias,
 		isAncestors,
 		maxDepth,
 		selectColumns,
@@ -134,11 +135,15 @@ export function buildRecursiveCte(config: RecursiveCteConfig): {
 	const dbTable = table;
 	const dbPk = pkColumn;
 	const dbFk = fkColumn;
-	const dbOuter = outerAlias;
 	const innerAlias = queryLocal('__n');
 
+	// Ancestor joins read the parent key from the preceding CTE row.
+	const traversalColumns = isAncestors
+		? Array.from(new Set([...selectColumns, dbFk]))
+		: selectColumns;
+
 	// Build anchor target list
-	const anchorTargets: Node[] = buildTargetList(selectColumns, innerAlias, {
+	const anchorTargets: Node[] = buildTargetList(traversalColumns, innerAlias, {
 		isAnchor: true,
 		trackPath,
 		pkColumn: dbPk,
@@ -146,13 +151,20 @@ export function buildRecursiveCte(config: RecursiveCteConfig): {
 	});
 
 	// Build anchor WHERE clause
-	const anchorWhere = buildAnchorWhere(
-		innerAlias,
-		dbOuter,
-		dbPk,
-		dbFk,
-		isAncestors,
-	);
+	const structuralAnchorWhere =
+		config.anchor.mode === 'correlated'
+			? buildAnchorWhere(
+					innerAlias,
+					config.anchor.outerAlias,
+					dbPk,
+					dbFk,
+					isAncestors,
+				)
+			: undefined;
+	const anchorWhere =
+		structuralAnchorWhere && config.anchorWhere
+			? andExpr(structuralAnchorWhere, config.anchorWhere)
+			: (structuralAnchorWhere ?? config.anchorWhere);
 
 	// Build anchor SELECT
 	const anchorSelect: SelectStmt = {
@@ -168,17 +180,21 @@ export function buildRecursiveCte(config: RecursiveCteConfig): {
 				},
 			},
 		],
-		whereClause: anchorWhere,
+		...(anchorWhere !== undefined && { whereClause: anchorWhere }),
 	};
 
 	// Build recursive target list
-	const recursiveTargets: Node[] = buildTargetList(selectColumns, innerAlias, {
-		isAnchor: false,
-		trackPath,
-		pkColumn: dbPk,
-		cteAlias,
-		usePg14Cycle,
-	});
+	const recursiveTargets: Node[] = buildTargetList(
+		traversalColumns,
+		innerAlias,
+		{
+			isAnchor: false,
+			trackPath,
+			pkColumn: dbPk,
+			cteAlias,
+			usePg14Cycle,
+		},
+	);
 
 	// Build recursive WHERE clause (depth limit + cycle detection)
 	const recursiveWhere = buildRecursiveWhere(
@@ -203,16 +219,7 @@ export function buildRecursiveCte(config: RecursiveCteConfig): {
 	// Build recursive SELECT
 	const recursiveSelect: SelectStmt = {
 		targetList: recursiveTargets,
-		fromClause: [
-			{
-				RangeVar: {
-					relname: cteAlias,
-					inh: true,
-					relpersistence: 'p',
-				},
-			},
-			recursiveJoin,
-		],
+		fromClause: [recursiveJoin],
 		whereClause: recursiveWhere,
 	};
 

@@ -3,12 +3,15 @@ import {
 	createOrm,
 	eq,
 	exists,
+	inArray,
 	inSubquery,
+	isNull,
 	like,
 	not,
 	notExists,
 	or,
 	planRecursive,
+	rangeOverlaps,
 	ref,
 	schema,
 	some,
@@ -20,7 +23,11 @@ import { compilePlan } from '../compiler.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const testSchema = schema({
-	users: { id: { type: 'integer', primaryKey: true }, name: { type: 'text' } },
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: { type: 'text' },
+		period: { type: 'daterange' },
+	},
 	posts: {
 		id: { type: 'integer', primaryKey: true },
 		authorId: ref('users', { as: 'author', inverse: 'posts' }),
@@ -90,8 +97,12 @@ describe('#888 include preflight', () => {
 		).toThrow(/include\[0\]\(posts\).*include\[0\]\(comments\).*#892/);
 	});
 });
-function recursive(where: WhereIntent) {
-	return adapter.compileRecursive(
+function recursive(
+	where: WhereIntent,
+	compiler = adapter,
+	recursiveModel = model,
+) {
+	return compiler.compileRecursive(
 		planRecursive(
 			{
 				type: 'recursive',
@@ -112,17 +123,70 @@ function recursive(where: WhereIntent) {
 				},
 				maxDepth: 2,
 			},
-			model,
+			recursiveModel,
 		),
-		model,
+		recursiveModel,
 	);
 }
 describe('#888 recursive anchor', () => {
-	for (const where of [like('name', 'A%'), not(like('name', 'A%'))]) {
-		it(`refuses ${where.kind} with unsupported like leaf`, () => {
-			expect(() => recursive(where)).toThrow(/recursive start\.where.*like/);
+	for (const [name, where, sql, params] of [
+		[
+			'like with escape',
+			like('name', 'A!%', { escape: '!' }),
+			'__n.name LIKE $1 ESCAPE $2',
+			['A!%', '!'],
+		],
+		['not like', not(like('name', 'A%')), 'NOT (__n.name LIKE $1)', ['A%']],
+		['in', inArray('id', [1, 2]), '__n.id = ANY ($1)', [[1, 2]]],
+		['null', isNull('name'), '__n.name IS NULL', []],
+		[
+			'scalar and IN subqueries share the alias counter',
+			and(
+				{
+					kind: 'subquery',
+					field: 'id',
+					operator: 'eq',
+					subquery: {
+						type: 'select',
+						from: 'posts',
+						select: { type: 'fields', fields: ['id'] },
+						where: eq('id', 7),
+					},
+				},
+				inSubquery('id', subquery('posts').select('id').where(eq('id', 8))),
+			),
+			'__n.id = (SELECT posts_subq_0.id FROM posts AS posts_subq_0 WHERE posts_subq_0.id = $1) AND __n.id = ANY (SELECT posts_subq_1.id FROM posts AS posts_subq_1 WHERE posts_subq_1.id = $2)',
+			[7, 8],
+		],
+		[
+			'range',
+			rangeOverlaps('period', { lower: '2026-01-01', upper: '2026-02-01' }),
+			'__n.period && CAST($1 AS daterange)',
+			['[2026-01-01,2026-02-01)'],
+		],
+	] as const) {
+		it(`supports recursive anchor ${name}`, () => {
+			const result = recursive(where);
+			expect(result.sql).toBe(
+				`WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE ${sql} UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree`,
+			);
+			expect(result.parameters).toEqual(params);
 		});
 	}
+	it('refuses an undeclared relation with the select WHERE message', () => {
+		const where = exists('missing');
+		let message = '';
+		try {
+			orm.select('users').where(where).dump();
+		} catch (error) {
+			if (!(error instanceof Error)) throw error;
+			message = error.message;
+		}
+		expect(message).toContain(
+			"no relation 'missing' is declared on table 'users'",
+		);
+		expect(() => recursive(where)).toThrow(new Error(message));
+	});
 	it('negates a supported comparison and binds its value', () => {
 		const result = recursive(not(eq('name', 'x')));
 		expect(result.sql).toBe(
@@ -131,6 +195,53 @@ describe('#888 recursive anchor', () => {
 		expect(result.parameters).toEqual(['x']);
 	});
 });
+
+// A declared PK wins over conventions; without one the configured fallback is required.
+for (const declaredPk of [true, false]) {
+	it(`recursive anchor uses custom key authorities with declared PK ${declaredPk}`, () => {
+		const authoritySchema = schema(
+			{
+				users: {
+					id: {
+						type: 'integer',
+						...(declaredPk ? { primaryKey: true } : { unique: true }),
+					},
+					matrix_pk: { type: 'integer', unique: true },
+				},
+				posts: {
+					id: { type: 'integer', primaryKey: true },
+					authorId: ref('users', {
+						as: 'author',
+						inverse: 'posts',
+						references: [declaredPk ? 'id' : 'matrix_pk'],
+					}),
+				},
+				edges: {
+					id: { type: 'integer', primaryKey: true },
+					from_id: { type: 'integer' },
+					to_id: { type: 'integer' },
+				},
+			},
+			undefined,
+			{ defaultPkColumnName: null },
+		);
+		const authorityAdapter = createPgCompileOnlyAdapter({
+			model: authoritySchema.model,
+			defaultPkColumnName: 'matrix_pk',
+			deriveFkColumnName: (table, pk) => `matrix_${table}_${pk}`,
+		});
+		const result = recursive(
+			exists('posts', { where: eq('id', 7) }),
+			authorityAdapter,
+			authoritySchema.model,
+		);
+		const key = declaredPk ? 'id' : 'matrix_pk';
+		expect(result.sql).toBe(
+			`WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.${key} = posts_exists_0."authorId" AND posts_exists_0.id = $1) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree`,
+		);
+		expect(result.parameters).toEqual([7]);
+	});
+}
 
 it('everyHandler negates both conditions and binds both parameters', () => {
 	const result = compilePlan({
@@ -157,25 +268,13 @@ it('everyHandler negates both conditions and binds both parameters', () => {
 	expect(result.parameters).toEqual([1, 2]);
 });
 
-for (const kind of [
-	'in',
-	'any',
-	'null',
-	'range',
-	'exists',
-	'notExists',
-	'rawExists',
-	'rawNotExists',
-	'relationFilter',
-	'subquery',
-	'jsonContains',
-	'jsonExists',
-	'expression',
-	'unknown_kind',
+for (const where of [
+	JSON.parse('{"kind":"unknown_kind"}'),
+	not(JSON.parse('{"kind":"unknown_kind"}')),
 ]) {
-	it(`refuses recursive anchor ${kind}`, () => {
-		expect(() => recursive({ kind } as WhereIntent)).toThrow(
-			new RegExp(`recursive start\\.where.*${kind}`),
+	it(`refuses recursive anchor unknown_kind inside ${where.kind}`, () => {
+		expect(() => recursive(where)).toThrow(
+			/recursive start\.where.*unknown_kind/,
 		);
 	});
 }

@@ -16,6 +16,7 @@ import {
 	relationBinding,
 	relationBindingFor,
 } from '../../binding-registry.js';
+import { resolveRelationKeys } from '../../relation-keys.js';
 import {
 	bindAliasAuthority,
 	requireRelationTargetColumns,
@@ -343,6 +344,7 @@ function buildExistsSubquery(
 			// Defaults to the root EXISTS alias; overridden when FK is found on an
 			// intermediate table (multi-hop).
 			let sourceAliasForJoin: string = targetAlias;
+			let sourceTableForJoin = targetTable;
 
 			const model = ctx.model;
 			if (model) {
@@ -353,6 +355,7 @@ function buildExistsSubquery(
 					rel = model.getRelation(`${prevRealTable}.${joinRelation}`);
 					if (rel) {
 						sourceAliasForJoin = prevAlias;
+						sourceTableForJoin = prevRealTable;
 						break;
 					}
 				}
@@ -363,9 +366,18 @@ function buildExistsSubquery(
 					// sourceAliasForJoin stays as targetAlias (root EXISTS alias)
 				}
 
+				if (!rel && ctx.position === 'filter') {
+					throw new Error(
+						`FILTER include('${joinRelation}'): no relation '${joinRelation}' is declared on table '${sourceTableForJoin}'.`,
+					);
+				}
 				if (rel) {
 					joinTargetTable = rel.target;
-					if (rel.type === 'belongsTo') {
+					if (ctx.position === 'filter') {
+						const keys = resolveRelationKeys(sourceTableForJoin, rel, ctx);
+						joinSourceCols = keys.sourceColumn;
+						joinTargetCols = keys.targetColumn;
+					} else if (rel.type === 'belongsTo') {
 						// FK is on the source side (sourceTable.fkCol → joinTargetTable.id)
 						const fk = toColumnList(rel.foreignKey);
 						joinSourceCols = fk.length > 0 ? fk : undefined;
@@ -391,6 +403,16 @@ function buildExistsSubquery(
 						joinTargetCols = fk.length > 0 ? fk : undefined;
 					}
 				}
+			}
+
+			if (!model && ctx.position === 'filter') {
+				const keys = resolveRelationKeys(
+					sourceTableForJoin,
+					{ type: 'belongsTo', target: joinTargetTable },
+					ctx,
+				);
+				joinSourceCols = keys.sourceColumn;
+				joinTargetCols = keys.targetColumn;
 			}
 
 			// Fall back to FK derivation convention when ModelIR didn't resolve columns.

@@ -14,6 +14,7 @@ import {
 	isParamIntent,
 	type QueryIntent,
 	toColumnList,
+	type WhereIntent,
 } from '@dbsp/types';
 import {
 	getNqlBindingRefName,
@@ -57,7 +58,7 @@ import {
 	relationBinding,
 	relationBindingFor,
 } from './binding-registry.js';
-import { compileWhereIntent } from './condition-compiler.js';
+import { compileCondition, compileWhereIntent } from './condition-compiler.js';
 import type { DeclaredNameResolver } from './declared-name-resolver.js';
 import { deparseQuoted } from './deparse.js';
 import { assertDialectCapability } from './dialect-capabilities.js';
@@ -165,12 +166,19 @@ function trustedRelationHasMultipleHops(
 // ============================================================================
 
 import {
-	buildCustomFnFilter,
+	buildCustomFnFilter as buildCustomFnFilterWithCompiler,
 	compileFilterCondition,
 	mapToHandlerDecision,
 } from './custom-fn-filter.js';
 
-export { buildCustomFnFilter } from './custom-fn-filter.js';
+/** Public adapter hook retains its three-argument signature. */
+export function buildCustomFnFilter(
+	intent: WhereIntent,
+	ctx: HandlerCompilerContext,
+	state: HandlerCompilerState,
+): Node {
+	return buildCustomFnFilterWithCompiler(intent, ctx, state, compileCondition);
+}
 
 import type { PlanDecision } from './plan-decision.js';
 
