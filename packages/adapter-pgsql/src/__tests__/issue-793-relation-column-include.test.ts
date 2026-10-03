@@ -15,6 +15,8 @@ const db = schema({
 	users: {
 		id: { type: 'integer', primaryKey: true },
 		name: 'string',
+		firstName: 'string',
+		lastName: 'string',
 		// NQL currently validates a multi-hop leaf against the first-hop table.
 		path: 'string',
 		file_id: ref('files', { as: 'file', inverse: 'users' }),
@@ -303,7 +305,12 @@ const departmentDb = schema({
 		department_id: ref('departments', { inverse: 'employees' }),
 	},
 });
-function compileNqlJsonAgg(query: string, model: typeof db.model) {
+function compileNqlIncludes(
+	query: string,
+	model: typeof db.model,
+	strategy: 'json_agg' | 'join' | 'lateral' = 'json_agg',
+	dbCasing: 'preserve' | 'snake_case' = 'preserve',
+) {
 	const nqlOrm = createOrm({
 		model,
 		adapter: createPgCompileOnlyAdapter({ model }),
@@ -312,13 +319,15 @@ function compileNqlJsonAgg(query: string, model: typeof db.model) {
 	if (intent.type !== 'select') throw new Error('Expected a select query');
 	const report = plan(intent, model, {
 		dialectCapabilities: POSTGRESQL_CAPABILITIES,
-		defaultIncludeStrategy: 'json_agg',
+		defaultIncludeStrategy: strategy,
 	});
-	return createPgCompileOnlyAdapter({ model }).compile(report, { model });
+	return createPgCompileOnlyAdapter({ model, dbCasing }).compile(report, {
+		model,
+	});
 }
 
 it('uses the column name for a to-many NQL default JSON key', () => {
-	const result = compileNqlJsonAgg(
+	const result = compileNqlIncludes(
 		'departments | select id, employees.name',
 		departmentDb.model,
 	);
@@ -329,9 +338,43 @@ it('uses the column name for a to-many NQL default JSON key', () => {
 });
 
 it('uses the column name for a two-hop NQL default JSON key', () => {
-	const result = compileNqlJsonAgg('posts | select author.file.path', db.model);
+	const result = compileNqlIncludes(
+		'posts | select author.file.path',
+		db.model,
+	);
 	expect(result.sql).toBe(
 		"SELECT COALESCE((SELECT json_agg(to_jsonb(__t__) || jsonb_build_object('file', COALESCE((SELECT json_agg(jsonb_build_object('path', __t1__.path) ORDER BY __t1__.id ASC NULLS LAST) FROM files AS __t1__ WHERE __t1__.id = __t__.file_id), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST) FROM users AS __t__ WHERE __t__.id = posts.author_id), '[]'::json) AS author_json FROM posts",
 	);
 	expect(result.parameters).toEqual([]);
+});
+
+for (const strategy of ['join', 'lateral'] as const) {
+	it(`preserves distinct NQL default and chosen labels with ${strategy}`, () => {
+		const result = compileNqlIncludes(
+			'posts | select author.name, author.id as name',
+			db.model,
+			strategy,
+		);
+		expect(result.sql).toBe(
+			strategy === 'join'
+				? 'SELECT author.name AS "author.name", author.id AS name FROM posts JOIN users AS author ON posts.author_id = author.id'
+				: 'SELECT users_lat_0.name AS "author.name", users_lat_0.id AS name FROM posts LEFT JOIN LATERAL (SELECT users_inner_0.name, users_inner_0.id FROM users AS users_inner_0 WHERE users_inner_0.id = posts.author_id) AS users_lat_0 ON true',
+		);
+		expect(result.parameters).toEqual([]);
+	});
+}
+
+it('refuses JSON_AGG projected keys that collide after snake_case naming', () => {
+	expect(() =>
+		compileNqlIncludes(
+			'posts | select author.firstName, author.lastName as first_name',
+			db.model,
+			'json_agg',
+			'snake_case',
+		),
+	).toThrow(
+		new Error(
+			"JSON_AGG relation projection 'author' has conflicting output key 'first_name'.",
+		),
+	);
 });

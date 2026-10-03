@@ -46,7 +46,6 @@ import {
 import { inferPgArrayType, stripArraySuffix } from './compiler-utils.js';
 import { validateDbType } from './db-type.js';
 import { declaredColumnName } from './declared-name-resolver.js';
-import { chosenRelationColumnAlias } from './handlers/include/json-agg.js';
 import { createCompilerState } from './handlers/types.js';
 import { intentToDecisions } from './intent-to-decisions.js';
 import {
@@ -609,13 +608,9 @@ function buildRelationColumnsMap(
 					`Relation column projection '${fullRelation}' requests column '${col}' with conflicting aliases '${previous.alias ?? col}' and '${alias ?? col}'.`,
 				);
 			}
-			const outputName =
-				chosenRelationColumnAlias(fullRelation, col, alias) ?? col;
+			const outputName = alias ?? col;
 			const conflicting = existing.find(
-				(e) =>
-					e.col !== col &&
-					(chosenRelationColumnAlias(fullRelation, e.col, e.alias) ?? e.col) ===
-						outputName,
+				(e) => e.col !== col && (e.alias ?? e.col) === outputName,
 			);
 			if (conflicting) {
 				throw new Error(

@@ -445,7 +445,7 @@ function compileJsonAggRecursive(
 	}
 
 	// Child relation values and projected columns share one JSON object.
-	const projectedKeys = new Set(
+	const projectedKeyNames =
 		columns && !columns.some((column) => identifierText(column) === '*')
 			? columns.map(identifierText)
 			: resolvedTarget.outputs !== undefined
@@ -462,8 +462,16 @@ function compileJsonAggRecursive(
 								},
 							),
 						),
-					),
-	);
+					);
+	const projectedKeys = new Set<string>();
+	for (const key of projectedKeyNames) {
+		if (projectedKeys.has(key)) {
+			throw new Error(
+				`JSON_AGG relation projection '${decision.relationPath ?? relation}' has conflicting output key '${key}'.`,
+			);
+		}
+		projectedKeys.add(key);
+	}
 	for (const child of childNodes ?? []) {
 		const key = identifierText(child.key);
 		if (projectedKeys.has(key)) {
