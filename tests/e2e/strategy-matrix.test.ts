@@ -312,7 +312,27 @@ describe('E2E-004: Strategy Matrix', () => {
 			});
 		});
 
-		describe('E2E-004-F2: planner option overrides auto', () => {});
+		describe('E2E-004-F2: planner option overrides auto', () => {
+			it('should use lateral when defaultIncludeStrategy specified via planOptions', async () => {
+				const adapter = await getTestAdapter();
+				const orm = createOrm({
+					model: blogModel,
+					adapter,
+					planOptions: {
+						defaultIncludeStrategy: 'lateral',
+					},
+				});
+
+				const query = orm.withSchema(SCHEMA).select('authors').include('posts');
+				const dump = query.dump();
+
+				// Uses lateral instead of the automatic json_agg due to planner option.
+				// ARCH-005: inverse relation name is 'author_posts'
+				const decision = getIncludeStrategyDecision(dump.plan!, 'author_posts');
+				expect(decision).toBeDefined();
+				expect(decision?.choice).toBe('lateral');
+			});
+		});
 	});
 
 	// =========================================================================
