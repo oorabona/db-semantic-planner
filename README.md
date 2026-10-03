@@ -49,7 +49,7 @@ The planner picks the right strategy (EXISTS, JOIN, lateral subquery) based on c
 | Query plan inspection | Yes | No | No | No |
 | Decision transparency | Yes | No | No | No |
 | Auto N+1 prevention | Yes | Yes | Yes | No |
-| Include strategies | 3 (join, lateral, subquery) | 1 (findMany) | Partial | No |
+| Include strategies | 4 (join, json_agg, lateral, cte) | 1 (findMany) | Partial | No |
 | Multi-tenant (schema-per-tenant) | Built-in | Manual | Manual | Manual |
 | Type-safe queries | Yes | Yes | Yes | Yes |
 | Zero codegen | Yes | No | Yes | Yes |

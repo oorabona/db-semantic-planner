@@ -4,12 +4,8 @@ import type {
 	PlanReport,
 	ResolvedIncludeStrategy,
 } from '@dbsp/types';
-import type { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
-import {
-	createPgAdapter,
-	createPgCompileOnlyAdapter,
-} from '../pgsql-adapter.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const db = schema({
 	users: { id: { type: 'integer', primaryKey: true } },
@@ -30,7 +26,7 @@ const db = schema({
 } as const);
 const adapter = createPgCompileOnlyAdapter({ model: db.model });
 const orm = createOrm({ schema: db, adapter });
-const strategies = ['join', 'json_agg', 'subquery', 'lateral', 'cte'] as const;
+const strategies = ['join', 'json_agg', 'lateral', 'cte'] as const;
 const path = /include\[0\]\(posts\)\.include\[0\]\(comments\)/;
 function refuses(compile: () => unknown, parent: string, child: string) {
 	let returned: unknown;
@@ -80,8 +76,6 @@ describe('#894 nested strategy refusal', () => {
 	for (const [parent, child] of [
 		['join', 'json_agg'],
 		['json_agg', 'join'],
-		['join', 'subquery'],
-		['subquery', 'join'],
 		['cte', 'cte'],
 	] as const) {
 		it(`refuses public ${parent}→${child} before returning SQL`, () =>
@@ -145,13 +139,11 @@ const sameSql: Record<string, string> = {
 	join: 'SELECT users.*, posts.id AS "posts.id", comments.id AS "comments.id" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId" LEFT JOIN comments AS comments ON posts.id = comments."postId"',
 	json_agg:
 		"SELECT users.*, COALESCE((SELECT json_agg(to_jsonb(__t__) || jsonb_build_object('comments', COALESCE((SELECT json_agg(to_jsonb(__t1__) ORDER BY __t1__.id ASC NULLS LAST) FROM comments AS __t1__ WHERE __t1__.\"postId\" = __t__.id), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST) FROM posts AS __t__ WHERE __t__.\"authorId\" = users.id), '[]'::json) AS posts_json FROM users",
-	subquery:
-		"SELECT users.*, COALESCE((SELECT json_agg(to_jsonb(__t__) || jsonb_build_object('comments', COALESCE((SELECT json_agg(to_jsonb(__t1__) ORDER BY __t1__.id ASC NULLS LAST) FROM comments AS __t1__ WHERE __t1__.\"postId\" = __t__.id), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST) FROM posts AS __t__ WHERE __t__.\"authorId\" = users.id), '[]'::json) AS posts_json FROM users",
 	lateral:
 		'SELECT users.*, posts_lat_0.*, comments_lat_1.* FROM users LEFT JOIN LATERAL (SELECT posts_inner_0.* FROM posts AS posts_inner_0 WHERE posts_inner_0."authorId" = users.id) AS posts_lat_0 ON true LEFT JOIN LATERAL (SELECT comments_inner_1.* FROM comments AS comments_inner_1 WHERE comments_inner_1."postId" = posts_lat_0.id) AS comments_lat_1 ON true',
 };
 describe('#894 supported SQL', () => {
-	for (const strategy of ['join', 'json_agg', 'subquery', 'lateral'] as const) {
+	for (const strategy of ['join', 'json_agg', 'lateral'] as const) {
 		it(`${strategy}→${strategy} preserves SQL and params`, () => {
 			const result = adapter.compile(nestedPlan(strategy, strategy));
 			expect(result.sql).toBe(sameSql[strategy]);
@@ -171,45 +163,6 @@ describe('#894 supported SQL', () => {
 		);
 		expect(result.params).toEqual([]);
 	});
-	it('subquery→subquery fetches children by post keys and attaches under posts', async () => {
-		const query = vi.fn<
-			(
-				sql: string,
-				params?: unknown[],
-			) => Promise<{ rows: Record<string, number>[] }>
-		>(async (sql) => ({
-			rows: sql.startsWith('SELECT * FROM comments')
-				? [{ id: 100, postId: 10 }]
-				: sql.startsWith('SELECT * FROM posts')
-					? [{ id: 10, authorId: 1 }]
-					: [{ id: 1 }],
-		}));
-		const executionOrm = createOrm({
-			schema: db,
-			adapter: createPgAdapter({ query } as unknown as Pool, {
-				model: db.model,
-			}),
-		});
-		const rows = await executionOrm
-			.select('users')
-			.withPlanOptions({ defaultIncludeStrategy: 'subquery' })
-			.include('posts', { include: [{ relation: 'comments' }] })
-			.all();
-		expect(query.mock.calls[1]).toEqual([
-			'SELECT * FROM posts WHERE "authorId" IN ($1)',
-			[1],
-		]);
-		expect(query.mock.calls[2]).toEqual([
-			'SELECT * FROM comments WHERE "postId" IN ($1)',
-			[10],
-		]);
-		expect(rows).toEqual([
-			{
-				id: 1,
-				posts: [{ id: 10, authorId: 1, comments: [{ id: 100, postId: 10 }] }],
-			},
-		]);
-	});
 });
 it('#895 preflight accesses include predicates linearly', () => {
 	const accesses = (count: number) => {
@@ -220,7 +173,7 @@ it('#895 preflight accesses include predicates linearly', () => {
 		const p = plan(
 			{ type: 'select', from: 'users', include: includes },
 			db.model,
-			{ defaultIncludeStrategy: 'subquery' },
+			{ defaultIncludeStrategy: 'json_agg' },
 		);
 		const decisions = p.decisions.map((d) =>
 			d.type === 'include-strategy'
@@ -239,7 +192,7 @@ it('#895 preflight accesses include predicates linearly', () => {
 		const lookups = vi.spyOn(Map.prototype, 'get');
 		try {
 			expect(() => adapter.compile({ ...p, decisions })).toThrow(
-				/strategy subquery.*#892/,
+				/strategy json_agg.*#892/,
 			);
 			expect(
 				lookups.mock.calls.filter(

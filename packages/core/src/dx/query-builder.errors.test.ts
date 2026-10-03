@@ -66,13 +66,6 @@ function createSpyAdapter(executeResult: unknown[] = []) {
 		sql: 'SELECT * FROM "users"',
 		parameters: [] as readonly unknown[],
 	}));
-	const compileWithIncludesSpy = vi.fn((_plan: unknown, _opts?: unknown) => ({
-		main: {
-			sql: 'SELECT * FROM "users"',
-			parameters: [] as readonly unknown[],
-		},
-		subqueryIncludes: [],
-	}));
 	const executeSpy = vi.fn(() => Promise.resolve(executeResult));
 	const createDumpSpy = vi.fn(
 		(
@@ -89,7 +82,6 @@ function createSpyAdapter(executeResult: unknown[] = []) {
 	const adapter = {
 		...base,
 		compile: compileSpy,
-		compileWithIncludes: compileWithIncludesSpy,
 		execute: executeSpy,
 		createDump: createDumpSpy,
 		withSchema: (_schemaName: string) => adapter,

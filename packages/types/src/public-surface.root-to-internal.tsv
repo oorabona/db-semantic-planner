@@ -4,7 +4,6 @@ AuthorAttestedNativeDefault	type	model-ir.ts
 CascadeCoveredOutcomeClaimPlan	type	transition/outcome-protocol.ts
 CollationRef	type	transition/equivalence.ts
 CompileOnlyAdapter	type	adapter.ts
-CompileResultWithIncludes	type	adapter.ts
 CompiledColumnMetadata	type	adapter.ts
 ConnectionAvailability	type	adapter.ts
 ContainmentClosureDestructiveOutcome	type	transition/destructive-authority.ts

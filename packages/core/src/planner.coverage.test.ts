@@ -643,23 +643,6 @@ describe('planner coverage', () => {
 		expect(report.metadata.isAmbiguous).toBe(false);
 	});
 
-	it('should handle defaultIncludeStrategy override', () => {
-		const intent: QueryIntent = {
-			type: 'select',
-			from: 'users',
-			include: [{ relation: 'posts' }],
-		};
-
-		const report = plan(intent, testSchema, {
-			defaultIncludeStrategy: 'subquery',
-		});
-
-		const includeDecision = report.decisions.find(
-			(d) => d.type === 'include-strategy',
-		);
-		expect(includeDecision?.choice).toBe('subquery');
-	});
-
 	it('should handle UnsupportedStrategyError for lateral on MySQL', () => {
 		// We need a relation with explicit includeStrategy set to lateral
 		// In practice this would come from model IR. Let's test via plan options.
@@ -1385,7 +1368,9 @@ describe('planner coverage', () => {
 			include: [{ relation: 'ancestors' }],
 		};
 
-		const report = plan(intent, treeSchema);
+		const report = plan(intent, treeSchema, {
+			dialectCapabilities: { name: 'PostgreSQL', supportsRecursiveCTE: true },
+		});
 		const includeDecision = report.decisions.find(
 			(d) => d.type === 'include-strategy',
 		);
@@ -1410,7 +1395,9 @@ describe('planner coverage', () => {
 			include: [{ relation: 'descendants' }],
 		};
 
-		const report = plan(intent, treeSchema);
+		const report = plan(intent, treeSchema, {
+			dialectCapabilities: { name: 'PostgreSQL', supportsRecursiveCTE: true },
+		});
 		const includeDecision = report.decisions.find(
 			(d) => d.type === 'include-strategy',
 		);

@@ -255,9 +255,7 @@ function mapToHandlerDecision(
 		set: pd.set,
 		limit: pd.limit,
 		offset: pd.offset,
-		strategy: (pd.choice === 'subquery'
-			? 'json_agg'
-			: pd.choice) as HandlerDecision['strategy'],
+		strategy: pd.choice as HandlerDecision['strategy'],
 		relation: pd.relation ?? pd.relationName,
 		relationName: pd.relationName,
 		relationPath: pd.relationPath,
@@ -1257,7 +1255,6 @@ export class PlanCompiler {
 			| 'join'
 			| 'lateral'
 			| 'cte'
-			| 'subquery'
 			| undefined;
 		if (!strategy)
 			throw new Error(
@@ -1265,7 +1262,6 @@ export class PlanCompiler {
 			);
 
 		// Bridge PlanDecision -> handler Decision via explicit mapper
-		// (mapper handles subquery → json_agg mapping internally)
 		const handlerDecision = mapToHandlerDecision(
 			decision,
 			plan.rootTable,

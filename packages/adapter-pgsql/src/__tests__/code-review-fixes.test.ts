@@ -5,7 +5,6 @@
  * B2 - Parameterized LIMIT emits ParamRef not literal index
  * B3 - Multi-hop relationColumn dotted path resolves only its registered full-path alias
  * C1 - Upsert conflictTarget.where partial-index WHERE clause
- * C3 - compileWithIncludes no double-fetch (subqueryIncludes always empty)
  * C5 - Introspected column defaults stored as { sql } verbatim
  * C7 - resolveExistsIntent walks AND/OR/NOT recursively
  * D1 - validateSqlExpression error message clarifies $$
@@ -161,47 +160,6 @@ describe('C1: Upsert conflictTarget.where partial-index', () => {
 		const infer = (clause as unknown as Record<string, unknown>)
 			.infer as Record<string, unknown>;
 		expect(infer.whereClause).toBeUndefined();
-	});
-});
-
-// ---------------------------------------------------------------------------
-// C3: compileWithIncludes — subquery strategy populates subqueryIncludes
-// (hydrateJsonAggIncludes only runs for choice === 'json_agg' decisions;
-//  choice === 'subquery' decisions must go through the subquery hydration path)
-// ---------------------------------------------------------------------------
-describe('C3: compileWithIncludes subquery strategy', () => {
-	it('subqueryIncludes is populated when plan has subquery include-strategy', async () => {
-		const { compileWithIncludes } = await import(
-			'../adapter-compiler-select.js'
-		);
-
-		const plan = {
-			rootTable: 'posts',
-			decisions: [
-				{
-					type: 'include-strategy',
-					choice: 'subquery',
-					context: {
-						relation: 'author',
-						target: 'users',
-						relationType: 'belongsTo',
-					},
-				},
-			],
-			warnings: [],
-		} as unknown as Parameters<typeof compileWithIncludes>[0];
-
-		const deps = {
-			naming,
-			defaultPk: 'id',
-			deriveFk: undefined,
-		} as unknown as Parameters<typeof compileWithIncludes>[2];
-
-		const result = compileWithIncludes(plan, undefined, deps);
-		expect(result.subqueryIncludes).toHaveLength(1);
-		expect(result.subqueryIncludes[0]?.relationName).toBe('author');
-		expect(result.subqueryIncludes[0]?.targetTable).toBe('users');
-		expect(result.subqueryIncludes[0]?.relationType).toBe('belongsTo');
 	});
 });
 

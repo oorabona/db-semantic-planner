@@ -214,14 +214,16 @@ describe('FIND-013: Recursive includes gate on supportsRecursiveCTE capability',
 		expect(stratDecision?.choice).toBe('cte');
 	});
 
-	it('recursive include with no dialectCapabilities (undefined) does not throw (backward compat)', () => {
+	it('recursive include with no dialectCapabilities (undefined) refuses explicitly', () => {
 		// Unknown dialect → assume CTE is supported (matches planner convention).
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'categories',
 			include: [{ relation: 'children', recursive: { maxDepth: 5 } }],
 		};
-		expect(() => plan(intent, categoriesSchema.model)).not.toThrow();
+		expect(() => plan(intent, categoriesSchema.model)).toThrow(
+			'Recursive include at include[0](children) requires a dialect with supportsRecursiveCTE; current dialect (no capabilities) does not support it.',
+		);
 	});
 });
 

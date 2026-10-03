@@ -132,7 +132,7 @@ dump.plan.decisions
 <div class="why-row reverse">
   <div class="why-text">
     <h3>vs Drizzle</h3>
-    <p>Automatic include strategy selection — no manual JOINs for relations. The planner picks lateral, subquery, or join based on cardinality. Built-in pgvector and ParadeDB helpers.</p>
+    <p>Automatic include strategy selection — no manual JOINs for relations. The planner picks join, json_agg, lateral, or cte based on cardinality. Built-in pgvector and ParadeDB helpers.</p>
   </div>
   <div class="why-code">
 

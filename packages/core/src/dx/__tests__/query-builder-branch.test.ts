@@ -53,10 +53,6 @@ function createSpyAdapter(executeResult: unknown[] = []) {
 		sql: 'SELECT 1',
 		parameters: [] as readonly unknown[],
 	}));
-	const compileWithIncludesSpy = vi.fn((_plan: unknown, _opts?: unknown) => ({
-		main: { sql: 'SELECT 1', parameters: [] as readonly unknown[] },
-		subqueryIncludes: [],
-	}));
 	const executeSpy = vi.fn(() => Promise.resolve(executeResult));
 	const createDumpSpy = vi.fn(
 		(
@@ -72,12 +68,11 @@ function createSpyAdapter(executeResult: unknown[] = []) {
 	const adapter: Adapter = {
 		...base,
 		compile: compileSpy,
-		compileWithIncludes: compileWithIncludesSpy,
 		execute: executeSpy,
 		createDump: createDumpSpy,
 		withSchema: (_s: string) => adapter,
 	} as unknown as Adapter;
-	return { adapter, executeSpy, compileSpy, compileWithIncludesSpy };
+	return { adapter, executeSpy, compileSpy };
 }
 
 const { adapter: spyAdapter } = createSpyAdapter([]);
@@ -503,15 +498,15 @@ describe('QueryBuilderImpl.cursorPaginate branches', () => {
 
 	it('single orderBy, asc, forward → cursor condition uses gt', async () => {
 		// Verify cursorCondition operator: asc+forward=gt
-		// all() calls compileWithIncludes (not compile), so inspect via compileWithIncludesSpy
+		// Inspect the plan passed by all() through compileSpy.
 		const rows = [{ id: 3, name: 'u3' }];
-		const { adapter, compileWithIncludesSpy } = createSpyAdapter(rows);
+		const { adapter, compileSpy } = createSpyAdapter(rows);
 		const o = createOrm({ adapter, schema: testSchema });
 		const cursor = Buffer.from(JSON.stringify({ id: 2 })).toString('base64');
 		await o.select('users').orderBy('id').cursorPaginate({ limit: 5, cursor });
-		expect(compileWithIncludesSpy).toHaveBeenCalled();
-		// The planReport passed to compileWithIncludes contains the cursor where condition
-		const planReport = compileWithIncludesSpy.mock.calls[0]?.[0] as {
+		expect(compileSpy).toHaveBeenCalled();
+		// The planReport passed to compile contains the cursor where condition
+		const planReport = compileSpy.mock.calls[0]?.[0] as {
 			intent?: { where?: { operator?: string } };
 		};
 		expect(planReport?.intent?.where).toBeDefined();
@@ -521,14 +516,14 @@ describe('QueryBuilderImpl.cursorPaginate branches', () => {
 
 	it('single orderBy, desc, forward → cursor condition uses lt', async () => {
 		const rows = [{ id: 2, name: 'u2' }];
-		const { adapter, compileWithIncludesSpy } = createSpyAdapter(rows);
+		const { adapter, compileSpy } = createSpyAdapter(rows);
 		const o = createOrm({ adapter, schema: testSchema });
 		const cursor = Buffer.from(JSON.stringify({ id: 3 })).toString('base64');
 		await o
 			.select('users')
 			.orderBy('id', 'desc')
 			.cursorPaginate({ limit: 5, cursor });
-		const planReport = compileWithIncludesSpy.mock.calls[0]?.[0] as {
+		const planReport = compileSpy.mock.calls[0]?.[0] as {
 			intent?: { where?: { operator?: string } };
 		};
 		const w = planReport?.intent?.where as { operator?: string };
@@ -537,14 +532,14 @@ describe('QueryBuilderImpl.cursorPaginate branches', () => {
 
 	it('single orderBy, asc, backward → cursor condition uses lt', async () => {
 		const rows = [{ id: 2, name: 'u2' }];
-		const { adapter, compileWithIncludesSpy } = createSpyAdapter(rows);
+		const { adapter, compileSpy } = createSpyAdapter(rows);
 		const o = createOrm({ adapter, schema: testSchema });
 		const cursor = Buffer.from(JSON.stringify({ id: 3 })).toString('base64');
 		await o
 			.select('users')
 			.orderBy('id', 'asc')
 			.cursorPaginate({ limit: 5, direction: 'backward', cursor });
-		const planReport = compileWithIncludesSpy.mock.calls[0]?.[0] as {
+		const planReport = compileSpy.mock.calls[0]?.[0] as {
 			intent?: { where?: { operator?: string } };
 		};
 		const w = planReport?.intent?.where as { operator?: string };
@@ -553,7 +548,7 @@ describe('QueryBuilderImpl.cursorPaginate branches', () => {
 
 	it('multi orderBy → cursor condition uses OR compound', async () => {
 		const rows = [{ id: 2, name: 'u2' }];
-		const { adapter, compileWithIncludesSpy } = createSpyAdapter(rows);
+		const { adapter, compileSpy } = createSpyAdapter(rows);
 		const o = createOrm({ adapter, schema: testSchema });
 		const cursor = Buffer.from(JSON.stringify({ id: 1, name: 'u1' })).toString(
 			'base64',
@@ -563,7 +558,7 @@ describe('QueryBuilderImpl.cursorPaginate branches', () => {
 			.orderBy('name')
 			.orderBy('id')
 			.cursorPaginate({ limit: 5, cursor });
-		const planReport = compileWithIncludesSpy.mock.calls[0]?.[0] as {
+		const planReport = compileSpy.mock.calls[0]?.[0] as {
 			intent?: { where?: { kind?: string } };
 		};
 		const w = planReport?.intent?.where as { kind?: string };
@@ -574,14 +569,14 @@ describe('QueryBuilderImpl.cursorPaginate branches', () => {
 	it('cursor value missing from cursorValues → buildCursorConditions returns null (no where added)', async () => {
 		// cursor has only 'email' but orderBy is on 'id' → cursorValue undefined → null
 		const rows = [{ id: 2, name: 'u2' }];
-		const { adapter, compileWithIncludesSpy } = createSpyAdapter(rows);
+		const { adapter, compileSpy } = createSpyAdapter(rows);
 		const o = createOrm({ adapter, schema: testSchema });
 		// Cursor with wrong field
 		const cursor = Buffer.from(JSON.stringify({ email: 'x@y.com' })).toString(
 			'base64',
 		);
 		await o.select('users').orderBy('id').cursorPaginate({ limit: 5, cursor });
-		const planReport = compileWithIncludesSpy.mock.calls[0]?.[0] as {
+		const planReport = compileSpy.mock.calls[0]?.[0] as {
 			intent?: { where?: unknown };
 		};
 		// No cursor condition was pushed (buildCursorConditions returns null)
@@ -686,10 +681,6 @@ describe('QueryBuilderImpl.paginate branches', () => {
 		const countAdapter: Adapter = {
 			...spyAdapter,
 			compile: vi.fn((_plan: unknown) => ({ sql: 'SELECT 1', parameters: [] })),
-			compileWithIncludes: vi.fn((_plan: unknown) => ({
-				main: { sql: 'SELECT 1', parameters: [] },
-				subqueryIncludes: [],
-			})),
 			execute: vi.fn(() => {
 				callCount++;
 				if (callCount === 1) return Promise.resolve([{ id: 1 }, { id: 2 }]);

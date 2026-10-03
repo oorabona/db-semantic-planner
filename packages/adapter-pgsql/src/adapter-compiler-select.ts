@@ -1,11 +1,14 @@
 /**
  * SELECT compilation: converts PlanReport to CompiledQuery.
- * Extracted from PgAdapter.compile() and PgAdapter.compileWithIncludes().
+ * Extracted from PgAdapter.compile().
  *
  * @internal
  */
 
-import { countDistinctRelationPathsByName } from '@dbsp/core/internal';
+import {
+	countDistinctRelationPathsByName,
+	validateIncludeStrategy,
+} from '@dbsp/core/internal';
 import type {
 	CompiledQuery,
 	CompileOptions,
@@ -16,11 +19,12 @@ import type {
 	OutputDescriptor,
 	OutputValueShape,
 	PlanReport,
-	SubqueryIncludeInfo,
 } from '@dbsp/types';
 import { resolveOutputReadHandling, toColumnList } from '@dbsp/types';
-import type { CompileResultWithIncludes, Mutable } from '@dbsp/types/internal';
-import { getTrustedNqlRelationFilterFields } from '@dbsp/types/internal';
+import {
+	getTrustedNqlRelationFilterFields,
+	type Mutable,
+} from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { defaultFkDerivation } from './assert-field.js';
@@ -52,7 +56,6 @@ import {
 import { createTypeCastParamRef } from './param-ref.js';
 import {
 	convertDottedFieldsToExists,
-	deriveForeignKey,
 	enrichExistsDecisionsInPlace,
 	extractAllIncludeDecisions,
 	synthesizeMissingJoinDecisions,
@@ -1341,6 +1344,16 @@ export function compileSelectEnvelope<T = unknown>(
 	// (observable via dump()). All SQL-generation paths below use execIntent so that
 	// compiled SQL matches plan.decisions (which were built from the optimized WHERE).
 	const execIntent = plan.executableIntent ?? plan.intent;
+	if (!execIntent) {
+		for (const decision of plan.decisions) {
+			if (decision.type === 'include-strategy')
+				validateIncludeStrategy(
+					decision.choice,
+					deps.dialectCapabilities,
+					false,
+				);
+		}
+	}
 	let hydrationPlan: PlanReport | undefined;
 	// planForCompilation: a view of the plan where .intent is the executable intent.
 	// Passed to extractor helpers (extractExistsDecisions, synthesizeMissingJoinDecisions,
@@ -1359,15 +1372,20 @@ export function compileSelectEnvelope<T = unknown>(
 		const legacyStrategies = new Map<string, string>();
 		for (const decision of planForCompilation.decisions) {
 			if (decision.type !== 'include-strategy') continue;
+			const strategy = validateIncludeStrategy(
+				decision.choice,
+				deps.dialectCapabilities,
+				false,
+			);
 			if (decision.context.intentPath) {
-				strategies.set(decision.context.intentPath, decision.choice);
+				strategies.set(decision.context.intentPath, strategy);
 			} else {
 				for (const alias of [
 					decision.context.relation,
 					decision.context.includeAlias,
 				]) {
 					if (alias && !legacyStrategies.has(alias))
-						legacyStrategies.set(alias, decision.choice);
+						legacyStrategies.set(alias, strategy);
 				}
 			}
 		}
@@ -1416,7 +1434,7 @@ export function compileSelectEnvelope<T = unknown>(
 			options?.model ?? deps.model,
 		);
 
-		// Phase 3: Extract ALL include decisions (json_agg, join, lateral, cte, subquery)
+		// Phase 3: Extract ALL include decisions (json_agg, join, lateral, cte)
 		const unifiedIncludeDecisions = extractAllIncludeDecisions(
 			planForCompilation,
 			deps.defaultPk,
@@ -1601,119 +1619,4 @@ export function compileSelect<T = unknown>(
 	deps: AdapterCompilerDeps,
 ): CompiledQuery<T> {
 	return finalizeEnvelope(compileSelectEnvelope(plan, options, deps));
-}
-
-export function compileWithIncludes<T = unknown>(
-	plan: PlanReport,
-	options: CompileOptions | undefined,
-	deps: AdapterCompilerDeps,
-): CompileResultWithIncludes<T> {
-	const main = compileSelect<T>(plan, options, deps);
-
-	// Extract subquery include info from planner decisions.
-	// Decisions with choice === 'subquery' need separate execution:
-	// mapToHandlerDecision lowers them to json_agg at the SQL level so the main
-	// query compiles, but hydrateJsonAggIncludes only processes decisions whose
-	// planner choice is 'json_agg'. When the user sets defaultIncludeStrategy:
-	// 'subquery', planner decisions carry choice === 'subquery', so hydration
-	// must happen via the subquery path (separate query + hydrateIncludes).
-	const subqueryIncludes: SubqueryIncludeInfo[] = [];
-	const intentsByPath = new Map<string, IncludeIntent>();
-	const rootIntentsByRelation = new Map<string, IncludeIntent>();
-	for (const include of (plan.executableIntent ?? plan.intent)?.include ?? []) {
-		if (!rootIntentsByRelation.has(include.relation))
-			rootIntentsByRelation.set(include.relation, include);
-	}
-	const collectIntents = (
-		includes: readonly IncludeIntent[] | undefined,
-		parent = '',
-	): void => {
-		for (const [index, include] of (includes ?? []).entries()) {
-			const path = `${parent}include[${index}]`;
-			intentsByPath.set(path, include);
-			collectIntents(include.include, `${path}.`);
-		}
-	};
-	collectIntents((plan.executableIntent ?? plan.intent)?.include);
-	const entriesByPath = new Map<string, Mutable<SubqueryIncludeInfo>>();
-
-	for (const d of plan.decisions) {
-		if (d.type !== 'include-strategy' || d.choice !== 'subquery') continue;
-
-		const ctx = d.context;
-		if (!ctx.target) continue;
-
-		const relationName = ctx.includeAlias ?? ctx.relation;
-		if (!relationName) continue;
-
-		// Derive FK using shared helper
-		const rawFk =
-			deriveForeignKey(ctx, deps.deriveFk, deps.defaultPk) ?? deps.defaultPk;
-		const fk = toColumnList(rawFk);
-		const parentKey = toColumnList(ctx.parentKey);
-
-		// For subquery include, we need:
-		// - sourceKey: column on the parent result to extract IDs from
-		// - foreignKey: column on the target table to match via WHERE ... IN
-		//
-		// belongsTo (posts → author): FK=authorId is on source.
-		//   Extract authorId from parents → SELECT * FROM authors WHERE id IN (...)
-		//   sourceKey=authorId, foreignKey=id (target PK)
-		//
-		// hasMany (authors → posts): FK=authorId is on target.
-		//   Extract id from parents → SELECT * FROM posts WHERE author_id IN (...)
-		//   sourceKey=id, foreignKey=authorId (target FK)
-		const isBelongsTo = ctx.relationType === 'belongsTo';
-		const sourceKey = isBelongsTo
-			? fk
-			: parentKey.length > 0
-				? parentKey
-				: [deps.defaultPk];
-		const targetFk = isBelongsTo
-			? parentKey.length > 0
-				? parentKey
-				: [deps.defaultPk]
-			: fk;
-
-		// Find matching include intent for select/where passthrough
-		const includeIntent = ctx.intentPath
-			? intentsByPath.get(ctx.intentPath)
-			: rootIntentsByRelation.get(relationName);
-
-		const entry: Mutable<SubqueryIncludeInfo> = {
-			relationName,
-			targetTable: ctx.target,
-			foreignKey: targetFk,
-			sourceKey,
-			sourceTable: ctx.sourceTable ?? plan.rootTable,
-		};
-		if (typeof ctx.relationType === 'string') {
-			entry.relationType = ctx.relationType;
-		}
-		if (includeIntent?.select != null) {
-			entry.select = includeIntent.select as NonNullable<
-				SubqueryIncludeInfo['select']
-			>;
-		}
-		if (includeIntent?.where != null) {
-			entry.where = includeIntent.where as NonNullable<
-				SubqueryIncludeInfo['where']
-			>;
-		}
-		if (ctx.intentPath) entriesByPath.set(ctx.intentPath, entry);
-		else subqueryIncludes.push(entry);
-	}
-
-	for (const [path, entry] of entriesByPath) {
-		const parentPath = path.slice(0, path.lastIndexOf('.include['));
-		const parent = path.includes('.include[')
-			? entriesByPath.get(parentPath)
-			: undefined;
-		if (parent) {
-			parent.nestedIncludes = [...(parent.nestedIncludes ?? []), entry];
-		} else {
-			subqueryIncludes.push(entry);
-		}
-	}
-	return { main, subqueryIncludes };
 }

@@ -899,24 +899,6 @@ describe('Semantic Planner', () => {
 			// flat excludes json_agg, no lateral → falls back to join
 			expect(includeDecision?.choice).toBe('join');
 		});
-
-		it('should use SEPARATE when explicitly requested via defaultIncludeStrategy', () => {
-			const intent: QueryIntent = {
-				type: 'select',
-				from: 'categories',
-				include: [{ relation: 'products' }],
-			};
-
-			const report = plan(intent, q2Schema, {
-				defaultIncludeStrategy: 'subquery',
-			});
-
-			const includeDecision = report.decisions.find(
-				(d) => d.type === 'include-strategy',
-			);
-			expect(includeDecision).toBeDefined();
-			expect(includeDecision?.choice).toBe('subquery');
-		});
 	});
 
 	// ============================================================================

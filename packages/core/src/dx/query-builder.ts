@@ -15,7 +15,11 @@ import type {
 } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanOptions, PlanReport } from '../planner.js';
-import { AmbiguousPlanError, plan } from '../planner.js';
+import {
+	AmbiguousPlanError,
+	plan,
+	validateIncludeStrategy,
+} from '../planner.js';
 import type { BatchValuesRef } from './batch-values.js';
 import { isBatchValuesRef } from './batch-values.js';
 import {
@@ -149,6 +153,21 @@ export class QueryBuilderImpl<TResult = unknown>
 		relation: string,
 		options?: IncludeOptionsWithRecursive,
 	): QueryBuilder<TResult> {
+		// Runtime callers may still pass an obsolete strategy outside the typed API.
+		const validateOptions = (value: unknown): void => {
+			if (!value || typeof value !== 'object') return;
+			if (
+				'strategy' in value &&
+				typeof value.strategy === 'string' &&
+				value.strategy !== 'flat'
+			) {
+				validateIncludeStrategy(value.strategy, this.ctx.dialectCapabilities);
+			}
+			if ('include' in value && Array.isArray(value.include)) {
+				for (const nested of value.include) validateOptions(nested);
+			}
+		};
+		validateOptions(options);
 		const builder = this.clone();
 
 		// Validate recursive includes (DX-017)
@@ -736,14 +755,11 @@ export class QueryBuilderImpl<TResult = unknown>
 			compileOptions.schemaName = this.ctx.schemaName;
 		}
 
-		// Use compileWithIncludes to get subquery include info for hasMany relations
-		const compiledWithIncludes = adapter.compileWithIncludes(
-			planReport,
-			compileOptions,
-		);
+		// Compile the complete SELECT, including its SQL-based includes
+		const compiled = adapter.compile(planReport, compileOptions);
 		const mainResults = (await executeCompiledQuery(
 			adapter,
-			compiledWithIncludes.main,
+			compiled,
 			'all()',
 		)) as TResult[];
 
@@ -755,24 +771,10 @@ export class QueryBuilderImpl<TResult = unknown>
 		);
 
 		// E2E-004: Hydrate json_agg includes by parsing JSON columns
-		hydrator.hydrateJsonAggIncludes(
-			mainResults,
-			planReport,
-			compiledWithIncludes.main,
-		);
+		hydrator.hydrateJsonAggIncludes(mainResults, planReport, compiled);
 
 		// E2E-004: Hydrate JOIN includes by grouping dot-prefixed columns
 		hydrator.hydrateJoinIncludes(mainResults, planReport);
-
-		// Process subquery includes (hasMany hydration - DX-033)
-		if (compiledWithIncludes.subqueryIncludes.length > 0) {
-			await hydrator.hydrateIncludes(
-				mainResults,
-				compiledWithIncludes.subqueryIncludes,
-				adapter,
-				compileOptions,
-			);
-		}
 
 		// Process recursive includes if any
 		if (this.recursiveIncludes.length > 0) {
@@ -1415,16 +1417,13 @@ export class QueryBuilderImpl<TResult = unknown>
 			compileOptions.schemaName = this.ctx.schemaName;
 		}
 
-		const compiledWithIncludes = adapter.compileWithIncludes(
-			planReport,
-			compileOptions,
-		);
+		const compiled = adapter.compile(planReport, compileOptions);
 
 		let mainResults: TResult[];
 		try {
 			mainResults = (await executeCompiledQuery(
 				adapter,
-				compiledWithIncludes.main,
+				compiled,
 				'all()',
 			)) as TResult[];
 		} catch (error) {
@@ -1435,7 +1434,7 @@ export class QueryBuilderImpl<TResult = unknown>
 					error: normalizeHookError(error),
 					intent,
 					phase: 'afterQuery',
-					sql: compiledWithIncludes.main.sql,
+					sql: compiled.sql,
 				});
 				throw finalError;
 			}
@@ -1448,20 +1447,8 @@ export class QueryBuilderImpl<TResult = unknown>
 			this.from,
 			this.ctx.schemaName,
 		);
-		hydrator.hydrateJsonAggIncludes(
-			mainResults,
-			planReport,
-			compiledWithIncludes.main,
-		);
+		hydrator.hydrateJsonAggIncludes(mainResults, planReport, compiled);
 		hydrator.hydrateJoinIncludes(mainResults, planReport);
-		if (compiledWithIncludes.subqueryIncludes.length > 0) {
-			await hydrator.hydrateIncludes(
-				mainResults,
-				compiledWithIncludes.subqueryIncludes,
-				adapter,
-				compileOptions,
-			);
-		}
 		if (this.recursiveIncludes.length > 0) {
 			await hydrator.processRecursiveIncludes(
 				mainResults,
@@ -1477,8 +1464,8 @@ export class QueryBuilderImpl<TResult = unknown>
 			operation: 'select',
 			intent,
 			resultType,
-			sql: compiledWithIncludes.main.sql,
-			parameters: compiledWithIncludes.main.parameters,
+			sql: compiled.sql,
+			parameters: compiled.parameters,
 			duration,
 			...(this.ctx.schemaName !== undefined && {
 				schemaName: this.ctx.schemaName,
@@ -1517,7 +1504,7 @@ export class QueryBuilderImpl<TResult = unknown>
 					error: normalizeHookError(error),
 					intent,
 					phase: 'afterQuery',
-					sql: compiledWithIncludes.main.sql,
+					sql: compiled.sql,
 				});
 				throw finalError;
 			}

@@ -311,10 +311,6 @@
 				"kind": "type"
 			},
 			{
-				"name": "CompileResultWithIncludes",
-				"kind": "type"
-			},
-			{
 				"name": "CompilingAdapter",
 				"kind": "type"
 			},
@@ -1839,10 +1835,6 @@
 				"kind": "type"
 			},
 			{
-				"name": "SubqueryIncludeInfo",
-				"kind": "type"
-			},
-			{
 				"name": "SubqueryRefIntent",
 				"kind": "type"
 			},
@@ -2508,10 +2500,6 @@
 			},
 			{
 				"name": "CompileOptionsBase",
-				"kind": "type"
-			},
-			{
-				"name": "CompileResultWithIncludes",
 				"kind": "type"
 			},
 			{
@@ -4108,10 +4096,6 @@
 			},
 			{
 				"name": "SubqueryExpressionIntent",
-				"kind": "type"
-			},
-			{
-				"name": "SubqueryIncludeInfo",
 				"kind": "type"
 			},
 			{

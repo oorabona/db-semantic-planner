@@ -271,42 +271,6 @@ describe('bigint js column metadata provenance', () => {
 		});
 	});
 
-	it('populates metadata for direct and many-to-many subquery include output', () => {
-		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
-		const direct = adapter.compileSubqueryInclude(
-			{
-				relationName: 'metrics',
-				targetTable: 'metrics',
-				foreignKey: 'eventId',
-				sourceKey: 'id',
-			},
-			['event-1'],
-		);
-		const manyToMany = adapter.compileSubqueryInclude(
-			{
-				relationName: 'metrics',
-				targetTable: 'metrics',
-				foreignKey: 'eventId',
-				sourceKey: 'id',
-				through: 'event_metrics',
-				throughSourceKey: 'eventId',
-				throughTargetKey: 'metricId',
-			},
-			['event-1'],
-		);
-
-		expect(direct.columnMetadata?.get('bigCount')).toEqual({
-			table: 'metrics',
-			column: 'bigCount',
-			js: 'bigint',
-		});
-		expect(manyToMany.columnMetadata?.get('bigCount')).toEqual({
-			table: 'metrics',
-			column: 'bigCount',
-			js: 'bigint',
-		});
-	});
-
 	it('does not synthesize metadata for forged js on non-bigint columns', () => {
 		const forgedSchema = schema({
 			docs: {

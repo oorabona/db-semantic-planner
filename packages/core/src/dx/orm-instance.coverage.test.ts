@@ -785,7 +785,7 @@ describe('orm-instance coverage', () => {
 		it('should pass relationHints to QueryBuilder', () => {
 			const adapter = createMockAdapter();
 			const relationHints = {
-				'users.posts': { strategy: 'subquery' as const },
+				'users.posts': { strategy: 'json_agg' as const },
 			};
 			const orm = createOrmInstance(model, false, relationHints, adapter);
 			const builder = orm.select('users');

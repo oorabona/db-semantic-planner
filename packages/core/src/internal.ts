@@ -8,7 +8,6 @@ export {
 	type AdapterCapabilities,
 	type AdapterStreamOptions,
 	type CompileOnlyAdapter,
-	type CompileResultWithIncludes,
 	type ConnectionAvailability,
 	type DumpMeta,
 	supportsExecution,
@@ -88,7 +87,10 @@ export type {
 	TableReaddressDeclaration,
 } from './model-ir.js';
 export { inspectMutationRows } from './mutation-rows.js';
-export type { RecursivePlanReport } from './planner.js';
+export {
+	type RecursivePlanReport,
+	validateIncludeStrategy,
+} from './planner.js';
 export {
 	type AdmittedDestructiveOutcomeClaim,
 	admitDestructiveOutcomeClaim,

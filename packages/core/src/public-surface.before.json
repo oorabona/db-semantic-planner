@@ -515,10 +515,6 @@
 				"kind": "type"
 			},
 			{
-				"name": "CompileResultWithIncludes",
-				"kind": "type"
-			},
-			{
 				"name": "CompilingAdapter",
 				"kind": "type"
 			},
@@ -2407,10 +2403,6 @@
 				"kind": "value"
 			},
 			{
-				"name": "SubqueryIncludeInfo",
-				"kind": "type"
-			},
-			{
 				"name": "SubqueryRefIntent",
 				"kind": "type"
 			},
@@ -3192,6 +3184,10 @@
 			{
 				"name": "transitionPhysicalSessionIsCompromised",
 				"kind": "value"
+			},
+			{
+				"name": "validateIncludeStrategy",
+				"kind": "value"
 			}
 		],
 		"runtime": [
@@ -3210,7 +3206,8 @@
 			"markTransitionClientCompromised",
 			"mintClaimToken",
 			"mintDurablyLoadedRun",
-			"transitionPhysicalSessionIsCompromised"
+			"transitionPhysicalSessionIsCompromised",
+			"validateIncludeStrategy"
 		],
 		"built": true
 	}
