@@ -18,7 +18,6 @@ import {
 	queryLocal,
 	resolveDeclaredIdentifier,
 } from './sql-identifier.js';
-import { stableJson } from './transition/stable-json.js';
 
 /** One ownership check for each public object; identical requests collapse. */
 export function claimPayloadKey(
@@ -42,6 +41,9 @@ export function resolveIncludePayloadShapes(
 	plan: PlanReport,
 	model: ModelIR | undefined,
 	deps: AdapterCompilerDeps,
+	resolveRootLabels: (
+		wildcard: () => readonly string[],
+	) => readonly { key: string; owner: string }[],
 ): readonly IncludePayloadShape[] {
 	const flatPaths = new Set<string>();
 	const requestedPathsByLeaf = new Map<string, string[]>();
@@ -134,7 +136,6 @@ export function resolveIncludePayloadShapes(
 			});
 		} else byPath.set(path, d);
 	}
-	const select = plan.intent?.select;
 	const rootColumns = () => {
 		const table = model?.getTable(plan.rootTable);
 		if (table) return table.columns.map((column) => column.name);
@@ -301,45 +302,8 @@ export function resolveIncludePayloadShapes(
 	const owners = new Map<string, string>();
 	if (plan.intent?.existsWrap) return roots;
 
-	if (!select || select.type === 'all')
-		for (const column of rootColumns())
-			claimPayloadKey(owners, '$', column, `column:${column}`);
-	else if (select.type === 'fields' || select.type === 'aggregate') {
-		for (const field of select.fields ?? [])
-			for (const key of field === '*' ? rootColumns() : [field])
-				claimPayloadKey(owners, '$', key, `column:${key}`);
-		if (select.type === 'aggregate')
-			for (const aggregate of select.aggregates)
-				claimPayloadKey(
-					owners,
-					'$',
-					aggregate.as ?? aggregate.function,
-					`aggregate:${stableJson(aggregate)}`,
-				);
-	} else if (select.type === 'expressions' && Array.isArray(select.columns))
-		for (const expr of select.columns) {
-			if (expr.kind === 'relationColumn' && byPath.has(expr.relation)) continue;
-			const key =
-				'as' in expr && expr.as
-					? expr.as
-					: expr.kind === 'column'
-						? expr.column
-						: expr.kind === 'columnAlias'
-							? expr.alias
-							: undefined;
-			if (key === '*') {
-				for (const column of rootColumns())
-					claimPayloadKey(owners, '$', column, `column:${column}`);
-			} else if (key)
-				claimPayloadKey(
-					owners,
-					'$',
-					key,
-					expr.kind === 'column' || expr.kind === 'columnAlias'
-						? `column:${expr.column}`
-						: `expression:${stableJson(expr)}`,
-				);
-		}
+	for (const { key, owner } of resolveRootLabels(rootColumns))
+		claimPayloadKey(owners, '$', key, owner);
 	for (const shape of roots.filter(
 		(shape) =>
 			shape.strategy !== 'join' ||

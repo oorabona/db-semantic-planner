@@ -1,10 +1,17 @@
-import type { ColumnIR, ColumnJsReadType, ModelIR, TableIR } from '@dbsp/types';
+import type {
+	ColumnIR,
+	ColumnJsReadType,
+	ModelIR,
+	SelectIntent,
+	TableIR,
+} from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
 	type DeclaredNameResolver,
 	declaredColumnName,
 	declaredTableName,
 } from './declared-name-resolver.js';
+import { stableJson } from './transition/stable-json.js';
 
 type ProjectionSource = {
 	readonly table: string;
@@ -390,6 +397,93 @@ function expandStar(
 	}
 }
 
+/** PostgreSQL's established labels for lowered SELECT expressions. */
+export function resolveProjectionOutputLabel(
+	value: unknown,
+): string | undefined {
+	if (!value || typeof value !== 'object') return undefined;
+	const node = value as Record<string, unknown>;
+	if (typeof node.as === 'string') return node.as;
+	switch (node.kind) {
+		case 'column':
+			return node.column as string;
+		case 'columnAlias':
+			return node.alias as string;
+		case 'ref':
+			return (node.column as string).split('.').at(-1);
+		case 'star':
+			return '*';
+		case 'customFn':
+			return (node.name as string).split('.').at(-1);
+		case 'aggregate':
+			return node.function as string;
+		case 'coalesce':
+			return 'coalesce';
+		case 'case':
+			return 'case';
+		case 'cast':
+			return resolveProjectionOutputLabel(node.expr);
+	}
+
+	const fields = columnRefFields(value);
+	if (fields) return stringField(fields.at(-1));
+	const call = node.FuncCall as { funcname?: unknown[] } | undefined;
+	if (call) return stringField(call.funcname?.at(-1));
+	const cast = node.TypeCast as { arg?: unknown } | undefined;
+	if (cast) return resolveProjectionOutputLabel(cast.arg);
+	if (node.CoalesceExpr) return 'coalesce';
+	if (node.CaseExpr) return 'case';
+	return undefined;
+}
+
+/** Root ownership uses the same label resolver as lowered SELECT candidates. */
+export function rootProjectionLabels(
+	select: SelectIntent | undefined,
+	wildcard: () => readonly string[],
+	included: ReadonlySet<string>,
+	strict: boolean,
+): readonly { key: string; owner: string }[] {
+	const fields = (names: readonly string[]) =>
+		names.flatMap((name) =>
+			(name === '*' ? wildcard() : [name]).map((key) => ({
+				key,
+				owner: `column:${key}`,
+			})),
+		);
+	if (!select || select.type === 'all') return fields(['*']);
+	if (select.type === 'fields') return fields(select.fields);
+	if (select.type === 'aggregate')
+		return [
+			...fields(select.fields ?? []),
+			...select.aggregates.map((aggregate) => ({
+				key: aggregate.as ?? aggregate.function,
+				owner: `aggregate:${stableJson(aggregate)}`,
+			})),
+		];
+	if (select.type !== 'expressions' || !Array.isArray(select.columns))
+		return [];
+	return select.columns.flatMap((expr) => {
+		if (expr.kind === 'relationColumn' && included.has(expr.relation))
+			return [];
+		const key = resolveProjectionOutputLabel(expr);
+		if (key === '*') return fields(['*']);
+		if (!key && !strict) return [];
+		if (!key)
+			throw new Error(
+				`Root projection expression ${stableJson(expr)} has no established output label; use .as(...).`,
+			);
+		return [
+			{
+				key: truncateIdentifier(key, 63),
+				owner:
+					expr.kind === 'column' || expr.kind === 'columnAlias'
+						? `column:${expr.column}`
+						: `expression:${stableJson(expr)}`,
+			},
+		];
+	});
+}
+
 function addTargetCandidates(
 	target: unknown,
 	candidates: Map<string, ProjectionCandidate[]>,
@@ -405,10 +499,11 @@ function addTargetCandidates(
 		typeof resTarget?.name === 'string' ? resTarget.name : undefined;
 	const fields = columnRefFields(value);
 	if (!fields) {
-		if (outputAlias) {
-			addCandidate(candidates, outputAlias, {
+		const label = outputAlias ?? resolveProjectionOutputLabel(value);
+		if (label) {
+			addCandidate(candidates, label, {
 				kind: 'expression',
-				logicalKey: outputAlias,
+				logicalKey: label,
 				reason: 'projection expression has no model column provenance',
 			});
 		}

@@ -48,21 +48,22 @@ function readPayload(value: unknown, shape: IncludePayloadShape): unknown {
 		return shape.isToOne ? (items[0] ?? null) : items;
 	}
 	if (!record(value)) return value;
+	const converted = { ...value };
 	for (const column of shape.columns)
 		if (Object.hasOwn(value, column.publicKey))
 			setValue(
-				value,
+				converted,
 				column.publicKey,
 				readColumn(value[column.publicKey], column),
 			);
 	for (const child of shape.children)
 		if (Object.hasOwn(value, child.publicKey))
 			setValue(
-				value,
+				converted,
 				child.publicKey,
 				readPayload(value[child.publicKey], child),
 			);
-	return value;
+	return converted;
 }
 
 /** SQL has already chosen keys. Hydration reads exact owned labels only. */
@@ -74,6 +75,7 @@ export function hydrateResolvedIncludes(
 	const assembleFlat = (
 		row: Record<string, unknown>,
 		shape: IncludePayloadShape,
+		deletions: Set<string>,
 	): unknown => {
 		const value: Record<string, unknown> = {};
 		let present = false;
@@ -84,10 +86,10 @@ export function hydrateResolvedIncludes(
 			const raw = row[column.outputLabel];
 			if (raw !== null && raw !== undefined) present = true;
 			setValue(value, column.publicKey, readColumn(raw, column));
-			delete row[column.outputLabel];
+			deletions.add(column.outputLabel);
 		}
 		for (const child of shape.children) {
-			const childValue = assembleFlat(row, child);
+			const childValue = assembleFlat(row, child, deletions);
 			if (childValue === undefined) continue;
 			owned = true;
 			setValue(value, child.publicKey, childValue);
@@ -97,23 +99,26 @@ export function hydrateResolvedIncludes(
 	};
 	for (const row of rows) {
 		if (!record(row)) continue;
+		const assignments = new Map<string, unknown>();
+		const deletions = new Set<string>();
 		for (const shape of shapes) {
 			if (strategy === 'json_agg' && shape.strategy === 'json_agg') {
 				if (!Object.hasOwn(row, shape.outputLabel)) continue;
-				setValue(
-					row,
+				assignments.set(
 					shape.publicKey,
 					readPayload(row[shape.outputLabel], shape),
 				);
-				delete row[shape.outputLabel];
+				deletions.add(shape.outputLabel);
 			} else if (
 				strategy === 'flat' &&
 				shape.strategy !== 'json_agg' &&
 				(shape.columns.length > 0 || shape.children.length > 0)
 			) {
-				const value = assembleFlat(row, shape);
-				if (value !== undefined) setValue(row, shape.publicKey, value);
+				const value = assembleFlat(row, shape, deletions);
+				if (value !== undefined) assignments.set(shape.publicKey, value);
 			}
 		}
+		for (const key of deletions) delete row[key];
+		for (const [key, value] of assignments) setValue(row, key, value);
 	}
 }

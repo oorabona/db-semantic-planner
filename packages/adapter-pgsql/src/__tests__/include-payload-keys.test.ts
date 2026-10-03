@@ -1,12 +1,15 @@
 import {
 	col,
 	createOrm,
+	fn,
+	literal,
 	POSTGRESQL_CAPABILITIES,
 	plan,
 	ResultHydrator,
 	ref,
 	relationColumn,
 	schema,
+	star,
 } from '@dbsp/core';
 import type { IncludeIntent, IncludePayloadShape } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
@@ -307,4 +310,128 @@ for (const strategy of ['json_agg', 'lateral', 'join'] as const)
 				? [{ posts: [{ id: 1, comments: [{ id: 2, votes: [{ id: 3 }] }] }] }]
 				: [{ posts: { id: 1, comments: { id: 2, votes: { id: 3 } } } }],
 		);
+	});
+
+it('907 owns function labels, expands stars, and refuses unknown labels', () => {
+	const labelModel = schema({
+		roots: { id: { type: 'integer', primaryKey: true }, now: 'text' },
+		events: {
+			id: { type: 'integer', primaryKey: true },
+			rootId: ref('roots', { inverse: 'now' }),
+		},
+	}).model;
+	const adapter = createPgCompileOnlyAdapter({ model: labelModel });
+	const orm = createOrm({ model: labelModel, adapter });
+	expect(() =>
+		orm
+			.select('roots')
+			.columns([fn('now')])
+			.include('now')
+			.dump(),
+	).toThrow("Include payload '$' has conflicting public key 'now'");
+	expect(() =>
+		orm.select('roots').columns([star()]).include('now').dump(),
+	).toThrow("Include payload '$' has conflicting public key 'now'");
+	expect(() =>
+		orm
+			.select('roots')
+			.columns([literal(1)])
+			.include('now')
+			.dump(),
+	).toThrow('use .as(...)');
+	const report = orm
+		.select('roots')
+		.columns([fn('now').as('ts')])
+		.include('now')
+		.plan();
+	const query = adapter.compile(report, { model: labelModel });
+	expect(query.sql).toContain('now() AS ts');
+	const rows = [{ ts: 'timestamp', now_json: [{ id: 1, rootId: 2 }] }];
+	new ResultHydrator(labelModel, 'roots').hydrateJsonAggIncludes(
+		rows,
+		report,
+		query,
+	);
+	expect(rows).toEqual([{ ts: 'timestamp', now: [{ id: 1, rootId: 2 }] }]);
+});
+
+it('907 collapses exact aggregate requests and refuses different owners', () => {
+	const adapter = createPgCompileOnlyAdapter({ model });
+	const orm = createOrm({ model, adapter });
+	const query = orm
+		.select('authors')
+		.include('posts', { join: 'left' })
+		.count('id', 'n')
+		.count('id', 'n')
+		.dump();
+	expect(query.sql).toBe(
+		'SELECT count(authors.id) AS n FROM authors LEFT JOIN posts AS posts ON authors.id = posts."authorId"',
+	);
+	expect(query.sql.match(/count\(/g)).toHaveLength(1);
+	expect(query.sql).toContain('AS n');
+	expect(() =>
+		orm
+			.select('authors')
+			.include('posts', { join: 'left' })
+			.count('id', 'n')
+			.count('amount', 'n')
+			.dump(),
+	).toThrow("Include payload '$' has conflicting public key 'n'");
+});
+
+for (const strategy of ['json_agg', 'join'] as const)
+	it(`907 stages every ${strategy} read before changing a row`, () => {
+		const atomicModel = schema({
+			roots: { id: { type: 'integer', primaryKey: true } },
+			children: {
+				id: { type: 'integer', primaryKey: true },
+				rootId: ref('roots', { inverse: 'children' }),
+				good: { type: 'bigint', js: 'bigint' },
+				bad: { type: 'bigint', js: 'number' },
+			},
+		}).model;
+		const adapter = createPgCompileOnlyAdapter({ model: atomicModel });
+		const report = createOrm({ model: atomicModel, adapter })
+			.select('roots')
+			.withPlanOptions({ defaultIncludeStrategy: strategy })
+			.include('children')
+			.columns([
+				col('id', 'id'),
+				...['id', 'rootId', 'good', 'bad'].map((name) =>
+					relationColumn('children', name, name),
+				),
+			])
+			.plan();
+		const query = adapter.compile(report, { model: atomicModel });
+		const rows =
+			strategy === 'json_agg'
+				? [
+						{
+							id: 1,
+							children_json: [
+								{ id: 2, rootId: 1, good: '1', bad: '9007199254740993' },
+							],
+						},
+					]
+				: [
+						{
+							id: 1,
+							'children.id': 2,
+							'children.rootId': 1,
+							'children.good': '1',
+							'children.bad': '9007199254740993',
+						},
+					];
+		const before = structuredClone(rows);
+		const hydrator = new ResultHydrator(atomicModel, 'roots');
+		expect(() =>
+			strategy === 'json_agg'
+				? hydrator.hydrateJsonAggIncludes(rows, report, query)
+				: hydrator.hydrateJoinIncludes(rows, report, query),
+		).toThrow(
+			new RangeError(
+				'Cannot convert PostgreSQL bigint column "children.bad" output key "bad" value "9007199254740993" to number: outside Number.MAX_SAFE_INTEGER; use js:\'bigint\' or omit js.',
+			),
+		);
+		expect(rows).toEqual(before);
 	});

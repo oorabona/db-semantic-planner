@@ -392,4 +392,6 @@ A relation uses the requested include name at every depth. For example, `include
 
 NQL's unaliased `relation.column` label is a default flat label, not an explicit alias. Flat SQL keeps that label; nested JSON uses the column's declared name. An explicit `as` supplies the public column key.
 
+Every root SELECT label owns its key, including function labels and expanded stars. Use `.as(...)` for expressions whose returned label cannot be established. Exact duplicate aggregate requests emit one SQL target. Hydration stages all conversions and child reads before changing each row; a conversion failure leaves that row unchanged.
+
 Compilation resolves these keys before generating SQL. Exact duplicate source/key requests deduplicate; two different owners of one public key fail with the payload path and key. A wildcard include over a target whose columns cannot be enumerated also fails.

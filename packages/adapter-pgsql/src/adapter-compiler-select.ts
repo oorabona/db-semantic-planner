@@ -35,6 +35,7 @@ import {
 	relationBinding,
 	relationBindingFor,
 } from './binding-registry.js';
+import { rootProjectionLabels } from './column-metadata.js';
 import { compileWhereIntent, type WhereCompilerCtx } from './compile-where.js';
 import {
 	type CompilerOptions,
@@ -85,6 +86,27 @@ function deduplicateRootProjection(
 			...intent,
 			select: { ...select, fields: [...new Set(select.fields)] },
 		};
+	if (select.type === 'aggregate') {
+		const seen = new Set<string>();
+		return {
+			...intent,
+			select: {
+				...select,
+				...(select.fields !== undefined && {
+					fields: [...new Set(select.fields)],
+				}),
+				aggregates: select.aggregates.filter((aggregate) => {
+					const identity = stableJson([
+						aggregate,
+						aggregate.as ?? aggregate.function,
+					]);
+					if (seen.has(identity)) return false;
+					seen.add(identity);
+					return true;
+				}),
+			},
+		};
+	}
 	if (select.type !== 'expressions' || !Array.isArray(select.columns))
 		return intent;
 	const seen = new Set<string>();
@@ -1415,6 +1437,13 @@ export function compileSelectEnvelope<T = unknown>(
 			planForCompilation,
 			resolvedModelForCompiler,
 			deps,
+			(rootColumns) =>
+				rootProjectionLabels(
+					planForCompilation.intent?.select,
+					rootColumns,
+					includedRelations,
+					includedRelations.size > 0,
+				),
 		);
 		hydrationPlan =
 			includePayloads.length > 0 ? { ...plan, includePayloads } : undefined;
