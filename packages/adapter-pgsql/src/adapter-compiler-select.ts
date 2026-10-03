@@ -602,7 +602,13 @@ function buildRelationColumnsMap(
 		const existing = map.get(mapKey);
 		if (existing) {
 			if (existing.length === 1 && existing[0]?.col === '*') continue; // wildcard already set
-			if (!existing.some((e) => e.col === col)) {
+			const previous = existing.find((e) => e.col === col);
+			if (previous && (previous.alias ?? col) !== (alias ?? col)) {
+				throw new Error(
+					`Relation column projection '${fullRelation}' requests column '${col}' with conflicting aliases '${previous.alias ?? col}' and '${alias ?? col}'.`,
+				);
+			}
+			if (!previous) {
 				existing.push({ col, ...(alias !== undefined && { alias }) });
 			}
 		} else {
@@ -683,10 +689,6 @@ function injectAndValidateRelationColumns(
 		if (
 			d.choice !== 'lateral' ||
 			!path ||
-			(!path.includes('.') &&
-				![...relationColumnsMap.keys()].some((key) =>
-					key.startsWith(`${path}.`),
-				)) ||
 			!entries ||
 			entries.some(({ col }) => col === '*') ||
 			!d.targetTable

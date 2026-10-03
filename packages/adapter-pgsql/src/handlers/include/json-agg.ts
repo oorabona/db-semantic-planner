@@ -431,6 +431,35 @@ function compileJsonAggRecursive(
 		columnValueOverrides = values;
 	}
 
+	// Child relation values and projected columns share one JSON object.
+	const projectedKeys = new Set(
+		columns && !columns.some((column) => identifierText(column) === '*')
+			? columns.map(identifierText)
+			: resolvedTarget.outputs !== undefined
+				? [...resolvedTarget.outputs.keys()]
+				: (ctx.model?.getTable(targetTable)?.columns ?? []).map((column) =>
+						identifierText(
+							resolveDeclaredIdentifier(
+								ctx.declaredNames,
+								ctx.dbCasing ?? 'preserve',
+								{
+									kind: 'column',
+									table: targetTable,
+									column: column.name,
+								},
+							),
+						),
+					),
+	);
+	for (const child of childNodes ?? []) {
+		const key = identifierText(child.key);
+		if (projectedKeys.has(key)) {
+			throw new Error(
+				`JSON_AGG relation projection '${decision.relationPath ?? relation}' has conflicting output key '${key}'.`,
+			);
+		}
+	}
+
 	return sqlJsonAggSubquery(
 		resolvedTarget.cteName ??
 			resolveDeclaredIdentifier(ctx.declaredNames, ctx.dbCasing ?? 'preserve', {

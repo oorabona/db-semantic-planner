@@ -233,7 +233,7 @@ function compileLateralCascade(
 	// Build outer SELECT targets referencing the lateral alias
 	const targets: Node[] = buildLateralTargets(columns, lateralAlias, scopedCtx);
 	// Alias only the outer projection: child correlations use original keys.
-	if (decision.relationPath?.includes('.') && decision.columnAliases) {
+	if (decision.columnAliases) {
 		for (let i = 0; i < (columns?.length ?? 0); i++) {
 			const column = columns?.[i];
 			const alias = column ? decision.columnAliases[column] : undefined;

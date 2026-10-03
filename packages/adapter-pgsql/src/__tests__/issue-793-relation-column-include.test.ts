@@ -154,3 +154,73 @@ it('refuses a lateral ancestor projection that omits a nested consumer correlati
 		"Nested relation column projection 'author' cannot be compiled with lateral: child 'author.file' requires column(s) 'file_id'.",
 	);
 });
+
+it('refuses a JSON_AGG alias that collides with a child relation key', async () => {
+	await expect(
+		orm
+			.select('posts')
+			.withPlanOptions({ defaultIncludeStrategy: 'json_agg' })
+			.include('author.file.users')
+			.columns([relationColumn('author.file', 'path', 'users')])
+			.all(),
+	).rejects.toThrow(
+		"JSON_AGG relation projection 'author.file' has conflicting output key 'users'.",
+	);
+});
+
+it('refuses a root lateral projection that omits a child correlation key', () => {
+	expect(() =>
+		orm
+			.select('posts')
+			.withPlanOptions({ defaultIncludeStrategy: 'lateral' })
+			.include('author.file')
+			.columns([relationColumn('author', 'name', 'authorName')])
+			.dump(),
+	).toThrow(
+		"Nested relation column projection 'author' cannot be compiled with lateral: child 'author.file' requires column(s) 'file_id'.",
+	);
+});
+
+it('preserves a one-hop lateral alias', () => {
+	const result = orm
+		.select('posts')
+		.withPlanOptions({ defaultIncludeStrategy: 'lateral' })
+		.include('author')
+		.columns([relationColumn('author', 'name', 'authorName')])
+		.dump();
+	expect(result.sql).toBe(
+		'SELECT users_lat_0.name AS "authorName" FROM posts LEFT JOIN LATERAL (SELECT users_inner_0.name FROM users AS users_inner_0 WHERE users_inner_0.id = posts.author_id) AS users_lat_0 ON true',
+	);
+	expect('params' in result && result.params).toEqual([]);
+});
+
+it('refuses one relation source column requested under different aliases', () => {
+	expect(() =>
+		orm
+			.select('posts')
+			.include('author')
+			.columns([
+				relationColumn('author', 'name', 'a'),
+				relationColumn('author', 'name', 'b'),
+			])
+			.dump(),
+	).toThrow(
+		"Relation column projection 'author' requests column 'name' with conflicting aliases 'a' and 'b'.",
+	);
+});
+
+it('deduplicates the same relation source column and alias', () => {
+	const result = orm
+		.select('posts')
+		.withPlanOptions({ defaultIncludeStrategy: 'lateral' })
+		.include('author')
+		.columns([
+			relationColumn('author', 'name', 'a'),
+			relationColumn('author', 'name', 'a'),
+		])
+		.dump();
+	expect(result.sql).toBe(
+		'SELECT users_lat_0.name AS a FROM posts LEFT JOIN LATERAL (SELECT users_inner_0.name FROM users AS users_inner_0 WHERE users_inner_0.id = posts.author_id) AS users_lat_0 ON true',
+	);
+	expect('params' in result && result.params).toEqual([]);
+});
