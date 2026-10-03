@@ -5,7 +5,7 @@ import {
 	type FkColumnDerivation,
 } from './assert-field.js';
 
-/** Declared relation keys and table primary keys precede convention fallbacks. */
+/** Declared relation and foreign-key references precede primary keys and fallbacks. */
 export function resolveRelationKeys(
 	sourceTable: string,
 	relation: Pick<
@@ -23,15 +23,27 @@ export function resolveRelationKeys(
 	const explicit = toColumnList(
 		belongsTo ? relation.targetKey : relation.sourceKey,
 	);
+	const foreign = toColumnList(relation.foreignKey);
+	const foreignTable = belongsTo ? sourceTable : relation.target;
+	const references =
+		authorities.model
+			?.getTable(foreignTable)
+			?.foreignKeys.find(
+				(fk) =>
+					fk.references.table === referencedTable &&
+					fk.columns.length === foreign.length &&
+					fk.columns.every((column, index) => column === foreign[index]),
+			)?.references.columns ?? [];
 	const declared = toColumnList(
 		authorities.model?.getTable(referencedTable)?.primaryKey,
 	);
 	const referencedKey = explicit.length
 		? explicit
-		: declared.length
-			? declared
-			: [authorities.defaultPkColumnName ?? DEFAULT_PK_COLUMN];
-	const foreign = toColumnList(relation.foreignKey);
+		: references.length
+			? references
+			: declared.length
+				? declared
+				: [authorities.defaultPkColumnName ?? DEFAULT_PK_COLUMN];
 	const foreignKey = foreign.length
 		? foreign
 		: referencedKey.map((key) =>

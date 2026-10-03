@@ -85,7 +85,9 @@ export type ConditionPosition =
  * declared names, model and shared parameter state retain their existing types.
  * Logical and relation descendants retain the caller's position; subquery
  * bodies use subquery. Only legacy top-level callers default to where.
- * FILTER compiles directly while the other positions retain their historical lowering.
+ * FILTER enters the condition compiler and bypasses PlanDecision; relation predicates
+ * and predicate subqueries still lower through handler decisions during migration.
+ * Other positions retain their historical lowering.
  */
 export type ConditionCompilerCtx = Omit<
 	WhereCompilerCtx,
