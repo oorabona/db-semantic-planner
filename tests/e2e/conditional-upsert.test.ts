@@ -91,12 +91,18 @@ describe('Issue #160 — conditional upsert', () => {
 				.onConflict(['sku'])
 				.doUpdate({ name: 'b' })
 				.returning(['name']);
-		for (const name of ['a', 'b']) {
-			expect(await upsert().execute()).toEqual([{ name }]);
-			const stored = await sql<{ name: string }>`
-				SELECT name FROM ${sql.ref(SCHEMA)}.widgets WHERE sku = 'ISSUE_914'
+		try {
+			for (const name of ['a', 'b']) {
+				expect(await upsert().execute()).toEqual([{ name }]);
+				const stored = await sql<{ name: string }>`
+					SELECT name FROM ${sql.ref(SCHEMA)}.widgets WHERE sku = 'ISSUE_914'
+				`.execute(pool);
+				expect(stored.rows).toEqual([{ name }]);
+			}
+		} finally {
+			await sql`
+				DELETE FROM ${sql.ref(SCHEMA)}.widgets WHERE sku = 'ISSUE_914'
 			`.execute(pool);
-			expect(stored.rows).toEqual([{ name }]);
 		}
 	});
 

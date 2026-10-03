@@ -385,5 +385,5 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 25
 success: true
-sql.equals: INSERT INTO ch6_pimdam.products ( title, sku, category_id, active ) VALUES ( $1, $2, $3, $4 ) ON CONFLICT (sku) DO UPDATE SET title = excluded.title, sku = excluded.sku, category_id = excluded.category_id, active = excluded.active
+sql.equals: INSERT INTO ch6_pimdam.products (title, sku, category_id, active) VALUES ($1, $2, $3, $4) ON CONFLICT (sku) DO UPDATE SET title = $5, sku = $6, category_id = $7, active = $8
 db.rows.equals: 1
