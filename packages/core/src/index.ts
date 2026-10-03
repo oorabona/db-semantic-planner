@@ -144,7 +144,6 @@ export type {
 	IntrospectingAdapter,
 	RawSqlAdapter,
 	StreamingAdapter,
-	SubqueryIncludeInfo,
 	TransactionalAdapter,
 } from './adapter.js';
 

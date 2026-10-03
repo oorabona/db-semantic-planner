@@ -40,7 +40,6 @@ export type AliasingMode = 'always' | 'onCollision';
  * Include strategy for relations (CLI-011)
  * - 'auto': Let the planner choose based on relation type (DEFAULT)
  * - 'join': Use JOIN (single query, database optimizes)
- * - 'subquery': Use subquery queries (N+1 style with batching)
  * - 'cte': Use CTE to materialize base query before joining
  * - 'lateral': Use LATERAL JOIN (PostgreSQL only) - limit N children per parent
  * - 'json_agg': Use JSON aggregation (PostgreSQL, MySQL 8+) - no row duplication
@@ -48,7 +47,6 @@ export type AliasingMode = 'always' | 'onCollision';
 export type IncludeStrategyMode =
 	| 'auto'
 	| 'join'
-	| 'subquery'
 	| 'cte'
 	| 'lateral'
 	| 'json_agg';

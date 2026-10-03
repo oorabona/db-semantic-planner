@@ -9,7 +9,6 @@
  *  - getPoolInstance() success path
  *  - indexExists() false branch (row with exists:false) + schema fallback
  *  - withSchema() carries pool, scoped execute works
- *  - compileWithIncludes() with/without include decisions
  *  - executeDDL() success path via pool.query
  *  - inTransaction flag semantics
  *  - listIndexes() / storageSize() schema fallback branches
@@ -4585,56 +4584,6 @@ describe('PgAdapter.withSchema — pool inheritance', () => {
 			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
 			'COMMIT',
 		]);
-	});
-});
-
-// ---------------------------------------------------------------------------
-// compileWithIncludes() — subquery includes present
-// ---------------------------------------------------------------------------
-
-describe('PgAdapter.compileWithIncludes — include decisions', () => {
-	it('returns subqueryIncludes as empty array when no include strategy in plan', () => {
-		const adapter = createPgAdapter(makePool());
-
-		const plan = {
-			rootTable: 'users',
-			decisions: [{ type: 'select', column: '*' }],
-		} as never;
-
-		const result = adapter.compileWithIncludes(plan);
-
-		expect(result.subqueryIncludes).toEqual([]);
-	});
-
-	it('returns main query with sql/parameters regardless of include strategy', () => {
-		const adapter = createPgAdapter(makePool());
-
-		const plan = {
-			rootTable: 'authors',
-			decisions: [
-				{
-					type: 'include-strategy',
-					choice: 'subquery',
-					context: {
-						relation: 'posts',
-						target: 'posts',
-						relationType: 'hasMany',
-						sourceTable: undefined,
-					},
-				},
-			],
-			intent: {
-				from: 'authors',
-				select: { type: 'star' },
-			},
-		} as never;
-
-		const result = adapter.compileWithIncludes(plan);
-
-		expect(result).toHaveProperty('main');
-		expect(typeof result.main.sql).toBe('string');
-		expect(Array.isArray(result.main.parameters)).toBe(true);
-		expect(Array.isArray(result.subqueryIncludes)).toBe(true);
 	});
 });
 

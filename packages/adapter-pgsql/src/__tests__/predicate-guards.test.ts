@@ -63,7 +63,7 @@ describe('#888 include preflight', () => {
 			});
 		}
 	}
-	for (const strategy of ['lateral', 'cte', 'subquery', 'json_agg'] as const) {
+	for (const strategy of ['lateral', 'cte', 'json_agg'] as const) {
 		it(`refuses forced ${strategy} include`, () => {
 			expect(() =>
 				orm

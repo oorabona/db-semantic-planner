@@ -10,7 +10,6 @@ CaseExpressionIntent	type	intent/expression-intent.ts
 ColumnJsReadType	type	model-ir.ts
 CompareOutcome	type	transition/contracts.ts
 CompileOnlyAdapter	type	adapter.ts
-CompileResultWithIncludes	type	adapter.ts
 ConnectionAvailability	type	adapter.ts
 DUCKDB_CAPABILITIES	value	dialects/index.ts
 DeleteIntent	type	intent/mutation-intent.ts

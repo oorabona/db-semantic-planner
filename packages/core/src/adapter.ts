@@ -33,7 +33,6 @@ export type {
 	NqlRuntimeBinding,
 	RawSqlAdapter,
 	StreamingAdapter,
-	SubqueryIncludeInfo,
 	TableDDLGeneratorAdapter,
 	TransactionalAdapter,
 	TransactionOptions,
@@ -42,7 +41,6 @@ export type {
 } from '@dbsp/types';
 export type {
 	CompileOnlyAdapter,
-	CompileResultWithIncludes,
 	ConnectionAvailability,
 	IntrospectionOptions,
 } from '@dbsp/types/internal';

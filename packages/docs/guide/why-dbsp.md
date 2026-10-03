@@ -12,7 +12,7 @@ Multi-tenant applications add another layer of complexity. Schema-per-tenant iso
 
 ## How dbsp is different
 
-db-semantic-planner is built around an intent-first paradigm. You declare what data you need — `orm.select('users').include('posts').where(eq('active', true))` — and the planner decides how to fetch it. The planner selects the optimal include strategy (`json_agg`, lateral join, correlated subquery, or CTE) based on the query shape, relation cardinality, and dialect capabilities. By default the planner chooses the strategy, and it explains why.
+db-semantic-planner is built around an intent-first paradigm. You declare what data you need — `orm.select('users').include('posts').where(eq('active', true))` — and the planner decides how to fetch it. The planner selects the optimal include strategy (`json_agg`, join, lateral join, or CTE) based on recursion, query shape, and dialect capabilities. By default the planner chooses the strategy, and it explains why.
 
 Every decision is observable. `.dump()` returns the full plan with reasoning, the compiled SQL, and the bound parameters — before execution. You can inspect what the planner chose and why, log it, or test it without a database connection. This makes debugging deterministic: same inputs always produce the same plan.
 
@@ -24,7 +24,7 @@ Multi-tenant isolation is a first-class primitive. `orm.withSchema('tenant_42')`
 |---------|:----:|:------:|:-------:|:------:|
 | Intent-first query planning | Yes | No | No | No |
 | Observable decisions (dump) | Full plan + SQL + params | SQL only (preview) | SQL only | SQL only |
-| Automatic include strategy | Yes (json_agg / lateral / subquery / CTE) | Yes (opaque) | Manual | Manual |
+| Automatic include strategy | Yes (join / json_agg / lateral / CTE) | Yes (opaque) | Manual | Manual |
 | N+1 prevention | Automatic | Yes | Yes | Manual |
 | Multi-tenant (withSchema) | Built-in | Manual | Manual | Manual |
 | Recursive CTEs | Builder API | No | Manual | Yes |

@@ -369,30 +369,6 @@ describe('query naming syntax tripwire for literal member and call forms', () =>
 		},
 	);
 
-	it('validates a belongsTo source key against its source table', () => {
-		const model = schema({
-			authors: { id: { type: 'integer', primaryKey: true } },
-			posts: { id: 'integer', authorId: ref('authors') },
-		}).model;
-		const adapter = createPgCompileOnlyAdapter({
-			model,
-			dbCasing: 'snake_case',
-		});
-		const compiled = adapter.compileSubqueryInclude(
-			{
-				relationName: 'author',
-				targetTable: 'authors',
-				foreignKey: 'id',
-				sourceKey: 'authorId',
-				sourceTable: 'posts',
-				relationType: 'belongsTo',
-			},
-			[7],
-		);
-
-		expect(compiled.sql).toContain('FROM authors WHERE id IN ($1)');
-	});
-
 	it.each(['snake_case', 'preserve'] as const)(
 		'repeats a projected COUNT expression for a HAVING alias with %s casing',
 		(dbCasing) => {

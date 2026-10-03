@@ -6,7 +6,6 @@
  * - createPgCompileOnlyAdapter() with default and custom options
  * - compile() with various decision types
  * - compile() with schema scoping
- * - compileWithIncludes() with and without subquery includes
  * - withSchema() adapter cloning
  * - dialectCapabilities property
  * - Custom options: defaultPkColumnName, deriveFkColumnName
@@ -461,243 +460,6 @@ describe('PgAdapter - Coverage Tests', () => {
 			const result = adapter.compile(plan);
 
 			expect(result.sql.toLowerCase()).toContain('group by');
-		});
-	});
-
-	describe('compileWithIncludes', () => {
-		it('returns main query and empty subqueryIncludes array', () => {
-			const adapter = createPgCompileOnlyAdapter();
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [{ type: 'select', column: '*' }],
-			} as any;
-
-			const result = adapter.compileWithIncludes(plan);
-
-			expect(result.main).toBeDefined();
-			expect(result.main.sql).toContain('SELECT');
-			expect(Array.isArray(result.subqueryIncludes)).toBe(true);
-			expect(result.subqueryIncludes).toHaveLength(0);
-		});
-
-		it('compiles with include-strategy decisions', () => {
-			const adapter = createPgCompileOnlyAdapter();
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{
-						type: 'include-strategy',
-						choice: 'json_agg',
-						context: {
-							relation: 'posts',
-							target: 'posts',
-						},
-					},
-				],
-			} as any;
-
-			const result = adapter.compileWithIncludes(plan);
-
-			expect(result.main).toBeDefined();
-			expect(result.main.sql).toContain('SELECT');
-		});
-
-		it('compiles synthetic binding json_agg include decisions with CTE parentKey correlation', () => {
-			const adapter = createPgCompileOnlyAdapter();
-			const plan: PlanReport = {
-				rootTable: 'active_authors',
-				intent: {
-					type: 'select',
-					from: 'active_authors',
-					select: {
-						type: 'expressions',
-						columns: [
-							{ kind: 'column', column: '*' },
-							{
-								kind: 'relationColumn',
-								relation: 'author_posts',
-								column: '*',
-								as: 'author_posts.*',
-							},
-						],
-					},
-					include: [{ relation: 'author_posts' }],
-				},
-				decisions: [
-					{
-						id: 'binding-include-0',
-						type: 'include-strategy',
-						choice: 'json_agg',
-						context: {
-							sourceTable: 'active_authors',
-							target: 'posts',
-							relation: 'author_posts',
-							relationType: 'hasMany',
-							foreignKey: 'author_id',
-							parentKey: 'author_key',
-							targetOrderKey: ['id'],
-							includeAlias: 'authorPosts',
-							intentPath: 'include[0]',
-						},
-						reasoning: 'synthetic binding include',
-						alternatives: [],
-					},
-				],
-				warnings: [],
-				ctes: [],
-				metadata: {
-					planningTimeMs: 0,
-					relationsAnalyzed: 0,
-					isAmbiguous: false,
-				},
-			} as PlanReport;
-
-			const result = adapter.compile(plan);
-
-			expect(result.sql).toContain(
-				'json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST)',
-			);
-			expect(result.sql).toContain('AS author_posts_json');
-			expect(result.sql).toMatch(
-				/WHERE __t__\.author_id = active_authors\.author_key/i,
-			);
-		});
-
-		it('compiles synthetic binding nested json_agg includes from flat chained intent paths', () => {
-			const adapter = createPgCompileOnlyAdapter();
-			const plan: PlanReport = {
-				rootTable: 'projected_authors',
-				intent: {
-					type: 'select',
-					from: 'projected_authors',
-					select: {
-						type: 'expressions',
-						columns: [
-							{ kind: 'column', column: '*' },
-							{
-								kind: 'relationColumn',
-								relation: 'author_posts.comments',
-								column: '*',
-								as: 'author_posts.comments.*',
-							},
-						],
-					},
-					include: [
-						{
-							relation: 'author_posts',
-							include: [{ relation: 'comments' }],
-						},
-					],
-				},
-				decisions: [
-					{
-						id: 'binding-include-0',
-						type: 'include-strategy',
-						choice: 'json_agg',
-						context: {
-							sourceTable: 'projected_authors',
-							target: 'posts',
-							relation: 'author_posts',
-							relationType: 'hasMany',
-							foreignKey: 'author_id',
-							parentKey: 'id',
-							targetOrderKey: ['id'],
-							includeAlias: 'author_posts',
-							intentPath: 'include[0]',
-						},
-						reasoning: 'synthetic binding include',
-						alternatives: [],
-					},
-					{
-						id: 'binding-include-0-tail-0',
-						type: 'include-strategy',
-						choice: 'json_agg',
-						context: {
-							sourceTable: 'posts',
-							target: 'comments',
-							relation: 'comments',
-							relationType: 'hasMany',
-							foreignKey: 'post_id',
-							parentKey: 'id',
-							targetOrderKey: ['id'],
-							includeAlias: 'comments',
-							intentPath: 'include[0].include[0]',
-						},
-						reasoning: 'synthetic binding tail include',
-						alternatives: [],
-					},
-				],
-				warnings: [],
-				ctes: [],
-				metadata: {
-					planningTimeMs: 0,
-					relationsAnalyzed: 0,
-					isAmbiguous: false,
-				},
-			} as PlanReport;
-
-			const result = adapter.compile(plan);
-
-			expect(result.sql).toContain(
-				'json_agg(to_jsonb(__t__) || jsonb_build_object',
-			);
-			expect(result.sql).toContain('ORDER BY __t__.id ASC NULLS LAST');
-			expect(result.sql).toContain('ORDER BY __t1__.id ASC NULLS LAST');
-			expect(result.sql).toContain('jsonb_build_object');
-			expect(result.sql).toContain('AS author_posts_json');
-			expect(result.sql).toMatch(
-				/WHERE __t__\.author_id = projected_authors\.id/i,
-			);
-			expect(result.sql).toMatch(/WHERE __t1__\.post_id = __t__\.id/i);
-		});
-
-		it('rejects synthetic binding json_agg includes when the dialect disables JSON aggregation', () => {
-			const adapter = createPgCompileOnlyAdapter();
-			const plan: PlanReport = {
-				rootTable: 'active_authors',
-				intent: {
-					type: 'select',
-					from: 'active_authors',
-					select: { type: 'all' },
-					include: [{ relation: 'author_posts' }],
-				},
-				decisions: [
-					{
-						id: 'binding-include-0',
-						type: 'include-strategy',
-						choice: 'json_agg',
-						context: {
-							sourceTable: 'active_authors',
-							target: 'posts',
-							relation: 'author_posts',
-							relationType: 'hasMany',
-							foreignKey: 'author_id',
-							parentKey: 'author_key',
-							includeAlias: 'author_posts',
-							intentPath: 'include[0]',
-						},
-						reasoning: 'synthetic binding include',
-						alternatives: [],
-					},
-				],
-				warnings: [],
-				ctes: [],
-				metadata: {
-					planningTimeMs: 0,
-					relationsAnalyzed: 0,
-					isAmbiguous: false,
-				},
-			} as PlanReport;
-
-			expect(() =>
-				adapter.compile(plan, {
-					dialectCapabilities: {
-						...adapter.dialectCapabilities,
-						supportsJsonAgg: false,
-					},
-				}),
-			).toThrow(/JSON aggregation for relation includes not supported/);
 		});
 	});
 
@@ -1663,233 +1425,6 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 	});
 
-	describe('compileSubqueryInclude', () => {
-		it('compiles simple subquery include for single FK', () => {
-			const adapter = createPgCompileOnlyAdapter();
-			const info = {
-				relationName: 'posts',
-				targetTable: 'posts',
-				foreignKey: 'author_id',
-				sourceKey: 'id',
-				sourceTable: 'users',
-			};
-			const result = adapter.compileSubqueryInclude(info as any, [1, 2, 3]);
-			const sql = result.sql.toLowerCase();
-			expect(sql).toContain('select');
-			expect(sql).toContain('posts');
-			expect(sql).toContain('in');
-			expect(result.parameters).toEqual([1, 2, 3]);
-		});
-
-		it('returns WHERE FALSE for empty parentIds', () => {
-			const adapter = createPgCompileOnlyAdapter();
-			const info = {
-				relationName: 'posts',
-				targetTable: 'posts',
-				foreignKey: 'author_id',
-				sourceKey: 'id',
-				sourceTable: 'users',
-			};
-			const result = adapter.compileSubqueryInclude(info as any, []);
-			expect(result.sql).toContain('WHERE FALSE');
-			expect(result.parameters).toEqual([]);
-		});
-
-		it('returns WHERE FALSE with schema for empty parentIds', () => {
-			const adapter = createPgCompileOnlyAdapter({
-				schemaName: 'tenant_sq',
-			});
-			const info = {
-				relationName: 'posts',
-				targetTable: 'posts',
-				foreignKey: 'author_id',
-				sourceKey: 'id',
-				sourceTable: 'users',
-			};
-			const result = adapter.compileSubqueryInclude(info as any, []);
-			expect(result.sql).toContain('tenant_sq');
-			expect(result.sql).toContain('WHERE FALSE');
-		});
-
-		it('compiles composite FK with multiple parent IDs', () => {
-			const adapter = createPgCompileOnlyAdapter();
-			const info = {
-				relationName: 'items',
-				targetTable: 'items',
-				foreignKey: ['org_id', 'user_id'],
-				sourceKey: 'id',
-				sourceTable: 'users',
-			};
-			const result = adapter.compileSubqueryInclude(info as any, [
-				[1, 'a'],
-				[2, 'b'],
-			]);
-			expect(result.parameters).toHaveLength(4);
-		});
-
-		it('compiles composite FK with single parent ID', () => {
-			const adapter = createPgCompileOnlyAdapter();
-			const info = {
-				relationName: 'items',
-				targetTable: 'items',
-				foreignKey: ['org_id', 'user_id'],
-				sourceKey: 'id',
-				sourceTable: 'users',
-			};
-			const result = adapter.compileSubqueryInclude(info as any, [[1, 'a']]);
-			expect(result.parameters).toHaveLength(2);
-		});
-
-		it('compiles M:N subquery include via junction table', () => {
-			const adapter = createPgCompileOnlyAdapter();
-			const info = {
-				relationName: 'tags',
-				targetTable: 'tags',
-				foreignKey: 'tag_id',
-				sourceKey: 'id',
-				sourceTable: 'posts',
-				through: 'post_tags',
-				throughSourceKey: 'post_id',
-				throughTargetKey: 'tag_id',
-			};
-			const result = adapter.compileSubqueryInclude(info as any, [1, 2]);
-			const sql = result.sql.toLowerCase();
-			expect(sql).toContain('join');
-			expect(sql).toContain('post_tags');
-			expect(result.parameters).toEqual([1, 2]);
-		});
-
-		it('compiles subquery include with schema', () => {
-			const adapter = createPgCompileOnlyAdapter({
-				schemaName: 'tenant_sqi',
-			});
-			const info = {
-				relationName: 'posts',
-				targetTable: 'posts',
-				foreignKey: 'author_id',
-				sourceKey: 'id',
-				sourceTable: 'users',
-			};
-			const result = adapter.compileSubqueryInclude(info as any, [1]);
-			expect(result.sql).toContain('tenant_sqi');
-		});
-	});
-
-	describe('compileWithIncludes - subquery includes', () => {
-		// subquery strategy decisions populate subqueryIncludes for client-side hydration.
-		// hydrateJsonAggIncludes only processes decisions with choice === 'json_agg';
-		// choice === 'subquery' decisions must travel the subquery hydration path.
-		it('subqueryIncludes is populated for subquery include-strategy (hasMany)', () => {
-			const adapter = createPgCompileOnlyAdapter();
-			const plan = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{
-						type: 'include-strategy',
-						choice: 'subquery',
-						context: {
-							relation: 'posts',
-							target: 'posts',
-							relationType: 'hasMany',
-						},
-					},
-				],
-			} as any;
-			const result = adapter.compileWithIncludes(plan);
-			// subquery decisions generate a client-side fetch entry
-			expect(result.subqueryIncludes).toHaveLength(1);
-			expect(result.subqueryIncludes[0]?.relationName).toBe('posts');
-			expect(result.subqueryIncludes[0]?.targetTable).toBe('posts');
-		});
-
-		it('skips include-strategy decisions that are not subquery', () => {
-			const adapter = createPgCompileOnlyAdapter();
-			const plan = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{
-						type: 'include-strategy',
-						choice: 'json_agg',
-						context: {
-							relation: 'posts',
-							target: 'posts',
-						},
-					},
-				],
-			} as any;
-			const result = adapter.compileWithIncludes(plan);
-			expect(result.subqueryIncludes).toHaveLength(0);
-		});
-
-		it('skips subquery decisions with no target', () => {
-			const adapter = createPgCompileOnlyAdapter();
-			const plan = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{
-						type: 'include-strategy',
-						choice: 'subquery',
-						context: { relation: 'posts' },
-					},
-				],
-			} as any;
-			const result = adapter.compileWithIncludes(plan);
-			expect(result.subqueryIncludes).toHaveLength(0);
-		});
-
-		it('uses includeAlias: subqueryIncludes uses includeAlias as relationName', () => {
-			const adapter = createPgCompileOnlyAdapter();
-			const plan = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{
-						type: 'include-strategy',
-						choice: 'subquery',
-						context: {
-							relation: 'posts',
-							target: 'posts',
-							includeAlias: 'myPosts',
-							relationType: 'hasMany',
-						},
-					},
-				],
-			} as any;
-			const result = adapter.compileWithIncludes(plan);
-			// includeAlias is preferred as the relation name for hydration
-			expect(result.subqueryIncludes).toHaveLength(1);
-			expect(result.subqueryIncludes[0]?.relationName).toBe('myPosts');
-		});
-
-		it('handles belongsTo: subqueryIncludes is populated with correct sourceKey/foreignKey', () => {
-			const adapter = createPgCompileOnlyAdapter();
-			const plan = {
-				rootTable: 'posts',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{
-						type: 'include-strategy',
-						choice: 'subquery',
-						context: {
-							relation: 'author',
-							target: 'users',
-							relationType: 'belongsTo',
-						},
-					},
-				],
-			} as any;
-			const result = adapter.compileWithIncludes(plan);
-			// belongsTo: sourceKey = FK on source (e.g. authorId), foreignKey = PK on target
-			expect(result.subqueryIncludes).toHaveLength(1);
-			expect(result.subqueryIncludes[0]?.relationName).toBe('author');
-			expect(result.subqueryIncludes[0]?.targetTable).toBe('users');
-			expect(result.subqueryIncludes[0]?.relationType).toBe('belongsTo');
-		});
-	});
-
 	describe('createDump', () => {
 		it('creates a dump with minimal meta', () => {
 			const adapter = createPgCompileOnlyAdapter();
@@ -2593,177 +2128,6 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 	});
 
-	describe('compileWithIncludes — subquery include branches', () => {
-		// subquery strategy decisions populate subqueryIncludes for client-side hydration.
-		// hydrateJsonAggIncludes only runs for choice === 'json_agg' planner decisions.
-		it('subqueryIncludes populated for hasMany subquery decision', () => {
-			const adapter = createPgCompileOnlyAdapter();
-			const plan = {
-				rootTable: 'authors',
-				decisions: [
-					{
-						type: 'include-strategy',
-						choice: 'subquery',
-						context: {
-							relation: 'posts',
-							target: 'posts',
-							relationType: 'hasMany',
-							sourceTable: 'authors',
-						},
-					},
-				],
-				intent: {
-					type: 'query',
-					table: 'authors',
-					select: { fields: ['id'] },
-					include: [{ relation: 'posts' }],
-				},
-			} as any;
-
-			const result = adapter.compileWithIncludes(plan);
-			// subquery decisions generate a client-side fetch entry
-			expect(result.subqueryIncludes.length).toBe(1);
-			expect(result.subqueryIncludes[0]?.relationName).toBe('posts');
-			expect(result.subqueryIncludes[0]?.targetTable).toBe('posts');
-		});
-
-		it('subqueryIncludes passes through includeIntent.select', () => {
-			const adapter = createPgCompileOnlyAdapter();
-			const plan = {
-				rootTable: 'authors',
-				decisions: [
-					{
-						type: 'include-strategy',
-						choice: 'subquery',
-						context: {
-							relation: 'posts',
-							target: 'posts',
-							relationType: 'hasMany',
-							sourceTable: 'authors',
-						},
-					},
-				],
-				intent: {
-					type: 'query',
-					table: 'authors',
-					select: { fields: ['id'] },
-					include: [
-						{
-							relation: 'posts',
-							select: { fields: ['title', 'body'] },
-						},
-					],
-				},
-			} as any;
-
-			const result = adapter.compileWithIncludes(plan);
-			expect(result.subqueryIncludes).toHaveLength(1);
-			// select is passed through from the include intent
-			expect(result.subqueryIncludes[0]?.select).toEqual({
-				fields: ['title', 'body'],
-			});
-		});
-
-		it('subqueryIncludes refuses includeIntent.where', () => {
-			const adapter = createPgCompileOnlyAdapter();
-			const whereClause = {
-				kind: 'comparison',
-				field: 'active',
-				operator: 'eq',
-				value: true,
-			};
-			const plan = {
-				rootTable: 'authors',
-				decisions: [
-					{
-						type: 'include-strategy',
-						choice: 'subquery',
-						context: {
-							relation: 'posts',
-							target: 'posts',
-							relationType: 'hasMany',
-							sourceTable: 'authors',
-						},
-					},
-				],
-				intent: {
-					type: 'query',
-					table: 'authors',
-					select: { fields: ['id'] },
-					include: [
-						{
-							relation: 'posts',
-							where: whereClause,
-						},
-					],
-				},
-			} as any;
-
-			expect(() => adapter.compileWithIncludes(plan)).toThrow(
-				/strategy subquery.*include\[0\]\(posts\).*#892/,
-			);
-		});
-
-		it('subqueryIncludes populated for belongsTo relationType', () => {
-			const adapter = createPgCompileOnlyAdapter();
-			const plan = {
-				rootTable: 'posts',
-				decisions: [
-					{
-						type: 'include-strategy',
-						choice: 'subquery',
-						context: {
-							relation: 'author',
-							target: 'users',
-							relationType: 'belongsTo',
-							sourceTable: 'posts',
-						},
-					},
-				],
-				intent: {
-					type: 'query',
-					table: 'posts',
-					select: { fields: ['id'] },
-					include: [{ relation: 'author' }],
-				},
-			} as any;
-
-			const result = adapter.compileWithIncludes(plan);
-			expect(result.subqueryIncludes).toHaveLength(1);
-			expect(result.subqueryIncludes[0]?.relationType).toBe('belongsTo');
-		});
-
-		it('subqueryIncludes uses includeAlias as relationName when set', () => {
-			const adapter = createPgCompileOnlyAdapter();
-			const plan = {
-				rootTable: 'posts',
-				decisions: [
-					{
-						type: 'include-strategy',
-						choice: 'subquery',
-						context: {
-							relation: 'author',
-							includeAlias: 'authorInfo',
-							target: 'users',
-							relationType: 'belongsTo',
-							sourceTable: 'posts',
-						},
-					},
-				],
-				intent: {
-					type: 'query',
-					table: 'posts',
-					select: { fields: ['id'] },
-					include: [{ relation: 'authorInfo' }],
-				},
-			} as any;
-
-			const result = adapter.compileWithIncludes(plan);
-			expect(result.subqueryIncludes).toHaveLength(1);
-			expect(result.subqueryIncludes[0]?.relationName).toBe('authorInfo');
-		});
-	});
-
 	describe('compileInsertFrom — coverage', () => {
 		it('compiles insert-from with columns, where, limit, returning', () => {
 			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
@@ -2944,5 +2308,204 @@ describe('PgAdapter - Coverage Tests', () => {
 				/managedTransactions: true/,
 			);
 		});
+	});
+});
+
+describe('synthetic binding includes', () => {
+	it('compiles synthetic binding json_agg include decisions with CTE parentKey correlation', () => {
+		const adapter = createPgCompileOnlyAdapter();
+		const plan: PlanReport = {
+			rootTable: 'active_authors',
+			intent: {
+				type: 'select',
+				from: 'active_authors',
+				select: {
+					type: 'expressions',
+					columns: [
+						{ kind: 'column', column: '*' },
+						{
+							kind: 'relationColumn',
+							relation: 'author_posts',
+							column: '*',
+							as: 'author_posts.*',
+						},
+					],
+				},
+				include: [{ relation: 'author_posts' }],
+			},
+			decisions: [
+				{
+					id: 'binding-include-0',
+					type: 'include-strategy',
+					choice: 'json_agg',
+					context: {
+						sourceTable: 'active_authors',
+						target: 'posts',
+						relation: 'author_posts',
+						relationType: 'hasMany',
+						foreignKey: 'author_id',
+						parentKey: 'author_key',
+						targetOrderKey: ['id'],
+						includeAlias: 'authorPosts',
+						intentPath: 'include[0]',
+					},
+					reasoning: 'synthetic binding include',
+					alternatives: [],
+				},
+			],
+			warnings: [],
+			ctes: [],
+			metadata: {
+				planningTimeMs: 0,
+				relationsAnalyzed: 0,
+				isAmbiguous: false,
+			},
+		} as PlanReport;
+
+		const result = adapter.compile(plan);
+
+		expect(result.sql).toContain(
+			'json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST)',
+		);
+		expect(result.sql).toContain('AS author_posts_json');
+		expect(result.sql).toMatch(
+			/WHERE __t__\.author_id = active_authors\.author_key/i,
+		);
+	});
+
+	it('compiles synthetic binding nested json_agg includes from flat chained intent paths', () => {
+		const adapter = createPgCompileOnlyAdapter();
+		const plan: PlanReport = {
+			rootTable: 'projected_authors',
+			intent: {
+				type: 'select',
+				from: 'projected_authors',
+				select: {
+					type: 'expressions',
+					columns: [
+						{ kind: 'column', column: '*' },
+						{
+							kind: 'relationColumn',
+							relation: 'author_posts.comments',
+							column: '*',
+							as: 'author_posts.comments.*',
+						},
+					],
+				},
+				include: [
+					{
+						relation: 'author_posts',
+						include: [{ relation: 'comments' }],
+					},
+				],
+			},
+			decisions: [
+				{
+					id: 'binding-include-0',
+					type: 'include-strategy',
+					choice: 'json_agg',
+					context: {
+						sourceTable: 'projected_authors',
+						target: 'posts',
+						relation: 'author_posts',
+						relationType: 'hasMany',
+						foreignKey: 'author_id',
+						parentKey: 'id',
+						targetOrderKey: ['id'],
+						includeAlias: 'author_posts',
+						intentPath: 'include[0]',
+					},
+					reasoning: 'synthetic binding include',
+					alternatives: [],
+				},
+				{
+					id: 'binding-include-0-tail-0',
+					type: 'include-strategy',
+					choice: 'json_agg',
+					context: {
+						sourceTable: 'posts',
+						target: 'comments',
+						relation: 'comments',
+						relationType: 'hasMany',
+						foreignKey: 'post_id',
+						parentKey: 'id',
+						targetOrderKey: ['id'],
+						includeAlias: 'comments',
+						intentPath: 'include[0].include[0]',
+					},
+					reasoning: 'synthetic binding tail include',
+					alternatives: [],
+				},
+			],
+			warnings: [],
+			ctes: [],
+			metadata: {
+				planningTimeMs: 0,
+				relationsAnalyzed: 0,
+				isAmbiguous: false,
+			},
+		} as PlanReport;
+
+		const result = adapter.compile(plan);
+
+		expect(result.sql).toContain(
+			'json_agg(to_jsonb(__t__) || jsonb_build_object',
+		);
+		expect(result.sql).toContain('ORDER BY __t__.id ASC NULLS LAST');
+		expect(result.sql).toContain('ORDER BY __t1__.id ASC NULLS LAST');
+		expect(result.sql).toContain('jsonb_build_object');
+		expect(result.sql).toContain('AS author_posts_json');
+		expect(result.sql).toMatch(
+			/WHERE __t__\.author_id = projected_authors\.id/i,
+		);
+		expect(result.sql).toMatch(/WHERE __t1__\.post_id = __t__\.id/i);
+	});
+
+	it('rejects synthetic binding json_agg includes when the dialect disables JSON aggregation', () => {
+		const adapter = createPgCompileOnlyAdapter();
+		const plan: PlanReport = {
+			rootTable: 'active_authors',
+			intent: {
+				type: 'select',
+				from: 'active_authors',
+				select: { type: 'all' },
+				include: [{ relation: 'author_posts' }],
+			},
+			decisions: [
+				{
+					id: 'binding-include-0',
+					type: 'include-strategy',
+					choice: 'json_agg',
+					context: {
+						sourceTable: 'active_authors',
+						target: 'posts',
+						relation: 'author_posts',
+						relationType: 'hasMany',
+						foreignKey: 'author_id',
+						parentKey: 'author_key',
+						includeAlias: 'author_posts',
+						intentPath: 'include[0]',
+					},
+					reasoning: 'synthetic binding include',
+					alternatives: [],
+				},
+			],
+			warnings: [],
+			ctes: [],
+			metadata: {
+				planningTimeMs: 0,
+				relationsAnalyzed: 0,
+				isAmbiguous: false,
+			},
+		} as PlanReport;
+
+		expect(() =>
+			adapter.compile(plan, {
+				dialectCapabilities: {
+					...adapter.dialectCapabilities,
+					supportsJsonAgg: false,
+				},
+			}),
+		).toThrow(/JSON aggregation for relation includes not supported/);
 	});
 });

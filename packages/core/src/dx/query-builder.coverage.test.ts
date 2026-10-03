@@ -54,13 +54,6 @@ function createSpyAdapter(executeResult: unknown[] = []) {
 		sql: 'SELECT * FROM "users"',
 		parameters: [] as readonly unknown[],
 	}));
-	const compileWithIncludesSpy = vi.fn((_plan: unknown, _opts?: unknown) => ({
-		main: {
-			sql: 'SELECT * FROM "users"',
-			parameters: [] as readonly unknown[],
-		},
-		subqueryIncludes: [],
-	}));
 	const executeSpy = vi.fn(() => Promise.resolve([...executeResult]));
 	const createDumpSpy = vi.fn(
 		(
@@ -81,7 +74,6 @@ function createSpyAdapter(executeResult: unknown[] = []) {
 			supportsStreaming: true,
 		},
 		compile: compileSpy,
-		compileWithIncludes: compileWithIncludesSpy,
 		execute: executeSpy,
 		createDump: createDumpSpy,
 		withSchema: (_schemaName: string) => adapter,
@@ -647,15 +639,15 @@ describe('exists() with hooks coverage', () => {
 describe('Schema-scoped queries coverage', () => {
 	it('should pass schemaName to compile options', async () => {
 		const adapter = createSpyAdapter([{ id: 1, name: 'Alice' }]);
-		const compileWithIncludesSpy = vi.spyOn(adapter, 'compileWithIncludes');
 
 		const orm = createOrm({ adapter, schema: testSchema });
 		const scopedOrm = orm.withSchema('tenant_42');
+		const compileSpy = vi.spyOn(adapter, 'compile');
 
 		await scopedOrm.select('users').first();
 
-		expect(compileWithIncludesSpy).toHaveBeenCalled();
-		const compileOpts = compileWithIncludesSpy.mock.calls[0][1];
+		expect(compileSpy).toHaveBeenCalled();
+		const compileOpts = compileSpy.mock.calls[0][1];
 		expect(compileOpts.schemaName).toBe('tenant_42');
 	});
 
@@ -1131,10 +1123,7 @@ describe('Hook integration coverage', () => {
 
 	it('should handle onError hook on execution failure', async () => {
 		const adapter = createSpyAdapter([]);
-		adapter.compileWithIncludes = vi.fn(() => ({
-			main: { sql: 'SELECT', parameters: [] },
-			subqueryIncludes: [],
-		}));
+		adapter.compile = vi.fn(() => ({ sql: 'SELECT', parameters: [] }));
 		adapter.execute = vi.fn().mockRejectedValue(new Error('DB fail'));
 
 		const hookManager = createHookManager().onError(
@@ -1719,10 +1708,7 @@ describe('executeWithHooks error branches', () => {
 
 	it('should handle adapter execute error with onError hooks', async () => {
 		const adapter = createSpyAdapter([]);
-		adapter.compileWithIncludes = vi.fn(() => ({
-			main: { sql: 'SELECT 1', parameters: [] },
-			subqueryIncludes: [],
-		}));
+		adapter.compile = vi.fn(() => ({ sql: 'SELECT 1', parameters: [] }));
 		adapter.execute = vi.fn().mockRejectedValue(new Error('DB down'));
 
 		const hookManager = createHookManager().onError(
@@ -1735,10 +1721,7 @@ describe('executeWithHooks error branches', () => {
 
 	it('should handle adapter execute error without onError hooks', async () => {
 		const adapter = createSpyAdapter([]);
-		adapter.compileWithIncludes = vi.fn(() => ({
-			main: { sql: 'SELECT 1', parameters: [] },
-			subqueryIncludes: [],
-		}));
+		adapter.compile = vi.fn(() => ({ sql: 'SELECT 1', parameters: [] }));
 		adapter.execute = vi.fn().mockRejectedValue(new Error('DB crash'));
 
 		const hookManager = createHookManager().beforeQuery(() => undefined); // Has hooks but no onError

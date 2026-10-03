@@ -47,7 +47,6 @@ const DIALECT_DISPLAY: Record<DialectMode, string> = {
 const STRATEGY_DISPLAY: Record<IncludeStrategyMode, string> = {
 	auto: 'auto',
 	join: 'join',
-	subquery: 'sep',
 	cte: 'cte',
 	lateral: 'lat',
 	json_agg: 'json',

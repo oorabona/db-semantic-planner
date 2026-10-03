@@ -69,13 +69,13 @@ describe('bigint js json_agg SQL projection', () => {
 			.withPlanOptions({ defaultIncludeStrategy: 'json_agg' })
 			.plan();
 
-		const compiled = adapter.compileWithIncludes(plan, {
+		const compiled = adapter.compile(plan, {
 			model: longSchema.model,
 		});
 		const physicalColumn = longColumn
 			.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)
 			.slice(0, 63);
-		const hydrationDecision = compiled.main.hydrationPlan?.decisions.find(
+		const hydrationDecision = compiled.hydrationPlan?.decisions.find(
 			(candidate) =>
 				candidate.type === 'include-strategy' &&
 				candidate.context.relation === 'readings',
@@ -244,17 +244,15 @@ describe('bigint js json_agg SQL projection', () => {
 			.withPlanOptions({ defaultIncludeStrategy: 'json_agg' })
 			.plan();
 
-		const compiled = adapter.compileWithIncludes(plan, {
+		const compiled = adapter.compile(plan, {
 			model: includeSchema.model,
 		});
 
-		expect(compiled.main.sql).toMatch(/CAST\(__t__\.observed_at AS text\)/);
-		expect(compiled.main.sql).toMatch(/CAST\(__t__\.safe_count AS text\)/);
-		expect(compiled.main.sql).toMatch(/CAST\(__t__\.string_count AS text\)/);
-		expect(compiled.main.sql).toMatch(/CAST\(__t__\.parse_json AS text\)/);
-		expect(compiled.main.sql).not.toMatch(
-			/CAST\(__t__\.legacy_count AS text\)/,
-		);
+		expect(compiled.sql).toMatch(/CAST\(__t__\.observed_at AS text\)/);
+		expect(compiled.sql).toMatch(/CAST\(__t__\.safe_count AS text\)/);
+		expect(compiled.sql).toMatch(/CAST\(__t__\.string_count AS text\)/);
+		expect(compiled.sql).toMatch(/CAST\(__t__\.parse_json AS text\)/);
+		expect(compiled.sql).not.toMatch(/CAST\(__t__\.legacy_count AS text\)/);
 		const decision = plan.decisions.find(
 			(candidate) =>
 				candidate.type === 'include-strategy' &&
@@ -268,7 +266,7 @@ describe('bigint js json_agg SQL projection', () => {
 			)?.jsonAggColumnKeyMap,
 		).toBeUndefined();
 		expect(decision?.context.jsonAggNestedReadTransforms).toBeUndefined();
-		const hydrationPlan = (compiled.main as { hydrationPlan?: PlanReport })
+		const hydrationPlan = (compiled as { hydrationPlan?: PlanReport })
 			.hydrationPlan;
 		const hydrationDecision = hydrationPlan?.decisions.find(
 			(candidate) =>

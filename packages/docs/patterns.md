@@ -242,7 +242,6 @@ Strategies:
 | `'join'` | `LEFT JOIN` | to-one relations (belongsTo, hasOne) |
 | `'lateral'` | `CROSS JOIN LATERAL` | to-many with LIMIT |
 | `'json_agg'` | JSON subquery aggregation | to-many, no row explosion (PostgreSQL default) |
-| `'subquery'` | correlated subquery | to-many, safe but potentially N+1 |
 | `'cte'` | `WITH RECURSIVE` | recursive / hierarchical trees |
 | `'auto'` | planner decides | default — resolved before compilation |
 
@@ -258,19 +257,19 @@ const plan = orm.select('users').include('posts', { limit: 10 }).plan();
 Auto-resolution (planner, `planner.ts`):
 
 ```
-recursive → capabilities.supportsRecursiveCTE !== false ? 'cte' : 'subquery'
+recursive → capabilities.supportsRecursiveCTE ? 'cte' : explicit error
 otherwise → capabilities.supportsJsonAgg && !excludeNested ? 'json_agg'
           → hasLimit && capabilities.supportsLateralJoin ? 'lateral'
           → 'join' (fallback)
 ```
 
-`selectSmartStrategy()` does not inspect relation cardinality: its `_relation` parameter is unused. Both to-one and to-many relations therefore take the same non-recursive path above.
+`selectSmartStrategy()` does not inspect relation cardinality. Both to-one and to-many relations therefore take the same non-recursive path above.
 
 ### Convention
 
 - `'auto'` is always resolved to a concrete strategy before `PlanReport` is emitted — it never reaches the compiler
-- The adapter dispatch keys are `join`, `lateral`, `json_agg`, and `cte`; `mapToHandlerDecision()` remaps the `subquery` strategy to `json_agg` before handler lookup
-- INCLUDE dispatch is closed: a new dispatchable handler strategy requires coordinated updates to `INCLUDE_STRATEGIES` and `allIncludeHandlers`. `subquery` shows why `IncludeStrategy` literals, capability flags, handler files, and planner rules are not a one-to-one set.
+- The adapter dispatch keys are `join`, `lateral`, `json_agg`, and `cte`
+- INCLUDE dispatch is closed: a new dispatchable handler strategy requires coordinated updates to `INCLUDE_STRATEGIES` and `allIncludeHandlers`.
 - Query-level include options such as `join` and `limit` influence strategy resolution; the planner validates the resolved strategy against `DialectCapabilities`
 
 ### When to use

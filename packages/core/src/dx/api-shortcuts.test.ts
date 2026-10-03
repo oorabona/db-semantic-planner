@@ -256,13 +256,6 @@ describe('DX-008: API Shortcuts', () => {
 			const compileSpy = vi.fn(
 				(_plan: unknown, _opts?: unknown) => compiledResult,
 			);
-			const compileWithIncludesSpy = vi.fn(
-				(_plan: unknown, _opts?: unknown) => ({
-					main: compiledResult,
-					subqueries: [],
-					subqueryIncludes: [],
-				}),
-			);
 			const executeSpy = vi.fn(() => Promise.resolve(executeResult));
 			const createDumpSpy = vi.fn(
 				(
@@ -279,20 +272,17 @@ describe('DX-008: API Shortcuts', () => {
 			const adapter = {
 				...base,
 				compile: compileSpy,
-				compileWithIncludes: compileWithIncludesSpy,
 				execute: executeSpy,
 				createDump: createDumpSpy,
 				withSchema: (_schemaName: string) => adapter,
 				_spies: {
 					compile: compileSpy,
-					compileWithIncludes: compileWithIncludesSpy,
 					execute: executeSpy,
 					createDump: createDumpSpy,
 				},
 			} as unknown as Adapter & {
 				_spies: {
 					compile: typeof compileSpy;
-					compileWithIncludes: typeof compileWithIncludesSpy;
 					execute: typeof executeSpy;
 					createDump: typeof createDumpSpy;
 				};
@@ -306,9 +296,9 @@ describe('DX-008: API Shortcuts', () => {
 
 			await ormWithUuidPk.select('products').byId('abc-123');
 
-			// Verify compileWithIncludes was called with plan containing 'uuid' field
-			expect(adapter._spies.compileWithIncludes).toHaveBeenCalled();
-			const planArg = adapter._spies.compileWithIncludes.mock.calls[0]![0] as {
+			// Verify compile was called with plan containing 'uuid' field
+			expect(adapter._spies.compile).toHaveBeenCalled();
+			const planArg = adapter._spies.compile.mock.calls[0]![0] as {
 				intent: { where?: { field?: string } };
 			};
 			expect(planArg.intent.where?.field).toBe('uuid');
@@ -323,9 +313,9 @@ describe('DX-008: API Shortcuts', () => {
 
 			await ormWithUuidPk.select('products').byIds(['abc-123', 'def-456']);
 
-			// Verify compileWithIncludes was called with plan containing 'uuid' field
-			expect(adapter._spies.compileWithIncludes).toHaveBeenCalled();
-			const planArg = adapter._spies.compileWithIncludes.mock.calls[0]![0] as {
+			// Verify compile was called with plan containing 'uuid' field
+			expect(adapter._spies.compile).toHaveBeenCalled();
+			const planArg = adapter._spies.compile.mock.calls[0]![0] as {
 				intent: { where?: { field?: string } };
 			};
 			expect(planArg.intent.where?.field).toBe('uuid');
@@ -344,8 +334,8 @@ describe('DX-008: API Shortcuts', () => {
 
 			await legacyOrm.select('items').byId(1);
 
-			expect(adapter._spies.compileWithIncludes).toHaveBeenCalled();
-			const planArg = adapter._spies.compileWithIncludes.mock.calls[0]![0] as {
+			expect(adapter._spies.compile).toHaveBeenCalled();
+			const planArg = adapter._spies.compile.mock.calls[0]![0] as {
 				intent: { where?: { field?: string } };
 			};
 			expect(planArg.intent.where?.field).toBe('id');

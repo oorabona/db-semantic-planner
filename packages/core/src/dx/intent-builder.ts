@@ -116,6 +116,9 @@ export function includeOptionsToIntent(
  */
 export function nestedIncludeToIntent(nested: NestedInclude): IncludeIntent {
 	const intent: Mutable<IncludeIntent> = { relation: nested.relation };
+	if (nested.join !== undefined) {
+		intent.join = nested.join;
+	}
 
 	if (nested.via !== undefined) {
 		intent.via = nested.via;

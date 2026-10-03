@@ -17,12 +17,10 @@ import type {
 	InsertIntent,
 	MutationIntent,
 	QueryIntent,
-	SelectIntent,
 	SetOperationIntent,
 	UpdateIntent,
 	UpsertFromIntent,
 	UpsertIntent,
-	WhereIntent,
 } from './intent-ast.js';
 import type {
 	CheckConstraintIR,
@@ -395,59 +393,6 @@ export interface CompileOptions extends CompileOptionsBase {
 }
 
 // ============================================================================
-// Include Hydration (DX-033)
-// ============================================================================
-
-/**
- * Metadata for a subquery include query.
- * Used when planner decides include-strategy: 'subquery' for hasMany/manyToMany relations.
- */
-export interface SubqueryIncludeInfo {
-	/** Name of the relation being included */
-	readonly relationName: string;
-	/** Target table to fetch from */
-	readonly targetTable: string;
-	/** Foreign key column(s) in target table */
-	readonly foreignKey: string | readonly string[];
-	/** Source key column(s) in parent table */
-	readonly sourceKey: string | readonly string[];
-	/** Optional select clause from include intent */
-	readonly select?: SelectIntent;
-	/** Optional where clause from include intent */
-	readonly where?: WhereIntent;
-	/** Optional nested includes (for recursive hydration) */
-	readonly nestedIncludes?: readonly SubqueryIncludeInfo[];
-
-	// --- M:N (manyToMany) support ---
-	/** Junction table for M:N relations (e.g., 'postTags') */
-	readonly through?: string;
-	/** FK in junction table pointing to source (e.g., 'postId') */
-	readonly throughSourceKey?: string;
-	/** FK in junction table pointing to target (e.g., 'tagId') */
-	readonly throughTargetKey?: string;
-
-	// --- Relation metadata ---
-	/** Relation type for to-one unwrapping (belongsTo/hasOne → single object) */
-	readonly relationType?: string;
-
-	// --- Subquery optimization (NQL-ALIGN Block 5) ---
-	/** Source/parent table name for subquery optimization */
-	readonly sourceTable?: string;
-	/** Parent query's WHERE conditions for subquery optimization */
-	readonly parentWhere?: WhereIntent;
-}
-
-/**
- * Result of compiling a query with subquery includes.
- */
-export interface CompileResultWithIncludes<T = unknown> {
-	/** The main query (includes any JOIN includes) */
-	readonly main: CompiledQuery<T>;
-	/** Metadata for subquery include queries (empty if all includes use JOIN) */
-	readonly subqueryIncludes: readonly SubqueryIncludeInfo[];
-}
-
-// ============================================================================
 // Dump (Observability)
 // ============================================================================
 
@@ -535,19 +480,6 @@ export interface CompilingAdapter extends BaseAdapter {
 		plan: PlanReport | CompiledNqlQuery,
 		options?: CompileOptions,
 	): CompiledQuery<T>;
-
-	/** Compile a plan with includes, returning subquery include metadata (DX-033). */
-	compileWithIncludes<T = unknown>(
-		plan: PlanReport,
-		options?: CompileOptions,
-	): CompileResultWithIncludes<T>;
-
-	/** Compile a subquery include query for given parent IDs (DX-033). */
-	compileSubqueryInclude(
-		info: SubqueryIncludeInfo,
-		parentIds: readonly unknown[],
-		options?: CompileOptions,
-	): CompiledQuery;
 
 	/** Compile an insert intent to executable SQL. */
 	compileInsert(intent: InsertIntent, options?: CompileOptions): CompiledQuery;

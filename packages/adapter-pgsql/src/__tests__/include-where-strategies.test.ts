@@ -65,10 +65,6 @@ const fixtures: Record<string, { sql: string; params: unknown[] }> = {
 		sql: 'SELECT users.*, posts.id AS "posts.id" FROM users JOIN posts AS posts ON users.id = posts."authorId" WHERE posts.published = $1',
 		params: [true],
 	},
-	'inner score with root parameter': {
-		sql: 'SELECT users.*, posts.id AS "posts.id" FROM users JOIN posts AS posts ON users.id = posts."authorId" WHERE users."tenantId" = $1 AND posts.score > $2',
-		params: [1, 3],
-	},
 	'inner empty and': {
 		sql: 'SELECT users.*, posts.id AS "posts.id" FROM users JOIN posts AS posts ON users.id = posts."authorId" WHERE true',
 		params: [],
@@ -77,17 +73,9 @@ const fixtures: Record<string, { sql: string; params: unknown[] }> = {
 		sql: 'SELECT users.*, posts.id AS "posts.id" FROM users JOIN posts AS posts ON users.id = posts."authorId" WHERE false',
 		params: [],
 	},
-	'inner nested': {
-		sql: 'SELECT users.*, posts.id AS "posts.id", comments.id AS "comments.id" FROM users JOIN posts AS posts ON users.id = posts."authorId" JOIN comments AS comments ON posts.id = comments."postId" WHERE comments.published = $1',
-		params: [true],
-	},
 	'left published': {
 		sql: 'SELECT users.*, posts.id AS "posts.id" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId" WHERE posts.published = $1',
 		params: [true],
-	},
-	'left score with root parameter': {
-		sql: 'SELECT users.*, posts.id AS "posts.id" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId" WHERE users."tenantId" = $1 AND posts.score > $2',
-		params: [1, 3],
 	},
 	'left empty and': {
 		sql: 'SELECT users.*, posts.id AS "posts.id" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId" WHERE true',
@@ -97,14 +85,10 @@ const fixtures: Record<string, { sql: string; params: unknown[] }> = {
 		sql: 'SELECT users.*, posts.id AS "posts.id" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId" WHERE false',
 		params: [],
 	},
-	'left nested': {
-		sql: 'SELECT users.*, posts.id AS "posts.id", comments.id AS "comments.id" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId" LEFT JOIN comments AS comments ON posts.id = comments."postId" WHERE comments.published = $1',
-		params: [true],
-	},
 };
 
 describe('#888 non-join include refusal', () => {
-	for (const strategy of ['json_agg', 'subquery', 'lateral', 'cte'] as const) {
+	for (const strategy of ['json_agg', 'lateral', 'cte'] as const) {
 		for (const [name, where] of [
 			['comparison', eq('published', true)],
 			['empty OR', or()],
@@ -133,32 +117,11 @@ describe('#888 non-join include refusal', () => {
 					})
 					.dump(),
 			).toThrow(
-				/strategy json_agg.*include\[0\]\(posts\).*include\[0\]\(comments\).*#892/,
+				join
+					? /include\[0\]\(posts\).*include\[0\]\(comments\).*parent strategy join.*child strategy json_agg.*#894/
+					: /strategy json_agg.*include\[0\]\(posts\).*include\[0\]\(comments\).*#892/,
 			);
 		});
-	}
-	for (const through of [undefined, 'postLinks']) {
-		for (const ids of [[], [1, 2]]) {
-			it(`refuses direct ${through ? 'M:N' : 'batch'} where with ${ids.length} parents`, () => {
-				expect(() =>
-					adapter.compileSubqueryInclude(
-						{
-							relationName: 'posts',
-							targetTable: 'posts',
-							sourceKey: 'id',
-							foreignKey: 'authorId',
-							...(through && {
-								through,
-								throughSourceKey: 'userId',
-								throughTargetKey: 'postId',
-							}),
-							where: or(),
-						},
-						ids,
-					),
-				).toThrow(/strategy subquery.*include\(posts\).*#892/);
-			});
-		}
 	}
 });
 
@@ -166,24 +129,13 @@ describe('#888 non-join include refusal', () => {
 const mainSql = {
 	json_agg:
 		'SELECT users.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM posts AS __t__ WHERE __t__."authorId" = users.id), \'[]\'::json) AS posts_json FROM users',
-	subquery:
-		'SELECT users.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM posts AS __t__ WHERE __t__."authorId" = users.id), \'[]\'::json) AS posts_json FROM users',
 	lateral:
 		'SELECT users.*, posts_lat_0.* FROM users LEFT JOIN LATERAL (SELECT posts_inner_0.* FROM posts AS posts_inner_0 WHERE posts_inner_0."authorId" = users.id) AS posts_lat_0 ON true',
 	cte: 'WITH posts_cte AS (SELECT posts_inner_0.* FROM posts AS posts_inner_0) SELECT users.* FROM users LEFT JOIN posts_cte AS posts_ref_0 ON users.id = posts_ref_0."authorId"',
 	join: 'SELECT users.*, posts.id AS "posts.id" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId"',
-	batch: 'SELECT * FROM posts WHERE "authorId" IN ($1, $2)',
-	'M:N':
-		'SELECT t.* FROM posts AS t JOIN "postLinks" AS j ON t.id = j."postId" WHERE j."userId" IN ($1, $2)',
 };
 describe('#888 includes without where preserve main SQL', () => {
-	for (const strategy of [
-		'json_agg',
-		'subquery',
-		'lateral',
-		'cte',
-		'join',
-	] as const) {
+	for (const strategy of ['json_agg', 'lateral', 'cte', 'join'] as const) {
 		it(`${strategy} without where matches main`, () => {
 			const result = orm
 				.select('users')
@@ -192,26 +144,6 @@ describe('#888 includes without where preserve main SQL', () => {
 				.dump();
 			expect(result.sql).toBe(mainSql[strategy]);
 			expect(result.params).toEqual([]);
-		});
-	}
-	for (const through of [undefined, 'postLinks']) {
-		it(`${through ? 'M:N' : 'batch'} without where matches main`, () => {
-			const result = adapter.compileSubqueryInclude(
-				{
-					relationName: 'posts',
-					targetTable: 'posts',
-					sourceKey: 'id',
-					foreignKey: 'authorId',
-					...(through && {
-						through,
-						throughSourceKey: 'userId',
-						throughTargetKey: 'postId',
-					}),
-				},
-				[1, 2],
-			);
-			expect(result.sql).toBe(mainSql[through ? 'M:N' : 'batch']);
-			expect(result.parameters).toEqual([1, 2]);
 		});
 	}
 });
@@ -239,8 +171,8 @@ it('refuses public M:N include where', () => {
 	expect(() =>
 		manyOrm
 			.select('users')
-			.withPlanOptions({ defaultIncludeStrategy: 'subquery' })
+			.withPlanOptions({ defaultIncludeStrategy: 'json_agg' })
 			.include('posts', { where: eq('published', true) })
 			.dump(),
-	).toThrow(/strategy subquery.*include\[0\]\(posts\).*#892/);
+	).toThrow(/strategy json_agg.*include\[0\]\(posts\).*#892/);
 });

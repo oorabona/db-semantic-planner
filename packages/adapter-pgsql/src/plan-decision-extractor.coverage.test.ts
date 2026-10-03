@@ -832,26 +832,6 @@ describe('plan-decision-extractor - coverage', () => {
 			expect(result[0].choice).toBe('lateral');
 		});
 
-		it('extracts subquery strategy (mapped to json_agg)', () => {
-			const plan = {
-				rootTable: 'users',
-				intent: { include: [{ relation: 'posts' }] },
-				decisions: [
-					{
-						type: 'include-strategy',
-						choice: 'subquery',
-						context: {
-							target: 'posts',
-							relation: 'posts',
-							intentPath: 'include[0]',
-						},
-					},
-				],
-			};
-			const result = extractAllIncludeDecisions(plan);
-			expect(result[0].choice).toBe('json_agg');
-		});
-
 		it('extracts join strategy as flat decision', () => {
 			const plan = {
 				rootTable: 'users',

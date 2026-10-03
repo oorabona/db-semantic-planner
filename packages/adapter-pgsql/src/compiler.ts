@@ -981,7 +981,6 @@ export class PlanCompiler {
 			| 'join'
 			| 'lateral'
 			| 'cte'
-			| 'subquery'
 			| undefined;
 		if (!strategy)
 			throw new Error(
@@ -989,7 +988,6 @@ export class PlanCompiler {
 			);
 
 		// Bridge PlanDecision -> handler Decision via explicit mapper
-		// (mapper handles subquery → json_agg mapping internally)
 		const handlerDecision = mapToHandlerDecision(
 			decision,
 			plan.rootTable,
