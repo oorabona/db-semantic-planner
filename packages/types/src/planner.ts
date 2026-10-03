@@ -67,8 +67,9 @@ export interface PlanDecision {
 		/** Parent/source key override for include-strategy correlation */
 		readonly parentKey?: ColumnListInput;
 		/**
-		 * Stable target order key for json_agg include arrays.
-		 * Uses the target table primary key, or all target columns when no PK is declared.
+		 * Stable target order key for json_agg arrays and lateral includes.
+		 * Uses the primary key, authored fields proven to give a unique order without a PK,
+		 * or all target columns for the unordered no-PK deterministic fallback.
 		 */
 		readonly targetOrderKey?: readonly JsonAggOrderByEntry[];
 		/** Authored include ordering, preserved separately from the fallback key. */

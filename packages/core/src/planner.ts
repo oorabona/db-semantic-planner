@@ -1133,18 +1133,22 @@ function processInclude(
 	// Use via hint if provided, otherwise use relation name
 	const relationName = include.via ?? include.relation;
 
-	// Resolve the relation
-	const relation =
-		resolveIncludeRelationName(model, sourceTable, relationName) ??
-		disambiguateRelation(
-			relationName,
-			sourceTable,
-			model,
-			state,
-			opts,
-			intentPath,
-			include.via,
-		);
+	// Resolve exact names, target-table names, then camelCase aliases through the shared helper.
+	const relation = resolveIncludeRelationName(
+		model,
+		sourceTable,
+		relationName,
+		() =>
+			disambiguateRelation(
+				relationName,
+				sourceTable,
+				model,
+				state,
+				opts,
+				intentPath,
+				include.via,
+			),
+	);
 
 	if (!relation) {
 		return;

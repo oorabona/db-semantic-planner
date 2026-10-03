@@ -514,26 +514,35 @@ export {
 } from './transition/refusal.js';
 
 /**
- * Resolve a declared include name, preserving direct lookup precedence and the
- * adapter's first-match snake_case-to-camelCase fallback.
- * Target-table disambiguation and virtual relations remain planner concerns.
+ * Resolve includes by exact name, target-table disambiguation, then camelCase fallback.
  * @internal
  */
 export function resolveIncludeRelationName(
 	model: ModelIR,
 	sourceTable: string,
 	name: string,
+	disambiguate?: () => RelationIR | undefined,
 ): RelationIR | undefined {
+	const exact = model.getRelation(`${sourceTable}.${name}`);
+	if (exact) return exact;
+	const targets = model
+		.getRelationsFrom(sourceTable)
+		.filter((r) => r.target === name);
+	if (targets.length > 0) {
+		if (disambiguate) return disambiguate();
+		if (targets.length === 1) return targets[0];
+		throw new Error(
+			`Ambiguous include relation "${name}" from table "${sourceTable}"`,
+		);
+	}
 	return (
-		model.getRelation(`${sourceTable}.${name}`) ??
 		model
 			.getRelationsFrom(sourceTable)
 			.find(
 				(relation) =>
-					relation.name === name ||
 					relation.name.replace(/_([a-z])/g, (_, c: string) =>
 						c.toUpperCase(),
 					) === name,
-			)
+			) ?? disambiguate?.()
 	);
 }

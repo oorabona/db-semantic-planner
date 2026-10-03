@@ -172,6 +172,8 @@ function includeSelectedColumns(
 ): readonly string[] | undefined {
 	if (!select || select.type === 'all') return undefined;
 	if (select.type === 'fields') {
+		if (!Array.isArray(select.fields))
+			throw new Error(`Include ${path} select fields must be an array`);
 		if (select.fields.length > 1 && select.fields.includes('*'))
 			throw new Error(
 				`Include ${path} select cannot mix '*' with other fields`,
@@ -1853,7 +1855,7 @@ function toJoinIncludeDecision(
 		| undefined;
 
 	let columns: string[] = [defaultPk];
-	if (includeIntent?.select?.type === 'fields' && includeIntent.select.fields) {
+	if (includeIntent?.select?.type === 'fields') {
 		const fields = includeSelectedColumns(
 			includeIntent.select,
 			relationPath,
@@ -1913,9 +1915,7 @@ function toJoinIncludeDecision(
 // ============================================================================
 
 /**
- * Recover explicit join decisions from legacy/incomplete plan reports. Current
- * planner reports resolve declared include names with the same shared helper,
- * so their camelCase includes are already covered and need no synthesis.
+ * Recover explicit joins from legacy/incomplete reports using the planner's shared exact-name, target-table, then camelCase resolution order.
  */
 export function synthesizeMissingJoinDecisions(
 	plan: PlanReport,
@@ -1974,7 +1974,7 @@ export function synthesizeMissingJoinDecisions(
 
 		// Build column list (PK always included for NULL-detection)
 		let columns: string[] = [defaultPk];
-		if (inc.select?.type === 'fields' && inc.select.fields) {
+		if (inc.select?.type === 'fields') {
 			const extraFields = includeSelectedColumns(inc.select, alias)!.filter(
 				(f) => f !== defaultPk,
 			);
@@ -2238,10 +2238,7 @@ export function extractLeftJoinIncludeDecisions(
 		// Extract columns from include intent's select
 		// PK is always included for NULL-detection (missing relation)
 		let columns: string[] = [defaultPk];
-		if (
-			includeIntent?.select?.type === 'fields' &&
-			includeIntent.select.fields
-		) {
+		if (includeIntent?.select?.type === 'fields') {
 			const fields = includeSelectedColumns(
 				includeIntent.select,
 				relationName,
