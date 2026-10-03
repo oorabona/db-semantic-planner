@@ -44,7 +44,7 @@
 			"position": "relation-every",
 			"kind": "eq",
 			"shape": "empty-and",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (true)))",
+			"sql": "SELECT users.* FROM users WHERE true",
 			"params": [],
 			"error": null
 		},

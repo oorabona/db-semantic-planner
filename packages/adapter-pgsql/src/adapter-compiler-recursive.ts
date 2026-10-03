@@ -422,7 +422,7 @@ export function compileRecursive<T = unknown>(
 	const trackDepth = intent.track?.depth !== undefined;
 
 	// Older direct reports omit start.from; their anchor source is the node table.
-	if (traversal.kind === 'custom') {
+	if (traversal.kind !== 'edge-table' && traversal.kind !== 'adjacency') {
 		throw new Error(
 			`PgAdapter.compileRecursive: Unsupported traversal kind '${traversal.kind}'`,
 		);
@@ -673,7 +673,7 @@ export function compileRecursive<T = unknown>(
 		// Exhaustive check: both supported traversal kinds are handled above.
 		const _exhaustive: never = traversal;
 		throw new Error(
-			`PgAdapter.compileRecursive: Unsupported traversal kind '${_exhaustive}'`,
+			`PgAdapter.compileRecursive: Unsupported traversal kind '${(_exhaustive as { kind: string }).kind}'`,
 		);
 	}
 

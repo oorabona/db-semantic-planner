@@ -670,9 +670,13 @@ export function createWhereDispatcher(
 			compiler(condition, {
 				...inner,
 				position:
-					ctx.position === 'recursive-anchor' && inner.position !== 'subquery'
-						? ctx.position
+					(ctx.position === 'recursive-anchor' || ctx.directRootWhere) &&
+					inner.position !== 'subquery'
+						? (ctx.position ?? 'where')
 						: inner.position,
+				...(ctx.directRootWhere !== undefined && {
+					directRootWhere: ctx.directRootWhere,
+				}),
 				rootTable: inner.logicalSourceTable,
 				currentAlias: inner.emittedAlias,
 				aliases: inner.visibleAliases,
@@ -685,10 +689,13 @@ export function createWhereDispatcher(
 		state: CompilerState,
 	): Node => {
 		ensureHandlersRegistered();
-		// Raw FILTER and recursive-anchor descendants retain their intent until
-		// compilation in the EXISTS emitter's child scope. Decisions stay intact.
+		// Raw compiler entries are validated in the condition compiler. Raw WHERE,
+		// FILTER and anchor descendants enter it in the EXISTS child scope;
+		// already-shaped descendant handler decisions are trusted here.
 		if (
-			(ctx.position === 'filter' || ctx.position === 'recursive-anchor') &&
+			((ctx.position === 'where' && ctx.directRootWhere) ||
+				ctx.position === 'filter' ||
+				ctx.position === 'recursive-anchor') &&
 			'kind' in decision &&
 			!('type' in decision)
 		) {

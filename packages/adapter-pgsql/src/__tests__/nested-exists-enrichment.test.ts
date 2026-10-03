@@ -707,7 +707,7 @@ describe('nested multi-hop fail-closed for undeclared hops', () => {
 		);
 		expect(() =>
 			adapter.compile(planReport, { model: testSchema.model }),
-		).toThrow(/no relation 'undeclared' is declared on table 'comments'/i);
+		).toThrow(/no relation 'undeclared' (?:is )?declared on table 'comments'/i);
 	});
 
 	it('exists(posts) wrapping relationFilter([undeclared]) throws on first hop', () => {
@@ -737,7 +737,7 @@ describe('nested multi-hop fail-closed for undeclared hops', () => {
 		);
 		expect(() =>
 			adapter.compile(planReport, { model: testSchema.model }),
-		).toThrow(/no relation 'undeclared' is declared on table 'posts'/i);
+		).toThrow(/no relation 'undeclared' (?:is )?declared on table 'posts'/i);
 	});
 
 	it('exists(posts) wrapping inner relationFilter(["comments"]) — fully-declared does not throw (regression)', () => {

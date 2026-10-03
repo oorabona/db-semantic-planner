@@ -15,6 +15,10 @@ import type {
 	RelationTargetProjectionRegistry,
 } from './relation-target-projection.js';
 export type WhereCompilerCtx = {
+	/** Root relation filters already planned as positive JOINs, keyed by source.relation. */
+	readonly rootWhereJoinRelations?: ReadonlySet<string>;
+	/** Internal migration provenance; legacy where callers retain their lowering. */
+	readonly directRootWhere?: boolean;
 	readonly position?: ConditionPosition;
 	/** Current root table name (or alias) */
 	readonly rootTable: string;
@@ -68,7 +72,7 @@ export type WhereCompilerCtx = {
 	readonly currentAlias?: string;
 };
 
-/** Compilation position selects the migrated FILTER and recursive-anchor paths; other callers retain their lowering. */
+/** Compilation position selects the migrated root WHERE, FILTER and recursive-anchor paths; other callers retain their lowering. */
 export type ConditionPosition =
 	| 'where'
 	| 'having'
@@ -85,7 +89,7 @@ export type ConditionPosition =
  * declared names, model and shared parameter state retain their existing types.
  * Logical and relation descendants retain the caller's position; subquery
  * bodies use subquery. Only legacy top-level callers default to where.
- * FILTER and recursive anchors enter the condition compiler and bypass PlanDecision;
+ * Root WHERE, FILTER and recursive anchors enter the condition compiler and bypass PlanDecision;
  * relation predicates and predicate subqueries still lower through handler decisions
  * during migration. Other positions retain their historical lowering.
  */
