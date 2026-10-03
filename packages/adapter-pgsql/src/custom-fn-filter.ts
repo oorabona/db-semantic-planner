@@ -7,7 +7,6 @@ import {
 	type FkColumnDerivation,
 } from './assert-field.js';
 import { deriveFkColumns } from './handlers/include/shared.js';
-import { createWhereDispatcher } from './handlers/index.js';
 import type {
 	CompilerContext as HandlerCompilerContext,
 	CompilerState as HandlerCompilerState,
@@ -138,7 +137,7 @@ export function mapToHandlerDecision(
  */
 export function compileFilterCondition(
 	filterCondition: PlanDecision | undefined,
-	dispatcher: ReturnType<typeof createWhereDispatcher>,
+	dispatcher: import('./handlers/types.js').WhereDispatcher,
 	ctx: HandlerCompilerContext,
 	state: HandlerCompilerState,
 ): import('@pgsql/types').Node | undefined {
@@ -161,11 +160,13 @@ export function buildCustomFnFilter(
 	// lowers to nothing (a malformed or unsupported condition) must NOT silently
 	// drop to an unfiltered aggregate, which would broaden results. An empty or()
 	// lowers to FALSE and an empty and() to TRUE, so neither reaches this branch.
+	if (!ctx.createWhereDispatcher)
+		throw new Error('FILTER requires a compiler-supplied WHERE dispatcher');
 	const filterDecision = convertWhereCondition(filterIntent, ctx.rootTable);
 	const filterNode = filterDecision
 		? compileFilterCondition(
 				filterDecision,
-				createWhereDispatcher(),
+				ctx.createWhereDispatcher(),
 				ctx,
 				state,
 			)

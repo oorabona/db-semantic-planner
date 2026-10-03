@@ -1,5 +1,6 @@
 import { deparseSync } from 'pgsql-deparser';
 import { expect, it } from 'vitest';
+import { compileWhereIntent } from '../condition-compiler.js';
 import {
 	type CompilerContext,
 	createCompilerState,
@@ -7,8 +8,8 @@ import {
 	type Decision,
 } from '../handlers/index.js';
 
-it('compiles rawExists with an inner WHERE when only the handler entry is imported', () => {
-	const dispatch = createWhereDispatcher();
+it('compiles rawExists with an inner WHERE using the explicitly supplied compiler', () => {
+	const dispatch = createWhereDispatcher(compileWhereIntent);
 	const state = createCompilerState();
 	const node = dispatch(
 		{

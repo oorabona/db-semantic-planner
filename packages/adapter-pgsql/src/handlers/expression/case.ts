@@ -72,8 +72,11 @@ export const caseHandler: ExpressionHandler = {
 
 		// Import WHERE dispatcher for compiling WHEN conditions
 		// Note: We need to avoid circular dependencies
-		const { createWhereDispatcher } = require('../index.js');
-		const dispatch = createWhereDispatcher();
+		if (!ctx.createWhereDispatcher)
+			throw new Error(
+				'Condition requires a compiler-supplied WHERE dispatcher',
+			);
+		const dispatch = ctx.createWhereDispatcher();
 
 		const args: Node[] = conditions.map((cond) => {
 			// Compile the WHEN condition

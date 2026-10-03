@@ -70,8 +70,8 @@ export function createSubqueryBuilder(
 		//   • scalar-direct            → 'scalar-direct' (also rejects LIMIT + ORDER BY)
 		//
 		// Callers:
-		//   • handleRawExistsIntent     (compile-where.ts)             — use='rawExists'
-		//   • handleSubqueryIntent      (compile-where.ts)             — use='scalar-direct'
+		//   • handleRawExistsIntent     (condition compiler)             — use='rawExists'
+		//   • handleSubqueryIntent      (condition compiler)             — use='scalar-direct'
 		//   • rawExistsHandler.compile  (handlers/where/raw-exists.ts) — use='rawExists'
 		//   • adapter-compiler-mutations compileSubquery callback       — use='rawExists'
 		assertNoUnsupportedSubqueryModifiers(intent, use);
@@ -201,6 +201,7 @@ export function createSubqueryBuilder(
 				// Bug 2 fix: use the alias name as rootTable so WHERE handlers emit
 				// "posts_sq"."col" = $N instead of "posts"."col" = $N (table is aliased).
 				rootTable: innerAlias,
+				position: 'subquery',
 				dbCasing,
 				aliases: new Map(),
 				paramState: innerState,

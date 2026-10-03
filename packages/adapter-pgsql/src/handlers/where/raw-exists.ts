@@ -11,7 +11,7 @@
  * discriminates the kind so there is no collision with the 'expression' handler).
  *
  * Subquery compilation uses buildSubqueryFromIntent() directly — mirrors
- * handleRawExistsIntent in compile-where.ts but via the handler path.
+ * the direct condition compiler but via the handler path.
  */
 
 import type { QueryIntent } from '@dbsp/types';
@@ -21,13 +21,10 @@ import {
 	createSubqueryBuilder,
 	type SubqueryConditionCompiler,
 } from '../../condition-subquery.js';
-import { buildCustomFnFilter } from '../../custom-fn-filter.js';
-import { MAX_DEPTH_LIMIT } from '../../recursive/cte-compiler.js';
 import type {
 	CompilerContext,
 	CompilerState,
 	Decision,
-	WhereDispatcher,
 	WhereHandler,
 } from '../types.js';
 
@@ -52,12 +49,7 @@ export function createRawExistsHandler(
 		): Node {
 			const subIntent = decision.expressionIntent as QueryIntent;
 
-			// Fail-fast contract: parameters and paramIndex are mutated unconditionally
-			// before the deparser emits anything. If buildSubqueryFromIntent throws
-			// (e.g. nested rawExists hitting "nested subquery not supported"), the
-			// outer state may be left with bumped paramIndex. We do NOT roll back —
-			// callers must let the throw propagate, not catch-and-recover. Same
-			// contract as the mutation path.
+			// The outer parameter state changes only after the builder returns.
 			const {
 				sql: subNode,
 				paramCount,
@@ -89,41 +81,10 @@ export function createRawExistsHandler(
 	};
 }
 
-/** Adapt a supplied dispatcher to the direct subquery compiler context. */
-export function createDispatcherConditionCompiler(
-	dispatch: WhereDispatcher,
-): SubqueryConditionCompiler {
-	return (intent, inner) =>
-		dispatch(
-			intent as unknown as Decision,
-			{
-				rootTable: inner.rootTable,
-				currentAlias: inner.currentAlias ?? inner.rootTable,
-				maxRecursiveDepth: MAX_DEPTH_LIMIT,
-				dbCasing: inner.dbCasing ?? 'preserve',
-				compileCustomFnFilter: buildCustomFnFilter,
-				...(inner.schemaName !== undefined && { schema: inner.schemaName }),
-				...(inner.declaredNames !== undefined && {
-					declaredNames: inner.declaredNames,
-				}),
-				...(inner.scope !== undefined && { scope: inner.scope }),
-				...(inner.currentBinding !== undefined && {
-					currentBinding: inner.currentBinding,
-				}),
-				...(inner.dialectCapabilities !== undefined && {
-					dialectCapabilities: inner.dialectCapabilities,
-				}),
-			},
-			inner.paramState,
-		);
-}
-
-/** Direct registry consumers provide their dispatcher at compilation. */
+/** Registry identity; a dispatcher replaces this with its compiler-backed handler. */
 export const rawExistsHandler: WhereHandler = {
 	operators: ['rawExists', 'rawNotExists'],
-	compile(decision, ctx, state, dispatch) {
-		return createRawExistsHandler(
-			createDispatcherConditionCompiler(dispatch),
-		).compile(decision, ctx, state, dispatch);
+	compile() {
+		throw new Error('raw EXISTS requires a compiler-backed dispatcher');
 	},
 };

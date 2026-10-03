@@ -58,13 +58,11 @@ import {
 	relationBindingFor,
 } from './binding-registry.js';
 import { compileWhereIntent } from './condition-compiler.js';
+import type { DeclaredNameResolver } from './declared-name-resolver.js';
 import { deparseQuoted } from './deparse.js';
 import { assertDialectCapability } from './dialect-capabilities.js';
 import { resolveCaseValue as resolveCaseValueShared } from './handlers/expression/case-value.js';
-import {
-	compileExpressionIntent,
-	registerWhereDispatcherFactory,
-} from './handlers/expression/custom.js';
+import { compileExpressionIntent } from './handlers/expression/custom.js';
 import { bindParameter } from './handlers/expression/param-value.js';
 import { buildRecursiveScalarSubquery } from './handlers/expression/pseudo.js';
 import { genericWindowHandler } from './handlers/expression/window.js';
@@ -76,23 +74,6 @@ import {
 	getIncludeHandler,
 	getNqlSafeExpressionHandler,
 } from './handlers/index.js';
-import { buildKeyCorrelation } from './handlers/where/exists.js';
-import {
-	type AliasColumnAuthority,
-	bindAliasAuthority,
-	queryScopeForBindingProjections,
-	type RelationTargetProjectionRegistry,
-	type ResolvedRelationTarget,
-	requireRelationTargetColumns,
-	resolveRelationTarget,
-} from './relation-target-projection.js';
-
-// Register createWhereDispatcher with compileExpressionIntent so CASE expressions
-// can compile their WHEN conditions. compiler.ts is the bridge: it imports both
-// compileExpressionIntent (from custom.ts) and createWhereDispatcher (from handlers/index.ts).
-registerWhereDispatcherFactory(() => createWhereDispatcher(compileWhereIntent));
-
-import type { DeclaredNameResolver } from './declared-name-resolver.js';
 import type {
 	CompilerContext as HandlerCompilerContext,
 	CompilerState as HandlerCompilerState,
@@ -107,6 +88,7 @@ import {
 	expressionUnqualifiedColumnRef,
 	isSelectWithFields,
 } from './handlers/types.js';
+import { buildKeyCorrelation } from './handlers/where/exists.js';
 import { buildColumnRef, compileValue } from './handlers/where/utils.js';
 import {
 	assertNoUnsupportedSubqueryModifiers,
@@ -121,6 +103,15 @@ import {
 	isAmbiguousRelationAlias,
 	resolveVisibleRelationAlias,
 } from './relation-alias.js';
+import {
+	type AliasColumnAuthority,
+	bindAliasAuthority,
+	queryScopeForBindingProjections,
+	type RelationTargetProjectionRegistry,
+	type ResolvedRelationTarget,
+	requireRelationTargetColumns,
+	resolveRelationTarget,
+} from './relation-target-projection.js';
 import {
 	identifierText,
 	queryLocal,
@@ -666,6 +657,7 @@ export class PlanCompiler {
 			}),
 			...(this.model != null && { model: this.model }),
 			compileCustomFnFilter: buildCustomFnFilter,
+			createWhereDispatcher: () => createWhereDispatcher(compileWhereIntent),
 		} as HandlerCompilerContext;
 	}
 
@@ -1309,6 +1301,7 @@ export class PlanCompiler {
 				state: HandlerCompilerState,
 			) => this.compileNqlFunctionArg(value, handlerCtx, state),
 			compileCustomFnFilter: buildCustomFnFilter,
+			createWhereDispatcher: () => createWhereDispatcher(compileWhereIntent),
 		} as HandlerCompilerContext;
 	}
 

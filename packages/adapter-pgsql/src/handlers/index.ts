@@ -27,7 +27,6 @@ import { allWhereHandlers } from './where/index.js';
 import { resolveWhereOperator } from './where/operator-resolver.js';
 import {
 	rawExistsHandler as builtinRawExistsHandler,
-	createDispatcherConditionCompiler,
 	createRawExistsHandler,
 } from './where/raw-exists.js';
 
@@ -657,13 +656,10 @@ function normalizeToDecision(input: Decision, ctx?: CompilerContext): Decision {
  * Create a WHERE dispatcher that looks up handlers from the registry.
  */
 export function createWhereDispatcher(
-	compiler?: SubqueryConditionCompiler,
+	compiler: SubqueryConditionCompiler,
 ): WhereDispatcher {
-	const rawExistsHandler = createRawExistsHandler(
-		compiler ??
-			((intent, ctx) =>
-				createDispatcherConditionCompiler(dispatch)(intent, ctx)),
-	);
+	const rawExistsHandler = createRawExistsHandler(compiler);
+	const contexts = new WeakMap<CompilerContext, CompilerContext>();
 
 	const dispatch: WhereDispatcher = (
 		decision: Decision,
@@ -686,7 +682,15 @@ export function createWhereDispatcher(
 		// Pass normalized decision with resolved operator so handler's switch matches
 		const resolved =
 			operator !== rawOperator ? { ...normalized, operator } : normalized;
-		return handler.compile(resolved, ctx, state, dispatch);
+		let runtimeCtx = contexts.get(ctx);
+		if (!runtimeCtx) {
+			runtimeCtx = ctx.createWhereDispatcher
+				? ctx
+				: { ...ctx, createWhereDispatcher: () => dispatch };
+			contexts.set(ctx, runtimeCtx);
+			contexts.set(runtimeCtx, runtimeCtx);
+		}
+		return handler.compile(resolved, runtimeCtx, state, dispatch);
 	};
 	return dispatch;
 }

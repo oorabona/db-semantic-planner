@@ -288,12 +288,73 @@ const authorityPositions = makePositions(
 	authorityAdapter,
 	authorityDb.model,
 );
-function predicates(p: Position): [string, WhereIntent][] {
+// Disable implicit PK inference; refs target unique columns on tables with no PK.
+function keyFallbackPositions(custom: boolean) {
+	const fallbackColumns = {
+		...authorityColumns,
+		id: { type: 'integer', unique: true },
+		matrix_pk: { type: 'integer', unique: true },
+	} as const;
+	const fallbackDb = schema(
+		{
+			users: fallbackColumns,
+			posts: {
+				...fallbackColumns,
+				authorId: ref('users', {
+					as: 'author',
+					inverse: 'posts',
+					references: [custom ? 'matrix_pk' : 'id'],
+				}),
+			},
+			comments: {
+				...fallbackColumns,
+				postId: ref('posts', {
+					as: 'post',
+					inverse: 'comments',
+					references: [custom ? 'matrix_pk' : 'id'],
+				}),
+			},
+			edges: {
+				id: { type: 'integer', primaryKey: true },
+				from_id: { type: 'integer' },
+				to_id: { type: 'integer' },
+			},
+		} as const,
+		undefined,
+		{ defaultPkColumnName: null },
+	);
+	const fallbackAdapter = createPgCompileOnlyAdapter({
+		model: fallbackDb.model,
+		...(custom
+			? {
+					defaultPkColumnName: 'matrix_pk',
+					deriveFkColumnName: (table: string, pk: string) =>
+						`matrix_${table}_${pk}`,
+				}
+			: {}),
+	});
+	const fallbackOrm = createOrm({
+		schema: fallbackDb,
+		adapter: fallbackAdapter,
+	});
+	return {
+		orm: fallbackOrm,
+		positions: makePositions(fallbackOrm, fallbackAdapter, fallbackDb.model),
+	};
+}
+const fallbackDefaultPositions = keyFallbackPositions(false);
+const fallbackCustomPositions = keyFallbackPositions(true);
+function predicates(
+	p: Position,
+	matrixOrm: MatrixOrm = orm,
+): [string, WhereIntent][] {
 	const field = (name: string) =>
 		`${p.prefix ?? ''}${name === 'period' || name === 'data' ? name : (p.field ?? name)}`;
 	const child = p.table === 'posts' ? 'comments' : 'posts';
 	const relation =
-		p.table === 'posts' ? orm.tables.posts.comments : orm.tables.users.posts;
+		p.table === 'posts'
+			? matrixOrm.tables.posts.comments
+			: matrixOrm.tables.users.posts;
 	const inner = subquery('posts').select('id').where(eq('score', 53));
 	const ordered = {
 		...subquery('posts')
@@ -370,6 +431,20 @@ function predicates(p: Position): [string, WhereIntent][] {
 			},
 		],
 		['rawExists', rawExists(inner)],
+		[
+			'rawExists-like-escape',
+			rawExists(
+				subquery('posts')
+					.select('id')
+					.where(like('name', 'c!_%', { escape: '!' })),
+			),
+		],
+		[
+			'rawExists-range',
+			rawExists(
+				subquery('posts').select('id').where(rangeOverlaps('period', range)),
+			),
+		],
 		[
 			'inSubquery-order-limit',
 			{ kind: 'in', field: field('id'), subquery: ordered },
@@ -448,6 +523,23 @@ export const conditionMatrix = positions.flatMap((position) =>
 					({ name }) => name === position.name,
 				)!,
 			})),
+		...[false, true].flatMap((custom) =>
+			predicates(
+				position,
+				(custom ? fallbackCustomPositions : fallbackDefaultPositions).orm,
+			)
+				.filter(([kind]) =>
+					['exists', 'notExists', 'some', 'every', 'none'].includes(kind),
+				)
+				.map(([kind, predicate]) => ({
+					kind: `${kind}-no-pk-${custom ? 'custom' : 'default'}-authorities`,
+					predicate,
+					runPosition: (custom
+						? fallbackCustomPositions
+						: fallbackDefaultPositions
+					).positions.find(({ name }) => name === position.name)!,
+				})),
+		),
 	].flatMap(({ kind, predicate, runPosition }) => {
 		const field = `${position.prefix ?? ''}${position.field ?? 'score'}`;
 		const sibling = eq(field, 13);

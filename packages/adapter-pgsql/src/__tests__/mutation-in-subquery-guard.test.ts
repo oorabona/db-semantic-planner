@@ -7,7 +7,7 @@
  * compileUpdate and compileDelete bridge a WhereIntent into the compiler
  * via whereIntentAsDecision() (a type-cast, not a real conversion), then pass
  * the result directly into config.where[].  mutation-compiler.ts dispatches
- * those decisions through createWhereDispatcher() → normalizeToDecision().
+ * those decisions through createWhereDispatcher(compileWhereIntent) → normalizeToDecision().
  *
  * The `case 'in'` branch in normalizeToDecision() previously built the
  * inSubquery Decision by extracting only from/select/where/limit/orderBy from

@@ -14,6 +14,7 @@ import type {
 	RelationTargetProjectionRegistry,
 } from './relation-target-projection.js';
 export type WhereCompilerCtx = {
+	readonly position?: ConditionPosition;
 	/** Current root table name (or alias) */
 	readonly rootTable: string;
 	/** Alias map: alias → real table name */
@@ -78,8 +79,9 @@ export type ConditionPosition =
 	| 'upsert-guard';
 /** Explicit authorities for the direct compiler seam. Correlation bindings,
  * declared names, model and shared parameter state retain their existing types.
- * Position is carried as metadata until the later caller migrations; it must
- * not select a different lowering in this behavior-preserving step.
+ * Logical and relation descendants retain the caller's position; subquery
+ * bodies use subquery. Only legacy top-level callers default to where.
+ * Position is metadata and does not select a different lowering in step 1.
  */
 export type ConditionCompilerCtx = Omit<
 	WhereCompilerCtx,
