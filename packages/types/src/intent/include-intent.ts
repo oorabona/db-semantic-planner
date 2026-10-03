@@ -129,7 +129,9 @@ export interface IncludeIntent {
 	 * - 'left' (default): LEFT JOIN — all root rows returned, NULL for unmatched relations
 	 * - 'inner': INNER JOIN — only root rows WITH a matching related record are returned
 	 *
-	 * Forces the 'join' include strategy (overrides auto-selection).
+	 * Forces 'join' before the relation hint, applicable defaultIncludeStrategy, and shape selection.
+	 * Conflicts with concrete relation hints other than 'join'; 'auto' and 'join' are accepted.
+	 * A plan-level default only fills the gap and never conflicts with explicit join.
 	 * Recursive includes compile as a CTE and refuse join (#894).
 	 *
 	 * @example

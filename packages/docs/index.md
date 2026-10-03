@@ -133,7 +133,7 @@ dump.plan.decisions
 <div class="why-row reverse">
   <div class="why-text">
     <h3>vs Drizzle</h3>
-    <p>Automatic include strategy selection — no manual JOINs for relations. The planner picks join, json_agg, lateral, or cte based on recursion, query shape, and dialect capabilities. Built-in pgvector and ParadeDB helpers.</p>
+    <p>Automatic include strategy selection — no manual JOINs for relations. The planner resolves explicit include joins, relation hints, and applicable defaults before query shape and dialect capabilities; flat output uses join or lateral, nested output defaults to json_agg when supported, and recursive includes use cte. Built-in pgvector and ParadeDB helpers.</p>
   </div>
   <div class="why-code">
 

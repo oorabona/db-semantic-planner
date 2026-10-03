@@ -127,8 +127,9 @@ The planner picks the SQL strategy from the query shape by default:
 
 | Strategy | When used | Notes |
 |----------|-----------|-------|
-| `json_agg` | Simple 1:N includes on the same root query | Aggregates rows with `json_agg()` + `GROUP BY` |
-| `lateral` | Flat includes with a per-parent `limit` | Uses `LATERAL` join for per-row subqueries |
+| `json_agg` | Nested non-recursive includes of any cardinality, when supported | JSON subquery aggregation |
+| `lateral` | Flat includes with a direct or nested per-parent `limit`, when supported | Uses `LATERAL` join for per-row subqueries |
+| `join` | Flat includes without limits, or nested output without JSON aggregation support | SQL JOIN |
 
 Inspect the chosen strategy at any time with `dump()`:
 
@@ -140,4 +141,4 @@ console.log(dump.plan?.decisions);
 
 If the planner emits a performance warning (e.g., potential N+1), it appears in `dump.plan?.warnings`.
 
-`defaultIncludeStrategy` applies only to non-recursive includes. Recursive includes always use `cte`; a recursive relation hint must be `auto` or `cte`.
+`defaultIncludeStrategy` applies only to non-recursive includes. Recursive includes always use `cte`; a recursive relation hint must be `auto` or `cte`. For every non-recursive include, explicit `include.join` takes precedence, then the relation `includeStrategy` hint, then an applicable `defaultIncludeStrategy`, then shape selection; explicit join conflicts with concrete hints other than `join` (`json_agg`, `lateral`, `cte`) and is refused, while a plan-level default only fills the gap.

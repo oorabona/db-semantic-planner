@@ -1142,6 +1142,154 @@ describe('#900 flat strategy precedence', () => {
 		});
 		return db.model;
 	}
+
+	for (const strategy of ['flat', 'auto'] as const) {
+		for (const hint of ['json_agg', 'lateral', 'cte']) {
+			it(`refuses explicit join conflicting with ${hint} on ${strategy}`, () => {
+				expect(() =>
+					plan(
+						{
+							type: 'select',
+							from: 'users',
+							include: [{ relation: 'posts', strategy, join: 'left' }],
+						},
+						fixture(hint),
+						{ dialectCapabilities: FULL_CAPS },
+					),
+				).toThrow(
+					new UnsupportedStrategyError(
+						`Include at include[0](posts) cannot use explicit join because relation 'posts' declares includeStrategy '${hint}'. Use 'auto' or 'join', or remove include.join.`,
+					),
+				);
+			});
+		}
+		for (const hint of ['auto', 'join']) {
+			it(`explicit join beats lateral default with ${hint} hint on ${strategy}`, () => {
+				const report = plan(
+					{
+						type: 'select',
+						from: 'users',
+						include: [{ relation: 'posts', strategy, join: 'left' }],
+					},
+					fixture(hint),
+					{ defaultIncludeStrategy: 'lateral', dialectCapabilities: FULL_CAPS },
+				);
+				const decision = report.decisions.find(
+					(d) => d.type === 'include-strategy',
+				)!;
+				expect(decision.choice).toBe('join');
+				expect(decision.reasoning).toBe(
+					'Relation users.posts (hasMany, cardinality: many) - using join selected by explicit join',
+				);
+			});
+		}
+	}
+	for (const strategy of ['join', 'lateral'] as const) {
+		it(`flat ${strategy} decision reports default and admissible alternatives`, () => {
+			const decision = resolve('auto', strategy).decisions.find(
+				(d) => d.type === 'include-strategy',
+			)!;
+			expect(decision.choice).toBe(strategy);
+			expect(decision.reasoning).toBe(
+				`Relation users.posts (hasMany, cardinality: many) - using ${strategy} selected by defaultIncludeStrategy`,
+			);
+			expect(decision.alternatives).toEqual([
+				strategy === 'join' ? 'lateral' : 'join',
+			]);
+		});
+	}
+	it('flat capability refusal excludes nested strategies even when CTE is supported', () => {
+		expect(() =>
+			resolve(
+				'auto',
+				'lateral',
+				{},
+				{ ...FULL_CAPS, supportsLateralJoin: false },
+			),
+		).toThrow(
+			new UnsupportedStrategyError(
+				`Flat output for relation 'posts' requires a dialect with supportsLateralJoin; current dialect (${FULL_CAPS.name}) does not support it. Accepted strategies for flat output: 'join', 'lateral'.`,
+			),
+		);
+	});
+
+	for (const [hint, fallback, extra, expected, source] of [
+		['auto', 'auto', {}, 'join', 'flat output'],
+		['auto', 'auto', { limit: 0 }, 'lateral', 'per-parent limit'],
+		[
+			'auto',
+			'auto',
+			{ include: [{ relation: 'comments', strategy: 'flat', limit: 2 }] },
+			'lateral',
+			'per-parent limit',
+		],
+		['lateral', 'join', {}, 'lateral', 'relation hint'],
+	] as const) {
+		it(`reports ${source} for ${hint}/${fallback}/${JSON.stringify(extra)}`, () => {
+			const decision = resolve(hint, fallback, extra).decisions.find(
+				(d) => d.type === 'include-strategy',
+			)!;
+			expect(decision.choice).toBe(expected);
+			expect(decision.reasoning).toBe(
+				`Relation users.posts (hasMany, cardinality: many) - using ${expected} selected by ${source}`,
+			);
+		});
+	}
+	it('reports nested output shape selection', () => {
+		const decision = plan(
+			{ type: 'select', from: 'users', include: [{ relation: 'posts' }] },
+			fixture(),
+			{ dialectCapabilities: FULL_CAPS },
+		).decisions.find((d) => d.type === 'include-strategy')!;
+		expect(decision.reasoning).toBe(
+			'Relation users.posts (hasMany, cardinality: many) - using json_agg selected by nested output',
+		);
+	});
+	it('flat alternatives respect dialect capabilities', () => {
+		const decision = resolve('auto', 'auto', {}, NO_CTE_CAPS).decisions.find(
+			(d) => d.type === 'include-strategy',
+		)!;
+		expect(decision.alternatives).toEqual([]);
+	});
+	it('flat explicit join with limit lists only flat accepted strategies', () => {
+		expect(() =>
+			resolve('auto', 'lateral', { join: 'left', limit: 2 }),
+		).toThrow(
+			new InvalidOperationError(
+				'include',
+				"Flat output for relation 'posts' cannot use 'join' selected by explicit join because the include or a nested include has a per-parent limit. Accepted strategies for flat output: 'join', 'lateral'; per-parent limits require 'lateral' with a dialect that supports lateral joins.",
+			),
+		);
+	});
+	for (const strategy of ['flat', 'auto'] as const) {
+		it(`conflict reports the full nested include path on ${strategy}`, () => {
+			const model = fixture('join');
+			Object.assign(model.getRelation('posts.comments')!, {
+				includeStrategy: 'lateral',
+			});
+			expect(() =>
+				plan(
+					{
+						type: 'select',
+						from: 'users',
+						include: [
+							{
+								relation: 'posts',
+								strategy,
+								include: [{ relation: 'comments', strategy, join: 'left' }],
+							},
+						],
+					},
+					model,
+					{ dialectCapabilities: FULL_CAPS },
+				),
+			).toThrow(
+				new UnsupportedStrategyError(
+					"Include at include[0].include[0](comments) cannot use explicit join because relation 'comments' declares includeStrategy 'lateral'. Use 'auto' or 'join', or remove include.join.",
+				),
+			);
+		});
+	}
 	const limited = [
 		{ limit: 2 },
 		{
@@ -1204,7 +1352,7 @@ describe('#900 flat strategy precedence', () => {
 				).toThrow(
 					new InvalidOperationError(
 						'include',
-						`Flat output for relation 'posts' cannot use 'join' selected by ${source} because the include or a nested include has a per-parent limit. Use 'lateral' with a dialect that supports lateral joins.`,
+						`Flat output for relation 'posts' cannot use 'join' selected by ${source} because the include or a nested include has a per-parent limit. Accepted strategies for flat output: 'join', 'lateral'; per-parent limits require 'lateral' with a dialect that supports lateral joins.`,
 					),
 				));
 		}
@@ -1229,14 +1377,14 @@ describe('#900 flat strategy precedence', () => {
 		it(`refuses required lateral without capability (${hint}/${fallback})`, () =>
 			expect(() => resolve(hint, fallback, extra, NO_CTE_CAPS)).toThrow(
 				new UnsupportedStrategyError(
-					"Strategy 'lateral' is not supported by test-no-cte. Supported strategies: 'join', 'auto'.",
+					"Flat output for relation 'posts' requires a dialect with supportsLateralJoin; current dialect (test-no-cte) does not support it. Accepted strategies for flat output: 'join', 'lateral'.",
 				),
 			));
 	}
 	it('refuses a nested limit without lateral support', () =>
 		expect(() => resolve('auto', 'auto', limited[1], NO_CTE_CAPS)).toThrow(
 			new UnsupportedStrategyError(
-				"Strategy 'lateral' is not supported by test-no-cte. Supported strategies: 'join', 'auto'.",
+				"Flat output for relation 'posts' requires a dialect with supportsLateralJoin; current dialect (test-no-cte) does not support it. Accepted strategies for flat output: 'join', 'lateral'.",
 			),
 		));
 	it('skips json_agg default on a non-JSON dialect', () =>
@@ -1263,7 +1411,7 @@ describe('#900 flat strategy precedence', () => {
 			),
 		).toThrow(
 			new UnsupportedStrategyError(
-				"Flat output for relation 'posts' requires a dialect with supportsLateralJoin; current dialect (no capabilities) does not support it.",
+				"Flat output for relation 'posts' requires a dialect with supportsLateralJoin; current dialect (no capabilities) does not support it. Accepted strategies for flat output: 'join', 'lateral'.",
 			),
 		);
 	});
