@@ -400,6 +400,17 @@ export function planRecursive(
 	model: ModelIR,
 	options: RecursivePlanOptions = {},
 ): RecursivePlanReport {
+	const nodeTable =
+		intent.traversal.kind === 'custom'
+			? intent.start.from
+			: intent.traversal.nodeTable;
+	const startFrom = intent.start.from ?? nodeTable;
+	if (startFrom !== nodeTable) {
+		throw new Error(
+			`Recursive start.from '${startFrom}' must match traversal.nodeTable '${nodeTable}'.`,
+		);
+	}
+
 	const startTime = performance.now();
 
 	// Step 1: Validate shape compatibility
@@ -424,9 +435,9 @@ export function planRecursive(
 	};
 
 	// Validate that start table exists
-	const startTable = model.getTable(intent.start.from);
+	const startTable = model.getTable(startFrom);
 	if (!startTable) {
-		throw new Error(`Unknown table: ${intent.start.from}`);
+		throw new Error(`Unknown table: ${startFrom}`);
 	}
 
 	// Step 2: Generate recursive-cte decision
@@ -436,7 +447,7 @@ export function planRecursive(
 		id: generateDecisionId(state, 'recursive-cte'),
 		type: 'recursive-cte',
 		context: {
-			sourceTable: intent.start.from,
+			sourceTable: startFrom,
 			intentPath: `recursive:${intent.cteName}`,
 		},
 		choice: 'with-recursive',
@@ -464,7 +475,7 @@ export function planRecursive(
 				id: generateDecisionId(state, 'bidirectional-edges'),
 				type: 'bidirectional-edges',
 				context: {
-					sourceTable: intent.start.from,
+					sourceTable: startFrom,
 					target: edgeTraversal.edgeTable,
 					intentPath: `recursive:${intent.cteName}:edges`,
 				},
@@ -504,7 +515,7 @@ export function planRecursive(
 
 	// PERF (FIND-051): use .slice() instead of spread — avoids iterable-protocol overhead.
 	const report: RecursivePlanReport = {
-		rootTable: intent.start.from,
+		rootTable: startFrom,
 		decisions: Object.freeze(state.decisions.slice()),
 		warnings: Object.freeze(state.warnings.slice()),
 		ctes: Object.freeze(state.ctes.slice()),

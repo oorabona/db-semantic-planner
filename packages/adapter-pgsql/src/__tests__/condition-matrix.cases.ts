@@ -236,6 +236,33 @@ function makePositions(
 				),
 		},
 		{
+			name: 'recursive-start-where-adjacency',
+			run: (c) =>
+				adapter.compileRecursive(
+					planRecursive(
+						{
+							type: 'recursive',
+							cteName: 'tree',
+							start: {
+								from: 'users',
+								nodeIdExpr: { kind: 'column', name: 'id' },
+								where: c,
+							},
+							traversal: {
+								kind: 'adjacency',
+								nodeTable: 'users',
+								nodeId: 'id',
+								parentId: 'score',
+								direction: 'descendants',
+							},
+							maxDepth: 2,
+						},
+						model,
+					),
+					model,
+				),
+		},
+		{
 			name: 'update-where',
 			run: (c) =>
 				orm.modify(orm.tables.users).set({ score: 41 }).where(c).dump(),

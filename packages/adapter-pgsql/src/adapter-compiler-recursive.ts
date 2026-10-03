@@ -40,7 +40,9 @@ import {
 import {
 	emittedBindName,
 	hasBindingName,
+	relationBinding,
 	withBindingName,
+	withRelationBinding,
 } from './binding-registry.js';
 import { buildCustomFnFilter } from './compiler.js';
 import { inferPgArrayType, stripArraySuffix } from './compiler-utils.js';
@@ -419,6 +421,69 @@ export function compileRecursive<T = unknown>(
 	const trackPath = intent.track?.path !== undefined;
 	const trackDepth = intent.track?.depth !== undefined;
 
+	// Older direct reports omit start.from; their anchor source is the node table.
+	if (traversal.kind === 'custom') {
+		throw new Error(
+			`PgAdapter.compileRecursive: Unsupported traversal kind '${traversal.kind}'`,
+		);
+	}
+	const startTable = intent.start.from ?? traversal.nodeTable;
+
+	if (startTable !== traversal.nodeTable) {
+		throw new Error(
+			`Recursive start.from '${startTable}' must match traversal.nodeTable '${traversal.nodeTable}'.`,
+		);
+	}
+	const anchorBinding = relationBinding({
+		kind: 'declared-table',
+		logicalTable: startTable,
+		qualifier: queryLocal('__n'),
+	});
+	const anchorScope = withRelationBinding(deps.scope, anchorBinding);
+
+	// Build anchor WHERE from intent.start.where
+	const anchorWhere = intent.start.where
+		? compileCondition(intent.start.where, {
+				position: 'recursive-anchor',
+				logicalSourceTable: startTable,
+				emittedAlias: '__n',
+				visibleAliases: new Map([['__n', startTable]]),
+				paramState: state,
+				defaultPkColumnName: deps.defaultPk,
+				deriveFkColumnName: deps.deriveFk,
+				aliasColumnAuthorities: bindAliasAuthority(
+					undefined,
+					queryLocal('__n'),
+					{
+						target: queryLocal(startTable),
+						logicalTable: startTable,
+					},
+				),
+				...(deps.model !== undefined && { model: deps.model }),
+				...(deps.declaredNames !== undefined && {
+					declaredNames: deps.declaredNames,
+				}),
+				...(schemaName !== undefined && { schemaName }),
+				...(deps.dbCasing !== undefined && { dbCasing: deps.dbCasing }),
+				...(deps.dialectCapabilities !== undefined && {
+					dialectCapabilities: deps.dialectCapabilities,
+				}),
+				scope: anchorScope,
+				currentBinding: anchorBinding,
+				compileSubquery: (query, offset) =>
+					buildSubqueryFromIntent(
+						query,
+						offset,
+						deps.declaredNames,
+						schemaName,
+						'rawExists',
+						anchorScope,
+						deps.dialectCapabilities,
+						deps.dbCasing,
+					),
+			})
+		: undefined;
+
 	let config: RecursiveCteConfig;
 
 	if (traversal.kind === 'edge-table') {
@@ -461,51 +526,6 @@ export function compileRecursive<T = unknown>(
 			traversal.direction === 'in' ? traversal.edgeTo : traversal.edgeFrom;
 		const edgeTo =
 			traversal.direction === 'in' ? traversal.edgeFrom : traversal.edgeTo;
-
-		// Older direct reports omit start.from; their anchor source is the node table.
-		const startTable = intent.start.from ?? table;
-
-		// Build anchor WHERE from intent.start.where
-		const anchorWhere = intent.start.where
-			? compileCondition(intent.start.where, {
-					position: 'recursive-anchor',
-					logicalSourceTable: startTable,
-					emittedAlias: '__n',
-					visibleAliases: new Map([['__n', startTable]]),
-					paramState: state,
-					defaultPkColumnName: deps.defaultPk,
-					deriveFkColumnName: deps.deriveFk,
-					aliasColumnAuthorities: bindAliasAuthority(
-						undefined,
-						queryLocal('__n'),
-						{
-							target: queryLocal(startTable),
-							logicalTable: startTable,
-						},
-					),
-					...(deps.model !== undefined && { model: deps.model }),
-					...(deps.declaredNames !== undefined && {
-						declaredNames: deps.declaredNames,
-					}),
-					...(schemaName !== undefined && { schemaName }),
-					...(deps.dbCasing !== undefined && { dbCasing: deps.dbCasing }),
-					...(deps.dialectCapabilities !== undefined && {
-						dialectCapabilities: deps.dialectCapabilities,
-					}),
-					...(deps.scope !== undefined && { scope: deps.scope }),
-					compileSubquery: (query, offset) =>
-						buildSubqueryFromIntent(
-							query,
-							offset,
-							deps.declaredNames,
-							schemaName,
-							'rawExists',
-							deps.scope,
-							deps.dialectCapabilities,
-							deps.dbCasing,
-						),
-				})
-			: undefined;
 
 		const base: RecursiveCteConfig = {
 			cteAlias: queryLocal(intent.cteName),
@@ -609,6 +629,7 @@ export function compileRecursive<T = unknown>(
 
 		// Adjacency-list traversal: self-referencing FK
 		config = {
+			...(anchorWhere !== undefined && { anchorWhere }),
 			cteAlias: queryLocal(intent.cteName),
 			table: resolveDeclaredIdentifier(
 				deps.declaredNames,
@@ -647,8 +668,8 @@ export function compileRecursive<T = unknown>(
 			ctx,
 		};
 	} else {
-		// Exhaustive check: only 'custom' remains, which is reserved for P2
-		const _exhaustive: 'custom' = traversal.kind;
+		// Exhaustive check: both supported traversal kinds are handled above.
+		const _exhaustive: never = traversal;
 		throw new Error(
 			`PgAdapter.compileRecursive: Unsupported traversal kind '${_exhaustive}'`,
 		);

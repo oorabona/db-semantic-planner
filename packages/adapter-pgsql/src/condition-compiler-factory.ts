@@ -25,7 +25,10 @@ import type {
 	WhereRelationFilterIntent,
 } from '@dbsp/types';
 import { toColumnList } from '@dbsp/types';
-import { getTrustedNqlRelationFilterFields } from '@dbsp/types/internal';
+import {
+	getTrustedNqlRelationFilterFields,
+	isFieldRef,
+} from '@dbsp/types/internal';
 import type { Node, SubLink } from '@pgsql/types';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from './assert-field.js';
 import {
@@ -36,6 +39,7 @@ import {
 	notExpr,
 	orExpr,
 } from './ast-helpers.js';
+import { queryScope, relationBinding } from './binding-registry.js';
 import type {
 	ConditionCompilerCtx,
 	WhereCompilerCtx,
@@ -69,6 +73,7 @@ import { unwrapParamIntent } from './param-intent.js';
 import { createParamRef } from './param-ref.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
 import { resolveRelationKeys } from './relation-keys.js';
+import { queryLocal } from './sql-identifier.js';
 
 /** Private recursion state, created by the top-level entry and shared by descendants. */
 type InternalConditionCtx = WhereCompilerCtx & {
@@ -938,7 +943,11 @@ export function createConditionCompiler(
 				handlerCtx,
 			);
 			if (exprRefResult !== null) return exprRefResult;
-			if (ctx.position === 'recursive-anchor') {
+			if (
+				ctx.position === 'recursive-anchor' &&
+				intent.jsonPath === undefined &&
+				!isFieldRef(intent.value)
+			) {
 				return compileMappedComparison(intent.operator)(
 					buildColumnRef(intent.field, handlerCtx),
 					compileValue(intent.value, ctx.paramState, undefined, true),
@@ -953,7 +962,8 @@ export function createConditionCompiler(
 		const bridged = needsColumn
 			? ({
 					...intent,
-					...(ctx.position === 'filter' && { type: 'where' }),
+					...((ctx.position === 'filter' ||
+						ctx.position === 'recursive-anchor') && { type: 'where' }),
 					column: rawIntent.field,
 					...('value' in rawIntent && {
 						value: rawIntent.value,
@@ -961,7 +971,8 @@ export function createConditionCompiler(
 				} as unknown as Decision)
 			: ({
 					...intent,
-					...(ctx.position === 'filter' && { type: 'where' }),
+					...((ctx.position === 'filter' ||
+						ctx.position === 'recursive-anchor') && { type: 'where' }),
 				} as unknown as Decision);
 		return dispatcher(bridged, handlerCtx, ctx.paramState);
 	}
@@ -1010,7 +1021,26 @@ export function createConditionCompiler(
 							compileCondition: recurse,
 						},
 			);
-		const dispatcher = createWhereDispatcher(recurse);
+		const dispatcher = createWhereDispatcher((child, inner) => {
+			if (inner.position !== 'recursive-anchor') return recurse(child, inner);
+			// EXISTS changes the table and alias but inherits its parent's binding.
+			// Rebuild the child authority before compiling any raw descendant.
+			const binding = relationBinding({
+				kind: 'declared-table',
+				logicalTable: inner.rootTable,
+				qualifier: queryLocal(inner.currentAlias ?? inner.rootTable),
+			});
+			return recurse(child, {
+				...inner,
+				currentBinding: binding,
+				scope: queryScope([
+					...Array.from(inner.scope?.bindings.values() ?? []).filter(
+						(visible) => visible.qualifier !== binding.qualifier,
+					),
+					binding,
+				]),
+			});
+		});
 		const normalized: InternalConditionCtx =
 			'logicalSourceTable' in ctx
 				? {

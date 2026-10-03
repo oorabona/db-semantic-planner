@@ -11,7 +11,7 @@
  */
 
 import type { CommonTableExpr, Node, SelectStmt } from '@pgsql/types';
-import { binaryExpr, eqExpr, integerNode } from '../ast-helpers.js';
+import { andExpr, binaryExpr, eqExpr, integerNode } from '../ast-helpers.js';
 import type { CompilerContext } from '../handlers/types.js';
 import { queryLocal, type SqlIdentifier } from '../sql-identifier.js';
 import {
@@ -71,7 +71,7 @@ export interface RecursiveCteConfig {
 	/** Bidirectional strategy: 'union' (safe, dedup) or 'union-all' (no dedup) */
 	bidirectionalStrategy?: 'union' | 'union-all';
 
-	// Anchor filter (for edge-table mode — WHERE on anchor node)
+	// Anchor filter for both traversal modes
 	/** Anchor WHERE clause node (pre-built AST) */
 	anchorWhere?: Node;
 }
@@ -146,13 +146,17 @@ export function buildRecursiveCte(config: RecursiveCteConfig): {
 	});
 
 	// Build anchor WHERE clause
-	const anchorWhere = buildAnchorWhere(
+	const structuralAnchorWhere = buildAnchorWhere(
 		innerAlias,
 		dbOuter,
 		dbPk,
 		dbFk,
 		isAncestors,
 	);
+
+	const anchorWhere = config.anchorWhere
+		? andExpr(structuralAnchorWhere, config.anchorWhere)
+		: structuralAnchorWhere;
 
 	// Build anchor SELECT
 	const anchorSelect: SelectStmt = {

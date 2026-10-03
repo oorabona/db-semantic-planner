@@ -1,0 +1,255 @@
+import {
+	and,
+	createOrm,
+	eq,
+	every,
+	exists,
+	like,
+	neq,
+	none,
+	not,
+	notExists,
+	or,
+	planRecursive,
+	rangeOverlaps,
+	rawExists,
+	ref,
+	schema,
+	some,
+	subquery,
+} from '@dbsp/core';
+import type { RecursiveIntent, WhereIntent } from '@dbsp/types';
+import { describe, expect, it } from 'vitest';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
+
+const columns = {
+	id: { type: 'integer', primaryKey: true },
+	name: { type: 'text' },
+	score: { type: 'integer' },
+	period: { type: 'daterange' },
+	data: { type: 'jsonb' },
+} as const;
+const db = schema({
+	users: columns,
+	posts: {
+		...columns,
+		authorId: ref('users', { as: 'author', inverse: 'posts' }),
+	},
+	comments: {
+		...columns,
+		postId: ref('posts', { as: 'post', inverse: 'comments' }),
+	},
+	seeds: columns,
+	edges: {
+		id: { type: 'integer', primaryKey: true },
+		from_id: { type: 'integer' },
+		to_id: { type: 'integer' },
+	},
+} as const);
+const adapter = createPgCompileOnlyAdapter({ model: db.model });
+const orm = createOrm({ schema: db, adapter });
+function intent(where: WhereIntent, adjacency = false): RecursiveIntent {
+	return {
+		type: 'recursive',
+		cteName: 'tree',
+		start: { from: 'users', nodeIdExpr: { kind: 'column', name: 'id' }, where },
+		traversal: adjacency
+			? {
+					kind: 'adjacency',
+					nodeTable: 'users',
+					nodeId: 'id',
+					parentId: 'score',
+					direction: 'descendants',
+				}
+			: {
+					kind: 'edge-table',
+					nodeTable: 'users',
+					nodeId: 'id',
+					edgeTable: 'edges',
+					edgeFrom: 'from_id',
+					edgeTo: 'to_id',
+					direction: 'out',
+				},
+		maxDepth: 2,
+	};
+}
+function compile(where: WhereIntent, adjacency = false) {
+	return adapter.compileRecursive(
+		planRecursive(intent(where, adjacency), db.model),
+		db.model,
+	);
+}
+function edgeSql(condition: string) {
+	return `WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE ${condition} UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree`;
+}
+function postsSql(condition: string, negative = false) {
+	const sql = `EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0."authorId" AND ${condition})`;
+	return negative ? `NOT (${sql})` : sql;
+}
+const escaped = like('name', 'a!%', { escape: '!' });
+const leaves: readonly [string, WhereIntent, string, readonly unknown[]][] = [
+	[
+		'escaped LIKE',
+		escaped,
+		'posts_exists_0.name LIKE $1 ESCAPE $2',
+		['a!%', '!'],
+	],
+	[
+		'range cast',
+		rangeOverlaps('period', { lower: '2026-01-01', upper: '2026-02-01' }),
+		'posts_exists_0.period && CAST($1 AS daterange)',
+		['[2026-01-01,2026-02-01)'],
+	],
+	[
+		'scalar subquery',
+		{
+			kind: 'subquery',
+			field: 'score',
+			operator: 'eq',
+			subquery: {
+				type: 'select',
+				from: 'comments',
+				select: { type: 'fields', fields: ['score'] },
+				where: eq('id', 4),
+			},
+		},
+		'posts_exists_0.score = (SELECT comments_subq_1.score FROM comments AS comments_subq_1 WHERE comments_subq_1.id = $1)',
+		[4],
+	],
+	[
+		'raw EXISTS',
+		rawExists(subquery('comments').select('id').where(eq('score', 4))),
+		'EXISTS (SELECT comments_sq.id FROM comments AS comments_sq WHERE comments_sq.score = $1)',
+		[4],
+	],
+	[
+		'nested relation filter',
+		some(orm.tables.posts.comments, () => like('name', 'a!%', { escape: '!' })),
+		'EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1."postId" AND comments_exists_1.name LIKE $1 ESCAPE $2)',
+		['a!%', '!'],
+	],
+];
+describe('#891 recursive anchor review repairs', () => {
+	for (const [name, leaf, sql, params] of leaves) {
+		for (const negative of [false, true]) {
+			it(`COR1 ${negative ? 'notExists' : 'exists'} descendant ${name}`, () => {
+				const result = compile(
+					negative
+						? notExists('posts', { where: leaf })
+						: exists('posts', { where: leaf }),
+				);
+				expect(result.sql).toBe(edgeSql(postsSql(sql, negative)));
+				expect(result.parameters).toEqual(params);
+			});
+		}
+	}
+	for (const [name, where, condition, params] of [
+		[
+			'logical groups',
+			exists('posts', { where: and(eq('id', 7), not(or(escaped))) }),
+			postsSql(
+				'posts_exists_0.id = $1 AND NOT (posts_exists_0.name LIKE $2 ESCAPE $3)',
+			),
+			[7, 'a!%', '!'],
+		],
+		[
+			'some',
+			some(orm.tables.users.posts, () => escaped),
+			postsSql('posts_exists_0.name LIKE $1 ESCAPE $2'),
+			['a!%', '!'],
+		],
+		[
+			'none',
+			none(orm.tables.users.posts, () => escaped),
+			postsSql('posts_exists_0.name LIKE $1 ESCAPE $2', true),
+			['a!%', '!'],
+		],
+		[
+			'every',
+			every(orm.tables.users.posts, () => escaped),
+			postsSql('NOT (posts_exists_0.name LIKE $1 ESCAPE $2)', true),
+			['a!%', '!'],
+		],
+	] as const) {
+		it(`COR1 ${name} descendants`, () => {
+			const result = compile(where);
+			expect(result.sql).toBe(edgeSql(condition));
+			expect(result.parameters).toEqual(params);
+		});
+	}
+	for (const [name, where, condition, params] of [
+		[
+			'JSON path',
+			{
+				kind: 'comparison',
+				field: 'data',
+				operator: 'eq',
+				value: 'yes',
+				jsonPath: ['active'],
+				jsonMode: 'text',
+			},
+			'(__n.data ->> $1) = $2',
+			['active', 'yes'],
+		],
+		[
+			'field reference',
+			eq('score', { kind: 'fieldRef', column: 'id', scope: 'inner' }),
+			'__n.score = __n.id',
+			[],
+		],
+		['legacy null', eq('score', null), '__n.score = $1', [null]],
+		['legacy inequality', neq('score', 7), '__n.score != $1', [7]],
+		['qualified root', eq('users.score', 7), '__n.score = $1', [7]],
+	] as const) {
+		it(`${name === 'qualified root' ? 'EDGE1' : 'COR2'} ${name}`, () => {
+			const result = compile(where);
+			expect(result.sql).toBe(edgeSql(condition));
+			expect(result.parameters).toEqual(params);
+		});
+	}
+	it('EDGE2 planning refuses mismatched start table', () => {
+		const query = intent(eq('score', 7));
+		expect(() =>
+			planRecursive(
+				{ ...query, start: { ...query.start, from: 'seeds' } },
+				db.model,
+			),
+		).toThrow(
+			"Recursive start.from 'seeds' must match traversal.nodeTable 'users'.",
+		);
+	});
+	it('EDGE2 compilation refuses mismatched start table independently', () => {
+		const report = planRecursive(intent(eq('score', 7)), db.model);
+		expect(() =>
+			adapter.compileRecursive(
+				{
+					...report,
+					intent: {
+						...report.intent,
+						start: { ...report.intent.start, from: 'seeds' },
+					},
+				},
+				db.model,
+			),
+		).toThrow(
+			"Recursive start.from 'seeds' must match traversal.nodeTable 'users'.",
+		);
+	});
+	it('EDGE2 omitted start.from falls back to the node table', () => {
+		const query = intent(eq('score', 7));
+		Reflect.deleteProperty(query.start, 'from');
+		const result = adapter.compileRecursive(
+			planRecursive(query, db.model),
+			db.model,
+		);
+		expect(result.sql).toBe(edgeSql('__n.score = $1'));
+		expect(result.parameters).toEqual([7]);
+	});
+	it('CON1 adjacency applies the anchor predicate', () => {
+		const result = compile(eq('score', 9), true);
+		expect(result.sql).toBe(
+			'WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = t0.id AND __n.score = $1 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree, tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree',
+		);
+		expect(result.parameters).toEqual([9]);
+	});
+});

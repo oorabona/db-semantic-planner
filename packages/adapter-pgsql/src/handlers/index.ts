@@ -669,6 +669,10 @@ export function createWhereDispatcher(
 		buildCustomFnFilter(intent, ctx, state, (condition, inner) =>
 			compiler(condition, {
 				...inner,
+				position:
+					ctx.position === 'recursive-anchor' && inner.position !== 'subquery'
+						? ctx.position
+						: inner.position,
 				rootTable: inner.logicalSourceTable,
 				currentAlias: inner.emittedAlias,
 				aliases: inner.visibleAliases,
@@ -681,10 +685,10 @@ export function createWhereDispatcher(
 		state: CompilerState,
 	): Node => {
 		ensureHandlersRegistered();
-		// Raw FILTER descendants retain their intent until the condition compiler
-		// resolves them in the EXISTS emitter's child scope. Decisions stay intact.
+		// Raw FILTER and recursive-anchor descendants retain their intent until
+		// compilation in the EXISTS emitter's child scope. Decisions stay intact.
 		if (
-			ctx.position === 'filter' &&
+			(ctx.position === 'filter' || ctx.position === 'recursive-anchor') &&
 			'kind' in decision &&
 			!('type' in decision)
 		) {

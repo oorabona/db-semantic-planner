@@ -820,6 +820,7 @@ describe('planner coverage', () => {
 			},
 			traversal: {
 				kind: 'adjacency',
+				nodeTable: 'categories',
 				parentId: 'parentId',
 				direction: 'down',
 			},
@@ -854,6 +855,7 @@ describe('planner coverage', () => {
 			},
 			traversal: {
 				kind: 'edge-table',
+				nodeTable: 'nodes',
 				edgeTable: 'edges',
 				sourceColumn: 'sourceId',
 				targetColumn: 'targetId',
@@ -889,6 +891,7 @@ describe('planner coverage', () => {
 			},
 			traversal: {
 				kind: 'edge-table',
+				nodeTable: 'nodes',
 				edgeTable: 'edges',
 				sourceColumn: 'sourceId',
 				targetColumn: 'targetId',
@@ -928,6 +931,7 @@ describe('planner coverage', () => {
 			},
 			traversal: {
 				kind: 'adjacency',
+				nodeTable: 'categories',
 				parentId: 'parentId',
 				direction: 'down',
 			},
@@ -960,6 +964,7 @@ describe('planner coverage', () => {
 			},
 			traversal: {
 				kind: 'adjacency',
+				nodeTable: 'categories',
 				parentId: 'parentId',
 				direction: 'down',
 			},
@@ -982,6 +987,7 @@ describe('planner coverage', () => {
 			},
 			traversal: {
 				kind: 'adjacency',
+				nodeTable: 'nonexistent',
 				parentId: 'parentId',
 				direction: 'down',
 			},
@@ -1010,6 +1016,7 @@ describe('planner coverage', () => {
 			},
 			traversal: {
 				kind: 'adjacency',
+				nodeTable: 'categories',
 				parentId: 'parentId',
 				direction: 'down',
 			},
@@ -1509,6 +1516,7 @@ describe('planner coverage', () => {
 			},
 			traversal: {
 				kind: 'edge-table',
+				nodeTable: 'nodes',
 				edgeTable: 'edges',
 				sourceColumn: 'sourceId',
 				targetColumn: 'targetId',
@@ -1546,6 +1554,7 @@ describe('planner coverage', () => {
 			},
 			traversal: {
 				kind: 'adjacency',
+				nodeTable: 'categories',
 				parentId: 'parentId',
 				direction: 'down',
 			},
@@ -1583,6 +1592,7 @@ describe('planner coverage', () => {
 			},
 			traversal: {
 				kind: 'edge-table',
+				nodeTable: 'nodes',
 				edgeTable: 'edges',
 				sourceColumn: 'sourceId',
 				targetColumn: 'targetId',
