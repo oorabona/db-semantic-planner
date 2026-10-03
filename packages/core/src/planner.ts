@@ -11,7 +11,6 @@ import type {
 	CTEDefinition,
 	DecisionType,
 	DialectCapabilities,
-	IncludeStrategy,
 	PlanDecision,
 	PlanOptions,
 	PlanReport,
@@ -285,6 +284,11 @@ export function plan(
 		defaultIncludeStrategy: options.defaultIncludeStrategy ?? 'auto',
 		dialectCapabilities: options.dialectCapabilities as DialectCapabilities,
 	};
+
+	validateIncludeStrategy(
+		opts.defaultIncludeStrategy,
+		opts.dialectCapabilities,
+	);
 
 	// Validate root table — skip when the FROM is a BatchValues unnest() source
 	// (the alias is not a real table; schema validation would incorrectly fail)
@@ -1112,19 +1116,33 @@ function processInclude(
 	const isRecursiveInclude =
 		(!!include.recursive || !!relation.recursive) && isSelfReferentialRelation;
 
+	// Reject stale relation hints before recursive/join shortcuts can discard them.
+	validateIncludeStrategy(
+		relation.includeStrategy,
+		opts.dialectCapabilities,
+		false,
+	);
+	// Validate runtime strategy inputs before recursive/join shortcuts can discard them.
+	if (include.strategy !== undefined && include.strategy !== 'flat') {
+		validateIncludeStrategy(include.strategy, opts.dialectCapabilities);
+	}
 	// Determine include strategy
 	// Priority: 1) recursive → cte (if dialect supports it), 2) include.join → forces join strategy, 3) include.strategy override, 4) auto-detect
 	let includeStrategy: ResolvedIncludeStrategy;
 	if (isRecursiveInclude) {
+		if (include.join !== undefined) {
+			throw new UnsupportedStrategyError(
+				`Recursive include at ${intentPath}(${include.relation}) cannot use join: recursive includes compile as a CTE (oorabona/db-semantic-planner#894).`,
+			);
+		}
 		// FIND-013: Guard recursive → cte against dialect capability.
 		// selectSmartStrategy handles the general case, but processInclude has
 		// an early-exit path that forces 'cte' before reaching it.  A dialect
 		// that declared supportsRecursiveCTE=false must not silently receive an
 		// invalid plan.
-		if (opts.dialectCapabilities?.supportsRecursiveCTE === false) {
+		if (!opts.dialectCapabilities?.supportsRecursiveCTE) {
 			throw new UnsupportedStrategyError(
-				`Recursive includes require a dialect with supportsRecursiveCTE; ` +
-					`current dialect (${opts.dialectCapabilities.name}) declared it unsupported.`,
+				`Recursive include at ${intentPath}(${include.relation}) requires a dialect with supportsRecursiveCTE; current dialect (${opts.dialectCapabilities?.name ?? 'no capabilities'}) does not support it.`,
 			);
 		}
 		includeStrategy = 'cte';
@@ -1432,12 +1450,40 @@ function determineFilterStrategy(
  * 1. If relation has explicit strategy (not 'auto'), use it (after validation)
  * 2. If planner option has explicit strategy (not 'auto'), use it
  * 3. Smart auto selection based on:
- *    - Relation type (hasOne/belongsTo → join, hasMany/belongsToMany → depends)
- *    - Dialect capabilities (lateral, json_agg support)
+ *    - Query shape (flat output and per-parent limits)
+ *    - Dialect capabilities (json_agg, lateral support)
  *    - Recursive relations → cte
  *
  * @throws {UnsupportedStrategyError} if requested strategy not supported by dialect
  */
+/**
+ * Validate include strategies at planner and adapter entry points.
+ * Adapters validate membership here and keep their existing handler capability checks.
+ */
+export function validateIncludeStrategy(
+	strategy: string,
+	capabilities: DialectCapabilities | undefined,
+	validateCapabilities = true,
+): ResolvedIncludeStrategy {
+	const checkCapabilities = validateCapabilities && capabilities !== undefined;
+	const supported = [
+		'join',
+		...(!checkCapabilities || capabilities.supportsJsonAgg ? ['json_agg'] : []),
+		...(!checkCapabilities || capabilities.supportsLateralJoin
+			? ['lateral']
+			: []),
+		...(!checkCapabilities || capabilities.supportsRecursiveCTE ? ['cte'] : []),
+	];
+	if (strategy === 'auto') return 'join';
+	if (!supported.includes(strategy)) {
+		throw new UnsupportedStrategyError(
+			`Strategy '${strategy}' is not supported by ${capabilities?.name ?? 'a dialect without capabilities'}. Supported strategies: ${supported.map((s) => `'${s}'`).join(', ')}.`,
+		);
+	}
+
+	return strategy as ResolvedIncludeStrategy;
+}
+
 function determineIncludeStrategy(
 	relation: RelationIR,
 	opts: Required<PlanOptions>,
@@ -1445,51 +1491,17 @@ function determineIncludeStrategy(
 ): ResolvedIncludeStrategy {
 	const capabilities = opts.dialectCapabilities;
 
-	// Helper to validate strategy against dialect capabilities
-	const validateStrategy = (
-		strategy: IncludeStrategy,
-	): ResolvedIncludeStrategy => {
-		if (strategy === 'auto') {
-			// Should not happen, but fallback to join
-			return 'join';
-		}
-
-		// Validate against dialect capabilities if available
-		if (capabilities) {
-			if (strategy === 'lateral' && !capabilities.supportsLateralJoin) {
-				throw new UnsupportedStrategyError(
-					`Strategy 'lateral' is not supported by ${capabilities.name}. ` +
-						`Use 'join', 'subquery', or 'json_agg' instead.`,
-				);
-			}
-			if (strategy === 'json_agg' && !capabilities.supportsJsonAgg) {
-				throw new UnsupportedStrategyError(
-					`Strategy 'json_agg' is not supported by ${capabilities.name}. ` +
-						`Use 'join', 'subquery', or 'lateral' instead.`,
-				);
-			}
-			if (strategy === 'cte' && !capabilities.supportsRecursiveCTE) {
-				throw new UnsupportedStrategyError(
-					`Strategy 'cte' is not supported by ${capabilities.name}. ` +
-						`Use 'join' or 'subquery' instead.`,
-				);
-			}
-		}
-
-		return strategy;
-	};
-
 	// 1. Use relation hint if not auto (explicit override)
 	if (relation.includeStrategy !== 'auto') {
-		return validateStrategy(relation.includeStrategy);
+		return validateIncludeStrategy(relation.includeStrategy, capabilities);
 	}
 
 	// 2. Use planner option if specified (CLI-010: runtime override)
 	if (opts.defaultIncludeStrategy && opts.defaultIncludeStrategy !== 'auto') {
-		return validateStrategy(opts.defaultIncludeStrategy);
+		return validateIncludeStrategy(opts.defaultIncludeStrategy, capabilities);
 	}
 
-	// 3. Smart auto selection based on relation type + dialect
+	// 3. Auto selection based on recursion, query shape, and dialect capabilities
 	return selectSmartStrategy(relation, capabilities, isRecursive);
 }
 
@@ -1510,15 +1522,13 @@ function hasNestedLimit(include: IncludeIntent): boolean {
  * Smart strategy selection based on relation characteristics and dialect.
  *
  * Selection algorithm:
- * - Recursive relations → 'cte' (if supported) or 'subquery'
- * - hasOne/belongsTo (to-one) → 'join' (always safe, single row)
- * - hasMany/belongsToMany (to-many):
- *   - If dialect supports json_agg → 'json_agg' (single row per parent, no explosion)
- *   - Else if dialect supports lateral → 'lateral' (good with LIMIT)
- *   - Else → 'join' (let DB optimize, user can override to 'subquery' if needed)
+ * - Recursive relations → 'cte' (requires recursive CTE support)
+ * - All non-recursive cardinalities: json_agg if supported and nested output allowed
+ * - Otherwise lateral if a per-parent limit is needed and supported
+ * - Otherwise join
  */
 function selectSmartStrategy(
-	_relation: RelationIR,
+	relation: RelationIR,
 	capabilities: DialectCapabilities | undefined,
 	isRecursive: boolean,
 	excludeNested = false,
@@ -1526,11 +1536,12 @@ function selectSmartStrategy(
 ): ResolvedIncludeStrategy {
 	// Recursive relations should use CTE
 	if (isRecursive) {
-		if (capabilities?.supportsRecursiveCTE !== false) {
+		if (capabilities?.supportsRecursiveCTE) {
 			return 'cte';
 		}
-		// Fallback for dialects without CTE support (rare)
-		return 'subquery';
+		throw new UnsupportedStrategyError(
+			`Recursive include '${relation.name}' requires a dialect with supportsRecursiveCTE; current dialect (${capabilities?.name ?? 'no capabilities'}) does not support it.`,
+		);
 	}
 
 	// Default strategy for ALL relation types: json_agg
@@ -1551,7 +1562,6 @@ function selectSmartStrategy(
 	}
 
 	// Fallback: use join (database optimizer handles it)
-	// User can explicitly request 'subquery' if row explosion is a concern
 	return 'join';
 }
 
@@ -1574,7 +1584,6 @@ function getAlternativeStrategies(
 ): string[] {
 	const allStrategies: ResolvedIncludeStrategy[] = [
 		'join',
-		'subquery',
 		'cte',
 		'lateral',
 		'json_agg',
@@ -1583,7 +1592,7 @@ function getAlternativeStrategies(
 	// Filter out current strategy and unsupported ones
 	return allStrategies.filter((s) => {
 		if (s === strategy) return false;
-		if (!capabilities) return s === 'join' || s === 'subquery'; // No capabilities = only basic strategies
+		if (!capabilities) return s === 'join'; // No capabilities = only basic strategies
 		if (s === 'lateral' && !capabilities.supportsLateralJoin) return false;
 		if (s === 'json_agg' && !capabilities.supportsJsonAgg) return false;
 		if (s === 'cte' && !capabilities.supportsRecursiveCTE) return false;
@@ -1756,8 +1765,6 @@ function generateIncludeReasoning(
 	switch (strategy) {
 		case 'join':
 			return `${prefix} - using JOIN for efficient single-query fetch`;
-		case 'subquery':
-			return `${prefix} - using subquery query to avoid row multiplication`;
 		case 'cte':
 			return `${prefix} - using CTE for recursive/hierarchical traversal`;
 		case 'lateral':

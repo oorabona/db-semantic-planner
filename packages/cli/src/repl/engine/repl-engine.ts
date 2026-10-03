@@ -39,11 +39,11 @@ import type {
  * Compact version of the STRATEGY_INFO/DIALECT_INFO from the old index.tsx.
  */
 const DIALECT_STRATEGIES: Record<string, readonly string[]> = {
-	postgresql: ['auto', 'join', 'subquery', 'cte', 'lateral', 'json_agg'],
-	mysql: ['auto', 'join', 'subquery', 'cte', 'json_agg'],
-	sqlite: ['auto', 'join', 'subquery', 'cte'],
-	mssql: ['auto', 'join', 'subquery', 'cte'],
-	duckdb: ['auto', 'join', 'subquery', 'cte', 'json_agg'],
+	postgresql: ['auto', 'join', 'cte', 'lateral', 'json_agg'],
+	mysql: ['auto', 'join', 'cte', 'json_agg'],
+	sqlite: ['auto', 'join', 'cte'],
+	mssql: ['auto', 'join', 'cte'],
+	duckdb: ['auto', 'join', 'cte', 'json_agg'],
 };
 
 /**

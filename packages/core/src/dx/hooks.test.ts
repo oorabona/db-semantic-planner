@@ -795,13 +795,6 @@ function createSpyAdapterForHooks(executeResult: unknown[] = []) {
 		sql: 'SELECT "users".* FROM "users"',
 		parameters: [] as readonly unknown[],
 	}));
-	const compileWithIncludesSpy = vi.fn((_plan: unknown, _opts?: unknown) => ({
-		main: {
-			sql: 'SELECT "users".* FROM "users"',
-			parameters: [] as readonly unknown[],
-		},
-		subqueryIncludes: [],
-	}));
 	const executeSpy = vi.fn(() => Promise.resolve(executeResult));
 	const createDumpSpy = vi.fn(
 		(
@@ -822,19 +815,16 @@ function createSpyAdapterForHooks(executeResult: unknown[] = []) {
 			supportsStreaming: true,
 		},
 		compile: compileSpy,
-		compileWithIncludes: compileWithIncludesSpy,
 		execute: executeSpy,
 		createDump: createDumpSpy,
 		withSchema: (_schemaName: string) => adapter,
 		_spies: {
 			compile: compileSpy,
-			compileWithIncludes: compileWithIncludesSpy,
 			execute: executeSpy,
 		},
 	} as unknown as Adapter & {
 		_spies: {
 			compile: typeof compileSpy;
-			compileWithIncludes: typeof compileWithIncludesSpy;
 			execute: typeof executeSpy;
 		};
 	};
@@ -882,7 +872,7 @@ describe('Query Hook Integration (SC-01 to SC-06)', () => {
 			await orm.select('users').all();
 
 			// Assert — the plan was called (compile happens), limit should be in the compiled query
-			expect(adapter._spies.compileWithIncludes).toHaveBeenCalledOnce();
+			expect(adapter._spies.compile).toHaveBeenCalledOnce();
 		});
 	});
 
@@ -1529,11 +1519,11 @@ describe('Security & Integration (SC-13 to SC-15)', () => {
 			// Act — this should still work (defaultFilters applied AFTER hooks)
 			await orm.select('users').all();
 
-			// Assert — compileWithIncludes was called (pipeline completed)
-			expect(adapter._spies.compileWithIncludes).toHaveBeenCalledOnce();
+			// Assert — compile was called (pipeline completed)
+			expect(adapter._spies.compile).toHaveBeenCalledOnce();
 			// The plan passed to compile should have the soft-delete filter
 			// (applied after hooks, cannot be bypassed)
-			const planArg = adapter._spies.compileWithIncludes.mock.calls[0]![0];
+			const planArg = adapter._spies.compile.mock.calls[0]![0];
 			// The plan report should exist (pipeline didn't crash from missing filter)
 			expect(planArg).toBeDefined();
 		});

@@ -90,9 +90,7 @@ export function mapToHandlerDecision(
 		set: pd.set,
 		limit: pd.limit,
 		offset: pd.offset,
-		strategy: (pd.choice === 'subquery'
-			? 'json_agg'
-			: pd.choice) as HandlerDecision['strategy'],
+		strategy: pd.choice as HandlerDecision['strategy'],
 		relation: pd.relation ?? pd.relationName,
 		relationName: pd.relationName,
 		relationPath: pd.relationPath,

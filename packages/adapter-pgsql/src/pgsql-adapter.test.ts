@@ -494,26 +494,6 @@ describe('PgAdapter', () => {
 		});
 	});
 
-	describe('compileWithIncludes', () => {
-		it('should compile plan with includes', () => {
-			const pool = createMockPool();
-			const adapter = createPgAdapter(pool);
-
-			const plan: PlanReport = {
-				rootTable: 'posts',
-				decisions: [{ type: 'select', column: '*' }],
-			} as any;
-
-			const result = adapter.compileWithIncludes(plan);
-
-			expect(result).toHaveProperty('main');
-			expect(result).toHaveProperty('subqueryIncludes');
-			expect(result.main).toHaveProperty('sql');
-			expect(result.main).toHaveProperty('parameters');
-			expect(Array.isArray(result.subqueryIncludes)).toBe(true);
-		});
-	});
-
 	describe('mutations', () => {
 		it('should compile insert intent', () => {
 			const pool = createMockPool();
@@ -2837,44 +2817,6 @@ describe('PgAdapter', () => {
 	});
 
 	describe('stubs (not yet implemented)', () => {
-		it('compileSubqueryInclude generates SELECT with IN clause', () => {
-			const pool = createMockPool();
-			const adapter = createPgAdapter(pool);
-
-			const info = {
-				relationName: 'posts',
-				targetTable: 'posts',
-				foreignKey: 'authorId',
-				sourceKey: 'id',
-			} as any;
-			const parentIds = [1, 2, 3];
-
-			const compiled = adapter.compileSubqueryInclude(info, parentIds);
-
-			expect(compiled.sql).toContain('SELECT');
-			expect(compiled.sql).toContain('posts');
-			expect(compiled.sql).toContain('IN');
-			expect(compiled.parameters).toEqual([1, 2, 3]);
-		});
-
-		it('compileSubqueryInclude returns empty result for no parent IDs', () => {
-			const pool = createMockPool();
-			const adapter = createPgAdapter(pool);
-
-			const info = {
-				relationName: 'posts',
-				targetTable: 'posts',
-				foreignKey: 'authorId',
-				sourceKey: 'id',
-			} as any;
-			const parentIds: unknown[] = [];
-
-			const compiled = adapter.compileSubqueryInclude(info, parentIds);
-
-			expect(compiled.sql).toContain('WHERE FALSE');
-			expect(compiled.parameters).toEqual([]);
-		});
-
 		it('compileInsertFrom generates INSERT ... SELECT', () => {
 			const pool = createMockPool();
 			const model = schema({

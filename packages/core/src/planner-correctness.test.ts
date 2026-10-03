@@ -24,7 +24,11 @@ import { ref, schema } from './dx/schema.js';
 import { subquery } from './dx/subquery-builder.js';
 import { createMockAdapter } from './dx/test-utils.js';
 import type { QueryIntent } from './index.js';
-import { plan, UnsupportedStrategyError } from './planner.js';
+import {
+	plan,
+	UnsupportedStrategyError,
+	validateIncludeStrategy,
+} from './planner.js';
 
 // ============================================================================
 // Dialect fixtures
@@ -214,14 +218,16 @@ describe('FIND-013: Recursive includes gate on supportsRecursiveCTE capability',
 		expect(stratDecision?.choice).toBe('cte');
 	});
 
-	it('recursive include with no dialectCapabilities (undefined) does not throw (backward compat)', () => {
-		// Unknown dialect → assume CTE is supported (matches planner convention).
+	it('recursive include with no dialectCapabilities (undefined) refuses explicitly', () => {
+		// Unknown dialect → refuse recursion without explicit CTE capability.
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'categories',
 			include: [{ relation: 'children', recursive: { maxDepth: 5 } }],
 		};
-		expect(() => plan(intent, categoriesSchema.model)).not.toThrow();
+		expect(() => plan(intent, categoriesSchema.model)).toThrow(
+			'Recursive include at include[0](children) requires a dialect with supportsRecursiveCTE; current dialect (no capabilities) does not support it.',
+		);
 	});
 });
 
@@ -998,5 +1004,41 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 		expect(filterDecision).toBeUndefined();
 		expect(report.intent).toBe(intent);
 		expect(report.intent.where?.kind).toBe('in');
+	});
+});
+
+describe('#894 strategy error alternatives', () => {
+	const db = schema({
+		users: { id: { type: 'integer', primaryKey: true } },
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			authorId: ref('users', { as: 'author', inverse: 'posts' }),
+		},
+	} as const);
+	const intent: QueryIntent = {
+		type: 'select',
+		from: 'users',
+		include: [{ relation: 'posts' }],
+	};
+	it('lists all accepted strategies without capabilities', () => {
+		expect(() =>
+			plan(intent, db.model, { defaultIncludeStrategy: 'subquery' as never }),
+		).toThrow(
+			"Strategy 'subquery' is not supported by a dialect without capabilities. Supported strategies: 'join', 'json_agg', 'lateral', 'cte'.",
+		);
+		for (const strategy of ['join', 'json_agg', 'lateral', 'cte']) {
+			expect(validateIncludeStrategy(strategy, undefined)).toBe(strategy);
+		}
+	});
+	it('lists only accepted strategies when lateral and json_agg are unavailable', () => {
+		expect(() =>
+			plan(intent, db.model, {
+				defaultIncludeStrategy: 'lateral',
+				dialectCapabilities: NO_CTE_CAPS,
+			}),
+		).toThrow(
+			"Strategy 'lateral' is not supported by test-no-cte. Supported strategies: 'join'.",
+		);
+		expect(validateIncludeStrategy('join', NO_CTE_CAPS)).toBe('join');
 	});
 });

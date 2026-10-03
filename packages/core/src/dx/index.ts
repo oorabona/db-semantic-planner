@@ -295,10 +295,7 @@ export {
 	type RelationPathUsage,
 } from './relation-paths.js';
 // ResultHydrator - handles result hydration and recursive include processing
-export {
-	type HydrateOptions,
-	ResultHydrator,
-} from './result-hydrator.js';
+export { ResultHydrator } from './result-hydrator.js';
 // ARCH-005: Unified Schema API
 export {
 	type ColumnDef,

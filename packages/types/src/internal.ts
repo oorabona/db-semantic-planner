@@ -427,7 +427,6 @@ export function getTrustedNqlRelationFilterFields(
 export type {
 	CompiledColumnMetadata,
 	CompileOnlyAdapter,
-	CompileResultWithIncludes,
 	ConnectionAvailability,
 	IntrospectionOptions,
 } from './adapter.js';

@@ -43,7 +43,7 @@ export const INCLUDE_STRATEGIES = Object.freeze([
 	'cte',
 ] as const);
 
-/** The four strategies this adapter implements handlers for, distinct from @dbsp/types' six-member IncludeStrategy, which includes the planner's subquery and auto. */
+/** The four strategies this adapter implements handlers for, distinct from @dbsp/types' five-member IncludeStrategy, which includes auto. */
 export type IncludeHandlerStrategy = (typeof INCLUDE_STRATEGIES)[number];
 
 // ============================================================================

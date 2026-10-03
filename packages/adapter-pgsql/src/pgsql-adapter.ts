@@ -51,7 +51,6 @@ import type {
 	RecursivePlanReport,
 	SelectIntent,
 	SetOperationIntent,
-	SubqueryIncludeInfo,
 	TableIR,
 	TransactionBeginOptions,
 	TransactionOptions,
@@ -59,20 +58,16 @@ import type {
 	UpsertFromIntent,
 	UpsertIntent,
 } from '@dbsp/types';
-import { convertBigintJsReadValue, toColumnList } from '@dbsp/types';
+import { convertBigintJsReadValue } from '@dbsp/types';
 import {
 	assertCompiledQuery,
 	projectionlessCompiledQuery,
 	rebuildCompiledQuery,
 } from '@dbsp/types/adapter-sdk';
-import type {
-	CompileResultWithIncludes,
-	ConnectionAvailability,
-} from '@dbsp/types/internal';
+import type { ConnectionAvailability } from '@dbsp/types/internal';
 import { getNqlBindingRefName, isNqlBindingRef } from '@dbsp/types/internal';
 import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
-import { compileSubqueryInclude as compileSubqueryIncludeImpl } from './adapter-compiler-includes.js';
 import {
 	compileBatchUpdate as compileBatchUpdateImpl,
 	compileDelete as compileDeleteImpl,
@@ -90,7 +85,6 @@ import {
 import {
 	compileSelect,
 	compileSelectEnvelope,
-	compileWithIncludes as compileWithIncludesImpl,
 } from './adapter-compiler-select.js';
 import {
 	DEFAULT_PK_COLUMN,
@@ -1666,16 +1660,6 @@ function guardCompiledQuery<T>(
 	}
 
 	return query;
-}
-
-function guardCompileResultWithIncludes<T>(
-	result: CompileResultWithIncludes<T>,
-	context: string,
-): CompileResultWithIncludes<T> {
-	return {
-		...result,
-		main: guardCompiledQuery(result.main, context),
-	};
 }
 
 function orderedNqlBindingNames(bundle: CompiledNqlQuery): string[] {
@@ -3463,67 +3447,6 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 		return guardCompiledQuery(
 			compileSelect<T>(plan, options, this.buildCompileDeps(options)),
 			'select plan',
-		);
-	}
-
-	/**
-	 * Compile a plan with includes, returning subquery include metadata (DX-033).
-	 */
-	compileWithIncludes<T = unknown>(
-		plan: PlanReport,
-		options?: CompileOptions,
-	): CompileResultWithIncludes<T> {
-		this.assertDeclaredPlanReferences(plan, options);
-		return guardCompileResultWithIncludes(
-			compileWithIncludesImpl<T>(plan, options, this.buildCompileDeps(options)),
-			'select plan with includes',
-		);
-	}
-
-	/**
-	 * Compile a subquery include query for given parent IDs (DX-033).
-	 * Generates: SELECT * FROM targetTable WHERE foreignKey IN ($1, $2, ...)
-	 *
-	 * @param info - Subquery include metadata
-	 * @param parentIds - Parent record IDs to fetch related records for
-	 * @param options - Compile options
-	 * @returns Compiled query for fetching related records
-	 */
-	compileSubqueryInclude(
-		info: SubqueryIncludeInfo,
-		parentIds: readonly unknown[],
-		options?: CompileOptions,
-	): CompiledQuery {
-		this.assertDeclaredMutationReferences(
-			info.targetTable,
-			toColumnList(info.foreignKey),
-			options,
-		);
-		if (info.sourceTable !== undefined && info.sourceKey !== undefined) {
-			this.assertDeclaredMutationReferences(
-				info.sourceTable,
-				toColumnList(info.sourceKey),
-				options,
-			);
-		}
-		if (info.through) {
-			this.assertDeclaredMutationReferences(
-				info.through,
-				[
-					...toColumnList(info.throughSourceKey),
-					...toColumnList(info.throughTargetKey),
-				],
-				options,
-			);
-		}
-		return guardCompiledQuery(
-			compileSubqueryIncludeImpl(
-				info,
-				parentIds,
-				options,
-				this.buildCompileDeps(options),
-			),
-			'subquery include',
 		);
 	}
 

@@ -336,29 +336,6 @@ describe('PgAdapter bigint js result conversion', () => {
 		expect(rows).toEqual([{ sequence: 9007199254740993n }]);
 	});
 
-	it('converts subquery include rows by carrying include column metadata', async () => {
-		const adapter = createPgAdapter(
-			makePool([{ id: 'metric-1', eventId: 'event-1', bigCount: '7' }]),
-			{ model: conversionSchema.model },
-		);
-
-		const includeQuery = adapter.compileSubqueryInclude(
-			{
-				relationName: 'metrics',
-				targetTable: 'metrics',
-				foreignKey: 'eventId',
-				sourceKey: 'id',
-			},
-			['event-1'],
-			{ model: conversionSchema.model },
-		);
-		const rows = await adapter.execute(includeQuery);
-
-		expect(rows).toEqual([
-			{ id: 'metric-1', eventId: 'event-1', bigCount: 7n },
-		]);
-	});
-
 	it('converts NQL binding-wrapper final rows by preserving leaf metadata', async () => {
 		const adapter = createPgAdapter(
 			makePool([{ sequence: '9007199254740993' }]),

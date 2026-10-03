@@ -97,10 +97,6 @@ function makeAdapter(overrides: Partial<Adapter> = {}): Adapter {
 			sql: 'SELECT 1',
 			parameters: [] as readonly unknown[],
 		})),
-		compileWithIncludes: vi.fn((_plan: unknown, _opts?: unknown) => ({
-			main: { sql: 'SELECT 1', parameters: [] as readonly unknown[] },
-			subqueryIncludes: [],
-		})),
 		execute: vi.fn(() => Promise.resolve([])),
 		createDump: vi.fn(
 			(

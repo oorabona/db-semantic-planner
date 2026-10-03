@@ -25,7 +25,7 @@ Every `include()` call goes through a two-layer pipeline:
 QueryBuilder.all()
     │
     ├─ 1. SQL compilation (adapter)
-    │       Planner picks a strategy → handler emits JOIN / subquery / CTE nodes
+    │       Planner picks a strategy → handler emits JOIN / JSON aggregate / CTE nodes
     │
     └─ 2. Result hydration (ResultHydrator in core/dx/)
             Flat DB rows → nested JS objects
@@ -39,22 +39,24 @@ to reassemble the rows.
 
 ### Strategy selection rules
 
-| Relation cardinality | Default strategy | Rationale |
+| Relation cardinality | PostgreSQL default strategy | Rationale |
 |----------------------|-----------------|-----------|
-| `belongsTo` / `hasOne` (to-one) | `join` | Single row per parent — safe to LEFT JOIN |
-| `hasMany` / `manyToMany` (to-many) | `subquery` (separate) | Avoids row explosion |
+| `belongsTo` / `hasOne` (to-one) | `json_agg` | Same capability-based selection as to-many |
+| `hasMany` / `manyToMany` (to-many) | `json_agg` | Avoids row explosion |
 | Any + explicit override | as specified | User intent wins |
+
+These defaults apply to non-recursive includes with nested output. Recursion requires CTE support. With flat output (`| flat`), the planner selects `lateral` when the include has a limit and the dialect supports it, and `join` otherwise. Explicit overrides are validated against dialect capabilities.
 
 The planner encodes this as:
 ```typescript
 // doctest: skip — illustrative data/type literal fragment (not executable code)
-{ type: 'include-strategy', choice: 'json_agg' | 'join' | 'lateral' | 'cte' | 'subquery' }
+{ type: 'include-strategy', choice: 'json_agg' | 'join' | 'lateral' | 'cte' }
 ```
 
 ### `json_agg` — correlated subquery aggregate
 
-**When used:** to-many relations when the dialect supports it and the include
-has no `LIMIT` requirement. Also the default for NQL implicit path notation
+**When used:** to-one and to-many relations when the dialect supports it and the
+output is nested (no `| flat`). Also the default for NQL implicit path notation
 (`posts.title` without `| flat`).
 
 **How it works:** The adapter compiles a correlated subquery per included
@@ -94,8 +96,9 @@ plain object; it does not infer camel/snake spellings from returned keys.
 
 ### `join` — LEFT JOIN (flat columns)
 
-**When used:** to-one relations (`belongsTo`, `hasOne`) where a single related
-row is expected. Safe because there is at most one matching row per parent.
+**When used:** explicit join overrides or the automatic fallback when JSON
+aggregation is excluded or unavailable and no supported lateral limit applies.
+For to-one relations, at most one matching row per parent avoids row explosion.
 
 **How it works:** The handler adds a `LEFT JOIN` to the main query and emits
 column targets aliased as `"relation.column"` using the dot-separator
@@ -189,40 +192,6 @@ simple cases.
 
 **Key file:** `packages/adapter-pgsql/src/handlers/include/cte.ts`
 
-### `subquery` — 2-phase separate query
-
-**When used:** the default for `hasMany` and `manyToMany` relations. The planner
-emits `SubqueryIncludeInfo` metadata instead of modifying the main SQL.
-
-**How it works — 2 phases:**
-
-1. **Main query executes** — returns root rows without the related data.
-2. **For each `SubqueryIncludeInfo`:**
-   - Extract parent IDs from the root results (`sourceKey` column).
-   - Compile: `SELECT * FROM targetTable WHERE foreignKey IN ($1, $2, ...)`.
-   - Execute the child query against the database.
-   - Group child rows by foreign key value into a `Map<parentId, childRows[]>`.
-   - Attach the child array (or single object for to-one) to each parent row.
-   - Recursively hydrate nested includes if `nestedIncludes` is present.
-
-```typescript
-// doctest: skip — illustrative data/type literal fragment (not executable code)
-// Phase 1: SELECT * FROM "users" WHERE ...
-// Phase 2: SELECT * FROM "posts" WHERE "user_id" IN ($1, $2, $3)
-
-// Hydrator groups:
-Map { 1 => [{id:10,...}, {id:11,...}], 2 => [{id:12,...}] }
-
-// Attaches:
-users[0].posts = [{ id: 10 }, { id: 11 }]
-users[1].posts = [{ id: 12 }]
-```
-
-**Key files:**
-- `packages/adapter-pgsql/src/adapter-compiler-includes.ts` — `compileSubqueryInclude()`
-- `packages/adapter-pgsql/src/pgsql-adapter.ts` — `compileSubqueryInclude()` (adapter method)
-- `packages/core/src/dx/result-hydrator.ts` — `hydrateIncludes()`
-
 ## Column Aliasing: The Dot Convention
 
 The `join` and `lateral` strategies share a column aliasing contract:
@@ -273,19 +242,13 @@ JOIN result:
 ```
 
 If Alice also has `tags[]` included via JOIN, the result becomes N×M×K rows.
-The planner defaults to `subquery` for `hasMany` specifically to avoid this.
+The planner defaults to `json_agg` for `hasMany` specifically to avoid this.
 
 ### How `json_agg` prevents explosion
 
 `json_agg` aggregates all child rows into a single JSON value inside a
 correlated subquery. The outer query returns exactly N rows (one per parent).
 No deduplication is needed in the hydrator.
-
-### How `subquery` prevents explosion
-
-The child query runs separately and returns M child rows total across all
-parents. The hydrator groups them in memory by foreign key. The parent result
-set is never multiplied.
 
 ### Explicit JOIN for hasMany
 
@@ -319,8 +282,8 @@ not stop execution but signals a potential N+1 or performance problem.
 | Depth | Strategy | SQL cost |
 |-------|----------|----------|
 | 1 | `join` / `json_agg` | Single query |
-| 2–3 | `subquery` (recursive hydration) | 1 query per depth level |
-| 4+ | `subquery` with `nestedIncludes` | Rapidly increases round-trips |
+| 2–3 | `join` / `json_agg` / `lateral` | Single query; one strategy per branch |
+| 4+ | `join` / `json_agg` / `lateral` | Single query; nesting can increase SQL cost |
 | Recursive tree | `WITH RECURSIVE` CTE | One query, PostgreSQL handles depth |
 
 For tree structures, always use the `recursive: true` option with an explicit
@@ -341,10 +304,10 @@ for (const post of posts) {
 }
 ```
 
-**Right:** Use `include()` — the planner batches the child query with `IN`:
+**Right:** Use `include()` — the planner fetches the relation in the same SQL statement:
 ```typescript
 const posts = await orm.select('posts').include('author').dump();
-// SQL: SELECT * FROM "users" WHERE "id" IN ($1, $2, ..., $N)
+// SQL: a correlated json_agg include in the posts SELECT
 ```
 
 ### Deep nesting without `maxDepth`
@@ -367,28 +330,24 @@ orm.select('categories')
 **Wrong:** Forcing `join` on a `hasMany` and then filtering/counting distinct
 parents in application code to undo the duplication.
 
-**Right:** Use `json_agg` or `subquery` (defaults) and let the hydrator handle
-grouping. Override to `lateral` only if you need `LIMIT` per parent.
+**Right:** Use `json_agg` (the default) to aggregate child rows in SQL. Override to `lateral` only if you need `LIMIT` per parent.
 
 ### Stacking multiple json_agg includes on large tables
 
 Each `json_agg` correlated subquery runs once per outer row. With 10,000 parent
 rows and 3 includes, that is 30,000 correlated subquery executions. Use indexed
-foreign keys and consider whether a `subquery` strategy with a bulk `IN` fetch
-is cheaper.
+foreign keys and measure the query cost for your workload.
 
 ## Key Files
 
 | File | Role |
 |------|------|
-| `packages/core/src/dx/result-hydrator.ts` | `ResultHydrator` class — subquery, JOIN, json_agg, recursive hydration |
+| `packages/core/src/dx/result-hydrator.ts` | `ResultHydrator` class — JOIN, json_agg, recursive hydration |
 | `packages/core/src/dx/hydration-utils.ts` | `hydrateJsonAggIncludes()` — shared JSON column parsing |
 | `packages/adapter-pgsql/src/handlers/include/json-agg.ts` | SQL compilation for `json_agg` strategy |
 | `packages/adapter-pgsql/src/handlers/include/join.ts` | SQL compilation for `join` strategy + dot-alias emission |
 | `packages/adapter-pgsql/src/handlers/include/lateral.ts` | SQL compilation for `lateral` strategy |
 | `packages/adapter-pgsql/src/handlers/include/cte.ts` | SQL compilation for `cte` strategy |
-| `packages/adapter-pgsql/src/adapter-compiler-includes.ts` | `compileSubqueryInclude()` — 2-phase batch query compiler |
-| `packages/types/src/adapter.ts` | `SubqueryIncludeInfo` interface |
 | `packages/types/src/planner.ts` | `maxIncludeDepth` config field |
 
 ## Gotchas
@@ -402,8 +361,3 @@ is cheaper.
 - **LEFT JOIN null propagation.** When a `join` strategy include has no match
   (LEFT JOIN returns all-null columns), the hydrator sets `relation: null`
   rather than an empty object. Check `allNull` logic in `hydrateJoinIncludes()`.
-- **Composite foreign keys.** `SubqueryIncludeInfo.foreignKey` can be a
-  `string[]`. The hydrator serializes composite key tuples via `JSON.stringify`
-  for Map keying, so parent/child matching works correctly.
-- **Empty parent result set.** `hydrateIncludes()` short-circuits immediately if
-  `results.length === 0` — no child queries are issued.

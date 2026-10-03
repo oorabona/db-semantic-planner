@@ -75,8 +75,6 @@ export function createMockAdapter(options?: MockAdapterOptions): Adapter {
 		dbCasing,
 		inTransaction: false,
 		compile: notImplemented,
-		compileWithIncludes: notImplemented,
-		compileSubqueryInclude: notImplemented,
 		compileInsert: notImplemented,
 		compileInsertFrom: notImplemented,
 		compileUpdate: notImplemented,

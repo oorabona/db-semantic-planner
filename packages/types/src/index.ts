@@ -51,7 +51,6 @@ export type {
 	SchemaChange,
 	SchemaDiff,
 	StreamingAdapter,
-	SubqueryIncludeInfo,
 	TableDDLGeneratorAdapter,
 	TransactionalAdapter,
 	TransactionBeginOptions,

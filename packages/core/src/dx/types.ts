@@ -226,6 +226,7 @@ export interface IncludeOptions {
 	 * - 'inner': INNER JOIN — only root rows WITH a matching related record are returned
 	 *
 	 * Forces the 'join' include strategy (overrides auto-selection).
+	 * Recursive includes compile as a CTE and refuse join (#894).
 	 *
 	 * @example
 	 * include('file', { join: 'inner' })

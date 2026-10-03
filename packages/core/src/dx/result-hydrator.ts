@@ -1,7 +1,7 @@
 /**
  * ResultHydrator - Handles result hydration and recursive include processing.
  *
- * DX-103: Extracted from QueryBuilderImpl to subquery hydration logic
+ * DX-103: Extracted from QueryBuilderImpl to separate hydration logic
  * from intent building and query execution.
  *
  * @module result-hydrator
@@ -12,9 +12,7 @@ import type { Mutable } from '@dbsp/types/internal';
 import {
 	type Adapter,
 	type CompiledQuery,
-	type CompileOptions,
 	executeCompiledQuery,
-	type SubqueryIncludeInfo,
 } from '../adapter.js';
 import type { RecursiveIntent, WhereIntent } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
@@ -38,31 +36,17 @@ import {
 /** A database result row — typed loosely since row shapes are dynamic. */
 type ResultRow = Record<string, unknown>;
 
-/**
- * Options for hydrating includes.
- * Requires model (unlike CompileOptions where it's optional).
- */
-export type HydrateOptions = Omit<CompileOptions, 'model'> & { model: ModelIR };
-
 // ============================================================================
 // ResultHydrator
 // ============================================================================
 
 /**
  * Handles result hydration including:
- * - Subquery include hydration for hasMany relations
  * - Recursive include processing via CTEs
  * - Building nested hierarchies from flat results
  *
  * @typeParam TResult - The expected result type
  */
-
-/**
- * NUL byte (U+0000) used as the composite-key separator. Kept as a named
- * constant because literal control characters are invisible in diffs and
- * can be corrupted by editor normalization.
- */
-const COMPOSITE_KEY_SEP = '\0';
 
 type JoinHydrationInfo = {
 	readonly relationPath: string;
@@ -237,99 +221,6 @@ export class ResultHydrator<TResult = unknown> {
 		this.model = model;
 		this.from = from;
 		this.schemaName = schemaName;
-	}
-
-	/**
-	 * Hydrate subquery includes (hasMany relations) into main results.
-	 */
-	async hydrateIncludes(
-		results: TResult[],
-		subqueryIncludes: readonly SubqueryIncludeInfo[],
-		adapter: Adapter,
-		compileOptions: HydrateOptions,
-	): Promise<void> {
-		if (results.length === 0) return;
-
-		for (const includeInfo of subqueryIncludes) {
-			// Extract parent IDs from results using sourceKey.
-			// PERF (FIND-054): single-pass for-loop avoids the intermediate array
-			// that .map().filter() allocates (2 passes + length-N temp array).
-			const parentIds: unknown[] = [];
-			for (const r of results) {
-				const id = this.extractQueryKeyValue(
-					r as Record<string, unknown>,
-					includeInfo.sourceKey,
-				);
-				if (id !== undefined && id !== null) parentIds.push(id);
-			}
-
-			if (parentIds.length === 0) continue;
-
-			// Compile and execute the include query
-			const includeQuery = adapter.compileSubqueryInclude(
-				includeInfo,
-				parentIds,
-				compileOptions,
-			);
-			const childResults = await executeCompiledQuery(
-				adapter,
-				includeQuery,
-				'all()',
-			);
-
-			// Group children by foreign key
-			const childrenByParentId = new Map<unknown, unknown[]>();
-			for (const child of childResults) {
-				const parentId = this.extractKeyValue(
-					child as Record<string, unknown>,
-					includeInfo.foreignKey,
-				);
-				if (parentId !== undefined) {
-					const existing = childrenByParentId.get(parentId);
-					if (existing) {
-						existing.push(child);
-					} else {
-						childrenByParentId.set(parentId, [child]);
-					}
-				}
-			}
-
-			// Attach children to parent objects
-			// For to-one relations (belongsTo/hasOne), unwrap to single object
-			const isToOne =
-				includeInfo.relationType === 'belongsTo' ||
-				includeInfo.relationType === 'hasOne';
-			for (const result of results) {
-				const parentId = this.extractKeyValue(
-					result as Record<string, unknown>,
-					includeInfo.sourceKey,
-				);
-				const children = childrenByParentId.get(parentId) ?? [];
-				(result as Record<string, unknown>)[includeInfo.relationName] = isToOne
-					? (children[0] ?? null)
-					: children;
-			}
-
-			// Process nested includes recursively if present
-			if (includeInfo.nestedIncludes && includeInfo.nestedIncludes.length > 0) {
-				// Flatten all children for nested hydration.
-				// PERF (FIND-055): avoid Array.from().flat() which allocates an array-of-arrays
-				// then flattens it; a double for-loop uses a single allocation.
-				const allChildren: Record<string, unknown>[] = [];
-				for (const arr of childrenByParentId.values()) {
-					for (const item of arr)
-						allChildren.push(item as Record<string, unknown>);
-				}
-				if (allChildren.length > 0) {
-					await this.hydrateIncludes(
-						allChildren as TResult[],
-						includeInfo.nestedIncludes,
-						adapter,
-						compileOptions,
-					);
-				}
-			}
-		}
 	}
 
 	/**
@@ -719,61 +610,5 @@ export class ResultHydrator<TResult = unknown> {
 		}
 
 		return roots;
-	}
-
-	/**
-	 * Extract a key value from an object, handling composite keys.
-	 *
-	 * Fast path: NUL-byte separator for the common case of string/number PKs
-	 * (~5× faster than JSON.stringify). Fallback: if any serialized part
-	 * contains a NUL byte (e.g. bytea PKs stored as strings), two distinct
-	 * keys could collide under the fast path — use JSON.stringify in that
-	 * case (slower but collision-safe for any value content).
-	 */
-	private extractKeyValue(
-		obj: Record<string, unknown>,
-		key: string | readonly string[],
-	): unknown {
-		const columns = toColumnList(key);
-		if (columns.length === 0) {
-			return undefined;
-		}
-		if (columns.length === 1) {
-			// biome-ignore lint/style/noNonNullAssertion: columns.length === 1 guaranteed by the enclosing if-block
-			return obj[columns[0]!];
-		}
-		// Composite key: build a string key for Map grouping.
-		const values = columns.map((k) => obj[k]);
-		// Return undefined if any component is missing
-		if (values.some((v) => v === undefined || v === null)) {
-			return undefined;
-		}
-		const parts = values.map((v) => String(v));
-		if (parts.some((p) => p.includes(COMPOSITE_KEY_SEP))) {
-			// Collision-safe fallback — slower but correct for any value content.
-			// Stringify `parts` (already normalized to strings via String(v))
-			// rather than `values` because JSON.stringify throws on bigint,
-			// and composite PKs may legitimately contain bigint values.
-			return JSON.stringify(parts);
-		}
-		return parts.join(COMPOSITE_KEY_SEP);
-	}
-
-	private extractQueryKeyValue(
-		obj: Record<string, unknown>,
-		key: string | readonly string[],
-	): unknown {
-		const columns = toColumnList(key);
-		if (columns.length === 0) {
-			return undefined;
-		}
-		if (columns.length === 1) {
-			// biome-ignore lint/style/noNonNullAssertion: columns.length === 1 guaranteed by the enclosing if-block
-			return obj[columns[0]!];
-		}
-		const values = columns.map((k) => obj[k]);
-		return values.some((v) => v === undefined || v === null)
-			? undefined
-			: values;
 	}
 }

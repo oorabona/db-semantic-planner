@@ -400,7 +400,9 @@ describe('planner: virtual ancestors/descendants relations', () => {
 			from: 'categories',
 			include: [{ relation: 'ancestors' }],
 		};
-		const report = plan(intent, selfRefSchema);
+		const report = plan(intent, selfRefSchema, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
 		expect(
 			report.warnings.find((w) => w.code === 'AMBIGUOUS_RELATION'),
 		).toBeUndefined();
@@ -415,7 +417,9 @@ describe('planner: virtual ancestors/descendants relations', () => {
 			from: 'categories',
 			include: [{ relation: 'descendants' }],
 		};
-		const report = plan(intent, selfRefSchema);
+		const report = plan(intent, selfRefSchema, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
 		expect(
 			report.warnings.find((w) => w.code === 'AMBIGUOUS_RELATION'),
 		).toBeUndefined();
@@ -462,7 +466,9 @@ describe('planner: recursive flag on non-self-referential relation', () => {
 			from: 'categories',
 			include: [{ relation: 'children', recursive: {} }],
 		};
-		const report = plan(intent, selfRefSchema);
+		const report = plan(intent, selfRefSchema, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
 		expect(
 			report.warnings.find((w) => w.code === 'INVALID_RECURSIVE_INCLUDE'),
 		).toBeUndefined();
@@ -480,7 +486,9 @@ describe('planner: CTE deduplication', () => {
 			from: 'categories',
 			include: [{ relation: 'children', recursive: {} }],
 		};
-		const report = plan(intent, selfRefSchema);
+		const report = plan(intent, selfRefSchema, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
 		const ctes = report.ctes.filter((c) =>
 			c.name.startsWith('cte_categories_'),
 		);
@@ -630,7 +638,10 @@ describe('planner: extractCTEs branches', () => {
 			from: 'categories',
 			include: [{ relation: 'children', recursive: {} }],
 		};
-		const report = plan(intent, selfRefSchema, { cteThreshold: 1 });
+		const report = plan(intent, selfRefSchema, {
+			cteThreshold: 1,
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
 		const ctes = report.ctes.filter((c) => c.name.includes('categories'));
 		expect(ctes.length).toBe(new Set(ctes.map((c) => c.name)).size);
 	});

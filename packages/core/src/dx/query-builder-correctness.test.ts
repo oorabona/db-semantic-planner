@@ -40,13 +40,6 @@ function createSpyAdapter(executeResult: unknown[] = []) {
 		sql: 'SELECT * FROM "users"',
 		parameters: [] as readonly unknown[],
 	}));
-	const compileWithIncludesSpy = vi.fn((_plan: unknown, _opts?: unknown) => ({
-		main: {
-			sql: 'SELECT * FROM "users"',
-			parameters: [] as readonly unknown[],
-		},
-		subqueryIncludes: [],
-	}));
 	const executeSpy = vi.fn(() => Promise.resolve([...executeResult]));
 	const createDumpSpy = vi.fn(
 		(
@@ -66,7 +59,6 @@ function createSpyAdapter(executeResult: unknown[] = []) {
 			supportsStreaming: true,
 		},
 		compile: compileSpy,
-		compileWithIncludes: compileWithIncludesSpy,
 		execute: executeSpy,
 		createDump: createDumpSpy,
 		withSchema: (_schemaName: string) => adapter,
@@ -415,13 +407,13 @@ describe('FIND-018: paginate() count query uses full query state', () => {
 			(adapter as unknown as { execute: ReturnType<typeof vi.fn> }).execute,
 		).toHaveBeenCalledTimes(2);
 	});
-	it('count uses full intent -- two compileWithIncludes calls', async () => {
+	it('count uses full intent -- two compile calls', async () => {
 		const rows = [{ id: 1 }];
 		const adapter = createSpyAdapter(rows);
 		const orm = createOrm({ adapter, schema: simpleSchema });
-		const cwis = (
-			adapter as unknown as { compileWithIncludes: ReturnType<typeof vi.fn> }
-		).compileWithIncludes;
+		const compileSpy = (
+			adapter as unknown as { compile: ReturnType<typeof vi.fn> }
+		).compile;
 		let idx = 0;
 		(adapter as unknown as { execute: ReturnType<typeof vi.fn> }).execute =
 			vi.fn(async () => {
@@ -432,7 +424,7 @@ describe('FIND-018: paginate() count query uses full query state', () => {
 			.select('users')
 			.where({ active: true })
 			.paginate({ page: 1, perPage: 5, withCount: true });
-		expect(cwis).toHaveBeenCalledTimes(2);
+		expect(compileSpy).toHaveBeenCalledTimes(2);
 	});
 	it('withCount: false -- single execute, no total', async () => {
 		const adapter = createSpyAdapter([{ id: 1 }]);

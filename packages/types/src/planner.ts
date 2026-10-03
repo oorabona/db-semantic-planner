@@ -233,7 +233,6 @@ export interface PlanOptions {
 	/**
 	 * Default include strategy for relations when set to 'auto'.
 	 * - 'join': Use JOIN (single query, database optimizes) - RECOMMENDED for to-one
-	 * - 'subquery': Use subquery queries (N+1 style with batching) - safe for to-many
 	 * - 'cte': Use CTE-based include (good for recursive/hierarchical)
 	 * - 'lateral': Use LATERAL JOIN (PostgreSQL) / CROSS APPLY (MSSQL)
 	 * - 'json_agg': Use JSON aggregation (PostgreSQL/MySQL/DuckDB)

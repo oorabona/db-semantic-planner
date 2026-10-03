@@ -626,7 +626,7 @@ export interface QueryBuilder<TResult = unknown> {
 	 * @example
 	 * ```typescript
 	 * orm.select('users')
-	 *   .withPlanOptions({ defaultIncludeStrategy: 'subquery', maxIncludeDepth: 3 })
+	 *   .withPlanOptions({ defaultIncludeStrategy: 'json_agg', maxIncludeDepth: 3 })
 	 *   .include('posts')
 	 *   .all();
 	 * ```

@@ -111,7 +111,7 @@ export interface SimplifiedOrmOptions<
 	 *   schema,
 	 *   adapter,
 	 *   planOptions: {
-	 *     defaultIncludeStrategy: 'subquery',
+	 *     defaultIncludeStrategy: 'json_agg',
 	 *     enableCTEs: true,
 	 *     maxIncludeDepth: 3,
 	 *   },
