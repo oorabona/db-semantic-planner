@@ -22,8 +22,8 @@ function shape(
 			outputLabel: name,
 		})),
 		children: [],
-		privateFields: ['node', 'parent', 'depth', 'order'].map((role) => ({
-			role: role as 'node' | 'parent' | 'depth' | 'order',
+		privateFields: ['node', 'parent', 'depth'].map((role) => ({
+			role: role as 'node' | 'parent' | 'depth',
 			jsonKey: `_${role}`,
 			physicalName: role,
 		})),
@@ -33,10 +33,9 @@ function shape(
 const node = (id: number, parent: number | null, depth: number) => ({
 	id,
 	name: `n${id}`,
-	_node: id,
-	_parent: parent,
+	_node: String(id),
+	_parent: parent === null ? null : String(parent),
 	_depth: depth,
-	_order: id,
 });
 function hydrate(payload: unknown, contract = shape()) {
 	const rows: Record<string, unknown>[] = [{ id: 1, payload }];
@@ -112,7 +111,7 @@ describe('#877 resolved recursive payload', () => {
 		]);
 		expect(Object.getPrototypeOf(rows[0]!)).toBe(Object.prototype);
 	});
-	it('converts private bigint keys before tree assembly', () => {
+	it('ignores public read policies for canonical private identity text', () => {
 		const contract = shape();
 		const privateFields = contract.privateFields!.map((field) =>
 			field.role === 'node' || field.role === 'parent'
@@ -123,7 +122,10 @@ describe('#877 resolved recursive payload', () => {
 							table: 'nodes',
 							column: field.role,
 							outputKey: field.jsonKey,
-							js: 'bigint' as const,
+							js:
+								field.role === 'node'
+									? ('string' as const)
+									: ('bigint' as const),
 						},
 					}
 				: field,

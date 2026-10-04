@@ -1363,6 +1363,9 @@ export function createNqlTag(
 	onObserverError?: ObserverErrorHandler,
 	defaultFilters?: import('./schema.js').DefaultFilters,
 ): NqlTag {
+	defaultFilters = defaultFilters
+		? Object.assign(Object.create(null), defaultFilters)
+		: undefined;
 	return function nql<T>(
 		strings: TemplateStringsArray,
 		...values: unknown[]

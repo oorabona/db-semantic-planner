@@ -114,6 +114,8 @@ export function compileRecursiveInclude(
 	};
 	const depthName = internal('__depth');
 	const visitedName = internal('__visited');
+	const nodeTextName = internal('__node_text');
+	const parentTextName = internal('__parent_text');
 	for (const column of walkColumns) {
 		if (
 			modelColumns &&
@@ -154,6 +156,23 @@ export function compileRecursiveInclude(
 			rootId: expressionQualifiedColumnRef(pk[0]!, outer, ctx),
 		},
 	});
+	const identityColumn = (role: 'node' | 'parent') =>
+		resolved.privateFields!.find((field) => field.role === role)!.physicalName;
+	const identityTargets = (alias: string) => [
+		sqlResTarget(
+			typeCast(col(alias, identityColumn('node')), 'text'),
+			nodeTextName,
+		),
+		sqlResTarget(
+			typeCast(col(alias, identityColumn('parent')), 'text'),
+			parentTextName,
+		),
+	];
+	const walkQuery = (
+		cte as { CommonTableExpr: { ctequery: { SelectStmt: SelectStmt } } }
+	).CommonTableExpr.ctequery.SelectStmt;
+	walkQuery.larg!.targetList!.push(...identityTargets(innerAlias));
+	walkQuery.rarg!.targetList!.push(...identityTargets(innerAlias));
 	const args = resolved.columns.flatMap((column) => {
 		const value = col(walk, column.physicalName);
 		return [
@@ -164,23 +183,23 @@ export function compileRecursiveInclude(
 	for (const field of resolved.privateFields!) {
 		const value = col(
 			walk,
-			field.role === 'depth' ? depthName : field.physicalName,
+			field.role === 'depth'
+				? depthName
+				: field.role === 'node'
+					? nodeTextName
+					: parentTextName,
 		);
-		args.push(
-			stringConstNode(field.jsonKey),
-			field.readHandling ? typeCast(value, 'text') : value,
-		);
+		args.push(stringConstNode(field.jsonKey), value);
 	}
 	const payload = buildChunkedJsonObject(args);
 	const aggregate = funcCall('json_agg', [payload], {
 		orderBy: [
 			sortBy(col(walk, depthName)),
 			sortBy(col(walk, dbPk)),
-			...resolved
-				.privateFields!.filter(
-					(f) => f.role === 'order' && f.physicalName !== dbPk,
-				)
-				.map((f) => sortBy(col(walk, f.physicalName))),
+			...toColumnList(ctx.model?.getTable(table)?.primaryKey)
+				.map(declared)
+				.filter((column) => column !== dbPk)
+				.map((column) => sortBy(col(walk, column))),
 		],
 	});
 	// Self is a depth-zero output row, separate from the recursive seed.
@@ -208,6 +227,7 @@ export function compileRecursiveInclude(
 				visitedName,
 			),
 		);
+		self.targetList!.push(...identityTargets(outer));
 		const outputWalk = allocate(`${relation}_output`);
 		const outputQuery: Node = {
 			SelectStmt: {
@@ -227,6 +247,8 @@ export function compileRecursiveInclude(
 		).SelectStmt.larg!.targetList!.push(
 			sqlResTarget(col(walk, depthName)),
 			sqlResTarget(col(walk, visitedName)),
+			sqlResTarget(col(walk, nodeTextName)),
+			sqlResTarget(col(walk, parentTextName)),
 		);
 		// Keep the aggregate qualifier stable using a range alias.
 		const select: Node = {

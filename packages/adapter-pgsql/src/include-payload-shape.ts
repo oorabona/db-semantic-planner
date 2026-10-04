@@ -1,3 +1,4 @@
+import { normalizeRecursiveIncludeOptions } from '@dbsp/core/internal';
 import type {
 	IncludePayloadShape,
 	ModelIR,
@@ -169,6 +170,30 @@ export function resolveIncludePayloadShapes(
 	for (const d of all) {
 		const path = d.relationPath ?? d.relationName ?? d.relation ?? '';
 		const previous = byPath.get(path);
+		if (previous && (previous.recursiveInclude || d.recursiveInclude)) {
+			const identity = (entry: PlanDecision) =>
+				JSON.stringify([
+					entry.relation,
+					entry.relationName,
+					entry.sourceTable,
+					entry.targetTable,
+					toColumnList(entry.parentKey),
+					toColumnList(entry.foreignKey),
+					entry.recursiveInclude
+						? [
+								entry.recursiveInclude.direction,
+								entry.recursiveInclude.maxDepth,
+								entry.recursiveInclude.flat,
+								entry.recursiveInclude.omitSelf,
+								entry.recursiveInclude.track?.depth,
+							]
+						: null,
+				]);
+			if (identity(previous) !== identity(d))
+				throw new Error(
+					`Include payload '$' has conflicting public key '${path}' (recursive traversals).`,
+				);
+		}
 		if (
 			previous &&
 			(previous.targetTable !== d.targetTable || previous.choice !== d.choice)
@@ -428,24 +453,20 @@ export function resolveIncludePayloadShapes(
 			)
 				claimPayloadKey(owners, path, publicKey, `column:${publicKey}`);
 			claimPayloadKey(owners, path, publicKey, `relation:${path}`);
-			const opts = d.recursiveInclude;
+			const opts = normalizeRecursiveIncludeOptions(
+				d.recursiveInclude,
+				relation,
+			);
 			recursive = {
 				direction: opts.direction!,
-				flat: opts.flat ?? true,
-				omitSelf: opts.omitSelf ?? true,
+				flat: opts.flat!,
+				omitSelf: opts.omitSelf!,
 				includeDepth: !!opts.track?.depth || !!opts.flat,
 			};
 			if (recursive.includeDepth)
 				claimPayloadKey(owners, path, 'depth', 'traversal:depth');
 			const reserved = new Set(columns.map((c) => c.publicKey));
-			privateFields = (
-				[
-					'node',
-					'parent',
-					'depth',
-					...toColumnList(table?.primaryKey).map(() => 'order' as const),
-				] as const
-			).map((role, index) => {
+			privateFields = (['node', 'parent', 'depth'] as const).map((role) => {
 				let jsonKey = `__dbsp_${role}`;
 				while (reserved.has(jsonKey)) jsonKey += '_';
 				reserved.add(jsonKey);
@@ -454,17 +475,7 @@ export function resolveIncludePayloadShapes(
 						? toColumnList(d.parentKey)[0]!
 						: role === 'parent'
 							? toColumnList(d.foreignKey)[0]!
-							: role === 'order'
-								? toColumnList(table?.primaryKey)[index - 3]!
-								: '';
-				const metadata = table?.columns.find((c) => c.name === logical);
-				const handling = metadata
-					? resolveJsonAggColumnReadHandling(
-							tableName,
-							metadata,
-							jsonAggContainerShape('hasMany'),
-						)
-					: undefined;
+							: '';
 				return {
 					role,
 					jsonKey,
@@ -477,9 +488,6 @@ export function resolveIncludePayloadShapes(
 								),
 							)
 						: '',
-					...(handling?.kind === 'nestedTransform' && {
-						readHandling: handling,
-					}),
 				};
 			});
 		}

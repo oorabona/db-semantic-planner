@@ -518,6 +518,9 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 	tablesProxy?: object,
 	onObserverError?: ObserverErrorHandler,
 ): OrmInstanceInternal<DB> {
+	defaultFilters = defaultFilters
+		? Object.assign(Object.create(null), defaultFilters)
+		: undefined;
 	// Create NQL template tag (DX-040)
 	// NQL compiler is now integrated directly - @dbsp/nql is imported in nql.ts
 	const nql: NqlTag = createNqlTag(

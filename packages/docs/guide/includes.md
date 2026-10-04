@@ -230,3 +230,5 @@ A repeated non-self-referential relation edge is refused in strict and lenient p
 Recursive includes cannot be nested under any include or contain nested includes. Grouped or aggregated roots, plain DISTINCT, set operations and row locks are refused by name. Traversed-node `defaultFilters` are not yet supported (#906); applicable filters are refused rather than silently omitted. PostgreSQL 10 is supported: cycle protection uses a visited-key array, without a CYCLE clause. The maximum depth defaults to 100 or the recursive relation metadata.
 
 A stored column with the requested include name conflicts at the root or at any node (`conflicting public key`). Use another public name with `via`, for example `.include('tree', { via: 'children', recursive: true, direction: 'descendants' })`.
+
+Recursive include options default to `flat: false`, `omitSelf: false`, and `includeDepth: false`. NQL hierarchy pseudo-columns explicitly request flat output with self omitted. Planning refuses `maxDepth` outside 1–2147483647, an empty `select` fields list, recursion on a non-self-reference, and `direction` contradicting the relation's recursive metadata or cardinality.

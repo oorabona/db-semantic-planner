@@ -12,6 +12,7 @@ import {
 import { POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 import {
 	countDistinctRelationPathsByName,
+	normalizeRecursiveIncludeOptions,
 	validateIncludeInput,
 	validateIncludeOptions,
 	validateIncludeOrdering,
@@ -1332,21 +1333,10 @@ function validateReportIncludes(
 					foreignKey: resolvedForeignKey,
 					parentKey: resolvedParentKey,
 					...((include.recursive || relation.recursive) && {
-						recursiveInclude: {
-							...(include.recursive || {}),
-							direction:
-								include.recursive?.direction ??
-								(relation.recursive?.direction === 'up' ||
-								relation.type === 'belongsTo'
-									? 'ancestors'
-									: 'descendants'),
-							maxDepth:
-								include.recursive?.maxDepth ??
-								relation.recursive?.maxDepth ??
-								100,
-							flat: include.recursive?.flat ?? true,
-							omitSelf: include.recursive?.omitSelf ?? true,
-						},
+						recursiveInclude: normalizeRecursiveIncludeOptions(
+							include.recursive,
+							relation,
+						),
 					}),
 				},
 			};

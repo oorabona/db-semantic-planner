@@ -102,14 +102,8 @@ function readRecursivePayload(
 				throw new Error(
 					`Invalid recursive include payload '${shape.path}': missing '${field.jsonKey}'.`,
 				);
-			setValue(
-				value,
-				field.jsonKey,
-				readColumn(item[field.jsonKey], {
-					publicKey: field.jsonKey,
-					readHandling: field.readHandling,
-				} as IncludePayloadShape['columns'][number]),
-			);
+			// SQL supplies canonical identity text independently of public read policies.
+			setValue(value, field.jsonKey, item[field.jsonKey]);
 		}
 		const depth = value[key('depth')];
 		if (!Number.isSafeInteger(depth) || (depth as number) < 0)

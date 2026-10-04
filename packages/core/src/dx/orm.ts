@@ -263,7 +263,9 @@ export function createOrm<T extends SchemaDefinition>(
 		// Full schema object provided
 		model = schemaObj.model;
 		schemaDefinition = schemaObj.definition;
-		defaultFilters = schemaObj.defaultFilters;
+		defaultFilters = schemaObj.defaultFilters
+			? Object.assign(Object.create(null), schemaObj.defaultFilters)
+			: undefined;
 
 		// ARCH-006: Validate casing consistency
 		if (
@@ -291,8 +293,16 @@ export function createOrm<T extends SchemaDefinition>(
 	}
 
 	if (configuredDefaultFilters) {
-		const combined: Record<string, WhereIntent> = { ...defaultFilters };
-		for (const [table, filter] of Object.entries(configuredDefaultFilters)) {
+		const combined: Record<string, WhereIntent> = Object.assign(
+			Object.create(null),
+			defaultFilters,
+		);
+		for (const [table, filter] of Object.entries(
+			Object.assign(
+				Object.create(null),
+				configuredDefaultFilters,
+			) as DefaultFilters,
+		)) {
 			if (!model.getTable(table))
 				throw new Error(`Default filter for non-existent table '${table}'.`);
 			const schemaFilter = combined[table];

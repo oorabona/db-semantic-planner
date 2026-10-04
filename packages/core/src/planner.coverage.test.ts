@@ -1420,19 +1420,14 @@ describe('planner coverage', () => {
 	// NEW: INVALID_RECURSIVE_INCLUDE warning
 	// ==================================================================
 
-	it('should warn when recursive option on non-self-referential relation', () => {
+	it('refuses recursive option on non-self-referential relation', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'users',
 			include: [{ strategy: 'flat', relation: 'posts', recursive: true }],
 		};
 
-		const report = plan(intent, testSchema);
-		const warning = report.warnings.find(
-			(w) => w.code === 'INVALID_RECURSIVE_INCLUDE',
-		);
-		expect(warning).toBeDefined();
-		expect(warning?.message).toContain('ignored');
+		expect(() => plan(intent, testSchema)).toThrow('self-referential relation');
 	});
 
 	// ==================================================================

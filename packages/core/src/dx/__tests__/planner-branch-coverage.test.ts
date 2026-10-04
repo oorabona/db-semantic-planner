@@ -440,18 +440,15 @@ describe('planner: virtual ancestors/descendants relations', () => {
 // ============================================================================
 
 describe('planner: recursive flag on non-self-referential relation', () => {
-	it('emits INVALID_RECURSIVE_INCLUDE when recursive=true on cross-table relation', () => {
+	it('refuses recursive=true on cross-table relation', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'posts',
 			include: [{ relation: 'author', recursive: {} }],
 		};
-		const report = plan(intent, simpleSchema, {
-			dialectCapabilities: SQLITE_CAPABILITIES,
-		});
-		expect(
-			report.warnings.find((w) => w.code === 'INVALID_RECURSIVE_INCLUDE'),
-		).toBeDefined();
+		expect(() =>
+			plan(intent, simpleSchema, { dialectCapabilities: SQLITE_CAPABILITIES }),
+		).toThrow('self-referential relation');
 	});
 
 	it('no INVALID_RECURSIVE_INCLUDE on actual self-referential relation', () => {

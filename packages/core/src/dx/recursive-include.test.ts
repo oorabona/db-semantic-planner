@@ -209,8 +209,6 @@ describe('Intent conversion (DX-017)', () => {
 		expect(intent.include?.[0]!.recursive).toBeDefined();
 		expect(intent.include?.[0]!.recursive).toEqual({
 			direction: 'descendants',
-			flat: false,
-			omitSelf: false,
 			maxDepth: 10,
 		});
 	});

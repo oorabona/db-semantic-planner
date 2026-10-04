@@ -504,30 +504,21 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 			);
 		});
 
-		it('keeps an include whose `recursive` flag the planner ignores (non-self relation) — its JOIN + where still filter', () => {
-			// `include.recursive` only matters when the referenced relation is
-			// self-referential; otherwise the planner warns and falls through to
-			// the normal strategy. Dot-notation is the reachable path here: the DX
-			// `.include()` eagerly THROWS for a plain non-self relation name with
-			// Recursive payloads are scalar targets; existsWrap replaces them with 1.
+		it('refuses recursive non-self relations in existsDump as in plan', () => {
 			const adapter = createPgCompileOnlyAdapter();
 			const orm = createOrm({ adapter, schema: nestedSchema });
-
-			const dump = orm
-				.select('users')
-				.include('posts.comments', {
-					recursive: true,
-					direction: 'descendants',
-					join: 'inner',
-					where: eq('body', 'flagged'),
-				} as never)
-				.where(eq('active', true))
-				.existsDump();
-
-			expect(dump.sql).toBe(
-				'SELECT EXISTS (SELECT 1 FROM users JOIN posts AS author_posts ON users.id = author_posts.author JOIN comments AS post_comments ON author_posts.id = post_comments.post WHERE users.active = $1 AND post_comments.body = $2 LIMIT 1) AS "exists"',
-			);
-			expect(dump.params).toEqual([true, 'flagged']);
+			expect(() =>
+				orm
+					.select('users')
+					.include('posts.comments', {
+						recursive: true,
+						direction: 'descendants',
+						join: 'inner',
+						where: eq('body', 'flagged'),
+					} as never)
+					.where(eq('active', true))
+					.existsDump(),
+			).toThrow('self-referential relation');
 		});
 
 		it('refuses recursive self-referential includes with explicit join (#894)', () => {

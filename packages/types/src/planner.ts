@@ -176,10 +176,9 @@ export interface IncludePayloadShape {
 		readonly readHandling?: NestedOutputReadHandling;
 	}[];
 	readonly privateFields?: readonly {
-		readonly role: 'node' | 'parent' | 'depth' | 'order';
+		readonly role: 'node' | 'parent' | 'depth';
 		readonly jsonKey: string;
 		readonly physicalName: string;
-		readonly readHandling?: NestedOutputReadHandling;
 	}[];
 	readonly recursive?: {
 		readonly direction: 'ancestors' | 'descendants';
