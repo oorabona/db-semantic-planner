@@ -91,6 +91,7 @@ export {
 	type RecursivePlanReport,
 	validateIncludeInput,
 	validateIncludeOptions,
+	validateIncludeOrdering,
 	validateIncludeStrategy,
 	validateResolvedIncludeStrategy,
 } from './planner.js';

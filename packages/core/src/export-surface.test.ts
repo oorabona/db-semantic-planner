@@ -46,6 +46,7 @@ const rootRuntime = [
 const includeValidationExports = [
 	'validateIncludeInput',
 	'validateIncludeOptions',
+	'validateIncludeOrdering',
 ];
 const internalNames = [
 	...includeValidationExports,

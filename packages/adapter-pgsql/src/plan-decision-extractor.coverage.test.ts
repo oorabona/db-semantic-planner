@@ -1276,7 +1276,7 @@ describe('plan-decision-extractor - coverage', () => {
 				decisions: [],
 			};
 			// Simulate already covered by planner
-			const covered = new Set<string>(['enclosingSymbol']);
+			const covered = new Set<string>(['include[0]']);
 			const result = synthesizeMissingJoinDecisions(plan, covered, mockModel);
 
 			expect(result).toHaveLength(0);

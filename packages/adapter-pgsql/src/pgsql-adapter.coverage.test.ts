@@ -2283,20 +2283,24 @@ describe('PgAdapter - Coverage Tests', () => {
 
 describe('synthetic binding includes', () => {
 	it('compiles synthetic binding json_agg include decisions with CTE parentKey correlation', () => {
-		const adapter = createPgCompileOnlyAdapter({
-			model: completeModel({
-				active_authors: { author_key: 'integer', id: 'integer' },
-				projected_authors: { id: 'integer' },
-				posts: {
-					id: { type: 'integer', primaryKey: true },
-					author_id: ref('active_authors', { inverse: 'author_posts' }),
-				},
-				comments: {
-					id: { type: 'integer', primaryKey: true },
-					post_id: ref('posts', { inverse: 'comments' }),
-				},
-			}),
+		const model = completeModel({
+			active_authors: { author_key: 'integer', id: 'integer' },
+			projected_authors: { id: 'integer' },
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				author_id: ref('active_authors', { inverse: 'author_posts' }),
+			},
+			comments: {
+				id: { type: 'integer', primaryKey: true },
+				post_id: ref('posts', { inverse: 'comments' }),
+			},
 		});
+		// This synthetic relation correlates on the projected author key.
+		Object.assign(model.getRelation('active_authors.author_posts'), {
+			sourceKey: ['author_key'],
+		});
+		const adapter = createPgCompileOnlyAdapter({ model });
+
 		const plan: PlanReport = {
 			rootTable: 'active_authors',
 			intent: {

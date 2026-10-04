@@ -185,7 +185,7 @@ selections are root relation columns, so `users | select id, posts.title | flat`
 and `users | select id, posts.title | limit posts 5` retain their behaviour.
 
 Every resolved include, including camelCase names for snake_case relations, is
-validated during planning and before adapter handler dispatch, including external reports. An external report’s include decisions must match its intent; contradictory, duplicate, or unmatched decisions are refused by include path. Include `select` forms are checked against the resolved strategy:
+validated during planning and before adapter handler dispatch, including external reports. An external report’s include decisions must match its intent; contradictory, duplicate, or unmatched decisions are refused by include path. Legacy decisions without a path must identify a unique include; nested coverage never suppresses a missing root join. Supplied foreign and parent keys must match the declared relation, and omitted keys are filled from that relation. Ordering options are validated in the same pass before handler dispatch. Include `select` forms are checked against the resolved strategy:
 `json_agg` accepts fields or all columns, `lateral` accepts only all columns, `join` accepts all columns or plain fields for to-one relations,
 and `cte` refuses explicit selection. Mixed wildcard lists such as `['*', 'id']`
 are refused for every strategy; `['*']` is the all-columns form. Both `json_agg`

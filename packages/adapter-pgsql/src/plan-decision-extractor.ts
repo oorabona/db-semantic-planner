@@ -1929,7 +1929,7 @@ function toJoinIncludeDecision(
  */
 export function synthesizeMissingJoinDecisions(
 	plan: PlanReport,
-	coveredRelations: ReadonlySet<string>,
+	coveredIntentPaths: ReadonlySet<string>,
 	model: ModelIR,
 	defaultPk: string = DEFAULT_PK_COLUMN,
 	deriveFk: FkColumnDerivation = defaultFkDerivation,
@@ -1937,6 +1937,12 @@ export function synthesizeMissingJoinDecisions(
 	const includes = plan.intent?.include;
 
 	if (!includes || includes.length === 0) return [];
+
+	const coveredPaths = new Set(coveredIntentPaths);
+	for (const decision of plan.decisions) {
+		if (decision.type === 'include-strategy' && decision.context.intentPath)
+			coveredPaths.add(decision.context.intentPath);
+	}
 
 	const sourceTable = plan.rootTable;
 
@@ -1949,16 +1955,7 @@ export function synthesizeMissingJoinDecisions(
 		if (inc.join !== 'inner' && inc.join !== 'left') continue;
 
 		// Already covered by a planner-emitted decision
-		if (
-			coveredRelations.has(alias) ||
-			plan.decisions.some(
-				(decision) =>
-					decision.type === 'include-strategy' &&
-					decision.context.sourceTable === sourceTable &&
-					decision.context.includeAlias === alias,
-			)
-		)
-			continue;
+		if (coveredPaths.has(`include[${index}]`)) continue;
 
 		validateIncludeOptions(inc, 'join', `include[${index}]`, alias);
 		const rel = resolveIncludeRelationName(model, sourceTable, alias);
@@ -1991,6 +1988,7 @@ export function synthesizeMissingJoinDecisions(
 			choice: 'join',
 			relationName: alias,
 			relationPath: alias,
+			intentPath: `include[${index}]`,
 			targetTable: rel.target,
 			sourceTable,
 			...(rel.type && {

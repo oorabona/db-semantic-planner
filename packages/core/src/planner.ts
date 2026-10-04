@@ -1282,65 +1282,12 @@ function processInclude(
 	const includeDecisionId = generateDecisionId(state, 'include-strategy');
 	const parentKey =
 		relation.type === 'belongsTo' ? relation.targetKey : relation.sourceKey;
-	const targetTable = model.getTable(relation.target);
-	let targetOrder = targetTable
-		? resolveJsonAggOrderKey(targetTable)
-		: undefined;
-
-	if (include.orderBy !== undefined || include.limit !== undefined) {
-		const entries = include.orderBy ?? [];
-		if (
-			!Array.isArray(entries) ||
-			Array.from(entries).some(
-				(entry) =>
-					!entry ||
-					typeof entry.field !== 'string' ||
-					!entry.field ||
-					entry.expression !== undefined ||
-					!['asc', 'desc'].includes(entry.direction) ||
-					(entry.nulls !== undefined &&
-						!['first', 'last'].includes(entry.nulls)),
-			)
-		)
-			throw new Error(
-				`Include ${fullPath} orderBy requires fields, asc/desc direction and first/last nulls`,
-			);
-		for (const entry of entries) {
-			if (!targetTable?.columns.some((column) => column.name === entry.field))
-				throw new Error(
-					`Include ${fullPath} orderBy field "${entry.field}" is not a column of target table "${relation.target}"`,
-				);
-		}
-		const ordered = new Set(entries.map((entry) => entry.field));
-		const unique =
-			targetTable?.columns.some(
-				(column) =>
-					column.unique && !column.nullable && ordered.has(column.name),
-			) ||
-			targetTable?.indexes.some(
-				(index) =>
-					index.unique &&
-					index.valid !== false &&
-					index.ready !== false &&
-					index.where === undefined &&
-					!index.expressions?.length &&
-					index.columns.length > 0 &&
-					index.columns.every(
-						(column) =>
-							ordered.has(column) &&
-							(index.nullsNotDistinct ||
-								targetTable.columns.some(
-									(entry) => entry.name === column && !entry.nullable,
-								)),
-					),
-			);
-		if (!toColumnList(targetTable?.primaryKey).length && !unique)
-			throw new Error(
-				`Include ${fullPath} ${include.limit !== undefined ? 'limit' : 'orderBy'} requires a primary key or unique ordering for a total order`,
-			);
-		if (unique && targetOrder?.fallback)
-			targetOrder = { columns: [...ordered], fallback: false };
-	}
+	const targetOrder = validateIncludeOrdering(
+		include,
+		model,
+		relation.target,
+		fullPath,
+	);
 
 	state.decisions.push({
 		id: includeDecisionId,
@@ -2133,4 +2080,84 @@ function generateJoinReasoning(
 		`Relation ${relation.source}.${relation.name} is optional without filter - ` +
 		`using LEFT JOIN to preserve parent rows without matches`
 	);
+}
+
+/** Shared ordering validation before planner or adapter dispatch. */
+export function validateIncludeOrdering(
+	include: IncludeIntent,
+	model: ModelIR | undefined,
+	target: string,
+	fullPath: string,
+	recordedKey?: readonly string[],
+): { columns: readonly string[]; fallback: boolean } | undefined {
+	const targetTable = model?.getTable(target);
+	let targetOrder = targetTable
+		? resolveJsonAggOrderKey(targetTable)
+		: undefined;
+
+	if (!toColumnList(targetTable?.primaryKey).length && recordedKey?.length)
+		targetOrder = { columns: recordedKey, fallback: false };
+	if (include.orderBy !== undefined || include.limit !== undefined) {
+		const entries = include.orderBy ?? [];
+		if (
+			!Array.isArray(entries) ||
+			Array.from(entries).some(
+				(entry) =>
+					!entry ||
+					typeof entry.field !== 'string' ||
+					!entry.field ||
+					entry.expression !== undefined ||
+					!['asc', 'desc'].includes(entry.direction) ||
+					(entry.nulls !== undefined &&
+						!['first', 'last'].includes(entry.nulls)),
+			)
+		)
+			throw new Error(
+				`Include ${fullPath} orderBy requires fields, asc/desc direction and first/last nulls`,
+			);
+		for (const entry of entries) {
+			if (
+				targetTable &&
+				!targetTable.columns.some((column) => column.name === entry.field)
+			)
+				throw new Error(
+					`Include ${fullPath} orderBy field "${entry.field}" is not a column of target table "${target}"`,
+				);
+		}
+		const ordered = new Set(entries.map((entry) => entry.field));
+		const unique =
+			targetTable?.columns.some(
+				(column) =>
+					column.unique && !column.nullable && ordered.has(column.name),
+			) ||
+			targetTable?.indexes.some(
+				(index) =>
+					index.unique &&
+					index.valid !== false &&
+					index.ready !== false &&
+					index.where === undefined &&
+					!index.expressions?.length &&
+					index.columns.length > 0 &&
+					index.columns.every(
+						(column) =>
+							ordered.has(column) &&
+							(index.nullsNotDistinct ||
+								targetTable.columns.some(
+									(entry) => entry.name === column && !entry.nullable,
+								)),
+					),
+			);
+		if (
+			!toColumnList(targetTable?.primaryKey).length &&
+			!recordedKey?.length &&
+			!unique
+		)
+			throw new Error(
+				`Include ${fullPath} ${include.limit !== undefined ? 'limit' : 'orderBy'} requires a primary key or unique ordering for a total order`,
+			);
+		if (unique && targetOrder?.fallback)
+			targetOrder = { columns: [...ordered], fallback: false };
+	}
+
+	return targetOrder;
 }
