@@ -239,7 +239,7 @@ it('keyless target keeps outer filter columns and exact private payload', () => 
 	const report = builder.plan();
 	const compiled = keylessAdapter.compile(report);
 	expect(compiled.sql).toBe(
-		'SELECT posts.*, author.name AS "author.name", author.__dbsp_presence_author AS __dbsp_presence_author FROM posts LEFT JOIN (SELECT *, 1 AS __dbsp_presence_author FROM users AS author) AS author ON posts."authorCode" = author.id WHERE author.email = $1',
+		'SELECT posts.*, author.name AS "author.name", author.__dbsp_presence_author AS __dbsp_presence_author FROM posts LEFT JOIN (SELECT author.id, author.name, author.email, 1 AS __dbsp_presence_author FROM users AS author) AS author ON posts."authorCode" = author.id WHERE author.email = $1',
 	);
 	const rows = [
 		{ 'author.name': null, __dbsp_presence_author: 1 },

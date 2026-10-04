@@ -845,7 +845,7 @@ for (const user of []) { // loop would iterate over actual user rows
 }
 
 // Use includes
-const users2 = orm.select('users').include('author_posts').dump();
+const users2 = orm.select('users').include('posts').dump();
 ```
 
 ### Index Recommendations

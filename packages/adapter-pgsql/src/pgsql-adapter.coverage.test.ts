@@ -12,7 +12,7 @@
  * - Adapter capabilities (execution/streaming support)
  */
 
-import { schema } from '@dbsp/core';
+import { ref, schema } from '@dbsp/core';
 import type { ModelIR, PlanReport } from '@dbsp/types';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import { describe, expect, it } from 'vitest';
@@ -22,15 +22,7 @@ import { createPgPhysicalModel } from './physical-model/index.js';
 function completeModel(
 	definition: Record<string, Record<string, unknown>>,
 ): ModelIR {
-	const model = schema(definition as any).model;
-	return {
-		...model,
-		getTable: (name: string) => model.tables.get(name),
-		getRelation: () => undefined,
-		getRelationsFrom: () => [],
-		getRelationsTo: () => [],
-		isAmbiguous: () => ({ ambiguous: false }),
-	} as unknown as ModelIR;
+	return schema(definition as any).model;
 }
 
 const coverageModel = completeModel({
@@ -66,7 +58,7 @@ const coverageModel = completeModel({
 		id: 'integer',
 		title: 'text',
 		archived: 'boolean',
-		user_id: 'integer',
+		user_id: ref('users', { as: 'author' }),
 	},
 	archive: { id: 'integer', title: 'text' },
 });
@@ -2324,11 +2316,11 @@ describe('synthetic binding includes', () => {
 				projected_authors: { id: 'integer' },
 				posts: {
 					id: { type: 'integer', primaryKey: true },
-					author_id: 'integer',
+					author_id: ref('active_authors', { inverse: 'author_posts' }),
 				},
 				comments: {
 					id: { type: 'integer', primaryKey: true },
-					post_id: 'integer',
+					post_id: ref('posts', { inverse: 'comments' }),
 				},
 			}),
 		});
@@ -2396,11 +2388,11 @@ describe('synthetic binding includes', () => {
 				projected_authors: { id: 'integer' },
 				posts: {
 					id: { type: 'integer', primaryKey: true },
-					author_id: 'integer',
+					author_id: ref('projected_authors', { inverse: 'author_posts' }),
 				},
 				comments: {
 					id: { type: 'integer', primaryKey: true },
-					post_id: 'integer',
+					post_id: ref('posts', { inverse: 'comments' }),
 				},
 			}),
 		});
@@ -2499,7 +2491,7 @@ describe('synthetic binding includes', () => {
 				},
 				comments: {
 					id: { type: 'integer', primaryKey: true },
-					post_id: 'integer',
+					post_id: ref('posts', { inverse: 'comments' }),
 				},
 			}),
 		});

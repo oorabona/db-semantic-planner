@@ -184,7 +184,7 @@ describe('DX-008: API Shortcuts', () => {
 		it('should apply via option to deepest level', () => {
 			const plan = orm
 				.select('users')
-				.include('posts.author', { via: 'commentAuthor' })
+				.include('posts.users', { via: 'author' })
 				.plan();
 
 			expect(plan.intent.include).toEqual([
@@ -192,8 +192,8 @@ describe('DX-008: API Shortcuts', () => {
 					relation: 'posts',
 					include: [
 						{
-							relation: 'author',
-							via: 'commentAuthor',
+							relation: 'users',
+							via: 'author',
 						},
 					],
 				},

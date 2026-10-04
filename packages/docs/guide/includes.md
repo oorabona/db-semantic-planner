@@ -17,6 +17,8 @@ const usersWithPosts = await orm.select('users').include('posts').dump();
 
 The relation name maps to the `inverse` or `as` name defined in your schema's `ref()` declaration.
 
+Unknown relations are refused with the include path in both strict and lenient planning. Normalized-name collisions are always refused with an exported `AmbiguousIncludeError` carrying `candidates` and `includePath`; use the exact declared name or `via` to identify the relation. Compilation applies the same include option rules to external reports.
+
 ---
 
 ## Nested Includes (Dot Notation)
@@ -183,7 +185,7 @@ selections are root relation columns, so `users | select id, posts.title | flat`
 and `users | select id, posts.title | limit posts 5` retain their behaviour.
 
 Every resolved include, including camelCase names for snake_case relations, is
-validated during planning. Include `select` forms are checked during planning:
+validated during planning and before adapter handler dispatch, including external reports. Include `select` forms are checked against the resolved strategy:
 `json_agg` accepts fields or all columns, `lateral` accepts only all columns, `join` accepts all columns or plain fields for to-one relations,
 and `cte` refuses explicit selection. Mixed wildcard lists such as `['*', 'id']`
 are refused for every strategy; `['*']` is the all-columns form. Both `json_agg`

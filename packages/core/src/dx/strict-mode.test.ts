@@ -322,51 +322,24 @@ describe('Scenario 6: Default strictMode is lenient', () => {
 // ============================================================================
 
 describe('Scenario 7: Invalid via hint behavior', () => {
-	/**
-	 * Note: The core planner uses `via` as the relation name to look up.
-	 * When `via` doesn't match any relation, it adds a warning and skips the include.
-	 * This is the actual planner behavior - it doesn't throw for unknown relations.
-	 */
-
-	it('should add warning for non-existent via hint in strict mode', () => {
-		const orm = createOrm({
-			adapter: createMockAdapter(),
-			schema: testSchema,
-			strictMode: true,
+	// An invalid via names no declared relation; neither planning mode drops it.
+	for (const strictMode of [true, false]) {
+		it(`refuses a non-existent via hint (strictMode=${strictMode})`, () => {
+			const orm = createOrm({
+				adapter: createMockAdapter(),
+				schema: testSchema,
+				strictMode,
+			});
+			expect(() =>
+				orm
+					.select('users')
+					.include('posts', { via: 'nonExistentRelation' })
+					.plan(),
+			).toThrow(
+				'Invalid include: Unknown relation "nonExistentRelation" from table "users" at "nonExistentRelation"',
+			);
 		});
-
-		// Plan succeeds but with warning about unknown relation
-		const planReport = orm
-			.select('users')
-			.include('posts', { via: 'nonExistentRelation' })
-			.plan();
-
-		// Should have warning about unknown relation
-		const warning = planReport.warnings.find((w) =>
-			w.message.includes('nonExistentRelation'),
-		);
-		expect(warning).toBeDefined();
-	});
-
-	it('should add warning for non-existent via hint in lenient mode', () => {
-		const orm = createOrm({
-			adapter: createMockAdapter(),
-			schema: testSchema,
-			strictMode: false,
-		});
-
-		// Plan succeeds but with warning
-		const planReport = orm
-			.select('users')
-			.include('posts', { via: 'nonExistentRelation' })
-			.plan();
-
-		// Should have warning about unknown relation
-		const warning = planReport.warnings.find((w) =>
-			w.message.includes('nonExistentRelation'),
-		);
-		expect(warning).toBeDefined();
-	});
+	}
 });
 
 // ============================================================================

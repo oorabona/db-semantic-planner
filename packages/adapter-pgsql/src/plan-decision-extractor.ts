@@ -8,8 +8,12 @@
  * All functions are stateless pure functions operating on PlanReport data.
  */
 
-import { deriveRelationPathFromIntentPath } from '@dbsp/core/internal';
+import {
+	deriveRelationPathFromIntentPath,
+	validateIncludeOptions,
+} from '@dbsp/core/internal';
 import type {
+	IncludeOrderByIntent,
 	ModelIR,
 	PlanReport,
 	SelectIntent,
@@ -117,6 +121,7 @@ function resolveIncludeByPath(
 				via?: string | undefined;
 				limit?: number | undefined;
 				select?: SelectIntent | undefined;
+				orderBy?: readonly IncludeOrderByIntent[] | undefined;
 				where?: unknown;
 				include?: readonly unknown[] | undefined;
 		  }>
@@ -128,6 +133,7 @@ function resolveIncludeByPath(
 			relation: string;
 			limit?: number | undefined;
 			select?: SelectIntent | undefined;
+			orderBy?: readonly IncludeOrderByIntent[] | undefined;
 			where?: unknown;
 	  }
 	| undefined {
@@ -1801,7 +1807,9 @@ function toIncludeDecision(
 			? { orderBy: context.targetOrderKey }
 			: {}),
 		...(context.orderByFallback ? { orderByFallback: true } : {}),
-		...(context.includeOrderBy && { includeOrderBy: context.includeOrderBy }),
+		...((includeIntent?.orderBy ?? context.includeOrderBy) && {
+			includeOrderBy: includeIntent?.orderBy ?? context.includeOrderBy,
+		}),
 		...(context.intentPath && { intentPath: context.intentPath }),
 		...(limit != null && { limit }),
 	};
@@ -1925,14 +1933,7 @@ export function synthesizeMissingJoinDecisions(
 	defaultPk: string = DEFAULT_PK_COLUMN,
 	deriveFk: FkColumnDerivation = defaultFkDerivation,
 ): SimplifiedPlanReport['decisions'] {
-	const includes = plan.intent?.include as
-		| ReadonlyArray<{
-				relation: string;
-				join?: 'inner' | 'left';
-				select?: SelectIntent | undefined;
-				where?: unknown;
-		  }>
-		| undefined;
+	const includes = plan.intent?.include;
 
 	if (!includes || includes.length === 0) return [];
 
@@ -1940,8 +1941,8 @@ export function synthesizeMissingJoinDecisions(
 
 	const synthesized: PlanDecision[] = [];
 
-	for (const inc of includes) {
-		const alias = inc.relation;
+	for (const [index, inc] of includes.entries()) {
+		const alias = inc.via ?? inc.relation;
 
 		// Only synthesize for explicit join: 'inner'|'left' includes
 		if (inc.join !== 'inner' && inc.join !== 'left') continue;
@@ -1958,6 +1959,7 @@ export function synthesizeMissingJoinDecisions(
 		)
 			continue;
 
+		validateIncludeOptions(inc, 'join', `include[${index}]`, alias);
 		const rel = resolveIncludeRelationName(model, sourceTable, alias);
 		if (!rel) continue;
 
@@ -2120,7 +2122,9 @@ function toJsonAggDecision(
 			? { orderBy: context.targetOrderKey }
 			: {}),
 		...(context.orderByFallback ? { orderByFallback: true } : {}),
-		...(context.includeOrderBy && { includeOrderBy: context.includeOrderBy }),
+		...((includeIntent?.orderBy ?? context.includeOrderBy) && {
+			includeOrderBy: includeIntent?.orderBy ?? context.includeOrderBy,
+		}),
 		...(context.intentPath && { intentPath: context.intentPath }),
 	};
 }
@@ -2210,8 +2214,8 @@ function joinPayloadColumns(
 	): boolean =>
 		includes.some((include) => {
 			const current = parent
-				? `${parent}.${include.relation}`
-				: include.relation;
+				? `${parent}.${include.via ?? include.relation}`
+				: (include.via ?? include.relation);
 			const flat = ancestorFlat || include.strategy === 'flat';
 			return (
 				(current === path && flat) ||

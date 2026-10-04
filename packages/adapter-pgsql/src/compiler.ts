@@ -71,6 +71,7 @@ import { compileExpressionIntent } from './handlers/expression/custom.js';
 import { bindParameter } from './handlers/expression/param-value.js';
 import { buildRecursiveScalarSubquery } from './handlers/expression/pseudo.js';
 import { genericWindowHandler } from './handlers/expression/window.js';
+import { completeKeylessJoinProjection } from './handlers/include/join.js';
 import {
 	createWhereDispatcher,
 	ensureExpressionHandlersRegistered,
@@ -548,6 +549,7 @@ export class PlanCompiler {
 	}> = [];
 	/** Raw JOIN AST nodes from include handlers (e.g., LATERAL) */
 	private rawJoins: Node[] = [];
+	private keylessJoinProjections = new Map<string, Node[]>();
 	/** CTE nodes from include handlers (e.g., CTE strategy) */
 	private pendingCtes: Node[] = [];
 	/** Local aliases for binding relation-column scalar subqueries. */
@@ -1141,6 +1143,24 @@ export class PlanCompiler {
 		} as HandlerCompilerContext;
 
 		const result = handler.compile(handlerDecision, ctx, handlerState);
+		if (
+			strategy === 'join' &&
+			finalJoinAlias &&
+			decision.payloadShape?.presence &&
+			!decision.payloadShape.presence.physicalName
+		) {
+			const join = result.join;
+			const rarg = join && 'JoinExpr' in join ? join.JoinExpr.rarg : undefined;
+			const subquery =
+				rarg && 'RangeSubselect' in rarg
+					? rarg.RangeSubselect.subquery
+					: undefined;
+			const targets =
+				subquery && 'SelectStmt' in subquery
+					? subquery.SelectStmt.targetList
+					: undefined;
+			if (targets) this.keylessJoinProjections.set(finalJoinAlias, targets);
+		}
 
 		// Sync parameters back
 		this.state.paramIndex = handlerState.paramIndex;
@@ -1185,6 +1205,7 @@ export class PlanCompiler {
 		this.currentRootTable = plan.rootTable;
 		this.pendingJoins = [];
 		this.rawJoins = [];
+		this.keylessJoinProjections.clear();
 		this.pendingCtes = [];
 		this.joinAliasMap = new Map();
 		this.visibleSqlQualifiers = new Map();
@@ -2695,6 +2716,11 @@ export class PlanCompiler {
 				cond,
 				joinAlias ? { currentAlias: joinAlias } : undefined,
 			);
+			const projection = joinAlias
+				? this.keylessJoinProjections.get(joinAlias)
+				: undefined;
+			if (projection && joinAlias)
+				completeKeylessJoinProjection(projection, joinAlias, [condExpr], true);
 			where = where ? andExpr(where, condExpr) : condExpr;
 		}
 		return where;
@@ -3216,6 +3242,13 @@ export class PlanCompiler {
 			if (obNode) orderBy.push(obNode);
 		}
 
+		for (const [alias, targets] of this.keylessJoinProjections)
+			completeKeylessJoinProjection(targets, alias, [
+				targetList,
+				where,
+				orderBy,
+				this.rawJoins,
+			]);
 		this.flushPendingJoins(from, plan);
 		return this.buildSelectStmt(
 			targetList,

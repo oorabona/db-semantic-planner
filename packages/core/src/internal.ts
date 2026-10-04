@@ -89,6 +89,8 @@ export type {
 export { inspectMutationRows } from './mutation-rows.js';
 export {
 	type RecursivePlanReport,
+	validateIncludeInput,
+	validateIncludeOptions,
 	validateIncludeStrategy,
 	validateResolvedIncludeStrategy,
 } from './planner.js';

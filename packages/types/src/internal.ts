@@ -9,6 +9,7 @@
  */
 
 import { toColumnList } from './column-list.js';
+import { AmbiguousIncludeError } from './include-errors.js';
 import type {
 	ModelIR,
 	NqlBindingRelationType,
@@ -556,8 +557,11 @@ export function resolveIncludeRelationName(
 				) === name,
 		);
 	if (aliases.length > 1)
-		throw new Error(
-			`Ambiguous include relation "${name}" from table "${sourceTable}"${includePath ? ` at "${includePath}"` : ''}. Use the exact relation name or "via" to specify one of: ${aliases.map((relation) => relation.name).join(', ')}`,
+		throw new AmbiguousIncludeError(
+			sourceTable,
+			name,
+			aliases.map((relation) => relation.name),
+			includePath,
 		);
 	return aliases[0] ?? disambiguate?.();
 }

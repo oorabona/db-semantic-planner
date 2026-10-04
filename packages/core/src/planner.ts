@@ -1122,13 +1122,7 @@ function processInclude(
 	const fullPath = parentIncludePath
 		? `${parentIncludePath}.${pathSegment}`
 		: pathSegment;
-	if (
-		include.select?.type === 'fields' &&
-		!Array.isArray(include.select.fields)
-	)
-		throw new Error(`Include ${fullPath} select fields must be an array`);
-	if (include.limit !== undefined)
-		validateLimit(include.limit, `Include ${intentPath}(${fullPath}) limit`);
+	validateIncludeInput(include, intentPath, fullPath);
 
 	// Check depth
 	if (depth > opts.maxIncludeDepth) {
@@ -1161,7 +1155,10 @@ function processInclude(
 	);
 
 	if (!relation) {
-		return;
+		throw new InvalidOperationError(
+			'include',
+			`Unknown relation "${relationName}" from table "${sourceTable}" at "${fullPath}"`,
+		);
 	}
 
 	// Check for circular includes
@@ -1245,61 +1242,8 @@ function processInclude(
 	}
 	const includeStrategy = resolution.strategy;
 
+	validateIncludeOptions(include, includeStrategy, intentPath, fullPath);
 	const optionPath = `${intentPath}(${fullPath})`;
-	if (includeStrategy === 'cte' || includeStrategy === 'join') {
-		for (const option of ['limit', 'orderBy'] as const) {
-			if (include[option] !== undefined) {
-				throw new InvalidOperationError(
-					'include',
-					`Include ${optionPath} ${option} is not supported by '${includeStrategy}' strategy.` +
-						(includeStrategy === 'join' && option === 'limit'
-							? ' Remove the explicit join or use a strategy that limits per parent (json_agg, lateral).'
-							: ''),
-				);
-			}
-		}
-	}
-	if (includeStrategy === 'lateral') {
-		if (include.orderBy !== undefined && include.limit === undefined)
-			throw new InvalidOperationError(
-				'include',
-				`Include ${optionPath} orderBy requires limit with 'lateral' strategy`,
-			);
-	}
-	if (
-		include.select?.type === 'fields' &&
-		include.select.fields.length > 1 &&
-		include.select.fields.includes('*')
-	)
-		throw new Error(
-			`Include ${fullPath} select cannot mix '*' with other fields`,
-		);
-	if (
-		includeStrategy === 'json_agg' &&
-		include.select !== undefined &&
-		include.select.type !== 'fields' &&
-		include.select.type !== 'all'
-	)
-		throw new Error(
-			`JSON_AGG include '${fullPath}' does not support select form '${include.select.type}'`,
-		);
-	if (
-		include.select !== undefined &&
-		(includeStrategy === 'cte' ||
-			(includeStrategy === 'join' && !supportsJoinIncludeSelect(include)))
-	)
-		throw new InvalidOperationError(
-			'include',
-			`Include ${optionPath} select is not supported by '${includeStrategy}' strategy.` +
-				(includeStrategy === 'join'
-					? ` Received select form: ${include.select.type}${include.select.type === 'fields' ? ` ${JSON.stringify(include.select.fields)}` : ''}.`
-					: ''),
-		);
-	if (includeStrategy === 'lateral' && !selectsWholeIncludeRow(include))
-		throw new InvalidOperationError(
-			'include',
-			`Include ${optionPath} select must select all columns with '${includeStrategy}' strategy`,
-		);
 
 	if (includeStrategy === 'join' && relation.type === 'belongsToMany')
 		throw new InvalidOperationError(
@@ -1843,6 +1787,86 @@ export class UnsupportedStrategyError extends Error {
 		super(message);
 		this.name = 'UnsupportedStrategyError';
 	}
+}
+
+/** Validate include values even before relation/strategy resolution. */
+export function validateIncludeInput(
+	include: IncludeIntent,
+	intentPath: string,
+	fullPath: string,
+): void {
+	if (
+		include.select?.type === 'fields' &&
+		!Array.isArray(include.select.fields)
+	)
+		throw new Error(`Include ${fullPath} select fields must be an array`);
+	if (include.limit !== undefined)
+		validateLimit(include.limit, `Include ${intentPath}(${fullPath}) limit`);
+}
+
+/** Shared planner/adapter contract for every resolved include strategy. */
+export function validateIncludeOptions(
+	include: IncludeIntent,
+	includeStrategy: string,
+	intentPath: string,
+	fullPath: string,
+): void {
+	validateIncludeInput(include, intentPath, fullPath);
+	const optionPath = `${intentPath}(${fullPath})`;
+	if (includeStrategy === 'cte' || includeStrategy === 'join') {
+		for (const option of ['limit', 'orderBy'] as const) {
+			if (include[option] !== undefined) {
+				throw new InvalidOperationError(
+					'include',
+					`Include ${optionPath} ${option} is not supported by '${includeStrategy}' strategy.` +
+						(includeStrategy === 'join' && option === 'limit'
+							? ' Remove the explicit join or use a strategy that limits per parent (json_agg, lateral).'
+							: ''),
+				);
+			}
+		}
+	}
+	if (includeStrategy === 'lateral') {
+		if (include.orderBy !== undefined && include.limit === undefined)
+			throw new InvalidOperationError(
+				'include',
+				`Include ${optionPath} orderBy requires limit with 'lateral' strategy`,
+			);
+	}
+	if (
+		include.select?.type === 'fields' &&
+		include.select.fields.length > 1 &&
+		include.select.fields.includes('*')
+	)
+		throw new Error(
+			`Include ${fullPath} select cannot mix '*' with other fields`,
+		);
+	if (
+		includeStrategy === 'json_agg' &&
+		include.select !== undefined &&
+		include.select.type !== 'fields' &&
+		include.select.type !== 'all'
+	)
+		throw new Error(
+			`JSON_AGG include '${fullPath}' does not support select form '${include.select.type}'`,
+		);
+	if (
+		include.select !== undefined &&
+		(includeStrategy === 'cte' ||
+			(includeStrategy === 'join' && !supportsJoinIncludeSelect(include)))
+	)
+		throw new InvalidOperationError(
+			'include',
+			`Include ${optionPath} select is not supported by '${includeStrategy}' strategy.` +
+				(includeStrategy === 'join'
+					? ` Received select form: ${include.select.type}${include.select.type === 'fields' ? ` ${JSON.stringify(include.select.fields)}` : ''}.`
+					: ''),
+		);
+	if (includeStrategy === 'lateral' && !selectsWholeIncludeRow(include))
+		throw new InvalidOperationError(
+			'include',
+			`Include ${optionPath} select must select all columns with '${includeStrategy}' strategy`,
+		);
 }
 
 /** Join includes honour omitted select, all, or plain field selections. */

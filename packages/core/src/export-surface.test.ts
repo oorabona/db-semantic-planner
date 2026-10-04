@@ -35,15 +35,31 @@ const manifest = JSON.parse(
 const names = (rows: Row[]) => rows.map((row) => row.name);
 const sorted = (values: Iterable<string>) => [...new Set(values)].sort();
 const excluded = new Set([...names(moved), ...names(removed)]);
-const rootNames = names(before.root.declarations).filter(
-	(name) => !excluded.has(name),
-);
-const rootRuntime = before.root.runtime.filter((name) => !excluded.has(name));
-const internalNames = [...names(before.internal.declarations), ...names(moved)];
+const rootNames = [
+	'AmbiguousIncludeError',
+	...names(before.root.declarations).filter((name) => !excluded.has(name)),
+];
+const rootRuntime = [
+	'AmbiguousIncludeError',
+	...before.root.runtime.filter((name) => !excluded.has(name)),
+];
+const includeValidationExports = [
+	'validateIncludeInput',
+	'validateIncludeOptions',
+];
+const internalNames = [
+	...includeValidationExports,
+	...names(before.internal.declarations),
+	...names(moved),
+];
 const movedRuntime = before.root.runtime.filter((name) =>
 	names(moved).includes(name),
 );
-const internalRuntime = [...before.internal.runtime, ...movedRuntime];
+const internalRuntime = [
+	...includeValidationExports,
+	...before.internal.runtime,
+	...movedRuntime,
+];
 
 // Read the built declaration target from the package exports map, never src/index.ts.
 function declarations(subpath: '.' | './internal') {

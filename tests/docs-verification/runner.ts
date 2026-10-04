@@ -159,7 +159,7 @@ const __defaultDb = __doctestSchema({
 		id: { type: 'uuid', primaryKey: true },
 		title: 'string',
 		content: { type: 'text', nullable: true },
-		authorId: __doctestRef('users', { inverse: 'posts' }),
+		authorId: __doctestRef('users', { as: 'author', inverse: 'posts' }),
 		published: 'boolean',
 		createdAt: 'timestamp',
 		searchVector: { type: 'tsvector', nullable: true },
@@ -167,12 +167,18 @@ const __defaultDb = __doctestSchema({
 	comments: {
 		id: { type: 'uuid', primaryKey: true },
 		postId: __doctestRef('posts'),
+		authorId: __doctestRef('users', { as: 'author', nullable: true }),
 		body: 'string',
+	},
+	profiles: {
+		id: { type: 'uuid', primaryKey: true },
+		userId: __doctestRef('users', { unique: true, inverse: 'profile' }),
+		bio: { type: 'text', nullable: true },
 	},
 	categories: {
 		id: { type: 'uuid', primaryKey: true },
 		name: 'string',
-		parentId: { type: __doctestRef('categories'), nullable: true },
+		parentId: __doctestRef('categories', { roles: { parent: 'parent', children: 'children' }, nullable: true }),
 	},
 	documents: {
 		id: { type: 'uuid', primaryKey: true },

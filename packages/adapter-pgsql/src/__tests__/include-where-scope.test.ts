@@ -1,4 +1,4 @@
-import { schema } from '@dbsp/core';
+import { ref, schema } from '@dbsp/core';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 /**
  * INCLUDE-WHERE-SCOPE regression tests.
@@ -21,9 +21,14 @@ import { normalizeSQL } from '../ast-helpers.js';
 // ---------------------------------------------------------------------------
 
 const compileModel = schema({
-	symbols: { id: 'integer', name: 'text', type: 'text', file_id: 'integer' },
+	symbols: {
+		id: 'integer',
+		name: 'text',
+		type: 'text',
+		file_id: ref('files', { as: 'file' }),
+	},
 	files: { id: 'integer', project_id: 'integer' },
-	posts: { id: 'integer', user_id: 'integer' },
+	posts: { id: 'integer', user_id: ref('users', { as: 'author' }) },
 	users: { id: 'integer', active: 'boolean' },
 }).model;
 
