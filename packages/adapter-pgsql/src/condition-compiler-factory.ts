@@ -280,6 +280,11 @@ export function createConditionCompiler(
 					emittedAlias: child.currentAlias ?? child.rootTable,
 					visibleAliases: new Map(),
 					position: 'subquery',
+					queryRanges: child.currentBinding ? [child.currentBinding] : [],
+					enclosingRanges: [
+						ctx.queryRanges ?? Array.from(ctx.scope?.bindings.values() ?? []),
+						...(ctx.enclosingRanges ?? []),
+					],
 					outerTable: ctx.currentAlias ?? ctx.rootTable,
 					...(child.currentBinding !== undefined && {
 						currentBinding: child.currentBinding,
@@ -289,6 +294,8 @@ export function createConditionCompiler(
 				});
 			},
 			rootTable: ctx.rootTable,
+			enclosingRanges: ctx.enclosingRanges,
+			queryRanges: ctx.queryRanges,
 			position: ctx.position,
 			...(ctx.directRootWhere !== undefined && {
 				directRootWhere: ctx.directRootWhere,
@@ -1322,8 +1329,26 @@ export function createConditionCompiler(
 				logicalTable: inner.rootTable,
 				qualifier: queryLocal(inner.currentAlias ?? inner.rootTable),
 			});
+			const entersQuery =
+				inner.rootTable !== normalized.rootTable ||
+				(inner.currentAlias ?? inner.rootTable) !==
+					(normalized.currentAlias ?? normalized.rootTable);
 			return recurse(child, {
 				...inner,
+				...(entersQuery && {
+					queryRanges: [
+						binding,
+						...Array.from(inner.scope?.bindings.values() ?? []).filter(
+							(range) =>
+								range.qualifier !== binding.qualifier &&
+								!ctx.scope?.bindings.has(range.qualifier),
+						),
+					],
+					enclosingRanges: [
+						ctx.queryRanges ?? Array.from(ctx.scope?.bindings.values() ?? []),
+						...(ctx.enclosingRanges ?? []),
+					],
+				}),
 				currentBinding: binding,
 				scope: queryScope([
 					...Array.from(inner.scope?.bindings.values() ?? []).filter(

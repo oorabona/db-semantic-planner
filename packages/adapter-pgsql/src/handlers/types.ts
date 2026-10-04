@@ -90,6 +90,10 @@ export interface CompilerContext {
 	readonly bindingNames?: BindingNameRegistry;
 	/** Query-local relation authority; bindings and their outputs never hit the model resolver. */
 	readonly scope?: QueryScope;
+	/** Enclosing query ranges, nearest query first; excludes the current query. */
+	readonly enclosingRanges?: readonly (readonly RelationBinding[])[];
+	/** Ranges emitted by the current query, separate from available CTE bindings. */
+	readonly queryRanges?: readonly RelationBinding[];
 	/**
 	 * The binding that owns unqualified expression columns.  New callers provide
 	 * this directly; the string fields above remain only at pre-lot-4 compiler

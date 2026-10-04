@@ -42,6 +42,10 @@ export type WhereCompilerCtx = {
 	readonly compileExpressionSubquery?: CompilerContext['compileSubquery'];
 	/** Lexically visible relation bindings. */
 	readonly scope?: QueryScope;
+	/** Enclosing query ranges, nearest query first; excludes the current query. */
+	readonly enclosingRanges?: readonly (readonly RelationBinding[])[];
+	/** Ranges emitted by the current query, separate from available CTE bindings. */
+	readonly queryRanges?: readonly RelationBinding[];
 	/** Binding that owns unqualified columns in this WHERE expression. */
 	readonly currentBinding?: RelationBinding;
 	/**

@@ -270,6 +270,14 @@ export function createSubqueryBuilder(
 				...(declaredNames !== undefined && { declaredNames }),
 				scope: innerScope,
 				currentBinding: innerBinding,
+				queryRanges: [innerBinding],
+				enclosingRanges: parent
+					? [
+							parent.queryRanges ??
+								Array.from(parent.scope?.bindings.values() ?? []),
+							...(parent.enclosingRanges ?? []),
+						]
+					: [],
 				compileSubquery:
 					parent?.compileSubquery ??
 					(() => {

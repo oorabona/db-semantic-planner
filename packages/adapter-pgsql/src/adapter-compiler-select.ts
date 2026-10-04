@@ -338,7 +338,9 @@ function compileJoinIntents(
 	]);
 
 	// Bindings are available for lookup, but only FROM ranges occupy qualifiers.
-	const occupiedQualifiers = new Set([rootTable]);
+	const occupiedQualifiers = new Set<string>([
+		sourceBinding(rootTable, deps).qualifier,
+	]);
 	for (const intent of joins) {
 		const qualifier =
 			intent.alias ??
