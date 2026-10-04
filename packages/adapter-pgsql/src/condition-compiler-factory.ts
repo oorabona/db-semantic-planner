@@ -1350,12 +1350,34 @@ export function createConditionCompiler(
 				handlerCtx = toHandlerContext(inner, dispatcher);
 				contexts.set(inner, handlerCtx);
 			}
-			return compileConditionWithLegacyContext(
-				child,
-				inner,
-				dispatcher,
-				handlerCtx,
-			);
+			try {
+				return compileConditionWithLegacyContext(
+					child,
+					inner,
+					dispatcher,
+					handlerCtx,
+				);
+			} catch (error) {
+				if (
+					error instanceof Error &&
+					error.message.startsWith('No WHERE handler') &&
+					(inner.position === 'having' ||
+						inner.position === 'case-when' ||
+						inner.position === 'filter')
+				) {
+					const position =
+						inner.position === 'having'
+							? 'HAVING'
+							: inner.position === 'case-when'
+								? 'CASE WHEN'
+								: 'FILTER';
+					throw new Error(
+						error.message.replace('No WHERE handler', `No ${position} handler`),
+						{ cause: error },
+					);
+				}
+				throw error;
+			}
 		};
 		const recurse = (child: WhereIntent, inner: WhereCompilerCtx): Node =>
 			compile(
@@ -1410,22 +1432,7 @@ export function createConditionCompiler(
 						compileCondition: recurse,
 					};
 
-		try {
-			return recurse(intent, normalized);
-		} catch (error) {
-			if (
-				error instanceof Error &&
-				(ctx.position === 'having' || ctx.position === 'case-when') &&
-				error.message.startsWith('No WHERE handler')
-			) {
-				const position = ctx.position === 'having' ? 'HAVING' : 'CASE WHEN';
-				throw new Error(
-					error.message.replace('No WHERE handler', `No ${position} handler`),
-					{ cause: error },
-				);
-			}
-			throw error;
-		}
+		return recurse(intent, normalized);
 	}
 	const buildSubqueryFromIntent = createSubqueryBuilder(
 		compileWhereIntent,

@@ -468,3 +468,65 @@ it('FILTER nested in HAVING labels recursive refusal FILTER', () => {
 			"FILTER exists('calls'): recursive relation predicates are not supported inside FILTER.",
 		);
 });
+
+it('CASE structured comparison branch is refused by kind instead of bound', () => {
+	const comparisonIntent = {
+		kind: 'comparison' as const,
+		column: 'id',
+		operator: '>' as const,
+		value: 0,
+	};
+	expect(() =>
+		orm
+			.select('symbols')
+			.columns([
+				op(
+					'+',
+					caseWhen(eq('id', 1), new ExpressionRef(comparisonIntent)).else(0),
+					literal(1),
+				).as('n'),
+			])
+			.dump(),
+	).toThrow(
+		"compileExpressionIntent: unsupported expression kind 'comparison'",
+	);
+});
+
+it('CASE JSON object literal branch binds as one parameter', () => {
+	const value = { kind: 'comparison', column: 'id', operator: '>', value: 0 };
+	const result = orm
+		.select('symbols')
+		.columns([
+			op(
+				'+',
+				caseWhen(
+					eq('id', 1),
+					// Exercise the resolver's JSON literal contract beyond the scalar DX type.
+					new ExpressionRef({
+						kind: 'literal',
+						value,
+					} as unknown as ConstructorParameters<typeof ExpressionRef>[0]),
+				).else(0),
+				literal(1),
+			).as('n'),
+		])
+		.dump();
+	expect(result.sql).toBe(
+		'SELECT CASE WHEN symbols.id = $1 THEN $2 ELSE 0 END + 1 AS n FROM symbols',
+	);
+	expect(result.params).toEqual([1, value]);
+});
+
+it('FILTER nested in HAVING labels invalid operator refusal FILTER', () => {
+	const condition = {
+		...eq('id', 1),
+		operator: 'invalid',
+	} as unknown as ReturnType<typeof eq>;
+	expect(() =>
+		orm
+			.select('symbols')
+			.groupBy(['id'])
+			.having(fn('count', star()).filter(condition).gt(1))
+			.dump(),
+	).toThrow('No FILTER handler registered for operator: invalid');
+});
