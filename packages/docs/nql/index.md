@@ -1367,7 +1367,7 @@ employees | select name, manager.name, manager.manager.name
 
 ### Recursive Ancestors (CTE)
 
-`managementChain` walks from the immediate manager toward the root. The correlated scalar aggregate tracks non-null referenced keys, refuses cycles and stops at the relation's `maxDepth` (10 here).
+`managementChain` walks from the immediate manager toward the root. The correlated scalar aggregate tracks non-null referenced keys, stops before a node repeats (a cycle returns each node once, without an error) and stops at the relation's `maxDepth` (10 here).
 
 ```nql
 employees | select name, managementChain.*
