@@ -231,9 +231,9 @@ describe('FIX-162: manual join aliases reserve include-generated aliases', () =>
 		expect(sql).not.toMatch(/HAVING length\(file\.path\) > \$1\b/);
 	});
 
-	it('duplicate manual .join() aliases are preserved as user-authored SQL aliases', () => {
+	it('duplicate manual .join() aliases are refused in one scope', () => {
 		const orm = buildOrm();
-		const sql = compact(
+		expect(() =>
 			orm
 				.select('uses')
 				.join('files', {
@@ -244,9 +244,7 @@ describe('FIX-162: manual join aliases reserve include-generated aliases', () =>
 					as: 'dup',
 					on: eq('uses.alt_file_id', exprRef('dup.id')),
 				})
-				.dump().sql,
-		);
-
-		expect(occurrenceCount(sql, /JOIN files AS dup\b/g)).toBe(2);
+				.dump(),
+		).toThrow("Query scope already binds qualifier 'dup'.");
 	});
 });

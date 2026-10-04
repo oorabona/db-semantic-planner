@@ -96,17 +96,10 @@ describe('rawExists / rawNotExists — SELECT pipeline (L103 regression lock)', 
 		expect(sql).toContain('files');
 	});
 
-	/**
-	 * 3. Correlated rawExists with outerRef — NOT YET SUPPORTED. The pipeline
-	 *    throws at decision-time so callers don't get silently-broken SQL
-	 *    (which is what the previous untested path produced — outerRef was
-	 *    parameterized as $N with the SubqueryRefIntent object literal).
-	 *    Tracked for follow-up: wire correlation through buildSubqueryFromIntent
-	 *    by setting up an outerAlias context.
-	 */
-	it('rawExists with outerRef throws "not yet supported" (boundary documented)', () => {
+	/** Explicit rawExists correlation resolves against the enclosing query. */
+	it('rawExists with outerRef keeps outer qualifier', () => {
 		const orm = buildOrm();
-		expect(() =>
+		expect(
 			(orm as any)
 				.select('communities')
 				.where(
@@ -116,8 +109,10 @@ describe('rawExists / rawNotExists — SELECT pipeline (L103 regression lock)', 
 							.select('id'),
 					),
 				)
-				.dump(),
-		).toThrow(/correlated subqueries.*not yet supported/i);
+				.dump().sql,
+		).toBe(
+			'SELECT communities.* FROM communities WHERE EXISTS (SELECT files_sq.id FROM files AS files_sq WHERE files_sq.community_id = communities.id)',
+		);
 	});
 
 	/**
@@ -197,25 +192,22 @@ describe('rawExists / rawNotExists — SELECT pipeline (L103 regression lock)', 
 		expect(sql).toMatch(/OR/i);
 	});
 
-	/**
-	 * 8. Nested rawExists boundary — the inner WhereCompilerCtx's compileSubquery
-	 *    callback throws "nested subquery not supported" by design. This test
-	 *    documents that boundary so any future change to that contract is loud.
-	 */
-	it('nested rawExists throws "nested subquery not supported" (documented boundary)', () => {
+	/** Query WHERE subquery bodies retain their own scope and outer correlation. */
+	it('nested rawExists on the same table allocates unique aliases', () => {
 		const orm = buildOrm();
-		expect(() =>
-			(orm as any)
-				.select('communities')
-				.where(
-					rawExists(
-						subquery('files')
-							.where(rawExists(subquery('files').select('id')))
-							.select('id'),
-					),
-				)
-				.dump(),
-		).toThrow(/nested subquery not supported/i);
-		// (kept multi-line: nested method-chain readability > biome single-line preference)
+		const result = (orm as any)
+			.select('communities')
+			.where(
+				rawExists(
+					subquery('files')
+						.where(rawExists(subquery('files').select('id')))
+						.select('id'),
+				),
+			)
+			.dump();
+		expect(result.sql).toBe(
+			'SELECT communities.* FROM communities WHERE EXISTS (SELECT files_sq.id FROM files AS files_sq WHERE EXISTS (SELECT files_sq_1.id FROM files AS files_sq_1))',
+		);
+		expect(result.params).toEqual([]);
 	});
 });

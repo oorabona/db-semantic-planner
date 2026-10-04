@@ -20,7 +20,7 @@
 			"position": "scalar-subquery-body",
 			"kind": "range-overlaps",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period && $1)",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period && CAST($1 AS daterange))",
 			"params": ["[2026-01-01,2026-02-01)"],
 			"error": null
 		},
@@ -28,7 +28,7 @@
 			"position": "scalar-subquery-body",
 			"kind": "range-overlaps",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period && $1 AND posts_subq_0.score = $2)",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period && CAST($1 AS daterange) AND posts_subq_0.score = $2)",
 			"params": ["[2026-01-01,2026-02-01)", 13],
 			"error": null
 		},
@@ -36,7 +36,7 @@
 			"position": "scalar-subquery-body",
 			"kind": "range-overlaps",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period && $1 OR posts_subq_0.score = $2)",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period && CAST($1 AS daterange) OR posts_subq_0.score = $2)",
 			"params": ["[2026-01-01,2026-02-01)", 13],
 			"error": null
 		},
@@ -44,7 +44,7 @@
 			"position": "scalar-subquery-body",
 			"kind": "range-overlaps",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE NOT (posts_subq_0.period && $1))",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE NOT (posts_subq_0.period && CAST($1 AS daterange)))",
 			"params": ["[2026-01-01,2026-02-01)"],
 			"error": null
 		},
@@ -52,7 +52,7 @@
 			"position": "scalar-subquery-body",
 			"kind": "range-overlaps",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 AND (NOT (posts_subq_0.period && $2) OR posts_subq_0.score = $3))",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 AND (NOT (posts_subq_0.period && CAST($2 AS daterange)) OR posts_subq_0.score = $3))",
 			"params": [13, "[2026-01-01,2026-02-01)", 17],
 			"error": null
 		},
@@ -60,7 +60,7 @@
 			"position": "scalar-subquery-body",
 			"kind": "range-contains",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period @> $1)",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period @> CAST($1 AS daterange))",
 			"params": ["[2026-01-01,2026-02-01)"],
 			"error": null
 		},
@@ -68,7 +68,7 @@
 			"position": "scalar-subquery-body",
 			"kind": "range-contains",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period @> $1 AND posts_subq_0.score = $2)",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period @> CAST($1 AS daterange) AND posts_subq_0.score = $2)",
 			"params": ["[2026-01-01,2026-02-01)", 13],
 			"error": null
 		},
@@ -76,7 +76,7 @@
 			"position": "scalar-subquery-body",
 			"kind": "range-contains",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period @> $1 OR posts_subq_0.score = $2)",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period @> CAST($1 AS daterange) OR posts_subq_0.score = $2)",
 			"params": ["[2026-01-01,2026-02-01)", 13],
 			"error": null
 		},
@@ -84,7 +84,7 @@
 			"position": "scalar-subquery-body",
 			"kind": "range-contains",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE NOT (posts_subq_0.period @> $1))",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE NOT (posts_subq_0.period @> CAST($1 AS daterange)))",
 			"params": ["[2026-01-01,2026-02-01)"],
 			"error": null
 		},
@@ -92,7 +92,7 @@
 			"position": "scalar-subquery-body",
 			"kind": "range-contains",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 AND (NOT (posts_subq_0.period @> $2) OR posts_subq_0.score = $3))",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 AND (NOT (posts_subq_0.period @> CAST($2 AS daterange)) OR posts_subq_0.score = $3))",
 			"params": [13, "[2026-01-01,2026-02-01)", 17],
 			"error": null
 		},
@@ -100,7 +100,7 @@
 			"position": "scalar-subquery-body",
 			"kind": "range-contains-point",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period @> $1)",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period @> CAST($1 AS date))",
 			"params": ["2026-01-15"],
 			"error": null
 		},
@@ -108,7 +108,7 @@
 			"position": "scalar-subquery-body",
 			"kind": "range-contains-point",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period @> $1 AND posts_subq_0.score = $2)",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period @> CAST($1 AS date) AND posts_subq_0.score = $2)",
 			"params": ["2026-01-15", 13],
 			"error": null
 		},
@@ -116,7 +116,7 @@
 			"position": "scalar-subquery-body",
 			"kind": "range-contains-point",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period @> $1 OR posts_subq_0.score = $2)",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period @> CAST($1 AS date) OR posts_subq_0.score = $2)",
 			"params": ["2026-01-15", 13],
 			"error": null
 		},
@@ -124,7 +124,7 @@
 			"position": "scalar-subquery-body",
 			"kind": "range-contains-point",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE NOT (posts_subq_0.period @> $1))",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE NOT (posts_subq_0.period @> CAST($1 AS date)))",
 			"params": ["2026-01-15"],
 			"error": null
 		},
@@ -132,7 +132,7 @@
 			"position": "scalar-subquery-body",
 			"kind": "range-contains-point",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 AND (NOT (posts_subq_0.period @> $2) OR posts_subq_0.score = $3))",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 AND (NOT (posts_subq_0.period @> CAST($2 AS date)) OR posts_subq_0.score = $3))",
 			"params": [13, "2026-01-15", 17],
 			"error": null
 		},
@@ -140,7 +140,7 @@
 			"position": "scalar-subquery-body",
 			"kind": "range-containedBy",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period <@ $1)",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period <@ CAST($1 AS daterange))",
 			"params": ["[2026-01-01,2026-02-01)"],
 			"error": null
 		},
@@ -148,7 +148,7 @@
 			"position": "scalar-subquery-body",
 			"kind": "range-containedBy",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period <@ $1 AND posts_subq_0.score = $2)",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period <@ CAST($1 AS daterange) AND posts_subq_0.score = $2)",
 			"params": ["[2026-01-01,2026-02-01)", 13],
 			"error": null
 		},
@@ -156,7 +156,7 @@
 			"position": "scalar-subquery-body",
 			"kind": "range-containedBy",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period <@ $1 OR posts_subq_0.score = $2)",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.period <@ CAST($1 AS daterange) OR posts_subq_0.score = $2)",
 			"params": ["[2026-01-01,2026-02-01)", 13],
 			"error": null
 		},
@@ -164,7 +164,7 @@
 			"position": "scalar-subquery-body",
 			"kind": "range-containedBy",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE NOT (posts_subq_0.period <@ $1))",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE NOT (posts_subq_0.period <@ CAST($1 AS daterange)))",
 			"params": ["[2026-01-01,2026-02-01)"],
 			"error": null
 		},
@@ -172,7 +172,7 @@
 			"position": "scalar-subquery-body",
 			"kind": "range-containedBy",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 AND (NOT (posts_subq_0.period <@ $2) OR posts_subq_0.score = $3))",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 AND (NOT (posts_subq_0.period <@ CAST($2 AS daterange)) OR posts_subq_0.score = $3))",
 			"params": [13, "[2026-01-01,2026-02-01)", 17],
 			"error": null
 		},
@@ -508,7 +508,7 @@
 			"position": "scalar-subquery-body",
 			"kind": "rawExists-range",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $1))",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($1 AS daterange)))",
 			"params": ["[2026-01-01,2026-02-01)"],
 			"error": null
 		},
@@ -516,7 +516,7 @@
 			"position": "scalar-subquery-body",
 			"kind": "rawExists-range",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $1) AND posts_subq_0.score = $2)",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($1 AS daterange)) AND posts_subq_0.score = $2)",
 			"params": ["[2026-01-01,2026-02-01)", 13],
 			"error": null
 		},
@@ -524,7 +524,7 @@
 			"position": "scalar-subquery-body",
 			"kind": "rawExists-range",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $1) OR posts_subq_0.score = $2)",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($1 AS daterange)) OR posts_subq_0.score = $2)",
 			"params": ["[2026-01-01,2026-02-01)", 13],
 			"error": null
 		},
@@ -532,7 +532,7 @@
 			"position": "scalar-subquery-body",
 			"kind": "rawExists-range",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $1)))",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($1 AS daterange))))",
 			"params": ["[2026-01-01,2026-02-01)"],
 			"error": null
 		},
@@ -540,7 +540,7 @@
 			"position": "scalar-subquery-body",
 			"kind": "rawExists-range",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $2)) OR posts_subq_0.score = $3))",
+			"sql": "SELECT users.* FROM users WHERE users.score = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($2 AS daterange))) OR posts_subq_0.score = $3))",
 			"params": [13, "[2026-01-01,2026-02-01)", 17],
 			"error": null
 		},
@@ -710,7 +710,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'comments.user_id' is absent from the physical model."
+			"error": "WHERE exists('comments'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "scalar-subquery-body",
@@ -718,7 +718,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'comments.user_id' is absent from the physical model."
+			"error": "WHERE exists('comments'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "scalar-subquery-body",
@@ -726,7 +726,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'comments.user_id' is absent from the physical model."
+			"error": "WHERE exists('comments'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "scalar-subquery-body",
@@ -734,7 +734,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'comments.user_id' is absent from the physical model."
+			"error": "WHERE exists('comments'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "scalar-subquery-body",
@@ -742,7 +742,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'comments.user_id' is absent from the physical model."
+			"error": "WHERE exists('comments'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "scalar-subquery-body",
@@ -750,7 +750,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'comments.user_id' is absent from the physical model."
+			"error": "WHERE exists('comments'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "scalar-subquery-body",
@@ -758,7 +758,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'comments.user_id' is absent from the physical model."
+			"error": "WHERE exists('comments'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "scalar-subquery-body",
@@ -766,7 +766,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'comments.user_id' is absent from the physical model."
+			"error": "WHERE exists('comments'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "scalar-subquery-body",
@@ -774,7 +774,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'comments.user_id' is absent from the physical model."
+			"error": "WHERE exists('comments'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "scalar-subquery-body",
@@ -782,7 +782,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'comments.user_id' is absent from the physical model."
+			"error": "WHERE exists('comments'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "scalar-subquery-body",
@@ -790,7 +790,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'comments.user_id' is absent from the physical model."
+			"error": "WHERE notExists('comments'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "scalar-subquery-body",
@@ -798,7 +798,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'comments.user_id' is absent from the physical model."
+			"error": "WHERE notExists('comments'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "scalar-subquery-body",
@@ -806,7 +806,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'comments.user_id' is absent from the physical model."
+			"error": "WHERE notExists('comments'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "scalar-subquery-body",
@@ -814,7 +814,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'comments.user_id' is absent from the physical model."
+			"error": "WHERE notExists('comments'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "scalar-subquery-body",
@@ -822,7 +822,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'comments.user_id' is absent from the physical model."
+			"error": "WHERE notExists('comments'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "scalar-subquery-body",
@@ -830,7 +830,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'comments.user_id' is absent from the physical model."
+			"error": "WHERE notExists('comments'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "scalar-subquery-body",
@@ -838,7 +838,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'comments.user_id' is absent from the physical model."
+			"error": "WHERE notExists('comments'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "scalar-subquery-body",
@@ -846,7 +846,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'comments.user_id' is absent from the physical model."
+			"error": "WHERE notExists('comments'): recursive relation predicates are not supported inside WHERE."
 		}
 	]
 }

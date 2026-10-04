@@ -528,6 +528,16 @@ export function containsOuterRef(where: unknown): boolean {
 	return false;
 }
 
+/** SELECT expressions cannot yet bind an outer query's range. */
+export function assertNoSelectExpressionCorrelation(query: QueryIntent): void {
+	if (containsOuterRef(query)) {
+		throw new Error(
+			'Correlated subqueries are not supported in SELECT expressions — ' +
+				'use an uncorrelated subquery or a .join() with groupBy and an aggregate.',
+		);
+	}
+}
+
 /** Handle kind: 'comparison' — field OP value */
 function convertComparison(
 	cond: FlatWhereFields,
