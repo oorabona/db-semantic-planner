@@ -57,9 +57,9 @@ An include `where` is accepted only when the include compiles as a join, and it 
 Pass an options object as the second argument to filter, project, or disambiguate the include:
 
 ```typescript
-// Keep users with a published post
-const usersFiltered = await orm.select('users')
-  .include('posts', { join: 'inner', where: eq('published', true) })
+// Keep posts by Alice
+const postsFiltered = await orm.select('posts')
+  .include('author', { join: 'inner', where: eq('name', 'Alice') })
   .dump();
 
 // Select specific columns on the relation
@@ -80,12 +80,12 @@ Include `select` support by strategy:
 | Strategy | Supported select forms |
 |----------|------------------------|
 | `json_agg` | `fields` (including an empty list) and `all`; other forms, including `expressions` and `aggregate`, are refused |
-| `join` | Omitted `select` or field selections; `all` and fields `['*']` are refused |
+| `join` | To-one only: omitted `select`, `all`, or explicit fields; fields `['*']` are refused |
 | `cte` | Omitted `select` only; any explicit `select` is refused |
 | `lateral` | All columns only: omitted select, `all`, or fields `['*']` |
 
-Join includes honour field selections by projecting the requested fields plus the primary key, and omitted `select` retains its existing projection.
-Join includes accept only omitted `select` or `select: { type: 'fields', fields: [...] }` with plain column names and no `'*'`.
+A to-one join include with omitted `select` or `select: { type: 'all' }` returns every target column, enumerated with `"relation.column"` transport labels and declared public keys. Explicit field selection returns exactly those fields, with no unrequested primary key. A private presence marker distinguishes an existing row of null values from a missing row; hydration removes it. To-many join includes are refused at planning and compilation, including join hints and defaults. Use `.join()`, NQL `| flat`, or a `json_agg`/`lateral` include instead.
+To-one join includes accept omitted `select`, `select: { type: 'all' }`, or `select: { type: 'fields', fields: [...] }` with plain column names and no `'*'`.
 CTE includes refuse any explicit `select` with the include path because they add no related targets to the outer `SELECT`.
 
 ### Include Options Reference
@@ -179,7 +179,7 @@ and `users | select id, posts.title | limit posts 5` retain their behaviour.
 
 Every resolved include, including camelCase names for snake_case relations, is
 validated during planning. Include `select` forms are checked during planning:
-`json_agg` accepts fields or all columns, `lateral` accepts only all columns, `join` accepts plain fields,
+`json_agg` accepts fields or all columns, `lateral` accepts only all columns, `join` accepts all columns or plain fields for to-one relations,
 and `cte` refuses explicit selection. Mixed wildcard lists such as `['*', 'id']`
 are refused for every strategy; `['*']` is the all-columns form. Both `json_agg`
 and `lateral` limit rows per parent. Refusals identify the full nested include path.

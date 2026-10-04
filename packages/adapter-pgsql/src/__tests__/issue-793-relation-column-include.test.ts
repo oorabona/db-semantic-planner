@@ -20,7 +20,7 @@ const db = schema({
 		lastName: 'string',
 		// NQL currently validates a multi-hop leaf against the first-hop table.
 		path: 'string',
-		file_id: ref('files', { as: 'file', inverse: 'users' }),
+		file_id: ref('files', { as: 'file', inverse: 'users', unique: true }),
 	},
 	posts: {
 		id: { type: 'integer', primaryKey: true },
@@ -64,7 +64,7 @@ describe('#793 exact include consumption', () => {
 			.columns([relationColumn('author', 'name', 'authorName')])
 			.dump();
 		expect(result.sql).toBe(
-			'SELECT author.name AS "author.authorName" FROM posts LEFT JOIN users AS author ON posts.author_id = author.id',
+			'SELECT author.name AS "author.authorName", author.id AS __dbsp_presence_author FROM posts LEFT JOIN users AS author ON posts.author_id = author.id',
 		);
 		expect('params' in result && result.params).toEqual([]);
 	});
@@ -74,7 +74,9 @@ describe('#793 exact include consumption', () => {
 				? orm.nql`posts | select *, author.file.path as fp | flat`.dump()
 				: orm.nql`posts | select *, author.file.path as fp`.dump();
 			expect(result.sql).toBe(
-				'SELECT posts.*, file.path AS fp FROM posts JOIN users AS author ON posts.author_id = author.id JOIN files AS file ON author.file_id = file.id',
+				flat
+					? 'SELECT posts.*, file.path AS fp FROM posts JOIN users AS author ON posts.author_id = author.id JOIN files AS file ON author.file_id = file.id'
+					: 'SELECT posts.*, author.id AS __dbsp_presence_author, file.path AS fp, file.id AS "__dbsp_presence_author.file" FROM posts JOIN users AS author ON posts.author_id = author.id JOIN files AS file ON author.file_id = file.id',
 			);
 			expect('params' in result && result.params).toEqual([]);
 		});
@@ -82,7 +84,7 @@ describe('#793 exact include consumption', () => {
 	it('preserves NQL same-path SQL and params', () => {
 		const result = orm.nql`posts | select *, author.name`.dump();
 		expect(result.sql).toBe(
-			'SELECT posts.*, author.name AS "author.name" FROM posts JOIN users AS author ON posts.author_id = author.id',
+			'SELECT posts.*, author.name AS "author.name", author.id AS __dbsp_presence_author FROM posts JOIN users AS author ON posts.author_id = author.id',
 		);
 		expect('params' in result && result.params).toEqual([]);
 	});
@@ -92,8 +94,8 @@ const nestedSql = {
 	json_agg:
 		"SELECT COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'name', __t__.name, 'firstName', __t__.\"firstName\", 'lastName', __t__.\"lastName\", 'path', __t__.path, 'file_id', __t__.file_id) || jsonb_build_object('file', COALESCE((SELECT json_agg(jsonb_build_object('fp', __t1__.path) ORDER BY __t1__.id ASC NULLS LAST) FROM files AS __t1__ WHERE __t1__.id = __t__.file_id), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST) FROM users AS __t__ WHERE __t__.id = posts.author_id), '[]'::json) AS author_json FROM posts",
 	lateral:
-		'SELECT users_lat_0.id AS "author.id", users_lat_0.name AS "author.name", users_lat_0."firstName" AS "author.firstName", users_lat_0."lastName" AS "author.lastName", users_lat_0.path AS "author.path", users_lat_0.file_id AS "author.file_id", files_lat_1.path AS "author.file.fp" FROM posts LEFT JOIN LATERAL (SELECT users_inner_0.id, users_inner_0.name, users_inner_0."firstName", users_inner_0."lastName", users_inner_0.path, users_inner_0.file_id FROM users AS users_inner_0 WHERE users_inner_0.id = posts.author_id) AS users_lat_0 ON true LEFT JOIN LATERAL (SELECT files_inner_1.path FROM files AS files_inner_1 WHERE files_inner_1.id = users_lat_0.file_id) AS files_lat_1 ON true',
-	join: 'SELECT file.path AS "author.file.fp" FROM posts JOIN users AS author ON posts.author_id = author.id JOIN files AS file ON author.file_id = file.id',
+		'SELECT users_lat_0.id AS "author.id", users_lat_0.name AS "author.name", users_lat_0."firstName" AS "author.firstName", users_lat_0."lastName" AS "author.lastName", users_lat_0.path AS "author.path", users_lat_0.file_id AS "author.file_id", users_lat_0.__dbsp_presence_author AS __dbsp_presence_author, files_lat_1.path AS "author.file.fp", files_lat_1."__dbsp_presence_author.file" AS "__dbsp_presence_author.file" FROM posts LEFT JOIN LATERAL (SELECT users_inner_0.id, users_inner_0.name, users_inner_0."firstName", users_inner_0."lastName", users_inner_0.path, users_inner_0.file_id, users_inner_0.id AS __dbsp_presence_author FROM users AS users_inner_0 WHERE users_inner_0.id = posts.author_id) AS users_lat_0 ON true LEFT JOIN LATERAL (SELECT files_inner_1.path, files_inner_1.id AS "__dbsp_presence_author.file" FROM files AS files_inner_1 WHERE files_inner_1.id = users_lat_0.file_id) AS files_lat_1 ON true',
+	join: 'SELECT author.id AS __dbsp_presence_author, file.path AS "author.file.fp", file.id AS "__dbsp_presence_author.file" FROM posts JOIN users AS author ON posts.author_id = author.id JOIN files AS file ON author.file_id = file.id',
 };
 for (const strategy of ['json_agg', 'lateral', 'join'] as const) {
 	const nested = (column: string) =>
@@ -118,8 +120,8 @@ const thirdDepthSql = {
 	json_agg:
 		"SELECT COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'name', __t__.name, 'firstName', __t__.\"firstName\", 'lastName', __t__.\"lastName\", 'path', __t__.path, 'file_id', __t__.file_id) || jsonb_build_object('file', COALESCE((SELECT json_agg(jsonb_build_object('id', __t1__.id, 'path', __t1__.path) || jsonb_build_object('users', COALESCE((SELECT json_agg(jsonb_build_object('nestedName', __t2__.name) ORDER BY __t2__.id ASC NULLS LAST) FROM users AS __t2__ WHERE __t2__.file_id = __t1__.id), '[]'::json)) ORDER BY __t1__.id ASC NULLS LAST) FROM files AS __t1__ WHERE __t1__.id = __t__.file_id), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST) FROM users AS __t__ WHERE __t__.id = posts.author_id), '[]'::json) AS author_json FROM posts",
 	lateral:
-		'SELECT users_lat_0.id AS "author.id", users_lat_0.name AS "author.name", users_lat_0."firstName" AS "author.firstName", users_lat_0."lastName" AS "author.lastName", users_lat_0.path AS "author.path", users_lat_0.file_id AS "author.file_id", files_lat_1.id AS "author.file.id", files_lat_1.path AS "author.file.path", users_lat_2.name AS "author.file.users.nestedName" FROM posts LEFT JOIN LATERAL (SELECT users_inner_0.id, users_inner_0.name, users_inner_0."firstName", users_inner_0."lastName", users_inner_0.path, users_inner_0.file_id FROM users AS users_inner_0 WHERE users_inner_0.id = posts.author_id) AS users_lat_0 ON true LEFT JOIN LATERAL (SELECT files_inner_1.id, files_inner_1.path FROM files AS files_inner_1 WHERE files_inner_1.id = users_lat_0.file_id) AS files_lat_1 ON true LEFT JOIN LATERAL (SELECT users_inner_2.name FROM users AS users_inner_2 WHERE users_inner_2.file_id = files_lat_1.id) AS users_lat_2 ON true',
-	join: 'SELECT users.name AS "author.file.users.nestedName" FROM posts JOIN users AS author ON posts.author_id = author.id JOIN files AS file ON author.file_id = file.id LEFT JOIN users AS users ON file.id = users.file_id',
+		'SELECT users_lat_0.id AS "author.id", users_lat_0.name AS "author.name", users_lat_0."firstName" AS "author.firstName", users_lat_0."lastName" AS "author.lastName", users_lat_0.path AS "author.path", users_lat_0.file_id AS "author.file_id", users_lat_0.__dbsp_presence_author AS __dbsp_presence_author, files_lat_1.id AS "author.file.id", files_lat_1.path AS "author.file.path", files_lat_1."__dbsp_presence_author.file" AS "__dbsp_presence_author.file", users_lat_2.name AS "author.file.users.nestedName", users_lat_2."__dbsp_presence_author.file.users" AS "__dbsp_presence_author.file.users" FROM posts LEFT JOIN LATERAL (SELECT users_inner_0.id, users_inner_0.name, users_inner_0."firstName", users_inner_0."lastName", users_inner_0.path, users_inner_0.file_id, users_inner_0.id AS __dbsp_presence_author FROM users AS users_inner_0 WHERE users_inner_0.id = posts.author_id) AS users_lat_0 ON true LEFT JOIN LATERAL (SELECT files_inner_1.id, files_inner_1.path, files_inner_1.id AS "__dbsp_presence_author.file" FROM files AS files_inner_1 WHERE files_inner_1.id = users_lat_0.file_id) AS files_lat_1 ON true LEFT JOIN LATERAL (SELECT users_inner_2.name, users_inner_2.id AS "__dbsp_presence_author.file.users" FROM users AS users_inner_2 WHERE users_inner_2.file_id = files_lat_1.id) AS users_lat_2 ON true',
+	join: 'SELECT author.id AS __dbsp_presence_author, file.id AS "__dbsp_presence_author.file", users.name AS "author.file.users.nestedName", users.id AS "__dbsp_presence_author.file.users" FROM posts JOIN users AS author ON posts.author_id = author.id JOIN files AS file ON author.file_id = file.id LEFT JOIN users AS users ON file.id = users.file_id',
 };
 for (const strategy of ['json_agg', 'lateral', 'join'] as const) {
 	it(`third-depth ${strategy} projection`, () => {
@@ -194,7 +196,7 @@ it('preserves a one-hop lateral alias', () => {
 		.columns([relationColumn('author', 'name', 'authorName')])
 		.dump();
 	expect(result.sql).toBe(
-		'SELECT users_lat_0.name AS "author.authorName" FROM posts LEFT JOIN LATERAL (SELECT users_inner_0.name FROM users AS users_inner_0 WHERE users_inner_0.id = posts.author_id) AS users_lat_0 ON true',
+		'SELECT users_lat_0.name AS "author.authorName", users_lat_0.__dbsp_presence_author AS __dbsp_presence_author FROM posts LEFT JOIN LATERAL (SELECT users_inner_0.name, users_inner_0.id AS __dbsp_presence_author FROM users AS users_inner_0 WHERE users_inner_0.id = posts.author_id) AS users_lat_0 ON true',
 	);
 	expect('params' in result && result.params).toEqual([]);
 });
@@ -223,7 +225,7 @@ it('deduplicates the same relation source column and alias', () => {
 		])
 		.dump();
 	expect(result.sql).toBe(
-		'SELECT users_lat_0.name AS "author.a" FROM posts LEFT JOIN LATERAL (SELECT users_inner_0.name FROM users AS users_inner_0 WHERE users_inner_0.id = posts.author_id) AS users_lat_0 ON true',
+		'SELECT users_lat_0.name AS "author.a", users_lat_0.__dbsp_presence_author AS __dbsp_presence_author FROM posts LEFT JOIN LATERAL (SELECT users_inner_0.name, users_inner_0.id AS __dbsp_presence_author FROM users AS users_inner_0 WHERE users_inner_0.id = posts.author_id) AS users_lat_0 ON true',
 	);
 	expect('params' in result && result.params).toEqual([]);
 });
@@ -349,7 +351,7 @@ it('retains correlation keys needed by nested lateral consumers', () => {
 		])
 		.dump();
 	expect(result.sql).toBe(
-		'SELECT users_lat_0.name AS "author.authorName", files_lat_1.path AS "author.file.fp" FROM posts LEFT JOIN LATERAL (SELECT users_inner_0.name, users_inner_0.file_id FROM users AS users_inner_0 WHERE users_inner_0.id = posts.author_id) AS users_lat_0 ON true LEFT JOIN LATERAL (SELECT files_inner_1.path FROM files AS files_inner_1 WHERE files_inner_1.id = users_lat_0.file_id) AS files_lat_1 ON true',
+		'SELECT users_lat_0.name AS "author.authorName", users_lat_0.__dbsp_presence_author AS __dbsp_presence_author, files_lat_1.path AS "author.file.fp", files_lat_1."__dbsp_presence_author.file" AS "__dbsp_presence_author.file" FROM posts LEFT JOIN LATERAL (SELECT users_inner_0.name, users_inner_0.file_id, users_inner_0.id AS __dbsp_presence_author FROM users AS users_inner_0 WHERE users_inner_0.id = posts.author_id) AS users_lat_0 ON true LEFT JOIN LATERAL (SELECT files_inner_1.path, files_inner_1.id AS "__dbsp_presence_author.file" FROM files AS files_inner_1 WHERE files_inner_1.id = users_lat_0.file_id) AS files_lat_1 ON true',
 	);
 });
 
@@ -413,7 +415,7 @@ it('returns both public aliases of one source without ambiguous lateral columns'
 		])
 		.dump();
 	expect(result.sql).toBe(
-		'SELECT users_lat_0.name AS "author.a", users_lat_0.name AS "author.b" FROM posts LEFT JOIN LATERAL (SELECT users_inner_0.name FROM users AS users_inner_0 WHERE users_inner_0.id = posts.author_id) AS users_lat_0 ON true',
+		'SELECT users_lat_0.name AS "author.a", users_lat_0.name AS "author.b", users_lat_0.__dbsp_presence_author AS __dbsp_presence_author FROM posts LEFT JOIN LATERAL (SELECT users_inner_0.name, users_inner_0.id AS __dbsp_presence_author FROM users AS users_inner_0 WHERE users_inner_0.id = posts.author_id) AS users_lat_0 ON true',
 	);
 });
 
@@ -447,6 +449,6 @@ it('retains correlation keys when a root lateral payload is projected', () => {
 		.columns([relationColumn('author', 'name', 'authorName')])
 		.dump();
 	expect(result.sql).toBe(
-		'SELECT users_lat_0.name AS "author.authorName", files_lat_1.id AS "author.file.id", files_lat_1.path AS "author.file.path" FROM posts LEFT JOIN LATERAL (SELECT users_inner_0.name, users_inner_0.file_id FROM users AS users_inner_0 WHERE users_inner_0.id = posts.author_id) AS users_lat_0 ON true LEFT JOIN LATERAL (SELECT files_inner_1.id, files_inner_1.path FROM files AS files_inner_1 WHERE files_inner_1.id = users_lat_0.file_id) AS files_lat_1 ON true',
+		'SELECT users_lat_0.name AS "author.authorName", users_lat_0.__dbsp_presence_author AS __dbsp_presence_author, files_lat_1.id AS "author.file.id", files_lat_1.path AS "author.file.path", files_lat_1."__dbsp_presence_author.file" AS "__dbsp_presence_author.file" FROM posts LEFT JOIN LATERAL (SELECT users_inner_0.name, users_inner_0.file_id, users_inner_0.id AS __dbsp_presence_author FROM users AS users_inner_0 WHERE users_inner_0.id = posts.author_id) AS users_lat_0 ON true LEFT JOIN LATERAL (SELECT files_inner_1.id, files_inner_1.path, files_inner_1.id AS "__dbsp_presence_author.file" FROM files AS files_inner_1 WHERE files_inner_1.id = users_lat_0.file_id) AS files_lat_1 ON true',
 	);
 });

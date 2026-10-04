@@ -574,6 +574,7 @@ describe('Semantic Planner', () => {
 				select: { type: 'fields', fields: ['name'] },
 				include: [
 					{
+						strategy: 'flat',
 						relation: 'products',
 						where: {
 							kind: 'comparison',
@@ -582,7 +583,7 @@ describe('Semantic Planner', () => {
 							value: true,
 						},
 					},
-					{ relation: 'products' },
+					{ strategy: 'flat', relation: 'products' },
 				],
 			};
 
@@ -597,7 +598,7 @@ describe('Semantic Planner', () => {
 			const intent: QueryIntent = {
 				type: 'select',
 				from: 'categories',
-				include: [{ relation: 'products' }],
+				include: [{ strategy: 'flat', relation: 'products' }],
 			};
 
 			const report = plan(intent, q2Schema, {
@@ -612,7 +613,10 @@ describe('Semantic Planner', () => {
 			const intent: QueryIntent = {
 				type: 'select',
 				from: 'categories',
-				include: [{ relation: 'products' }, { relation: 'products' }],
+				include: [
+					{ strategy: 'flat', relation: 'products' },
+					{ strategy: 'flat', relation: 'products' },
+				],
 			};
 
 			const report = plan(intent, q2Schema, { enableCTEs: false });
@@ -624,7 +628,10 @@ describe('Semantic Planner', () => {
 			const intent: QueryIntent = {
 				type: 'select',
 				from: 'categories',
-				include: [{ relation: 'products' }, { relation: 'products' }],
+				include: [
+					{ strategy: 'flat', relation: 'products' },
+					{ strategy: 'flat', relation: 'products' },
+				],
 			};
 
 			const report = plan(intent, q2Schema, { enableCTEs: true });
@@ -676,7 +683,7 @@ describe('Semantic Planner', () => {
 			const intent: QueryIntent = {
 				type: 'select',
 				from: 'users',
-				include: [{ relation: 'posts', via: 'createdPosts' }],
+				include: [{ strategy: 'flat', relation: 'posts', via: 'createdPosts' }],
 			};
 
 			const report = plan(intent, q3Schema);
@@ -687,7 +694,7 @@ describe('Semantic Planner', () => {
 			const intent: QueryIntent = {
 				type: 'select',
 				from: 'users',
-				include: [{ relation: 'posts' }],
+				include: [{ strategy: 'flat', relation: 'posts' }],
 			};
 
 			const report = plan(intent, q3Schema, {
@@ -701,7 +708,7 @@ describe('Semantic Planner', () => {
 			const intent: QueryIntent = {
 				type: 'select',
 				from: 'users',
-				include: [{ relation: 'createdPosts' }],
+				include: [{ strategy: 'flat', relation: 'createdPosts' }],
 			};
 
 			const report = plan(intent, q3Schema);
@@ -736,7 +743,7 @@ describe('Semantic Planner', () => {
 			const intent: QueryIntent = {
 				type: 'select',
 				from: 'categories',
-				include: [{ relation: 'products' }],
+				include: [{ strategy: 'flat', relation: 'products' }],
 			};
 
 			const report = plan(intent, q2Schema);
@@ -966,11 +973,13 @@ describe('Semantic Planner', () => {
 				from: 'roots',
 				include: [
 					{
+						strategy: 'flat',
 						relation: 'betas',
 						include: [
 							{
+								strategy: 'flat',
 								relation: 'gammas',
-								include: [{ relation: 'deltas' }],
+								include: [{ strategy: 'flat', relation: 'deltas' }],
 							},
 						],
 					},
@@ -1009,12 +1018,14 @@ describe('Semantic Planner', () => {
 				from: 'roots',
 				include: [
 					{
+						strategy: 'flat',
 						relation: 'betas',
 						include: [
 							{
+								strategy: 'flat',
 								relation: 'gammas',
 								join: 'inner',
-								include: [{ relation: 'deltas' }],
+								include: [{ strategy: 'flat', relation: 'deltas' }],
 							},
 						],
 					},
@@ -1057,8 +1068,9 @@ describe('Semantic Planner', () => {
 				from: 'categories',
 				include: [
 					{
+						strategy: 'flat',
 						relation: 'products',
-						include: [{ relation: 'category' }],
+						include: [{ strategy: 'flat', relation: 'category' }],
 					},
 				],
 			};
@@ -1118,9 +1130,11 @@ describe('Semantic Planner', () => {
 				from: 'categories',
 				include: [
 					{
+						strategy: 'flat',
 						relation: 'products', // depth 0 - this is fine
 						include: [
 							{
+								strategy: 'flat',
 								relation: 'category', // depth 1 - exceeds maxIncludeDepth: 0
 							},
 						],
@@ -1145,11 +1159,13 @@ describe('Semantic Planner', () => {
 				from: 'categories',
 				include: [
 					{
+						strategy: 'flat',
 						relation: 'products',
 						include: [
 							{
+								strategy: 'flat',
 								relation: 'category',
-								include: [{ relation: 'products' }],
+								include: [{ strategy: 'flat', relation: 'products' }],
 							},
 						],
 					},
@@ -1172,7 +1188,10 @@ describe('Semantic Planner', () => {
 			const intent: QueryIntent = {
 				type: 'select',
 				from: 'categories',
-				include: [{ relation: 'products' }, { relation: 'products' }],
+				include: [
+					{ strategy: 'flat', relation: 'products' },
+					{ strategy: 'flat', relation: 'products' },
+				],
 			};
 
 			const report = plan(intent, q2Schema);
@@ -1186,7 +1205,7 @@ describe('Semantic Planner', () => {
 			const intent: QueryIntent = {
 				type: 'select',
 				from: 'categories',
-				include: [{ relation: 'products' }],
+				include: [{ strategy: 'flat', relation: 'products' }],
 			};
 
 			const report = plan(intent, q2Schema);

@@ -1293,6 +1293,15 @@ function processInclude(
 			`Include ${optionPath} select must select all columns with '${includeStrategy}' strategy`,
 		);
 
+	if (
+		includeStrategy === 'join' &&
+		relation.type === 'hasMany' &&
+		include.strategy !== 'flat'
+	)
+		throw new InvalidOperationError(
+			'include',
+			`Include ${optionPath} cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include.`,
+		);
 	// Pre-compute join type for include-strategy decision embedding
 	// (only relevant when strategy is 'join')
 	// When an ancestor used LEFT JOIN (optional relation), cascade LEFT to preserve
@@ -1399,6 +1408,7 @@ function processInclude(
 					includeStrategy,
 					opts.dialectCapabilities,
 					include,
+					relation,
 				),
 	});
 
@@ -1811,11 +1821,12 @@ export class UnsupportedStrategyError extends Error {
 	}
 }
 
-/** Join includes honour only omitted select or plain field selections. */
+/** Join includes honour omitted select, all, or plain field selections. */
 function supportsJoinIncludeSelect(include: IncludeIntent): boolean {
 	const select = include.select;
 	return (
 		select === undefined ||
+		select.type === 'all' ||
 		(select.type === 'fields' && !select.fields.includes('*'))
 	);
 }
@@ -1837,6 +1848,7 @@ function getAlternativeStrategies(
 	strategy: ResolvedIncludeStrategy,
 	capabilities: DialectCapabilities | undefined,
 	include: IncludeIntent,
+	relation: RelationIR,
 ): string[] {
 	const allStrategies: ResolvedIncludeStrategy[] =
 		include.strategy === 'flat'
@@ -1846,6 +1858,12 @@ function getAlternativeStrategies(
 	// Filter out current strategy and unsupported ones
 	return allStrategies.filter((s) => {
 		if (s === strategy) return false;
+		if (
+			s === 'join' &&
+			relation.type === 'hasMany' &&
+			include.strategy !== 'flat'
+		)
+			return false;
 		if (include.join !== undefined && s !== 'join') return false;
 		if (include.where && s !== 'join') return false;
 		if (

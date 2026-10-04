@@ -17,11 +17,17 @@ for (const relation of ['r'.repeat(62)])
 					roots: { id: { type: 'integer', primaryKey: true } },
 					children: {
 						id: { type: 'integer', primaryKey: true },
-						rootId: ref('roots', { inverse: relation }),
+						rootId: ref('roots', {
+							unique: strategy === 'join',
+							inverse: relation,
+						}),
 					},
 					leaves: {
 						id: { type: 'integer', primaryKey: true },
-						childId: ref('children', { inverse: 'leaves' }),
+						childId: ref('children', {
+							unique: strategy === 'join',
+							inverse: 'leaves',
+						}),
 					},
 				}).model;
 				const adapter = createPgCompileOnlyAdapter({ model });
@@ -47,6 +53,7 @@ for (const relation of ['r'.repeat(62)])
 				const labels: string[] = [];
 				const raw: Record<string, unknown> = {};
 				const populate = (payload: IncludePayloadShape) => {
+					if (payload.presence) raw[payload.presence.outputLabel] = 2;
 					for (const column of payload.columns) {
 						labels.push(column.outputLabel);
 						raw[column.outputLabel] = column.logicalName === 'rootId' ? 1 : 2;

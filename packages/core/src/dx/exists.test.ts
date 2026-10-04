@@ -27,7 +27,7 @@ const testSchema = schema({
 	posts: {
 		id: 'uuid',
 		title: 'string',
-		author: ref('users'),
+		author: ref('users', { unique: true }),
 	},
 });
 
@@ -311,12 +311,12 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 			posts: {
 				id: 'uuid',
 				title: 'string',
-				author: ref('users'),
+				author: ref('users', { unique: true }),
 			},
 			comments: {
 				id: 'uuid',
 				body: 'string',
-				post: ref('posts'),
+				post: ref('posts', { unique: true }),
 			},
 		});
 
@@ -373,13 +373,17 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 			expect(dump.params).toEqual(['x', 999999]);
 		});
 
-		it('keeps a to-many LEFT JOIN under offset() so row multiplicity stays correct', () => {
+		it('keeps a manual to-many LEFT JOIN under offset() so row multiplicity stays correct', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const orm = createOrm({ adapter, schema: testSchema });
+			const manySchema = schema({
+				users: { id: 'uuid' },
+				posts: { id: 'uuid', author: ref('users') },
+			});
+			const orm = createOrm({ adapter, schema: manySchema });
 
 			const dump = orm
 				.select('users')
-				.include('posts', { join: 'left' })
+				.join('author_posts', { type: 'left', as: 'author_posts' })
 				.offset(1)
 				.existsDump();
 

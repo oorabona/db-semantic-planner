@@ -17,27 +17,30 @@ import type { IncludeIntent, IncludePayloadShape } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
-const model = schema({
-	roots: { id: { type: 'integer', primaryKey: true } },
-	authors: {
-		id: { type: 'integer', primaryKey: true },
-		rootId: ref('roots', { inverse: 'authors' }),
-		firstName: 'text',
-		amount: { type: 'bigint', js: 'bigint' },
-	},
-	posts: {
-		id: { type: 'integer', primaryKey: true },
-		authorId: ref('authors', { inverse: 'posts' }),
-		firstName: 'text',
-		amount: { type: 'bigint', js: 'bigint' },
-	},
-	comments: {
-		id: { type: 'integer', primaryKey: true },
-		postId: ref('posts', { inverse: 'comments' }),
-		firstName: 'text',
-		amount: { type: 'bigint', js: 'bigint' },
-	},
-}).model;
+function payloadModel(toOne = false) {
+	return schema({
+		roots: { id: { type: 'integer', primaryKey: true } },
+		authors: {
+			id: { type: 'integer', primaryKey: true },
+			rootId: ref('roots', { unique: toOne, inverse: 'authors' }),
+			firstName: 'text',
+			amount: { type: 'bigint', js: 'bigint' },
+		},
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			authorId: ref('authors', { unique: toOne, inverse: 'posts' }),
+			firstName: 'text',
+			amount: { type: 'bigint', js: 'bigint' },
+		},
+		comments: {
+			id: { type: 'integer', primaryKey: true },
+			postId: ref('posts', { unique: toOne, inverse: 'comments' }),
+			firstName: 'text',
+			amount: { type: 'bigint', js: 'bigint' },
+		},
+	}).model;
+}
+const model = payloadModel();
 
 function compile(
 	strategy: 'json_agg' | 'lateral' | 'join',
@@ -48,6 +51,7 @@ function compile(
 		include: [{ relation: 'posts', include: [{ relation: 'comments' }] }],
 	},
 ) {
+	const model = payloadModel(strategy === 'join');
 	const adapter = createPgCompileOnlyAdapter({ model, dbCasing: casing });
 	const report = createOrm({ model, adapter })
 		.select('roots')
@@ -110,6 +114,7 @@ for (const strategy of ['json_agg', 'lateral', 'join'] as const)
 					];
 				else {
 					const populate = (shape: IncludePayloadShape, name: string): void => {
+						if (shape.presence) rows[0]![shape.presence.outputLabel] = 1;
 						for (const column of shape.columns)
 							rows[0]![column.outputLabel] =
 								column.publicKey === 'value' ? '9007199254740993' : name;
@@ -213,8 +218,8 @@ for (const casing of ['preserve', 'snake_case'] as const)
 				strategy === 'json_agg'
 					? `SELECT COALESCE((SELECT json_agg(jsonb_build_object('first_name', __t__.${field}) ORDER BY __t__.id ASC NULLS LAST) FROM authors AS __t__ WHERE __t__.${fk} = roots.id), '[]'::json) AS authors_json FROM roots`
 					: strategy === 'lateral'
-						? `SELECT authors_lat_0.${field} AS "authors.first_name" FROM roots LEFT JOIN LATERAL (SELECT authors_inner_0.${field} FROM authors AS authors_inner_0 WHERE authors_inner_0.${fk} = roots.id) AS authors_lat_0 ON true`
-						: `SELECT authors.${field} AS "authors.first_name" FROM roots LEFT JOIN authors AS authors ON roots.id = authors.${fk}`;
+						? `SELECT authors_lat_0.${field} AS "authors.first_name", authors_lat_0.__dbsp_presence_authors AS __dbsp_presence_authors FROM roots LEFT JOIN LATERAL (SELECT authors_inner_0.${field}, authors_inner_0.id AS __dbsp_presence_authors FROM authors AS authors_inner_0 WHERE authors_inner_0.${fk} = roots.id) AS authors_lat_0 ON true`
+						: `SELECT authors.${field} AS "authors.first_name", authors.id AS __dbsp_presence_authors FROM roots LEFT JOIN authors AS authors ON roots.id = authors.${fk}`;
 			expect(query.sql).toBe(expected);
 		});
 	}
@@ -256,15 +261,24 @@ for (const strategy of ['json_agg', 'lateral', 'join'] as const)
 			authors: { id: { type: 'integer', primaryKey: true } },
 			posts: {
 				id: { type: 'integer', primaryKey: true },
-				authorId: ref('authors', { inverse: 'author_posts' }),
+				authorId: ref('authors', {
+					unique: strategy === 'join',
+					inverse: 'author_posts',
+				}),
 			},
 			comments: {
 				id: { type: 'integer', primaryKey: true },
-				postId: ref('posts', { inverse: 'post_comments' }),
+				postId: ref('posts', {
+					unique: strategy === 'join',
+					inverse: 'post_comments',
+				}),
 			},
 			votes: {
 				id: { type: 'integer', primaryKey: true },
-				commentId: ref('comments', { inverse: 'comment_votes' }),
+				commentId: ref('comments', {
+					inverse: 'comment_votes',
+					unique: strategy === 'join',
+				}),
 			},
 		}).model;
 		const adapter = createPgCompileOnlyAdapter({
@@ -304,6 +318,11 @@ for (const strategy of ['json_agg', 'lateral', 'join'] as const)
 							'posts.comments.votes.id': 3,
 						},
 					];
+		const supply = (shape: IncludePayloadShape) => {
+			if (shape.presence) rows[0]![shape.presence.outputLabel] = 1;
+			for (const child of shape.children) supply(child);
+		};
+		supply(payload!);
 		const hydrator = new ResultHydrator(namedModel, 'authors');
 		hydrator.hydrateJsonAggIncludes(rows, report, query);
 		hydrator.hydrateJoinIncludes(rows, report, query);
@@ -358,6 +377,7 @@ it('907 owns function labels, expands stars, and refuses unknown labels', () => 
 });
 
 it('907 collapses exact aggregate requests and refuses different owners', () => {
+	const model = payloadModel(true);
 	const adapter = createPgCompileOnlyAdapter({ model });
 	const orm = createOrm({ model, adapter });
 	const query = orm
@@ -387,7 +407,10 @@ for (const strategy of ['json_agg', 'join'] as const)
 			roots: { id: { type: 'integer', primaryKey: true } },
 			children: {
 				id: { type: 'integer', primaryKey: true },
-				rootId: ref('roots', { inverse: 'children' }),
+				rootId: ref('roots', {
+					unique: strategy === 'join',
+					inverse: 'children',
+				}),
 				good: { type: 'bigint', js: 'bigint' },
 				bad: { type: 'bigint', js: 'number' },
 			},
@@ -439,6 +462,7 @@ for (const strategy of ['json_agg', 'join'] as const)
 	});
 
 it('907k resolves window and NQL scalar function labels', () => {
+	const model = payloadModel(true);
 	const orm = createOrm({
 		model,
 		adapter: createPgCompileOnlyAdapter({ model }),
@@ -459,7 +483,7 @@ it('907k resolves window and NQL scalar function labels', () => {
 		roots: { id: { type: 'integer', primaryKey: true } },
 		events: {
 			id: { type: 'integer', primaryKey: true },
-			rootId: ref('roots', { inverse: 'now' }),
+			rootId: ref('roots', { inverse: 'now', unique: true }),
 		},
 	}).model;
 	const collisionOrm = createOrm({
@@ -510,6 +534,7 @@ it('907k diagnostics never expose bound values', () => {
 });
 
 it('907k normalizes aggregate source and output key', () => {
+	const model = payloadModel(true);
 	const orm = createOrm({
 		model,
 		adapter: createPgCompileOnlyAdapter({ model }),

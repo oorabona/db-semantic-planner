@@ -58,7 +58,7 @@ describe('planner coverage', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'users',
-			include: [{ relation: 'posts' }],
+			include: [{ strategy: 'flat', relation: 'posts' }],
 		};
 
 		const report = plan(intent, testSchema, {
@@ -190,12 +190,18 @@ describe('planner coverage', () => {
 			from: 'users',
 			include: [
 				{
+					strategy: 'flat',
 					relation: 'posts',
 					include: [
 						{
+							strategy: 'flat',
 							relation: 'comments',
 							include: [
-								{ relation: 'post', include: [{ relation: 'comments' }] },
+								{
+									strategy: 'flat',
+									relation: 'post',
+									include: [{ strategy: 'flat', relation: 'comments' }],
+								},
 							],
 						},
 					],
@@ -327,7 +333,7 @@ describe('planner coverage', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'users',
-			include: [{ relation: 'posts', via: 'posts' }],
+			include: [{ strategy: 'flat', relation: 'posts', via: 'posts' }],
 		};
 
 		const report = plan(intent, testSchema);
@@ -343,6 +349,7 @@ describe('planner coverage', () => {
 			from: 'users',
 			include: [
 				{
+					strategy: 'flat',
 					relation: 'posts',
 					where: {
 						kind: 'comparison',
@@ -607,6 +614,7 @@ describe('planner coverage', () => {
 			from: 'users',
 			include: [
 				{
+					strategy: 'flat',
 					relation: 'posts',
 					where: {
 						kind: 'comparison',
@@ -693,7 +701,7 @@ describe('planner coverage', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'users',
-			include: [{ relation: 'posts' }],
+			include: [{ strategy: 'flat', relation: 'posts' }],
 		};
 
 		const report = plan(intent, testSchema);
@@ -711,11 +719,13 @@ describe('planner coverage', () => {
 			from: 'users',
 			include: [
 				{
+					strategy: 'flat',
 					relation: 'posts',
 					include: [
 						{
+							strategy: 'flat',
 							relation: 'author',
-							include: [{ relation: 'posts' }], // back to posts from users
+							include: [{ strategy: 'flat', relation: 'posts' }], // back to posts from users
 						},
 					],
 				},
@@ -1174,7 +1184,7 @@ describe('planner coverage', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'users',
-			include: [{ relation: 'posts' }],
+			include: [{ strategy: 'flat', relation: 'posts' }],
 		};
 
 		const report = plan(intent, testSchema, {
@@ -1196,6 +1206,7 @@ describe('planner coverage', () => {
 			from: 'users',
 			include: [
 				{
+					strategy: 'flat',
 					relation: 'posts',
 					where: {
 						kind: 'comparison',
@@ -1419,7 +1430,7 @@ describe('planner coverage', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'users',
-			include: [{ relation: 'posts', recursive: true }],
+			include: [{ strategy: 'flat', relation: 'posts', recursive: true }],
 		};
 
 		const report = plan(intent, testSchema);

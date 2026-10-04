@@ -234,7 +234,7 @@ describe('issue 763: relation qualifiers require an emitted SQL alias', () => {
 				.columns([relationColumn('category', 'name', 'categoryName')])
 				.dump().sql,
 		).toBe(
-			'SELECT category.name AS "category.categoryName" FROM products LEFT JOIN categories AS category ON products.category_id = category.id',
+			'SELECT category.name AS "category.categoryName", category.id AS __dbsp_presence_category FROM products LEFT JOIN categories AS category ON products.category_id = category.id',
 		);
 	});
 

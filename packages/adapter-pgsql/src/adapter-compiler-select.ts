@@ -618,6 +618,8 @@ function stripJoinColumnsForAggregation(
 		for (const d of decisions) {
 			if (d.type === 'includeStrategy' && d.choice === 'join') {
 				(d as Mutable<PlanDecision>).columns = [];
+				// Suppressed aggregate/root projections do not hydrate an empty include.
+				(d as Mutable<PlanDecision>).emptyProjection = false;
 			}
 		}
 	}

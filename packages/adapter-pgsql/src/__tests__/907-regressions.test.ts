@@ -56,9 +56,13 @@ it('907 item 1 duplicate wildcard keeps exact SQL shape and hydrated rows', () =
 						}
 					: {
 							'calls.id': 2,
+							__dbsp_presence_calls: 2,
 							'calls.userId': 1,
 							'calls.amount': '42',
-							...(path.includes('.') && { 'calls.users.id': 1 }),
+							...(path.includes('.') && {
+								'calls.users.id': 1,
+								'__dbsp_presence_calls.users': 1,
+							}),
 						};
 			const hydrate = (query: typeof single) => {
 				const rows = [structuredClone(row)];
@@ -182,7 +186,7 @@ it('907 omitted include payload retains an empty compiled shape and exact rows',
 	const query = orm
 		.withSchema('issue_154_e2e')
 		.select('definitions')
-		.include('uses', { join: 'left' })
+		.join('uses', { type: 'left', as: 'uses' })
 		.columns([
 			'id',
 			fn('array_agg', exprRef('uses.id'))
@@ -196,14 +200,7 @@ it('907 omitted include payload retains an empty compiled shape and exact rows',
 	expect(compiled.sql.replace(/\s+/g, ' ').trim()).toBe(
 		'SELECT definitions.id, array_agg(uses.id) FILTER (WHERE uses.id IS NOT NULL) AS use_ids FROM issue_154_e2e.definitions LEFT JOIN issue_154_e2e.uses AS uses ON definitions.id = uses."defId" GROUP BY definitions.id ORDER BY definitions.id ASC',
 	);
-	expect(compiled.hydrationPlan?.includePayloads).toEqual([
-		expect.objectContaining({
-			path: 'uses',
-			strategy: 'join',
-			columns: [],
-			children: [],
-		}),
-	]);
+	expect(compiled.hydrationPlan?.includePayloads).toBeUndefined();
 	const rows = [
 		{ id: 100, use_ids: [1000, 1001] },
 		{ id: 200, use_ids: null },

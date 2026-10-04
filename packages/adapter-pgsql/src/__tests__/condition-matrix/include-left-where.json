@@ -4,801 +4,801 @@
 			"position": "include-left-where",
 			"kind": "eq",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2",
-			"params": [31, 7],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "eq",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND posts.score = $3",
-			"params": [31, 7, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "eq",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.score = $2 OR posts.score = $3)",
-			"params": [31, 7, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "eq",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.score = $2)",
-			"params": [31, 7],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "eq",
 			"shape": "empty-or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND false",
-			"params": [31],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "eq",
 			"shape": "empty-and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND true",
-			"params": [31],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "eq",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.score = $3) OR posts.score = $4)",
-			"params": [31, 13, 7, 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "neq",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score <> $2",
-			"params": [31, 7],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "neq",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score <> $2 AND posts.score = $3",
-			"params": [31, 7, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "neq",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.score <> $2 OR posts.score = $3)",
-			"params": [31, 7, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "neq",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.score <> $2)",
-			"params": [31, 7],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "neq",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.score <> $3) OR posts.score = $4)",
-			"params": [31, 13, 7, 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "gt",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score > $2",
-			"params": [31, 7],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "gt",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score > $2 AND posts.score = $3",
-			"params": [31, 7, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "gt",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.score > $2 OR posts.score = $3)",
-			"params": [31, 7, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "gt",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.score > $2)",
-			"params": [31, 7],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "gt",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.score > $3) OR posts.score = $4)",
-			"params": [31, 13, 7, 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "gte",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score >= $2",
-			"params": [31, 7],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "gte",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score >= $2 AND posts.score = $3",
-			"params": [31, 7, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "gte",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.score >= $2 OR posts.score = $3)",
-			"params": [31, 7, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "gte",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.score >= $2)",
-			"params": [31, 7],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "gte",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.score >= $3) OR posts.score = $4)",
-			"params": [31, 13, 7, 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "lt",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score < $2",
-			"params": [31, 7],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "lt",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score < $2 AND posts.score = $3",
-			"params": [31, 7, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "lt",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.score < $2 OR posts.score = $3)",
-			"params": [31, 7, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "lt",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.score < $2)",
-			"params": [31, 7],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "lt",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.score < $3) OR posts.score = $4)",
-			"params": [31, 13, 7, 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "lte",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score <= $2",
-			"params": [31, 7],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "lte",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score <= $2 AND posts.score = $3",
-			"params": [31, 7, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "lte",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.score <= $2 OR posts.score = $3)",
-			"params": [31, 7, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "lte",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.score <= $2)",
-			"params": [31, 7],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "lte",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.score <= $3) OR posts.score = $4)",
-			"params": [31, 13, 7, 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "isDistinctFrom",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score IS DISTINCT FROM $2",
-			"params": [31, 7],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "isDistinctFrom",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score IS DISTINCT FROM $2 AND posts.score = $3",
-			"params": [31, 7, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "isDistinctFrom",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.score IS DISTINCT FROM $2 OR posts.score = $3)",
-			"params": [31, 7, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "isDistinctFrom",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.score IS DISTINCT FROM $2)",
-			"params": [31, 7],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "isDistinctFrom",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.score IS DISTINCT FROM $3) OR posts.score = $4)",
-			"params": [31, 13, 7, 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "eq-null",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score IS NULL",
-			"params": [31],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "eq-null",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score IS NULL AND posts.score = $2",
-			"params": [31, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "eq-null",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.score IS NULL OR posts.score = $2)",
-			"params": [31, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "eq-null",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.score IS NULL)",
-			"params": [31],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "eq-null",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.score IS NULL) OR posts.score = $3)",
-			"params": [31, 13, 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "neq-null",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score IS NOT NULL",
-			"params": [31],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "neq-null",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score IS NOT NULL AND posts.score = $2",
-			"params": [31, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "neq-null",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.score IS NOT NULL OR posts.score = $2)",
-			"params": [31, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "neq-null",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.score IS NOT NULL)",
-			"params": [31],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "neq-null",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.score IS NOT NULL) OR posts.score = $3)",
-			"params": [31, 13, 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "isDistinctFrom-null",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score IS DISTINCT FROM NULL",
-			"params": [31],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "isDistinctFrom-null",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score IS DISTINCT FROM NULL AND posts.score = $2",
-			"params": [31, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "isDistinctFrom-null",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.score IS DISTINCT FROM NULL OR posts.score = $2)",
-			"params": [31, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "isDistinctFrom-null",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.score IS DISTINCT FROM NULL)",
-			"params": [31],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "isDistinctFrom-null",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.score IS DISTINCT FROM NULL) OR posts.score = $3)",
-			"params": [31, 13, 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "like",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.name LIKE $2",
-			"params": [31, "a%"],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "like",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.name LIKE $2 AND posts.score = $3",
-			"params": [31, "a%", 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "like",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.name LIKE $2 OR posts.score = $3)",
-			"params": [31, "a%", 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "like",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.name LIKE $2)",
-			"params": [31, "a%"],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "like",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.name LIKE $3) OR posts.score = $4)",
-			"params": [31, 13, "a%", 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "ilike",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.name ILIKE $2",
-			"params": [31, "B%"],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "ilike",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.name ILIKE $2 AND posts.score = $3",
-			"params": [31, "B%", 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "ilike",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.name ILIKE $2 OR posts.score = $3)",
-			"params": [31, "B%", 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "ilike",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.name ILIKE $2)",
-			"params": [31, "B%"],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "ilike",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.name ILIKE $3) OR posts.score = $4)",
-			"params": [31, 13, "B%", 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "like-escape",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.name LIKE $2 ESCAPE $3",
-			"params": [31, "c!_%", "!"],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "like-escape",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.name LIKE $2 ESCAPE $3 AND posts.score = $4",
-			"params": [31, "c!_%", "!", 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "like-escape",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.name LIKE $2 ESCAPE $3 OR posts.score = $4)",
-			"params": [31, "c!_%", "!", 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "like-escape",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.name LIKE $2 ESCAPE $3)",
-			"params": [31, "c!_%", "!"],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "like-escape",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.name LIKE $3 ESCAPE $4) OR posts.score = $5)",
-			"params": [31, 13, "c!_%", "!", 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "in-values",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = ANY ($2)",
-			"params": [31, [3, 5]],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "in-values",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = ANY ($2) AND posts.score = $3",
-			"params": [31, [3, 5], 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "in-values",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.score = ANY ($2) OR posts.score = $3)",
-			"params": [31, [3, 5], 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "in-values",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.score = ANY ($2))",
-			"params": [31, [3, 5]],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "in-values",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.score = ANY ($3)) OR posts.score = $4)",
-			"params": [31, 13, [3, 5], 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "in-empty",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND false",
-			"params": [31],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "in-empty",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND false AND posts.score = $2",
-			"params": [31, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "in-empty",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (false OR posts.score = $2)",
-			"params": [31, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "in-empty",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (false)",
-			"params": [31],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "in-empty",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (false) OR posts.score = $3)",
-			"params": [31, 13, 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "any",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = ANY (CAST($2 AS int4[]))",
-			"params": [31, [3, 5]],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "any",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = ANY (CAST($2 AS int4[])) AND posts.score = $3",
-			"params": [31, [3, 5], 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "any",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.score = ANY (CAST($2 AS int4[])) OR posts.score = $3)",
-			"params": [31, [3, 5], 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "any",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.score = ANY (CAST($2 AS int4[])))",
-			"params": [31, [3, 5]],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "any",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.score = ANY (CAST($3 AS int4[]))) OR posts.score = $4)",
-			"params": [31, 13, [3, 5], 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "any-empty",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = ANY (CAST($2 AS int4[]))",
-			"params": [31, []],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "any-empty",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = ANY (CAST($2 AS int4[])) AND posts.score = $3",
-			"params": [31, [], 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "any-empty",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.score = ANY (CAST($2 AS int4[])) OR posts.score = $3)",
-			"params": [31, [], 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "any-empty",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.score = ANY (CAST($2 AS int4[])))",
-			"params": [31, []],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "any-empty",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.score = ANY (CAST($3 AS int4[]))) OR posts.score = $4)",
-			"params": [31, 13, [], 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "isNull",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score IS NULL",
-			"params": [31],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "isNull",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score IS NULL AND posts.score = $2",
-			"params": [31, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "isNull",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.score IS NULL OR posts.score = $2)",
-			"params": [31, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "isNull",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.score IS NULL)",
-			"params": [31],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "isNull",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.score IS NULL) OR posts.score = $3)",
-			"params": [31, 13, 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "isNotNull",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score IS NOT NULL",
-			"params": [31],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "isNotNull",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score IS NOT NULL AND posts.score = $2",
-			"params": [31, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "isNotNull",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.score IS NOT NULL OR posts.score = $2)",
-			"params": [31, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "isNotNull",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.score IS NOT NULL)",
-			"params": [31],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "isNotNull",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.score IS NOT NULL) OR posts.score = $3)",
-			"params": [31, 13, 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "between",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.period BETWEEN $2 AND $3",
-			"params": [31, "2026-01-01", "2026-02-01"],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "between",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.period BETWEEN $2 AND $3 AND posts.score = $4",
-			"params": [31, "2026-01-01", "2026-02-01", 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "between",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.period BETWEEN $2 AND $3 OR posts.score = $4)",
-			"params": [31, "2026-01-01", "2026-02-01", 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
 		}
 	]
 }

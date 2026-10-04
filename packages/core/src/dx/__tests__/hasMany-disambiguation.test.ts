@@ -82,23 +82,23 @@ describe('hasMany disambiguation — schema() DSL path', () => {
 		expect(calleeCalls?.foreignKey).toBe('callee_id');
 	});
 
-	it('include("caller_calls") compiles and SQL uses caller_id', () => {
+	it('join("caller_calls") compiles and SQL uses caller_id', () => {
 		const orm = buildOrm(callGraphSchema);
 		const { symbols } = callGraphSchema.tables;
 		const { sql } = orm
 			.from(symbols)
-			.include('caller_calls', { join: 'left' })
+			.join('caller_calls', { type: 'left' })
 			.dump();
 		expect(sql).toContain('caller_id');
 		expect(sql).not.toContain('callee_id');
 	});
 
-	it('include("callee_calls") compiles and SQL uses callee_id', () => {
+	it('join("callee_calls") compiles and SQL uses callee_id', () => {
 		const orm = buildOrm(callGraphSchema);
 		const { symbols } = callGraphSchema.tables;
 		const { sql } = orm
 			.from(symbols)
-			.include('callee_calls', { join: 'left' })
+			.join('callee_calls', { type: 'left' })
 			.dump();
 		expect(sql).toContain('callee_id');
 		expect(sql).not.toContain('caller_id');

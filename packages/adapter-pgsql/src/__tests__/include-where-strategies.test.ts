@@ -11,7 +11,7 @@ const testSchema = schema({
 		id: { type: 'integer', primaryKey: true },
 		published: { type: 'boolean' },
 		score: { type: 'integer' },
-		authorId: ref('users', { as: 'author', inverse: 'posts' }),
+		authorId: ref('users', { unique: true, as: 'author', inverse: 'posts' }),
 	},
 	postLinks: {
 		id: { type: 'integer', primaryKey: true },
@@ -21,7 +21,7 @@ const testSchema = schema({
 	comments: {
 		id: { type: 'integer', primaryKey: true },
 		published: { type: 'boolean' },
-		postId: ref('posts', { as: 'post', inverse: 'comments' }),
+		postId: ref('posts', { unique: true, as: 'post', inverse: 'comments' }),
 	},
 } as const);
 const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
@@ -54,7 +54,7 @@ describe('#888 join include where strategies', () => {
 				.include('posts', { join, where: or() })
 				.dump();
 			expect(result.sql).toBe(
-				`SELECT users.*, posts.id AS "posts.id" FROM users ${join === 'inner' ? 'JOIN' : 'LEFT JOIN'} posts AS posts ON users.id = posts."authorId" WHERE users."tenantId" = $1 AND false`,
+				`SELECT users.*, posts.id AS "posts.id", posts.published AS "posts.published", posts.score AS "posts.score", posts."authorId" AS "posts.authorId", posts.id AS __dbsp_presence_posts FROM users ${join === 'inner' ? 'JOIN' : 'LEFT JOIN'} posts AS posts ON users.id = posts."authorId" WHERE users."tenantId" = $1 AND false`,
 			);
 			expect(result.params).toEqual([1]);
 		});
@@ -62,27 +62,27 @@ describe('#888 join include where strategies', () => {
 });
 const fixtures: Record<string, { sql: string; params: unknown[] }> = {
 	'inner published': {
-		sql: 'SELECT users.*, posts.id AS "posts.id" FROM users JOIN posts AS posts ON users.id = posts."authorId" WHERE posts.published = $1',
+		sql: 'SELECT users.*, posts.id AS "posts.id", posts.published AS "posts.published", posts.score AS "posts.score", posts."authorId" AS "posts.authorId", posts.id AS __dbsp_presence_posts FROM users JOIN posts AS posts ON users.id = posts."authorId" WHERE posts.published = $1',
 		params: [true],
 	},
 	'inner empty and': {
-		sql: 'SELECT users.*, posts.id AS "posts.id" FROM users JOIN posts AS posts ON users.id = posts."authorId" WHERE true',
+		sql: 'SELECT users.*, posts.id AS "posts.id", posts.published AS "posts.published", posts.score AS "posts.score", posts."authorId" AS "posts.authorId", posts.id AS __dbsp_presence_posts FROM users JOIN posts AS posts ON users.id = posts."authorId" WHERE true',
 		params: [],
 	},
 	'inner empty or': {
-		sql: 'SELECT users.*, posts.id AS "posts.id" FROM users JOIN posts AS posts ON users.id = posts."authorId" WHERE false',
+		sql: 'SELECT users.*, posts.id AS "posts.id", posts.published AS "posts.published", posts.score AS "posts.score", posts."authorId" AS "posts.authorId", posts.id AS __dbsp_presence_posts FROM users JOIN posts AS posts ON users.id = posts."authorId" WHERE false',
 		params: [],
 	},
 	'left published': {
-		sql: 'SELECT users.*, posts.id AS "posts.id" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId" WHERE posts.published = $1',
+		sql: 'SELECT users.*, posts.id AS "posts.id", posts.published AS "posts.published", posts.score AS "posts.score", posts."authorId" AS "posts.authorId", posts.id AS __dbsp_presence_posts FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId" WHERE posts.published = $1',
 		params: [true],
 	},
 	'left empty and': {
-		sql: 'SELECT users.*, posts.id AS "posts.id" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId" WHERE true',
+		sql: 'SELECT users.*, posts.id AS "posts.id", posts.published AS "posts.published", posts.score AS "posts.score", posts."authorId" AS "posts.authorId", posts.id AS __dbsp_presence_posts FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId" WHERE true',
 		params: [],
 	},
 	'left empty or': {
-		sql: 'SELECT users.*, posts.id AS "posts.id" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId" WHERE false',
+		sql: 'SELECT users.*, posts.id AS "posts.id", posts.published AS "posts.published", posts.score AS "posts.score", posts."authorId" AS "posts.authorId", posts.id AS __dbsp_presence_posts FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId" WHERE false',
 		params: [],
 	},
 };
@@ -130,9 +130,9 @@ const mainSql = {
 	json_agg:
 		"SELECT users.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'published', __t__.published, 'score', __t__.score, 'authorId', __t__.\"authorId\") ORDER BY __t__.id ASC NULLS LAST) FROM posts AS __t__ WHERE __t__.\"authorId\" = users.id), '[]'::json) AS posts_json FROM users",
 	lateral:
-		'SELECT users.*, posts_lat_0.id AS "posts.id", posts_lat_0.published AS "posts.published", posts_lat_0.score AS "posts.score", posts_lat_0."authorId" AS "posts.authorId" FROM users LEFT JOIN LATERAL (SELECT posts_inner_0.id, posts_inner_0.published, posts_inner_0.score, posts_inner_0."authorId" FROM posts AS posts_inner_0 WHERE posts_inner_0."authorId" = users.id) AS posts_lat_0 ON true',
+		'SELECT users.*, posts_lat_0.id AS "posts.id", posts_lat_0.published AS "posts.published", posts_lat_0.score AS "posts.score", posts_lat_0."authorId" AS "posts.authorId", posts_lat_0.__dbsp_presence_posts AS __dbsp_presence_posts FROM users LEFT JOIN LATERAL (SELECT posts_inner_0.id, posts_inner_0.published, posts_inner_0.score, posts_inner_0."authorId", posts_inner_0.id AS __dbsp_presence_posts FROM posts AS posts_inner_0 WHERE posts_inner_0."authorId" = users.id) AS posts_lat_0 ON true',
 	cte: 'WITH posts_cte AS (SELECT posts_inner_0.* FROM posts AS posts_inner_0) SELECT users.* FROM users LEFT JOIN posts_cte AS posts_ref_0 ON users.id = posts_ref_0."authorId"',
-	join: 'SELECT users.*, posts.id AS "posts.id" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId"',
+	join: 'SELECT users.*, posts.id AS "posts.id", posts.published AS "posts.published", posts.score AS "posts.score", posts."authorId" AS "posts.authorId", posts.id AS __dbsp_presence_posts FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId"',
 };
 describe('#888 includes without where preserve main SQL', () => {
 	for (const strategy of ['json_agg', 'lateral', 'cte', 'join'] as const) {
@@ -160,8 +160,8 @@ it('refuses public M:N include where', () => {
 			published: { type: 'boolean' },
 		},
 		links: {
-			userId: ref('users', { inverse: 'posts', through: true }),
-			postId: ref('posts', { inverse: 'users', through: true }),
+			userId: ref('users', { unique: true, inverse: 'posts', through: true }),
+			postId: ref('posts', { unique: true, inverse: 'users', through: true }),
 		},
 	} as const);
 	const manyOrm = createOrm({

@@ -54,7 +54,9 @@ For every non-recursive include, explicit `include.join` takes precedence, then 
 
 Include payload keys are explicit aliases or declared model names. Physical database
 names affect SQL references only. JSON includes return nested payloads; join and
-lateral includes return transport columns that the compiled shape owns.
+lateral includes return transport columns that the compiled shape owns. A to-one join include with no selection or `select: { type: 'all' }` returns the whole related row with `"relation.column"` labels and declared public keys. Explicit field selection returns only those fields.
+
+For join and lateral flat hydration, the compiled shape records a private presence marker. It projects a non-null target key, or a constant within the joined target when there is no key. Hydration reads and removes that marker: only a null marker means a missing row. An existing row whose selected values are all null remains an object of nulls. The marker cannot collide with public payload keys. NQL `| flat` retains its flat rowset.
 
 Transport labels are at most 63 UTF-8 bytes. The compiled shape records the exact
 emitted labels and their public keys, including nested includes. Hydration reads
@@ -97,15 +99,7 @@ No deduplication is needed in the hydrator.
 
 ### Explicit JOIN for hasMany
 
-You can force `join` on a `hasMany` via:
-```typescript
-orm.select('users').include('posts', { join: 'inner' })
-```
-
-Only do this when:
-- You know each parent has at most one matching child (effectively to-one)
-- You are filtering to a single child and want the JOIN semantics
-- You understand the row explosion and need flat rows for aggregation
+To-many join includes are refused by `plan()` and by the adapter for external reports, whether selected explicitly, by a relation hint, or by a default. Use `.join()` or NQL `| flat` for a flat rowset, or use a `json_agg`/`lateral` include.
 
 ## Recursive Include Depth
 
@@ -172,8 +166,7 @@ orm.select('categories')
 
 ### Mixing `join` strategy on hasMany
 
-**Wrong:** Forcing `join` on a `hasMany` and then filtering/counting distinct
-parents in application code to undo the duplication.
+**Refused:** Forcing `join` on a `hasMany`, including through relation hints or defaults.
 
 **Right:** Use `json_agg` (the default) to aggregate child rows in SQL. Both `json_agg` and `lateral` support `LIMIT` per parent.
 
