@@ -322,9 +322,7 @@ export function resolveIncludePayloadShapes(
 				(descriptor?.source.kind === 'modelColumn'
 					? descriptor.source.column
 					: logicalName);
-			const flatColumn =
-				strategy !== 'json_agg' &&
-				(flatPaths.has(path) || entry.nqlLabel === true);
+			const flatColumn = strategy !== 'json_agg' && flatPaths.has(path);
 			const publicKey = flatPaths.has(path)
 				? (entry.alias ?? publicName)
 				: (chosenRelationColumnAlias(entry.alias, entry.defaultLabel) ??

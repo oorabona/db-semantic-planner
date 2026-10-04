@@ -342,3 +342,5 @@ export {
 	runAssertions,
 	validateAssertionBlocks,
 } from './assert/index.js';
+
+export { InvalidJsonAggPayloadError } from './dx/include-payload-hydration.js';

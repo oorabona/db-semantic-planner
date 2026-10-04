@@ -15,6 +15,7 @@ import {
 	plan,
 	type QueryIntent,
 } from '@dbsp/core';
+import { createBindingFinalPlan } from '@dbsp/core/internal';
 import { type CompileResult, compile as compileNql } from '@dbsp/nql';
 
 /**
@@ -237,6 +238,16 @@ export async function compileNqlToSql(
 			params: result.parameters,
 			intentType,
 			intent: summary,
+			...(compiled.query && compiled.bindings?.has(compiled.query.from)
+				? {
+						planReport: createBindingFinalPlan(
+							compiled.query,
+							compiled,
+							model,
+							adapter.dialectCapabilities,
+						),
+					}
+				: {}),
 		};
 	}
 

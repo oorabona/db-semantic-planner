@@ -35,15 +35,30 @@ const manifest = JSON.parse(
 const names = (rows: Row[]) => rows.map((row) => row.name);
 const sorted = (values: Iterable<string>) => [...new Set(values)].sort();
 const excluded = new Set([...names(moved), ...names(removed)]);
-const rootNames = names(before.root.declarations).filter(
-	(name) => !excluded.has(name),
-);
-const rootRuntime = before.root.runtime.filter((name) => !excluded.has(name));
-const internalNames = [...names(before.internal.declarations), ...names(moved)];
+// Issue #929 adds a caller-visible read error and the shared CLI binding planner.
+const rootAdditions = ['InvalidJsonAggPayloadError'];
+const internalAdditions = ['createBindingFinalPlan'];
+const rootNames = [
+	...names(before.root.declarations).filter((name) => !excluded.has(name)),
+	...rootAdditions,
+];
+const rootRuntime = [
+	...before.root.runtime.filter((name) => !excluded.has(name)),
+	...rootAdditions,
+];
+const internalNames = [
+	...names(before.internal.declarations),
+	...names(moved),
+	...internalAdditions,
+];
 const movedRuntime = before.root.runtime.filter((name) =>
 	names(moved).includes(name),
 );
-const internalRuntime = [...before.internal.runtime, ...movedRuntime];
+const internalRuntime = [
+	...before.internal.runtime,
+	...movedRuntime,
+	...internalAdditions,
+];
 
 // Read the built declaration target from the package exports map, never src/index.ts.
 function declarations(subpath: '.' | './internal') {

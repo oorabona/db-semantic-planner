@@ -673,7 +673,7 @@ function createBindingTailIncludeDecisions(
 		});
 }
 
-function createBindingFinalPlan(
+export function createBindingFinalPlan(
 	intent: QueryIntent,
 	bundle: CompiledNqlQuery,
 	model: ModelIR,
@@ -2216,8 +2216,16 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 	): void {
 		if (!compiled.hydrationPlan?.includePayloads?.length) return;
 		const hydrator = new ResultHydrator<T>(this.model, planReport.rootTable);
-		hydrator.hydrateJsonAggIncludes(rows, planReport, compiled);
-		hydrator.hydrateJoinIncludes(rows, planReport, compiled);
+		const payloads = compiled.hydrationPlan.includePayloads;
+		if (payloads.some((payload) => payload.strategy === 'json_agg'))
+			hydrator.hydrateJsonAggIncludes(rows, planReport, compiled);
+		if (
+			payloads.some(
+				(payload) =>
+					payload.strategy === 'join' || payload.strategy === 'lateral',
+			)
+		)
+			hydrator.hydrateJoinIncludes(rows, planReport, compiled);
 	}
 
 	async run(): Promise<void> {

@@ -1,5 +1,6 @@
 import {
 	createOrm,
+	InvalidJsonAggPayloadError,
 	InvalidOperationError,
 	nqlRaw,
 	ResultHydrator,
@@ -161,18 +162,21 @@ it('run discards program read rows without parsing JSON', async () => {
 	).resolves.toBeUndefined();
 });
 
-function hintedModel(strategy: 'join' | 'lateral' | 'json_agg' | 'cte') {
+function hintedModel(
+	strategy: 'join' | 'lateral' | 'json_agg' | 'cte',
+	base = db.model,
+) {
 	const hints = {
 		getRelation: (name: string) => {
-			const relation = db.model.getRelation(name);
+			const relation = base.getRelation(name);
 			return relation ? { ...relation, includeStrategy: strategy } : relation;
 		},
 		getRelationsFrom: (name: string) =>
-			db.model
+			base
 				.getRelationsFrom(name)
 				?.map((relation) => ({ ...relation, includeStrategy: strategy })),
 	};
-	return new Proxy(db.model, {
+	return new Proxy(base, {
 		get(target, property) {
 			if (property === 'getRelation') return hints.getRelation;
 			if (property === 'getRelationsFrom') return hints.getRelationsFrom;
@@ -332,6 +336,9 @@ it.each([nestedRead, programRead])(
 			model: db.model,
 			adapter: createPgAdapter(pool, { model: db.model }),
 		});
+		await expect(orm.nql`${nqlRaw(text)}`.all()).rejects.toBeInstanceOf(
+			InvalidJsonAggPayloadError,
+		);
 		await expect(orm.nql`${nqlRaw(text)}`.all()).rejects.toMatchObject({
 			name: 'InvalidJsonAggPayloadError',
 			message: "Invalid JSON in json_agg payload 'posts'.",
@@ -356,6 +363,26 @@ it('skips hydration entirely when compiled read has no payload', async () => {
 		expect(await orm.nql`users | select id`.all()).toEqual([{ id: 1 }]);
 		expect(json).not.toHaveBeenCalled();
 		expect(join).not.toHaveBeenCalled();
+		vi.mocked(pool.query).mockResolvedValueOnce({
+			rows: [{ id: 1, posts_json: '[{"title":"First"}]' }],
+		} as never);
+		expect(await orm.nql`users | select id, posts.title`.all()).toEqual([
+			{ id: 1, posts: [{ title: 'First' }] },
+		]);
+		expect(json).toHaveBeenCalledTimes(1);
+		expect(join).not.toHaveBeenCalled();
+		json.mockClear();
+		const model = hintedModel('join');
+		const joinOrm = createOrm({
+			model,
+			adapter: createPgAdapter(pool, { model }),
+		});
+		vi.mocked(pool.query).mockResolvedValueOnce({
+			rows: [{ id: 1, 'author.name': 'Ada', __dbsp_presence_author: 2 }],
+		} as never);
+		await joinOrm.nql`posts | select id, author.name`.all();
+		expect(json).not.toHaveBeenCalled();
+		expect(join).toHaveBeenCalledTimes(1);
 	} finally {
 		json.mockRestore();
 		join.mockRestore();
@@ -502,3 +529,73 @@ it('keeps fluent recursive CTE include root rows unchanged', async () => {
 	expect(await read.execute()).toEqual(roots);
 	expect(query).toHaveBeenCalledTimes(1);
 });
+
+for (const strategy of ['join', 'lateral'] as const) {
+	it(`nested aliases own their object keys with ${strategy}`, async () => {
+		const base = schema({
+			users: { id: { type: 'integer', primaryKey: true }, name: 'string' },
+			editors: { id: { type: 'integer', primaryKey: true }, name: 'string' },
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				title: 'string',
+				authorId: ref('users', { as: 'author' }),
+				editorId: ref(strategy === 'join' ? 'users' : 'editors', {
+					as: 'editor',
+				}),
+			},
+		}).model;
+		const model = hintedModel(strategy, base);
+		const pool = {
+			query: vi.fn(async () => ({
+				rows: [
+					{
+						id: 1,
+						'author.n': 'Ada',
+						__dbsp_presence_author: 2,
+						'editor.n': 'Grace',
+						__dbsp_presence_editor: 3,
+					},
+				],
+			})),
+		} as unknown as Pool;
+		const orm = createOrm({ model, adapter: createPgAdapter(pool, { model }) });
+		const read = orm.nql`posts | select id, author.name as n, editor.name as n`;
+		if (strategy === 'join')
+			expect(read.dump().sql).toBe(
+				'SELECT posts.id, author.name AS "author.n", author.id AS __dbsp_presence_author, editor.name AS "editor.n", editor.id AS __dbsp_presence_editor FROM posts JOIN users AS author ON posts."authorId" = author.id JOIN users AS editor ON posts."editorId" = editor.id',
+			);
+		else
+			expect(read.dump().sql).toBe(
+				'SELECT posts.id, users_lat_0.name AS "author.n", users_lat_0.__dbsp_presence_author AS __dbsp_presence_author, editors_lat_0.name AS "editor.n", editors_lat_0.__dbsp_presence_editor AS __dbsp_presence_editor FROM posts LEFT JOIN LATERAL (SELECT users_inner_0.name, users_inner_0.id AS __dbsp_presence_author FROM users AS users_inner_0 WHERE users_inner_0.id = posts."authorId") AS users_lat_0 ON true LEFT JOIN LATERAL (SELECT editors_inner_0.name, editors_inner_0.id AS __dbsp_presence_editor FROM editors AS editors_inner_0 WHERE editors_inner_0.id = posts."editorId") AS editors_lat_0 ON true',
+			);
+		expect(await read.all()).toEqual([
+			{ id: 1, author: { n: 'Ada' }, editor: { n: 'Grace' } },
+		]);
+		expect(() =>
+			orm.nql`posts | select id, author.name as n, editor.name as n | flat`.dump(),
+		).toThrow(
+			"Include payload '$' has conflicting public key 'n' (generated:author:name and generated:editor:name).",
+		);
+		const root = orm.nql`posts | select id, author.name as n, title as n`;
+		expect(root.dump().sql).toContain('AS "author.n"');
+		vi.mocked(pool.query).mockResolvedValueOnce({
+			rows: [
+				{ id: 1, n: 'Title', 'author.n': 'Ada', __dbsp_presence_author: 2 },
+			],
+		} as never);
+		expect(await root.all()).toEqual([
+			{ id: 1, n: 'Title', author: { n: 'Ada' } },
+		]);
+		expect(() =>
+			orm.nql`posts | select id, author.name as n, title as n | flat`.dump(),
+		).toThrow(
+			"Include payload '$' has conflicting public key 'n' (column:title and generated:author:name).",
+		);
+		const alias = orm.nql`posts | select id, author.name as a`;
+		expect(alias.dump().sql).toContain('AS "author.a"');
+		vi.mocked(pool.query).mockResolvedValueOnce({
+			rows: [{ id: 1, 'author.a': 'Ada', __dbsp_presence_author: 2 }],
+		} as never);
+		expect(await alias.all()).toEqual([{ id: 1, author: { a: 'Ada' } }]);
+	});
+}

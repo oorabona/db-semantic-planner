@@ -137,3 +137,20 @@ it.each([
 	expect(orm.nql`${nqlRaw(text!)}`.dump().sql).toBe(expected);
 	expect(cli.params).toEqual([]);
 });
+
+it('binding read exposes the same plan as the tag', async () => {
+	const text = 'users | select id | bind u\nu | select *';
+	const cli = await compileNqlToSql(text, db.model);
+	const orm = createOrm({
+		model: db.model,
+		adapter: createPgCompileOnlyAdapter({ model: db.model }),
+	});
+	const dump = orm.nql`${nqlRaw(text)}`.dump();
+	expect(cli.planReport).toMatchObject({
+		rootTable: 'u',
+		decisions: [],
+		ctes: [],
+	});
+	expect(cli.planReport).toEqual('plan' in dump && dump.plan);
+	expect(cli.sql).toBe(dump.sql);
+});
