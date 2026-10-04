@@ -102,6 +102,15 @@ export function hydrateResolvedIncludes(
 			setValue(value, child.publicKey, childValue);
 			if (shape.columns.length === 0 && childValue !== null) present = true;
 		}
+		if (shape.presence) {
+			const label = shape.presence.outputLabel;
+			if (!Object.hasOwn(row, label))
+				throw new Error(
+					`Missing include presence marker '${label}' for '${shape.path}'.`,
+				);
+			deletions.add(label);
+			return row[label] === null ? null : value;
+		}
 		return owned ? (present ? value : null) : undefined;
 	};
 	for (const row of rows) {
@@ -120,7 +129,9 @@ export function hydrateResolvedIncludes(
 			} else if (
 				strategy === 'flat' &&
 				shape.strategy !== 'json_agg' &&
-				(shape.columns.length > 0 || shape.children.length > 0)
+				(shape.presence !== undefined ||
+					shape.columns.length > 0 ||
+					shape.children.length > 0)
 			) {
 				const value = assembleFlat(row, shape, deletions);
 				if (value !== undefined) assignments.set(shape.publicKey, value);

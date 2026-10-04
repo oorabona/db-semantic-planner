@@ -53,20 +53,20 @@ describe('FIX-162 manual .join() alias collisions', () => {
 		const sql = normalizeSql(dump.sql);
 
 		expect(sql).toBe(
-			'SELECT file.path AS "definition.file.def_file", file_2.path AS "file.use_file" FROM issue_162_e2e.uses JOIN issue_162_e2e.files AS file_1 ON uses.alt_file_id = file_1.id JOIN issue_162_e2e.definitions AS definition ON uses.def_id = definition.id JOIN issue_162_e2e.files AS file ON definition.file_id = file.id JOIN issue_162_e2e.files AS file_2 ON uses.file_id = file_2.id ORDER BY uses.id ASC',
+			'SELECT definition.id AS "definition.id", definition.file_id AS "definition.fileId", definition.id AS __dbsp_presence_definition, file.path AS "definition.file.def_file", file.id AS "__dbsp_presence_definition.file", file_2.path AS "file.use_file", file_2.id AS __dbsp_presence_file FROM issue_162_e2e.uses JOIN issue_162_e2e.files AS file_1 ON uses.alt_file_id = file_1.id JOIN issue_162_e2e.definitions AS definition ON uses.def_id = definition.id JOIN issue_162_e2e.files AS file ON definition.file_id = file.id JOIN issue_162_e2e.files AS file_2 ON uses.file_id = file_2.id ORDER BY uses.id ASC',
 		);
 
 		const rows = (await query.execute()) as unknown as Array<{
-			definition: { file: { def_file: string } };
+			definition: { id: number; fileId: number; file: { def_file: string } };
 			file: { use_file: string };
 		}>;
 		expect(rows).toEqual([
 			{
-				definition: { file: { def_file: '/def.ts' } },
+				definition: { id: 100, fileId: 10, file: { def_file: '/def.ts' } },
 				file: { use_file: '/use.ts' },
 			},
 			{
-				definition: { file: { def_file: '/def.ts' } },
+				definition: { id: 100, fileId: 10, file: { def_file: '/def.ts' } },
 				file: { use_file: '/use.ts' },
 			},
 		]);

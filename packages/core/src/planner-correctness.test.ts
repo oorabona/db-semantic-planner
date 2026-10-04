@@ -318,14 +318,16 @@ describe('FIND-014: include.limit with join strategy throws InvalidOperationErro
 		expect(stratDecision?.choice).toBe('lateral');
 	});
 
-	it('include with no limit and explicit join:inner does not throw', () => {
+	it('include with no limit and explicit join:inner refuses a to-many join', () => {
 		// Guard against over-triggering: limit-free join includes must not throw.
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'users',
 			include: [{ relation: 'posts', join: 'inner' }],
 		};
-		expect(() => plan(intent, simpleSchema.model)).not.toThrow();
+		expect(() => plan(intent, simpleSchema.model)).toThrow(
+			"Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include.",
+		);
 	});
 });
 
@@ -1131,11 +1133,15 @@ describe('#900 flat strategy precedence', () => {
 			users: { id: { type: 'integer', primaryKey: true } },
 			posts: {
 				id: { type: 'integer', primaryKey: true },
-				authorId: ref('users', { as: 'author', inverse: 'posts' }),
+				authorId: ref('users', {
+					as: 'author',
+					inverse: 'posts',
+					unique: true,
+				}),
 			},
 			comments: {
 				id: { type: 'integer', primaryKey: true },
-				postId: ref('posts', { as: 'post', inverse: 'comments' }),
+				postId: ref('posts', { as: 'post', inverse: 'comments', unique: true }),
 			},
 		});
 		Object.assign(db.model.getRelation('users.posts')!, {
@@ -1180,7 +1186,7 @@ describe('#900 flat strategy precedence', () => {
 				)!;
 				expect(decision.choice).toBe('join');
 				expect(decision.reasoning).toBe(
-					'Relation users.posts (hasMany, cardinality: many) - using join selected by explicit join',
+					'Relation users.posts (hasOne, cardinality: one) - using join selected by explicit join',
 				);
 			});
 		}
@@ -1192,7 +1198,7 @@ describe('#900 flat strategy precedence', () => {
 			)!;
 			expect(decision.choice).toBe(strategy);
 			expect(decision.reasoning).toBe(
-				`Relation users.posts (hasMany, cardinality: many) - using ${strategy} selected by defaultIncludeStrategy`,
+				`Relation users.posts (hasOne, cardinality: one) - using ${strategy} selected by defaultIncludeStrategy`,
 			);
 			expect(decision.alternatives).toEqual([
 				strategy === 'join' ? 'lateral' : 'join',
@@ -1242,7 +1248,7 @@ describe('#900 flat strategy precedence', () => {
 		[{ where: eq('id', 1) }, []],
 		[{ orderBy: [{ field: 'id', direction: 'asc' }] }, []],
 		[{ select: { type: 'fields', fields: ['id'] } }, ['join']],
-		[{ select: { type: 'all' } }, ['lateral']],
+		[{ select: { type: 'all' } }, ['join', 'lateral']],
 		[{ select: { type: 'fields', fields: ['*'] } }, ['lateral']],
 	] as const) {
 		it(`nested alternatives honour options ${JSON.stringify(extra)}`, () => {
@@ -1314,7 +1320,7 @@ describe('#900 flat strategy precedence', () => {
 			)!;
 			expect(decision.choice).toBe(expected);
 			expect(decision.reasoning).toBe(
-				`Relation users.posts (hasMany, cardinality: many) - using ${expected} selected by ${source}`,
+				`Relation users.posts (hasOne, cardinality: one) - using ${expected} selected by ${source}`,
 			);
 		});
 	}
@@ -1325,7 +1331,7 @@ describe('#900 flat strategy precedence', () => {
 			{ dialectCapabilities: FULL_CAPS },
 		).decisions.find((d) => d.type === 'include-strategy')!;
 		expect(decision.reasoning).toBe(
-			'Relation users.posts (hasMany, cardinality: many) - using json_agg selected by nested output',
+			'Relation users.posts (hasOne, cardinality: one) - using json_agg selected by nested output',
 		);
 	});
 	it('flat alternatives respect dialect capabilities', () => {

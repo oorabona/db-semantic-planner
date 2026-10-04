@@ -162,6 +162,11 @@ export interface IncludePayloadShape {
 	readonly table: string;
 	readonly isToOne: boolean;
 	readonly outputLabel: string;
+	/** Private null-extension witness; never a public payload key. */
+	readonly presence?: {
+		readonly outputLabel: string;
+		readonly physicalName?: string;
+	};
 	readonly columns: readonly {
 		readonly logicalName: string;
 		readonly physicalName: string;

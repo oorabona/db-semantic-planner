@@ -1,6 +1,16 @@
-import type { IncludePayloadShape, ModelIR, PlanReport } from '@dbsp/types';
-import { resolveOutputReadHandling } from '@dbsp/types';
-import type { Mutable } from '@dbsp/types/internal';
+import type {
+	IncludePayloadShape,
+	ModelIR,
+	PlanReport,
+	QueryIntent,
+} from '@dbsp/types';
+import { resolveOutputReadHandling, toColumnList } from '@dbsp/types';
+import {
+	belongsToManyJoinIncludeRefusal,
+	dropsJoinIncludeData,
+	type Mutable,
+	resolveIncludeRelationName,
+} from '@dbsp/types/internal';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { truncateIdentifier } from './column-metadata.js';
 import { chosenRelationColumnAlias } from './handlers/include/json-agg.js';
@@ -42,6 +52,25 @@ export function claimPayloadKey(
 	return previous === undefined;
 }
 
+/** Only flat relational projections reach this after join payload refusal. */
+function stripJoinColumnsForAggregation(
+	d: PlanDecision,
+	intent: QueryIntent | undefined,
+	flat: boolean,
+): void {
+	if (!flat) return;
+	if (
+		d.choice !== 'join' ||
+		!(dropsJoinIncludeData(intent) || intent?.select?.type === 'expressions')
+	)
+		return;
+	const mutable = d as Mutable<PlanDecision>;
+	// Keep explicit relationColumn requests; only automatic columns are suppressed.
+	mutable.columns =
+		d.payloadColumnRequests?.map((request) => request.col) ?? [];
+	mutable.emptyProjection = false;
+}
+
 /** Runs after injection, before SQL. SQL handlers and hydration consume the same objects. */
 export function resolveIncludePayloadShapes(
 	decisions: readonly PlanDecision[],
@@ -51,6 +80,7 @@ export function resolveIncludePayloadShapes(
 	resolveRootLabels: (
 		wildcard: () => readonly string[],
 	) => readonly { key: string; owner: PayloadOwner }[],
+	emittedRootLabels: () => ReadonlySet<string>,
 ): readonly IncludePayloadShape[] {
 	const transportLabels = new Map<string, string>();
 	const usedLabels = new Set<string>();
@@ -172,6 +202,7 @@ export function resolveIncludePayloadShapes(
 			);
 		return [];
 	};
+
 	const resolved = new Map<string, IncludePayloadShape>();
 	const resolvePayload = (d: PlanDecision): IncludePayloadShape => {
 		const path = d.relationPath ?? d.relationName ?? d.relation ?? '';
@@ -191,6 +222,44 @@ export function resolveIncludePayloadShapes(
 			strategy !== 'cte'
 		)
 			throw new Error(`Invalid include payload strategy '${strategy}'.`);
+		const parentPath = path.includes('.')
+			? path.slice(0, path.lastIndexOf('.'))
+			: undefined;
+		const sourceTable =
+			d.sourceTable ??
+			(parentPath ? byPath.get(parentPath)?.targetTable : plan.rootTable);
+		const relation =
+			model && sourceTable
+				? resolveIncludeRelationName(
+						model,
+						sourceTable,
+						d.relationName ?? d.relation ?? path.split('.').at(-1)!,
+					)
+				: undefined;
+		// External reports can carry belongsToMany even though legacy decisions narrow the type.
+		const relationType: string | undefined = relation?.type ?? d.relationType;
+		if (strategy === 'join' && relationType === 'belongsToMany')
+			throw new Error(
+				belongsToManyJoinIncludeRefusal(`${d.intentPath ?? path}(${path})`),
+			);
+		if (
+			strategy === 'join' &&
+			relationType === 'hasMany' &&
+			!flatPaths.has(path)
+		)
+			throw new Error(
+				`Include ${d.intentPath ?? path}(${path}) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include.`,
+			);
+		const intent = plan.executableIntent ?? plan.intent;
+		if (
+			strategy === 'join' &&
+			!flatPaths.has(path) &&
+			dropsJoinIncludeData(intent)
+		)
+			throw new Error(
+				`Include ${d.intentPath ?? path}(${path}) cannot use 'join' with aggregation, groupBy or DISTINCT because its data would be dropped. Use .join() for relational columns, grouping or ordering.`,
+			);
+		stripJoinColumnsForAggregation(d, intent, flatPaths.has(path));
 		let requested = d.columns;
 		if (d.emptyProjection) requested = [];
 		else if (
@@ -312,6 +381,31 @@ export function resolveIncludePayloadShapes(
 				children.push(shape);
 		}
 		const publicKey = path.split('.').at(-1) ?? path;
+		let presence: IncludePayloadShape['presence'];
+		if (
+			strategy !== 'json_agg' &&
+			!plan.intent?.existsWrap &&
+			!flatPaths.has(path) &&
+			(d.emptyProjection || columns.length > 0 || children.length > 0)
+		) {
+			const key = toColumnList(table?.primaryKey)[0];
+			const physicalName = key
+				? identifierText(
+						requireRelationTargetColumn(
+							target,
+							queryLocal(key),
+							'presence key',
+							path,
+						)?.outputKey ??
+							resolveDeclaredIdentifier(
+								deps.declaredNames,
+								deps.dbCasing ?? 'preserve',
+								{ kind: 'column', table: tableName, column: key },
+							),
+					)
+				: undefined;
+			presence = { outputLabel: '', ...(physicalName && { physicalName }) };
+		}
 		const shape: IncludePayloadShape = {
 			path,
 			publicKey,
@@ -324,6 +418,7 @@ export function resolveIncludePayloadShapes(
 			),
 			columns,
 			children,
+			...(presence && { presence }),
 		};
 		resolved.set(path, shape);
 		(d as Mutable<PlanDecision>).payloadShape = shape;
@@ -333,14 +428,54 @@ export function resolveIncludePayloadShapes(
 		.filter(([path]) => !path.includes('.'))
 		.map(([, d]) => resolvePayload(d));
 	for (const d of all) resolvePayload(d);
+	const rootLabels = plan.intent?.existsWrap
+		? []
+		: resolveRootLabels(rootColumns);
+	const needsPresence = [...resolved.values()].some((shape) => shape.presence);
+	if (needsPresence && rootLabels.length > 0)
+		for (const label of emittedRootLabels()) usedLabels.add(label);
+	for (const shape of resolved.values()) {
+		if (!shape.presence) continue;
+		const target = resolveRelationTarget(queryLocal(shape.table), deps);
+		const targetLabels = new Set(
+			target.outputs
+				? [...target.outputs.values()].map((column) =>
+						identifierText(column.outputKey),
+					)
+				: (model
+						?.getTable(shape.table)
+						?.columns.map((column) =>
+							identifierText(
+								resolveDeclaredIdentifier(
+									deps.declaredNames,
+									deps.dbCasing ?? 'preserve',
+									{ kind: 'column', table: shape.table, column: column.name },
+								),
+							),
+						) ?? []),
+		);
+		const prefix = `__dbsp_presence_${shape.path}`;
+		let label = truncateIdentifier(prefix, 63);
+		let counter = 0;
+		while (usedLabels.has(label) || targetLabels.has(label)) {
+			const suffix = `_${++counter}`;
+			label = `${truncateIdentifier(prefix, 63 - suffix.length)}${suffix}`;
+		}
+		usedLabels.add(label);
+		(shape as Mutable<IncludePayloadShape>).presence = {
+			...shape.presence,
+			outputLabel: label,
+		};
+	}
 	const owners = new Map<string, PayloadOwner>();
 	if (plan.intent?.existsWrap) return roots;
 
-	for (const { key, owner } of resolveRootLabels(rootColumns))
+	for (const { key, owner } of rootLabels)
 		claimPayloadKey(owners, '$', key, owner);
 	for (const shape of roots.filter(
 		(shape) =>
 			shape.strategy !== 'join' ||
+			shape.presence !== undefined ||
 			shape.columns.length > 0 ||
 			shape.children.length > 0,
 	)) {

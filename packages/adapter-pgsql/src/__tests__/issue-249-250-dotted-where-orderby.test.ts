@@ -53,7 +53,7 @@ describe('FIX-250: dotted relation WHERE with any()/inArray()', () => {
 			.dump();
 
 		expect(ws(dump.sql)).toEqual(
-			'SELECT symbols.id, file.id AS "file.id" FROM symbols JOIN files AS file ON symbols.file_id = file.id WHERE EXISTS (SELECT 1 FROM files AS files_exists_1 WHERE symbols.file_id = files_exists_1.id AND files_exists_1.project_id = ANY (CAST($1 AS int4[])))',
+			'SELECT symbols.id, file.id AS "file.id", file.project_id AS "file.project_id", file.id AS __dbsp_presence_file FROM symbols JOIN files AS file ON symbols.file_id = file.id WHERE EXISTS (SELECT 1 FROM files AS files_exists_1 WHERE symbols.file_id = files_exists_1.id AND files_exists_1.project_id = ANY (CAST($1 AS int4[])))',
 		);
 		expect(dump.params).toEqual([[1, 2, 3]]);
 	});
@@ -68,7 +68,7 @@ describe('FIX-250: dotted relation WHERE with any()/inArray()', () => {
 			.dump();
 
 		expect(ws(dump.sql)).toEqual(
-			'SELECT symbols.id, file.id AS "file.id" FROM symbols JOIN files AS file ON symbols.file_id = file.id WHERE EXISTS (SELECT 1 FROM files AS files_exists_1 WHERE symbols.file_id = files_exists_1.id AND files_exists_1.project_id = ANY ($1))',
+			'SELECT symbols.id, file.id AS "file.id", file.project_id AS "file.project_id", file.id AS __dbsp_presence_file FROM symbols JOIN files AS file ON symbols.file_id = file.id WHERE EXISTS (SELECT 1 FROM files AS files_exists_1 WHERE symbols.file_id = files_exists_1.id AND files_exists_1.project_id = ANY ($1))',
 		);
 		expect(dump.params).toEqual([[1, 2, 3]]);
 	});
@@ -200,7 +200,7 @@ describe('FIX-249: orderBy dotted string', () => {
 			.dump();
 
 		expect(ws(dump.sql)).toEqual(
-			'SELECT symbols.id, file.id AS "file.id" FROM symbols JOIN files AS file ON symbols.file_id = file.id ORDER BY file.project_id ASC',
+			'SELECT symbols.id, file.id AS "file.id", file.project_id AS "file.project_id", file.id AS __dbsp_presence_file FROM symbols JOIN files AS file ON symbols.file_id = file.id ORDER BY file.project_id ASC',
 		);
 		expect(dump.params).toEqual([]);
 	});

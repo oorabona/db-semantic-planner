@@ -5,10 +5,11 @@ import {
 	relationColumn,
 	schema,
 } from '@dbsp/core';
+import type { IncludePayloadShape } from '@dbsp/types';
 import { expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
-const model = schema({
+const manyModel = schema({
 	roots: { id: { type: 'integer', primaryKey: true } },
 	children: {
 		id: { type: 'integer', primaryKey: true },
@@ -20,11 +21,25 @@ const model = schema({
 		childId: ref('children', { inverse: 'leaves' }),
 	},
 }).model;
+const model = manyModel;
+const oneModel = schema({
+	roots: { id: { type: 'integer', primaryKey: true } },
+	children: {
+		id: { type: 'integer', primaryKey: true },
+		rootId: ref('roots', { inverse: 'children', unique: true }),
+		amount: { type: 'bigint', js: 'number' },
+	},
+	leaves: {
+		id: { type: 'integer', primaryKey: true },
+		childId: ref('children', { inverse: 'leaves', unique: true }),
+	},
+}).model;
 function compiled(
 	from: 'roots' | 'children',
 	relation: string,
 	strategy: 'join' | 'json_agg' = 'json_agg',
 ) {
+	const model = strategy === 'join' ? oneModel : manyModel;
 	const adapter = createPgCompileOnlyAdapter({ model });
 	const report = createOrm({ model, adapter })
 		.select(from)
@@ -36,6 +51,18 @@ function compiled(
 		report,
 		query,
 		hydrate(rows: unknown[]) {
+			const supply = (
+				shape: IncludePayloadShape,
+				row: Record<string, unknown>,
+			) => {
+				if (shape.presence)
+					row[shape.presence.outputLabel] = row[`${shape.path}.id`] ?? null;
+				for (const child of shape.children) supply(child, row);
+			};
+			for (const row of rows)
+				if (row && typeof row === 'object')
+					for (const shape of query.hydrationPlan?.includePayloads ?? [])
+						supply(shape, row as Record<string, unknown>);
 			const hydrator = new ResultHydrator(model, from);
 			hydrator.hydrateJsonAggIncludes(rows, report, query);
 			hydrator.hydrateJoinIncludes(rows, report, query);
@@ -214,6 +241,7 @@ it('unowned flat labels remain independent of included values', () => {
 	).toEqual([{ children: { id: 2 }, 'other.id': 3, 'children.unowned': 4 }]);
 });
 it('matched joins retain mixed null and present fields', () => {
+	const model = oneModel;
 	const adapter = createPgCompileOnlyAdapter({ model });
 	const report = createOrm({ model, adapter })
 		.select('roots')
@@ -227,7 +255,13 @@ it('matched joins retain mixed null and present fields', () => {
 		.plan();
 	const query = adapter.compile(report, { model });
 	const rows = [
-		{ 'children.id': 2, 'children.amount': null, 'children.leaves.id': null },
+		{
+			'children.id': 2,
+			'children.amount': null,
+			'children.leaves.id': null,
+			__dbsp_presence_children: 2,
+			'__dbsp_presence_children.leaves': null,
+		},
 	];
 	new ResultHydrator(model, 'roots').hydrateJoinIncludes(rows, report, query);
 	expect(rows).toEqual([{ children: { id: 2, amount: null, leaves: null } }]);
@@ -237,11 +271,11 @@ it('several join and JSON includes coexist in one row', () => {
 		roots: { id: { type: 'integer', primaryKey: true } },
 		a: {
 			id: { type: 'integer', primaryKey: true },
-			rootId: ref('roots', { inverse: 'a' }),
+			rootId: ref('roots', { inverse: 'a', unique: true }),
 		},
 		b: {
 			id: { type: 'integer', primaryKey: true },
-			rootId: ref('roots', { inverse: 'b' }),
+			rootId: ref('roots', { inverse: 'b', unique: true }),
 		},
 		c: {
 			id: { type: 'integer', primaryKey: true },
@@ -265,7 +299,9 @@ it('several join and JSON includes coexist in one row', () => {
 		{
 			id: 1,
 			'a.id': 2,
+			__dbsp_presence_a: 2,
 			'b.id': null,
+			__dbsp_presence_b: null,
 			c_json: [{ id: 3, rootId: 1 }],
 			d_json: '[{"id":4,"rootId":1}]',
 		},
@@ -412,6 +448,7 @@ it('non-bigint scalar keys retain their text despite stray js metadata', () => {
 
 for (const strategy of ['json_agg', 'join', 'lateral'] as const) {
 	it(`one source requested under two aliases returns both keys with ${strategy}`, () => {
+		const model = strategy === 'join' ? oneModel : manyModel;
 		const adapter = createPgCompileOnlyAdapter({ model });
 		const report = createOrm({ model, adapter })
 			.select('roots')
@@ -426,7 +463,13 @@ for (const strategy of ['json_agg', 'join', 'lateral'] as const) {
 		const rows: unknown[] =
 			strategy === 'json_agg'
 				? [{ children_json: [{ a: '42', b: '42' }] }]
-				: [{ 'children.a': '42', 'children.b': '42' }];
+				: [
+						{
+							'children.a': '42',
+							'children.b': '42',
+							__dbsp_presence_children: 1,
+						},
+					];
 		const hydrator = new ResultHydrator(model, 'roots');
 		hydrator.hydrateJsonAggIncludes(rows, report, query);
 		hydrator.hydrateJoinIncludes(rows, report, query);
