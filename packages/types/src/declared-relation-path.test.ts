@@ -27,24 +27,24 @@ it('returns ordered declarations and physical key metadata without FK inference'
 		resolveDeclaredRelationPath(model, 'posts', ['author', 'file']),
 	).toEqual({
 		ok: true,
+		logicalSegments: ['author', 'file'],
 		relations,
 		targetTable: 'files',
 		hops: [
 			{
-				source: 'posts',
-				target: 'users',
-				type: 'belongsTo',
-				foreignKey: ['tenantId', 'authorId'],
-				sourceKey: [],
-				targetKey: ['tenantId', 'id'],
+				segmentIndex: 0,
+				fromTable: 'posts',
+				toTable: 'users',
+				pairs: [
+					{ fromColumn: 'tenantId', toColumn: 'tenantId' },
+					{ fromColumn: 'authorId', toColumn: 'id' },
+				],
 			},
 			{
-				source: 'users',
-				target: 'files',
-				type: 'belongsTo',
-				foreignKey: ['fileId'],
-				sourceKey: [],
-				targetKey: [],
+				segmentIndex: 1,
+				fromTable: 'users',
+				toTable: 'files',
+				pairs: [{ fromColumn: 'fileId', toColumn: 'id' }],
 			},
 		],
 	});
@@ -57,4 +57,100 @@ it('returns ordered declarations and physical key metadata without FK inference'
 		segmentIndex: 1,
 		sourceTable: 'users',
 	});
+});
+
+it('expands a composite many-to-many logical segment into two physical hops', () => {
+	const relation = {
+		name: 'tags',
+		target: 'tags',
+		type: 'belongsToMany' as const,
+		through: 'postTags',
+		sourceKey: ['tenant', 'id'],
+		targetKey: ['tenant', 'code'],
+		foreignKey: ['tenant', 'postId'],
+		otherKey: ['tenant', 'tagCode'],
+	};
+	expect(
+		resolveDeclaredRelationPath(
+			{ getRelationsFrom: () => [relation] },
+			'posts',
+			['tags'],
+		),
+	).toEqual({
+		ok: true,
+		logicalSegments: ['tags'],
+		relations: [relation],
+		targetTable: 'tags',
+		hops: [
+			{
+				segmentIndex: 0,
+				fromTable: 'posts',
+				toTable: 'postTags',
+				pairs: [
+					{ fromColumn: 'tenant', toColumn: 'tenant' },
+					{ fromColumn: 'id', toColumn: 'postId' },
+				],
+			},
+			{
+				segmentIndex: 0,
+				fromTable: 'postTags',
+				toTable: 'tags',
+				pairs: [
+					{ fromColumn: 'tenant', toColumn: 'tenant' },
+					{ fromColumn: 'tagCode', toColumn: 'code' },
+				],
+			},
+		],
+	});
+});
+it('preserves logical lookup for metadata-only compiler facades without inventing hops', () => {
+	const relation = { name: 'tags', target: 'tags' };
+	expect(
+		resolveDeclaredRelationPath(
+			{ getRelationsFrom: () => [relation] },
+			'posts',
+			['tags'],
+		),
+	).toEqual({
+		ok: true,
+		logicalSegments: ['tags'],
+		relations: [relation],
+		hops: [],
+		targetTable: 'tags',
+	});
+});
+it('refuses conflicting junction aliases and explicit mismatched key vectors', () => {
+	const relation = {
+		name: 'tags',
+		target: 'tags',
+		type: 'belongsToMany' as const,
+		through: 'postTags',
+		sourceKey: ['id'],
+		targetKey: ['id'],
+		foreignKey: ['postId'],
+		otherKey: ['tagId'],
+		throughSourceKey: ['wrong'],
+	};
+	expect(() =>
+		resolveDeclaredRelationPath(
+			{ getRelationsFrom: () => [relation] },
+			'posts',
+			['tags'],
+		),
+	).toThrow('conflicting junction key aliases');
+	expect(() =>
+		resolveDeclaredRelationPath(
+			{
+				getRelationsFrom: () => [
+					{
+						...relation,
+						throughSourceKey: ['postId'],
+						sourceKey: ['tenant', 'id'],
+					},
+				],
+			},
+			'posts',
+			['tags'],
+		),
+	).toThrow('mismatched key arity');
 });

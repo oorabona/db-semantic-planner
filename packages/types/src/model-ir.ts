@@ -555,10 +555,14 @@ export interface RelationIR {
 	readonly foreignKey?: string | readonly string[] | undefined;
 
 	/**
-	 * For M:N relations: foreign key column on junction table pointing to target.
+	 * For M:N relations: foreign key column(s) on junction table pointing to target.
 	 * Example: In posts-tags via postTags, otherKey = 'tagId'
 	 */
-	readonly otherKey?: string | undefined;
+	readonly otherKey?: string | readonly string[] | undefined;
+	/** Junction-to-source column vector, shared with the NQL facade. */
+	readonly throughSourceKey?: string | readonly string[] | undefined;
+	/** Junction-to-target column vector, shared with the NQL facade. */
+	readonly throughTargetKey?: string | readonly string[] | undefined;
 
 	// --- Planning Hints ---
 

@@ -774,7 +774,13 @@ function createModel(
 				: { foreignKey: mapNameList(relation.foreignKey, map) }),
 			...(relation.otherKey === undefined
 				? {}
-				: { otherKey: map(relation.otherKey) }),
+				: { otherKey: mapNameList(relation.otherKey, map) }),
+			...(relation.throughSourceKey === undefined
+				? {}
+				: { throughSourceKey: mapNameList(relation.throughSourceKey, map) }),
+			...(relation.throughTargetKey === undefined
+				? {}
+				: { throughTargetKey: mapNameList(relation.throughTargetKey, map) }),
 			...(relation.sourceKey === undefined
 				? {}
 				: { sourceKey: mapNameList(relation.sourceKey, map) }),

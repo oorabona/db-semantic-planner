@@ -36,12 +36,14 @@ const names = (rows: Row[]) => rows.map((row) => row.name);
 const sorted = (values: Iterable<string>) => [...new Set(values)].sort();
 const excluded = new Set([...names(moved), ...names(removed)]);
 // Issue #929 adds a caller-visible read error and the shared CLI binding planner.
-const rootAdditions = ['InvalidJsonAggPayloadError'];
+const rootAdditions = ['InvalidJsonAggPayloadError', 'manyToMany'];
+const rootTypeAdditions = ['ManyToManyOptions', 'ManyToManyDefinition'];
 const internalAdditions = ['compileNqlRead', 'createBindingFinalPlan'];
 const rootNames = [
 	'AmbiguousIncludeError',
 	...names(before.root.declarations).filter((name) => !excluded.has(name)),
 	...rootAdditions,
+	...rootTypeAdditions,
 ];
 const rootRuntime = [
 	'AmbiguousIncludeError',

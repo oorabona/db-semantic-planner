@@ -284,7 +284,7 @@ for (const position of ['raw', 'scalar', 'in'] as const) {
 				[...relations.values()].filter((r) => r.source === source),
 		};
 		expect(() => run(exists('comments'), model)).toThrow(
-			'many-to-many relation predicates need the junction declaration (#787)',
+			'many-to-many traversal is not supported yet (#787)',
 		);
 	});
 }

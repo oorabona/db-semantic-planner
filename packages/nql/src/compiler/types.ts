@@ -74,8 +74,8 @@ export interface ColumnValidatorRelation {
 	readonly foreignKey?: string | readonly string[] | undefined;
 	readonly through?: string | undefined;
 	readonly otherKey?: string | readonly string[] | undefined;
-	readonly throughSourceKey?: string | undefined;
-	readonly throughTargetKey?: string | undefined;
+	readonly throughSourceKey?: string | readonly string[] | undefined;
+	readonly throughTargetKey?: string | readonly string[] | undefined;
 	readonly recursive?: unknown;
 	readonly sourceKey?: string | readonly string[] | undefined;
 	readonly targetKey?: string | readonly string[] | undefined;

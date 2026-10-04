@@ -23,6 +23,8 @@ import { resolveJsonAggOrderKey, toColumnList } from '@dbsp/types';
 import {
 	belongsToManyJoinIncludeRefusal,
 	dropsJoinIncludeData,
+	getTrustedNqlRelationFilterFields,
+	resolveDeclaredRelationPath,
 	resolveIncludeRelationName,
 } from '@dbsp/types/internal';
 import { InvalidOperationError } from './dx/errors.js';
@@ -262,6 +264,71 @@ export function plan(
 	options: PlanOptions = {},
 ): PlanReport {
 	const startTime = performance.now();
+	const refusePath = (source: string, path: string) => {
+		const resolved = resolveDeclaredRelationPath(
+			model,
+			source,
+			path.split('.'),
+		);
+		if (
+			resolved.ok &&
+			resolved.relations.some((r) => r.type === 'belongsToMany')
+		)
+			throw new InvalidOperationError(
+				'relation',
+				belongsToManyJoinIncludeRefusal(`${source}.${path}`),
+			);
+	};
+	for (const join of intent.joins ?? [])
+		if (join.relation) refusePath(intent.from, join.relation);
+	const visitWhereIncludes = (node: WhereIntent, source: string): void => {
+		if (node.kind === 'and' || node.kind === 'or')
+			for (const child of node.conditions) visitWhereIncludes(child, source);
+		else if (node.kind === 'not') visitWhereIncludes(node.condition, source);
+		else if (
+			node.kind === 'exists' ||
+			node.kind === 'notExists' ||
+			node.kind === 'relationFilter'
+		) {
+			const path =
+				typeof node.relation === 'string'
+					? node.relation.split('.')
+					: node.relation;
+			const resolved = resolveDeclaredRelationPath(model, source, path);
+			if (!resolved.ok) return;
+			if (node.kind !== 'relationFilter')
+				for (const name of Object.keys(node.include ?? {}))
+					refusePath(resolved.targetTable, name);
+			if (node.where) visitWhereIncludes(node.where, resolved.targetTable);
+		}
+	};
+	if (intent.where) visitWhereIncludes(intent.where, intent.from);
+	if (intent.having) visitWhereIncludes(intent.having, intent.from);
+	// Binding relation columns have their own admitted junction lowering (#192).
+	{
+		const visitExpression = (value: unknown): void => {
+			if (!value || typeof value !== 'object') return;
+			if (
+				'kind' in value &&
+				(value.kind === 'exists' ||
+					value.kind === 'notExists' ||
+					value.kind === 'relationFilter')
+			) {
+				visitWhereIncludes(value as WhereIntent, intent.from);
+				return;
+			}
+			if (
+				'kind' in value &&
+				value.kind === 'relationColumn' &&
+				'relation' in value &&
+				typeof value.relation === 'string' &&
+				!getTrustedNqlRelationFilterFields(value)
+			)
+				refusePath(intent.from, value.relation);
+			for (const child of Object.values(value)) visitExpression(child);
+		};
+		visitExpression(intent.select);
+	}
 
 	const state: PlannerState = {
 		decisions: [],
@@ -1161,6 +1228,12 @@ function processInclude(
 		);
 	}
 
+	if (relation.type === 'belongsToMany')
+		throw new InvalidOperationError(
+			'include',
+			belongsToManyJoinIncludeRefusal(`${sourceTable}.${fullPath}`),
+		);
+
 	// Check for circular includes
 	const includePath = `${sourceTable}.${relation.name}`;
 	const isSelfReferentialRelation = relation.source === relation.target;
@@ -1222,11 +1295,6 @@ function processInclude(
 	validateIncludeOptions(include, includeStrategy, intentPath, fullPath);
 	const optionPath = `${intentPath}(${fullPath})`;
 
-	if (includeStrategy === 'join' && relation.type === 'belongsToMany')
-		throw new InvalidOperationError(
-			'include',
-			belongsToManyJoinIncludeRefusal(optionPath),
-		);
 	if (
 		includeStrategy === 'join' &&
 		isToManyInclude(relation) &&

@@ -108,5 +108,5 @@ export function dropsJoinIncludeData(intent: QueryIntent | undefined): boolean {
 }
 
 export function belongsToManyJoinIncludeRefusal(path: string): string {
-	return `Include ${path} cannot use 'join' for a belongsToMany relation. The relation goes through a junction table that join includes, .join(<relation>), NQL | flat and json_agg/lateral includes do not traverse yet. Join the junction and target tables explicitly with .join(<table>, { on }).`;
+	return `Relation '${path}': many-to-many traversal is not supported yet (#787).`;
 }

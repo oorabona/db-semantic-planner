@@ -627,7 +627,7 @@ SELECT users.*, COALESCE((SELECT json_agg(jsonb_build_object('roleId', __t__.rol
 
 *Schema: blog*
 
-`posts | select *, tags.*` is refused, and reports `relation column "tags"."*" has no emitted alias in this query`. Nothing declares a `posts.tags` foreign key; the two hops through `postTags` are not synthesised.
+With `posts.tags` declared using `manyToMany()`, `posts | select *, tags.*`, `posts | select id, tags.name` and `| flat` are refused at planning: `Relation 'posts.tags': many-to-many traversal is not supported yet (#787).` NQL validates the leaf column against `tags`; the declaration does not yet enable traversal. Without the declaration, the query reports an unknown relation.
 
 [#787](https://github.com/oorabona/db-semantic-planner/issues/787) tracks it, and carries the measurements for the neighbouring forms.
 

@@ -284,10 +284,28 @@ export interface SchemaExtras {
  */
 export type DefaultFilters = Record<string, WhereIntent>;
 
-/**
- * Options for schema() function.
- */
+/** Junction foreign keys for an explicitly declared many-to-many relation. */
+export interface ManyToManyOptions {
+	readonly through: string;
+	readonly sourceForeignKey: readonly string[];
+	readonly targetForeignKey: readonly string[];
+	readonly inverse: string;
+}
+export interface ManyToManyDefinition {
+	readonly target: string;
+	readonly options: ManyToManyOptions;
+}
+export function manyToMany(
+	target: string,
+	options: ManyToManyOptions,
+): ManyToManyDefinition {
+	return { target, options };
+}
+
+/** Options for schema() function. */
 export interface SchemaOptions {
+	/** Explicit many-to-many declarations indexed by source table and relation name. */
+	relations?: Record<string, Record<string, ManyToManyDefinition>>;
 	/**
 	 * Default filters applied automatically to all queries per table.
 	 * Override with `.withoutDefaultFilters()` on the query builder.
@@ -793,6 +811,8 @@ export function schemaToModelIR(
 		tableNames,
 		constraints,
 	);
+
+	buildManyToManyRelations(tables, relations, options?.relations);
 
 	// Phase 5: Build ModelIR
 	const tableMap = new Map<string, TableIR>();
@@ -2164,4 +2184,153 @@ export async function getSchemaFromDb<
 	}
 
 	return result;
+}
+
+function buildManyToManyRelations(
+	tables: readonly TableIR[],
+	relations: RelationIR[],
+	declarations: SchemaOptions['relations'],
+): void {
+	const list = (
+		key: string | readonly string[] | undefined,
+	): readonly string[] => (typeof key === 'string' ? [key] : (key ?? []));
+	const uniqueKeys = (table: TableIR): readonly (readonly string[])[] => [
+		list(table.primaryKey),
+		...table.indexes
+			.filter(
+				(i) =>
+					i.unique &&
+					i.where === undefined &&
+					(!i.method || i.method === 'btree' || i.method === 'hash'),
+			)
+			.map((i) => i.columns),
+		...table.columns.filter((c) => c.unique).map((c) => [c.name]),
+	];
+	const equal = (a: readonly string[], b: readonly string[]) =>
+		a.length === b.length && a.every((c, i) => c === b[i]);
+	for (const [source, entries] of Object.entries(declarations ?? {})) {
+		for (const [name, { target, options }] of Object.entries(entries)) {
+			const label = `${source}.${name}`;
+			const fail = (message: string): never => {
+				throw new SchemaValidationError(
+					`Many-to-many relation '${label}': ${message}`,
+				);
+			};
+			const table = (role: string, value: string): TableIR =>
+				tables.find((t) => t.name === value) ??
+				fail(`unknown ${role} table '${value}'.`);
+			const from = table('source', source),
+				to = table('target', target),
+				junction = table('junction', options.through);
+			const fk = (columns: readonly string[], referenced: TableIR) => {
+				if (
+					!columns.length ||
+					(junction.foreignKeys.some(
+						(f) =>
+							!hasExternalSchema(f.references.schema) &&
+							f.references.table === referenced.name,
+					) &&
+						!junction.foreignKeys.some(
+							(f) =>
+								!hasExternalSchema(f.references.schema) &&
+								f.references.table === referenced.name &&
+								f.references.columns.length === columns.length,
+						))
+				)
+					fail(
+						`arity mismatch for junction foreign key to '${referenced.name}'.`,
+					);
+				const match = junction.foreignKeys.find(
+					(f) =>
+						equal(f.columns, columns) &&
+						!hasExternalSchema(f.references.schema) &&
+						f.references.table === referenced.name,
+				);
+				if (!match)
+					return fail(
+						`junction foreign key [${columns}] is not a declared foreign key referencing '${referenced.name}' key vector.`,
+					);
+				if (match.columns.length !== match.references.columns.length)
+					fail(
+						`arity mismatch for junction foreign key to '${referenced.name}'.`,
+					);
+				if (
+					!uniqueKeys(referenced).some(
+						(k) =>
+							k.length === match.references.columns.length &&
+							k.every((c) => match.references.columns.includes(c)),
+					)
+				)
+					return fail(
+						`junction foreign key [${columns}] does not reference a key vector of '${referenced.name}'.`,
+					);
+				return match.references.columns;
+			};
+			const sourceKey = fk(options.sourceForeignKey, from),
+				targetKey = fk(options.targetForeignKey, to);
+			const union = [
+				...new Set([...options.sourceForeignKey, ...options.targetForeignKey]),
+			];
+			const keys = uniqueKeys(junction);
+			if (!keys.some((k) => k.length > 0 && k.every((c) => union.includes(c))))
+				fail(
+					`junction '${junction.name}' foreign keys are not covered by a primary key or unique constraint.`,
+				);
+			const add = (
+				src: TableIR,
+				dst: TableIR,
+				relationName: string,
+				foreignKey: readonly string[],
+				otherKey: readonly string[],
+				srcKey: readonly string[],
+				dstKey: readonly string[],
+			) => {
+				if (
+					src.columns.some((c) => c.name === relationName) ||
+					relations.some(
+						(r) => r.source === src.name && r.name === relationName,
+					)
+				)
+					fail(
+						`relation name '${src.name}.${relationName}' collides with a column or relation.`,
+					);
+				relations.push({
+					name: relationName,
+					source: src.name,
+					target: dst.name,
+					type: 'belongsToMany',
+					through: junction.name,
+					foreignKey: [...foreignKey],
+					otherKey: [...otherKey],
+					sourceKey: [...srcKey],
+					targetKey: [...dstKey],
+					throughSourceKey: [...foreignKey],
+					throughTargetKey: [...otherKey],
+					cardinality: 'many',
+					optionality: 'optional',
+					includeStrategy: 'auto',
+					filterStrategy: 'auto',
+					joinDefault: 'auto',
+				});
+			};
+			add(
+				from,
+				to,
+				name,
+				options.sourceForeignKey,
+				options.targetForeignKey,
+				sourceKey,
+				targetKey,
+			);
+			add(
+				to,
+				from,
+				options.inverse,
+				options.targetForeignKey,
+				options.sourceForeignKey,
+				targetKey,
+				sourceKey,
+			);
+		}
+	}
 }

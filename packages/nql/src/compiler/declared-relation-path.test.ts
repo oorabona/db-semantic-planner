@@ -82,3 +82,32 @@ describe('declared relation column final target', () => {
 		);
 	});
 });
+it('validates many-to-many leaves against the final target', () => {
+	const relation = {
+		name: 'tags',
+		source: 'posts',
+		target: 'tags',
+		type: 'belongsToMany' as const,
+		through: 'postTags',
+		foreignKey: ['postId'],
+		otherKey: ['tagId'],
+		sourceKey: ['id'],
+		targetKey: ['id'],
+	};
+	const manySchema = {
+		getTable: (table: string) =>
+			table === 'tags'
+				? { columns: [{ name: 'id' }, { name: 'name' }] }
+				: schema.getTable(table),
+		getRelationsFrom: (source: string) =>
+			source === 'posts' ? [relation] : [],
+	};
+	expect(compile('posts | select id, tags.name', manySchema).success).toBe(
+		true,
+	);
+	expect(
+		compile('posts | select id, tags.authorId', manySchema).errors[0]?.message,
+	).toBe(
+		"Column 'authorId' does not exist on table 'tags'. Available columns: id, name",
+	);
+});

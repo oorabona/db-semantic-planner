@@ -70,9 +70,9 @@ payloads become arrays. Read conversions use public payload keys.
 Hydration is atomic per row: if a read conversion fails, that row retains its
 original keys and values.
 
-A `belongsToMany` join include has a separate refusal, including explicit strategies, hints, defaults and external reports. For a `tags` include, the exact message is:
+Every `belongsToMany` include strategy is refused, including explicit strategies, hints and defaults. For a `tags` include, the exact message is:
 
-> `Include include[0](tags) cannot use 'join' for a belongsToMany relation. The relation goes through a junction table that join includes, .join(<relation>), NQL | flat and json_agg/lateral includes do not traverse yet. Join the junction and target tables explicitly with .join(<table>, { on }).`
+> `Relation 'posts.tags': many-to-many traversal is not supported yet (#787).`
 
 ## Row Explosion Risk
 

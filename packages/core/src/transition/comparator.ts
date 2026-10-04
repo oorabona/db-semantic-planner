@@ -199,8 +199,16 @@ function normalizeRelation(
 	relation: RelationIR,
 	normalize: NormalizeIdentifier,
 ): RelationIR {
-	const { foreignKey, otherKey, sourceKey, targetKey, through, ...rest } =
-		relation;
+	const {
+		foreignKey,
+		otherKey,
+		sourceKey,
+		targetKey,
+		through,
+		throughSourceKey,
+		throughTargetKey,
+		...rest
+	} = relation;
 	return {
 		...rest,
 		name: normalize(relation.name),
@@ -214,9 +222,14 @@ function normalizeRelation(
 			: {}),
 		...(otherKey !== undefined
 			? {
-					otherKey:
-						typeof otherKey === 'string' ? normalize(otherKey) : otherKey,
+					otherKey: normalizeColumnRef(otherKey, normalize),
 				}
+			: {}),
+		...(throughSourceKey !== undefined
+			? { throughSourceKey: normalizeColumnRef(throughSourceKey, normalize) }
+			: {}),
+		...(throughTargetKey !== undefined
+			? { throughTargetKey: normalizeColumnRef(throughTargetKey, normalize) }
 			: {}),
 		...(sourceKey !== undefined
 			? { sourceKey: normalizeColumnRef(sourceKey, normalize) }

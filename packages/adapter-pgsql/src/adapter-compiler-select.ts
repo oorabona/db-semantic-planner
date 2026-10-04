@@ -32,6 +32,7 @@ import type {
 } from '@dbsp/types';
 import { resolveOutputReadHandling, toColumnList } from '@dbsp/types';
 import {
+	belongsToManyJoinIncludeRefusal,
 	getTrustedNqlRelationFilterFields,
 	type Mutable,
 	resolveIncludeRelationName,
@@ -382,6 +383,10 @@ function compileJoinIntents(
 				);
 			}
 
+			if (rel.type === 'belongsToMany')
+				throw new Error(
+					belongsToManyJoinIncludeRefusal(`${rootTable}.${rel.name}`),
+				);
 			// Derive FK direction from relation type
 			// - belongsTo: FK is on the source (root) table → sourceColumn=FK, targetColumn=PK
 			// - hasMany/hasOne: FK is on the target table → sourceColumn=PK, targetColumn=FK
