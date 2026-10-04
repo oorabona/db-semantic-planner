@@ -1172,10 +1172,9 @@ describe('Semantic Planner', () => {
 				],
 			};
 
-			const report = plan(intent, q2Schema);
-
-			// Should have completed without infinite loop
-			expect(report.decisions.length).toBeGreaterThan(0);
+			expect(() => plan(intent, q2Schema)).toThrowError(
+				`Invalid include: Circular include detected: categories.products`,
+			);
 		});
 	});
 

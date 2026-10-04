@@ -253,7 +253,7 @@ describe('planner: processInclude depth exceeded warning', () => {
 // ============================================================================
 
 describe('planner: processInclude circular detection', () => {
-	it('emits CIRCULAR_INCLUDE when same relation visited again in traversal path', () => {
+	it('refuses circular includes when same relation visited again in traversal path', () => {
 		// posts → comments → post → comments (circular)
 		const intent: QueryIntent = {
 			type: 'select',
@@ -272,12 +272,9 @@ describe('planner: processInclude circular detection', () => {
 				},
 			],
 		};
-		const report = plan(intent, simpleSchema);
-		const circularWarning = report.warnings.find(
-			(w) => w.code === 'CIRCULAR_INCLUDE',
+		expect(() => plan(intent, simpleSchema)).toThrowError(
+			`Invalid include: Circular include detected: posts.comments`,
 		);
-		expect(circularWarning).toBeDefined();
-		expect(circularWarning?.code).toBe('CIRCULAR_INCLUDE');
 	});
 });
 

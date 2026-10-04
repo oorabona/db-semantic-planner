@@ -1165,12 +1165,10 @@ function processInclude(
 	const includePath = `${sourceTable}.${relation.name}`;
 	const isSelfReferentialRelation = relation.source === relation.target;
 	if (!isSelfReferentialRelation && state.visitedIncludes.has(includePath)) {
-		state.warnings.push({
-			code: 'CIRCULAR_INCLUDE',
-			message: `Circular include detected: ${includePath}`,
-			suggestion: 'Remove circular include to prevent infinite recursion',
-		});
-		return;
+		throw new InvalidOperationError(
+			'include',
+			`Circular include detected: ${includePath}`,
+		);
 	}
 	if (!isSelfReferentialRelation) state.visitedIncludes.add(includePath);
 
@@ -1180,21 +1178,14 @@ function processInclude(
 	paths.push(intentPath);
 	state.relationAccessCounts.set(relationPath, paths);
 
-	// CLI-012c: Check for recursive include on self-referential relations
-	const isRecursiveInclude =
-		(!!include.recursive || !!relation.recursive) && isSelfReferentialRelation;
-
-	// Recursive hints have a narrower contract than generic include strategies.
-	if (isRecursiveInclude) {
-		if (
-			relation.includeStrategy !== 'auto' &&
-			relation.includeStrategy !== 'cte'
-		) {
-			throw new UnsupportedStrategyError(
-				`Recursive include at ${intentPath}(${fullPath}) requires strategy 'cte', but relation '${relation.name}' declares includeStrategy '${relation.includeStrategy}'. Use 'auto' or 'cte'.`,
-			);
-		}
-	} else {
+	const isRecursiveInclude = validateRecursiveIncludeStrategy(
+		include,
+		relation,
+		intentPath,
+		fullPath,
+		opts.dialectCapabilities,
+	);
+	if (!isRecursiveInclude) {
 		validateIncludeStrategy(
 			relation.includeStrategy,
 			opts.dialectCapabilities,
@@ -1207,20 +1198,6 @@ function processInclude(
 	}
 	let resolution: IncludeStrategyResolution;
 	if (isRecursiveInclude) {
-		if (include.join !== undefined) {
-			throw new UnsupportedStrategyError(
-				`Recursive include at ${intentPath}(${fullPath}) cannot use join: recursive includes compile as a CTE (oorabona/db-semantic-planner#894).`,
-			);
-		}
-		// FIND-013: Guard recursive → cte against dialect capability.
-		// Recursive resolution requires explicit capability validation. A dialect
-		// that declared supportsRecursiveCTE=false must not silently receive an
-		// invalid plan.
-		if (!opts.dialectCapabilities?.supportsRecursiveCTE) {
-			throw new UnsupportedStrategyError(
-				`Recursive include at ${intentPath}(${fullPath}) requires a dialect with supportsRecursiveCTE; current dialect (${opts.dialectCapabilities?.name ?? 'no capabilities'}) does not support it.`,
-			);
-		}
 		resolution = { strategy: 'cte', source: 'recursive' };
 	} else {
 		resolution =
@@ -2082,6 +2059,38 @@ function generateJoinReasoning(
 	);
 }
 
+/** Recursive includes share the same strategy contract at planning and compilation. */
+export function validateRecursiveIncludeStrategy(
+	include: IncludeIntent,
+	relation: RelationIR,
+	intentPath: string,
+	fullPath: string,
+	capabilities: DialectCapabilities | undefined,
+	strategy?: string,
+): boolean {
+	const recursive =
+		(!!include.recursive || !!relation.recursive) &&
+		relation.source === relation.target;
+	if (!recursive) return false;
+	if (relation.includeStrategy !== 'auto' && relation.includeStrategy !== 'cte')
+		throw new UnsupportedStrategyError(
+			`Recursive include at ${intentPath}(${fullPath}) requires strategy 'cte', but relation '${relation.name}' declares includeStrategy '${relation.includeStrategy}'. Use 'auto' or 'cte'.`,
+		);
+	if (include.join !== undefined)
+		throw new UnsupportedStrategyError(
+			`Recursive include at ${intentPath}(${fullPath}) cannot use join: recursive includes compile as a CTE (oorabona/db-semantic-planner#894).`,
+		);
+	if (strategy !== undefined && strategy !== 'cte')
+		throw new UnsupportedStrategyError(
+			`Recursive include at ${intentPath}(${fullPath}) requires strategy 'cte', but decision declares '${strategy}'.`,
+		);
+	if (!capabilities?.supportsRecursiveCTE)
+		throw new UnsupportedStrategyError(
+			`Recursive include at ${intentPath}(${fullPath}) requires a dialect with supportsRecursiveCTE; current dialect (${capabilities?.name ?? 'no capabilities'}) does not support it.`,
+		);
+	return true;
+}
+
 /** Shared ordering validation before planner or adapter dispatch. */
 export function validateIncludeOrdering(
 	include: IncludeIntent,
@@ -2095,8 +2104,19 @@ export function validateIncludeOrdering(
 		? resolveJsonAggOrderKey(targetTable)
 		: undefined;
 
-	if (!toColumnList(targetTable?.primaryKey).length && recordedKey?.length)
-		targetOrder = { columns: recordedKey, fallback: false };
+	if (recordedKey?.length) {
+		for (const column of recordedKey) {
+			if (
+				targetTable &&
+				!targetTable.columns.some((entry) => entry.name === column)
+			)
+				throw new Error(
+					`Include ${fullPath} recorded order key "${column}" is not a column of target table "${target}"`,
+				);
+		}
+		if (!toColumnList(targetTable?.primaryKey).length)
+			targetOrder = { columns: recordedKey, fallback: false };
+	}
 	if (include.orderBy !== undefined || include.limit !== undefined) {
 		const entries = include.orderBy ?? [];
 		if (
@@ -2124,7 +2144,10 @@ export function validateIncludeOrdering(
 					`Include ${fullPath} orderBy field "${entry.field}" is not a column of target table "${target}"`,
 				);
 		}
-		const ordered = new Set(entries.map((entry) => entry.field));
+		const ordered = new Set([
+			...entries.map((entry) => entry.field),
+			...(targetOrder?.fallback ? [] : (targetOrder?.columns ?? [])),
+		]);
 		const unique =
 			targetTable?.columns.some(
 				(column) =>
@@ -2149,7 +2172,7 @@ export function validateIncludeOrdering(
 			);
 		if (
 			!toColumnList(targetTable?.primaryKey).length &&
-			!recordedKey?.length &&
+			(targetTable !== undefined || !recordedKey?.length) &&
 			!unique
 		)
 			throw new Error(

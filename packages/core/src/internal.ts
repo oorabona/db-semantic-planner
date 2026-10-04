@@ -93,6 +93,7 @@ export {
 	validateIncludeOptions,
 	validateIncludeOrdering,
 	validateIncludeStrategy,
+	validateRecursiveIncludeStrategy,
 	validateResolvedIncludeStrategy,
 } from './planner.js';
 export {

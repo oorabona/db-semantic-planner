@@ -9,11 +9,13 @@ import {
  * @internal
  */
 
+import { POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 import {
 	countDistinctRelationPathsByName,
 	validateIncludeInput,
 	validateIncludeOptions,
 	validateIncludeOrdering,
+	validateRecursiveIncludeStrategy,
 	validateResolvedIncludeStrategy,
 } from '@dbsp/core/internal';
 import type {
@@ -1281,6 +1283,16 @@ function validateReportIncludes(
 			throw new Error(
 				`Include ${intentPath}(${fullPath}) has no resolved include-strategy decision`,
 			);
+		if (relation ?? virtualRelation)
+			validateRecursiveIncludeStrategy(
+				include,
+				(relation ?? virtualRelation)!,
+				intentPath,
+				fullPath,
+				POSTGRESQL_CAPABILITIES,
+				strategy,
+			);
+
 		if (chosen && relation) {
 			const context = chosen.context;
 			const defaultPk = compilerOptions.defaultPkColumnName ?? 'id';
