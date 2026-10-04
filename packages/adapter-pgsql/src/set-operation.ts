@@ -97,6 +97,18 @@ export function compileSetOperationEnvelope(
 	// Compile right side (QueryIntent or nested SetOperationIntent)
 	const right = compileLeafOrBranch(intent.right, compileFn);
 
+	if (
+		[left, right].some((branch) =>
+			branch.hydrationPlan?.includePayloads?.some(
+				(payload) => payload.strategy === 'json_agg',
+			),
+		)
+	) {
+		throw new Error(
+			'Set operations with nested relation output are not supported; use | flat in each branch.',
+		);
+	}
+
 	// Renumber right-side parameters to avoid $N collisions
 	const rightSQL = renumberParams(right.sql, left.parameters.length);
 

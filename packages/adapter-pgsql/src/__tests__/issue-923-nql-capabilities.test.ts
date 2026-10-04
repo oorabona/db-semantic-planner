@@ -101,3 +101,77 @@ ${nqlRaw(text)}`;
 		);
 	},
 );
+
+const nestedRead = 'users | select id, posts.title';
+const programRead =
+	"insert into users set id = 3, name = 'New' | select id | bind created\nusers | select id, posts.title";
+const cteRead =
+	'with enriched as (users | select id, posts.title)\nenriched | select *';
+
+it.each([programRead, cteRead])(
+	'hydrates final read all() and first(): %s',
+	async (text) => {
+		const query = vi.fn(async (sql: string) => ({
+			rows:
+				sql.startsWith('SELECT') || sql.startsWith('WITH')
+					? [{ id: 1, posts_json: '[{"title":"First"}]' }]
+					: [{ id: 3 }],
+		}));
+		const client = { query, release: vi.fn() };
+		const pool = {
+			query,
+			connect: vi.fn(async () => client),
+		} as unknown as Pool;
+		const executingOrm = createOrm({
+			model: db.model,
+			adapter: createPgAdapter(pool, { model: db.model }),
+		});
+		expect(await executingOrm.nql`${nqlRaw(text)}`.all()).toEqual([
+			{ id: 1, posts: [{ title: 'First' }] },
+		]);
+		expect(await executingOrm.nql`${nqlRaw(text)}`.first()).toEqual({
+			id: 1,
+			posts: [{ title: 'First' }],
+		});
+	},
+);
+
+it('run discards program read rows without parsing JSON', async () => {
+	const query = vi.fn(async (sql: string) => ({
+		rows: sql.startsWith('SELECT')
+			? [{ id: 1, posts_json: 'invalid JSON' }]
+			: [{ id: 3 }],
+	}));
+	const client = { query, release: vi.fn() };
+	const pool = { query, connect: vi.fn(async () => client) } as unknown as Pool;
+	const executingOrm = createOrm({
+		model: db.model,
+		adapter: createPgAdapter(pool, { model: db.model }),
+	});
+	await expect(
+		executingOrm.nql`${nqlRaw(programRead)}`.run(),
+	).resolves.toBeUndefined();
+});
+
+it.each(['*', 'id, posts_json', 'id'])(
+	'CTE projection resolves payload visibility: %s',
+	async (projection) => {
+		const query = vi.fn().mockResolvedValue({
+			rows: [
+				projection === 'id'
+					? { id: 1 }
+					: { id: 1, posts_json: '[{"title":"First"}]' },
+			],
+		});
+		const executingOrm = createOrm({
+			model: db.model,
+			adapter: createPgAdapter({ query } as unknown as Pool, {
+				model: db.model,
+			}),
+		});
+		const text = `with enriched as (${nestedRead})\nenriched | select ${projection}`;
+		expect(await executingOrm.nql`${nqlRaw(text)}`.all()).toEqual([
+			projection === 'id' ? { id: 1 } : { id: 1, posts: [{ title: 'First' }] },
+		]);
+	},
+);

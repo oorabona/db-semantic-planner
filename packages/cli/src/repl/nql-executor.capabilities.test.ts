@@ -54,3 +54,50 @@ it.each(cases)('CLI and tag agree for %s', async (text, sql) => {
 	expect(tag.sql).toBe(cli.sql);
 	expect('params' in tag && tag.params).toEqual(cli.params);
 });
+
+const refusal =
+	'Set operations with nested relation output are not supported; use | flat in each branch.';
+const nested = 'users | select id, posts.title';
+const flat = 'users | select id, posts.title | flat';
+const setCases = [
+	...[
+		'union',
+		'union all',
+		'intersect',
+		'intersect all',
+		'except',
+		'except all',
+	].map((op) => `${nested} | ${op} (${nested})`),
+	`${nested} | union (users | select id, name)`,
+	`users | select id, name | union (${nested})`,
+	`${nested} | union (posts | select id, author.name)`,
+	`users | select id, name | union (${nested} | except (${nested}))`,
+];
+it.each(setCases)('CLI and tag refuse nested set output: %s', async (text) => {
+	const orm = createOrm({
+		model: db.model,
+		adapter: createPgCompileOnlyAdapter({ model: db.model }),
+	});
+	await expect(compileNqlToSql(text, db.model)).rejects.toThrow(refusal);
+	expect(() => orm.nql`${nqlRaw(text)}`.dump()).toThrow(refusal);
+});
+it.each([
+	'union',
+	'union all',
+	'intersect',
+	'intersect all',
+	'except',
+	'except all',
+])('CLI and tag compile flat %s', async (op) => {
+	const text = `${flat} | ${op} (${flat})`;
+	const cli = await compileNqlToSql(text, db.model);
+	const orm = createOrm({
+		model: db.model,
+		adapter: createPgCompileOnlyAdapter({ model: db.model }),
+	});
+	expect(orm.nql`${nqlRaw(text)}`.dump().sql).toBe(cli.sql);
+	const branch =
+		'SELECT users.id, posts.title AS "posts.title" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId"';
+	expect(cli.sql).toBe(`(${branch}) ${op.toUpperCase()} (${branch})`);
+	expect(cli.params).toEqual([]);
+});
