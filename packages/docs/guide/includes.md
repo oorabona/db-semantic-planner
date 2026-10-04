@@ -92,6 +92,8 @@ Every `belongsToMany` include strategy is refused, including explicit strategies
 
 > `Relation 'posts.tags': many-to-many traversal is not supported yet (#787).`
 
+The provisional refusal applies when planning includes (any strategy, NQL relation columns and `| flat`), relation `.join()` and relation predicates. Other traversal routes are not supported until the junction lowering lands.
+
 To-one join includes accept omitted `select`, `select: { type: 'all' }`, or `select: { type: 'fields', fields: [...] }` with plain column names and no `'*'`.
 CTE includes refuse any explicit `select` with the include path because they add no related targets to the outer `SELECT`.
 

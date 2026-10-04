@@ -218,7 +218,7 @@ Relations are auto-inferred from `ref()` calls. The planner detects:
 - **hasMany** (1:N) — the target table
 - **hasOne** (1:1) — the inverse of a unique FK
 
-Declare many-to-many relations explicitly with `SchemaOptions.relations` and `manyToMany()` (see below). The declaration retains both junction foreign keys and their referenced key vectors. Traversal is refused until [#787](https://github.com/oorabona/db-semantic-planner/issues/787) lands.
+Declare many-to-many relations explicitly with `SchemaOptions.relations` and `manyToMany()` (see below). The declaration retains both junction foreign keys and their referenced key vectors. Traversal remains provisional until the junction lowering lands.
 
 ```typescript
 const db = schema({
@@ -296,15 +296,15 @@ const db = schema({
 
 This declares `posts.tags` and `tags.posts`. Composite foreign keys use ordered
 column lists matching declared junction foreign keys. The junction must have a
-primary key or unique constraint covered by the two foreign key lists; the
+primary key, unique constraint or B-tree unique index covered by the two foreign key lists; the
 inferred junction primary key satisfies this requirement. Names must not collide
 with columns or existing relations.
 
-Every include strategy, relation column, `| flat`, relation-mode `.join()` and
-`exists.include` refuses many-to-many traversal with
+Traversal of a declared many-to-many relation is refused when planning an include
+(any strategy, including NQL relation columns and `| flat`) or a relation `.join()`:
 `Relation 'posts.tags': many-to-many traversal is not supported yet (#787).`
-Relation predicates retain their existing #787 refusal. Explicit table joins and
-binding junction traversal retain their existing behavior.
+Relation predicates retain their existing #787 refusal. Other traversal routes are
+not supported until the junction lowering lands.
 
 ### Schema Options (`dbCasing`)
 

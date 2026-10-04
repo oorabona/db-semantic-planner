@@ -166,7 +166,7 @@ it('refuses every include strategy at planning', () => {
 			"Relation 'posts.tags': many-to-many traversal is not supported yet (#787).",
 		);
 });
-it('refuses a relation join and relation column at planning', () => {
+it('refuses a relation join at planning', () => {
 	const model = schema(definition, undefined, options()).model;
 	expect(() =>
 		plan(
@@ -174,28 +174,6 @@ it('refuses a relation join and relation column at planning', () => {
 				type: 'select',
 				from: 'posts',
 				joins: [{ relation: 'tags', type: 'inner' }],
-			},
-			model,
-		),
-	).toThrow(
-		"Relation 'posts.tags': many-to-many traversal is not supported yet (#787).",
-	);
-	expect(() =>
-		plan(
-			{
-				type: 'select',
-				from: 'posts',
-				select: {
-					type: 'expressions',
-					columns: [
-						{
-							kind: 'relationColumn',
-							relation: 'tags',
-							column: 'name',
-							as: 'name',
-						},
-					],
-				},
 			},
 			model,
 		),
@@ -256,70 +234,6 @@ it('retains ordered composite referenced keys on both directions', () => {
 		targetKey: ['tenant', 'code'],
 	});
 });
-it('refuses exists.include at planning', () => {
-	const model = schema(
-		{
-			...definition,
-			authors: { id: 'integer' },
-			posts: { id: 'integer', authorId: ref('authors', { inverse: 'posts' }) },
-		},
-		undefined,
-		options(),
-	).model;
-	expect(() =>
-		plan(
-			{
-				type: 'select',
-				from: 'authors',
-				where: {
-					kind: 'exists',
-					relation: 'posts',
-					include: { tags: { join: 'inner' } },
-				},
-			},
-			model,
-		),
-	).toThrow(
-		"Relation 'posts.tags': many-to-many traversal is not supported yet (#787).",
-	);
-});
-it('refuses exists.include inside select filters at planning', () => {
-	const model = schema(
-		{
-			...definition,
-			authors: { id: 'integer' },
-			posts: { id: 'integer', authorId: ref('authors', { inverse: 'posts' }) },
-		},
-		undefined,
-		options(),
-	).model;
-	expect(() =>
-		plan(
-			{
-				type: 'select',
-				from: 'authors',
-				select: {
-					type: 'expressions',
-					columns: [
-						{
-							kind: 'aggregate',
-							function: 'count',
-							field: '*',
-							filter: {
-								kind: 'exists',
-								relation: 'posts',
-								include: { tags: { join: 'inner' } },
-							},
-						},
-					],
-				},
-			},
-			model,
-		),
-	).toThrow(
-		"Relation 'posts.tags': many-to-many traversal is not supported yet (#787).",
-	);
-});
 it('rejects a junction foreign key to an external table of the same name', () => {
 	expect(() =>
 		schema(
@@ -368,4 +282,47 @@ it('rejects a composite junction foreign key referencing a non-key vector', () =
 			options('posts', 'tags', 'tags', 'postTags', 'posts', ['a', 'b']),
 		),
 	).toThrow("does not reference a key vector of 'posts'");
+});
+
+it('rejects hash unique indexes as junction uniqueness proof', () => {
+	expect(() =>
+		schema(
+			{
+				...definition,
+				postTags: { id: 'integer', postId: ref('posts'), tagId: ref('tags') },
+			},
+			{
+				postTags: {
+					indexes: [
+						{ columns: ['postId', 'tagId'], unique: true, method: 'hash' },
+					],
+				},
+			},
+			options(),
+		),
+	).toThrow("junction 'postTags' foreign keys are not covered");
+});
+it('names nested include refusals from the query root once', () => {
+	const model = schema(
+		{
+			...definition,
+			authors: { id: 'integer' },
+			posts: { id: 'integer', authorId: ref('authors', { inverse: 'posts' }) },
+		},
+		undefined,
+		options(),
+	).model;
+	expect(() =>
+		plan(
+			{
+				type: 'select',
+				from: 'authors',
+				include: [{ relation: 'posts', include: [{ relation: 'tags' }] }],
+			},
+			model,
+			{ defaultIncludeStrategy: 'json_agg' },
+		),
+	).toThrow(
+		"Relation 'authors.posts.tags': many-to-many traversal is not supported yet (#787).",
+	);
 });

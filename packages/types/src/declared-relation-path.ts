@@ -155,7 +155,7 @@ export function resolveDeclaredRelationPath<
 				targetKey,
 				relation.targetKey !== undefined && relation.foreignKey !== undefined,
 			);
-		} else {
+		} else if (relation.type === 'hasOne' || relation.type === 'hasMany') {
 			hop(
 				currentTable,
 				relation.target,

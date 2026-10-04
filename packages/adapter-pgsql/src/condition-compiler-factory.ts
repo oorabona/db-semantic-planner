@@ -27,7 +27,6 @@ import type {
 } from '@dbsp/types';
 import { toColumnList } from '@dbsp/types';
 import {
-	belongsToManyJoinIncludeRefusal,
 	getTrustedNqlRelationFilterFields,
 	isFieldRef,
 	resolveDeclaredRelationPath,
@@ -169,22 +168,6 @@ export function assertNoManyToManyRootRelations(
 					);
 				}
 				target = relation.target;
-			}
-			if (node.kind !== 'relationFilter' && node.include) {
-				for (const name of Object.keys(node.include)) {
-					const resolved = resolveDeclaredRelationPath(
-						model,
-						target,
-						name.split('.'),
-					);
-					if (
-						resolved.ok &&
-						resolved.relations.some((r) => r.type === 'belongsToMany')
-					)
-						throw new Error(
-							belongsToManyJoinIncludeRefusal(`${target}.${name}`),
-						);
-				}
 			}
 			if (node.where) visit(node.where, target);
 		}

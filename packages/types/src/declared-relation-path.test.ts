@@ -104,7 +104,13 @@ it('expands a composite many-to-many logical segment into two physical hops', ()
 	});
 });
 it('preserves logical lookup for metadata-only compiler facades without inventing hops', () => {
-	const relation = { name: 'tags', target: 'tags' };
+	const relation = {
+		name: 'tags',
+		target: 'tags',
+		foreignKey: 'postId',
+		sourceKey: 'id',
+		targetKey: 'id',
+	};
 	expect(
 		resolveDeclaredRelationPath(
 			{ getRelationsFrom: () => [relation] },

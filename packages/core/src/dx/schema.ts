@@ -2201,7 +2201,7 @@ function buildManyToManyRelations(
 				(i) =>
 					i.unique &&
 					i.where === undefined &&
-					(!i.method || i.method === 'btree' || i.method === 'hash'),
+					(!i.method || i.method === 'btree'),
 			)
 			.map((i) => i.columns),
 		...table.columns.filter((c) => c.unique).map((c) => [c.name]),

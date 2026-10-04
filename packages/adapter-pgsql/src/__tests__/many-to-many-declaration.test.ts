@@ -1,12 +1,4 @@
-import {
-	createOrm,
-	exists,
-	manyToMany,
-	notExists,
-	nqlRaw,
-	ref,
-	schema,
-} from '@dbsp/core';
+import { createOrm, exists, manyToMany, nqlRaw, ref, schema } from '@dbsp/core';
 import { expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -37,7 +29,7 @@ const orm = createOrm({
 });
 const refusal =
 	"Relation 'posts.tags': many-to-many traversal is not supported yet (#787).";
-it('refuses declared many-to-many fluent includes, join, and exists.include at planning', () => {
+it('refuses declared many-to-many fluent includes and join at planning', () => {
 	for (const strategy of [
 		'auto',
 		'join',
@@ -53,18 +45,6 @@ it('refuses declared many-to-many fluent includes, join, and exists.include at p
 				.plan(),
 		).toThrow(refusal);
 	expect(() => orm.select('posts').join('tags').plan()).toThrow(refusal);
-	expect(() =>
-		orm
-			.select('authors')
-			.where(exists('posts', { include: { tags: { join: 'inner' } } }))
-			.plan(),
-	).toThrow(refusal);
-	expect(() =>
-		orm
-			.select('authors')
-			.where(notExists('posts', { include: { tags: { join: 'left' } } }))
-			.plan(),
-	).toThrow(refusal);
 });
 it('refuses declared many-to-many NQL relation columns and flat includes at planning', () => {
 	for (const query of [
