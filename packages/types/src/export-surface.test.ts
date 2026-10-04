@@ -40,7 +40,13 @@ const rootNames = [
 	'IncludePayloadShape',
 ];
 const rootRuntime = before.root.runtime.filter((name) => !excluded.has(name));
+// Join include data rules shared by the planner and the adapter (#908).
+const joinIncludeExports = [
+	'belongsToManyJoinIncludeRefusal',
+	'dropsJoinIncludeData',
+];
 const internalNames = [
+	...joinIncludeExports,
 	...rootNames,
 	...names(before.internal.declarations).filter(
 		(name) => !names(before.root.declarations).includes(name),
@@ -51,6 +57,7 @@ const movedRuntime = before.root.runtime.filter((name) =>
 	names(moved).includes(name),
 );
 const internalRuntime = [
+	...joinIncludeExports,
 	...rootRuntime,
 	...before.internal.runtime.filter(
 		(name) => !before.root.runtime.includes(name),
