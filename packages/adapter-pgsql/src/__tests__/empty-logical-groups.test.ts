@@ -252,7 +252,7 @@ const expected: Record<string, { sql: string; params: readonly unknown[] }> = {
 		params: [],
 	},
 	'every true': {
-		sql: 'SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0."authorId" AND NOT (true)))',
+		sql: 'SELECT users.* FROM users WHERE true',
 		params: [],
 	},
 	'none false': {

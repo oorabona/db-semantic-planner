@@ -28,7 +28,7 @@
 			"position": "select-where",
 			"kind": "range-overlaps",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users WHERE users.period && $1 AND users.score = $2",
+			"sql": "SELECT users.* FROM users WHERE users.period && CAST($1 AS daterange) AND users.score = $2",
 			"params": ["[2026-01-01,2026-02-01)", 13],
 			"error": null
 		},
@@ -36,7 +36,7 @@
 			"position": "select-where",
 			"kind": "range-overlaps",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users WHERE users.period && $1 OR users.score = $2",
+			"sql": "SELECT users.* FROM users WHERE users.period && CAST($1 AS daterange) OR users.score = $2",
 			"params": ["[2026-01-01,2026-02-01)", 13],
 			"error": null
 		},
@@ -44,7 +44,7 @@
 			"position": "select-where",
 			"kind": "range-overlaps",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE NOT (users.period && $1)",
+			"sql": "SELECT users.* FROM users WHERE NOT (users.period && CAST($1 AS daterange))",
 			"params": ["[2026-01-01,2026-02-01)"],
 			"error": null
 		},
@@ -52,7 +52,7 @@
 			"position": "select-where",
 			"kind": "range-overlaps",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users WHERE users.score = $1 AND (NOT (users.period && $2) OR users.score = $3)",
+			"sql": "SELECT users.* FROM users WHERE users.score = $1 AND (NOT (users.period && CAST($2 AS daterange)) OR users.score = $3)",
 			"params": [13, "[2026-01-01,2026-02-01)", 17],
 			"error": null
 		},
@@ -68,7 +68,7 @@
 			"position": "select-where",
 			"kind": "range-contains",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users WHERE users.period @> $1 AND users.score = $2",
+			"sql": "SELECT users.* FROM users WHERE users.period @> CAST($1 AS daterange) AND users.score = $2",
 			"params": ["[2026-01-01,2026-02-01)", 13],
 			"error": null
 		},
@@ -76,7 +76,7 @@
 			"position": "select-where",
 			"kind": "range-contains",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users WHERE users.period @> $1 OR users.score = $2",
+			"sql": "SELECT users.* FROM users WHERE users.period @> CAST($1 AS daterange) OR users.score = $2",
 			"params": ["[2026-01-01,2026-02-01)", 13],
 			"error": null
 		},
@@ -84,7 +84,7 @@
 			"position": "select-where",
 			"kind": "range-contains",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE NOT (users.period @> $1)",
+			"sql": "SELECT users.* FROM users WHERE NOT (users.period @> CAST($1 AS daterange))",
 			"params": ["[2026-01-01,2026-02-01)"],
 			"error": null
 		},
@@ -92,7 +92,7 @@
 			"position": "select-where",
 			"kind": "range-contains",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users WHERE users.score = $1 AND (NOT (users.period @> $2) OR users.score = $3)",
+			"sql": "SELECT users.* FROM users WHERE users.score = $1 AND (NOT (users.period @> CAST($2 AS daterange)) OR users.score = $3)",
 			"params": [13, "[2026-01-01,2026-02-01)", 17],
 			"error": null
 		},
@@ -108,7 +108,7 @@
 			"position": "select-where",
 			"kind": "range-contains-point",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users WHERE users.period @> $1 AND users.score = $2",
+			"sql": "SELECT users.* FROM users WHERE users.period @> CAST($1 AS date) AND users.score = $2",
 			"params": ["2026-01-15", 13],
 			"error": null
 		},
@@ -116,7 +116,7 @@
 			"position": "select-where",
 			"kind": "range-contains-point",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users WHERE users.period @> $1 OR users.score = $2",
+			"sql": "SELECT users.* FROM users WHERE users.period @> CAST($1 AS date) OR users.score = $2",
 			"params": ["2026-01-15", 13],
 			"error": null
 		},
@@ -124,7 +124,7 @@
 			"position": "select-where",
 			"kind": "range-contains-point",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE NOT (users.period @> $1)",
+			"sql": "SELECT users.* FROM users WHERE NOT (users.period @> CAST($1 AS date))",
 			"params": ["2026-01-15"],
 			"error": null
 		},
@@ -132,7 +132,7 @@
 			"position": "select-where",
 			"kind": "range-contains-point",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users WHERE users.score = $1 AND (NOT (users.period @> $2) OR users.score = $3)",
+			"sql": "SELECT users.* FROM users WHERE users.score = $1 AND (NOT (users.period @> CAST($2 AS date)) OR users.score = $3)",
 			"params": [13, "2026-01-15", 17],
 			"error": null
 		},
@@ -148,7 +148,7 @@
 			"position": "select-where",
 			"kind": "range-containedBy",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users WHERE users.period <@ $1 AND users.score = $2",
+			"sql": "SELECT users.* FROM users WHERE users.period <@ CAST($1 AS daterange) AND users.score = $2",
 			"params": ["[2026-01-01,2026-02-01)", 13],
 			"error": null
 		},
@@ -156,7 +156,7 @@
 			"position": "select-where",
 			"kind": "range-containedBy",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users WHERE users.period <@ $1 OR users.score = $2",
+			"sql": "SELECT users.* FROM users WHERE users.period <@ CAST($1 AS daterange) OR users.score = $2",
 			"params": ["[2026-01-01,2026-02-01)", 13],
 			"error": null
 		},
@@ -164,7 +164,7 @@
 			"position": "select-where",
 			"kind": "range-containedBy",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE NOT (users.period <@ $1)",
+			"sql": "SELECT users.* FROM users WHERE NOT (users.period <@ CAST($1 AS daterange))",
 			"params": ["[2026-01-01,2026-02-01)"],
 			"error": null
 		},
@@ -172,7 +172,7 @@
 			"position": "select-where",
 			"kind": "range-containedBy",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users WHERE users.score = $1 AND (NOT (users.period <@ $2) OR users.score = $3)",
+			"sql": "SELECT users.* FROM users WHERE users.score = $1 AND (NOT (users.period <@ CAST($2 AS daterange)) OR users.score = $3)",
 			"params": [13, "[2026-01-01,2026-02-01)", 17],
 			"error": null
 		},
@@ -708,145 +708,145 @@
 			"position": "select-where",
 			"kind": "exists-recursive-up",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)",
-			"params": [71],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "select-where",
 			"kind": "exists-recursive-up",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND users.score = $2",
-			"params": [71, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "select-where",
 			"kind": "exists-recursive-up",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR users.score = $2",
-			"params": [71, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "select-where",
 			"kind": "exists-recursive-up",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
-			"params": [71],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "select-where",
 			"kind": "exists-recursive-up",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users WHERE users.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR users.score = $3)",
-			"params": [13, 71, 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "select-where",
 			"kind": "exists-recursive-down",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)",
-			"params": [71],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "select-where",
 			"kind": "exists-recursive-down",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND users.score = $2",
-			"params": [71, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "select-where",
 			"kind": "exists-recursive-down",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR users.score = $2",
-			"params": [71, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "select-where",
 			"kind": "exists-recursive-down",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
-			"params": [71],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "select-where",
 			"kind": "exists-recursive-down",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users WHERE users.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR users.score = $3)",
-			"params": [13, 71, 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "select-where",
 			"kind": "notExists-recursive-up",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
-			"params": [71],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "select-where",
 			"kind": "notExists-recursive-up",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND users.score = $2",
-			"params": [71, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "select-where",
 			"kind": "notExists-recursive-up",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR users.score = $2",
-			"params": [71, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "select-where",
 			"kind": "notExists-recursive-up",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)))",
-			"params": [71],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "select-where",
 			"kind": "notExists-recursive-up",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users WHERE users.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR users.score = $3)",
-			"params": [13, 71, 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "select-where",
 			"kind": "notExists-recursive-down",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))",
-			"params": [71],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "select-where",
 			"kind": "notExists-recursive-down",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND users.score = $2",
-			"params": [71, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "select-where",
 			"kind": "notExists-recursive-down",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR users.score = $2",
-			"params": [71, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
 		}
 	]
 }

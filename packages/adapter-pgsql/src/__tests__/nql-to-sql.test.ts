@@ -1560,7 +1560,7 @@ filtered_posts
 			| order by title`.dump();
 
 		expect(normalizeSQL(dump.sql)).toBe(
-			'with "filtered_posts" as (select posts.title, author.name as author_name from tenant_42.posts join tenant_42.authors as author on posts."authorid" = author.id where author.name = $1) select filtered_posts.title, filtered_posts.author_name from filtered_posts order by filtered_posts.title asc',
+			'with "filtered_posts" as (select posts.title, author.name as author_name from tenant_42.posts join tenant_42.authors as author on posts."authorid" = author.id where exists (select 1 from tenant_42.authors as authors_exists_1 where posts."authorid" = authors_exists_1.id and authors_exists_1.name = $1)) select filtered_posts.title, filtered_posts.author_name from filtered_posts order by filtered_posts.title asc',
 		);
 	});
 

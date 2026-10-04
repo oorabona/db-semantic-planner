@@ -576,6 +576,7 @@ describe('compileWhereIntent', () => {
 						rootTable: 'projected_posts',
 						model: {
 							getRelation: () => undefined,
+							getRelationsFrom: () => [],
 						} as never,
 					},
 				),
