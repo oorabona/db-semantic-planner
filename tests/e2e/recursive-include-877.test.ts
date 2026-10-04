@@ -369,7 +369,7 @@ describe('#877 correlated recursive includes', () => {
 					})
 					.dump(),
 			).toThrow(
-				"Recursive include 'children' cannot expose traversal depth: projected column 'depth' already exists",
+				"Include payload 'children' has conflicting public key 'depth' (column:depth and traversal:depth).",
 			);
 	});
 	it('returns every stored value from a 51-column recursive payload', async () => {

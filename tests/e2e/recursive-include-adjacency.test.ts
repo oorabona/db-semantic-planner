@@ -139,9 +139,14 @@ describe('#891 adjacency recursion and public CTE includes', () => {
 				.map((decision) => decision.choice),
 		).toEqual(['cte']);
 
-		// The current CTE handler joins immediate children without projecting child
-		// columns. Public hydration therefore returns the root objects unchanged;
-		// DX-017 does not populate the separate recursiveIncludes hydrator path.
-		expect(await query.execute()).toEqual([rootA, rootB]);
+		// Each root walks its own tree; the default includes the root itself at depth 0.
+		const node = (row: typeof rootA, children: readonly unknown[]) => ({
+			...row,
+			children,
+		});
+		expect(await query.execute()).toEqual([
+			node(rootA, [node(rootA, [node(childA, [node(leafA, [])])])]),
+			node(rootB, [node(rootB, [node(childB, [node(leafB, [])])])]),
+		]);
 	});
 });
