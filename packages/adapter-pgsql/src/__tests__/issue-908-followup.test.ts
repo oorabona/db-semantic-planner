@@ -122,7 +122,11 @@ it('belongsToMany refuses every join include source and external report', () => 
 		});
 		expect(() =>
 			manyAdapter.compile({ ...report, decisions }, { model: manyModel }),
-		).toThrow(refusal);
+		).toThrow(
+			omit
+				? 'Include include[0](tags) decision does not match its intent'
+				: refusal,
+		);
 	}
 	// The refusal's suggested table joins actually traverse the junction.
 	expect(

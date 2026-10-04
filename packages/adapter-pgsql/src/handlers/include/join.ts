@@ -272,24 +272,49 @@ export function completeKeylessJoinProjection(
 	nodes: readonly unknown[],
 	includeWhere = false,
 ): void {
-	const markerNode = targets.at(-1);
-	const marker =
-		markerNode && 'ResTarget' in markerNode
-			? markerNode.ResTarget.name
-			: undefined;
+	completeKeylessJoinProjections(
+		new Map([[alias, targets]]),
+		nodes,
+		includeWhere,
+	);
+}
+
+/** Discover references once for all keyless include wrappers in a query. */
+export function completeKeylessJoinProjections(
+	projections: ReadonlyMap<string, Node[]>,
+	nodes: readonly unknown[],
+	includeWhere = false,
+): void {
+	if (projections.size === 0) return;
 	const fieldName = (field: Node | undefined): string | undefined =>
 		field && 'String' in field ? field.String.sval : undefined;
-	const projected = new Set(
-		targets.map((target) => {
-			const value = (target as { ResTarget?: ResTarget }).ResTarget?.val;
-			return value && 'ColumnRef' in value
-				? fieldName(value.ColumnRef.fields?.at(-1))
-				: undefined;
+	const entries = new Map(
+		[...projections].map(([alias, targets]) => {
+			const last = targets.at(-1);
+			return [
+				alias,
+				{
+					targets,
+					marker: last && 'ResTarget' in last ? last.ResTarget.name : undefined,
+					projected: new Set(
+						targets.map((target) => {
+							const value = (target as { ResTarget?: ResTarget }).ResTarget
+								?.val;
+							return value && 'ColumnRef' in value
+								? fieldName(value.ColumnRef.fields?.at(-1))
+								: undefined;
+						}),
+					),
+				},
+			];
 		}),
 	);
-	const shadowsAlias = (node: unknown): boolean => {
-		if (!node || typeof node !== 'object') return false;
-		if (Array.isArray(node)) return node.some(shadowsAlias);
+	const bindings = (node: unknown, aliases: Set<string>): void => {
+		if (!node || typeof node !== 'object') return;
+		if (Array.isArray(node)) {
+			for (const child of node) bindings(child, aliases);
+			return;
+		}
 		const record = node as Record<string, unknown>;
 		for (const kind of [
 			'RangeVar',
@@ -306,45 +331,51 @@ export function completeKeylessJoinProjection(
 				  }
 				| undefined;
 			if (!binding) continue;
-			if ((binding.alias?.aliasname ?? binding.relname) === alias) return true;
-			if (
-				kind === 'JoinExpr' &&
-				(shadowsAlias(binding.larg) || shadowsAlias(binding.rarg))
-			)
-				return true;
+			const name = binding.alias?.aliasname ?? binding.relname;
+			if (name) aliases.add(name);
+			if (kind === 'JoinExpr') {
+				bindings(binding.larg, aliases);
+				bindings(binding.rarg, aliases);
+			}
 		}
-		return false;
 	};
-	const visit = (node: unknown): void => {
+	const visit = (node: unknown, hidden: ReadonlySet<string>): void => {
 		if (!node || typeof node !== 'object') return;
 		if (Array.isArray(node)) {
-			for (const child of node) visit(child);
+			for (const child of node) visit(child, hidden);
 			return;
 		}
 		const ast = node as { SelectStmt?: SelectStmt; ColumnRef?: ColumnRef };
-		if (
-			ast.SelectStmt &&
-			(includeWhere || shadowsAlias(ast.SelectStmt.fromClause))
-		)
+		if (ast.SelectStmt) {
+			if (includeWhere) return;
+			const scoped = new Set(hidden);
+			bindings(ast.SelectStmt.fromClause, scoped);
+			for (const child of Object.values(ast.SelectStmt)) visit(child, scoped);
 			return;
+		}
 		const fields = ast.ColumnRef?.fields;
 		const unqualified = includeWhere && fields?.length === 1;
+		const alias = unqualified
+			? projections.keys().next().value
+			: fields && fieldName(fields[0]);
+		const entry = alias && !hidden.has(alias) ? entries.get(alias) : undefined;
 		const column = fieldName(fields?.[unqualified ? 0 : 1]);
 		if (
-			(unqualified ||
-				(fields?.length === 2 && fieldName(fields[0]) === alias)) &&
+			alias &&
+			entry &&
+			(unqualified || fields?.length === 2) &&
 			column &&
-			column !== marker &&
-			!projected.has(column)
+			column !== entry.marker &&
+			!entry.projected.has(column)
 		) {
-			projected.add(column);
-			targets.splice(
-				targets.length - 1,
+			entry.projected.add(column);
+			entry.targets.splice(
+				entry.targets.length - 1,
 				0,
 				sqlResTarget(sqlColumnRef(queryLocal(column), queryLocal(alias))),
 			);
 		}
-		for (const child of Object.values(node)) visit(child);
+		for (const child of Object.values(node)) visit(child, hidden);
 	};
-	for (const node of nodes) visit(node);
+	for (const node of nodes) visit(node, new Set());
 }

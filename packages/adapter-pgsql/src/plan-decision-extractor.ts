@@ -1767,6 +1767,9 @@ function toIncludeDecision(
 		relationName,
 	);
 	const limit = includeIntent?.limit;
+	const includeOrderBy = includeIntent
+		? includeIntent.orderBy
+		: context.includeOrderBy;
 	const columns =
 		choice === 'json_agg'
 			? includeSelectedColumns(
@@ -1807,9 +1810,7 @@ function toIncludeDecision(
 			? { orderBy: context.targetOrderKey }
 			: {}),
 		...(context.orderByFallback ? { orderByFallback: true } : {}),
-		...((includeIntent?.orderBy ?? context.includeOrderBy) && {
-			includeOrderBy: includeIntent?.orderBy ?? context.includeOrderBy,
-		}),
+		...(includeOrderBy && { includeOrderBy }),
 		...(context.intentPath && { intentPath: context.intentPath }),
 		...(limit != null && { limit }),
 	};
@@ -2090,6 +2091,9 @@ function toJsonAggDecision(
 		relationName,
 	);
 	const limit = includeIntent?.limit;
+	const includeOrderBy = includeIntent
+		? includeIntent.orderBy
+		: context.includeOrderBy;
 	const columns = includeSelectedColumns(
 		includeIntent?.select,
 		deriveRelationPathFromIntentPath(
@@ -2122,9 +2126,7 @@ function toJsonAggDecision(
 			? { orderBy: context.targetOrderKey }
 			: {}),
 		...(context.orderByFallback ? { orderByFallback: true } : {}),
-		...((includeIntent?.orderBy ?? context.includeOrderBy) && {
-			includeOrderBy: includeIntent?.orderBy ?? context.includeOrderBy,
-		}),
+		...(includeOrderBy && { includeOrderBy }),
 		...(context.intentPath && { intentPath: context.intentPath }),
 	};
 }

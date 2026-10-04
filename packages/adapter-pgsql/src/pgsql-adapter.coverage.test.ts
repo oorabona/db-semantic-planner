@@ -1777,41 +1777,13 @@ describe('PgAdapter - Coverage Tests', () => {
 
 	describe('compile — intent path with model (column validation)', () => {
 		it('throws when include has invalid columns in target table', () => {
-			const model = {
-				tables: new Map([
-					[
-						'posts',
-						{
-							name: 'posts',
-							columns: [
-								{ name: 'id', type: 'integer', nullable: false },
-								{ name: 'author_id', type: 'integer', nullable: false },
-							],
-							primaryKey: 'id',
-							foreignKeys: [],
-							indexes: [],
-						},
-					],
-					[
-						'users',
-						{
-							name: 'users',
-							columns: [
-								{ name: 'id', type: 'integer', nullable: false },
-								{ name: 'name', type: 'text', nullable: false },
-							],
-							primaryKey: 'id',
-							foreignKeys: [],
-							indexes: [],
-						},
-					],
-				]),
-				relations: new Map(),
-				getTable: function (n) {
-					return this.tables.get(n);
+			const model = schema({
+				posts: {
+					id: { type: 'integer', primaryKey: true },
+					author_id: ref('users', { as: 'author' }),
 				},
-				getRelation: () => undefined,
-			} as any;
+				users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+			}).model;
 
 			// Use intent path: plan.intent triggers intentToDecisions which produces
 			// selectRelationColumn decisions. plan.decisions contains planner output
@@ -1836,6 +1808,7 @@ describe('PgAdapter - Coverage Tests', () => {
 				intent: {
 					type: 'query',
 					table: 'posts',
+					include: [{ relation: 'author' }],
 					select: {
 						type: 'expressions',
 						columns: [

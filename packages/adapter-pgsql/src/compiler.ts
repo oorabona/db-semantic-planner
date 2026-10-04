@@ -71,7 +71,10 @@ import { compileExpressionIntent } from './handlers/expression/custom.js';
 import { bindParameter } from './handlers/expression/param-value.js';
 import { buildRecursiveScalarSubquery } from './handlers/expression/pseudo.js';
 import { genericWindowHandler } from './handlers/expression/window.js';
-import { completeKeylessJoinProjection } from './handlers/include/join.js';
+import {
+	completeKeylessJoinProjection,
+	completeKeylessJoinProjections,
+} from './handlers/include/join.js';
 import {
 	createWhereDispatcher,
 	ensureExpressionHandlersRegistered,
@@ -3242,13 +3245,12 @@ export class PlanCompiler {
 			if (obNode) orderBy.push(obNode);
 		}
 
-		for (const [alias, targets] of this.keylessJoinProjections)
-			completeKeylessJoinProjection(targets, alias, [
-				targetList,
-				where,
-				orderBy,
-				this.rawJoins,
-			]);
+		completeKeylessJoinProjections(this.keylessJoinProjections, [
+			targetList,
+			where,
+			orderBy,
+			this.rawJoins,
+		]);
 		this.flushPendingJoins(from, plan);
 		return this.buildSelectStmt(
 			targetList,

@@ -1222,6 +1222,7 @@ function validateReportIncludes(
 	compilerOptions: CompilerOptions,
 	parent = '',
 	intentParent = '',
+	matched = new Set<object>(),
 ): void {
 	for (const [index, include] of (includes ?? []).entries()) {
 		const name = include.via ?? include.relation;
@@ -1230,14 +1231,17 @@ function validateReportIncludes(
 		validateIncludeInput(include, intentPath, fullPath);
 		const assignment = assignments[intentPath];
 		const chosen = assignment?.decision;
+		if (chosen) matched.add(chosen);
 		const declaredSource =
 			model?.getTable(sourceTable) &&
 			resolveRelationTarget(queryLocal(sourceTable), compilerOptions)
 				.cteName === undefined;
+		// Target-table includes may carry the planner's explicit disambiguation.
+		// Exact relation names and via still resolve independently of the decision.
 		const chosenRelation =
 			model &&
 			chosen?.context.target === name &&
-			(chosen.context.sourceTable ?? sourceTable) === sourceTable &&
+			chosen.context.sourceTable === sourceTable &&
 			chosen.context.relation
 				? model.getRelation(`${sourceTable}.${chosen.context.relation}`)
 				: undefined;
@@ -1247,7 +1251,7 @@ function validateReportIncludes(
 						model,
 						sourceTable,
 						name,
-						chosenRelation ? () => chosenRelation : undefined,
+						chosenRelation?.target === name ? () => chosenRelation : undefined,
 						fullPath,
 					)
 				: undefined;
@@ -1268,6 +1272,26 @@ function validateReportIncludes(
 			throw new Error(
 				`Include ${intentPath}(${fullPath}) has no resolved include-strategy decision`,
 			);
+		if (chosen && relation) {
+			const context = chosen.context;
+			if (
+				context.sourceTable !== sourceTable ||
+				context.relation !== relation.name ||
+				context.target !== relation.target ||
+				context.relationType !== relation.type ||
+				(include.join !== undefined &&
+					(strategy !== 'join' || chosen.joinType !== include.join)) ||
+				(include.strategy === 'flat' &&
+					strategy !== 'join' &&
+					strategy !== 'lateral') ||
+				(include.join === undefined &&
+					relation.includeStrategy !== 'auto' &&
+					strategy !== relation.includeStrategy)
+			)
+				throw new Error(
+					`Include ${intentPath}(${fullPath}) decision does not match its intent`,
+				);
+		}
 		validateIncludeOptions(include, strategy, intentPath, fullPath);
 		validateReportIncludes(
 			include.include,
@@ -1280,7 +1304,13 @@ function validateReportIncludes(
 			compilerOptions,
 			fullPath,
 			`${intentPath}.`,
+			matched,
 		);
+	}
+	if (!intentParent) {
+		for (const [path, assignment] of Object.entries(assignments))
+			if (assignment && !matched.has(assignment.decision))
+				throw new Error(`Include ${path} has no matching intent include`);
 	}
 }
 
@@ -1399,6 +1429,10 @@ export function compileSelectEnvelope<T = unknown>(
 				deps.dialectCapabilities,
 			);
 			if (decision.context.intentPath) {
+				if (includeAssignments[decision.context.intentPath])
+					throw new Error(
+						`Include ${decision.context.intentPath} has duplicate include-strategy decisions`,
+					);
 				strategies.set(decision.context.intentPath, strategy);
 				includeAssignments[decision.context.intentPath] = {
 					strategy,
@@ -1450,6 +1484,15 @@ export function compileSelectEnvelope<T = unknown>(
 			includeAssignments,
 			compilerOptions,
 		);
+		for (const legacy of new Set(legacyStrategies.values()))
+			if (
+				!Object.values(includeAssignments).some(
+					(a) => a?.decision === legacy.decision,
+				)
+			)
+				throw new Error(
+					`Include ${legacy.decision.context.relation} has no matching intent include`,
+				);
 		assertSupportedIncludeWhere(execIntent.include, strategies);
 		if (execIntent.where) {
 			assertNoRecursiveRootRelations(execIntent.where);
