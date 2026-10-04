@@ -140,7 +140,10 @@ describe('#891 adjacency recursion and public CTE includes', () => {
 		).toEqual(['cte']);
 
 		// Each root walks its own tree; the default includes the root itself at depth 0.
-		const node = (row: typeof rootA, children: readonly unknown[]) => ({
+		const node = (
+			row: { id: number; parent_id: number | null },
+			children: readonly unknown[],
+		) => ({
 			...row,
 			children,
 		});
