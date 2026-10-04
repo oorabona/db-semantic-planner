@@ -138,7 +138,7 @@ orm.select('products')
 
 Source: `packages/core/src/dx/subquery-builder.ts:288` — `outerRef(column)` returns a `SubqueryRefIntent`.
 
-Query WHERE scalar comparisons and `inSubquery()` compile the body with its own alias and resolve `outerRef()` to the immediately enclosing query. `rawExists()` and `rawNotExists()` use the same body compiler in WHERE, aggregate FILTER and recursive `start.where` anchors. All levels share one parameter sequence. Legacy `compilePlan()` and SELECT expression subqueries retain their existing correlation restrictions.
+Query WHERE scalar comparisons and `inSubquery()` compile the body with its own alias and resolve unqualified `outerRef()` to the immediately enclosing query and qualified references to the nearest matching enclosing table or alias. `rawExists()` and `rawNotExists()` use the same body compiler in WHERE, aggregate FILTER and recursive `start.where` anchors. All levels share one parameter sequence. Legacy `compilePlan()` and SELECT expression subqueries retain their existing correlation restrictions.
 
 ---
 
@@ -146,7 +146,7 @@ Query WHERE scalar comparisons and `inSubquery()` compile the body with its own 
 
 ### Nested aliases and correlation
 
-Predicate subqueries allocate distinct aliases at every nesting depth and across siblings, including repeated queries on the same table. Each `outerRef()` binds to the immediately enclosing query; all levels share one parameter sequence. Duplicate explicit aliases in one scope are rejected.
+Predicate subqueries allocate distinct aliases at every nesting depth and across siblings, including repeated queries on the same table. Unqualified `outerRef()` binds to the immediately enclosing query; qualified `outerRef('posts.id')` binds to the nearest enclosing query whose table or alias is `posts`; all levels share one parameter sequence. Duplicate explicit aliases in one scope are rejected.
 
 ```typescript
 import { schema, createOrm, and, eq, inSubquery, outerRef, subquery } from '@dbsp/core';

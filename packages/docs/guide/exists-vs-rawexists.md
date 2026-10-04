@@ -12,8 +12,8 @@ differ fundamentally in *where the schema knowledge comes from*.
   the safe, type-guided path when the FK is declared in the schema.
 
 - **`rawExists(subquery(...))`** — you build the subquery explicitly, with control
-  over the `SELECT` list, `WHERE` clause, and any inner aggregation. The inner table
-  alias is currently fixed (the compiler emits `${table}_sq`). No FK lookup, no
+  over the `SELECT` list, `WHERE` clause, and any inner aggregation. Inner table
+  aliases are generated distinctly within PostgreSQL’s 63-byte limit. No FK lookup, no
   planner help. This is the escape hatch for polymorphic tables, ad-hoc cross-schema
   references, and any target table that has no `ref()` declared toward the source.
 
@@ -89,7 +89,7 @@ Key observations:
 
 ### Explicit correlation with rawExists()
 
-A subquery body in query WHERE resolves `outerRef()` against its immediately enclosing query:
+A subquery body in query WHERE resolves `outerRef()` against its immediately enclosing query when unqualified (qualified references select the nearest matching enclosing table or alias):
 
 ```typescript
 import { createOrm, rawExists, subquery, gt, outerRef, ref, schema } from '@dbsp/core';
@@ -197,7 +197,7 @@ polymorphic or ad-hoc join targets.
 
 ### Correlation scope
 
-Query WHERE subquery bodies support `outerRef()` for scalar comparisons, `inSubquery()` and `rawExists()`. Nested bodies refer to their immediately enclosing query and share parameter numbering. A nested `rawExists()` that reuses the enclosing generated qualifier is refused with `Query scope already binds qualifier 'posts_sq'.` Legacy `compilePlan()` lowering retains its correlation refusal.
+Query WHERE subquery bodies support `outerRef()` for scalar comparisons, `inSubquery()` and `rawExists()`. Nested same-table `rawExists()` bodies compile with distinct generated aliases and share parameter numbering. Unqualified `outerRef()` binds to the immediately enclosing query; qualified `outerRef('posts.id')` binds to the nearest enclosing query whose table or alias is `posts`. Only a user-supplied alias reused in one scope is refused. Legacy `compilePlan()` lowering retains its correlation refusal.
 
 ### `exists()` silently drops the WHERE for undeclared relations
 

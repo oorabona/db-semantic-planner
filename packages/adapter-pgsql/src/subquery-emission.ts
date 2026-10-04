@@ -54,6 +54,7 @@ import {
 	relationBinding,
 	relationBindingFor,
 } from './binding-registry.js';
+import { truncateIdentifier } from './column-metadata.js';
 import {
 	assertNoManyToManyRootRelations,
 	assertNoRecursiveRootRelations,
@@ -207,9 +208,8 @@ export function assertNoDroppedDecisionModifiers(
  *  2. `assertNoDroppedDecisionModifiers(decision, use)` — validates the Decision's
  *     own fields unconditionally.  Catches directly-constructed compilePlan
  *     decisions (no subqueryIntent) that carry forbidden modifiers directly.
- *  3. Rejects correlated subqueries (outerRef() inside the inner WHERE).
- *  4. Builds the SelectStmt from the lowered `decision` fields (targetTable,
- *     selectColumn, aggregate, conditions, orderBy, limit).
+ * The canonical body is compiled through the one condition compiler, with
+ * decision dispatch retained for legacy callers.
  *
  * Called by:
  *   - `buildScalarSubquery`  (handlers/where/subquery.ts) — scalar + IN handlers
@@ -220,8 +220,7 @@ export function assertNoDroppedDecisionModifiers(
  * parameter seeding).
  *
  * @param use           - How the subquery is used (drives modifier validation rules)
- * @param sourceIntent  - The ORIGINAL QueryIntent before lowering (provenance) —
- *                        used for validation only; SQL is built from `decision`.
+ * @param sourceIntent  - The ORIGINAL QueryIntent before lowering (provenance).
  * @param decision      - The lowered Decision (targetTable, selectColumn, conditions…)
  * @param ctx           - Immutable compiler context
  * @param state         - Mutable compiler state (params array, aliases, paramIndex)
@@ -272,12 +271,21 @@ export function buildPredicateSubquerySelect(
 
 	// Generate unique alias
 	let aliasIndex = state.aliases.size;
-	let targetAlias = `${targetTable}_subq_${aliasIndex}`;
-	while (
-		Array.from(state.aliases.values()).includes(targetAlias) ||
-		relationBindingFor(ctx.scope, queryLocal(targetAlias))
-	) {
-		targetAlias = `${targetTable}_subq_${++aliasIndex}`;
+	const aliasFor = (index: number) => {
+		const suffix = `_subq_${index}`;
+		return `${truncateIdentifier(targetTable, 63 - suffix.length)}${suffix}`;
+	};
+	const reserved = new Set(
+		[
+			...state.aliases.values(),
+			...(ctx.bindingNames ?? []),
+			...Array.from(ctx.scope?.bindings.keys() ?? []),
+			ctx.currentAlias ?? ctx.rootTable,
+		].map((name) => truncateIdentifier(name, 63)),
+	);
+	let targetAlias = aliasFor(aliasIndex);
+	while (reserved.has(targetAlias)) {
+		targetAlias = aliasFor(++aliasIndex);
 	}
 	state.aliases.set(`subquery_${targetAlias}`, targetAlias);
 	// A mutation may carry an outer scope and a newer CTE binding registry. Merge

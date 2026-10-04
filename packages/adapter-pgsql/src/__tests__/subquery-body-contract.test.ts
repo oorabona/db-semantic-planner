@@ -425,3 +425,76 @@ it('canonical subquery body avoids repeated recursive validation', () => {
 	// One validation read plus the retained lowering/handler reads.
 	expect(reads).toBe(3);
 });
+
+it('qualified outerRef binds nearest enclosing same-table query at depth three', () => {
+	const result = dump(
+		rawExists(
+			subquery('posts')
+				.select('id')
+				.where(
+					rawExists(
+						subquery('posts')
+							.select('id')
+							.where(eq('id', outerRef('posts.id'))),
+					),
+				),
+		),
+	);
+	expect(result.sql).toBe(
+		'SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE EXISTS (SELECT posts_sq_2.id FROM posts AS posts_sq_2 WHERE posts_sq_2.id = posts_sq_1.id)))',
+	);
+	expect(result.params).toEqual([]);
+});
+
+for (const table of ['t'.repeat(63)]) {
+	it(`generated aliases fit 63 bytes and preserve self correlation: ${table}`, () => {
+		const model = schema({
+			[table]: { id: { type: 'integer', primaryKey: true } },
+		});
+		const longOrm = createOrm({
+			schema: model,
+			adapter: createPgCompileOnlyAdapter({ model: model.model }),
+		});
+		const prefix = 't'.repeat(60);
+		const alias = `${prefix}_sq`;
+		const result = longOrm
+			.select(table)
+			.where(
+				rawExists(
+					subquery(table)
+						.select('id')
+						.where(eq('id', outerRef('id'))),
+				),
+			)
+			.dump();
+		expect(new TextEncoder().encode(alias).length).toBe(63);
+		expect(result.sql).toBe(
+			`SELECT ${table}.* FROM ${table} WHERE EXISTS (SELECT ${alias}.id FROM ${table} AS ${alias} WHERE ${alias}.id = ${table}.id)`,
+		);
+		expect(result.params).toEqual([]);
+	});
+}
+
+it('handler subquery aliases fit 63 bytes across siblings', () => {
+	const table = 't'.repeat(63);
+	const model = schema({
+		[table]: { id: { type: 'integer', primaryKey: true } },
+	});
+	const longOrm = createOrm({
+		schema: model,
+		adapter: createPgCompileOnlyAdapter({ model: model.model }),
+	});
+	const body = subquery(table)
+		.select('id')
+		.where(eq('id', outerRef('id')));
+	const first = `${'t'.repeat(56)}_subq_0`;
+	const second = `${'t'.repeat(56)}_subq_1`;
+	const result = longOrm
+		.select(table)
+		.where(and(inSubquery('id', body), inSubquery('id', body)))
+		.dump();
+	expect(result.sql).toBe(
+		`SELECT ${table}.* FROM ${table} WHERE ${table}.id = ANY (SELECT ${first}.id FROM ${table} AS ${first} WHERE ${first}.id = ${table}.id) AND ${table}.id = ANY (SELECT ${second}.id FROM ${table} AS ${second} WHERE ${second}.id = ${table}.id)`,
+	);
+	expect(result.params).toEqual([]);
+});

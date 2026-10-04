@@ -13,6 +13,7 @@ import {
 	relationBinding,
 	relationBindingFor,
 } from './binding-registry.js';
+import { truncateIdentifier } from './column-metadata.js';
 import type {
 	ConditionCompilerCtx,
 	WhereCompilerCtx,
@@ -118,13 +119,22 @@ export function createSubqueryBuilder(
 			? (rawAliases.get(parent.paramState) ?? new Set<string>())
 			: new Set<string>();
 		if (parent) rawAliases.set(parent.paramState, allocated);
-		let innerAlias = `${targetTable}_sq`;
+		const aliasFor = (index: number) => {
+			const suffix = index === 0 ? '_sq' : `_sq_${index}`;
+			return `${truncateIdentifier(targetTable, 63 - suffix.length)}${suffix}`;
+		};
+		const reserved = new Set(
+			[
+				...Array.from(scope?.bindings.keys() ?? []),
+				...(parent ? [parent.currentAlias ?? parent.rootTable] : []),
+				...allocated,
+				...(parent?.paramState.aliases.values() ?? []),
+			].map((name) => truncateIdentifier(name, 63)),
+		);
+		let innerAlias = aliasFor(0);
 		let aliasIndex = 0;
-		while (
-			relationBindingFor(scope, queryLocal(innerAlias)) ||
-			allocated.has(innerAlias)
-		) {
-			innerAlias = `${targetTable}_sq_${++aliasIndex}`;
+		while (reserved.has(innerAlias)) {
+			innerAlias = aliasFor(++aliasIndex);
 		}
 		allocated.add(innerAlias);
 		const sourceBinding =
