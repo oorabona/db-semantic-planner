@@ -1,6 +1,7 @@
 import {
 	cast,
 	createOrm,
+	ExpressionRef,
 	eq,
 	exprRef,
 	fn,
@@ -463,7 +464,7 @@ it('908f: structural wrappers still refuse outer aggregates', () => {
 		expect(() =>
 			orm
 				.select('posts')
-				.columns([{ __expr: true, intent }])
+				.columns([new ExpressionRef(intent)])
 				.include('author', { join: 'left' })
 				.plan(),
 		).toThrow(
