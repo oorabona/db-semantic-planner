@@ -8,7 +8,7 @@
  * The old async path (createOrm({ adapter })) was removed in ARCH-006.
  */
 
-import { createOrm, getSchemaFromDb } from '@dbsp/core';
+import { createOrm, getSchemaFromDb, isRef } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
@@ -121,10 +121,8 @@ describe('Auto-Introspection (ARCH-006)', () => {
 
 			// author_id should be a ref definition (using actual DB column name)
 			const authorIdDef = posts!.author_id;
-			expect(authorIdDef).toMatchObject({
-				__brand: 'ref',
-				target: 'authors',
-			});
+			expect(authorIdDef !== undefined && isRef(authorIdDef)).toBe(true);
+			expect(authorIdDef).toMatchObject({ target: 'authors' });
 		});
 
 		it('can be used to create an ORM instance', async () => {
