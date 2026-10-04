@@ -499,7 +499,9 @@ it('keeps fluent recursive CTE include root rows unchanged', async () => {
 			.decisions.filter((d) => d.type === 'include-strategy')
 			.map((d) => d.choice),
 	).toEqual(['cte']);
-	expect(read.dump().sql).toMatchSnapshot();
+	expect(read.dump().sql).toBe(
+		"SELECT categories.*, COALESCE((WITH RECURSIVE children_walk AS (SELECT __n.id AS id, __n.parent_id AS parent_id, 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited FROM categories AS __n WHERE __n.parent_id = categories.id AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.parent_id AS parent_id, children_walk.__depth + 1 AS __depth, children_walk.__visited || __n.id AS __visited FROM children_walk JOIN categories AS __n ON __n.parent_id = children_walk.id WHERE children_walk.__depth < 100 AND __n.id <> ALL (children_walk.__visited)) SELECT json_agg(json_build_object('id', children_walk.id, 'parent_id', children_walk.parent_id, '__dbsp_node', children_walk.id, '__dbsp_parent', children_walk.parent_id, '__dbsp_depth', children_walk.__depth, '__dbsp_order', children_walk.id) ORDER BY children_walk.__depth, children_walk.id) FROM children_walk), '[]'::json) AS children_json FROM categories",
+	);
 	expect(await read.execute()).toEqual(
 		roots.map((row) => ({ ...row, children: [] })),
 	);

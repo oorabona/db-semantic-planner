@@ -22,23 +22,68 @@ const db = schema({
 const adapter = createPgCompileOnlyAdapter({ model: db.model });
 const orm = createOrm({ schema: db, adapter });
 describe('#877 recursive includes', () => {
-	for (const direction of ['ancestors', 'descendants'] as const)
-		for (const maxDepth of [undefined, 3]) {
-			it(`${direction} maxDepth=${maxDepth}`, () => {
-				const query = orm
-					.select('categories')
-					.include(direction === 'ancestors' ? 'parent' : 'children', {
-						recursive: true,
-						direction,
-						omitSelf: true,
-						flat: true,
-						...(maxDepth === undefined ? {} : { maxDepth }),
-					})
-					.dump();
-				expect(query.sql).toMatchSnapshot();
-				expect('params' in query && query.params).toEqual([]);
-			});
-		}
+	it('ancestors maxDepth=undefined', () => {
+		const query = orm
+			.select('categories')
+			.include('parent', {
+				recursive: true,
+				direction: 'ancestors',
+				omitSelf: true,
+				flat: true,
+			})
+			.dump();
+		expect(query.sql).toBe(
+			'SELECT categories.*, COALESCE((WITH RECURSIVE parent_walk AS (SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited FROM categories AS __n WHERE __n.id = categories."parentId" AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", parent_walk.__depth + 1 AS __depth, parent_walk.__visited || __n.id AS __visited FROM parent_walk JOIN categories AS __n ON __n.id = parent_walk."parentId" WHERE parent_walk.__depth < 100 AND __n.id <> ALL (parent_walk.__visited)) SELECT json_agg(json_build_object(\'id\', parent_walk.id, \'name\', parent_walk.name, \'parentId\', parent_walk."parentId", \'__dbsp_node\', parent_walk.id, \'__dbsp_parent\', parent_walk."parentId", \'__dbsp_depth\', parent_walk.__depth, \'__dbsp_order\', parent_walk.id) ORDER BY parent_walk.__depth, parent_walk.id) FROM parent_walk), \'[]\'::json) AS parent_json FROM categories',
+		);
+		expect('params' in query && query.params).toEqual([]);
+	});
+	it('ancestors maxDepth=3', () => {
+		const query = orm
+			.select('categories')
+			.include('parent', {
+				recursive: true,
+				direction: 'ancestors',
+				omitSelf: true,
+				flat: true,
+				maxDepth: 3,
+			})
+			.dump();
+		expect(query.sql).toBe(
+			'SELECT categories.*, COALESCE((WITH RECURSIVE parent_walk AS (SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited FROM categories AS __n WHERE __n.id = categories."parentId" AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", parent_walk.__depth + 1 AS __depth, parent_walk.__visited || __n.id AS __visited FROM parent_walk JOIN categories AS __n ON __n.id = parent_walk."parentId" WHERE parent_walk.__depth < 3 AND __n.id <> ALL (parent_walk.__visited)) SELECT json_agg(json_build_object(\'id\', parent_walk.id, \'name\', parent_walk.name, \'parentId\', parent_walk."parentId", \'__dbsp_node\', parent_walk.id, \'__dbsp_parent\', parent_walk."parentId", \'__dbsp_depth\', parent_walk.__depth, \'__dbsp_order\', parent_walk.id) ORDER BY parent_walk.__depth, parent_walk.id) FROM parent_walk), \'[]\'::json) AS parent_json FROM categories',
+		);
+		expect('params' in query && query.params).toEqual([]);
+	});
+	it('descendants maxDepth=undefined', () => {
+		const query = orm
+			.select('categories')
+			.include('children', {
+				recursive: true,
+				direction: 'descendants',
+				omitSelf: true,
+				flat: true,
+			})
+			.dump();
+		expect(query.sql).toBe(
+			'SELECT categories.*, COALESCE((WITH RECURSIVE children_walk AS (SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited FROM categories AS __n WHERE __n."parentId" = categories.id AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", children_walk.__depth + 1 AS __depth, children_walk.__visited || __n.id AS __visited FROM children_walk JOIN categories AS __n ON __n."parentId" = children_walk.id WHERE children_walk.__depth < 100 AND __n.id <> ALL (children_walk.__visited)) SELECT json_agg(json_build_object(\'id\', children_walk.id, \'name\', children_walk.name, \'parentId\', children_walk."parentId", \'__dbsp_node\', children_walk.id, \'__dbsp_parent\', children_walk."parentId", \'__dbsp_depth\', children_walk.__depth, \'__dbsp_order\', children_walk.id) ORDER BY children_walk.__depth, children_walk.id) FROM children_walk), \'[]\'::json) AS children_json FROM categories',
+		);
+		expect('params' in query && query.params).toEqual([]);
+	});
+	it('descendants maxDepth=3', () => {
+		const query = orm
+			.select('categories')
+			.include('children', {
+				recursive: true,
+				direction: 'descendants',
+				omitSelf: true,
+				flat: true,
+				maxDepth: 3,
+			})
+			.dump();
+		expect(query.sql).toBe(
+			'SELECT categories.*, COALESCE((WITH RECURSIVE children_walk AS (SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited FROM categories AS __n WHERE __n."parentId" = categories.id AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", children_walk.__depth + 1 AS __depth, children_walk.__visited || __n.id AS __visited FROM children_walk JOIN categories AS __n ON __n."parentId" = children_walk.id WHERE children_walk.__depth < 3 AND __n.id <> ALL (children_walk.__visited)) SELECT json_agg(json_build_object(\'id\', children_walk.id, \'name\', children_walk.name, \'parentId\', children_walk."parentId", \'__dbsp_node\', children_walk.id, \'__dbsp_parent\', children_walk."parentId", \'__dbsp_depth\', children_walk.__depth, \'__dbsp_order\', children_walk.id) ORDER BY children_walk.__depth, children_walk.id) FROM children_walk), \'[]\'::json) AS children_json FROM categories',
+		);
+		expect('params' in query && query.params).toEqual([]);
+	});
 	it('exposes includeDepth under the public key without flat output', () => {
 		const query = orm
 			.select('categories')
@@ -49,11 +94,15 @@ describe('#877 recursive includes', () => {
 				includeDepth: true,
 			})
 			.dump();
-		expect(query.sql).toMatchSnapshot();
+		expect(query.sql).toBe(
+			'SELECT categories.*, COALESCE((WITH RECURSIVE children_walk AS (SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited FROM categories AS __n WHERE __n."parentId" = categories.id AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", children_walk.__depth + 1 AS __depth, children_walk.__visited || __n.id AS __visited FROM children_walk JOIN categories AS __n ON __n."parentId" = children_walk.id WHERE children_walk.__depth < 100 AND __n.id <> ALL (children_walk.__visited)) SELECT json_agg(json_build_object(\'id\', children_walk.id, \'name\', children_walk.name, \'parentId\', children_walk."parentId", \'__dbsp_node\', children_walk.id, \'__dbsp_parent\', children_walk."parentId", \'__dbsp_depth\', children_walk.__depth, \'__dbsp_order\', children_walk.id) ORDER BY children_walk.__depth, children_walk.id) FROM children_walk), \'[]\'::json) AS children_json FROM categories',
+		);
 	});
 	it('NQL managementChain projection', () => {
 		const query = orm.nql`categories | select name, managementChain.*`.dump();
-		expect(query.sql).toMatchSnapshot();
+		expect(query.sql).toBe(
+			'SELECT categories.name, COALESCE((WITH RECURSIVE "managementChain_walk" AS (SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited FROM categories AS __n WHERE __n.id = categories."parentId" AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", "managementChain_walk".__depth + 1 AS __depth, "managementChain_walk".__visited || __n.id AS __visited FROM "managementChain_walk" JOIN categories AS __n ON __n.id = "managementChain_walk"."parentId" WHERE "managementChain_walk".__depth < 10 AND __n.id <> ALL ("managementChain_walk".__visited)) SELECT json_agg(json_build_object(\'id\', "managementChain_walk".id, \'name\', "managementChain_walk".name, \'parentId\', "managementChain_walk"."parentId", \'__dbsp_node\', "managementChain_walk".id, \'__dbsp_parent\', "managementChain_walk"."parentId", \'__dbsp_depth\', "managementChain_walk".__depth, \'__dbsp_order\', "managementChain_walk".id) ORDER BY "managementChain_walk".__depth, "managementChain_walk".id) FROM "managementChain_walk"), \'[]\'::json) AS "managementChain_json" FROM categories',
+		);
 		expect('params' in query && query.params).toEqual([]);
 	});
 });
@@ -337,7 +386,9 @@ describe('#877 shared plan/compile refusals', () => {
 				select: { type: 'fields', fields: ['id'] },
 			})
 			.dump();
-		expect(result.sql).toMatchSnapshot();
+		expect(result.sql).toBe(
+			'SELECT nodes.*, COALESCE((WITH RECURSIVE children_walk AS (SELECT __n.id AS id, __n."nodeKey" AS "nodeKey", __n."parentKey" AS "parentKey", 1 AS __depth, array_remove(ARRAY[nodes."nodeKey", __n."nodeKey"], NULL) AS __visited FROM nodes AS __n WHERE __n."parentKey" = nodes."nodeKey" AND __n."nodeKey" IS DISTINCT FROM nodes."nodeKey" AND __n."nodeKey" IS NOT NULL UNION ALL SELECT __n.id AS id, __n."nodeKey" AS "nodeKey", __n."parentKey" AS "parentKey", children_walk.__depth + 1 AS __depth, children_walk.__visited || __n."nodeKey" AS __visited FROM children_walk JOIN nodes AS __n ON __n."parentKey" = children_walk."nodeKey" WHERE children_walk.__depth < 100 AND __n."nodeKey" <> ALL (children_walk.__visited)) SELECT json_agg(json_build_object(\'id\', children_walk.id, \'__dbsp_node\', children_walk."nodeKey", \'__dbsp_parent\', children_walk."parentKey", \'__dbsp_depth\', children_walk.__depth, \'__dbsp_order\', children_walk.id) ORDER BY children_walk.__depth, children_walk."nodeKey", children_walk.id) FROM children_walk), \'[]\'::json) AS tree_json FROM nodes',
+		);
 		expect(result.sql).toContain('__n."parentKey" = nodes."nodeKey"');
 		expect(result.sql).toContain('__n."nodeKey" IS NOT NULL');
 	});
@@ -421,7 +472,9 @@ describe('#877 shared plan/compile refusals', () => {
 					direction: 'descendants',
 				})
 				.dump().sql,
-		).toMatchSnapshot();
+		).toBe(
+			'SELECT nodes.*, COALESCE((WITH RECURSIVE children_walk AS (SELECT __n.id AS id, __n.children AS children, __n."parentId" AS "parentId", 1 AS __depth, array_remove(ARRAY[nodes.id, __n.id], NULL) AS __visited FROM nodes AS __n WHERE __n."parentId" = nodes.id AND __n.id IS DISTINCT FROM nodes.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.children AS children, __n."parentId" AS "parentId", children_walk.__depth + 1 AS __depth, children_walk.__visited || __n.id AS __visited FROM children_walk JOIN nodes AS __n ON __n."parentId" = children_walk.id WHERE children_walk.__depth < 100 AND __n.id <> ALL (children_walk.__visited)), children_output AS (SELECT children_walk.id, children_walk.children, children_walk."parentId", children_walk.__depth, children_walk.__visited FROM children_walk UNION ALL SELECT nodes.id AS id, nodes.children AS children, nodes."parentId" AS "parentId", 0 AS __depth, array_remove(ARRAY[nodes.id], NULL) AS __visited) SELECT json_agg(json_build_object(\'id\', children_walk.id, \'children\', children_walk.children, \'parentId\', children_walk."parentId", \'__dbsp_node\', children_walk.id, \'__dbsp_parent\', children_walk."parentId", \'__dbsp_depth\', children_walk.__depth, \'__dbsp_order\', children_walk.id) ORDER BY children_walk.__depth, children_walk.id) FROM children_output AS children_walk), \'[]\'::json) AS tree_json FROM nodes',
+		);
 	});
 });
 
@@ -431,7 +484,9 @@ it('default nested ancestors includes a separate depth-zero self row and preserv
 		.where(eq('id', 4))
 		.include('parent', { recursive: true, direction: 'ancestors' })
 		.dump();
-	expect(query.sql).toMatchSnapshot();
+	expect(query.sql).toBe(
+		'SELECT categories.*, COALESCE((WITH RECURSIVE parent_walk AS (SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited FROM categories AS __n WHERE __n.id = categories."parentId" AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", parent_walk.__depth + 1 AS __depth, parent_walk.__visited || __n.id AS __visited FROM parent_walk JOIN categories AS __n ON __n.id = parent_walk."parentId" WHERE parent_walk.__depth < 100 AND __n.id <> ALL (parent_walk.__visited)), parent_output AS (SELECT parent_walk.id, parent_walk.name, parent_walk."parentId", parent_walk.__depth, parent_walk.__visited FROM parent_walk UNION ALL SELECT categories.id AS id, categories.name AS name, categories."parentId" AS "parentId", 0 AS __depth, array_remove(ARRAY[categories.id], NULL) AS __visited) SELECT json_agg(json_build_object(\'id\', parent_walk.id, \'name\', parent_walk.name, \'parentId\', parent_walk."parentId", \'__dbsp_node\', parent_walk.id, \'__dbsp_parent\', parent_walk."parentId", \'__dbsp_depth\', parent_walk.__depth, \'__dbsp_order\', parent_walk.id) ORDER BY parent_walk.__depth, parent_walk.id) FROM parent_output AS parent_walk), \'[]\'::json) AS parent_json FROM categories WHERE categories.id = $1',
+	);
 	expect(query.params).toEqual([4]);
 });
 
@@ -441,7 +496,9 @@ it('default nested descendants includes a separate depth-zero self row and prese
 		.where(eq('id', 4))
 		.include('children', { recursive: true, direction: 'descendants' })
 		.dump();
-	expect(query.sql).toMatchSnapshot();
+	expect(query.sql).toBe(
+		'SELECT categories.*, COALESCE((WITH RECURSIVE children_walk AS (SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited FROM categories AS __n WHERE __n."parentId" = categories.id AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", children_walk.__depth + 1 AS __depth, children_walk.__visited || __n.id AS __visited FROM children_walk JOIN categories AS __n ON __n."parentId" = children_walk.id WHERE children_walk.__depth < 100 AND __n.id <> ALL (children_walk.__visited)), children_output AS (SELECT children_walk.id, children_walk.name, children_walk."parentId", children_walk.__depth, children_walk.__visited FROM children_walk UNION ALL SELECT categories.id AS id, categories.name AS name, categories."parentId" AS "parentId", 0 AS __depth, array_remove(ARRAY[categories.id], NULL) AS __visited) SELECT json_agg(json_build_object(\'id\', children_walk.id, \'name\', children_walk.name, \'parentId\', children_walk."parentId", \'__dbsp_node\', children_walk.id, \'__dbsp_parent\', children_walk."parentId", \'__dbsp_depth\', children_walk.__depth, \'__dbsp_order\', children_walk.id) ORDER BY children_walk.__depth, children_walk.id) FROM children_output AS children_walk), \'[]\'::json) AS children_json FROM categories WHERE categories.id = $1',
+	);
 	expect(query.params).toEqual([4]);
 });
 
@@ -451,7 +508,9 @@ it('preserves the ordinary non-recursive CTE include SQL and params', () => {
 		.withPlanOptions({ defaultIncludeStrategy: 'cte' })
 		.include('children')
 		.dump();
-	expect(query.sql).toMatchSnapshot();
+	expect(query.sql).toBe(
+		'WITH children_cte AS (SELECT categories_inner_0.* FROM categories AS categories_inner_0) SELECT categories.* FROM categories LEFT JOIN children_cte AS children_ref_0 ON categories.id = children_ref_0."parentId"',
+	);
 	expect(query.params).toEqual([]);
 });
 
@@ -498,7 +557,9 @@ it('keeps stored depth and allocates internal columns around the complete model'
 			omitSelf: true,
 		})
 		.dump();
-	expect(query.sql).toMatchSnapshot();
+	expect(query.sql).toBe(
+		'SELECT "depthNodes".*, COALESCE((WITH RECURSIVE children_walk AS (SELECT __n.id AS id, __n.depth AS depth, __n.__depth AS __depth, __n.__visited AS __visited, __n."parentId" AS "parentId", 1 AS __depth_1, array_remove(ARRAY["depthNodes".id, __n.id], NULL) AS __visited_1 FROM "depthNodes" AS __n WHERE __n."parentId" = "depthNodes".id AND __n.id IS DISTINCT FROM "depthNodes".id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.depth AS depth, __n.__depth AS __depth, __n.__visited AS __visited, __n."parentId" AS "parentId", children_walk.__depth_1 + 1 AS __depth_1, children_walk.__visited_1 || __n.id AS __visited_1 FROM children_walk JOIN "depthNodes" AS __n ON __n."parentId" = children_walk.id WHERE children_walk.__depth_1 < 100 AND __n.id <> ALL (children_walk.__visited_1)) SELECT json_agg(json_build_object(\'id\', children_walk.id, \'depth\', children_walk.depth, \'__depth\', children_walk.__depth, \'__visited\', children_walk.__visited, \'parentId\', children_walk."parentId", \'__dbsp_node\', children_walk.id, \'__dbsp_parent\', children_walk."parentId", \'__dbsp_depth\', children_walk.__depth_1, \'__dbsp_order\', children_walk.id) ORDER BY children_walk.__depth_1, children_walk.id) FROM children_walk), \'[]\'::json) AS children_json FROM "depthNodes"',
+	);
 	expect(query.params).toEqual([]);
 });
 
@@ -527,7 +588,9 @@ it('allocates the inner alias when the root is __n', () => {
 			flat: true,
 		})
 		.dump();
-	expect(query.sql).toMatchSnapshot();
+	expect(query.sql).toBe(
+		'SELECT __n.*, COALESCE((WITH RECURSIVE children_walk AS (SELECT __n_1.id AS id, __n_1.name AS name, __n_1."parentId" AS "parentId", 1 AS __depth, array_remove(ARRAY[__n.id, __n_1.id], NULL) AS __visited FROM __n AS __n_1 WHERE __n_1."parentId" = __n.id AND __n_1.id IS DISTINCT FROM __n.id AND __n_1.id IS NOT NULL UNION ALL SELECT __n_1.id AS id, __n_1.name AS name, __n_1."parentId" AS "parentId", children_walk.__depth + 1 AS __depth, children_walk.__visited || __n_1.id AS __visited FROM children_walk JOIN __n AS __n_1 ON __n_1."parentId" = children_walk.id WHERE children_walk.__depth < 100 AND __n_1.id <> ALL (children_walk.__visited)) SELECT json_agg(json_build_object(\'id\', children_walk.id, \'name\', children_walk.name, \'parentId\', children_walk."parentId", \'__dbsp_node\', children_walk.id, \'__dbsp_parent\', children_walk."parentId", \'__dbsp_depth\', children_walk.__depth, \'__dbsp_order\', children_walk.id) ORDER BY children_walk.__depth, children_walk.id) FROM children_walk), \'[]\'::json) AS children_json FROM __n',
+	);
 	expect(query.params).toEqual([]);
 });
 
@@ -557,7 +620,9 @@ it('uses the json_agg read policy to cast handled bigint ids and payload fields 
 			flat: true,
 		})
 		.dump();
-	expect(query.sql).toMatchSnapshot();
+	expect(query.sql).toBe(
+		'SELECT categories.*, COALESCE((WITH RECURSIVE children_walk AS (SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited FROM categories AS __n WHERE __n."parentId" = categories.id AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", children_walk.__depth + 1 AS __depth, children_walk.__visited || __n.id AS __visited FROM children_walk JOIN categories AS __n ON __n."parentId" = children_walk.id WHERE children_walk.__depth < 100 AND __n.id <> ALL (children_walk.__visited)) SELECT json_agg(json_build_object(\'id\', CAST(children_walk.id AS text), \'name\', CAST(children_walk.name AS text), \'parentId\', CAST(children_walk."parentId" AS text), \'__dbsp_node\', CAST(children_walk.id AS text), \'__dbsp_parent\', CAST(children_walk."parentId" AS text), \'__dbsp_depth\', children_walk.__depth, \'__dbsp_order\', CAST(children_walk.id AS text)) ORDER BY children_walk.__depth, children_walk.id) FROM children_walk), \'[]\'::json) AS children_json FROM categories',
+	);
 	expect(query.params).toEqual([]);
 });
 
@@ -589,7 +654,9 @@ it('builds a 51-column payload in bounded chunks joined into one JSON object', (
 			flat: true,
 		})
 		.dump();
-	expect(query.sql).toMatchSnapshot();
+	expect(query.sql).toBe(
+		"SELECT wide.*, COALESCE((WITH RECURSIVE children_walk AS (SELECT __n.id AS id, __n.field0 AS field0, __n.field1 AS field1, __n.field2 AS field2, __n.field3 AS field3, __n.field4 AS field4, __n.field5 AS field5, __n.field6 AS field6, __n.field7 AS field7, __n.field8 AS field8, __n.field9 AS field9, __n.field10 AS field10, __n.field11 AS field11, __n.field12 AS field12, __n.field13 AS field13, __n.field14 AS field14, __n.field15 AS field15, __n.field16 AS field16, __n.field17 AS field17, __n.field18 AS field18, __n.field19 AS field19, __n.field20 AS field20, __n.field21 AS field21, __n.field22 AS field22, __n.field23 AS field23, __n.field24 AS field24, __n.field25 AS field25, __n.field26 AS field26, __n.field27 AS field27, __n.field28 AS field28, __n.field29 AS field29, __n.field30 AS field30, __n.field31 AS field31, __n.field32 AS field32, __n.field33 AS field33, __n.field34 AS field34, __n.field35 AS field35, __n.field36 AS field36, __n.field37 AS field37, __n.field38 AS field38, __n.field39 AS field39, __n.field40 AS field40, __n.field41 AS field41, __n.field42 AS field42, __n.field43 AS field43, __n.field44 AS field44, __n.field45 AS field45, __n.field46 AS field46, __n.field47 AS field47, __n.field48 AS field48, __n.\"parentId\" AS \"parentId\", 1 AS __depth, array_remove(ARRAY[wide.id, __n.id], NULL) AS __visited FROM wide AS __n WHERE __n.\"parentId\" = wide.id AND __n.id IS DISTINCT FROM wide.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.field0 AS field0, __n.field1 AS field1, __n.field2 AS field2, __n.field3 AS field3, __n.field4 AS field4, __n.field5 AS field5, __n.field6 AS field6, __n.field7 AS field7, __n.field8 AS field8, __n.field9 AS field9, __n.field10 AS field10, __n.field11 AS field11, __n.field12 AS field12, __n.field13 AS field13, __n.field14 AS field14, __n.field15 AS field15, __n.field16 AS field16, __n.field17 AS field17, __n.field18 AS field18, __n.field19 AS field19, __n.field20 AS field20, __n.field21 AS field21, __n.field22 AS field22, __n.field23 AS field23, __n.field24 AS field24, __n.field25 AS field25, __n.field26 AS field26, __n.field27 AS field27, __n.field28 AS field28, __n.field29 AS field29, __n.field30 AS field30, __n.field31 AS field31, __n.field32 AS field32, __n.field33 AS field33, __n.field34 AS field34, __n.field35 AS field35, __n.field36 AS field36, __n.field37 AS field37, __n.field38 AS field38, __n.field39 AS field39, __n.field40 AS field40, __n.field41 AS field41, __n.field42 AS field42, __n.field43 AS field43, __n.field44 AS field44, __n.field45 AS field45, __n.field46 AS field46, __n.field47 AS field47, __n.field48 AS field48, __n.\"parentId\" AS \"parentId\", children_walk.__depth + 1 AS __depth, children_walk.__visited || __n.id AS __visited FROM children_walk JOIN wide AS __n ON __n.\"parentId\" = children_walk.id WHERE children_walk.__depth < 100 AND __n.id <> ALL (children_walk.__visited)) SELECT json_agg(CAST(CAST(json_build_object('id', children_walk.id, 'field0', children_walk.field0, 'field1', children_walk.field1, 'field2', children_walk.field2, 'field3', children_walk.field3, 'field4', children_walk.field4, 'field5', children_walk.field5, 'field6', children_walk.field6, 'field7', children_walk.field7, 'field8', children_walk.field8, 'field9', children_walk.field9, 'field10', children_walk.field10, 'field11', children_walk.field11, 'field12', children_walk.field12, 'field13', children_walk.field13, 'field14', children_walk.field14, 'field15', children_walk.field15, 'field16', children_walk.field16, 'field17', children_walk.field17, 'field18', children_walk.field18, 'field19', children_walk.field19, 'field20', children_walk.field20, 'field21', children_walk.field21, 'field22', children_walk.field22, 'field23', children_walk.field23, 'field24', children_walk.field24, 'field25', children_walk.field25, 'field26', children_walk.field26, 'field27', children_walk.field27, 'field28', children_walk.field28, 'field29', children_walk.field29, 'field30', children_walk.field30, 'field31', children_walk.field31, 'field32', children_walk.field32, 'field33', children_walk.field33, 'field34', children_walk.field34, 'field35', children_walk.field35, 'field36', children_walk.field36, 'field37', children_walk.field37, 'field38', children_walk.field38, 'field39', children_walk.field39, 'field40', children_walk.field40, 'field41', children_walk.field41, 'field42', children_walk.field42, 'field43', children_walk.field43, 'field44', children_walk.field44, 'field45', children_walk.field45, 'field46', children_walk.field46, 'field47', children_walk.field47, 'field48', children_walk.field48) AS jsonb) || CAST(json_build_object('parentId', children_walk.\"parentId\", '__dbsp_node', children_walk.id, '__dbsp_parent', children_walk.\"parentId\", '__dbsp_depth', children_walk.__depth, '__dbsp_order', children_walk.id) AS jsonb) AS json) ORDER BY children_walk.__depth, children_walk.id) FROM children_walk), '[]'::json) AS children_json FROM wide",
+	);
 	expect(query.params).toEqual([]);
 });
 
@@ -640,7 +707,9 @@ it('uses shared shortening for long requested keys and collision-free transport 
 	expect(new Set(shapes.map((shape) => shape.outputLabel)).size).toBe(2);
 	for (const shape of shapes)
 		expect(Buffer.byteLength(shape.outputLabel)).toBeLessThanOrEqual(63);
-	expect(compiled.sql).toMatchSnapshot();
+	expect(compiled.sql).toBe(
+		'SELECT categories.*, COALESCE((WITH RECURSIVE children_walk AS (SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited FROM categories AS __n WHERE __n."parentId" = categories.id AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", children_walk.__depth + 1 AS __depth, children_walk.__visited || __n.id AS __visited FROM children_walk JOIN categories AS __n ON __n."parentId" = children_walk.id WHERE children_walk.__depth < 100 AND __n.id <> ALL (children_walk.__visited)), children_output AS (SELECT children_walk.id, children_walk.name, children_walk."parentId", children_walk.__depth, children_walk.__visited FROM children_walk UNION ALL SELECT categories.id AS id, categories.name AS name, categories."parentId" AS "parentId", 0 AS __depth, array_remove(ARRAY[categories.id], NULL) AS __visited) SELECT json_agg(json_build_object(\'id\', children_walk.id, \'name\', children_walk.name, \'parentId\', children_walk."parentId", \'__dbsp_node\', children_walk.id, \'__dbsp_parent\', children_walk."parentId", \'__dbsp_depth\', children_walk.__depth, \'__dbsp_order\', children_walk.id) ORDER BY children_walk.__depth, children_walk.id) FROM children_output AS children_walk), \'[]\'::json) AS "éééééééééééééééééééééééééééééé_3", COALESCE((WITH RECURSIVE parent_walk AS (SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited FROM categories AS __n WHERE __n.id = categories."parentId" AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", parent_walk.__depth + 1 AS __depth, parent_walk.__visited || __n.id AS __visited FROM parent_walk JOIN categories AS __n ON __n.id = parent_walk."parentId" WHERE parent_walk.__depth < 100 AND __n.id <> ALL (parent_walk.__visited)), parent_output AS (SELECT parent_walk.id, parent_walk.name, parent_walk."parentId", parent_walk.__depth, parent_walk.__visited FROM parent_walk UNION ALL SELECT categories.id AS id, categories.name AS name, categories."parentId" AS "parentId", 0 AS __depth, array_remove(ARRAY[categories.id], NULL) AS __visited) SELECT json_agg(json_build_object(\'id\', parent_walk.id, \'name\', parent_walk.name, \'parentId\', parent_walk."parentId", \'__dbsp_node\', parent_walk.id, \'__dbsp_parent\', parent_walk."parentId", \'__dbsp_depth\', parent_walk.__depth, \'__dbsp_order\', parent_walk.id) ORDER BY parent_walk.__depth, parent_walk.id) FROM parent_output AS parent_walk), \'[]\'::json) AS "éééééééééééééééééééééééééééééé_7" FROM categories',
+	);
 });
 
 it('preserves different recursive public payloads using via for the same relation', () => {
@@ -669,7 +738,9 @@ it('preserves different recursive public payloads using via for the same relatio
 		['tree', false],
 		['list', true],
 	]);
-	expect(compiled.sql).toMatchSnapshot();
+	expect(compiled.sql).toBe(
+		'SELECT categories.*, COALESCE((WITH RECURSIVE children_walk AS (SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited FROM categories AS __n WHERE __n."parentId" = categories.id AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", children_walk.__depth + 1 AS __depth, children_walk.__visited || __n.id AS __visited FROM children_walk JOIN categories AS __n ON __n."parentId" = children_walk.id WHERE children_walk.__depth < 100 AND __n.id <> ALL (children_walk.__visited)) SELECT json_agg(json_build_object(\'id\', children_walk.id, \'name\', children_walk.name, \'parentId\', children_walk."parentId", \'__dbsp_node\', children_walk.id, \'__dbsp_parent\', children_walk."parentId", \'__dbsp_depth\', children_walk.__depth, \'__dbsp_order\', children_walk.id) ORDER BY children_walk.__depth, children_walk.id) FROM children_walk), \'[]\'::json) AS tree_json, COALESCE((WITH RECURSIVE children_walk AS (SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited FROM categories AS __n WHERE __n."parentId" = categories.id AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", children_walk.__depth + 1 AS __depth, children_walk.__visited || __n.id AS __visited FROM children_walk JOIN categories AS __n ON __n."parentId" = children_walk.id WHERE children_walk.__depth < 100 AND __n.id <> ALL (children_walk.__visited)) SELECT json_agg(json_build_object(\'id\', children_walk.id, \'name\', children_walk.name, \'parentId\', children_walk."parentId", \'__dbsp_node\', children_walk.id, \'__dbsp_parent\', children_walk."parentId", \'__dbsp_depth\', children_walk.__depth, \'__dbsp_order\', children_walk.id) ORDER BY children_walk.__depth, children_walk.id) FROM children_walk), \'[]\'::json) AS list_json FROM categories',
+	);
 });
 it('refuses traversed filters supplied directly to createOrm', () => {
 	const filtered = createOrm({
