@@ -1,8 +1,10 @@
 import {
 	and,
+	any,
 	createOrm,
 	eq,
 	exists,
+	fn,
 	inSubquery,
 	not,
 	or,
@@ -10,6 +12,7 @@ import {
 	rawExists,
 	ref,
 	schema,
+	star,
 	subquery,
 } from '@dbsp/core';
 import type { ModelIR, WhereIntent } from '@dbsp/types';
@@ -177,13 +180,14 @@ for (const shape of shapes)
 		expect(result.params).toEqual(shape.params);
 	});
 
-it('nested rawExists same alias refusal', () => {
-	expect(() => dump(rawExists(subquery('posts').select('id')))).toThrow(
-		"Query scope already binds qualifier 'posts_sq'.",
+it('nested rawExists same table allocates a distinct alias', () => {
+	const result = dump(
+		rawExists(subquery('posts').select('id').where(eq('score', 3))),
 	);
-	expect(() =>
-		dump(rawExists(subquery('posts').select('id').where(eq('score', 3)))),
-	).toThrow("Query scope already binds qualifier 'posts_sq'.");
+	expect(result.sql).toBe(
+		'SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.score = $1))',
+	);
+	expect(result.params).toEqual([3]);
 });
 it('nested rawExists distinct alias outcome', () => {
 	const result = dump(
@@ -284,3 +288,140 @@ for (const position of ['raw', 'scalar', 'in'] as const) {
 		);
 	});
 }
+
+for (const kind of ['rawExists', 'rawNotExists'] as const) {
+	const predicate = (body: ReturnType<typeof subquery>) => ({
+		...rawExists(body),
+		kind,
+	});
+	it(`FILTER ${kind} body uses model array type`, () => {
+		const result = orm
+			.select('users')
+			.columns([
+				fn('count', star())
+					.filter(
+						predicate(subquery('posts').select('id').where(any('score', []))),
+					)
+					.as('n'),
+			])
+			.dump();
+		expect(result.sql).toBe(
+			`SELECT count(*) FILTER (WHERE ${kind === 'rawNotExists' ? 'NOT (' : ''}EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = ANY (CAST($1 AS int4[])))${kind === 'rawNotExists' ? ')' : ''}) AS n FROM users`,
+		);
+		expect(result.params).toEqual([[]]);
+	});
+}
+for (const sibling of [false, true]) {
+	it(`three nested same-table aliases with sibling ${sibling}`, () => {
+		const deepest = subquery('posts')
+			.select('id')
+			.where(and(eq('score', 3), eq('id', outerRef('id'))));
+		const middle = subquery('posts')
+			.select('id')
+			.where(
+				and(
+					eq('score', 2),
+					eq('id', outerRef('id')),
+					inSubquery('id', deepest),
+				),
+			);
+		const nested = inSubquery(
+			'id',
+			subquery('posts')
+				.select('id')
+				.where(
+					and(
+						eq('score', 1),
+						eq('id', outerRef('id')),
+						inSubquery('id', middle),
+					),
+				),
+		);
+		const result = orm
+			.select('users')
+			.where(
+				sibling
+					? and(
+							inSubquery(
+								'id',
+								subquery('posts').select('id').where(eq('score', 0)),
+							),
+							nested,
+						)
+					: nested,
+			)
+			.dump();
+		const n = sibling ? 1 : 0;
+		const offset = sibling ? 1 : 0;
+		const a = `posts_subq_${n}`,
+			b = `posts_subq_${n + 1}`,
+			c = `posts_subq_${n + 2}`;
+		expect(result.sql).toBe(
+			`SELECT users.* FROM users WHERE ${sibling ? 'users.id = ANY (SELECT posts_subq_0.id FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1) AND ' : ''}users.id = ANY (SELECT ${a}.id FROM posts AS ${a} WHERE ${a}.score = $${offset + 1} AND ${a}.id = users.id AND ${a}.id = ANY (SELECT ${b}.id FROM posts AS ${b} WHERE ${b}.score = $${offset + 2} AND ${b}.id = ${a}.id AND ${b}.id = ANY (SELECT ${c}.id FROM posts AS ${c} WHERE ${c}.score = $${offset + 3} AND ${c}.id = ${b}.id)))`,
+		);
+		expect(result.sql).toContain(`posts_subq_${n}.id = users.id`);
+		expect(result.sql).toContain(`posts_subq_${n + 1}.id = posts_subq_${n}.id`);
+		expect(result.sql).toContain(
+			`posts_subq_${n + 2}.id = posts_subq_${n + 1}.id`,
+		);
+		expect(result.sql.match(/FROM posts AS posts_subq_\d+/g)).toEqual(
+			Array.from(
+				{ length: sibling ? 4 : 3 },
+				(_, i) => `FROM posts AS posts_subq_${i}`,
+			),
+		);
+		expect(result.params).toEqual(sibling ? [0, 1, 2, 3] : [1, 2, 3]);
+		expect(result.sql.match(/\$\d+/g)).toEqual(
+			result.params.map((_, i) => `$${i + 1}`),
+		);
+	});
+}
+
+it('rawExists sibling then nested same table has unique aliases and immediate outerRef', () => {
+	const result = orm
+		.select('users')
+		.where(
+			and(
+				rawExists(subquery('posts').select('id').where(eq('score', 0))),
+				rawExists(
+					subquery('posts')
+						.select('id')
+						.where(
+							and(
+								eq('score', 1),
+								eq('id', outerRef('id')),
+								rawExists(
+									subquery('posts')
+										.select('id')
+										.where(and(eq('score', 2), eq('id', outerRef('id')))),
+								),
+							),
+						),
+				),
+			),
+		)
+		.dump();
+	expect(result.sql).toBe(
+		'SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1) AND EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.score = $2 AND posts_sq_1.id = users.id AND EXISTS (SELECT posts_sq_2.id FROM posts AS posts_sq_2 WHERE posts_sq_2.score = $3 AND posts_sq_2.id = posts_sq_1.id))',
+	);
+	expect(result.params).toEqual([0, 1, 2]);
+});
+
+it('canonical subquery body avoids repeated recursive validation', () => {
+	let reads = 0;
+	const body = exists('comments');
+	Object.defineProperty(body, 'recursive', {
+		enumerable: true,
+		get: () => {
+			reads++;
+			return undefined;
+		},
+	});
+	const result = orm
+		.select('users')
+		.where(inSubquery('id', subquery('posts').select('id').where(body)))
+		.dump();
+	expect(result.params).toEqual([]);
+	// One validation read plus the retained lowering/handler reads.
+	expect(reads).toBe(3);
+});

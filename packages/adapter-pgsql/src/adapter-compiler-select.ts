@@ -326,8 +326,16 @@ function compileJoinIntents(
 	const deriveFk = deps.deriveFk ?? defaultFkDerivation;
 	const defaultPk = deps.defaultPk;
 	const results: PlanDecision[] = [];
+	const explicitAliases = new Set<string>();
 
 	for (const intent of joins) {
+		if (intent.alias !== undefined) {
+			if (explicitAliases.has(intent.alias))
+				throw new Error(
+					`Query scope already binds qualifier '${intent.alias}'.`,
+				);
+			explicitAliases.add(intent.alias);
+		}
 		if (intent.relation !== undefined) {
 			// ── Relation mode: resolve FK from model ──────────────────────────
 			// If no model available, we can't resolve the FK — skip with warning.

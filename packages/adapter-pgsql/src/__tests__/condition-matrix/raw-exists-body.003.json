@@ -20,41 +20,41 @@
 			"position": "raw-exists-body",
 			"kind": "rawNotExists",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Query scope already binds qualifier 'posts_sq'."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.score = $1)))",
+			"params": [53],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "rawNotExists",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Query scope already binds qualifier 'posts_sq'."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.score = $1)) AND posts_sq.score = $2)",
+			"params": [53, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "rawNotExists",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Query scope already binds qualifier 'posts_sq'."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.score = $1)) OR posts_sq.score = $2)",
+			"params": [53, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "rawNotExists",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Query scope already binds qualifier 'posts_sq'."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (NOT (EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.score = $1))))",
+			"params": [53],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "rawNotExists",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Query scope already binds qualifier 'posts_sq'."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1 AND (NOT (NOT (EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.score = $2))) OR posts_sq.score = $3))",
+			"params": [13, 53, 17],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",

@@ -271,9 +271,15 @@ export function buildPredicateSubquerySelect(
 	}
 
 	// Generate unique alias
-	const existingAliases = state.aliases.size;
-	const targetAlias = `${targetTable}_subq_${existingAliases}`;
-	state.aliases.set(`subquery_${targetTable}`, targetAlias);
+	let aliasIndex = state.aliases.size;
+	let targetAlias = `${targetTable}_subq_${aliasIndex}`;
+	while (
+		Array.from(state.aliases.values()).includes(targetAlias) ||
+		relationBindingFor(ctx.scope, queryLocal(targetAlias))
+	) {
+		targetAlias = `${targetTable}_subq_${++aliasIndex}`;
+	}
+	state.aliases.set(`subquery_${targetAlias}`, targetAlias);
 	// A mutation may carry an outer scope and a newer CTE binding registry. Merge
 	// both at this boundary: the CTE entered before this subquery, so it remains a
 	// local relation even when the inherited scope predates that binding.
@@ -363,7 +369,7 @@ export function buildPredicateSubquerySelect(
 		);
 	}
 
-	if (sourceIntent.where) {
+	if (sourceIntent.where && !ctx.compileSubqueryCondition) {
 		assertNoRecursiveRootRelations(sourceIntent.where);
 		assertNoManyToManyRootRelations(sourceIntent.where, targetTable, ctx.model);
 	}

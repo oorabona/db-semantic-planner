@@ -138,15 +138,27 @@ orm.select('products')
 
 Source: `packages/core/src/dx/subquery-builder.ts:288` — `outerRef(column)` returns a `SubqueryRefIntent`.
 
-Query WHERE scalar comparisons, `inSubquery()` and `rawExists()` compile the body with its own alias and resolve `outerRef()` to the immediately enclosing query. All levels share one parameter sequence. Legacy `compilePlan()` and SELECT expression subqueries retain their existing correlation restrictions.
+Query WHERE scalar comparisons and `inSubquery()` compile the body with its own alias and resolve `outerRef()` to the immediately enclosing query. `rawExists()` and `rawNotExists()` use the same body compiler in WHERE, aggregate FILTER and recursive `start.where` anchors. All levels share one parameter sequence. Legacy `compilePlan()` and SELECT expression subqueries retain their existing correlation restrictions.
 
 ---
 
 ## Common pitfalls
 
-### Alias collisions in scalar subqueries
+### Nested aliases and correlation
 
-If you reference the same table in both the outer query and the subquery, PostgreSQL may alias them identically. The planner handles table-level aliasing in the outer query, but the subquery compiles to bare table references. Disambiguate by ensuring the two SELECT targets are different tables or by using a CTE.
+Predicate subqueries allocate distinct aliases at every nesting depth and across siblings, including repeated queries on the same table. Each `outerRef()` binds to the immediately enclosing query; all levels share one parameter sequence. Duplicate explicit aliases in one scope are rejected.
+
+```typescript
+import { schema, createOrm, and, eq, inSubquery, outerRef, subquery } from '@dbsp/core';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+
+const db = schema({ users: { id: 'integer' }, posts: { id: 'integer', score: 'integer' } } as const);
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter({ model: db.model }) });
+const deepest = subquery('posts').select('id').where(and(eq('score', 3), eq('id', outerRef('id'))));
+const middle = subquery('posts').select('id').where(and(eq('score', 2), eq('id', outerRef('id')), inSubquery('id', deepest)));
+orm.select('users').where(inSubquery('id', subquery('posts').select('id').where(and(eq('score', 1), eq('id', outerRef('id')), inSubquery('id', middle))))).dump();
+// params: [1, 2, 3]
+```
 
 ### Performance: subquery vs JOIN
 

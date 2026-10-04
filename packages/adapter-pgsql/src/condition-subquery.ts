@@ -28,6 +28,9 @@ import {
 } from './intent-to-decisions.js';
 import { queryLocal, resolveDeclaredIdentifier } from './sql-identifier.js';
 
+// Reserve raw aliases for one compilation without changing legacy handler alias counts.
+const rawAliases = new WeakMap<object, Set<string>>();
+
 export type SubqueryConditionCompiler = (
 	intent: WhereIntent,
 	ctx: WhereCompilerCtx,
@@ -111,7 +114,19 @@ export function createSubqueryBuilder(
 			);
 		}
 		const targetTable = intent.from;
-		const innerAlias = `${targetTable}_sq`;
+		const allocated = parent
+			? (rawAliases.get(parent.paramState) ?? new Set<string>())
+			: new Set<string>();
+		if (parent) rawAliases.set(parent.paramState, allocated);
+		let innerAlias = `${targetTable}_sq`;
+		let aliasIndex = 0;
+		while (
+			relationBindingFor(scope, queryLocal(innerAlias)) ||
+			allocated.has(innerAlias)
+		) {
+			innerAlias = `${targetTable}_sq_${++aliasIndex}`;
+		}
+		allocated.add(innerAlias);
 		const sourceBinding =
 			relationBindingFor(scope, queryLocal(targetTable)) ??
 			relationBinding({

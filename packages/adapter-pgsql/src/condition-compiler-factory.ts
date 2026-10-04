@@ -273,7 +273,6 @@ export function createConditionCompiler(
 	): CompilerContext {
 		return {
 			compileSubqueryCondition: (intent, child, state) => {
-				assertNoRecursiveRootRelations(intent);
 				return compileCondition(intent, {
 					...ctx,
 					logicalSourceTable: child.rootTable,

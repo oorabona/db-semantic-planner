@@ -203,7 +203,7 @@ export function buildCustomFnFilter(
 			aliasColumnAuthorities: ctx.aliasColumnAuthorities,
 		}),
 		...(ctx.outerAlias !== undefined && { outerTable: ctx.outerAlias }),
-		compileSubquery: (intent, offset) => {
+		compileSubquery: (intent, offset, parent) => {
 			return createSubqueryBuilder((innerIntent, inner) =>
 				conditionCompiler(innerIntent, {
 					...inner,
@@ -221,6 +221,7 @@ export function buildCustomFnFilter(
 				ctx.scope,
 				ctx.dialectCapabilities,
 				ctx.dbCasing,
+				parent,
 			);
 		},
 	});

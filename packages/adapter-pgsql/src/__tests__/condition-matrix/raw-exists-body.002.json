@@ -428,121 +428,121 @@
 			"position": "raw-exists-body",
 			"kind": "rawExists",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Query scope already binds qualifier 'posts_sq'."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.score = $1))",
+			"params": [53],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "rawExists",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Query scope already binds qualifier 'posts_sq'."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.score = $1) AND posts_sq.score = $2)",
+			"params": [53, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "rawExists",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Query scope already binds qualifier 'posts_sq'."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.score = $1) OR posts_sq.score = $2)",
+			"params": [53, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "rawExists",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Query scope already binds qualifier 'posts_sq'."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.score = $1)))",
+			"params": [53],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "rawExists",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Query scope already binds qualifier 'posts_sq'."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1 AND (NOT (EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.score = $2)) OR posts_sq.score = $3))",
+			"params": [13, 53, 17],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "rawExists-like-escape",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Query scope already binds qualifier 'posts_sq'."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.name LIKE $1 ESCAPE $2))",
+			"params": ["c!_%", "!"],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "rawExists-like-escape",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Query scope already binds qualifier 'posts_sq'."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.name LIKE $1 ESCAPE $2) AND posts_sq.score = $3)",
+			"params": ["c!_%", "!", 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "rawExists-like-escape",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Query scope already binds qualifier 'posts_sq'."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.name LIKE $1 ESCAPE $2) OR posts_sq.score = $3)",
+			"params": ["c!_%", "!", 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "rawExists-like-escape",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Query scope already binds qualifier 'posts_sq'."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.name LIKE $1 ESCAPE $2)))",
+			"params": ["c!_%", "!"],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "rawExists-like-escape",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Query scope already binds qualifier 'posts_sq'."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1 AND (NOT (EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.name LIKE $2 ESCAPE $3)) OR posts_sq.score = $4))",
+			"params": [13, "c!_%", "!", 17],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "rawExists-range",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Query scope already binds qualifier 'posts_sq'."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.period && CAST($1 AS daterange)))",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "rawExists-range",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Query scope already binds qualifier 'posts_sq'."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.period && CAST($1 AS daterange)) AND posts_sq.score = $2)",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "rawExists-range",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Query scope already binds qualifier 'posts_sq'."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.period && CAST($1 AS daterange)) OR posts_sq.score = $2)",
+			"params": ["[2026-01-01,2026-02-01)", 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "rawExists-range",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Query scope already binds qualifier 'posts_sq'."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.period && CAST($1 AS daterange))))",
+			"params": ["[2026-01-01,2026-02-01)"],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "rawExists-range",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Query scope already binds qualifier 'posts_sq'."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1 AND (NOT (EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.period && CAST($2 AS daterange))) OR posts_sq.score = $3))",
+			"params": [13, "[2026-01-01,2026-02-01)", 17],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",

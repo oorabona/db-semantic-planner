@@ -193,20 +193,21 @@ describe('rawExists / rawNotExists — SELECT pipeline (L103 regression lock)', 
 	});
 
 	/** Query WHERE subquery bodies retain their own scope and outer correlation. */
-	it('nested rawExists refuses reuse of its enclosing alias', () => {
+	it('nested rawExists on the same table allocates unique aliases', () => {
 		const orm = buildOrm();
-		expect(() =>
-			(orm as any)
-				.select('communities')
-				.where(
-					rawExists(
-						subquery('files')
-							.where(rawExists(subquery('files').select('id')))
-							.select('id'),
-					),
-				)
-				.dump(),
-		).toThrow("Query scope already binds qualifier 'files_sq'.");
-		// (kept multi-line: nested method-chain readability > biome single-line preference)
+		const result = (orm as any)
+			.select('communities')
+			.where(
+				rawExists(
+					subquery('files')
+						.where(rawExists(subquery('files').select('id')))
+						.select('id'),
+				),
+			)
+			.dump();
+		expect(result.sql).toBe(
+			'SELECT communities.* FROM communities WHERE EXISTS (SELECT files_sq.id FROM files AS files_sq WHERE EXISTS (SELECT files_sq_1.id FROM files AS files_sq_1))',
+		);
+		expect(result.params).toEqual([]);
 	});
 });

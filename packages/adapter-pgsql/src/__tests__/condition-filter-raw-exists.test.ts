@@ -66,7 +66,7 @@ it('compiles a range inside raw EXISTS inside a HAVING aggregate FILTER', () => 
 		)
 		.dump();
 	expect(result.sql).toBe(
-		'SELECT users.* FROM users HAVING count(*) FILTER (WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $1)) > $2',
+		'SELECT users.* FROM users HAVING count(*) FILTER (WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($1 AS daterange))) > $2',
 	);
 	expect(result.params).toEqual(['[2026-01-01,2026-02-01)', 0]);
 });
