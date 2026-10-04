@@ -60,6 +60,7 @@ export {
 	stringAgg,
 	validateTypeName,
 } from './dx/index.js';
+export { compileNqlRead, createBindingFinalPlan } from './dx/nql.js';
 export { type RefDefinition, validateSchemaIndexOptions } from './dx/schema.js';
 export {
 	type CaseExpressionIntent,
