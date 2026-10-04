@@ -15,7 +15,7 @@ import {
 	plan,
 	type QueryIntent,
 } from '@dbsp/core';
-import { createBindingFinalPlan } from '@dbsp/core/internal';
+import { compileNqlRead, createBindingFinalPlan } from '@dbsp/core/internal';
 import { type CompileResult, compile as compileNql } from '@dbsp/nql';
 
 /**
@@ -222,7 +222,23 @@ export async function compileNqlToSql(
 		compiled.cteQuery ||
 		((compiled.bindings?.size ?? 0) > 0 && !compiled.mutation)
 	) {
-		const result = adapter.compile(compiled, { model });
+		const executableSequence =
+			(compiled.mutationBindings?.size ?? 0) > 0 ||
+			(compiled.nqlProgramSequence?.some(
+				(step) => step.kind === 'query' && step.snapshot === true,
+			) ??
+				false);
+		const read =
+			compiled.query && !executableSequence
+				? compileNqlRead(
+						{ ...compiled, query: compiled.query },
+						model,
+						adapter,
+						options,
+					)
+				: undefined;
+		const result =
+			read?.compiled ?? adapter.compile(compiled, { ...options, model });
 		const intentType = compiled.setOperation ? 'setOperation' : 'query';
 		const summary = extractIntentSummary(
 			compiled.cteQuery
@@ -238,16 +254,18 @@ export async function compileNqlToSql(
 			params: result.parameters,
 			intentType,
 			intent: summary,
-			...(compiled.query && compiled.bindings?.has(compiled.query.from)
-				? {
-						planReport: createBindingFinalPlan(
-							compiled.query,
-							compiled,
-							model,
-							adapter.dialectCapabilities,
-						),
-					}
-				: {}),
+			...(read
+				? { planReport: read.planReport }
+				: compiled.query && compiled.bindings?.has(compiled.query.from)
+					? {
+							planReport: createBindingFinalPlan(
+								compiled.query,
+								compiled,
+								model,
+								adapter.dialectCapabilities,
+							),
+						}
+					: {}),
 		};
 	}
 

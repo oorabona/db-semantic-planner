@@ -39,6 +39,7 @@ import {
 	type Adapter,
 	assertConnectionAvailable,
 	type CompiledQuery,
+	type CompileOnlyAdapter,
 	type CompileOptions,
 	type Dump,
 	type DumpMeta,
@@ -735,6 +736,95 @@ function bindingFinalPlanHasIncludes(planReport: PlanReport): boolean {
 			decision.type === 'include-strategy' &&
 			['json_agg', 'join', 'lateral'].includes(decision.choice),
 	);
+}
+
+function createNqlStatementBundle(
+	statement:
+		| { readonly query: QueryIntent }
+		| { readonly mutation: MutationIntent },
+	bindings: ReadonlyMap<string, QueryIntent>,
+	runtimeBindings: ReadonlyMap<string, NqlRuntimeBinding>,
+	sourceBundle: CompiledNqlQuery,
+	bindingDependencies?: readonly string[],
+	planReport?: PlanReport,
+): CompiledNqlQuery {
+	const statementBindings = filterMapByRuntimeBindingDependencies(
+		bindings,
+		runtimeSourceBindingNames(sourceBundle),
+		bindingDependencies,
+	);
+	const statementRuntimeBindings = filterMapByBindingDependencies(
+		runtimeBindings,
+		bindingDependencies,
+	);
+	const emittedBindingNames = new Set([
+		...statementBindings.keys(),
+		...statementRuntimeBindings.keys(),
+	]);
+	const statementBindingOutputSchemas = filterOptionalMapByNames(
+		sourceBundle.bindingOutputSchemas,
+		emittedBindingNames,
+	);
+	const statementMutationBindings = filterOptionalMapByBindingDependencies(
+		sourceBundle.mutationBindings,
+		bindingDependencies,
+	);
+	return {
+		...statement,
+		...(planReport !== undefined && { plan: planReport }),
+		...(statementBindings.size > 0 && { bindings: statementBindings }),
+		...(statementBindingOutputSchemas !== undefined && {
+			bindingOutputSchemas: statementBindingOutputSchemas,
+		}),
+		...(statementMutationBindings !== undefined && {
+			mutationBindings: statementMutationBindings,
+		}),
+		...(statementRuntimeBindings.size > 0 && {
+			runtimeBindings: statementRuntimeBindings,
+		}),
+	};
+}
+
+/** Plan a final NQL query before compiling its binding/include bundle. */
+export function compileNqlRead<T = unknown>(
+	bundle: CompiledNqlQuery & { query: QueryIntent },
+	model: ModelIR,
+	adapter?: CompileOnlyAdapter,
+	options?: CompileOptions,
+): { planReport: PlanReport; compiled: CompiledQuery<T> | undefined } {
+	const bindingFinalQuery = isBindingFinalQuery(bundle);
+	const planReport = bindingFinalQuery
+		? createBindingFinalPlan(
+				bundle.query,
+				bundle,
+				model,
+				adapter?.dialectCapabilities,
+			)
+		: executePlan(
+				bundle.query,
+				model,
+				adapter
+					? { dialectCapabilities: adapter.dialectCapabilities }
+					: undefined,
+			);
+	const finalStep = createNqlProgramSteps({
+		kind: 'query',
+		bundle,
+		intent: bundle.query,
+	}).at(-1);
+	const finalBundle = createNqlStatementBundle(
+		{ query: bundle.query },
+		bundle.bindings ?? new Map(),
+		bundle.runtimeBindings ?? new Map(),
+		bundle,
+		finalStep?.bindingDependencies,
+		bindingFinalPlanHasIncludes(planReport) ? planReport : undefined,
+	);
+	const compiled = adapter?.compile<T>(
+		bindingFinalQuery || hasNqlBindings(finalBundle) ? finalBundle : planReport,
+		{ ...options, model },
+	);
+	return { planReport, compiled };
 }
 
 /**
@@ -1569,17 +1659,14 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			);
 		}
 
-		const bindingFinalQuery = isBindingFinalQuery(compiledIntent.bundle);
-		const planReport = bindingFinalQuery
-			? createBindingFinalPlan(
-					compiledIntent.intent,
-					compiledIntent.bundle,
-					this.model,
-					this.adapter?.dialectCapabilities,
-				)
-			: this.planInternal();
+		const { planReport, compiled } = compileNqlRead<T>(
+			{ ...compiledIntent.bundle, query: compiledIntent.intent },
+			this.model,
+			this.adapter,
+			this.nqlBundleCompileOptions(),
+		);
 
-		if (!this.adapter) {
+		if (!this.adapter || !compiled) {
 			return {
 				plan: planReport,
 				sql: '[No adapter - SQL not available]',
@@ -1587,15 +1674,6 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 				...(meta !== undefined && { meta }),
 			};
 		}
-
-		const finalBundle = this.createFinalNqlStatementBundle(
-			compiledIntent,
-			bindingFinalPlanHasIncludes(planReport) ? planReport : undefined,
-		);
-		const compiled =
-			bindingFinalQuery || hasNqlBindings(finalBundle)
-				? this.adapter.compile<T>(finalBundle, this.nqlBundleCompileOptions())
-				: this.adapter.compile<T>(planReport, this.nqlBundleCompileOptions());
 
 		try {
 			return this.adapter.createDump(planReport, compiled, meta);
@@ -1682,53 +1760,6 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		};
 	}
 
-	private createNqlStatementBundle(
-		statement:
-			| { readonly query: QueryIntent }
-			| { readonly mutation: MutationIntent },
-		bindings: ReadonlyMap<string, QueryIntent>,
-		runtimeBindings: ReadonlyMap<string, NqlRuntimeBinding>,
-		sourceBundle: CompiledNqlQuery,
-		bindingDependencies?: readonly string[],
-		planReport?: PlanReport,
-	): CompiledNqlQuery {
-		const statementBindings = filterMapByRuntimeBindingDependencies(
-			bindings,
-			runtimeSourceBindingNames(sourceBundle),
-			bindingDependencies,
-		);
-		const statementRuntimeBindings = filterMapByBindingDependencies(
-			runtimeBindings,
-			bindingDependencies,
-		);
-		const emittedBindingNames = new Set([
-			...statementBindings.keys(),
-			...statementRuntimeBindings.keys(),
-		]);
-		const statementBindingOutputSchemas = filterOptionalMapByNames(
-			sourceBundle.bindingOutputSchemas,
-			emittedBindingNames,
-		);
-		const statementMutationBindings = filterOptionalMapByBindingDependencies(
-			sourceBundle.mutationBindings,
-			bindingDependencies,
-		);
-		return {
-			...statement,
-			...(planReport !== undefined && { plan: planReport }),
-			...(statementBindings.size > 0 && { bindings: statementBindings }),
-			...(statementBindingOutputSchemas !== undefined && {
-				bindingOutputSchemas: statementBindingOutputSchemas,
-			}),
-			...(statementMutationBindings !== undefined && {
-				mutationBindings: statementMutationBindings,
-			}),
-			...(statementRuntimeBindings.size > 0 && {
-				runtimeBindings: statementRuntimeBindings,
-			}),
-		};
-	}
-
 	private createFinalNqlStatementBundle(
 		compiledIntent: CompiledNqlIntent,
 		planReport?: PlanReport,
@@ -1738,7 +1769,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		}
 		const finalStep = createNqlProgramSteps(compiledIntent).at(-1);
 		if (compiledIntent.kind === 'query') {
-			return this.createNqlStatementBundle(
+			return createNqlStatementBundle(
 				{ query: compiledIntent.intent },
 				compiledIntent.bundle.bindings ?? new Map(),
 				compiledIntent.bundle.runtimeBindings ?? new Map(),
@@ -1747,7 +1778,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 				planReport,
 			);
 		}
-		return this.createNqlStatementBundle(
+		return createNqlStatementBundle(
 			{ mutation: compiledIntent.intent },
 			compiledIntent.bundle.bindings ?? new Map(),
 			compiledIntent.bundle.runtimeBindings ?? new Map(),
@@ -1857,7 +1888,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 							`NQL mutation binding '${step.bindName}' cannot execute without a RETURNING projection.`,
 						);
 					}
-					const statementBundle = this.createNqlStatementBundle(
+					const statementBundle = createNqlStatementBundle(
 						{ mutation: step.intent },
 						priorBindings,
 						runtimeBindings,
@@ -1880,7 +1911,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 						finalRows = rows.transformedRows;
 					}
 				} else if (step.snapshot === true && step.bindName !== undefined) {
-					const statementBundle = this.createNqlStatementBundle(
+					const statementBundle = createNqlStatementBundle(
 						{ query: step.intent },
 						priorBindings,
 						runtimeBindings,
@@ -1911,7 +1942,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 									txAdapter.dialectCapabilities,
 								)
 							: undefined;
-					const statementBundle = this.createNqlStatementBundle(
+					const statementBundle = createNqlStatementBundle(
 						{ query: step.intent },
 						priorBindings,
 						runtimeBindings,
@@ -1975,7 +2006,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 
 		for (const step of steps) {
 			if (step.kind === 'mutation') {
-				const statementBundle = this.createNqlStatementBundle(
+				const statementBundle = createNqlStatementBundle(
 					{ mutation: step.intent },
 					priorBindings,
 					runtimeBindings,
@@ -2010,7 +2041,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 								adapter.dialectCapabilities,
 							)
 						: undefined;
-				const statementBundle = this.createNqlStatementBundle(
+				const statementBundle = createNqlStatementBundle(
 					{ query: step.intent },
 					priorBindings,
 					runtimeBindings,

@@ -154,3 +154,111 @@ it('binding read exposes the same plan as the tag', async () => {
 	expect(cli.planReport).toEqual('plan' in dump && dump.plan);
 	expect(cli.sql).toBe(dump.sql);
 });
+
+const bindingDb = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		active: 'boolean',
+	},
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		title: 'string',
+		authorId: ref('users', { as: 'author', inverse: 'posts' }),
+	},
+});
+
+function withoutTiming(plan: import('@dbsp/core').PlanReport | undefined) {
+	if (!plan) return undefined;
+	const { planningTimeMs, ...metadata } = plan.metadata;
+	return { ...plan, metadata };
+}
+
+const expectedBindingSql = new Map([
+	[
+		'users',
+		'WITH "u" as (SELECT users.id FROM users WHERE users.active = $1) SELECT users.id FROM users WHERE users.id = ANY (SELECT u_subq_0.id FROM u AS u_subq_0)',
+	],
+	[
+		'active_users',
+		`WITH "active_users" as (SELECT users.id, users.name FROM users) SELECT active_users.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'title', __t__.title, 'authorId', __t__."authorId") ORDER BY __t__.id ASC NULLS LAST) FROM posts AS __t__ WHERE __t__."authorId" = active_users.id), '[]'::json) AS posts_json FROM active_users`,
+	],
+	['u', 'WITH "u" as (SELECT users.id FROM users) SELECT u.* FROM u'],
+]);
+
+it.each([
+	[
+		'users | where active = true | select id | bind u\nusers | where id in (u) | select id',
+		'users',
+		0,
+	],
+	[
+		'users | select id, name | bind active_users\nactive_users | select *, posts.*',
+		'active_users',
+		1,
+	],
+	['users | select id | bind u\nu | select *', 'u', 0],
+	[
+		'users | select id, name | bind active_users\nactive_users | select *, posts.author.*',
+		'active_users',
+		2,
+	],
+] as const)('binding query parity: %s', async (text, rootTable, decisions) => {
+	const cli = await compileNqlToSql(text, bindingDb.model);
+	const orm = createOrm({
+		model: bindingDb.model,
+		adapter: createPgCompileOnlyAdapter({ model: bindingDb.model }),
+	});
+	const tag = orm.nql`${nqlRaw(text)}`.dump();
+	if (!('params' in tag)) throw new Error('Expected a read dump');
+	expect(cli.sql).toBe(tag.sql);
+	expect(cli.params).toEqual(tag.params);
+	expect(withoutTiming(cli.planReport)).toEqual(withoutTiming(tag.plan));
+	if (decisions < 2) {
+		expect(cli.sql).toBe(expectedBindingSql.get(rootTable));
+		expect(cli.params).toEqual(rootTable === 'users' ? [true] : []);
+	}
+	expect(cli.planReport?.rootTable).toBe(rootTable);
+	expect(cli.planReport?.decisions).toHaveLength(decisions);
+	for (const decision of cli.planReport?.decisions ?? []) {
+		expect(decision).toMatchObject({
+			type: 'include-strategy',
+			choice: 'json_agg',
+		});
+	}
+});
+
+it.each([
+	"users | where active = true | select id, name | bind active_users\nactive_users | select id, name | union (users | where name = 'Ada' | select id, name)",
+	'users | select id | bind u\nwith selected as (u | select id)\nselected | select *',
+])('unplanned binding read parity: %s', async (text) => {
+	const cli = await compileNqlToSql(text, bindingDb.model);
+	const orm = createOrm({
+		model: bindingDb.model,
+		adapter: createPgCompileOnlyAdapter({ model: bindingDb.model }),
+	});
+	const tag = orm.nql`${nqlRaw(text)}`.dump();
+	if (!('params' in tag)) throw new Error('Expected a read dump');
+	expect(cli.sql).toBe(tag.sql);
+	expect(cli.params).toEqual(tag.params);
+	expect(cli.planReport).toBeUndefined();
+	expect(tag.plan).toBeUndefined();
+});
+
+it('binding include parity preserves adapter schema and casing options', async () => {
+	const options = { schemaName: 'tenant', dbCasing: 'snake_case' } as const;
+	const text =
+		'users | select id, name | bind active_users\nactive_users | select *, posts.*';
+	const cli = await compileNqlToSql(text, bindingDb.model, options);
+	const orm = createOrm({
+		model: bindingDb.model,
+		adapter: createPgCompileOnlyAdapter({ model: bindingDb.model, ...options }),
+	});
+	const tag = orm.nql`${nqlRaw(text)}`.dump();
+	if (!('params' in tag)) throw new Error('Expected a read dump');
+	expect(cli.sql).toBe(tag.sql);
+	expect(cli.sql).toContain('tenant');
+	expect(cli.sql).toContain('author_id');
+	expect(cli.params).toEqual(tag.params);
+	expect(withoutTiming(cli.planReport)).toEqual(withoutTiming(tag.plan));
+});
