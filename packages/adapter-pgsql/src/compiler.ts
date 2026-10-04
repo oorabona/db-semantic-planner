@@ -97,6 +97,7 @@ import { buildKeyCorrelation } from './handlers/where/exists.js';
 import { buildColumnRef, compileValue } from './handlers/where/utils.js';
 import {
 	assertNoUnsupportedSubqueryModifiers,
+	containsOuterRef,
 	convertWhereCondition,
 	intentToDecisions,
 } from './intent-to-decisions.js';
@@ -1809,6 +1810,13 @@ export class PlanCompiler {
 		ast: Node;
 		parameters: readonly unknown[];
 	} {
+		if (containsOuterRef(query)) {
+			throw new Error(
+				'scalar subquery with correlated outerRef() is not yet supported — ' +
+					'use exists("relation", { where: ... }) when a schema relation exists, ' +
+					'or restructure the query to avoid the correlation.',
+			);
+		}
 		const innerCompiler = new PlanCompiler(this.childCompilerOptions());
 		const innerPlan: SimplifiedPlanReport = {
 			rootTable: query.from,

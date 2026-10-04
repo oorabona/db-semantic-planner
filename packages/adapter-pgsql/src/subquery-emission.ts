@@ -245,7 +245,9 @@ export function buildPredicateSubquerySelect(
 	// whose own fields carry forbidden modifiers or a malformed projection.
 	assertNoDroppedDecisionModifiers(decision, use);
 
-	// Correlated subqueries (outerRef inside the inner WHERE) are not supported.
+	// Correlation is refused only on the route without the condition callback.
+	// The subquery builder without a parent returns values for the caller to
+	// append; with a parent it shares parameter state and returns no values.
 	if (
 		!ctx.compileSubqueryCondition &&
 		sourceIntent.where &&

@@ -49,10 +49,10 @@ orm.select('users')
 
 ## Pattern: scalar subquery in SELECT
 
-Embed an aggregate from a related table as a column in the outer SELECT:
+Embed an aggregate from another table as a column in the outer SELECT:
 
 ```typescript
-import { schema, createOrm, subquery, outerRef, eq } from '@dbsp/core';
+import { schema, createOrm, subquery } from '@dbsp/core';
 import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({
@@ -66,17 +66,18 @@ orm.select('symbols')
     'id',
     'name',
     subquery('calls')
-      .where(eq('symbolId', outerRef('id')))
       .count()
       .asExpr('callCount'),
   ])
   .dump();
 // SQL: SELECT "id", "name",
-//   (SELECT COUNT(*) FROM "calls" WHERE "symbolId" = "symbols"."id") AS "callCount"
+//   (SELECT COUNT(*) FROM "calls") AS "callCount"
 // FROM "symbols"
 ```
 
 `.asExpr('alias')` wraps the `SubqueryExpression` as an `ExpressionSpec` for use in `.columns([...])`. Source: `packages/core/src/dx/subquery-builder.ts:175`.
+
+`outerRef()` inside a SELECT-expression subquery is refused at compile time.
 
 Aggregate methods available on `SubqueryBuilder`:
 

@@ -47,8 +47,8 @@ export type WhereCompilerCtx = {
 	/**
 	 * Callback to compile a QueryIntent subquery into an AST node.
 	 * Used by EXISTS/NOT EXISTS handlers that need correlated subqueries.
-	 * Returns the compiled AST node, the count of parameters consumed, and
-	 * the actual parameter values so the caller can push them to the outer state.
+	 * Without a parent, returns parameter values for the caller to append.
+	 * With a parent, shares its parameter state and returns no values.
 	 */
 	readonly compileSubquery: (
 		intent: QueryIntent,

@@ -61,6 +61,9 @@ export function createSubqueryBuilder(
 	 * WhereSubqueryIntent (kind: 'subquery') can compile to:
 	 *   field OP (SELECT col FROM table [WHERE ...])
 	 *
+	 * Without a parent, returns values for the caller to append; with a parent,
+	 * shares the parent parameter state and returns no values.
+	 *
 	 * @param intent      - The inner QueryIntent describing the subquery
 	 * @param paramOffset - Current outer $N offset; inner WHERE params start at offset+1
 	 * @param declaredNames - Addressed declared-name resolver for the child query

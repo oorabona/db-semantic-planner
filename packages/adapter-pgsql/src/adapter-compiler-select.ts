@@ -326,15 +326,21 @@ function compileJoinIntents(
 	const deriveFk = deps.deriveFk ?? defaultFkDerivation;
 	const defaultPk = deps.defaultPk;
 	const results: PlanDecision[] = [];
-	const explicitAliases = new Set<string>();
+	let joinScope = queryScope([
+		...(deps.scope?.bindings.values() ?? []),
+		...(!hasSourceBinding(rootTable, deps)
+			? [sourceBinding(rootTable, deps)]
+			: []),
+	]);
 
 	for (const intent of joins) {
-		if (intent.alias !== undefined) {
-			if (explicitAliases.has(intent.alias))
-				throw new Error(
-					`Query scope already binds qualifier '${intent.alias}'.`,
-				);
-			explicitAliases.add(intent.alias);
+		const qualifier =
+			intent.alias ??
+			intent.relation ??
+			intent.batchValues?.alias ??
+			intent.table;
+		if (qualifier !== undefined && joinScope.bindings.has(qualifier)) {
+			throw new Error(`Query scope already binds qualifier '${qualifier}'.`);
 		}
 		if (intent.relation !== undefined) {
 			// ── Relation mode: resolve FK from model ──────────────────────────
@@ -382,6 +388,15 @@ function compileJoinIntents(
 				: fkColumns;
 			const alias = intent.alias ?? intent.relation;
 
+			joinScope = queryScope([
+				...joinScope.bindings.values(),
+				relationBinding({
+					qualifier: queryLocal(alias),
+					kind: 'declared-table',
+					logicalTable: rel.target,
+				}),
+			]);
+
 			results.push({
 				type: 'join',
 				targetTable: rel.target,
@@ -412,22 +427,20 @@ function compileJoinIntents(
 			const bvOnParamState = createCompilerState();
 			bvOnParamState.paramIndex = bvParams.length;
 
+			joinScope = queryScope([
+				...joinScope.bindings.values(),
+				batchValuesBinding(alias, [
+					...bv.columns,
+					...(bv.ordinality ? ['ord'] : []),
+				]),
+			]);
 			const bvCtx: WhereCompilerCtx = {
 				rootTable,
 				aliases: new Map<string, string>(),
 				paramState: bvOnParamState,
 				outerTable: alias,
 				...(schemaName !== undefined && { schemaName }),
-				scope: queryScope([
-					...(deps.scope?.bindings.values() ?? []),
-					...(!hasSourceBinding(rootTable, deps)
-						? [sourceBinding(rootTable, deps)]
-						: []),
-					batchValuesBinding(alias, [
-						...bv.columns,
-						...(bv.ordinality ? ['ord'] : []),
-					]),
-				]),
+				scope: joinScope,
 				dbCasing: deps.dbCasing ?? 'preserve',
 				...(deps.declaredNames !== undefined && {
 					declaredNames: deps.declaredNames,
@@ -510,16 +523,7 @@ function compileJoinIntents(
 								kind: 'declared-table',
 								logicalTable: intent.table,
 							});
-			const scopeBindings = [
-				...(deps.scope?.bindings.values() ?? []),
-				...(!hasSourceBinding(rootTable, deps)
-					? [sourceBinding(rootTable, deps)]
-					: []),
-				...(relationBindingFor(deps.scope, joinedBinding.qualifier) ===
-					undefined && tableAlias !== rootTable
-					? [joinedBinding]
-					: []),
-			];
+			joinScope = queryScope([...joinScope.bindings.values(), joinedBinding]);
 			const ctx: WhereCompilerCtx = {
 				rootTable,
 				aliases: tableAliasMap,
@@ -528,7 +532,7 @@ function compileJoinIntents(
 				// joined alias (e.g. 'e2' in self-join ON conditions).
 				outerTable: tableAlias,
 				...(schemaName !== undefined && { schemaName }),
-				scope: queryScope([...scopeBindings]),
+				scope: joinScope,
 				dbCasing: deps.dbCasing ?? 'preserve',
 				...(deps.declaredNames !== undefined && {
 					declaredNames: deps.declaredNames,
