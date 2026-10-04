@@ -1,3 +1,4 @@
+import { EXPRESSION_BRAND } from '@dbsp/types';
 /**
  * Tests for SubqueryExpression.asExpr() — scalar subqueries as SELECT columns.
  *
@@ -20,10 +21,10 @@ import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 // ============================================================================
 
 describe('SubqueryExpression.asExpr()', () => {
-	it('returns an ExpressionSpec with __expr marker', () => {
+	it('returns an ExpressionSpec with expression symbol marker', () => {
 		const expr = subquery('calls').count().asExpr('call_count');
 
-		expect(expr.__expr).toBe(true);
+		expect(expr[EXPRESSION_BRAND]).toBe(true);
 		expect(expr.intent.kind).toBe('subquery');
 	});
 
@@ -53,7 +54,7 @@ describe('SubqueryExpression.asExpr()', () => {
 			.asExpr('n');
 
 		expect(spec1.intent).toEqual(spec2.intent);
-		expect(spec1.__expr).toBe(true);
+		expect(spec1[EXPRESSION_BRAND]).toBe(true);
 	});
 });
 

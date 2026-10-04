@@ -1,3 +1,4 @@
+import { EXPRESSION_BRAND } from '@dbsp/types';
 /**
  * @fileoverview Core DX layer type definitions.
  *
@@ -48,12 +49,12 @@ export type { DumpMetaInput, QueryBuilder } from './query-builder-types.js';
 
 /**
  * A wrapper around an ExpressionIntent that marks it for use in columns().
- * The __expr marker allows runtime detection of expression vs string columns.
+ * The expression symbol marker allows runtime detection of expression vs string columns.
  *
  * Create these using helper functions like coalesce() or raw().
  */
 export interface ExpressionSpec {
-	readonly __expr: true;
+	readonly [EXPRESSION_BRAND]: true;
 	readonly intent: ExpressionIntent;
 }
 
@@ -97,8 +98,8 @@ export function isExpressionSpec(spec: ColumnSpec): spec is ExpressionSpec {
 	return (
 		typeof spec === 'object' &&
 		spec !== null &&
-		'__expr' in spec &&
-		spec.__expr === true
+		EXPRESSION_BRAND in spec &&
+		spec[EXPRESSION_BRAND] === true
 	);
 }
 

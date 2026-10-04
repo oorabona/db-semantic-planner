@@ -1,3 +1,4 @@
+import { REF_BRAND } from '@dbsp/types';
 /**
  * ARCH-005: Unified Schema API Tests
  *
@@ -26,7 +27,7 @@ describe('ref()', () => {
 			const result = ref('users');
 
 			// Assert
-			expect(result.__brand).toBe('ref');
+			expect(result[REF_BRAND]).toBe('ref');
 			expect(result.target).toBe('users');
 			expect(result.options).toEqual({});
 		});

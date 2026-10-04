@@ -1,3 +1,4 @@
+import { EXPRESSION_BRAND } from '@dbsp/types';
 /**
  * @fileoverview Type-safe query builder using TableRef/ColumnRef.
  *
@@ -222,8 +223,8 @@ class FromBuilderImpl<
 		if (
 			typeof condition === 'object' &&
 			condition !== null &&
-			'__expr' in condition &&
-			condition.__expr === true
+			EXPRESSION_BRAND in condition &&
+			condition[EXPRESSION_BRAND] === true
 		) {
 			throw new InvalidOperationError(
 				'where',

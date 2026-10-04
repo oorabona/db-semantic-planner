@@ -1,3 +1,4 @@
+import { EXPRESSION_BRAND } from '@dbsp/types';
 /**
  * ORDERBY-RELATION-COL regression test.
  *
@@ -5,7 +6,7 @@
  * column reference "callerFile"."path" instead of the literal string "calls.__expr".
  *
  * Root cause: orderBy() was only handling instanceof ExpressionRef for expressions.
- * relationColumn() returns a plain ExpressionSpec (duck-typed { __expr: true, intent }),
+ * relationColumn() returns a plain, factory-branded ExpressionSpec,
  * which fell through all checks and was treated as an object record (OrderByRecord),
  * stringifying to "__expr".
  *
@@ -160,7 +161,7 @@ describe('ORDERBY-RELATION-COL: ExpressionSpec shape validation', () => {
 	it('isExpressionSpec detects relationColumn() output correctly', () => {
 		// Verify the duck-type shape that the fix relies on
 		const spec = relationColumn('callerFile', 'path', 'callerFilePath');
-		expect(spec.__expr).toBe(true);
+		expect(spec[EXPRESSION_BRAND]).toBe(true);
 		expect(spec.intent).toEqual({
 			kind: 'relationColumn',
 			relation: 'callerFile',
@@ -177,8 +178,8 @@ describe('ORDERBY-RELATION-COL: ExpressionSpec shape validation', () => {
 		const wouldHaveProducedExprField = entries.some(
 			([key]) => key === '__expr',
 		);
-		// Confirm the shape that caused the bug — __expr IS a top-level key
-		expect(wouldHaveProducedExprField).toBe(true);
+		// Factory brands no longer appear among enumerable string keys.
+		expect(wouldHaveProducedExprField).toBe(false);
 		// The fix: isExpressionSpec() catches this BEFORE the Object.entries() path
 	});
 });

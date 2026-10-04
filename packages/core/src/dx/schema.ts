@@ -1,3 +1,4 @@
+import { brandValue, REF_BRAND } from '@dbsp/types';
 /**
  * ARCH-005: Unified Schema API
  *
@@ -138,7 +139,7 @@ export interface RefDefinition<
 	TTarget extends string = string,
 	TOptions extends RefOptions = RefOptions,
 > {
-	readonly __brand: 'ref';
+	readonly [REF_BRAND]: 'ref';
 	readonly target: TTarget;
 	readonly options: TOptions;
 }
@@ -622,11 +623,14 @@ export function ref<
 	const TTarget extends string,
 	const TOptions extends RefOptions = Record<string, never>,
 >(target: TTarget, options?: TOptions): RefDefinition<TTarget, TOptions> {
-	return {
-		__brand: 'ref',
-		target,
-		options: options ? normalizeRefOptions(options) : ({} as TOptions),
-	};
+	return brandValue(
+		{
+			target,
+			options: options ? normalizeRefOptions(options) : ({} as TOptions),
+		},
+		REF_BRAND,
+		'ref' as const,
+	);
 }
 
 /**
@@ -638,8 +642,8 @@ export function isRef(
 	return (
 		typeof value === 'object' &&
 		value !== null &&
-		'__brand' in value &&
-		value.__brand === 'ref'
+		REF_BRAND in value &&
+		value[REF_BRAND] === 'ref'
 	);
 }
 
