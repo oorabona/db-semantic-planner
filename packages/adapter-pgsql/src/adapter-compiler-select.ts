@@ -35,7 +35,10 @@ import {
 	relationBinding,
 	relationBindingFor,
 } from './binding-registry.js';
-import { rootProjectionLabels } from './column-metadata.js';
+import {
+	aggregateProjectionIdentity,
+	rootProjectionLabels,
+} from './column-metadata.js';
 import { compileWhereIntent, type WhereCompilerCtx } from './compile-where.js';
 import {
 	type CompilerOptions,
@@ -88,6 +91,14 @@ function deduplicateRootProjection(
 		};
 	if (select.type === 'aggregate') {
 		const seen = new Set<string>();
+		const aliased = new Map(
+			select.aggregates
+				.filter((aggregate) => aggregate.as !== undefined)
+				.map((aggregate) => [
+					aggregateProjectionIdentity(aggregate),
+					aggregate,
+				]),
+		);
 		return {
 			...intent,
 			select: {
@@ -95,15 +106,17 @@ function deduplicateRootProjection(
 				...(select.fields !== undefined && {
 					fields: [...new Set(select.fields)],
 				}),
-				aggregates: select.aggregates.filter((aggregate) => {
-					const identity = stableJson([
-						aggregate,
-						aggregate.as ?? aggregate.function,
-					]);
-					if (seen.has(identity)) return false;
-					seen.add(identity);
-					return true;
-				}),
+				aggregates: select.aggregates
+					.map(
+						(aggregate) =>
+							aliased.get(aggregateProjectionIdentity(aggregate)) ?? aggregate,
+					)
+					.filter((aggregate) => {
+						const identity = aggregateProjectionIdentity(aggregate);
+						if (seen.has(identity)) return false;
+						seen.add(identity);
+						return true;
+					}),
 			},
 		};
 	}
@@ -121,7 +134,9 @@ function deduplicateRootProjection(
 								expr.column,
 								expr.kind === 'column' ? (expr.as ?? expr.column) : expr.alias,
 							])
-						: stableJson(expr);
+						: expr.kind === 'aggregate'
+							? aggregateProjectionIdentity(expr)
+							: stableJson(expr);
 				if (seen.has(identity)) return false;
 				seen.add(identity);
 				return true;

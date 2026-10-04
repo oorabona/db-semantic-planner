@@ -407,12 +407,14 @@ export function resolveProjectionOutputLabel(
 	switch (node.kind) {
 		case 'column':
 			return node.column as string;
+		case 'window':
 		case 'columnAlias':
 			return node.alias as string;
 		case 'ref':
 			return (node.column as string).split('.').at(-1);
 		case 'star':
 			return '*';
+		case 'function':
 		case 'customFn':
 			return (node.name as string).split('.').at(-1);
 		case 'aggregate':
@@ -436,13 +438,25 @@ export function resolveProjectionOutputLabel(
 	return undefined;
 }
 
+/** Aggregate equality ignores alias syntax but retains the final output key. */
+export function aggregateProjectionIdentity(aggregate: {
+	readonly as?: string;
+	readonly function: string;
+}): string {
+	const { as, ...source } = aggregate;
+	return stableJson([source, as ?? aggregate.function]);
+}
+
 /** Root ownership uses the same label resolver as lowered SELECT candidates. */
 export function rootProjectionLabels(
 	select: SelectIntent | undefined,
 	wildcard: () => readonly string[],
 	included: ReadonlySet<string>,
 	strict: boolean,
-): readonly { key: string; owner: string }[] {
+): readonly {
+	key: string;
+	owner: string | { identity: string; description: string };
+}[] {
 	const fields = (names: readonly string[]) =>
 		names.flatMap((name) =>
 			(name === '*' ? wildcard() : [name]).map((key) => ({
@@ -457,7 +471,10 @@ export function rootProjectionLabels(
 			...fields(select.fields ?? []),
 			...select.aggregates.map((aggregate) => ({
 				key: aggregate.as ?? aggregate.function,
-				owner: `aggregate:${stableJson(aggregate)}`,
+				owner: {
+					identity: `aggregate:${aggregateProjectionIdentity(aggregate)}`,
+					description: `aggregate:${aggregate.as ?? aggregate.function}`,
+				},
 			})),
 		];
 	if (select.type !== 'expressions' || !Array.isArray(select.columns))
@@ -470,7 +487,7 @@ export function rootProjectionLabels(
 		if (!key && !strict) return [];
 		if (!key)
 			throw new Error(
-				`Root projection expression ${stableJson(expr)} has no established output label; use .as(...).`,
+				`Root projection expression ${expr.kind} has no established output label; use .as(...).`,
 			);
 		return [
 			{
@@ -478,7 +495,13 @@ export function rootProjectionLabels(
 				owner:
 					expr.kind === 'column' || expr.kind === 'columnAlias'
 						? `column:${expr.column}`
-						: `expression:${stableJson(expr)}`,
+						: {
+								identity:
+									expr.kind === 'aggregate'
+										? `aggregate:${aggregateProjectionIdentity(expr)}`
+										: `expression:${stableJson(expr)}`,
+								description: `${expr.kind}:${truncateIdentifier(key, 63)}`,
+							},
 			},
 		];
 	});

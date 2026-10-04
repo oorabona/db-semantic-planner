@@ -4,10 +4,12 @@ import {
 	fn,
 	literal,
 	POSTGRESQL_CAPABILITIES,
+	param,
 	plan,
 	ResultHydrator,
 	ref,
 	relationColumn,
+	rowNumber,
 	schema,
 	star,
 } from '@dbsp/core';
@@ -435,3 +437,102 @@ for (const strategy of ['json_agg', 'join'] as const)
 		);
 		expect(rows).toEqual(before);
 	});
+
+it('907k resolves window and NQL scalar function labels', () => {
+	const orm = createOrm({
+		model,
+		adapter: createPgCompileOnlyAdapter({ model }),
+	});
+	expect(
+		orm
+			.select('roots')
+			.columns([rowNumber().orderBy('id').as('rn')])
+			.include('authors')
+			.dump().sql,
+	).toBe(
+		"SELECT row_number() OVER (ORDER BY roots.id ASC) AS rn, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'rootId', __t__.\"rootId\", 'firstName', __t__.\"firstName\", 'amount', CAST(__t__.amount AS text)) ORDER BY __t__.id ASC NULLS LAST) FROM authors AS __t__ WHERE __t__.\"rootId\" = roots.id), '[]'::json) AS authors_json FROM roots",
+	);
+	expect(orm.nql`roots | select now(), authors.*`.dump().sql).toContain(
+		'now()',
+	);
+	const collisionModel = schema({
+		roots: { id: { type: 'integer', primaryKey: true } },
+		events: {
+			id: { type: 'integer', primaryKey: true },
+			rootId: ref('roots', { inverse: 'now' }),
+		},
+	}).model;
+	const collisionOrm = createOrm({
+		model: collisionModel,
+		adapter: createPgCompileOnlyAdapter({ model: collisionModel }),
+	});
+	expect(() => collisionOrm.nql`roots | select now(), now.*`.dump()).toThrow(
+		"Include payload '$' has conflicting public key 'now' (function:now and relation:now).",
+	);
+});
+
+it('907k diagnostics never expose bound values', () => {
+	const orm = createOrm({
+		model,
+		adapter: createPgCompileOnlyAdapter({ model }),
+	});
+	const secret = 'sk_live_DO_NOT_LOG';
+	const message = (run: () => unknown) => {
+		try {
+			run();
+		} catch (error) {
+			return (error as Error).message;
+		}
+		throw new Error('Expected refusal');
+	};
+	const unlabeled = message(() =>
+		orm
+			.select('roots')
+			.columns([param(secret)])
+			.include('authors')
+			.dump(),
+	);
+	expect(unlabeled).not.toContain(secret);
+	expect(unlabeled).toBe(
+		'Root projection expression param has no established output label; use .as(...).',
+	);
+	const collision = message(() =>
+		orm
+			.select('roots')
+			.columns([param(secret).as('authors')])
+			.include('authors')
+			.dump(),
+	);
+	expect(collision).toBe(
+		"Include payload '$' has conflicting public key 'authors' (param:authors and relation:authors).",
+	);
+	expect(collision).not.toContain(secret);
+});
+
+it('907k normalizes aggregate source and output key', () => {
+	const orm = createOrm({
+		model,
+		adapter: createPgCompileOnlyAdapter({ model }),
+	});
+	for (const fn of ['count', 'sum', 'avg', 'min', 'max'] as const) {
+		const query = orm
+			.select('authors')
+			.include('posts', { join: 'left' })
+			[fn]('id')
+			[fn]('id', fn)
+			.dump();
+		expect(query.sql).toBe(
+			`SELECT ${fn}(authors.id) AS ${fn} FROM authors LEFT JOIN posts AS posts ON authors.id = posts."authorId"`,
+		);
+		expect(() =>
+			orm
+				.select('authors')
+				.include('posts', { join: 'left' })
+				[fn]('id')
+				[fn]('amount', fn)
+				.dump(),
+		).toThrow(
+			`Include payload '$' has conflicting public key '${fn}' (aggregate:${fn} and aggregate:${fn}).`,
+		);
+	}
+});

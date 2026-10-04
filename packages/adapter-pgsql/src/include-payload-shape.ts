@@ -19,17 +19,23 @@ import {
 	resolveDeclaredIdentifier,
 } from './sql-identifier.js';
 
+type PayloadOwner = string | { identity: string; description: string };
+
 /** One ownership check for each public object; identical requests collapse. */
 export function claimPayloadKey(
-	owners: Map<string, string>,
+	owners: Map<string, PayloadOwner>,
 	path: string,
 	key: string,
-	owner: string,
+	owner: PayloadOwner,
 ): boolean {
 	const previous = owners.get(key);
-	if (previous !== undefined && previous !== owner)
+	if (
+		previous !== undefined &&
+		(typeof previous === 'string' ? previous : previous.identity) !==
+			(typeof owner === 'string' ? owner : owner.identity)
+	)
 		throw new Error(
-			`Include payload '${path}' has conflicting public key '${key}' (${previous} and ${owner}).`,
+			`Include payload '${path}' has conflicting public key '${key}' (${typeof previous === 'string' ? previous : previous.description} and ${typeof owner === 'string' ? owner : owner.description}).`,
 		);
 	owners.set(key, owner);
 	return previous === undefined;
@@ -43,7 +49,7 @@ export function resolveIncludePayloadShapes(
 	deps: AdapterCompilerDeps,
 	resolveRootLabels: (
 		wildcard: () => readonly string[],
-	) => readonly { key: string; owner: string }[],
+	) => readonly { key: string; owner: PayloadOwner }[],
 ): readonly IncludePayloadShape[] {
 	const flatPaths = new Set<string>();
 	const requestedPathsByLeaf = new Map<string, string[]>();
@@ -178,7 +184,7 @@ export function resolveIncludePayloadShapes(
 					`Include payload '${path}' cannot enumerate wildcard keys for opaque target '${tableName}'.`,
 				);
 		}
-		const owners = new Map<string, string>();
+		const owners = new Map<string, PayloadOwner>();
 		const columns: IncludePayloadShape['columns'][number][] = [];
 		const requests =
 			d.payloadColumnRequests ??
@@ -299,7 +305,7 @@ export function resolveIncludePayloadShapes(
 		.filter(([path]) => !path.includes('.'))
 		.map(([, d]) => resolvePayload(d));
 	for (const d of all) resolvePayload(d);
-	const owners = new Map<string, string>();
+	const owners = new Map<string, PayloadOwner>();
 	if (plan.intent?.existsWrap) return roots;
 
 	for (const { key, owner } of resolveRootLabels(rootColumns))
