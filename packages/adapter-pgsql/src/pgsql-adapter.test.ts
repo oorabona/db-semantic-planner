@@ -4,7 +4,7 @@
  * Tests adapter interface implementation without database connection.
  */
 
-import { type PlanReport, schema } from '@dbsp/core';
+import { type PlanReport, ref, schema } from '@dbsp/core';
 import { supportsExecution } from '@dbsp/core/internal';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import type { Pool, PoolClient } from 'pg';
@@ -2980,12 +2980,17 @@ describe('PgAdapter', () => {
 		const propagationModel = schema({
 			customers: { id: 'integer' },
 			orders: {
+				customer_id: ref('customers', { inverse: 'orders' }),
 				id: 'integer',
 				name: 'text',
 				total: 'integer',
 				anything: 'text',
 			},
-			symbols: { id: 'integer', name: 'text', file_id: 'integer' },
+			symbols: {
+				id: 'integer',
+				name: 'text',
+				file_id: ref('files', { as: 'file' }),
+			},
 			files: { id: 'integer', path: 'text' },
 		}).model;
 		/**
@@ -3004,12 +3009,18 @@ describe('PgAdapter', () => {
 				intent: {
 					type: 'query',
 					table: rootTable,
+					include: includeDecisions.map((d: any) => ({
+						relation: d.context.relation,
+					})),
 					select: {
 						type: 'expressions',
 						columns: selectExprs,
 					},
 				},
-				decisions: includeDecisions,
+				decisions: includeDecisions.map((d: any) => ({
+					...d,
+					context: { ...d.context, sourceTable: rootTable },
+				})),
 			} as unknown as PlanReport;
 		}
 
@@ -3096,7 +3107,12 @@ describe('PgAdapter', () => {
 		it('validates columns against model schema', () => {
 			const model = schema({
 				customers: { id: 'integer' },
-				orders: { id: 'integer', name: 'string', total: 'decimal' },
+				orders: {
+					customer_id: ref('customers', { inverse: 'orders' }),
+					id: 'integer',
+					name: 'string',
+					total: 'decimal',
+				},
 			}).model;
 
 			const adapter = new PgAdapter(undefined, { model: propagationModel });
@@ -3143,7 +3159,11 @@ describe('PgAdapter', () => {
 		it('propagates relation columns with a complete model', () => {
 			const model = schema({
 				customers: { id: 'integer' },
-				orders: { id: 'integer', anything: 'string' },
+				orders: {
+					customer_id: ref('customers', { inverse: 'orders' }),
+					id: 'integer',
+					anything: 'string',
+				},
 			}).model;
 
 			const adapter = new PgAdapter(undefined, { model: propagationModel });

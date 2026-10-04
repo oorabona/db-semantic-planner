@@ -336,18 +336,20 @@ it('root context sees manual JOIN aliases allocated before predicate compilation
 	const call = spy.mock.calls.find(([intent]) => intent === predicate);
 	expect(call?.[1].visibleAliases.get('p')).toBe('p');
 });
-it('expression-valued scalar subqueries stay refused at the root', () => {
-	expect(() =>
-		orm
-			.select('users')
-			.where({
-				kind: 'expression',
-				expr: subquery('posts').select('score').asExpr('s').intent,
-				operator: 'gt',
-				value: 0,
-			})
-			.dump(),
-	).toThrow(/subquery/i);
+it('binds expression-valued scalar subqueries at the root (#891 step 4c decision)', () => {
+	const result = orm
+		.select('users')
+		.where({
+			kind: 'expression',
+			expr: subquery('posts').select('score').asExpr('s').intent,
+			operator: 'gt',
+			value: 0,
+		})
+		.dump();
+	expect(result.sql).toBe(
+		'SELECT users.* FROM users WHERE (SELECT posts.score FROM posts AS posts) > $1',
+	);
+	expect(result.params).toEqual([0]);
 });
 it('refuses a root relation without model authority', () => {
 	const { model, ...context } = ctx();

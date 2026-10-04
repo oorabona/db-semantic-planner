@@ -71,13 +71,13 @@ orm.select('symbols')
   ])
   .dump();
 // SQL: SELECT "id", "name",
-//   (SELECT COUNT(*) FROM "calls") AS "callCount"
+//   (SELECT COUNT(*) FROM "calls" AS "calls") AS "callCount"
 // FROM "symbols"
 ```
 
 `.asExpr('alias')` wraps the `SubqueryExpression` as an `ExpressionSpec` for use in `.columns([...])`. Source: `packages/core/src/dx/subquery-builder.ts:175`.
 
-Correlated subqueries using `outerRef()` are not supported in SELECT expressions and are refused at compile time, including when nested inside an expression such as `op(...)`. Use an uncorrelated subquery or a `.join()` with `groupBy` and an aggregate to produce a value.
+SELECT-expression subqueries, including those nested in `op(...)`, support `outerRef()` in their WHERE body. Unqualified references bind the immediately enclosing query; qualified references use the nearest enclosing range, preferring an exact emitted qualifier and otherwise requiring a unique logical table. Ambiguous logical tables are refused. A FROM-less `compileSelectExpression()` can correlate nested subqueries to their enclosing subquery, but has no outer table of its own. An `outerRef()` (qualified or unqualified) in its immediate subquery body is refused with `outerRef() requires an enclosing query range.`; it never binds that subquery's own range.
 
 Aggregate methods available on `SubqueryBuilder`:
 
@@ -139,7 +139,7 @@ orm.select('products')
 
 Source: `packages/core/src/dx/subquery-builder.ts:288` — `outerRef(column)` returns a `SubqueryRefIntent`.
 
-Query WHERE scalar comparisons and `inSubquery()` compile the body with its own alias and resolve unqualified `outerRef()` to the immediately enclosing query and qualified references by searching enclosing queries nearest first: an exact emitted qualifier wins; otherwise a logical table must have exactly one range in that query, with multiple ranges refused as ambiguous and their aliases named. `rawExists()` and `rawNotExists()` use the same body compiler; correlated bodies compile in query WHERE and are refused in aggregate FILTER and recursive `start.where` anchors. A query WHERE that also contains a dotted relation path such as `eq('caller.name', 'Ada')`, and a join include's `where`, still compile through the earlier route, which refuses correlated bodies. All levels share one parameter sequence. Legacy `compilePlan()` and SELECT expression subqueries retain their existing correlation restrictions.
+Query WHERE scalar comparisons and `inSubquery()` compile the body with its own alias and resolve unqualified `outerRef()` to the immediately enclosing query and qualified references by searching enclosing queries nearest first: an exact emitted qualifier wins; otherwise a logical table must have exactly one range in that query, with multiple ranges refused as ambiguous and their aliases named. `rawExists()` and `rawNotExists()` use the same body compiler; correlated bodies compile in query WHERE and are refused in aggregate FILTER and recursive `start.where` anchors. A query WHERE that also contains a dotted relation path such as `eq('caller.name', 'Ada')`, and a join include's `where`, still compile through the earlier route, which refuses correlated bodies. All levels share one parameter sequence. SELECT-expression subquery bodies use this canonical route too, with their own emitted alias. Legacy `compilePlan()` retains its existing correlation restrictions.
 
 ---
 

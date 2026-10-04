@@ -157,7 +157,7 @@ const posts = await orm.select('posts').include('author').dump();
 
 **Wrong:** Open-ended recursive traversal on an unbounded tree:
 ```typescript
-orm.select('categories').include('children', { recursive: true }).dump()
+orm.select('categories').include('children', { recursive: true, direction: 'descendants' }).dump()
 // Default maxDepth: 100 — may fetch enormous trees
 ```
 

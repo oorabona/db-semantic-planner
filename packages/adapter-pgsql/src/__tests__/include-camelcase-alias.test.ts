@@ -201,7 +201,7 @@ describe('Issue 15: include camelCase alias — synthesizeMissingJoinDecisions',
 		expect(sql).toContain('file_id');
 	});
 
-	it('does not emit a JOIN when no include entries have explicit join:', () => {
+	it('refuses missing strategy decisions instead of dropping the include', () => {
 		const plan: PlanReport = {
 			rootTable: 'variable_defs',
 			intent: {
@@ -221,10 +221,9 @@ describe('Issue 15: include camelCase alias — synthesizeMissingJoinDecisions',
 			metadata: { planningTimeMs: 0, relationsAnalyzed: 0, isAmbiguous: false },
 		};
 
-		const { sql } = compile(plan);
-
-		// Without explicit join:, no JOIN should be synthesized
-		expect(sql).not.toMatch(/LEFT JOIN/i);
+		expect(() => compile(plan)).toThrow(
+			'Include include[0](enclosingSymbol) has no resolved include-strategy decision',
+		);
 	});
 });
 
@@ -330,7 +329,7 @@ describe('legacy synthesis camelCase collisions', () => {
 		}
 		expect(error).toBeInstanceOf(Error);
 		expect((error as Error).message).toBe(
-			'Ambiguous include relation "fooBAr" from table "variable_defs". Use the exact relation name or "via" to specify one of: foo_b_ar, foo_bAr',
+			'Ambiguous include relation "fooBAr" from table "variable_defs" at "fooBAr". Use the exact relation name or "via" to specify one of: foo_b_ar, foo_bAr',
 		);
 	});
 });

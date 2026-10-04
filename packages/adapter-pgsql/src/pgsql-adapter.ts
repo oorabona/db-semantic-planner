@@ -129,10 +129,7 @@ import {
 import { deparseQuoted } from './deparse.js';
 import { compileExpressionIntent } from './handlers/expression/custom.js';
 import { createCompilerState } from './handlers/types.js';
-import {
-	assertNoSelectExpressionCorrelation,
-	intentToDecisions,
-} from './intent-to-decisions.js';
+import { intentToDecisions } from './intent-to-decisions.js';
 import {
 	type IntrospectedModelIR,
 	type IntrospectionOptions,
@@ -3472,12 +3469,12 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 		// This public path does not otherwise build compiler dependencies, so it
 		// must enter the same model/casing gate as every table-backed compiler.
 		const deps = this.buildCompileDeps(options);
-		const schemaName = this.schemaName;
-		const dialectCapabilities = this.dialectCapabilities;
+		const schemaName = deps.schemaName;
+		const dialectCapabilities = deps.dialectCapabilities;
 		const state = createCompilerState();
 		const ctx = {
 			...(schemaName !== undefined && { schema: schemaName }),
-			dialectCapabilities,
+			...(dialectCapabilities !== undefined && { dialectCapabilities }),
 			rootTable: '',
 			maxRecursiveDepth: MAX_DEPTH_LIMIT,
 			compileCustomFnFilter: buildCustomFnFilter,
@@ -3490,19 +3487,28 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 				query: import('@dbsp/types').QueryIntent,
 				paramOffset: number,
 			): CompileSubqueryResult {
-				assertNoSelectExpressionCorrelation(query);
 				const innerCompiler = new PlanCompiler({
 					dbCasing: deps.dbCasing ?? 'preserve',
+					defaultPkColumnName: deps.defaultPk,
+					deriveFkColumnName: deps.deriveFk,
 					...(schemaName !== undefined && { schema: schemaName }),
 					...(deps.declaredNames !== undefined && {
 						declaredNames: deps.declaredNames,
 					}),
 					...(deps.model !== undefined && { model: deps.model }),
-					dialectCapabilities,
+					...(dialectCapabilities !== undefined && { dialectCapabilities }),
 				});
 				const innerPlan = {
 					rootTable: query.from,
-					decisions: intentToDecisions(query, query.from),
+					decisions: intentToDecisions(query, query.from, {
+						omitRootWhere: true,
+						directConditions: true,
+					}),
+					directConditions: true,
+					rootAlias: query.from,
+					enclosingRanges: [],
+					...(query.where && { rawWhere: query.where }),
+					...(query.having && { rawHaving: query.having }),
 				};
 				const innerResult = innerCompiler.compile(innerPlan);
 				const renumbered = renumberParamRefsInAst(innerResult.ast, paramOffset);

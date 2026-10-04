@@ -1,4 +1,4 @@
-import { schema } from '@dbsp/core';
+import { ref, schema } from '@dbsp/core';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 /**
  * INCLUDE-2HOP-COLS regression tests.
@@ -23,8 +23,12 @@ import { normalizeSQL } from '../ast-helpers.js';
 // ---------------------------------------------------------------------------
 
 const compileModel = schema({
-	calls: { id: 'integer', callee_id: 'integer' },
-	callees: { id: 'integer', name: 'text', file_id: 'integer' },
+	calls: { id: 'integer', callee_id: ref('callees', { as: 'callee' }) },
+	callees: {
+		id: 'integer',
+		name: 'text',
+		file_id: ref('files', { as: 'file' }),
+	},
 	files: { id: 'integer', path: 'text' },
 }).model;
 

@@ -319,7 +319,7 @@ describe('FIND-014: include.limit with join strategy throws InvalidOperationErro
 	});
 
 	it('include with no limit and explicit join:inner refuses a to-many join', () => {
-		// Guard against over-triggering: limit-free join includes must not throw.
+		// A to-many join include is refused even without a per-parent limit.
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'users',

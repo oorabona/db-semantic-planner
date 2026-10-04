@@ -42,11 +42,13 @@ const brandExports = [
 	'brandValue',
 ];
 const rootNames = [
+	'AmbiguousIncludeError',
 	...brandExports,
 	...names(before.root.declarations).filter((name) => !excluded.has(name)),
 	'IncludePayloadShape',
 ];
 const rootRuntime = [
+	'AmbiguousIncludeError',
 	...brandExports,
 	...before.root.runtime.filter((name) => !excluded.has(name)),
 ];

@@ -429,13 +429,18 @@ describe('issue 763: relation qualifiers require an emitted SQL alias', () => {
 			);
 		}
 
-		const planReport = plan(parsed.ast.query, e2eBlogSchema.model, {
-			dialectCapabilities: POSTGRESQL_CAPABILITIES,
-		});
+		const planReport = plan(
+			{ type: 'select', from: 'posts' },
+			e2eBlogSchema.model,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
 		expect(() =>
-			createPgCompileOnlyAdapter().compile(planReport, {
-				model: e2eBlogSchema.model,
-			}),
-		).toThrow('relation column "tags"."*" has no emitted alias in this query');
+			createPgCompileOnlyAdapter().compile(
+				{ ...planReport, intent: parsed.ast!.query! },
+				{ model: e2eBlogSchema.model },
+			),
+		).toThrow(
+			'Invalid include: Unknown relation "tags" from table "posts" at "tags"',
+		);
 	});
 });

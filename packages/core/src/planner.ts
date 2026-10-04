@@ -1122,13 +1122,7 @@ function processInclude(
 	const fullPath = parentIncludePath
 		? `${parentIncludePath}.${pathSegment}`
 		: pathSegment;
-	if (
-		include.select?.type === 'fields' &&
-		!Array.isArray(include.select.fields)
-	)
-		throw new Error(`Include ${fullPath} select fields must be an array`);
-	if (include.limit !== undefined)
-		validateLimit(include.limit, `Include ${intentPath}(${fullPath}) limit`);
+	validateIncludeInput(include, intentPath, fullPath);
 
 	// Check depth
 	if (depth > opts.maxIncludeDepth) {
@@ -1161,19 +1155,20 @@ function processInclude(
 	);
 
 	if (!relation) {
-		return;
+		throw new InvalidOperationError(
+			'include',
+			`Unknown relation "${relationName}" from table "${sourceTable}" at "${fullPath}"`,
+		);
 	}
 
 	// Check for circular includes
 	const includePath = `${sourceTable}.${relation.name}`;
 	const isSelfReferentialRelation = relation.source === relation.target;
 	if (!isSelfReferentialRelation && state.visitedIncludes.has(includePath)) {
-		state.warnings.push({
-			code: 'CIRCULAR_INCLUDE',
-			message: `Circular include detected: ${includePath}`,
-			suggestion: 'Remove circular include to prevent infinite recursion',
-		});
-		return;
+		throw new InvalidOperationError(
+			'include',
+			`Circular include detected: ${includePath}`,
+		);
 	}
 	if (!isSelfReferentialRelation) state.visitedIncludes.add(includePath);
 
@@ -1183,21 +1178,14 @@ function processInclude(
 	paths.push(intentPath);
 	state.relationAccessCounts.set(relationPath, paths);
 
-	// CLI-012c: Check for recursive include on self-referential relations
-	const isRecursiveInclude =
-		(!!include.recursive || !!relation.recursive) && isSelfReferentialRelation;
-
-	// Recursive hints have a narrower contract than generic include strategies.
-	if (isRecursiveInclude) {
-		if (
-			relation.includeStrategy !== 'auto' &&
-			relation.includeStrategy !== 'cte'
-		) {
-			throw new UnsupportedStrategyError(
-				`Recursive include at ${intentPath}(${fullPath}) requires strategy 'cte', but relation '${relation.name}' declares includeStrategy '${relation.includeStrategy}'. Use 'auto' or 'cte'.`,
-			);
-		}
-	} else {
+	const isRecursiveInclude = validateRecursiveIncludeStrategy(
+		include,
+		relation,
+		intentPath,
+		fullPath,
+		opts.dialectCapabilities,
+	);
+	if (!isRecursiveInclude) {
 		validateIncludeStrategy(
 			relation.includeStrategy,
 			opts.dialectCapabilities,
@@ -1210,20 +1198,6 @@ function processInclude(
 	}
 	let resolution: IncludeStrategyResolution;
 	if (isRecursiveInclude) {
-		if (include.join !== undefined) {
-			throw new UnsupportedStrategyError(
-				`Recursive include at ${intentPath}(${fullPath}) cannot use join: recursive includes compile as a CTE (oorabona/db-semantic-planner#894).`,
-			);
-		}
-		// FIND-013: Guard recursive → cte against dialect capability.
-		// Recursive resolution requires explicit capability validation. A dialect
-		// that declared supportsRecursiveCTE=false must not silently receive an
-		// invalid plan.
-		if (!opts.dialectCapabilities?.supportsRecursiveCTE) {
-			throw new UnsupportedStrategyError(
-				`Recursive include at ${intentPath}(${fullPath}) requires a dialect with supportsRecursiveCTE; current dialect (${opts.dialectCapabilities?.name ?? 'no capabilities'}) does not support it.`,
-			);
-		}
 		resolution = { strategy: 'cte', source: 'recursive' };
 	} else {
 		resolution =
@@ -1245,61 +1219,8 @@ function processInclude(
 	}
 	const includeStrategy = resolution.strategy;
 
+	validateIncludeOptions(include, includeStrategy, intentPath, fullPath);
 	const optionPath = `${intentPath}(${fullPath})`;
-	if (includeStrategy === 'cte' || includeStrategy === 'join') {
-		for (const option of ['limit', 'orderBy'] as const) {
-			if (include[option] !== undefined) {
-				throw new InvalidOperationError(
-					'include',
-					`Include ${optionPath} ${option} is not supported by '${includeStrategy}' strategy.` +
-						(includeStrategy === 'join' && option === 'limit'
-							? ' Remove the explicit join or use a strategy that limits per parent (json_agg, lateral).'
-							: ''),
-				);
-			}
-		}
-	}
-	if (includeStrategy === 'lateral') {
-		if (include.orderBy !== undefined && include.limit === undefined)
-			throw new InvalidOperationError(
-				'include',
-				`Include ${optionPath} orderBy requires limit with 'lateral' strategy`,
-			);
-	}
-	if (
-		include.select?.type === 'fields' &&
-		include.select.fields.length > 1 &&
-		include.select.fields.includes('*')
-	)
-		throw new Error(
-			`Include ${fullPath} select cannot mix '*' with other fields`,
-		);
-	if (
-		includeStrategy === 'json_agg' &&
-		include.select !== undefined &&
-		include.select.type !== 'fields' &&
-		include.select.type !== 'all'
-	)
-		throw new Error(
-			`JSON_AGG include '${fullPath}' does not support select form '${include.select.type}'`,
-		);
-	if (
-		include.select !== undefined &&
-		(includeStrategy === 'cte' ||
-			(includeStrategy === 'join' && !supportsJoinIncludeSelect(include)))
-	)
-		throw new InvalidOperationError(
-			'include',
-			`Include ${optionPath} select is not supported by '${includeStrategy}' strategy.` +
-				(includeStrategy === 'join'
-					? ` Received select form: ${include.select.type}${include.select.type === 'fields' ? ` ${JSON.stringify(include.select.fields)}` : ''}.`
-					: ''),
-		);
-	if (includeStrategy === 'lateral' && !selectsWholeIncludeRow(include))
-		throw new InvalidOperationError(
-			'include',
-			`Include ${optionPath} select must select all columns with '${includeStrategy}' strategy`,
-		);
 
 	if (includeStrategy === 'join' && relation.type === 'belongsToMany')
 		throw new InvalidOperationError(
@@ -1338,65 +1259,12 @@ function processInclude(
 	const includeDecisionId = generateDecisionId(state, 'include-strategy');
 	const parentKey =
 		relation.type === 'belongsTo' ? relation.targetKey : relation.sourceKey;
-	const targetTable = model.getTable(relation.target);
-	let targetOrder = targetTable
-		? resolveJsonAggOrderKey(targetTable)
-		: undefined;
-
-	if (include.orderBy !== undefined || include.limit !== undefined) {
-		const entries = include.orderBy ?? [];
-		if (
-			!Array.isArray(entries) ||
-			Array.from(entries).some(
-				(entry) =>
-					!entry ||
-					typeof entry.field !== 'string' ||
-					!entry.field ||
-					entry.expression !== undefined ||
-					!['asc', 'desc'].includes(entry.direction) ||
-					(entry.nulls !== undefined &&
-						!['first', 'last'].includes(entry.nulls)),
-			)
-		)
-			throw new Error(
-				`Include ${fullPath} orderBy requires fields, asc/desc direction and first/last nulls`,
-			);
-		for (const entry of entries) {
-			if (!targetTable?.columns.some((column) => column.name === entry.field))
-				throw new Error(
-					`Include ${fullPath} orderBy field "${entry.field}" is not a column of target table "${relation.target}"`,
-				);
-		}
-		const ordered = new Set(entries.map((entry) => entry.field));
-		const unique =
-			targetTable?.columns.some(
-				(column) =>
-					column.unique && !column.nullable && ordered.has(column.name),
-			) ||
-			targetTable?.indexes.some(
-				(index) =>
-					index.unique &&
-					index.valid !== false &&
-					index.ready !== false &&
-					index.where === undefined &&
-					!index.expressions?.length &&
-					index.columns.length > 0 &&
-					index.columns.every(
-						(column) =>
-							ordered.has(column) &&
-							(index.nullsNotDistinct ||
-								targetTable.columns.some(
-									(entry) => entry.name === column && !entry.nullable,
-								)),
-					),
-			);
-		if (!toColumnList(targetTable?.primaryKey).length && !unique)
-			throw new Error(
-				`Include ${fullPath} ${include.limit !== undefined ? 'limit' : 'orderBy'} requires a primary key or unique ordering for a total order`,
-			);
-		if (unique && targetOrder?.fallback)
-			targetOrder = { columns: [...ordered], fallback: false };
-	}
+	const targetOrder = validateIncludeOrdering(
+		include,
+		model,
+		relation.target,
+		fullPath,
+	);
 
 	state.decisions.push({
 		id: includeDecisionId,
@@ -1845,6 +1713,86 @@ export class UnsupportedStrategyError extends Error {
 	}
 }
 
+/** Validate include values even before relation/strategy resolution. */
+export function validateIncludeInput(
+	include: IncludeIntent,
+	intentPath: string,
+	fullPath: string,
+): void {
+	if (
+		include.select?.type === 'fields' &&
+		!Array.isArray(include.select.fields)
+	)
+		throw new Error(`Include ${fullPath} select fields must be an array`);
+	if (include.limit !== undefined)
+		validateLimit(include.limit, `Include ${intentPath}(${fullPath}) limit`);
+}
+
+/** Shared planner/adapter contract for every resolved include strategy. */
+export function validateIncludeOptions(
+	include: IncludeIntent,
+	includeStrategy: string,
+	intentPath: string,
+	fullPath: string,
+): void {
+	validateIncludeInput(include, intentPath, fullPath);
+	const optionPath = `${intentPath}(${fullPath})`;
+	if (includeStrategy === 'cte' || includeStrategy === 'join') {
+		for (const option of ['limit', 'orderBy'] as const) {
+			if (include[option] !== undefined) {
+				throw new InvalidOperationError(
+					'include',
+					`Include ${optionPath} ${option} is not supported by '${includeStrategy}' strategy.` +
+						(includeStrategy === 'join' && option === 'limit'
+							? ' Remove the explicit join or use a strategy that limits per parent (json_agg, lateral).'
+							: ''),
+				);
+			}
+		}
+	}
+	if (includeStrategy === 'lateral') {
+		if (include.orderBy !== undefined && include.limit === undefined)
+			throw new InvalidOperationError(
+				'include',
+				`Include ${optionPath} orderBy requires limit with 'lateral' strategy`,
+			);
+	}
+	if (
+		include.select?.type === 'fields' &&
+		include.select.fields.length > 1 &&
+		include.select.fields.includes('*')
+	)
+		throw new Error(
+			`Include ${fullPath} select cannot mix '*' with other fields`,
+		);
+	if (
+		includeStrategy === 'json_agg' &&
+		include.select !== undefined &&
+		include.select.type !== 'fields' &&
+		include.select.type !== 'all'
+	)
+		throw new Error(
+			`JSON_AGG include '${fullPath}' does not support select form '${include.select.type}'`,
+		);
+	if (
+		include.select !== undefined &&
+		(includeStrategy === 'cte' ||
+			(includeStrategy === 'join' && !supportsJoinIncludeSelect(include)))
+	)
+		throw new InvalidOperationError(
+			'include',
+			`Include ${optionPath} select is not supported by '${includeStrategy}' strategy.` +
+				(includeStrategy === 'join'
+					? ` Received select form: ${include.select.type}${include.select.type === 'fields' ? ` ${JSON.stringify(include.select.fields)}` : ''}.`
+					: ''),
+		);
+	if (includeStrategy === 'lateral' && !selectsWholeIncludeRow(include))
+		throw new InvalidOperationError(
+			'include',
+			`Include ${optionPath} select must select all columns with '${includeStrategy}' strategy`,
+		);
+}
+
 /** Join includes honour omitted select, all, or plain field selections. */
 function supportsJoinIncludeSelect(include: IncludeIntent): boolean {
 	const select = include.select;
@@ -2109,4 +2057,130 @@ function generateJoinReasoning(
 		`Relation ${relation.source}.${relation.name} is optional without filter - ` +
 		`using LEFT JOIN to preserve parent rows without matches`
 	);
+}
+
+/** Recursive includes share the same strategy contract at planning and compilation. */
+export function validateRecursiveIncludeStrategy(
+	include: IncludeIntent,
+	relation: RelationIR,
+	intentPath: string,
+	fullPath: string,
+	capabilities: DialectCapabilities | undefined,
+	strategy?: string,
+): boolean {
+	const recursive =
+		(!!include.recursive || !!relation.recursive) &&
+		relation.source === relation.target;
+	if (!recursive) return false;
+	if (relation.includeStrategy !== 'auto' && relation.includeStrategy !== 'cte')
+		throw new UnsupportedStrategyError(
+			`Recursive include at ${intentPath}(${fullPath}) requires strategy 'cte', but relation '${relation.name}' declares includeStrategy '${relation.includeStrategy}'. Use 'auto' or 'cte'.`,
+		);
+	if (include.join !== undefined)
+		throw new UnsupportedStrategyError(
+			`Recursive include at ${intentPath}(${fullPath}) cannot use join: recursive includes compile as a CTE (oorabona/db-semantic-planner#894).`,
+		);
+	if (strategy !== undefined && strategy !== 'cte')
+		throw new UnsupportedStrategyError(
+			`Recursive include at ${intentPath}(${fullPath}) requires strategy 'cte', but decision declares '${strategy}'.`,
+		);
+	if (!capabilities?.supportsRecursiveCTE)
+		throw new UnsupportedStrategyError(
+			`Recursive include at ${intentPath}(${fullPath}) requires a dialect with supportsRecursiveCTE; current dialect (${capabilities?.name ?? 'no capabilities'}) does not support it.`,
+		);
+	return true;
+}
+
+/** Shared ordering validation before planner or adapter dispatch. */
+export function validateIncludeOrdering(
+	include: IncludeIntent,
+	model: ModelIR | undefined,
+	target: string,
+	fullPath: string,
+	recordedKey?: readonly string[],
+): { columns: readonly string[]; fallback: boolean } | undefined {
+	const targetTable = model?.getTable(target);
+	let targetOrder = targetTable
+		? resolveJsonAggOrderKey(targetTable)
+		: undefined;
+
+	if (recordedKey?.length) {
+		for (const column of recordedKey) {
+			if (
+				targetTable &&
+				!targetTable.columns.some((entry) => entry.name === column)
+			)
+				throw new Error(
+					`Include ${fullPath} recorded order key "${column}" is not a column of target table "${target}"`,
+				);
+		}
+		if (!toColumnList(targetTable?.primaryKey).length)
+			targetOrder = { columns: recordedKey, fallback: false };
+	}
+	if (include.orderBy !== undefined || include.limit !== undefined) {
+		const entries = include.orderBy ?? [];
+		if (
+			!Array.isArray(entries) ||
+			Array.from(entries).some(
+				(entry) =>
+					!entry ||
+					typeof entry.field !== 'string' ||
+					!entry.field ||
+					entry.expression !== undefined ||
+					!['asc', 'desc'].includes(entry.direction) ||
+					(entry.nulls !== undefined &&
+						!['first', 'last'].includes(entry.nulls)),
+			)
+		)
+			throw new Error(
+				`Include ${fullPath} orderBy requires fields, asc/desc direction and first/last nulls`,
+			);
+		for (const entry of entries) {
+			if (
+				targetTable &&
+				!targetTable.columns.some((column) => column.name === entry.field)
+			)
+				throw new Error(
+					`Include ${fullPath} orderBy field "${entry.field}" is not a column of target table "${target}"`,
+				);
+		}
+		const ordered = new Set([
+			...entries.map((entry) => entry.field),
+			...(targetOrder?.fallback ? [] : (targetOrder?.columns ?? [])),
+		]);
+		const unique =
+			targetTable?.columns.some(
+				(column) =>
+					column.unique && !column.nullable && ordered.has(column.name),
+			) ||
+			targetTable?.indexes.some(
+				(index) =>
+					index.unique &&
+					index.valid !== false &&
+					index.ready !== false &&
+					index.where === undefined &&
+					!index.expressions?.length &&
+					index.columns.length > 0 &&
+					index.columns.every(
+						(column) =>
+							ordered.has(column) &&
+							(index.nullsNotDistinct ||
+								targetTable.columns.some(
+									(entry) => entry.name === column && !entry.nullable,
+								)),
+					),
+			);
+		if (
+			!toColumnList(targetTable?.primaryKey).length &&
+			(targetTable !== undefined || !recordedKey?.length) &&
+			!unique
+		)
+			throw new Error(
+				`Include ${fullPath} ${include.limit !== undefined ? 'limit' : 'orderBy'} requires a primary key or unique ordering for a total order`,
+			);
+		if (unique && targetOrder?.fallback)
+			targetOrder = { columns: [...ordered], fallback: false };
+	}
+
+	return targetOrder;
 }

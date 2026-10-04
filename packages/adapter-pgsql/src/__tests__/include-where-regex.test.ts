@@ -1,4 +1,4 @@
-import { schema } from '@dbsp/core';
+import { ref, schema } from '@dbsp/core';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 /**
  * Regression tests: op() expressions in include({ where }) are compiled.
@@ -20,7 +20,7 @@ import { normalizeSQL } from '../ast-helpers.js';
 // ---------------------------------------------------------------------------
 
 const compileModel = schema({
-	symbols: { id: 'integer', file_id: 'integer' },
+	symbols: { id: 'integer', file_id: ref('files', { as: 'file' }) },
 	files: { id: 'integer', path: 'text', project_id: 'integer' },
 }).model;
 

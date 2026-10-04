@@ -672,7 +672,7 @@ for (const strategy of ['json_agg', 'lateral'] as const) {
 	});
 }
 
-it('uses the recorded total order when a compile model has no key', () => {
+it('revalidates recorded total order against a compile model without a key', () => {
 	const report = plan(
 		{
 			type: 'select',
@@ -688,11 +688,9 @@ it('uses the recorded total order when a compile model has no key', () => {
 			return name === 'posts' && table ? { ...table, primaryKey: [] } : table;
 		},
 	});
-	const adapter = createPgCompileOnlyAdapter();
-	expect(adapter.compile(report, { model: noKey }).sql).toBe(
-		adapter.compile(report, { model }).sql,
-	);
-	expect(adapter.compile(report, { model: noKey }).sql).toBe(
-		`SELECT users.*, COALESCE((SELECT json_agg(__lim.__row ORDER BY __lim.__key0 ASC NULLS LAST) FROM (SELECT jsonb_build_object('id', __t__.id, 'authorId', __t__."authorId", 'rank', __t__.rank, 'title', __t__.title) AS __row, __t__.id AS __key0 FROM posts AS __t__ WHERE __t__."authorId" = users.id ORDER BY __t__.id ASC NULLS LAST LIMIT 1) AS __lim), '[]'::json) AS posts_json FROM users`,
+	expect(() =>
+		createPgCompileOnlyAdapter().compile(report, { model: noKey }),
+	).toThrowError(
+		'Include posts limit requires a primary key or unique ordering for a total order',
 	);
 });

@@ -58,6 +58,7 @@ import {
 	relationBinding,
 	relationBindingFor,
 } from './binding-registry.js';
+import { truncateIdentifier } from './column-metadata.js';
 import {
 	buildSubqueryFromIntent,
 	compileCondition,
@@ -71,6 +72,10 @@ import { compileExpressionIntent } from './handlers/expression/custom.js';
 import { bindParameter } from './handlers/expression/param-value.js';
 import { buildRecursiveScalarSubquery } from './handlers/expression/pseudo.js';
 import { genericWindowHandler } from './handlers/expression/window.js';
+import {
+	completeKeylessJoinProjection,
+	completeKeylessJoinProjections,
+} from './handlers/include/join.js';
 import {
 	createWhereDispatcher,
 	ensureExpressionHandlersRegistered,
@@ -397,6 +402,10 @@ function mergeDuplicateJoinIncludeDecisions(
 export interface SimplifiedPlanReport {
 	/** Executable root predicate, compiled after visible alias allocation. */
 	readonly rawWhere?: WhereIntent;
+	readonly rawHaving?: WhereIntent;
+	readonly directConditions?: boolean;
+	readonly enclosingRanges?: HandlerCompilerContext['enclosingRanges'];
+	readonly rootAlias?: string;
 	readonly rootWhereJoinRelations?: ReadonlySet<string>;
 	readonly rootTable: string;
 	readonly decisions: readonly PlanDecision[];
@@ -548,6 +557,7 @@ export class PlanCompiler {
 	}> = [];
 	/** Raw JOIN AST nodes from include handlers (e.g., LATERAL) */
 	private rawJoins: Node[] = [];
+	private keylessJoinProjections = new Map<string, Node[]>();
 	/** CTE nodes from include handlers (e.g., CTE strategy) */
 	private pendingCtes: Node[] = [];
 	/** Local aliases for binding relation-column scalar subqueries. */
@@ -1141,6 +1151,24 @@ export class PlanCompiler {
 		} as HandlerCompilerContext;
 
 		const result = handler.compile(handlerDecision, ctx, handlerState);
+		if (
+			strategy === 'join' &&
+			finalJoinAlias &&
+			decision.payloadShape?.presence &&
+			!decision.payloadShape.presence.physicalName
+		) {
+			const join = result.join;
+			const rarg = join && 'JoinExpr' in join ? join.JoinExpr.rarg : undefined;
+			const subquery =
+				rarg && 'RangeSubselect' in rarg
+					? rarg.RangeSubselect.subquery
+					: undefined;
+			const targets =
+				subquery && 'SelectStmt' in subquery
+					? subquery.SelectStmt.targetList
+					: undefined;
+			if (targets) this.keylessJoinProjections.set(finalJoinAlias, targets);
+		}
 
 		// Sync parameters back
 		this.state.paramIndex = handlerState.paramIndex;
@@ -1185,6 +1213,7 @@ export class PlanCompiler {
 		this.currentRootTable = plan.rootTable;
 		this.pendingJoins = [];
 		this.rawJoins = [];
+		this.keylessJoinProjections.clear();
 		this.pendingCtes = [];
 		this.joinAliasMap = new Map();
 		this.visibleSqlQualifiers = new Map();
@@ -1245,7 +1274,13 @@ export class PlanCompiler {
 		plan: SimplifiedPlanReport,
 		currentAlias?: string,
 	): HandlerCompilerContext {
-		const alias = currentAlias ?? plan.rootTable;
+		const alias =
+			plan.rootAlias &&
+			(!currentAlias ||
+				currentAlias === plan.rootTable ||
+				currentAlias === this.tableIdentifier(plan.rootTable))
+				? plan.rootAlias
+				: (currentAlias ?? plan.rootTable);
 		const bindings = [
 			...((
 				this.scope ??
@@ -1258,7 +1293,9 @@ export class PlanCompiler {
 		const boundQualifiers = new Set(
 			bindings.map((binding) => identifierText(binding.qualifier)),
 		);
-		const declaredRoot = this.tableIdentifier(plan.rootTable);
+		const declaredRoot = plan.rootAlias
+			? queryLocal(plan.rootAlias)
+			: this.tableIdentifier(plan.rootTable);
 		if (
 			!boundQualifiers.has(declaredRoot) &&
 			declaredRelationBindingFor(this.scope, plan.rootTable) === undefined
@@ -1305,6 +1342,22 @@ export class PlanCompiler {
 				declaredNames: this.declaredNames,
 			}),
 			rootTable: plan.rootTable,
+			dbCasing: this.dbCasing,
+			...(plan.enclosingRanges && {
+				enclosingRanges: plan.enclosingRanges,
+				position: 'subquery' as const,
+				...(plan.enclosingRanges[0]?.[0] && {
+					outerAlias: identifierText(plan.enclosingRanges[0][0].qualifier),
+				}),
+			}),
+			...(plan.directConditions && {
+				compileCaseCondition: (
+					intent: WhereIntent,
+					ctx: HandlerCompilerContext,
+					state: HandlerCompilerState,
+				) =>
+					this.compilePositionCondition(intent, plan, ctx, state, 'case-when'),
+			}),
 			queryRanges: bindings.filter(
 				(binding) =>
 					binding.qualifier === declaredRoot ||
@@ -1330,8 +1383,11 @@ export class PlanCompiler {
 				aliasColumnAuthorities: this.aliasColumnAuthorities,
 			}),
 			...(this.model != null && { model: this.model }),
-			compileSubquery: (query: QueryIntent, paramOffset: number) =>
-				this.compileExpressionSubquery(query, paramOffset),
+			compileSubquery: (
+				query: QueryIntent,
+				paramOffset: number,
+				parent?: HandlerCompilerContext,
+			) => this.compileExpressionSubquery(query, paramOffset, plan, parent),
 			compileNqlSelectExpression: (
 				value: unknown,
 				handlerCtx: HandlerCompilerContext,
@@ -1829,15 +1885,51 @@ export class PlanCompiler {
 	private compileExpressionSubquery(
 		query: QueryIntent,
 		paramOffset: number,
+		parentPlan: SimplifiedPlanReport,
+		parentContext?: HandlerCompilerContext,
 	): {
 		ast: Node;
 		parameters: readonly unknown[];
 	} {
-		assertNoSelectExpressionCorrelation(query);
+		if (!parentPlan.directConditions) {
+			assertNoSelectExpressionCorrelation(query);
+			const innerCompiler = new PlanCompiler(this.childCompilerOptions());
+			const innerResult = innerCompiler.compile({
+				rootTable: query.from,
+				decisions: intentToDecisions(query, query.from),
+			});
+			return {
+				ast: renumberParamRefsInAst(innerResult.ast, paramOffset),
+				parameters: innerResult.parameters,
+			};
+		}
+		const parent = parentContext ?? this.createHandlerContext(parentPlan);
+		const enclosingRanges = [
+			parent.queryRanges ?? [],
+			...(parent.enclosingRanges ?? []),
+		];
+		const reserved = new Set(
+			enclosingRanges
+				.flat()
+				.map((binding) => identifierText(binding.qualifier)),
+		);
+		let rootAlias: string = this.tableIdentifier(query.from);
+		for (let i = 0; reserved.has(rootAlias); i++) {
+			const suffix = i === 0 ? '_sq' : `_sq_${i}`;
+			rootAlias = `${truncateIdentifier(query.from, 63 - suffix.length)}${suffix}`;
+		}
 		const innerCompiler = new PlanCompiler(this.childCompilerOptions());
 		const innerPlan: SimplifiedPlanReport = {
 			rootTable: query.from,
-			decisions: intentToDecisions(query, query.from),
+			decisions: intentToDecisions(query, query.from, {
+				omitRootWhere: true,
+				directConditions: true,
+			}),
+			directConditions: true,
+			rootAlias,
+			enclosingRanges,
+			...(query.where && { rawWhere: query.where }),
+			...(query.having && { rawHaving: query.having }),
 		};
 		const innerResult = innerCompiler.compile(innerPlan);
 		const renumbered = renumberParamRefsInAst(innerResult.ast, paramOffset);
@@ -2660,7 +2752,7 @@ export class PlanCompiler {
 						this.isNqlBindingRoot(plan)
 							? queryLocal(plan.rootTable)
 							: this.tableIdentifier(plan.rootTable),
-						undefined,
+						plan.rootAlias ? queryLocal(plan.rootAlias) : undefined,
 						this.schemaIdentifier(this.schemaForRangeVar(plan, plan.rootTable)),
 					),
 		];
@@ -2695,6 +2787,11 @@ export class PlanCompiler {
 				cond,
 				joinAlias ? { currentAlias: joinAlias } : undefined,
 			);
+			const projection = joinAlias
+				? this.keylessJoinProjections.get(joinAlias)
+				: undefined;
+			if (projection && joinAlias)
+				completeKeylessJoinProjection(projection, joinAlias, [condExpr], true);
 			where = where ? andExpr(where, condExpr) : condExpr;
 		}
 		return where;
@@ -2980,6 +3077,56 @@ export class PlanCompiler {
 		};
 	}
 
+	private compilePositionCondition(
+		intent: WhereIntent,
+		plan: SimplifiedPlanReport,
+		ctx: HandlerCompilerContext,
+		state: HandlerCompilerState,
+		position: 'having' | 'case-when',
+	): Node {
+		return compileCondition(intent, {
+			...ctx,
+			position,
+			logicalSourceTable: ctx.rootTable,
+			emittedAlias: ctx.currentAlias ?? ctx.rootTable,
+			visibleAliases: new Map(ctx.aliases),
+			paramState: state,
+			...(ctx.schema !== undefined && { schemaName: ctx.schema }),
+			...(position === 'having' && {
+				resolveHavingOperand: (condition: WhereIntent) => {
+					if (!('field' in condition)) return undefined;
+					const lowered = convertWhereCondition(condition, ctx.rootTable);
+					if (!lowered) return undefined;
+					const resolved = this.resolveHavingAggregateAlias(
+						lowered,
+						plan.decisions,
+					);
+					return resolved.type === 'having'
+						? mapToHandlerDecision(
+								resolved,
+								ctx.rootTable,
+								this.defaultPk,
+								this.deriveFk,
+							)
+						: undefined;
+				},
+			}),
+			compileSubquery: (query, offset, parent) =>
+				buildSubqueryFromIntent(
+					query,
+					offset,
+					this.declaredNames,
+					ctx.schema,
+					'rawExists',
+					ctx.scope,
+					this.dialectCapabilities,
+					this.dbCasing,
+					parent,
+				),
+			compileExpressionSubquery: ctx.compileSubquery,
+		});
+	}
+
 	private compileRootWhere(
 		intent: WhereIntent,
 		plan: SimplifiedPlanReport,
@@ -3023,7 +3170,9 @@ export class PlanCompiler {
 		);
 		const condition = compileCondition(intent, {
 			...handlerCtx,
-			position: 'where',
+			position: plan.enclosingRanges ? 'subquery' : 'where',
+			...(handlerCtx.outerAlias && { outerTable: handlerCtx.outerAlias }),
+			compileExpressionSubquery: handlerCtx.compileSubquery,
 			...(plan.rootWhereJoinRelations !== undefined && {
 				rootWhereJoinRelations: provenJoins,
 			}),
@@ -3211,11 +3360,27 @@ export class PlanCompiler {
 			if (root) where = where ? andExpr(where, root) : root;
 		}
 
+		having = plan.rawHaving
+			? this.compilePositionCondition(
+					plan.rawHaving,
+					plan,
+					this.createHandlerContext(plan),
+					this.state,
+					'having',
+				)
+			: having;
+
 		for (const decision of orderByDecisions) {
 			const obNode = this.compileOrderByDecision(decision, plan);
 			if (obNode) orderBy.push(obNode);
 		}
 
+		completeKeylessJoinProjections(this.keylessJoinProjections, [
+			targetList,
+			where,
+			orderBy,
+			this.rawJoins,
+		]);
 		this.flushPendingJoins(from, plan);
 		return this.buildSelectStmt(
 			targetList,

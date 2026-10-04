@@ -200,7 +200,6 @@ describe('planner coverage', () => {
 								{
 									strategy: 'flat',
 									relation: 'post',
-									include: [{ strategy: 'flat', relation: 'comments' }],
 								},
 							],
 						},
@@ -209,7 +208,7 @@ describe('planner coverage', () => {
 			],
 		};
 
-		const report = plan(intent, testSchema, { maxIncludeDepth: 2 });
+		const report = plan(intent, testSchema, { maxIncludeDepth: 1 });
 
 		const deepNestingWarning = report.warnings.find(
 			(w) => w.code === 'DEEP_NESTING',
@@ -314,19 +313,16 @@ describe('planner coverage', () => {
 		);
 	});
 
-	it('should warn on unknown relation in include', () => {
+	it('should refuse unknown relation in include', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'users',
 			include: [{ relation: 'nonexistent_relation' }],
 		};
 
-		const report = plan(intent, testSchema);
-		const warning = report.warnings.find(
-			(w) => w.code === 'AMBIGUOUS_RELATION',
+		expect(() => plan(intent, testSchema)).toThrow(
+			'Invalid include: Unknown relation "nonexistent_relation" from table "users" at "nonexistent_relation"',
 		);
-		expect(warning).toBeDefined();
-		expect(warning?.message).toContain('Unknown relation');
 	});
 
 	it('should handle include with via hint', () => {
@@ -732,10 +728,8 @@ describe('planner coverage', () => {
 			],
 		};
 
-		const report = plan(intent, testSchema);
-		// Should detect circular include
-		expect(report.warnings.some((w) => w.code === 'CIRCULAR_INCLUDE')).toBe(
-			true,
+		expect(() => plan(intent, testSchema)).toThrowError(
+			`Invalid include: Circular include detected: users.posts`,
 		);
 	});
 

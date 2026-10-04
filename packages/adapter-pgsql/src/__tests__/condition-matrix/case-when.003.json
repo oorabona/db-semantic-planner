@@ -6,7 +6,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"error": "CASE WHEN notExists('posts'): recursive relation predicates are not supported inside CASE WHEN."
 		},
 		{
 			"position": "case-when",
@@ -14,7 +14,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"error": "CASE WHEN notExists('posts'): recursive relation predicates are not supported inside CASE WHEN."
 		},
 		{
 			"position": "case-when",
@@ -60,201 +60,201 @@
 			"position": "case-when",
 			"kind": "exists",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "exists",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "exists",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "exists",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "exists",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13, 61, 17],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "notExists",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "notExists",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "notExists",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "notExists",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "notExists",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13, 61, 17],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "some",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "some",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "some",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "some",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "some",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13, 61, 17],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "every",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "every",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "every",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "every",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1)))) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "every",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $2)))) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13, 61, 17],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "none",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "none",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "none",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "none",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "none",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13, 61, 17],
+			"error": null
 		},
 		{
 			"position": "case-when",
@@ -340,7 +340,7 @@
 			"position": "case-when",
 			"kind": "exists-custom-authorities",
 			"shape": "leaf",
-			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1) THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61],
 			"error": null
 		},
@@ -348,7 +348,7 @@
 			"position": "case-when",
 			"kind": "exists-custom-authorities",
 			"shape": "and",
-			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61, 13],
 			"error": null
 		},
@@ -356,7 +356,7 @@
 			"position": "case-when",
 			"kind": "exists-custom-authorities",
 			"shape": "or",
-			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61, 13],
 			"error": null
 		},
@@ -364,7 +364,7 @@
 			"position": "case-when",
 			"kind": "exists-custom-authorities",
 			"shape": "not",
-			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1)) THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61],
 			"error": null
 		},
@@ -372,7 +372,7 @@
 			"position": "case-when",
 			"kind": "exists-custom-authorities",
 			"shape": "two-level",
-			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $2)) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
 			"params": [13, 61, 17],
 			"error": null
 		},
@@ -380,7 +380,7 @@
 			"position": "case-when",
 			"kind": "notExists-custom-authorities",
 			"shape": "leaf",
-			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1)) THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61],
 			"error": null
 		},
@@ -388,7 +388,7 @@
 			"position": "case-when",
 			"kind": "notExists-custom-authorities",
 			"shape": "and",
-			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1)) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61, 13],
 			"error": null
 		},
@@ -396,7 +396,7 @@
 			"position": "case-when",
 			"kind": "notExists-custom-authorities",
 			"shape": "or",
-			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1)) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61, 13],
 			"error": null
 		},
@@ -404,7 +404,7 @@
 			"position": "case-when",
 			"kind": "notExists-custom-authorities",
 			"shape": "not",
-			"sql": "SELECT CASE WHEN NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1))) THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))) THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61],
 			"error": null
 		},
@@ -412,7 +412,7 @@
 			"position": "case-when",
 			"kind": "notExists-custom-authorities",
 			"shape": "two-level",
-			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $2))) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
 			"params": [13, 61, 17],
 			"error": null
 		},
@@ -420,7 +420,7 @@
 			"position": "case-when",
 			"kind": "some-custom-authorities",
 			"shape": "leaf",
-			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1) THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61],
 			"error": null
 		},
@@ -428,7 +428,7 @@
 			"position": "case-when",
 			"kind": "some-custom-authorities",
 			"shape": "and",
-			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61, 13],
 			"error": null
 		},
@@ -436,7 +436,7 @@
 			"position": "case-when",
 			"kind": "some-custom-authorities",
 			"shape": "or",
-			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61, 13],
 			"error": null
 		},
@@ -444,7 +444,7 @@
 			"position": "case-when",
 			"kind": "some-custom-authorities",
 			"shape": "not",
-			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1)) THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61],
 			"error": null
 		},
@@ -452,7 +452,7 @@
 			"position": "case-when",
 			"kind": "some-custom-authorities",
 			"shape": "two-level",
-			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $2)) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
 			"params": [13, 61, 17],
 			"error": null
 		},
@@ -460,7 +460,7 @@
 			"position": "case-when",
 			"kind": "every-custom-authorities",
 			"shape": "leaf",
-			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND NOT (posts_exists_0.score = $1))) THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61],
 			"error": null
 		},
@@ -468,7 +468,7 @@
 			"position": "case-when",
 			"kind": "every-custom-authorities",
 			"shape": "and",
-			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND NOT (posts_exists_0.score = $1))) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61, 13],
 			"error": null
 		},
@@ -476,7 +476,7 @@
 			"position": "case-when",
 			"kind": "every-custom-authorities",
 			"shape": "or",
-			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND NOT (posts_exists_0.score = $1))) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61, 13],
 			"error": null
 		},
@@ -484,7 +484,7 @@
 			"position": "case-when",
 			"kind": "every-custom-authorities",
 			"shape": "not",
-			"sql": "SELECT CASE WHEN NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND NOT (posts_exists_0.score = $1)))) THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1)))) THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61],
 			"error": null
 		},
@@ -492,7 +492,7 @@
 			"position": "case-when",
 			"kind": "every-custom-authorities",
 			"shape": "two-level",
-			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND NOT (posts_exists_0.score = $2)))) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $2)))) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
 			"params": [13, 61, 17],
 			"error": null
 		},
@@ -500,7 +500,7 @@
 			"position": "case-when",
 			"kind": "none-custom-authorities",
 			"shape": "leaf",
-			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1)) THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61],
 			"error": null
 		},
@@ -508,7 +508,7 @@
 			"position": "case-when",
 			"kind": "none-custom-authorities",
 			"shape": "and",
-			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1)) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61, 13],
 			"error": null
 		},
@@ -516,7 +516,7 @@
 			"position": "case-when",
 			"kind": "none-custom-authorities",
 			"shape": "or",
-			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1)) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61, 13],
 			"error": null
 		},
@@ -524,7 +524,7 @@
 			"position": "case-when",
 			"kind": "none-custom-authorities",
 			"shape": "not",
-			"sql": "SELECT CASE WHEN NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1))) THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))) THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61],
 			"error": null
 		},
@@ -532,7 +532,7 @@
 			"position": "case-when",
 			"kind": "none-custom-authorities",
 			"shape": "two-level",
-			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $2))) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
 			"params": [13, 61, 17],
 			"error": null
 		},
@@ -540,207 +540,207 @@
 			"position": "case-when",
 			"kind": "exists-no-pk-default-authorities",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "exists-no-pk-default-authorities",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "exists-no-pk-default-authorities",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "exists-no-pk-default-authorities",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "exists-no-pk-default-authorities",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13, 61, 17],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "notExists-no-pk-default-authorities",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "notExists-no-pk-default-authorities",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "notExists-no-pk-default-authorities",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "notExists-no-pk-default-authorities",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "notExists-no-pk-default-authorities",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13, 61, 17],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "some-no-pk-default-authorities",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "some-no-pk-default-authorities",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "some-no-pk-default-authorities",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "some-no-pk-default-authorities",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "some-no-pk-default-authorities",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13, 61, 17],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "every-no-pk-default-authorities",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "every-no-pk-default-authorities",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "every-no-pk-default-authorities",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1))) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "every-no-pk-default-authorities",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $1)))) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "every-no-pk-default-authorities",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (posts_exists_0.score = $2)))) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13, 61, 17],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "none-no-pk-default-authorities",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "none-no-pk-default-authorities",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "none-no-pk-default-authorities",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "none-no-pk-default-authorities",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1))) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "none-no-pk-default-authorities",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'posts.user_id' is absent from the physical model."
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2))) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13, 61, 17],
+			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "exists-no-pk-custom-authorities",
 			"shape": "leaf",
-			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1) THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61],
 			"error": null
 		},
@@ -748,7 +748,7 @@
 			"position": "case-when",
 			"kind": "exists-no-pk-custom-authorities",
 			"shape": "and",
-			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61, 13],
 			"error": null
 		},
@@ -756,7 +756,7 @@
 			"position": "case-when",
 			"kind": "exists-no-pk-custom-authorities",
 			"shape": "or",
-			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61, 13],
 			"error": null
 		},
@@ -764,7 +764,7 @@
 			"position": "case-when",
 			"kind": "exists-no-pk-custom-authorities",
 			"shape": "not",
-			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1)) THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61],
 			"error": null
 		},
@@ -772,7 +772,7 @@
 			"position": "case-when",
 			"kind": "exists-no-pk-custom-authorities",
 			"shape": "two-level",
-			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $2)) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
 			"params": [13, 61, 17],
 			"error": null
 		},
@@ -780,7 +780,7 @@
 			"position": "case-when",
 			"kind": "notExists-no-pk-custom-authorities",
 			"shape": "leaf",
-			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1)) THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61],
 			"error": null
 		},
@@ -788,7 +788,7 @@
 			"position": "case-when",
 			"kind": "notExists-no-pk-custom-authorities",
 			"shape": "and",
-			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1)) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61, 13],
 			"error": null
 		},
@@ -796,7 +796,7 @@
 			"position": "case-when",
 			"kind": "notExists-no-pk-custom-authorities",
 			"shape": "or",
-			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.matrix_users_matrix_pk AND posts_exists_0.score = $1)) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1)) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
 			"params": [61, 13],
 			"error": null
 		}

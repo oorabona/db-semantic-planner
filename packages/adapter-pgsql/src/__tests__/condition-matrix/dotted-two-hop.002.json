@@ -668,9 +668,9 @@
 			"position": "dotted-two-hop",
 			"kind": "expression-scalar-subquery",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
+			"sql": "SELECT users.* FROM users WHERE (SELECT posts.score FROM posts AS posts WHERE posts.score = $1 ORDER BY posts.score DESC LIMIT 1) > $2",
+			"params": [59, 67],
+			"error": null
 		},
 		{
 			"position": "dotted-two-hop",
@@ -678,7 +678,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
+			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context."
 		},
 		{
 			"position": "dotted-two-hop",
@@ -686,15 +686,15 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
+			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context."
 		},
 		{
 			"position": "dotted-two-hop",
 			"kind": "expression-scalar-subquery",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
+			"sql": "SELECT users.* FROM users WHERE NOT ((SELECT posts.score FROM posts AS posts WHERE posts.score = $1 ORDER BY posts.score DESC LIMIT 1) > $2)",
+			"params": [59, 67],
+			"error": null
 		},
 		{
 			"position": "dotted-two-hop",
@@ -702,7 +702,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
+			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context."
 		},
 		{
 			"position": "dotted-two-hop",

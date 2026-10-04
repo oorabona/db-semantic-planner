@@ -54,6 +54,11 @@ export type IncludeHandlerStrategy = (typeof INCLUDE_STRATEGIES)[number];
  * Immutable context passed to all handlers during compilation.
  */
 export interface CompilerContext {
+	readonly compileCaseCondition?: (
+		intent: import('@dbsp/types').WhereIntent,
+		ctx: CompilerContext,
+		state: CompilerState,
+	) => Node;
 	readonly compileSubqueryCondition?: (
 		intent: import('@dbsp/types').WhereIntent,
 		ctx: CompilerContext,
@@ -116,6 +121,7 @@ export interface CompilerContext {
 	readonly compileSubquery?: (
 		query: import('@dbsp/types').QueryIntent,
 		paramOffset: number,
+		parent?: CompilerContext,
 	) => { ast: Node; parameters: readonly unknown[] };
 	/**
 	 * Optional recursive compiler for NQL-origin SELECT expression values nested

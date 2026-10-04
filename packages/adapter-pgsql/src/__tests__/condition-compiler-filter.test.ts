@@ -298,7 +298,7 @@ describe('FILTER context repair regressions', () => {
 			.columns([aggregate(condition).as('n')])
 			.dump();
 		expect(result.sql).toBe(
-			'SELECT count(*) FILTER (WHERE (SELECT posts.score FROM posts WHERE posts.score = $1) > $2) AS n FROM users',
+			'SELECT count(*) FILTER (WHERE (SELECT posts.score FROM posts AS posts WHERE posts.score = $1) > $2) AS n FROM users',
 		);
 		expect(result.params).toEqual([5, 0]);
 	});

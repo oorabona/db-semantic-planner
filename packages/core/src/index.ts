@@ -95,6 +95,7 @@ export {
 // Semantic Planner
 // ============================================================================
 
+export { AmbiguousIncludeError } from '@dbsp/types';
 export type {
 	PlanDecision,
 	PlanOptions,

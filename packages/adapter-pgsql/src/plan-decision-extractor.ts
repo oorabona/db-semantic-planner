@@ -8,8 +8,12 @@
  * All functions are stateless pure functions operating on PlanReport data.
  */
 
-import { deriveRelationPathFromIntentPath } from '@dbsp/core/internal';
+import {
+	deriveRelationPathFromIntentPath,
+	validateIncludeOptions,
+} from '@dbsp/core/internal';
 import type {
+	IncludeOrderByIntent,
 	ModelIR,
 	PlanReport,
 	SelectIntent,
@@ -117,6 +121,7 @@ function resolveIncludeByPath(
 				via?: string | undefined;
 				limit?: number | undefined;
 				select?: SelectIntent | undefined;
+				orderBy?: readonly IncludeOrderByIntent[] | undefined;
 				where?: unknown;
 				include?: readonly unknown[] | undefined;
 		  }>
@@ -128,6 +133,7 @@ function resolveIncludeByPath(
 			relation: string;
 			limit?: number | undefined;
 			select?: SelectIntent | undefined;
+			orderBy?: readonly IncludeOrderByIntent[] | undefined;
 			where?: unknown;
 	  }
 	| undefined {
@@ -1761,6 +1767,9 @@ function toIncludeDecision(
 		relationName,
 	);
 	const limit = includeIntent?.limit;
+	const includeOrderBy = includeIntent
+		? includeIntent.orderBy
+		: context.includeOrderBy;
 	const columns =
 		choice === 'json_agg'
 			? includeSelectedColumns(
@@ -1801,7 +1810,7 @@ function toIncludeDecision(
 			? { orderBy: context.targetOrderKey }
 			: {}),
 		...(context.orderByFallback ? { orderByFallback: true } : {}),
-		...(context.includeOrderBy && { includeOrderBy: context.includeOrderBy }),
+		...(includeOrderBy && { includeOrderBy }),
 		...(context.intentPath && { intentPath: context.intentPath }),
 		...(limit != null && { limit }),
 	};
@@ -1920,44 +1929,35 @@ function toJoinIncludeDecision(
  */
 export function synthesizeMissingJoinDecisions(
 	plan: PlanReport,
-	coveredRelations: ReadonlySet<string>,
+	coveredIntentPaths: ReadonlySet<string>,
 	model: ModelIR,
 	defaultPk: string = DEFAULT_PK_COLUMN,
 	deriveFk: FkColumnDerivation = defaultFkDerivation,
 ): SimplifiedPlanReport['decisions'] {
-	const includes = plan.intent?.include as
-		| ReadonlyArray<{
-				relation: string;
-				join?: 'inner' | 'left';
-				select?: SelectIntent | undefined;
-				where?: unknown;
-		  }>
-		| undefined;
+	const includes = plan.intent?.include;
 
 	if (!includes || includes.length === 0) return [];
+
+	const coveredPaths = new Set(coveredIntentPaths);
+	for (const decision of plan.decisions) {
+		if (decision.type === 'include-strategy' && decision.context.intentPath)
+			coveredPaths.add(decision.context.intentPath);
+	}
 
 	const sourceTable = plan.rootTable;
 
 	const synthesized: PlanDecision[] = [];
 
-	for (const inc of includes) {
-		const alias = inc.relation;
+	for (const [index, inc] of includes.entries()) {
+		const alias = inc.via ?? inc.relation;
 
 		// Only synthesize for explicit join: 'inner'|'left' includes
 		if (inc.join !== 'inner' && inc.join !== 'left') continue;
 
 		// Already covered by a planner-emitted decision
-		if (
-			coveredRelations.has(alias) ||
-			plan.decisions.some(
-				(decision) =>
-					decision.type === 'include-strategy' &&
-					decision.context.sourceTable === sourceTable &&
-					decision.context.includeAlias === alias,
-			)
-		)
-			continue;
+		if (coveredPaths.has(`include[${index}]`)) continue;
 
+		validateIncludeOptions(inc, 'join', `include[${index}]`, alias);
 		const rel = resolveIncludeRelationName(model, sourceTable, alias);
 		if (!rel) continue;
 
@@ -1988,6 +1988,7 @@ export function synthesizeMissingJoinDecisions(
 			choice: 'join',
 			relationName: alias,
 			relationPath: alias,
+			intentPath: `include[${index}]`,
 			targetTable: rel.target,
 			sourceTable,
 			...(rel.type && {
@@ -2088,6 +2089,9 @@ function toJsonAggDecision(
 		relationName,
 	);
 	const limit = includeIntent?.limit;
+	const includeOrderBy = includeIntent
+		? includeIntent.orderBy
+		: context.includeOrderBy;
 	const columns = includeSelectedColumns(
 		includeIntent?.select,
 		deriveRelationPathFromIntentPath(
@@ -2120,7 +2124,7 @@ function toJsonAggDecision(
 			? { orderBy: context.targetOrderKey }
 			: {}),
 		...(context.orderByFallback ? { orderByFallback: true } : {}),
-		...(context.includeOrderBy && { includeOrderBy: context.includeOrderBy }),
+		...(includeOrderBy && { includeOrderBy }),
 		...(context.intentPath && { intentPath: context.intentPath }),
 	};
 }
@@ -2210,8 +2214,8 @@ function joinPayloadColumns(
 	): boolean =>
 		includes.some((include) => {
 			const current = parent
-				? `${parent}.${include.relation}`
-				: include.relation;
+				? `${parent}.${include.via ?? include.relation}`
+				: (include.via ?? include.relation);
 			const flat = ancestorFlat || include.strategy === 'flat';
 			return (
 				(current === path && flat) ||

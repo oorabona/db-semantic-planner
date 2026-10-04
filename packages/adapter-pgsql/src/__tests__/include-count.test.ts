@@ -1,4 +1,4 @@
-import { schema } from '@dbsp/core';
+import { ref, schema } from '@dbsp/core';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 /** Aggregate join includes are refused rather than dropping their data (#908). */
 
@@ -10,7 +10,11 @@ import { describe, expect, it } from 'vitest';
 // ---------------------------------------------------------------------------
 
 const compileModel = schema({
-	symbols: { id: 'integer', name: 'text', file_id: 'integer' },
+	symbols: {
+		id: 'integer',
+		name: 'text',
+		file_id: ref('files', { as: 'file' }),
+	},
 	files: { id: 'integer', project_id: 'integer' },
 }).model;
 

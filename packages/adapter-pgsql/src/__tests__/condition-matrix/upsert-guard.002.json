@@ -700,7 +700,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
+			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context."
 		},
 		{
 			"position": "upsert-guard",
@@ -708,7 +708,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
+			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context."
 		},
 		{
 			"position": "upsert-guard",
@@ -716,7 +716,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
+			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context."
 		},
 		{
 			"position": "upsert-guard",
@@ -724,7 +724,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
+			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context."
 		},
 		{
 			"position": "upsert-guard",
@@ -732,7 +732,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
+			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context."
 		},
 		{
 			"position": "upsert-guard",

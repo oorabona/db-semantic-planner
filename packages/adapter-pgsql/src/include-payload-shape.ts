@@ -105,8 +105,11 @@ export function resolveIncludePayloadShapes(
 		parentFlat = false,
 	): void => {
 		for (const include of includes) {
-			const path = parent ? `${parent}.${include.relation}` : include.relation;
-			const leaf = include.relation.split('.').at(-1) ?? include.relation;
+			const path = parent
+				? `${parent}.${include.via ?? include.relation}`
+				: (include.via ?? include.relation);
+			const name = include.via ?? include.relation;
+			const leaf = name.split('.').at(-1) ?? name;
 			const requests = requestedPathsByLeaf.get(leaf) ?? [];
 			requests.push(path);
 			requestedPathsByLeaf.set(leaf, requests);
