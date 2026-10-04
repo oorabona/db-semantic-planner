@@ -80,8 +80,7 @@ enriched | select *`;
 });
 
 it('hydrates a join-hinted author through tag all() and preserves flat labels', async () => {
-	const model = {
-		...db.model,
+	const hints = {
 		getRelation: (name: string) => {
 			const relation = db.model.getRelation(name);
 			return relation
@@ -93,6 +92,14 @@ it('hydrates a join-hinted author through tag all() and preserves flat labels', 
 				.getRelationsFrom(name)
 				.map((relation) => ({ ...relation, includeStrategy: 'join' as const })),
 	};
+	const model = new Proxy(db.model, {
+		get(target, property) {
+			if (property === 'getRelation') return hints.getRelation;
+			if (property === 'getRelationsFrom') return hints.getRelationsFrom;
+			const value = Reflect.get(target, property, target);
+			return typeof value === 'function' ? value.bind(target) : value;
+		},
+	});
 	const orm = createOrm({
 		model,
 		adapter: createPgAdapter(await getTestPool(), { model }),

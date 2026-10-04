@@ -177,9 +177,7 @@ it.each(['*', 'id, posts_json', 'id'])(
 );
 
 function hintedModel(strategy: 'join' | 'lateral' | 'json_agg') {
-	return {
-		...db.model,
-		getTable: db.model.getTable.bind(db.model),
+	const hints = {
 		getRelation: (name: string) => {
 			const relation = db.model.getRelation(name);
 			return relation ? { ...relation, includeStrategy: strategy } : relation;
@@ -189,6 +187,14 @@ function hintedModel(strategy: 'join' | 'lateral' | 'json_agg') {
 				.getRelationsFrom(name)
 				?.map((relation) => ({ ...relation, includeStrategy: strategy })),
 	};
+	return new Proxy(db.model, {
+		get(target, property) {
+			if (property === 'getRelation') return hints.getRelation;
+			if (property === 'getRelationsFrom') return hints.getRelationsFrom;
+			const value = Reflect.get(target, property, target);
+			return typeof value === 'function' ? value.bind(target) : value;
+		},
+	});
 }
 const operators = [
 	'union',
