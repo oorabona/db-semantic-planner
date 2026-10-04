@@ -139,7 +139,7 @@ orm.select('products')
 
 Source: `packages/core/src/dx/subquery-builder.ts:288` — `outerRef(column)` returns a `SubqueryRefIntent`.
 
-Query WHERE scalar comparisons and `inSubquery()` compile the body with its own alias and resolve unqualified `outerRef()` to the immediately enclosing query and qualified references to the nearest matching enclosing table or alias. `rawExists()` and `rawNotExists()` use the same body compiler in WHERE, aggregate FILTER and recursive `start.where` anchors. All levels share one parameter sequence. Legacy `compilePlan()` and SELECT expression subqueries retain their existing correlation restrictions.
+Query WHERE scalar comparisons and `inSubquery()` compile the body with its own alias and resolve unqualified `outerRef()` to the immediately enclosing query and qualified references by searching enclosing queries nearest first: an exact emitted qualifier wins; otherwise a logical table must have exactly one range in that query, with multiple ranges refused as ambiguous and their aliases named. `rawExists()` and `rawNotExists()` use the same body compiler; correlated bodies compile in query WHERE and are refused in aggregate FILTER and recursive `start.where` anchors. A query WHERE that also contains a dotted relation path such as `eq('caller.name', 'Ada')`, and a join include's `where`, still compile through the earlier route, which refuses correlated bodies. All levels share one parameter sequence. Legacy `compilePlan()` and SELECT expression subqueries retain their existing correlation restrictions.
 
 ---
 
@@ -147,7 +147,7 @@ Query WHERE scalar comparisons and `inSubquery()` compile the body with its own 
 
 ### Nested aliases and correlation
 
-Predicate subqueries allocate distinct aliases at every nesting depth and across siblings, including repeated queries on the same table. Unqualified `outerRef()` binds to the immediately enclosing query; qualified `outerRef('posts.id')` binds to the nearest enclosing query whose table or alias is `posts`; all levels share one parameter sequence. Duplicate explicit aliases in one scope are rejected.
+Predicate subqueries allocate distinct aliases at every nesting depth and across siblings, including repeated queries on the same table. Unqualified `outerRef()` binds to the immediately enclosing query; qualified `outerRef('posts.id')` searches enclosing queries nearest first. An exact emitted qualifier wins; otherwise a logical-table match requires exactly one range of that table in that query. Multiple ranges are refused as ambiguous, naming their aliases; no match in any enclosing query is refused as not visible. Root ranges, manual joins (with explicit or implicit aliases) and join includes are visible under their emitted qualifiers and logical tables. All levels share one parameter sequence. A manual `.join()` qualifier repeating an emitted range (root, implicit or explicit alias) is refused; the root logical name is also reserved. Generated subquery aliases are reallocated.
 
 ```typescript
 import { schema, createOrm, and, eq, inSubquery, outerRef, subquery } from '@dbsp/core';

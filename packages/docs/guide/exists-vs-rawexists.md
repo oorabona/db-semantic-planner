@@ -13,9 +13,10 @@ differ fundamentally in *where the schema knowledge comes from*.
 
 - **`rawExists(subquery(...))`** — you build the subquery explicitly, with control
   over the `SELECT` list, `WHERE` clause, and any inner aggregation. Inner table
-  aliases are generated distinctly within PostgreSQL’s 63-byte limit. No FK lookup, no
-  planner help. This is the escape hatch for polymorphic tables, ad-hoc cross-schema
-  references, and any target table that has no `ref()` declared toward the source.
+  aliases are generated distinctly within PostgreSQL’s 63-byte limit. The wrapper
+  does not correlate its target with the parent. Relation predicates inside the
+  body still resolve declared keys and model casts. This is the escape hatch for
+  polymorphic tables, ad-hoc cross-schema references, and any target table that has no `ref()` declared toward the source.
 
 ## When
 
@@ -89,7 +90,7 @@ Key observations:
 
 ### Explicit correlation with rawExists()
 
-A subquery body in query WHERE resolves `outerRef()` against its immediately enclosing query when unqualified (qualified references select the nearest matching enclosing table or alias):
+A subquery body in query WHERE resolves `outerRef()` against its immediately enclosing query when unqualified. Qualified references search enclosing queries nearest first: an exact emitted qualifier wins; otherwise the logical table must have exactly one range in that query. Multiple ranges are refused as ambiguous, naming their aliases:
 
 ```typescript
 import { createOrm, rawExists, subquery, gt, outerRef, ref, schema } from '@dbsp/core';
@@ -197,7 +198,7 @@ polymorphic or ad-hoc join targets.
 
 ### Correlation scope
 
-Query WHERE subquery bodies support `outerRef()` for scalar comparisons, `inSubquery()` and `rawExists()`. Nested same-table `rawExists()` bodies compile with distinct generated aliases and share parameter numbering. Unqualified `outerRef()` binds to the immediately enclosing query; qualified `outerRef('posts.id')` binds to the nearest enclosing query whose table or alias is `posts`. Only a user-supplied alias reused in one scope is refused. Legacy `compilePlan()` lowering retains its correlation refusal.
+Query WHERE subquery bodies support `outerRef()` for scalar comparisons, `inSubquery()` and `rawExists()`. Nested same-table `rawExists()` bodies compile with distinct generated aliases and share parameter numbering. Unqualified `outerRef()` binds to the immediately enclosing query; qualified `outerRef('posts.id')` searches enclosing queries nearest first. An exact emitted qualifier wins; otherwise a logical-table match requires exactly one range of that table in that query. Multiple ranges are refused as ambiguous, naming their aliases; no match in any enclosing query is refused as not visible. A manual `.join()` qualifier repeating an emitted range (root, implicit or explicit alias) is refused; the root logical name is also reserved. Generated subquery aliases are reallocated. Legacy `compilePlan()` lowering retains its correlation refusal, and so does a query WHERE that also contains a dotted relation path such as `eq('caller.name', 'Ada')`, or a join include's `where`: both still compile through the earlier route.
 
 ### `exists()` silently drops the WHERE for undeclared relations
 

@@ -192,14 +192,23 @@ export function compileValueOrFieldRef(
 		) {
 			const dot = value.column.lastIndexOf('.');
 			const qualifier = value.column.slice(0, dot);
-			const binding = Array.from(ctx.scope?.bindings.values() ?? [])
-				.reverse()
-				.find(
-					(candidate) =>
-						candidate.qualifier !== ctx.currentBinding?.qualifier &&
-						(candidate.qualifier === qualifier ||
-							candidate.logicalTable === qualifier),
+			let binding: RelationBinding | undefined;
+			for (const ranges of ctx.enclosingRanges ?? []) {
+				binding = ranges.find((candidate) => candidate.qualifier === qualifier);
+				if (binding) break;
+				const candidates = ranges.filter(
+					(candidate) => candidate.logicalTable === qualifier,
 				);
+				if (candidates.length > 1)
+					throw new Error(
+						`outerRef qualifier '${qualifier}' is ambiguous between ${candidates
+							.map((candidate) => `'${candidate.qualifier}'`)
+							.sort()
+							.join(', ')} in an enclosing query.`,
+					);
+				binding = candidates[0];
+				if (binding) break;
+			}
 			if (!binding)
 				throw new Error(
 					`outerRef qualifier '${qualifier}' is not visible in an enclosing query.`,

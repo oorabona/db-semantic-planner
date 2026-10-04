@@ -175,6 +175,10 @@ export function buildCustomFnFilter(
 		emittedAlias: ctx.currentAlias ?? ctx.rootTable,
 		visibleAliases: new Map(ctx.aliases ?? state.aliases),
 		position: 'filter',
+		...(ctx.queryRanges !== undefined && { queryRanges: ctx.queryRanges }),
+		...(ctx.enclosingRanges !== undefined && {
+			enclosingRanges: ctx.enclosingRanges,
+		}),
 		...(ctx.defaultPkColumnName !== undefined && {
 			defaultPkColumnName: ctx.defaultPkColumnName,
 		}),

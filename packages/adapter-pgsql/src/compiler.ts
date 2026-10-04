@@ -563,6 +563,8 @@ export class PlanCompiler {
 	 * SQL alias that is actually emitted for that relation.
 	 */
 	private visibleSqlQualifiers: ReadonlyMap<string, string> = new Map();
+	/** Actual FROM/JOIN namespace, before public relation paths overlay aliases. */
+	private emittedRangeQualifiers: ReadonlySet<string> = new Set();
 	/** Projection labels are query-local and take precedence in bare ORDER BY. */
 	private projectionAliases: ReadonlySet<string> = new Set();
 	/**
@@ -1186,6 +1188,7 @@ export class PlanCompiler {
 		this.pendingCtes = [];
 		this.joinAliasMap = new Map();
 		this.visibleSqlQualifiers = new Map();
+		this.emittedRangeQualifiers = new Set();
 		this.usedJoinAliases = new Set();
 		this.aliasColumnAuthorities = new Map();
 
@@ -1269,17 +1272,32 @@ export class PlanCompiler {
 			);
 			boundQualifiers.add(declaredRoot);
 		}
-		for (const entry of this.joinAliasMap.values()) {
-			if (entry.targetTable === undefined || boundQualifiers.has(entry.alias)) {
-				continue;
-			}
+		for (const emittedAlias of this.emittedRangeQualifiers) {
+			if (boundQualifiers.has(emittedAlias)) continue;
+			const authority = this.aliasColumnAuthorities.get(emittedAlias);
+			if (!authority) continue;
+			const logicalTable =
+				authority.logicalTable ??
+				(this.model?.getTable(identifierText(authority.target)) !== undefined
+					? identifierText(authority.target)
+					: undefined);
 			bindings.push(
 				relationBinding({
-					qualifier: queryLocal(entry.alias),
-					kind: 'declared-table',
-					logicalTable: entry.targetTable,
+					qualifier: queryLocal(emittedAlias),
+					...(logicalTable !== undefined
+						? { kind: 'declared-table' as const, logicalTable }
+						: { kind: 'join-alias' as const }),
+					...(authority.outputs !== undefined && {
+						outputs: new Map(
+							[...authority.outputs].map(([key, value]) => [
+								queryLocal(key),
+								value,
+							]),
+						),
+					}),
 				}),
 			);
+			boundQualifiers.add(emittedAlias);
 		}
 		const scope = bindings.length > 0 ? queryScope(bindings) : undefined;
 		return {
@@ -1287,6 +1305,11 @@ export class PlanCompiler {
 				declaredNames: this.declaredNames,
 			}),
 			rootTable: plan.rootTable,
+			queryRanges: bindings.filter(
+				(binding) =>
+					binding.qualifier === declaredRoot ||
+					this.emittedRangeQualifiers.has(binding.qualifier),
+			),
 			currentAlias: alias,
 			aliases: this.visibleSqlQualifiers,
 			maxRecursiveDepth: MAX_DEPTH_LIMIT,
@@ -2458,6 +2481,10 @@ export class PlanCompiler {
 			) {
 				const alias = this.filterJoinAlias(decision);
 				emittedAliases.set(alias, alias);
+				this.registerAliasAuthority(
+					queryLocal(alias),
+					queryLocal(decision.targetTable),
+				);
 			}
 		}
 
@@ -2501,6 +2528,7 @@ export class PlanCompiler {
 		for (const [relation, alias] of relationPaths) {
 			qualifiers.set(relation, alias);
 		}
+		this.emittedRangeQualifiers = new Set(emittedAliases.keys());
 		this.visibleSqlQualifiers = qualifiers;
 		this.state.aliases = new Map(qualifiers);
 		return includeResults;
@@ -2982,6 +3010,10 @@ export class PlanCompiler {
 			this.visibleSqlQualifiers = new Map([
 				...this.visibleSqlQualifiers,
 				[relationName, relationName],
+			]);
+			this.emittedRangeQualifiers = new Set([
+				...this.emittedRangeQualifiers,
+				relationName,
 			]);
 			this.state.aliases = new Map(this.visibleSqlQualifiers);
 		}
