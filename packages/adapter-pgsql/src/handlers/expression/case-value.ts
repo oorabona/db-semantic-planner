@@ -8,13 +8,12 @@
 import type { Node } from '@pgsql/types';
 import {
 	booleanConstNode,
-	floatNode,
-	integerNode,
 	nullConstNode,
 	sqlColumnRef,
 } from '../../ast-helpers.js';
 import { queryLocal } from '../../sql-identifier.js';
 import type { CompilerState } from '../types.js';
+import { numericLiteralNode } from './numeric-literal.js';
 import { bindParameter } from './param-value.js';
 
 /**
@@ -87,9 +86,7 @@ export function resolveCaseValue(
 			if (typeof expr.value === 'boolean')
 				return booleanConstNode(expr.value as boolean);
 			if (typeof expr.value === 'number') {
-				if (Number.isInteger(expr.value))
-					return integerNode(expr.value as number);
-				return floatNode(String(expr.value));
+				return numericLiteralNode(expr.value);
 			}
 			return bindParameter(expr.value, state);
 
@@ -100,6 +97,17 @@ export function resolveCaseValue(
 			);
 
 		case 'arithmetic': {
+			const operator = expr.operator;
+			if (typeof operator !== 'string') {
+				throw new Error(
+					`Invalid arithmetic operator: expected a string, got ${typeof operator}. Operator must be a plain string value.`,
+				);
+			}
+			if (!['+', '-', '*', '/', '%'].includes(operator)) {
+				throw new Error(
+					'Invalid arithmetic operator. Only +, -, *, /, % are allowed.',
+				);
+			}
 			const left = resolveCaseValue(
 				expr.left,
 				alias,
@@ -121,7 +129,7 @@ export function resolveCaseValue(
 			return {
 				A_Expr: {
 					kind: 'AEXPR_OP',
-					name: [{ String: { sval: expr.operator as string } }],
+					name: [{ String: { sval: operator } }],
 					lexpr: left,
 					rexpr: right,
 				},

@@ -181,7 +181,7 @@ export function assertNoRecursiveRootRelations(
 	position = 'WHERE',
 ): void {
 	const seen = new WeakSet<object>();
-	function visit(value: unknown): void {
+	function visit(value: unknown, position: string): void {
 		if (!value || typeof value !== 'object' || seen.has(value)) return;
 		seen.add(value);
 		const node = value as WhereIntent;
@@ -213,10 +213,10 @@ export function assertNoRecursiveRootRelations(
 				key === 'query'
 			)
 				continue;
-			visit(child);
+			visit(child, key === 'filter' ? 'FILTER' : position);
 		}
 	}
-	visit(intent);
+	visit(intent, position);
 }
 
 /** Private recursion state, created by the top-level entry and shared by descendants. */

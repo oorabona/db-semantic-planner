@@ -23,9 +23,7 @@ import type { SubqueryExpressionIntent } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import {
 	booleanConstNode,
-	floatNode,
 	funcCall,
-	integerNode,
 	nullConstNode,
 	sortBy,
 	stringConstNode,
@@ -48,6 +46,7 @@ import {
 	expressionWholeRowRef,
 } from '../types.js';
 import { resolveCaseValue } from './case-value.js';
+import { numericLiteralNode } from './numeric-literal.js';
 
 // The condition compiler supplies the runtime dispatcher factory through context.
 // compile-where.ts preserves the compatibility re-export surface.
@@ -259,15 +258,7 @@ export function compileExpressionIntent(
 				return booleanConstNode(i.value);
 			}
 			if (typeof i.value === 'number') {
-				if (!Number.isFinite(i.value)) {
-					throw new Error(
-						`literal(): numeric value must be finite; got ${i.value}. Use param() for computed values.`,
-					);
-				}
-				if (Number.isInteger(i.value)) {
-					return integerNode(i.value);
-				}
-				return floatNode(String(i.value));
+				return numericLiteralNode(i.value);
 			}
 			if (typeof i.value === 'string') {
 				return stringConstNode(i.value);
@@ -340,7 +331,7 @@ export function compileExpressionIntent(
 			if (!ctx.compileSubquery) {
 				throw new Error(
 					"compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. " +
-						'Use asExpr() only in .columns() context, not in standalone expressions.',
+						'Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context.',
 				);
 			}
 			const { ast: innerAst, parameters: innerParams } = ctx.compileSubquery(

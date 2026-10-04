@@ -6,7 +6,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "HAVING notExists('posts'): recursive relation predicates are not supported inside HAVING."
+			"error": "FILTER notExists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",
@@ -14,7 +14,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "HAVING notExists('posts'): recursive relation predicates are not supported inside HAVING."
+			"error": "FILTER notExists('posts'): recursive relation predicates are not supported inside FILTER."
 		},
 		{
 			"position": "having-filter",

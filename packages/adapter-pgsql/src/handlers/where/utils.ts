@@ -193,7 +193,7 @@ export function compileValueOrFieldRef(
 			throw new Error('outerRef() requires an enclosing query range.');
 		if (
 			value.scope === 'outer' &&
-			ctx.position === 'subquery' &&
+			ctx.enclosingRanges?.some((ranges) => ranges.length > 0) &&
 			value.column.includes('.')
 		) {
 			const dot = value.column.lastIndexOf('.');
@@ -220,6 +220,12 @@ export function compileValueOrFieldRef(
 					`outerRef qualifier '${qualifier}' is not visible in an enclosing query.`,
 				);
 			return expressionColumnRef(value.column.slice(dot + 1), ctx, binding);
+		}
+		if (value.scope === 'outer' && ctx.enclosingRanges !== undefined) {
+			const binding = ctx.enclosingRanges.find(
+				(ranges) => ranges.length > 0,
+			)?.[0];
+			if (binding) return expressionColumnRef(value.column, ctx, binding);
 		}
 		if (value.column.includes('.')) return buildColumnRef(value.column, ctx);
 		const alias =

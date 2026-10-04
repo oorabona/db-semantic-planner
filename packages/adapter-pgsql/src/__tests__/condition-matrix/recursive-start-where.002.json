@@ -670,7 +670,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
+			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context."
 		},
 		{
 			"position": "recursive-start-where",
@@ -678,7 +678,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
+			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context."
 		},
 		{
 			"position": "recursive-start-where",
@@ -686,7 +686,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
+			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context."
 		},
 		{
 			"position": "recursive-start-where",
@@ -694,7 +694,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
+			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context."
 		},
 		{
 			"position": "recursive-start-where",
@@ -702,7 +702,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() only in .columns() context, not in standalone expressions."
+			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context."
 		},
 		{
 			"position": "recursive-start-where",

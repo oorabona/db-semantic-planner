@@ -2,8 +2,10 @@ import {
 	and,
 	caseWhen,
 	createOrm,
+	ExpressionRef,
 	eq,
 	exists,
+	fn,
 	inSubquery,
 	literal,
 	op,
@@ -11,9 +13,12 @@ import {
 	rangeOverlaps,
 	ref,
 	schema,
+	star,
 	subquery,
 } from '@dbsp/core';
 import { expect, it } from 'vitest';
+import { resolveCaseValue } from '../handlers/expression/case-value.js';
+import { createCompilerState } from '../handlers/types.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const db = schema({
@@ -299,3 +304,167 @@ for (const position of ['HAVING', 'CASE WHEN'] as const) {
 		).toThrow(`No ${position} handler registered for operator: invalid`);
 	});
 }
+
+for (const position of ['CASE', 'HAVING', 'FILTER'] as const) {
+	it(`${position} outer references resolve across an inner table collision and reject ambiguity`, () => {
+		for (const qualifier of ['symbols', 'caller', undefined]) {
+			const condition = eq(
+				'id',
+				outerRef(qualifier ? `${qualifier}.id` : 'id'),
+			);
+			const inner = {
+				type: 'select' as const,
+				from: 'symbols',
+				...(position === 'CASE'
+					? {
+							where: caseWhen(condition, literal(true))
+								.else(literal(false))
+								.eq(true),
+						}
+					: {}),
+				...(position === 'HAVING' ? { having: condition } : {}),
+				select: {
+					type: 'expressions' as const,
+					columns: [
+						position === 'FILTER'
+							? fn('count', star()).filter(condition).intent
+							: fn('count', star()).intent,
+					],
+				},
+			};
+			const expr = new ExpressionRef({ kind: 'subquery', query: inner }).as(
+				'n',
+			);
+			const query = orm
+				.select('calls')
+				.join('symbols', { as: 'caller', on: eq('calls.id', 1) });
+			const result = query.columns([expr]).dump();
+			const sql =
+				position === 'CASE'
+					? 'SELECT (SELECT count(*) FROM symbols AS symbols WHERE CASE WHEN symbols.id = caller.id THEN true ELSE false END = $1) AS n FROM calls JOIN symbols AS caller ON calls.id = $2'
+					: position === 'HAVING'
+						? 'SELECT (SELECT count(*) FROM symbols AS symbols HAVING symbols.id = caller.id) AS n FROM calls JOIN symbols AS caller ON calls.id = $1'
+						: 'SELECT (SELECT count(*) FILTER (WHERE symbols.id = caller.id) FROM symbols AS symbols) AS n FROM calls JOIN symbols AS caller ON calls.id = $1';
+			expect
+				.soft(result.sql)
+				.toBe(qualifier ? sql : sql.replace('caller.id', 'calls.id'));
+			expect.soft(result.params).toEqual(position === 'CASE' ? [true, 1] : [1]);
+			if (qualifier === 'symbols') {
+				expect
+					.soft(() =>
+						query
+							.join('symbols', { as: 'callee', on: eq('calls.id', 2) })
+							.columns([expr])
+							.dump(),
+					)
+					.toThrow(
+						"outerRef qualifier 'symbols' is ambiguous between 'callee', 'caller' in an enclosing query.",
+					);
+			}
+		}
+	});
+}
+it('CASE THEN ELSE multi-branch and nested values refuse all non-finite numbers', () => {
+	for (const value of [
+		Number.NaN,
+		Number.POSITIVE_INFINITY,
+		Number.NEGATIVE_INFINITY,
+	]) {
+		for (const branch of ['THEN', 'ELSE', 'multi', 'nested'] as const) {
+			const safe = caseWhen(eq('id', 1), literal(0));
+			const expr =
+				branch === 'THEN'
+					? caseWhen(eq('id', 1), literal(value)).else(literal(0))
+					: branch === 'ELSE'
+						? safe.else(literal(value))
+						: branch === 'multi'
+							? safe.when(eq('id', 2), literal(value)).else(literal(0))
+							: safe.else(
+									caseWhen(eq('id', 2), literal(value)).else(literal(0)),
+								);
+			expect
+				.soft(() =>
+					orm
+						.select('symbols')
+						.columns([op('+', expr, literal(1)).as('n')])
+						.dump(),
+				)
+				.toThrow(
+					`literal(): numeric value must be finite; got ${value}. Use param() for computed values.`,
+				);
+		}
+	}
+});
+it('CASE arithmetic refuses forged string and object operators', () => {
+	for (const operator of [
+		'+ (SELECT pg_sleep(1)) +',
+		'||',
+		{ toString: () => '+' },
+	]) {
+		const forged = {
+			kind: 'arithmetic' as const,
+			operator,
+			left: literal(1).intent,
+			right: literal(2).intent,
+		};
+		expect
+			.soft(() =>
+				orm
+					.select('symbols')
+					.columns([
+						caseWhen(
+							eq('id', 1),
+							new ExpressionRef(
+								forged as unknown as ConstructorParameters<
+									typeof ExpressionRef
+								>[0],
+							),
+						)
+							.else(literal(0))
+							.as('n'),
+					])
+					.dump(),
+			)
+			.toThrow(
+				typeof operator === 'string'
+					? 'Invalid arithmetic operator. Only +, -, *, /, % are allowed.'
+					: 'Invalid arithmetic operator: expected a string, got object. Operator must be a plain string value.',
+			);
+	}
+});
+it('CASE arithmetic snapshots the operator once', () => {
+	let reads = 0;
+	const forged = {
+		kind: 'arithmetic' as const,
+		get operator() {
+			return ++reads === 1 ? '+' : '+ (SELECT pg_sleep(1)) +';
+		},
+		left: literal(1).intent,
+		right: literal(2).intent,
+	};
+	const result = resolveCaseValue(
+		forged,
+		'symbols',
+		undefined,
+		undefined,
+		createCompilerState(),
+	);
+	expect(result).toHaveProperty('A_Expr.name', [{ String: { sval: '+' } }]);
+	expect(reads).toBe(1);
+});
+it('FILTER nested in HAVING labels recursive refusal FILTER', () => {
+	const condition = exists('calls', {
+		recursive: { direction: 'down', through: 'calls', maxDepth: 2 },
+	});
+	expect
+		.soft(() =>
+			orm
+				.select('symbols')
+				.groupBy(['id'])
+				.having(fn('count', star()).filter(condition).gt(1))
+				.dump(),
+		)
+		.toThrow(
+			"FILTER exists('calls'): recursive relation predicates are not supported inside FILTER.",
+		);
+});
