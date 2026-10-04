@@ -1,5 +1,6 @@
 import { compileWhereIntent } from './condition-compiler.js';
 import { createWhereDispatcher } from './handlers/index.js';
+import { assertRelationalOutput } from './relational-output.js';
 /**
  * PgAdapter - Implements the Adapter interface for PostgreSQL using native pg driver.
  *
@@ -2421,6 +2422,7 @@ function projectNqlBindingQueryEnvelope<T = unknown>(
 	hydrationPlan: PlanReport | undefined,
 ): ProjectionEnvelope<T> {
 	const shape = buildNqlBindingProjectionShape(source, query.select);
+
 	if (shape.preserveOneToOne) {
 		return preserveOneToOne(source, {
 			sql,
@@ -3283,6 +3285,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 				bindingNames,
 				bindingProjections,
 			);
+			assertRelationalOutput(compiled.hydrationPlan, 'Relational bodies');
 			const outputSchema = bundle.bindingOutputSchemas?.get(name);
 			const compiledBindingOutputs =
 				compiled.projection.kind === 'known'

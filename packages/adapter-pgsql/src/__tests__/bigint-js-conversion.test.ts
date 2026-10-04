@@ -529,7 +529,7 @@ describe('PgAdapter bigint js result conversion', () => {
 	it('converts NQL binding outputs projected from single-hop physical relation provenance', async () => {
 		const bundle = compileRelationConversionNql(`posts
 			| select author.accountNumber as accountNumber, author.safeAccountNumber as safeAccountNumber, author.stringAccountNumber as stringAccountNumber
-			| bind post_author_accounts
+			| flat | bind post_author_accounts
 post_author_accounts | select accountNumber, safeAccountNumber, stringAccountNumber`);
 		const outputSchema = bundle.bindingOutputSchemas?.get(
 			'post_author_accounts',
@@ -613,7 +613,7 @@ post_author_accounts | select accountNumber, safeAccountNumber, stringAccountNum
 	it('converts runtime NQL bindings from compiler physical relation provenance', async () => {
 		const compiledSource = compileRelationConversionNql(`posts
 			| select author.accountNumber as accountNumber, author.safeAccountNumber as safeAccountNumber, author.stringAccountNumber as stringAccountNumber
-			| bind post_author_accounts
+			| flat | bind post_author_accounts
 post_author_accounts | select accountNumber, safeAccountNumber, stringAccountNumber`);
 		const outputSchema = compiledSource.bindingOutputSchemas?.get(
 			'post_author_accounts',
@@ -698,7 +698,7 @@ post_author_accounts | select accountNumber, safeAccountNumber, stringAccountNum
 	it('converts NQL binding outputs projected from multihop physical relation provenance', async () => {
 		const bundle = compileRelationConversionNql(`posts
 			| select author.profile.accountNumber as profileAccountNumber, author.profile.safeAccountNumber as profileSafeAccountNumber, author.profile.stringAccountNumber as profileStringAccountNumber
-			| bind profile_accounts
+			| flat | bind profile_accounts
 profile_accounts | select profileAccountNumber, profileSafeAccountNumber, profileStringAccountNumber`);
 		const adapter = createPgAdapter(
 			makePool([
@@ -775,7 +775,7 @@ profile_accounts | select profileAccountNumber, profileSafeAccountNumber, profil
 		]);
 	});
 
-	it('leaves NQL binding outputs projected from hasMany aggregate relation columns metadata-free', async () => {
+	it('refuses hasMany nested relation output in a binding body', async () => {
 		const bundle = compileRelationConversionNql(`users
 			| select posts.viewCount as postViewCount, posts.safeViewCount as postSafeViewCount, posts.stringViewCount as postStringViewCount
 			| bind user_post_counts
@@ -834,27 +834,11 @@ user_post_counts | select postViewCount, postSafeViewCount, postStringViewCount`
 				},
 			},
 		]);
-		const compiled = adapter.compile(bundle, {
-			model: relationConversionSchema.model,
-		});
-		expect(compiled.sql).toContain('json_agg');
-		expect(compiled.columnMetadata?.has('postViewCount') ?? false).toBe(false);
-		expect(compiled.columnMetadata?.has('postSafeViewCount') ?? false).toBe(
-			false,
+		expect(() =>
+			adapter.compile(bundle, { model: relationConversionSchema.model }),
+		).toThrow(
+			"Relational bodies with nested relation output are not supported; use | flat in every branch. A relation with includeStrategy hint 'json_agg' or 'cte' cannot be flattened; change that hint or select from the joined table.",
 		);
-		expect(compiled.columnMetadata?.has('postStringViewCount') ?? false).toBe(
-			false,
-		);
-
-		const rows = await adapter.execute(compiled);
-
-		expect(rows).toEqual([
-			{
-				postViewCount: ['9007199254740997'],
-				postSafeViewCount: ['45'],
-				postStringViewCount: ['9007199254740998'],
-			},
-		]);
 	});
 
 	it('leaves NQL binding outputs projected from many-to-many aggregate relation columns metadata-free', async () => {

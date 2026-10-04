@@ -34,12 +34,19 @@ function setValue(
 	});
 }
 
+export class InvalidJsonAggPayloadError extends Error {
+	constructor(path: string, cause: unknown) {
+		super(`Invalid JSON in json_agg payload '${path}'.`, { cause });
+		this.name = 'InvalidJsonAggPayloadError';
+	}
+}
+
 function readPayload(value: unknown, shape: IncludePayloadShape): unknown {
 	if (typeof value === 'string') {
 		try {
 			value = JSON.parse(value);
-		} catch {
-			return shape.isToOne ? null : [];
+		} catch (cause) {
+			throw new InvalidJsonAggPayloadError(shape.path, cause);
 		}
 	}
 	if (value === null || value === undefined) return shape.isToOne ? null : [];
@@ -111,6 +118,7 @@ export function hydrateResolvedIncludes(
 		const assignments = new Map<string, unknown>();
 		const deletions = new Set<string>();
 		for (const shape of shapes) {
+			if (shape.outputMode === 'flat') continue;
 			if (strategy === 'json_agg' && shape.strategy === 'json_agg') {
 				if (!Object.hasOwn(row, shape.outputLabel)) continue;
 				assignments.set(
@@ -120,7 +128,7 @@ export function hydrateResolvedIncludes(
 				deletions.add(shape.outputLabel);
 			} else if (
 				strategy === 'flat' &&
-				shape.strategy !== 'json_agg' &&
+				(shape.strategy === 'join' || shape.strategy === 'lateral') &&
 				(shape.presence !== undefined ||
 					shape.columns.length > 0 ||
 					shape.children.length > 0)

@@ -785,7 +785,7 @@ b | select x`.dump(),
 		it('marks relation-column projections as untypeable (relation-column)', () => {
 			const { compile, nql } = createBindingTag();
 
-			nql`posts | select id, user.name | bind b
+			nql`posts | select id, user.name | flat | bind b
 b | select id`.dump();
 
 			const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);

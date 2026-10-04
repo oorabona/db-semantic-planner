@@ -1131,7 +1131,7 @@ WHERE EXISTS (
 
 *Schema: iam*
 
-Combine the results of two queries with `union`, `intersect`, `except`, or `union all`. Both sides must select the same columns. The right-hand query is wrapped in parentheses.
+Combine the results of two queries with `union`, `intersect`, `except`, or `union all`. Both sides must select the same columns. Nested relation output is refused for all set operations, including ALL variants; use `| flat` in every branch. A relation whose `includeStrategy` hint is `json_agg` or `cte` cannot be flattened; change that hint or select from the joined table. The right-hand query is wrapped in parentheses.
 
 ### UNION (Deduplicated)
 
@@ -1272,7 +1272,7 @@ UNION ALL
 
 ## Common Table Expressions (WITH)
 
-The `with` keyword defines named subqueries (CTEs) that can be referenced in the main query.
+The `with` keyword defines named subqueries (CTEs) that can be referenced in the main query. Nested relation output belongs to terminal reads; `with` bodies must use `| flat` (relations hinted `json_agg` or `cte` cannot be flattened).
 
 ```
 with name as (query) mainQuery
@@ -1911,6 +1911,8 @@ if (!unsupportedSnapshotShape.includes('unsupported snapshot shape (#186)')) {
 ### Bind (Named CTE)
 
 *Schema: iam*
+
+Read-only `bind` bodies must use `| flat` for relation output; relations hinted `json_agg` or `cte` cannot be flattened.
 
 Capture a query result and name it for reuse in subsequent statements. This is NQL's equivalent of a CTE — the bound name can be referenced in later queries within the same `.dbsp` file.
 

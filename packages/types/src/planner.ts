@@ -156,7 +156,9 @@ export interface CTEDefinition {
 export interface IncludePayloadShape {
 	readonly path: string;
 	readonly publicKey: string;
-	readonly strategy: 'json_agg' | 'lateral' | 'join';
+	readonly strategy: 'json_agg' | 'lateral' | 'join' | 'cte';
+	/** Requested public shape, independent of the physical strategy. */
+	readonly outputMode: 'nested' | 'flat';
 	readonly table: string;
 	readonly isToOne: boolean;
 	readonly outputLabel: string;

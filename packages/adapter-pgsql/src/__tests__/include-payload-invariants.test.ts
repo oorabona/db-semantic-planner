@@ -74,7 +74,6 @@ for (const [name, value] of [
 	['null', null],
 	['undefined', undefined],
 	['empty', []],
-	['malformed JSON', '{'],
 ] as const) {
 	it(`to-many ${name} has an empty collection`, () => {
 		expect(
@@ -87,6 +86,14 @@ for (const [name, value] of [
 		).toEqual([{ roots: null }]);
 	});
 }
+it.each([
+	['roots', 'children', 'children_json'],
+	['children', 'roots', 'root_json'],
+] as const)('malformed JSON throws for %s.%s', (from, relation, label) => {
+	expect(() => compiled(from, relation).hydrate([{ [label]: '{' }])).toThrow(
+		`Invalid JSON in json_agg payload '${relation}'.`,
+	);
+});
 it('a to-one singleton collection becomes its related object', () => {
 	expect(
 		compiled('children', 'roots').hydrate([{ root_json: [{ id: 1 }] }]),
@@ -325,7 +332,9 @@ it('root star and relation star retain distinct public labels', () => {
 		{ id: 1, 'children.id': 2, 'children.rootId': 1, 'children.amount': '42' },
 	];
 	new ResultHydrator(model, 'roots').hydrateJoinIncludes(rows, report, query);
-	expect(rows).toEqual([{ id: 1, children: { id: 2, rootId: 1, amount: 42 } }]);
+	expect(rows).toEqual([
+		{ id: 1, 'children.id': 2, 'children.rootId': 1, 'children.amount': '42' },
+	]);
 });
 it('explicit root output and relation star retain distinct public labels', () => {
 	const adapter = createPgCompileOnlyAdapter({ model });
@@ -339,7 +348,9 @@ it('explicit root output and relation star retain distinct public labels', () =>
 		{ id: 1, 'children.id': 2, 'children.rootId': 1, 'children.amount': '42' },
 	];
 	new ResultHydrator(model, 'roots').hydrateJoinIncludes(rows, report, query);
-	expect(rows).toEqual([{ id: 1, children: { id: 2, rootId: 1, amount: 42 } }]);
+	expect(rows).toEqual([
+		{ id: 1, 'children.id': 2, 'children.rootId': 1, 'children.amount': '42' },
+	]);
 });
 it('root star expands independently of include projection', () => {
 	const adapter = createPgCompileOnlyAdapter({ model });

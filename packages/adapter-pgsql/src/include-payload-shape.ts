@@ -121,7 +121,7 @@ export function resolveIncludePayloadShapes(
 		for (const d of items) {
 			if (
 				d.type === 'includeStrategy' &&
-				['json_agg', 'join', 'lateral'].includes(d.choice ?? '')
+				['json_agg', 'join', 'lateral', 'cte'].includes(d.choice ?? '')
 			)
 				all.push(d);
 			visit(d.children ?? []);
@@ -214,7 +214,14 @@ export function resolveIncludePayloadShapes(
 		const tableName = d.targetTable ?? d.relationName ?? d.relation ?? '';
 		const target = resolveRelationTarget(queryLocal(tableName), deps);
 		const table = model?.getTable(tableName);
-		const strategy = d.choice as IncludePayloadShape['strategy'];
+		const strategy = d.choice;
+		if (
+			strategy !== 'json_agg' &&
+			strategy !== 'join' &&
+			strategy !== 'lateral' &&
+			strategy !== 'cte'
+		)
+			throw new Error(`Invalid include payload strategy '${strategy}'.`);
 		const parentPath = path.includes('.')
 			? path.slice(0, path.lastIndexOf('.'))
 			: undefined;
@@ -318,7 +325,7 @@ export function resolveIncludePayloadShapes(
 			const flatColumn =
 				strategy !== 'json_agg' &&
 				(flatPaths.has(path) || entry.nqlLabel === true);
-			const publicKey = flatColumn
+			const publicKey = flatPaths.has(path)
 				? (entry.alias ?? publicName)
 				: (chosenRelationColumnAlias(entry.alias, entry.defaultLabel) ??
 					publicName);
@@ -403,6 +410,7 @@ export function resolveIncludePayloadShapes(
 			path,
 			publicKey,
 			strategy,
+			outputMode: flatPaths.has(path) ? 'flat' : 'nested',
 			table: tableName,
 			isToOne: d.relationType === 'belongsTo' || d.relationType === 'hasOne',
 			outputLabel: transportLabel(

@@ -388,7 +388,7 @@ describe('bigint js json_agg SQL projection', () => {
 		).not.toHaveProperty('observedAt');
 	});
 
-	it('preserves resolver nested transforms when a CTE wraps a json_agg include', () => {
+	it('does not inherit nested transforms when a CTE wraps a json_agg source', () => {
 		const jsonAggNestedReadTransforms = [
 			{
 				kind: 'nestedTransform',
@@ -419,6 +419,7 @@ describe('bigint js json_agg SQL projection', () => {
 			includePayloads: [
 				{
 					path: 'readings',
+					outputMode: 'nested',
 					publicKey: 'readings',
 					strategy: 'json_agg',
 					table: 'readings',
@@ -517,14 +518,6 @@ describe('bigint js json_agg SQL projection', () => {
 		expect(compiled.sql).toMatch(/^WITH /);
 		expect(compiled.sql).toContain('readings_json');
 		expect(compiled.columnMetadata?.has('readings_json') ?? false).toBe(false);
-		const compiledHydrationPlan = (compiled as { hydrationPlan?: PlanReport })
-			.hydrationPlan;
-		expect(
-			compiledHydrationPlan?.includePayloads?.[0]?.columns.flatMap((column) =>
-				column.readHandling
-					? [{ ...column.readHandling, outputKey: undefined }]
-					: [],
-			),
-		).toEqual(jsonAggNestedReadTransforms);
+		expect(compiled.hydrationPlan?.includePayloads).toBeUndefined();
 	});
 });

@@ -217,6 +217,29 @@ export async function compileNqlToSql(
 	const compiled = compileNqlToIntent(nql, model);
 
 	// 2. Compile IntentAST to SQL using adapter
+	if (
+		compiled.cteQuery ||
+		((compiled.bindings?.size ?? 0) > 0 && !compiled.mutation)
+	) {
+		const result = adapter.compile(compiled, { model });
+		const intentType = compiled.setOperation ? 'setOperation' : 'query';
+		const summary = extractIntentSummary(
+			compiled.cteQuery
+				? { ...compiled, query: compiled.cteQuery.query }
+				: compiled,
+			intentType,
+		);
+		summary.ctes = compiled.cteQuery?.ctes.map((cte) => cte.name) ?? [
+			...(compiled.bindings?.keys() ?? []),
+		];
+		return {
+			sql: result.sql,
+			params: result.parameters,
+			intentType,
+			intent: summary,
+		};
+	}
+
 	if (compiled.query) {
 		const queryIntent = compiled.query;
 		// Read capabilities from adapter (always available on BaseAdapter)
