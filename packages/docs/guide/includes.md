@@ -57,9 +57,9 @@ An include `where` is accepted only when the include compiles as a join, and it 
 Pass an options object as the second argument to filter, project, or disambiguate the include:
 
 ```typescript
-// Keep users with a published post
-const usersFiltered = await orm.select('users')
-  .include('posts', { join: 'inner', where: eq('published', true) })
+// Keep posts by Alice
+const postsFiltered = await orm.select('posts')
+  .include('author', { join: 'inner', where: eq('name', 'Alice') })
   .dump();
 
 // Select specific columns on the relation
@@ -80,12 +80,17 @@ Include `select` support by strategy:
 | Strategy | Supported select forms |
 |----------|------------------------|
 | `json_agg` | `fields` (including an empty list) and `all`; other forms, including `expressions` and `aggregate`, are refused |
-| `join` | Omitted `select` or field selections; `all` and fields `['*']` are refused |
+| `join` | To-one only: omitted `select`, `all`, or explicit fields; fields `['*']` are refused |
 | `cte` | Omitted `select` only; any explicit `select` is refused |
 | `lateral` | All columns only: omitted select, `all`, or fields `['*']` |
 
-Join includes honour field selections by projecting the requested fields plus the primary key, and omitted `select` retains its existing projection.
-Join includes accept only omitted `select` or `select: { type: 'fields', fields: [...] }` with plain column names and no `'*'`.
+A to-one join include with omitted `select` or `select: { type: 'all' }` returns every target column, enumerated with `"relation.column"` transport labels and declared public keys. Explicit field selection returns exactly those fields, with no unrequested primary key. A private presence marker distinguishes an existing row of null values from a missing row; hydration removes it. `hasMany` join includes are refused at planning and compilation, including join hints and defaults. Use `.join()`, NQL `| flat`, or a `json_agg`/`lateral` include instead.
+
+A `belongsToMany` join include has a separate refusal, including explicit strategies, hints, defaults and external reports. For a `tags` include, the exact message is:
+
+> `Include include[0](tags) cannot use 'join' for a belongsToMany relation. The relation goes through a junction table that join includes, .join(<relation>), NQL | flat and json_agg/lateral includes do not traverse yet. Join the junction and target tables explicitly with .join(<table>, { on }).`
+
+To-one join includes accept omitted `select`, `select: { type: 'all' }`, or `select: { type: 'fields', fields: [...] }` with plain column names and no `'*'`.
 CTE includes refuse any explicit `select` with the include path because they add no related targets to the outer `SELECT`.
 
 ### Include Options Reference
@@ -142,7 +147,7 @@ The planner picks the SQL strategy from the query shape by default:
 
 | Strategy | When used | Notes |
 |----------|-----------|-------|
-| `json_agg` | Nested non-recursive includes of any cardinality, when supported | JSON subquery aggregation |
+| `json_agg` | Nested non-recursive to-one and `hasMany` includes, when supported | JSON subquery aggregation |
 | `lateral` | Flat includes with a direct or nested per-parent `limit`, when supported | Uses `LATERAL` join for per-row subqueries |
 | `join` | Flat includes without limits, or nested output without JSON aggregation support | SQL JOIN |
 
@@ -179,7 +184,7 @@ and `users | select id, posts.title | limit posts 5` retain their behaviour.
 
 Every resolved include, including camelCase names for snake_case relations, is
 validated during planning. Include `select` forms are checked during planning:
-`json_agg` accepts fields or all columns, `lateral` accepts only all columns, `join` accepts plain fields,
+`json_agg` accepts fields or all columns, `lateral` accepts only all columns, `join` accepts all columns or plain fields for to-one relations,
 and `cte` refuses explicit selection. Mixed wildcard lists such as `['*', 'id']`
 are refused for every strategy; `['*']` is the all-columns form. Both `json_agg`
 and `lateral` limit rows per parent. Refusals identify the full nested include path.
@@ -195,3 +200,5 @@ NQL's unaliased `relation.column` label is a default flat label, not an explicit
 Every root SELECT label owns its key, including function labels and expanded stars. Use `.as(...)` for expressions whose returned label cannot be established. Exact duplicate aggregate requests emit one SQL target. Hydration stages all conversions and child reads before changing each row; a conversion failure leaves that row unchanged.
 
 Compilation resolves these keys before generating SQL. Exact duplicate source/key requests deduplicate; two different owners of one public key fail with the payload path and key. A wildcard include over a target whose columns cannot be enumerated also fails.
+
+Scalar expression projections retain join include payloads. Expression projections containing a call in `NQL_SELECT_AGGREGATE_FUNCTIONS`, including nested calls, are aggregation. Join includes are refused when aggregation, `groupBy` or `DISTINCT` would drop their data; use `.join()` for relational columns, grouping or ordering.

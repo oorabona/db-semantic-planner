@@ -165,22 +165,22 @@ describe('#911 relation resolution precedence', () => {
 			'billingProfile',
 			'public_link',
 			'billingProfile',
-			'SELECT accounts.*, public_link.id AS "billingProfile.id" FROM accounts LEFT JOIN "billingProfile" AS public_link ON accounts.public_id = public_link.id',
-			'SELECT accounts.*, "billingProfile".id AS "billingProfile.id" FROM accounts LEFT JOIN "billingProfile" AS "billingProfile" ON accounts.public_id = "billingProfile".id',
+			'SELECT accounts.*, public_link.id AS "billingProfile.id", public_link.id AS "__dbsp_presence_billingProfile" FROM accounts LEFT JOIN "billingProfile" AS public_link ON accounts.public_id = public_link.id',
+			'SELECT accounts.*, "billingProfile".id AS "billingProfile.id", "billingProfile".id AS "__dbsp_presence_billingProfile" FROM accounts LEFT JOIN "billingProfile" AS "billingProfile" ON accounts.public_id = "billingProfile".id',
 		],
 		[
 			'billing_profile',
 			'billing_profile',
 			'secrets',
-			'SELECT accounts.*, billing_profile.id AS "billing_profile.id" FROM accounts LEFT JOIN secrets AS billing_profile ON accounts.secret_id = billing_profile.id',
-			'SELECT accounts.*, billing_profile.id AS "billing_profile.id" FROM accounts LEFT JOIN secrets AS billing_profile ON accounts.secret_id = billing_profile.id',
+			'SELECT accounts.*, billing_profile.id AS "billing_profile.id", billing_profile.id AS __dbsp_presence_billing_profile FROM accounts LEFT JOIN secrets AS billing_profile ON accounts.secret_id = billing_profile.id',
+			'SELECT accounts.*, billing_profile.id AS "billing_profile.id", billing_profile.id AS __dbsp_presence_billing_profile FROM accounts LEFT JOIN secrets AS billing_profile ON accounts.secret_id = billing_profile.id',
 		],
 		[
 			'publicLink',
 			'public_link',
 			'billingProfile',
-			'SELECT accounts.*, public_link.id AS "publicLink.id" FROM accounts LEFT JOIN "billingProfile" AS public_link ON accounts.public_id = public_link.id',
-			'SELECT accounts.*, "publicLink".id AS "publicLink.id" FROM accounts LEFT JOIN "billingProfile" AS "publicLink" ON accounts.public_id = "publicLink".id',
+			'SELECT accounts.*, public_link.id AS "publicLink.id", public_link.id AS "__dbsp_presence_publicLink" FROM accounts LEFT JOIN "billingProfile" AS public_link ON accounts.public_id = public_link.id',
+			'SELECT accounts.*, "publicLink".id AS "publicLink.id", "publicLink".id AS "__dbsp_presence_publicLink" FROM accounts LEFT JOIN "billingProfile" AS "publicLink" ON accounts.public_id = "publicLink".id',
 		],
 	] as const) {
 		it(`resolves ${name} in planner and legacy synthesis`, () => {
@@ -243,7 +243,7 @@ for (const [strategy, expectedSql] of [
 	],
 	[
 		'lateral',
-		'SELECT users.*, posts_lat_0."authorId" AS "posts.authorId", posts_lat_0.rank AS "posts.rank", posts_lat_0.title AS "posts.title" FROM users LEFT JOIN LATERAL (SELECT posts_inner_0."authorId", posts_inner_0.rank, posts_inner_0.title FROM posts AS posts_inner_0 WHERE posts_inner_0."authorId" = users.id ORDER BY posts_inner_0.rank DESC LIMIT 1) AS posts_lat_0 ON true',
+		'SELECT users.*, posts_lat_0."authorId" AS "posts.authorId", posts_lat_0.rank AS "posts.rank", posts_lat_0.title AS "posts.title", posts_lat_0.__dbsp_presence_posts AS __dbsp_presence_posts FROM users LEFT JOIN LATERAL (SELECT posts_inner_0."authorId", posts_inner_0.rank, posts_inner_0.title, 1 AS __dbsp_presence_posts FROM posts AS posts_inner_0 WHERE posts_inner_0."authorId" = users.id ORDER BY posts_inner_0.rank DESC LIMIT 1) AS posts_lat_0 ON true',
 	],
 ] as const) {
 	it(`#911 uses authored unique ordering without a PK for ${strategy}`, () => {

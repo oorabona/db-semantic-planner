@@ -50,7 +50,7 @@ function buildJoin(
 	targetColumn: ColumnListInput,
 	ctx: CompilerContext,
 	joinType: 'inner' | 'left' = 'left',
-): Node {
+): { JoinExpr: JoinExpr } {
 	// Build the join condition: source.sourceColumn = target.targetColumn
 	const joinCondition = buildKeyCorrelation(
 		sourceAlias,
@@ -90,7 +90,7 @@ function buildJoin(
  * Adds a LEFT JOIN to fetch related records.
  * Best for: hasOne, belongsTo relationships (1:1 or N:1)
  *
- * Note: May cause row explosion for hasMany (1:N) relationships.
+ * To-many nested includes are refused before handler dispatch; NQL flat remains a rowset.
  */
 export const joinIncludeHandler: IncludeHandler = {
 	strategy: 'join',
@@ -205,6 +205,38 @@ export const joinIncludeHandler: IncludeHandler = {
 						),
 						queryLocal(column.outputLabel),
 					),
+				),
+			);
+		}
+		const presence = decision.payloadShape?.presence;
+		if (presence) {
+			if (!presence.physicalName) {
+				const expr = join.JoinExpr;
+				expr.rarg = {
+					RangeSubselect: {
+						subquery: {
+							SelectStmt: {
+								targetList: [
+									sqlResTarget(sqlColumnRefStar()),
+									sqlResTarget(
+										{ A_Const: { ival: { ival: 1 } } },
+										queryLocal(presence.outputLabel),
+									),
+								],
+								fromClause: [expr.rarg!],
+							},
+						},
+						alias: { aliasname: targetAlias },
+					},
+				};
+			}
+			targets.push(
+				sqlResTarget(
+					sqlColumnRef(
+						queryLocal(presence.physicalName ?? presence.outputLabel),
+						queryLocal(targetAlias),
+					),
+					queryLocal(presence.outputLabel),
 				),
 			);
 		}

@@ -4,7 +4,7 @@
 			"position": "include-left-where",
 			"kind": "between",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.period BETWEEN $2 AND $3)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (post.period BETWEEN $2 AND $3)",
 			"params": [31, "2026-01-01", "2026-02-01"],
 			"error": null
 		},
@@ -12,7 +12,7 @@
 			"position": "include-left-where",
 			"kind": "between",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.period BETWEEN $3 AND $4) OR posts.score = $5)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (post.period BETWEEN $3 AND $4) OR post.score = $5)",
 			"params": [31, 13, "2026-01-01", "2026-02-01", 17],
 			"error": null
 		},
@@ -20,7 +20,7 @@
 			"position": "include-left-where",
 			"kind": "range-overlaps",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.period && $2",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.period && $2",
 			"params": [31, "[2026-01-01,2026-02-01)"],
 			"error": null
 		},
@@ -28,7 +28,7 @@
 			"position": "include-left-where",
 			"kind": "range-overlaps",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.period && $2 AND posts.score = $3",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.period && $2 AND post.score = $3",
 			"params": [31, "[2026-01-01,2026-02-01)", 13],
 			"error": null
 		},
@@ -36,7 +36,7 @@
 			"position": "include-left-where",
 			"kind": "range-overlaps",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.period && $2 OR posts.score = $3)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND (post.period && $2 OR post.score = $3)",
 			"params": [31, "[2026-01-01,2026-02-01)", 13],
 			"error": null
 		},
@@ -44,7 +44,7 @@
 			"position": "include-left-where",
 			"kind": "range-overlaps",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.period && $2)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (post.period && $2)",
 			"params": [31, "[2026-01-01,2026-02-01)"],
 			"error": null
 		},
@@ -52,7 +52,7 @@
 			"position": "include-left-where",
 			"kind": "range-overlaps",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.period && $3) OR posts.score = $4)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (post.period && $3) OR post.score = $4)",
 			"params": [31, 13, "[2026-01-01,2026-02-01)", 17],
 			"error": null
 		},
@@ -60,7 +60,7 @@
 			"position": "include-left-where",
 			"kind": "range-contains",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.period @> $2",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.period @> $2",
 			"params": [31, "[2026-01-01,2026-02-01)"],
 			"error": null
 		},
@@ -68,7 +68,7 @@
 			"position": "include-left-where",
 			"kind": "range-contains",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.period @> $2 AND posts.score = $3",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.period @> $2 AND post.score = $3",
 			"params": [31, "[2026-01-01,2026-02-01)", 13],
 			"error": null
 		},
@@ -76,7 +76,7 @@
 			"position": "include-left-where",
 			"kind": "range-contains",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.period @> $2 OR posts.score = $3)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND (post.period @> $2 OR post.score = $3)",
 			"params": [31, "[2026-01-01,2026-02-01)", 13],
 			"error": null
 		},
@@ -84,7 +84,7 @@
 			"position": "include-left-where",
 			"kind": "range-contains",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.period @> $2)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (post.period @> $2)",
 			"params": [31, "[2026-01-01,2026-02-01)"],
 			"error": null
 		},
@@ -92,7 +92,7 @@
 			"position": "include-left-where",
 			"kind": "range-contains",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.period @> $3) OR posts.score = $4)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (post.period @> $3) OR post.score = $4)",
 			"params": [31, 13, "[2026-01-01,2026-02-01)", 17],
 			"error": null
 		},
@@ -100,7 +100,7 @@
 			"position": "include-left-where",
 			"kind": "range-contains-point",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.period @> $2",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.period @> $2",
 			"params": [31, "2026-01-15"],
 			"error": null
 		},
@@ -108,7 +108,7 @@
 			"position": "include-left-where",
 			"kind": "range-contains-point",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.period @> $2 AND posts.score = $3",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.period @> $2 AND post.score = $3",
 			"params": [31, "2026-01-15", 13],
 			"error": null
 		},
@@ -116,7 +116,7 @@
 			"position": "include-left-where",
 			"kind": "range-contains-point",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.period @> $2 OR posts.score = $3)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND (post.period @> $2 OR post.score = $3)",
 			"params": [31, "2026-01-15", 13],
 			"error": null
 		},
@@ -124,7 +124,7 @@
 			"position": "include-left-where",
 			"kind": "range-contains-point",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.period @> $2)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (post.period @> $2)",
 			"params": [31, "2026-01-15"],
 			"error": null
 		},
@@ -132,7 +132,7 @@
 			"position": "include-left-where",
 			"kind": "range-contains-point",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.period @> $3) OR posts.score = $4)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (post.period @> $3) OR post.score = $4)",
 			"params": [31, 13, "2026-01-15", 17],
 			"error": null
 		},
@@ -140,7 +140,7 @@
 			"position": "include-left-where",
 			"kind": "range-containedBy",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.period <@ $2",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.period <@ $2",
 			"params": [31, "[2026-01-01,2026-02-01)"],
 			"error": null
 		},
@@ -148,7 +148,7 @@
 			"position": "include-left-where",
 			"kind": "range-containedBy",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.period <@ $2 AND posts.score = $3",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.period <@ $2 AND post.score = $3",
 			"params": [31, "[2026-01-01,2026-02-01)", 13],
 			"error": null
 		},
@@ -156,7 +156,7 @@
 			"position": "include-left-where",
 			"kind": "range-containedBy",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.period <@ $2 OR posts.score = $3)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND (post.period <@ $2 OR post.score = $3)",
 			"params": [31, "[2026-01-01,2026-02-01)", 13],
 			"error": null
 		},
@@ -164,7 +164,7 @@
 			"position": "include-left-where",
 			"kind": "range-containedBy",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.period <@ $2)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (post.period <@ $2)",
 			"params": [31, "[2026-01-01,2026-02-01)"],
 			"error": null
 		},
@@ -172,7 +172,7 @@
 			"position": "include-left-where",
 			"kind": "range-containedBy",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.period <@ $3) OR posts.score = $4)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (post.period <@ $3) OR post.score = $4)",
 			"params": [31, 13, "[2026-01-01,2026-02-01)", 17],
 			"error": null
 		},
@@ -180,7 +180,7 @@
 			"position": "include-left-where",
 			"kind": "jsonContains",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.data @> $2",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.data @> $2",
 			"params": [
 				31,
 				{
@@ -193,7 +193,7 @@
 			"position": "include-left-where",
 			"kind": "jsonContains",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.data @> $2 AND posts.score = $3",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.data @> $2 AND post.score = $3",
 			"params": [
 				31,
 				{
@@ -207,7 +207,7 @@
 			"position": "include-left-where",
 			"kind": "jsonContains",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.data @> $2 OR posts.score = $3)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND (post.data @> $2 OR post.score = $3)",
 			"params": [
 				31,
 				{
@@ -221,7 +221,7 @@
 			"position": "include-left-where",
 			"kind": "jsonContains",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.data @> $2)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (post.data @> $2)",
 			"params": [
 				31,
 				{
@@ -234,7 +234,7 @@
 			"position": "include-left-where",
 			"kind": "jsonContains",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.data @> $3) OR posts.score = $4)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (post.data @> $3) OR post.score = $4)",
 			"params": [
 				31,
 				13,
@@ -249,7 +249,7 @@
 			"position": "include-left-where",
 			"kind": "jsonContainedBy",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.data <@ $2",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.data <@ $2",
 			"params": [
 				31,
 				{
@@ -262,7 +262,7 @@
 			"position": "include-left-where",
 			"kind": "jsonContainedBy",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.data <@ $2 AND posts.score = $3",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.data <@ $2 AND post.score = $3",
 			"params": [
 				31,
 				{
@@ -276,7 +276,7 @@
 			"position": "include-left-where",
 			"kind": "jsonContainedBy",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.data <@ $2 OR posts.score = $3)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND (post.data <@ $2 OR post.score = $3)",
 			"params": [
 				31,
 				{
@@ -290,7 +290,7 @@
 			"position": "include-left-where",
 			"kind": "jsonContainedBy",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.data <@ $2)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (post.data <@ $2)",
 			"params": [
 				31,
 				{
@@ -303,7 +303,7 @@
 			"position": "include-left-where",
 			"kind": "jsonContainedBy",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.data <@ $3) OR posts.score = $4)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (post.data <@ $3) OR post.score = $4)",
 			"params": [
 				31,
 				13,
@@ -318,7 +318,7 @@
 			"position": "include-left-where",
 			"kind": "jsonExists",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.data ? $2",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.data ? $2",
 			"params": [31, "active"],
 			"error": null
 		},
@@ -326,7 +326,7 @@
 			"position": "include-left-where",
 			"kind": "jsonExists",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.data ? $2 AND posts.score = $3",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.data ? $2 AND post.score = $3",
 			"params": [31, "active", 13],
 			"error": null
 		},
@@ -334,7 +334,7 @@
 			"position": "include-left-where",
 			"kind": "jsonExists",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.data ? $2 OR posts.score = $3)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND (post.data ? $2 OR post.score = $3)",
 			"params": [31, "active", 13],
 			"error": null
 		},
@@ -342,7 +342,7 @@
 			"position": "include-left-where",
 			"kind": "jsonExists",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.data ? $2)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (post.data ? $2)",
 			"params": [31, "active"],
 			"error": null
 		},
@@ -350,7 +350,7 @@
 			"position": "include-left-where",
 			"kind": "jsonExists",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.data ? $3) OR posts.score = $4)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (post.data ? $3) OR post.score = $4)",
 			"params": [31, 13, "active", 17],
 			"error": null
 		},
@@ -358,7 +358,7 @@
 			"position": "include-left-where",
 			"kind": "inSubquery",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.id = ANY (SELECT posts_subq_1.id FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.id = ANY (SELECT posts_subq_1.id FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2)",
 			"params": [31, 53],
 			"error": null
 		},
@@ -366,7 +366,7 @@
 			"position": "include-left-where",
 			"kind": "inSubquery",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.id = ANY (SELECT posts_subq_1.id FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2) AND posts.score = $3",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.id = ANY (SELECT posts_subq_1.id FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2) AND post.score = $3",
 			"params": [31, 53, 13],
 			"error": null
 		},
@@ -374,7 +374,7 @@
 			"position": "include-left-where",
 			"kind": "inSubquery",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.id = ANY (SELECT posts_subq_1.id FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2) OR posts.score = $3)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND (post.id = ANY (SELECT posts_subq_1.id FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2) OR post.score = $3)",
 			"params": [31, 53, 13],
 			"error": null
 		},
@@ -382,7 +382,7 @@
 			"position": "include-left-where",
 			"kind": "inSubquery",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.id = ANY (SELECT posts_subq_1.id FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2))",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (post.id = ANY (SELECT posts_subq_1.id FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2))",
 			"params": [31, 53],
 			"error": null
 		},
@@ -390,7 +390,7 @@
 			"position": "include-left-where",
 			"kind": "inSubquery",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.id = ANY (SELECT posts_subq_1.id FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $3)) OR posts.score = $4)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (post.id = ANY (SELECT posts_subq_1.id FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $3)) OR post.score = $4)",
 			"params": [31, 13, 53, 17],
 			"error": null
 		},
@@ -398,7 +398,7 @@
 			"position": "include-left-where",
 			"kind": "scalar-subquery",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2)",
 			"params": [31, 59],
 			"error": null
 		},
@@ -406,7 +406,7 @@
 			"position": "include-left-where",
 			"kind": "scalar-subquery",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2) AND posts.score = $3",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2) AND post.score = $3",
 			"params": [31, 59, 13],
 			"error": null
 		},
@@ -414,7 +414,7 @@
 			"position": "include-left-where",
 			"kind": "scalar-subquery",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2) OR posts.score = $3)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND (post.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2) OR post.score = $3)",
 			"params": [31, 59, 13],
 			"error": null
 		},
@@ -422,7 +422,7 @@
 			"position": "include-left-where",
 			"kind": "scalar-subquery",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2))",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (post.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2))",
 			"params": [31, 59],
 			"error": null
 		},
@@ -430,7 +430,7 @@
 			"position": "include-left-where",
 			"kind": "scalar-subquery",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $3)) OR posts.score = $4)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (post.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $3)) OR post.score = $4)",
 			"params": [31, 13, 59, 17],
 			"error": null
 		},
@@ -438,7 +438,7 @@
 			"position": "include-left-where",
 			"kind": "rawExists",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $2)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $2)",
 			"params": [31, 53],
 			"error": null
 		},
@@ -446,7 +446,7 @@
 			"position": "include-left-where",
 			"kind": "rawExists",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $2) AND posts.score = $3",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $2) AND post.score = $3",
 			"params": [31, 53, 13],
 			"error": null
 		},
@@ -454,7 +454,7 @@
 			"position": "include-left-where",
 			"kind": "rawExists",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $2) OR posts.score = $3)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $2) OR post.score = $3)",
 			"params": [31, 53, 13],
 			"error": null
 		},
@@ -462,7 +462,7 @@
 			"position": "include-left-where",
 			"kind": "rawExists",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $2))",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $2))",
 			"params": [31, 53],
 			"error": null
 		},
@@ -470,7 +470,7 @@
 			"position": "include-left-where",
 			"kind": "rawExists",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $3)) OR posts.score = $4)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $3)) OR post.score = $4)",
 			"params": [31, 13, 53, 17],
 			"error": null
 		},
@@ -478,7 +478,7 @@
 			"position": "include-left-where",
 			"kind": "rawExists-like-escape",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.name LIKE $2 ESCAPE $3)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.name LIKE $2 ESCAPE $3)",
 			"params": [31, "c!_%", "!"],
 			"error": null
 		},
@@ -486,7 +486,7 @@
 			"position": "include-left-where",
 			"kind": "rawExists-like-escape",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.name LIKE $2 ESCAPE $3) AND posts.score = $4",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.name LIKE $2 ESCAPE $3) AND post.score = $4",
 			"params": [31, "c!_%", "!", 13],
 			"error": null
 		},
@@ -494,7 +494,7 @@
 			"position": "include-left-where",
 			"kind": "rawExists-like-escape",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.name LIKE $2 ESCAPE $3) OR posts.score = $4)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.name LIKE $2 ESCAPE $3) OR post.score = $4)",
 			"params": [31, "c!_%", "!", 13],
 			"error": null
 		},
@@ -502,7 +502,7 @@
 			"position": "include-left-where",
 			"kind": "rawExists-like-escape",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.name LIKE $2 ESCAPE $3))",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.name LIKE $2 ESCAPE $3))",
 			"params": [31, "c!_%", "!"],
 			"error": null
 		},
@@ -510,7 +510,7 @@
 			"position": "include-left-where",
 			"kind": "rawExists-like-escape",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.name LIKE $3 ESCAPE $4)) OR posts.score = $5)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.name LIKE $3 ESCAPE $4)) OR post.score = $5)",
 			"params": [31, 13, "c!_%", "!", 17],
 			"error": null
 		},
@@ -518,7 +518,7 @@
 			"position": "include-left-where",
 			"kind": "rawExists-range",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $2)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $2)",
 			"params": [31, "[2026-01-01,2026-02-01)"],
 			"error": null
 		},
@@ -526,7 +526,7 @@
 			"position": "include-left-where",
 			"kind": "rawExists-range",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $2) AND posts.score = $3",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $2) AND post.score = $3",
 			"params": [31, "[2026-01-01,2026-02-01)", 13],
 			"error": null
 		},
@@ -534,7 +534,7 @@
 			"position": "include-left-where",
 			"kind": "rawExists-range",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $2) OR posts.score = $3)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $2) OR post.score = $3)",
 			"params": [31, "[2026-01-01,2026-02-01)", 13],
 			"error": null
 		},
@@ -542,7 +542,7 @@
 			"position": "include-left-where",
 			"kind": "rawExists-range",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $2))",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $2))",
 			"params": [31, "[2026-01-01,2026-02-01)"],
 			"error": null
 		},
@@ -550,7 +550,7 @@
 			"position": "include-left-where",
 			"kind": "rawExists-range",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $3)) OR posts.score = $4)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $3)) OR post.score = $4)",
 			"params": [31, 13, "[2026-01-01,2026-02-01)", 17],
 			"error": null
 		},
@@ -558,7 +558,7 @@
 			"position": "include-left-where",
 			"kind": "inSubquery-order-limit",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.id = ANY (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2 ORDER BY posts_subq_1.score DESC LIMIT 1)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.id = ANY (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2 ORDER BY posts_subq_1.score DESC LIMIT 1)",
 			"params": [31, 59],
 			"error": null
 		},
@@ -566,7 +566,7 @@
 			"position": "include-left-where",
 			"kind": "inSubquery-order-limit",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.id = ANY (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2 ORDER BY posts_subq_1.score DESC LIMIT 1) AND posts.score = $3",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.id = ANY (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2 ORDER BY posts_subq_1.score DESC LIMIT 1) AND post.score = $3",
 			"params": [31, 59, 13],
 			"error": null
 		},
@@ -574,7 +574,7 @@
 			"position": "include-left-where",
 			"kind": "inSubquery-order-limit",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.id = ANY (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2 ORDER BY posts_subq_1.score DESC LIMIT 1) OR posts.score = $3)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND (post.id = ANY (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2 ORDER BY posts_subq_1.score DESC LIMIT 1) OR post.score = $3)",
 			"params": [31, 59, 13],
 			"error": null
 		},
@@ -582,7 +582,7 @@
 			"position": "include-left-where",
 			"kind": "inSubquery-order-limit",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.id = ANY (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2 ORDER BY posts_subq_1.score DESC LIMIT 1))",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (post.id = ANY (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2 ORDER BY posts_subq_1.score DESC LIMIT 1))",
 			"params": [31, 59],
 			"error": null
 		},
@@ -590,7 +590,7 @@
 			"position": "include-left-where",
 			"kind": "inSubquery-order-limit",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.id = ANY (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $3 ORDER BY posts_subq_1.score DESC LIMIT 1)) OR posts.score = $4)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (post.id = ANY (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $3 ORDER BY posts_subq_1.score DESC LIMIT 1)) OR post.score = $4)",
 			"params": [31, 13, 59, 17],
 			"error": null
 		},
@@ -638,7 +638,7 @@
 			"position": "include-left-where",
 			"kind": "scalar-subquery-order-limit",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2 ORDER BY posts_subq_1.score DESC LIMIT 1)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2 ORDER BY posts_subq_1.score DESC LIMIT 1)",
 			"params": [31, 59],
 			"error": null
 		},
@@ -646,7 +646,7 @@
 			"position": "include-left-where",
 			"kind": "scalar-subquery-order-limit",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2 ORDER BY posts_subq_1.score DESC LIMIT 1) AND posts.score = $3",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2 ORDER BY posts_subq_1.score DESC LIMIT 1) AND post.score = $3",
 			"params": [31, 59, 13],
 			"error": null
 		},
@@ -654,7 +654,7 @@
 			"position": "include-left-where",
 			"kind": "scalar-subquery-order-limit",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (posts.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2 ORDER BY posts_subq_1.score DESC LIMIT 1) OR posts.score = $3)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND (post.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2 ORDER BY posts_subq_1.score DESC LIMIT 1) OR post.score = $3)",
 			"params": [31, 59, 13],
 			"error": null
 		},
@@ -662,7 +662,7 @@
 			"position": "include-left-where",
 			"kind": "scalar-subquery-order-limit",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (posts.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2 ORDER BY posts_subq_1.score DESC LIMIT 1))",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (post.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $2 ORDER BY posts_subq_1.score DESC LIMIT 1))",
 			"params": [31, 59],
 			"error": null
 		},
@@ -670,7 +670,7 @@
 			"position": "include-left-where",
 			"kind": "scalar-subquery-order-limit",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (posts.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $3 ORDER BY posts_subq_1.score DESC LIMIT 1)) OR posts.score = $4)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (post.score = (SELECT posts_subq_1.score FROM posts AS posts_subq_1 WHERE posts_subq_1.score = $3 ORDER BY posts_subq_1.score DESC LIMIT 1)) OR post.score = $4)",
 			"params": [31, 13, 59, 17],
 			"error": null
 		},
@@ -720,7 +720,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -728,7 +728,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -736,7 +736,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -744,7 +744,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -752,7 +752,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -760,7 +760,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -768,7 +768,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -776,7 +776,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -784,7 +784,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -792,7 +792,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -800,7 +800,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -808,7 +808,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -816,7 +816,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -824,7 +824,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -832,7 +832,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -840,7 +840,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -848,7 +848,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -856,7 +856,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		}
 	]
 }

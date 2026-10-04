@@ -89,9 +89,22 @@ for (const [name, helper] of [
 				.where(helper(orm.tables.users.posts, () => condition))
 				.dump(),
 		);
-add('include join', () =>
-	orm.select('users').include('posts', { join: 'inner', where: or() }).dump(),
-);
+add('include join', () => {
+	const toOne = schema({
+		users: { id: { type: 'integer', primaryKey: true }, tenantId: 'integer' },
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			authorId: ref('users', { as: 'author', inverse: 'posts', unique: true }),
+		},
+	});
+	return createOrm({
+		schema: toOne,
+		adapter: createPgCompileOnlyAdapter({ model: toOne.model }),
+	})
+		.select('users')
+		.include('posts', { join: 'inner', where: or() })
+		.dump();
+});
 add('IN inner where', () =>
 	orm
 		.select('users')
@@ -264,7 +277,7 @@ const expected: Record<string, { sql: string; params: readonly unknown[] }> = {
 		params: [],
 	},
 	'include join': {
-		sql: 'SELECT users.*, posts.id AS "posts.id" FROM users JOIN posts AS posts ON users.id = posts."authorId" WHERE false',
+		sql: 'SELECT users.*, posts.id AS "posts.id", posts."authorId" AS "posts.authorId", posts.id AS __dbsp_presence_posts FROM users JOIN posts AS posts ON users.id = posts."authorId" WHERE false',
 		params: [],
 	},
 	'IN inner where': {

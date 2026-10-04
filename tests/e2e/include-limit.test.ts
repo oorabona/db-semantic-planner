@@ -146,7 +146,7 @@ it('lateral orders the top row independently per parent', async () => {
 		})
 		.dump();
 	expect(dump.sql).toBe(
-		'SELECT authors.name, posts_lat_0.id AS "posts.id", posts_lat_0.title AS "posts.title", posts_lat_0.content AS "posts.content", posts_lat_0.author_id AS "posts.authorId", posts_lat_0.published AS "posts.published", posts_lat_0.created_at AS "posts.createdAt", posts_lat_0.rank AS "posts.rank" FROM include_limit_e2e.authors LEFT JOIN LATERAL (SELECT posts_inner_0.id, posts_inner_0.title, posts_inner_0.content, posts_inner_0.author_id, posts_inner_0.published, posts_inner_0.created_at, posts_inner_0.rank FROM include_limit_e2e.posts AS posts_inner_0 WHERE posts_inner_0.author_id = authors.id ORDER BY posts_inner_0.rank DESC, posts_inner_0.id ASC NULLS LAST LIMIT 1) AS posts_lat_0 ON true ORDER BY authors.id ASC',
+		'SELECT authors.name, posts_lat_0.id AS "posts.id", posts_lat_0.title AS "posts.title", posts_lat_0.content AS "posts.content", posts_lat_0.author_id AS "posts.authorId", posts_lat_0.published AS "posts.published", posts_lat_0.created_at AS "posts.createdAt", posts_lat_0.rank AS "posts.rank", posts_lat_0.__dbsp_presence_posts AS __dbsp_presence_posts FROM include_limit_e2e.authors LEFT JOIN LATERAL (SELECT posts_inner_0.id, posts_inner_0.title, posts_inner_0.content, posts_inner_0.author_id, posts_inner_0.published, posts_inner_0.created_at, posts_inner_0.rank, posts_inner_0.id AS __dbsp_presence_posts FROM include_limit_e2e.posts AS posts_inner_0 WHERE posts_inner_0.author_id = authors.id ORDER BY posts_inner_0.rank DESC, posts_inner_0.id ASC NULLS LAST LIMIT 1) AS posts_lat_0 ON true ORDER BY authors.id ASC',
 	);
 	const pool = await getTestPool();
 	const { rows } = await pool.query(dump.sql, [...dump.params]);

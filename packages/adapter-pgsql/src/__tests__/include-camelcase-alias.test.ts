@@ -8,6 +8,7 @@
  * and resolves the alias via snakeToCamel(rel.name) === alias as a fallback.
  */
 
+import { schema } from '@dbsp/core';
 import type { ModelIR, PlanReport } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import type { AdapterCompilerDeps } from '../adapter-compiler-deps.js';
@@ -50,7 +51,16 @@ const mockModel = {
 		return [];
 	},
 	getRelationsTo: () => [],
-	getTable: () => undefined,
+	getTable: (name: string) =>
+		schema({
+			variable_defs: {
+				id: { type: 'integer', primaryKey: true },
+				enclosing_symbol_id: 'integer',
+				file_id: 'integer',
+			},
+			symbols: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+			files: { id: { type: 'integer', primaryKey: true }, path: 'text' },
+		}).model.getTable(name),
 	relations: [],
 } as unknown as ModelIR;
 

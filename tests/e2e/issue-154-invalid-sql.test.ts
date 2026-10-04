@@ -40,7 +40,7 @@ describe('FIX-154 invalid SQL regressions', () => {
 		const query = orm
 			.withSchema(SCHEMA)
 			.select('definitions')
-			.include('uses', { join: 'left' })
+			.join('uses', { type: 'left' })
 			.columns([
 				'id',
 				fn('array_agg', exprRef('uses.id'))
@@ -87,20 +87,20 @@ describe('FIX-154 invalid SQL regressions', () => {
 		const joinCount = (sql.match(/\bJOIN\b/g) ?? []).length;
 		expect(joinCount).toBe(3);
 		expect(sql).toBe(
-			'SELECT file.path AS "definition.file.def_file", file_1.path AS "file.use_file" FROM issue_154_e2e.uses JOIN issue_154_e2e.definitions AS definition ON uses.def_id = definition.id JOIN issue_154_e2e.files AS file ON definition.file_id = file.id JOIN issue_154_e2e.files AS file_1 ON uses.file_id = file_1.id ORDER BY uses.id ASC',
+			'SELECT definition.id AS "definition.id", definition.file_id AS "definition.fileId", definition.id AS __dbsp_presence_definition, file.path AS "definition.file.def_file", file.id AS "__dbsp_presence_definition.file", file_1.path AS "file.use_file", file_1.id AS __dbsp_presence_file FROM issue_154_e2e.uses JOIN issue_154_e2e.definitions AS definition ON uses.def_id = definition.id JOIN issue_154_e2e.files AS file ON definition.file_id = file.id JOIN issue_154_e2e.files AS file_1 ON uses.file_id = file_1.id ORDER BY uses.id ASC',
 		);
 
 		const rows = (await query.execute()) as unknown as Array<{
-			definition: { file: { def_file: string } };
+			definition: { id: number; fileId: number; file: { def_file: string } };
 			file: { use_file: string };
 		}>;
 		expect(rows).toEqual([
 			{
-				definition: { file: { def_file: '/def.ts' } },
+				definition: { id: 100, fileId: 10, file: { def_file: '/def.ts' } },
 				file: { use_file: '/use.ts' },
 			},
 			{
-				definition: { file: { def_file: '/def.ts' } },
+				definition: { id: 100, fileId: 10, file: { def_file: '/def.ts' } },
 				file: { use_file: '/use.ts' },
 			},
 		]);
@@ -114,7 +114,7 @@ describe('FIX-154 invalid SQL regressions', () => {
 			.select('uses')
 			.include('definition', {
 				join: 'inner',
-				select: { type: 'fields', fields: ['id'] },
+				select: { type: 'all' },
 			})
 			.include('definition.file', {
 				join: 'inner',
@@ -135,19 +135,19 @@ describe('FIX-154 invalid SQL regressions', () => {
 
 		const rows = (await query.execute()) as unknown as Array<{
 			id: number;
-			definition: { id: number; file: { id: number; path: string } };
-			file: { id: number; path: string };
+			definition: { id: number; fileId: number; file: { path: string } };
+			file: { path: string };
 		}>;
 		expect(rows).toEqual([
 			{
 				id: 1000,
-				definition: { id: 100, file: { id: 10, path: '/def.ts' } },
-				file: { id: 20, path: '/use.ts' },
+				definition: { id: 100, fileId: 10, file: { path: '/def.ts' } },
+				file: { path: '/use.ts' },
 			},
 			{
 				id: 1001,
-				definition: { id: 100, file: { id: 10, path: '/def.ts' } },
-				file: { id: 20, path: '/use.ts' },
+				definition: { id: 100, fileId: 10, file: { path: '/def.ts' } },
+				file: { path: '/use.ts' },
 			},
 		]);
 	});
@@ -172,7 +172,8 @@ describe('FIX-154 invalid SQL regressions', () => {
 			altFileId: number;
 			definition: {
 				id: number;
-				file: { id: number; path: string };
+				fileId: number;
+				file: { path: string };
 			};
 		}>;
 		expect(rows).toEqual([
@@ -183,7 +184,8 @@ describe('FIX-154 invalid SQL regressions', () => {
 				altFileId: 30,
 				definition: {
 					id: 100,
-					file: { id: 10, path: '/def.ts' },
+					fileId: 10,
+					file: { path: '/def.ts' },
 				},
 			},
 			{
@@ -193,7 +195,8 @@ describe('FIX-154 invalid SQL regressions', () => {
 				altFileId: 30,
 				definition: {
 					id: 100,
-					file: { id: 10, path: '/def.ts' },
+					fileId: 10,
+					file: { path: '/def.ts' },
 				},
 			},
 		]);

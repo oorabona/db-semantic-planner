@@ -1854,14 +1854,12 @@ function toJoinIncludeDecision(
 		  }
 		| undefined;
 
-	let columns: string[] = [defaultPk];
-	if (includeIntent?.select?.type === 'fields') {
-		const fields = includeSelectedColumns(
-			includeIntent.select,
-			relationPath,
-		)!.filter((f) => f !== defaultPk);
-		columns = [defaultPk, ...fields];
-	}
+	const columns = joinPayloadColumns(
+		includeIntent?.select,
+		relationPath,
+		plan,
+		defaultPk,
+	);
 
 	const foreignKey =
 		deriveForeignKey(context, deriveFk, defaultPk) ?? defaultPk;
@@ -1899,12 +1897,15 @@ function toJoinIncludeDecision(
 		choice: 'join',
 		relationName,
 		relationPath,
+		...(intentPath && { intentPath }),
 		targetTable: context.target,
 		...(context.sourceTable && { sourceTable: context.sourceTable }),
 		...(relationType && { relationType }),
 		foreignKey,
 		parentKey,
 		columns,
+		...(includeIntent?.select?.type === 'fields' &&
+			columns.length === 0 && { emptyProjection: true }),
 		...(joinType && { joinType }),
 		...(conditions && { conditions }),
 	};
@@ -1972,14 +1973,8 @@ export function synthesizeMissingJoinDecisions(
 						),
 					];
 
-		// Build column list (PK always included for NULL-detection)
-		let columns: string[] = [defaultPk];
-		if (inc.select?.type === 'fields') {
-			const extraFields = includeSelectedColumns(inc.select, alias)!.filter(
-				(f) => f !== defaultPk,
-			);
-			columns = [defaultPk, ...extraFields];
-		}
+		// Public selection is independent of the private presence marker.
+		const columns = joinPayloadColumns(inc.select, alias, plan, defaultPk);
 
 		// Build WHERE conditions from include intent
 		let conditions: PlanDecision[] | undefined;
@@ -2008,6 +2003,8 @@ export function synthesizeMissingJoinDecisions(
 						? toColumnList(rel.sourceKey)
 						: [defaultPk],
 			columns,
+			...(inc.select?.type === 'fields' &&
+				columns.length === 0 && { emptyProjection: true }),
 			joinType: inc.join,
 			...(conditions && { conditions }),
 		});
@@ -2199,6 +2196,37 @@ export function extractJsonAggDecisions(
 	return rootDecisions.map(attachChildren);
 }
 
+/** NQL flat retains its existing rowset projection; nested includes own their payload. */
+function joinPayloadColumns(
+	select: SelectIntent | undefined,
+	path: string,
+	plan: PlanReport,
+	defaultPk: string,
+): readonly string[] {
+	const isFlat = (
+		includes: readonly import('@dbsp/types').IncludeIntent[],
+		parent = '',
+		ancestorFlat = false,
+	): boolean =>
+		includes.some((include) => {
+			const current = parent
+				? `${parent}.${include.relation}`
+				: include.relation;
+			const flat = ancestorFlat || include.strategy === 'flat';
+			return (
+				(current === path && flat) ||
+				isFlat(include.include ?? [], current, flat)
+			);
+		});
+	const selected = includeSelectedColumns(select, path);
+	if (isFlat(plan.intent?.include ?? []))
+		return [
+			defaultPk,
+			...(selected ?? []).filter((column) => column !== defaultPk),
+		];
+	return selected ?? ['*'];
+}
+
 /**
  * Extract LEFT JOIN include decisions from include-strategy plan decisions.
  */
@@ -2236,15 +2264,13 @@ export function extractLeftJoinIncludeDecisions(
 		);
 
 		// Extract columns from include intent's select
-		// PK is always included for NULL-detection (missing relation)
-		let columns: string[] = [defaultPk];
-		if (includeIntent?.select?.type === 'fields') {
-			const fields = includeSelectedColumns(
-				includeIntent.select,
-				relationName,
-			)!.filter((f) => f !== defaultPk);
-			columns = [defaultPk, ...fields];
-		}
+		// Public selection is independent of presence detection.
+		const columns = joinPayloadColumns(
+			includeIntent?.select,
+			relationName,
+			plan,
+			defaultPk,
+		);
 
 		const foreignKey =
 			deriveForeignKey(context, deriveFk, defaultPk) ?? defaultPk;
@@ -2263,6 +2289,8 @@ export function extractLeftJoinIncludeDecisions(
 			foreignKey,
 			parentKey,
 			columns,
+			...(includeIntent?.select?.type === 'fields' &&
+				columns.length === 0 && { emptyProjection: true }),
 		});
 	}
 
