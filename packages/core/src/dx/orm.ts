@@ -1,7 +1,6 @@
 import type {
 	FeatureBehaviorConfig,
 	UnsupportedFeatureBehavior,
-	WhereIntent,
 } from '@dbsp/types';
 import type { Adapter } from '../adapter.js';
 import type { ModelIR } from '../model-ir.js';
@@ -71,9 +70,6 @@ export interface SimplifiedOrmOptions<
 	 * or `createPgCompileOnlyAdapter()` from adapter-pgsql.
 	 */
 	readonly adapter: Adapter<unknown>;
-
-	/** Default filters, combined with schema filters when both are supplied. */
-	readonly defaultFilters?: DefaultFilters;
 
 	/**
 	 * Enable strict mode validation (default: false).
@@ -244,7 +240,6 @@ export function createOrm<T extends SchemaDefinition>(
 		onObserverError,
 		unsupportedFeatures,
 		suppressDxWarnings,
-		defaultFilters: configuredDefaultFilters,
 	} = options;
 
 	// Derive the internal, general-shaped suppress list from the DX-only
@@ -290,27 +285,6 @@ export function createOrm<T extends SchemaDefinition>(
 				'or model (ModelIR). For database introspection, use getSchemaFromDb() ' +
 				'from the adapter (e.g. adapter.introspect()).',
 		);
-	}
-
-	if (configuredDefaultFilters) {
-		const combined: Record<string, WhereIntent> = Object.assign(
-			Object.create(null),
-			defaultFilters,
-		);
-		for (const [table, filter] of Object.entries(
-			Object.assign(
-				Object.create(null),
-				configuredDefaultFilters,
-			) as DefaultFilters,
-		)) {
-			if (!model.getTable(table))
-				throw new Error(`Default filter for non-existent table '${table}'.`);
-			const schemaFilter = combined[table];
-			combined[table] = schemaFilter
-				? { kind: 'and', conditions: [schemaFilter, filter] }
-				: filter;
-		}
-		defaultFilters = combined;
 	}
 
 	// CAPS-003: Feature negotiation — cross-check ModelIR against adapter capabilities

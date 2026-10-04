@@ -742,23 +742,55 @@ it('preserves different recursive public payloads using via for the same relatio
 		'SELECT categories.*, COALESCE((WITH RECURSIVE children_walk AS (SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n."parentId" AS text) AS __parent_text FROM categories AS __n WHERE __n."parentId" = categories.id AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", children_walk.__depth + 1 AS __depth, children_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n."parentId" AS text) AS __parent_text FROM children_walk JOIN categories AS __n ON __n."parentId" = children_walk.id WHERE children_walk.__depth < 100 AND __n.id <> ALL (children_walk.__visited)) SELECT json_agg(json_build_object(\'id\', children_walk.id, \'name\', children_walk.name, \'parentId\', children_walk."parentId", \'__dbsp_node\', children_walk.__node_text, \'__dbsp_parent\', children_walk.__parent_text, \'__dbsp_depth\', children_walk.__depth) ORDER BY children_walk.__depth, children_walk.id) FROM children_walk), \'[]\'::json) AS tree_json, COALESCE((WITH RECURSIVE children_walk AS (SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n."parentId" AS text) AS __parent_text FROM categories AS __n WHERE __n."parentId" = categories.id AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.name AS name, __n."parentId" AS "parentId", children_walk.__depth + 1 AS __depth, children_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n."parentId" AS text) AS __parent_text FROM children_walk JOIN categories AS __n ON __n."parentId" = children_walk.id WHERE children_walk.__depth < 100 AND __n.id <> ALL (children_walk.__visited)) SELECT json_agg(json_build_object(\'id\', children_walk.id, \'name\', children_walk.name, \'parentId\', children_walk."parentId", \'__dbsp_node\', children_walk.__node_text, \'__dbsp_parent\', children_walk.__parent_text, \'__dbsp_depth\', children_walk.__depth) ORDER BY children_walk.__depth, children_walk.id) FROM children_walk), \'[]\'::json) AS list_json FROM categories',
 	);
 });
-it('refuses traversed filters supplied directly to createOrm', () => {
-	const filtered = createOrm({
-		schema: db,
-		adapter,
-		defaultFilters: { categories: eq('id', 1) },
-	});
-	expect(() =>
-		filtered
-			.select('categories')
-			.include('children', { recursive: true, direction: 'descendants' })
-			.plan(),
-	).toThrow(
-		'Recursive include with applicable defaultFilters on traversed nodes is not yet supported (#906).',
-	);
-	expect(() =>
-		filtered.nql`categories | select managementChain.*`.dump(),
-	).toThrow(
-		'Recursive include with applicable defaultFilters on traversed nodes is not yet supported (#906).',
-	);
+describe('#877 hierarchy shortcut execution', () => {
+	for (const [parent, children] of [
+		['parent', 'children'],
+		['manager', 'reports'],
+	] as const) {
+		for (const direction of ['ancestors', 'descendants'] as const) {
+			it(`reads the requested ${direction === 'ancestors' ? parent : children} key for ${direction}`, async () => {
+				const db = schema({
+					nodes: {
+						id: { type: 'integer', primaryKey: true },
+						parentId: ref('nodes', {
+							nullable: true,
+							as: parent,
+							inverse: children,
+							roles: { parent, children },
+						}),
+					},
+				});
+				const adapter = createPgCompileOnlyAdapter({ model: db.model });
+				const fake = Object.create(adapter) as typeof adapter;
+				const key = direction === 'ancestors' ? parent : children;
+				Object.defineProperty(fake, 'connectionAvailability', {
+					value: { status: 'available' },
+				});
+				Object.defineProperty(fake, 'execute', {
+					value: async () => [
+						{
+							id: 1,
+							[`${key}_json`]: [
+								{
+									id: 2,
+									parentId: direction === 'ancestors' ? null : 1,
+									__dbsp_node: '2',
+									__dbsp_parent: direction === 'ancestors' ? null : '1',
+									__dbsp_depth: 1,
+								},
+							],
+						},
+					],
+				});
+				const orm = createOrm({ schema: db, adapter: fake });
+				const rows =
+					direction === 'ancestors'
+						? await orm.listAncestors('nodes', 1, { parentId: 'parentId' })
+						: await orm.listDescendants('nodes', 1, { parentId: 'parentId' });
+				expect(rows).toEqual([
+					{ id: 2, parentId: direction === 'ancestors' ? null : 1, depth: 1 },
+				]);
+			});
+		}
+	}
 });

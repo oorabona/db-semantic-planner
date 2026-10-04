@@ -146,22 +146,23 @@ describe('#877 recursive include boundaries', () => {
 				.dump(),
 		).not.toThrow();
 	});
-	it('plans a constructor default filter plans without inherited values', () => {
-		const db = schema({
-			constructor: { id: { type: 'integer', primaryKey: true } },
-		});
+	it('plans a schema constructor default filter without inherited values', () => {
+		const db = schema(
+			{ constructor: { id: { type: 'integer', primaryKey: true } } },
+			undefined,
+			{ defaultFilters: { constructor: eq('id', 1) } },
+		);
 		const adapter = createPgCompileOnlyAdapter({ model: db.model });
 		const orm = createOrm({
 			schema: db,
 			adapter,
-			defaultFilters: { constructor: eq('id', 1) },
 		});
 		expect(orm.select('constructor').plan().intent.where).toEqual(eq('id', 1));
 		expect(orm.select('constructor').dump().sql).toBe(
 			'SELECT constructor.* FROM constructor WHERE constructor.id = $1',
 		);
 	});
-	it('copies schema default-filter sources before lookup and merges owned constructor filters', async () => {
+	it('copies schema default-filter sources before lookup', async () => {
 		const filters = { nodes: eq('id', 7) };
 		const db = schema(
 			{
@@ -182,27 +183,12 @@ describe('#877 recursive include boundaries', () => {
 		const orm = createOrm({
 			schema: db,
 			adapter: fake,
-			defaultFilters: { constructor: eq('id', 1) },
 		});
 		expect(await orm.select('constructor').all()).toEqual([{ id: 1 }]);
 		expect(
 			createOrm({ schema: db, adapter }).select('constructor').plan().intent
 				.where,
 		).toBeUndefined();
-		const merged = schema(
-			{ constructor: { id: { type: 'integer', primaryKey: true } } },
-			undefined,
-			{ defaultFilters: { constructor: eq('id', 2) } },
-		);
-		expect(
-			createOrm({
-				schema: merged,
-				adapter,
-				defaultFilters: { constructor: eq('id', 1) },
-			})
-				.select('constructor')
-				.plan().intent.where,
-		).toEqual({ kind: 'and', conditions: [eq('id', 2), eq('id', 1)] });
 	});
 	it('refuses maxDepth beyond PostgreSQL integer range at planning', () => {
 		expect(() =>
