@@ -1329,26 +1329,8 @@ export function createConditionCompiler(
 				logicalTable: inner.rootTable,
 				qualifier: queryLocal(inner.currentAlias ?? inner.rootTable),
 			});
-			const entersQuery =
-				inner.rootTable !== normalized.rootTable ||
-				(inner.currentAlias ?? inner.rootTable) !==
-					(normalized.currentAlias ?? normalized.rootTable);
 			return recurse(child, {
 				...inner,
-				...(entersQuery && {
-					queryRanges: [
-						binding,
-						...Array.from(inner.scope?.bindings.values() ?? []).filter(
-							(range) =>
-								range.qualifier !== binding.qualifier &&
-								!ctx.scope?.bindings.has(range.qualifier),
-						),
-					],
-					enclosingRanges: [
-						ctx.queryRanges ?? Array.from(ctx.scope?.bindings.values() ?? []),
-						...(ctx.enclosingRanges ?? []),
-					],
-				}),
 				currentBinding: binding,
 				scope: queryScope([
 					...Array.from(inner.scope?.bindings.values() ?? []).filter(

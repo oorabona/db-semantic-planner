@@ -243,6 +243,7 @@ function buildExistsSubquery(
 		| readonly { relation?: string; joinType?: string }[]
 		| undefined;
 	let predicateScope = scopedWithTarget.scope;
+	const queryRanges = [targetBinding];
 	let includeSourceTable = targetTable;
 	for (const include of includeDecisions ?? []) {
 		if (!include.relation) continue;
@@ -254,6 +255,7 @@ function buildExistsSubquery(
 			kind: 'declared-table',
 			logicalTable: includeTarget,
 		});
+		queryRanges.push(includeBinding);
 		if (
 			relationBindingFor(predicateScope, includeBinding.qualifier) === undefined
 		) {
@@ -294,6 +296,11 @@ function buildExistsSubquery(
 			rootTable: targetTable,
 			currentAlias: targetAlias,
 			outerAlias: sourceAlias,
+			queryRanges,
+			enclosingRanges: [
+				ctx.queryRanges ?? [sourceBinding],
+				...(ctx.enclosingRanges ?? []),
+			],
 			aliasColumnAuthorities,
 		};
 

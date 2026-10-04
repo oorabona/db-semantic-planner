@@ -9,6 +9,7 @@ import {
 	schema,
 	subquery,
 } from '@dbsp/core';
+import { rawNotExists } from '@dbsp/core/internal';
 import type { CompileOptions, PlanReport } from '@dbsp/types';
 import { createPhysicalNameInventory } from '@dbsp/types/internal';
 import { expect, it } from 'vitest';
@@ -27,7 +28,16 @@ const db = schema({
 	symbols: { id: { type: 'integer', primaryKey: true }, name: 'text' },
 	posts: { id: { type: 'integer', primaryKey: true } },
 	comments: { id: { type: 'integer', primaryKey: true }, postId: 'integer' },
-	userProfiles: { id: { type: 'integer', primaryKey: true } },
+	userProfiles: {
+		id: { type: 'integer', primaryKey: true },
+		fileId: ref('files', { as: 'file' }),
+	},
+	nodes: {
+		id: { type: 'integer', primaryKey: true },
+		parentId: ref('nodes', {
+			roles: { parent: 'parent', children: 'children' },
+		}),
+	},
 	files: { id: { type: 'integer', primaryKey: true } },
 });
 const orm = createOrm({
@@ -208,7 +218,7 @@ it('root, unqualified, nearest enclosing and missing qualifiers retain their con
 		"outerRef qualifier 'missing' is not visible in an enclosing query.",
 	);
 });
-it('snake_case collisions reserve the emitted root qualifier only', () => {
+it('snake_case collisions reserve logical and emitted root qualifiers', () => {
 	const local = createOrm({
 		schema: db,
 		adapter: createPgCompileOnlyAdapter({
@@ -216,27 +226,24 @@ it('snake_case collisions reserve the emitted root qualifier only', () => {
 			dbCasing: 'snake_case',
 		}),
 	});
-	const result = local
-		.select('userProfiles')
-		.join('files', { as: 'userProfiles', on: eq('userProfiles.id', 1) })
-		.dump();
-	expect({ sql: result.sql, params: result.params }).toMatchInlineSnapshot(`
-		{
-		  "params": [
-		    1,
-		  ],
-		  "sql": "SELECT "userProfiles".* FROM user_profiles JOIN files AS "userProfiles" ON "userProfiles".id = $1",
+	for (const alias of ['userProfiles', 'user_profiles']) {
+		for (const relationMode of [false, true]) {
+			expect(() =>
+				local
+					.select('userProfiles')
+					.join(
+						relationMode ? 'file' : 'files',
+						relationMode
+							? { as: alias }
+							: { as: alias, on: eq(`${alias}.id`, 1) },
+					)
+					.dump(),
+			).toThrow(`Query scope already binds qualifier '${alias}'.`);
 		}
-	`);
-	expect(() =>
-		local
-			.select('userProfiles')
-			.join('files', { as: 'user_profiles', on: eq('user_profiles.id', 1) })
-			.dump(),
-	).toThrow("Query scope already binds qualifier 'user_profiles'.");
+	}
 });
 
-it('physical-name mappings reserve the emitted root qualifier only', () => {
+it('physical-name mappings reserve logical and emitted root qualifiers', () => {
 	const original = createPgPhysicalModel({
 		mode: 'logical',
 		model: db.model,
@@ -265,27 +272,21 @@ it('physical-name mappings reserve the emitted root qualifier only', () => {
 			declaredNames: createDeclaredNameResolver(physicalModel),
 		});
 	const local = createOrm({ schema: db, adapter });
-	const result = local
-		.select('userProfiles')
-		.join('files', { as: 'userProfiles', on: eq('userProfiles.id', 1) })
-		.dump();
-	expect({ sql: result.sql, params: result.params }).toMatchInlineSnapshot(`
-		{
-		  "params": [
-		    1,
-		  ],
-		  "sql": "SELECT "userProfiles".* FROM account_profiles JOIN files AS "userProfiles" ON "userProfiles".id = $1",
+	for (const alias of ['userProfiles', 'account_profiles']) {
+		for (const relationMode of [false, true]) {
+			expect(() =>
+				local
+					.select('userProfiles')
+					.join(
+						relationMode ? 'file' : 'files',
+						relationMode
+							? { as: alias }
+							: { as: alias, on: eq(`${alias}.id`, 1) },
+					)
+					.dump(),
+			).toThrow(`Query scope already binds qualifier '${alias}'.`);
 		}
-	`);
-	expect(() =>
-		local
-			.select('userProfiles')
-			.join('files', {
-				as: 'account_profiles',
-				on: eq('account_profiles.id', 1),
-			})
-			.dump(),
-	).toThrow("Query scope already binds qualifier 'account_profiles'.");
+	}
 });
 
 it('emitted aliases survive public relation-path ambiguity and deeper bodies', () => {
@@ -342,3 +343,33 @@ it('a relation predicate retains its own root range for a nested qualified body'
 		}
 	`);
 });
+
+for (const kind of ['rawExists', 'rawNotExists', 'inSubquery'] as const) {
+	it(`nested relation predicates push the nearest range for ${kind}`, () => {
+		const query = subquery('nodes')
+			.select('id')
+			.where(eq('id', outerRef('nodes.id')));
+		const condition =
+			kind === 'rawExists'
+				? rawExists(query)
+				: kind === 'rawNotExists'
+					? rawNotExists(query)
+					: inSubquery('id', query);
+		const result = orm
+			.select('nodes')
+			.where(
+				exists('children', { where: exists('children', { where: condition }) }),
+			)
+			.dump();
+		const bodySql =
+			kind === 'rawExists'
+				? 'EXISTS (SELECT nodes_sq.id FROM nodes AS nodes_sq WHERE nodes_sq.id = nodes_exists_1.id)'
+				: kind === 'rawNotExists'
+					? 'NOT (EXISTS (SELECT nodes_sq.id FROM nodes AS nodes_sq WHERE nodes_sq.id = nodes_exists_1.id))'
+					: 'nodes_exists_1.id = ANY (SELECT nodes_subq_2.id FROM nodes AS nodes_subq_2 WHERE nodes_subq_2.id = nodes_exists_1.id)';
+		expect(result.sql).toBe(
+			`SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0."parentId" AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_exists_0.id = nodes_exists_1."parentId" AND ${bodySql}))`,
+		);
+		expect(result.params).toEqual([]);
+	});
+}
