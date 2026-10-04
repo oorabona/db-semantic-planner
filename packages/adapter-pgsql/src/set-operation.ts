@@ -20,6 +20,7 @@ import {
 	fromCompiledQuery,
 	type ProjectionEnvelope,
 } from './projection-envelope.js';
+import { assertRelationalOutput } from './relational-output.js';
 
 /**
  * Compiled set-operation SQL with positional parameters.
@@ -94,20 +95,12 @@ export function compileSetOperationEnvelope(
 	// Compile left side (always a QueryIntent)
 	const left = compileLeafOrBranch(intent.left, compileFn);
 
+	assertRelationalOutput(left.hydrationPlan, 'Set operations');
+
 	// Compile right side (QueryIntent or nested SetOperationIntent)
 	const right = compileLeafOrBranch(intent.right, compileFn);
 
-	if (
-		[left, right].some((branch) =>
-			branch.hydrationPlan?.includePayloads?.some(
-				(payload) => payload.outputMode !== 'flat',
-			),
-		)
-	) {
-		throw new Error(
-			"Set operations with nested relation output are not supported; use | flat in every branch. A relation with includeStrategy hint 'json_agg' or 'cte' cannot be flattened; change that hint or select from the joined table.",
-		);
-	}
+	assertRelationalOutput(right.hydrationPlan, 'Set operations');
 
 	// Renumber right-side parameters to avoid $N collisions
 	const rightSQL = renumberParams(right.sql, left.parameters.length);

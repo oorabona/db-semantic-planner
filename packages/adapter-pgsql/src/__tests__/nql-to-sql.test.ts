@@ -1723,13 +1723,13 @@ authors | select name, posts.title | flat`.dump(),
 		);
 	});
 
-	it('plans includes in a CTE body', () => {
-		expect(
+	it('refuses nested includes in a CTE body', () => {
+		expect(() =>
 			blogCteToSQL(
 				'with enriched as (posts | select title, author.*) enriched | select *',
 			),
-		).toBe(
-			"with \"enriched\" as (select posts.title, coalesce((select json_agg(jsonb_build_object('id', __t__.id, 'name', __t__.name) order by __t__.id asc nulls last) from authors as __t__ where __t__.id = posts.\"authorid\"), '[]'::json) as author_json from posts) select enriched.* from enriched",
+		).toThrow(
+			"Relational bodies with nested relation output are not supported; use | flat in every branch. A relation with includeStrategy hint 'json_agg' or 'cte' cannot be flattened; change that hint or select from the joined table.",
 		);
 	});
 

@@ -1,5 +1,6 @@
 import { compileWhereIntent } from './condition-compiler.js';
 import { createWhereDispatcher } from './handlers/index.js';
+import { assertRelationalOutput } from './relational-output.js';
 /**
  * PgAdapter - Implements the Adapter interface for PostgreSQL using native pg driver.
  *
@@ -2421,34 +2422,12 @@ function projectNqlBindingQueryEnvelope<T = unknown>(
 	hydrationPlan: PlanReport | undefined,
 ): ProjectionEnvelope<T> {
 	const shape = buildNqlBindingProjectionShape(source, query.select);
-	// Preserve only payloads whose owned transport labels survive this projection.
-	const visible = new Set(
-		shape.selections
-			.filter((selection) => selection.inputKey === selection.outputKey)
-			.map((selection) => selection.inputKey),
-	);
-	const survives = (
-		payload: import('@dbsp/types').IncludePayloadShape,
-	): boolean =>
-		payload.strategy === 'json_agg'
-			? visible.has(payload.outputLabel)
-			: payload.columns.some((column) => visible.has(column.outputLabel)) ||
-				payload.children.some(survives);
-	const inherited = source.hydrationPlan;
-	const payloads = inherited?.includePayloads?.filter(survives);
-	const projectedPlan =
-		hydrationPlan ??
-		(shape.preserveOneToOne
-			? inherited
-			: payloads?.length
-				? { ...inherited!, includePayloads: payloads }
-				: undefined);
 
 	if (shape.preserveOneToOne) {
 		return preserveOneToOne(source, {
 			sql,
 			parameters,
-			...(projectedPlan !== undefined ? { hydrationPlan: projectedPlan } : {}),
+			...(hydrationPlan !== undefined ? { hydrationPlan } : {}),
 			preserveHydrationPlan: false,
 		});
 	}
@@ -2457,7 +2436,7 @@ function projectNqlBindingQueryEnvelope<T = unknown>(
 		parameters,
 		selections: shape.selections,
 		expressions: shape.expressions,
-		...(projectedPlan !== undefined ? { hydrationPlan: projectedPlan } : {}),
+		...(hydrationPlan !== undefined ? { hydrationPlan } : {}),
 		preserveHydrationPlan: false,
 	});
 }
@@ -3306,6 +3285,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 				bindingNames,
 				bindingProjections,
 			);
+			assertRelationalOutput(compiled.hydrationPlan, 'Relational bodies');
 			const outputSchema = bundle.bindingOutputSchemas?.get(name);
 			const compiledBindingOutputs =
 				compiled.projection.kind === 'known'

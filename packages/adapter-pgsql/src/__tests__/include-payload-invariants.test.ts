@@ -47,7 +47,6 @@ for (const [name, value] of [
 	['null', null],
 	['undefined', undefined],
 	['empty', []],
-	['malformed JSON', '{'],
 ] as const) {
 	it(`to-many ${name} has an empty collection`, () => {
 		expect(
@@ -60,6 +59,14 @@ for (const [name, value] of [
 		).toEqual([{ roots: null }]);
 	});
 }
+it.each([
+	['roots', 'children', 'children_json'],
+	['children', 'roots', 'root_json'],
+] as const)('malformed JSON throws for %s.%s', (from, relation, label) => {
+	expect(() => compiled(from, relation).hydrate([{ [label]: '{' }])).toThrow(
+		`Invalid JSON in json_agg payload '${relation}'.`,
+	);
+});
 it('a to-one singleton collection becomes its related object', () => {
 	expect(
 		compiled('children', 'roots').hydrate([{ root_json: [{ id: 1 }] }]),

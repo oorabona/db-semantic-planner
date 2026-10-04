@@ -4,6 +4,7 @@ import {
 	compileWhereIntent,
 } from './condition-compiler.js';
 import { createWhereDispatcher } from './handlers/index.js';
+import { assertRelationalOutput } from './relational-output.js';
 /**
  * Recursive CTE and unnest-CTE compilation.
  * Extracted from PgAdapter.compileRecursive(), compileCteQuery(),
@@ -272,59 +273,6 @@ function buildCteProjectionShape(
 	return { selections, expressions, preserveOneToOne: false };
 }
 
-function isRootJsonAggHydrationDecision(
-	decision: PlanReport['decisions'][number],
-): boolean {
-	const intentPath = decision.context.intentPath;
-	return (
-		decision.type === 'include-strategy' &&
-		decision.choice === 'json_agg' &&
-		(typeof intentPath !== 'string' || !intentPath.includes('.include['))
-	);
-}
-
-function addJsonAggOutputKeyCandidates(
-	keys: Set<string>,
-	baseName: string | undefined,
-): void {
-	if (baseName === undefined) return;
-	const rawJsonKey = `${baseName}_json`;
-	keys.add(rawJsonKey);
-}
-
-function jsonAggHydrationOutputKeys(
-	plan: PlanReport | undefined,
-): ReadonlySet<string> {
-	const keys = new Set<string>();
-	for (const decision of plan?.decisions ?? []) {
-		if (!isRootJsonAggHydrationDecision(decision)) continue;
-		addJsonAggOutputKeyCandidates(keys, decision.context.relation);
-		addJsonAggOutputKeyCandidates(keys, decision.context.includeAlias);
-	}
-	return keys;
-}
-
-function sourceHydrationPlanForCteProjection(
-	source: ProjectionEnvelope,
-	shape: {
-		readonly selections: readonly ProjectNamedFieldsSelection[];
-		readonly preserveOneToOne: boolean;
-	},
-): PlanReport | undefined {
-	if (source.hydrationPlan === undefined) return undefined;
-	if (shape.preserveOneToOne) return source.hydrationPlan;
-
-	const jsonOutputKeys = jsonAggHydrationOutputKeys(source.hydrationPlan);
-	if (jsonOutputKeys.size === 0) return undefined;
-	return shape.selections.some(
-		(selection) =>
-			jsonOutputKeys.has(selection.inputKey) &&
-			jsonOutputKeys.has(selection.outputKey),
-	)
-		? source.hydrationPlan
-		: undefined;
-}
-
 function projectCteQueryEnvelope<T = unknown>(
 	source: ProjectionEnvelope<T>,
 	query: QueryIntent,
@@ -333,15 +281,11 @@ function projectCteQueryEnvelope<T = unknown>(
 	hydrationPlan: PlanReport | undefined,
 ): ProjectionEnvelope<T> {
 	const shape = buildCteProjectionShape(source, query.select);
-	const projectedHydrationPlan =
-		hydrationPlan ?? sourceHydrationPlanForCteProjection(source, shape);
 	if (shape.preserveOneToOne) {
 		return preserveOneToOne<T>(source, {
 			sql,
 			parameters,
-			...(projectedHydrationPlan !== undefined
-				? { hydrationPlan: projectedHydrationPlan }
-				: {}),
+			...(hydrationPlan !== undefined ? { hydrationPlan } : {}),
 			preserveHydrationPlan: false,
 		});
 	}
@@ -350,9 +294,7 @@ function projectCteQueryEnvelope<T = unknown>(
 		parameters,
 		selections: shape.selections,
 		expressions: shape.expressions,
-		...(projectedHydrationPlan !== undefined
-			? { hydrationPlan: projectedHydrationPlan }
-			: {}),
+		...(hydrationPlan !== undefined ? { hydrationPlan } : {}),
 		preserveHydrationPlan: false,
 	});
 }
@@ -894,6 +836,7 @@ export function compileCteQuery<T = unknown>(
 				visibleCteDeps,
 				cteProjectionByName,
 			);
+			assertRelationalOutput(innerCompiled.hydrationPlan, 'Relational bodies');
 			// Renumber inner params to follow all previously accumulated CTE params
 			const currentParamOffset = allCteParams.length;
 			const renumberedInnerSql =
@@ -911,6 +854,7 @@ export function compileCteQuery<T = unknown>(
 				preserveOneToOne(innerCompiled, {
 					sql: renumberedInnerSql,
 					parameters: innerCompiled.parameters,
+					preserveHydrationPlan: false,
 				}),
 			);
 		} else {

@@ -34,12 +34,19 @@ function setValue(
 	});
 }
 
+export class InvalidJsonAggPayloadError extends Error {
+	constructor(path: string, cause: unknown) {
+		super(`Invalid JSON in json_agg payload '${path}'.`, { cause });
+		this.name = 'InvalidJsonAggPayloadError';
+	}
+}
+
 function readPayload(value: unknown, shape: IncludePayloadShape): unknown {
 	if (typeof value === 'string') {
 		try {
 			value = JSON.parse(value);
-		} catch {
-			return shape.isToOne ? null : [];
+		} catch (cause) {
+			throw new InvalidJsonAggPayloadError(shape.path, cause);
 		}
 	}
 	if (value === null || value === undefined) return shape.isToOne ? null : [];

@@ -101,3 +101,39 @@ it.each([
 	expect(cli.sql).toBe(`(${branch}) ${op.toUpperCase()} (${branch})`);
 	expect(cli.params).toEqual([]);
 });
+
+it.each([
+	'with enriched as (posts | select id, author.name)\nenriched | select *',
+	'posts | select id, author.name | bind enriched\nenriched | select *',
+])('CLI and tag refuse relational body: %s', async (text) => {
+	const message = refusal.replace('Set operations', 'Relational bodies');
+	await expect(compileNqlToSql(text, db.model)).rejects.toThrow(
+		new Error(message),
+	);
+	const orm = createOrm({
+		model: db.model,
+		adapter: createPgCompileOnlyAdapter({ model: db.model }),
+	});
+	expect(() => orm.nql`${nqlRaw(text)}`.dump()).toThrow(new Error(message));
+});
+
+it.each([
+	[
+		'with enriched as (posts | select id, author.name | flat)\nenriched | select *',
+		'AS',
+	],
+	[
+		'posts | select id, author.name | flat | bind enriched\nenriched | select *',
+		'as',
+	],
+])('CLI and tag preserve flat body SQL: %s', async (text, keyword) => {
+	const cli = await compileNqlToSql(text!, db.model);
+	const orm = createOrm({
+		model: db.model,
+		adapter: createPgCompileOnlyAdapter({ model: db.model }),
+	});
+	const expected = `WITH "enriched" ${keyword} (SELECT posts.id, author.name AS "author.name" FROM posts JOIN users AS author ON posts."authorId" = author.id) SELECT enriched.* FROM enriched`;
+	expect(cli.sql).toBe(expected);
+	expect(orm.nql`${nqlRaw(text!)}`.dump().sql).toBe(expected);
+	expect(cli.params).toEqual([]);
+});

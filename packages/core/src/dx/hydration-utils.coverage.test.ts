@@ -28,7 +28,6 @@ describe('metadata-owned JSON hydration', () => {
 		['empty array', [], []],
 		['null', null, []],
 		['undefined', undefined, []],
-		['invalid JSON', 'invalid', []],
 		['scalar', 42, 42],
 		['object', { id: 1 }, { id: 1 }],
 	] as const)
@@ -37,12 +36,20 @@ describe('metadata-owned JSON hydration', () => {
 			hydrateJsonAggIncludes(rows, report());
 			expect(rows).toEqual([{ posts: expected, untouched: 'x' }]);
 		});
-	for (const input of [null, undefined, [], '[]', 'invalid'])
+	for (const input of [null, undefined, [], '[]'])
 		it(`unwraps a to-one miss ${String(input)}`, () => {
 			const rows = [{ owned_json: input }];
 			hydrateJsonAggIncludes(rows, report({ ...shape, isToOne: true }));
 			expect(rows).toEqual([{ posts: null }]);
 		});
+	it.each([false, true])('rejects malformed JSON for toOne=%s', (isToOne) => {
+		expect(() =>
+			hydrateJsonAggIncludes(
+				[{ owned_json: 'invalid' }],
+				report({ ...shape, isToOne }),
+			),
+		).toThrow("Invalid JSON in json_agg payload 'posts'.");
+	});
 	it('unwraps a to-one hit', () => {
 		const rows = [{ owned_json: '[{"id":1}]' }];
 		hydrateJsonAggIncludes(rows, report({ ...shape, isToOne: true }));

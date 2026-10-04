@@ -2214,6 +2214,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		planReport: PlanReport,
 		compiled: CompiledQuery<T>,
 	): void {
+		if (!compiled.hydrationPlan?.includePayloads?.length) return;
 		const hydrator = new ResultHydrator<T>(this.model, planReport.rootTable);
 		hydrator.hydrateJsonAggIncludes(rows, planReport, compiled);
 		hydrator.hydrateJoinIncludes(rows, planReport, compiled);

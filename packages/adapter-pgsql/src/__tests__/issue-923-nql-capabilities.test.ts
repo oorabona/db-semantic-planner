@@ -1,10 +1,11 @@
-import { createOrm, nqlRaw, ref, schema } from '@dbsp/core';
+import { createOrm, nqlRaw, ResultHydrator, ref, schema } from '@dbsp/core';
 import type { Pool } from 'pg';
 import { expect, it, vi } from 'vitest';
 import {
 	createPgAdapter,
 	createPgCompileOnlyAdapter,
 } from '../pgsql-adapter.js';
+import { compileSetOperation } from '../set-operation.js';
 
 const db = schema({
 	files: { id: { type: 'integer', primaryKey: true }, path: 'string' },
@@ -108,7 +109,7 @@ const programRead =
 const cteRead =
 	'with enriched as (users | select id, posts.title)\nenriched | select *';
 
-it.each([programRead, cteRead])(
+it.each([nestedRead, programRead])(
 	'hydrates final read all() and first(): %s',
 	async (text) => {
 		const query = vi.fn(async (sql: string) => ({
@@ -153,30 +154,7 @@ it('run discards program read rows without parsing JSON', async () => {
 	).resolves.toBeUndefined();
 });
 
-it.each(['*', 'id, posts_json', 'id'])(
-	'CTE projection resolves payload visibility: %s',
-	async (projection) => {
-		const query = vi.fn().mockResolvedValue({
-			rows: [
-				projection === 'id'
-					? { id: 1 }
-					: { id: 1, posts_json: '[{"title":"First"}]' },
-			],
-		});
-		const executingOrm = createOrm({
-			model: db.model,
-			adapter: createPgAdapter({ query } as unknown as Pool, {
-				model: db.model,
-			}),
-		});
-		const text = `with enriched as (${nestedRead})\nenriched | select ${projection}`;
-		expect(await executingOrm.nql`${nqlRaw(text)}`.all()).toEqual([
-			projection === 'id' ? { id: 1 } : { id: 1, posts: [{ title: 'First' }] },
-		]);
-	},
-);
-
-function hintedModel(strategy: 'join' | 'lateral' | 'json_agg') {
+function hintedModel(strategy: 'join' | 'lateral' | 'json_agg' | 'cte') {
 	const hints = {
 		getRelation: (name: string) => {
 			const relation = db.model.getRelation(name);
@@ -206,15 +184,15 @@ const operators = [
 ];
 const refusal =
 	"Set operations with nested relation output are not supported; use | flat in every branch. A relation with includeStrategy hint 'json_agg' or 'cte' cannot be flattened; change that hint or select from the joined table.";
-for (const strategy of ['join', 'lateral', 'json_agg'] as const) {
+for (const strategy of ['join', 'lateral', 'json_agg', 'cte'] as const) {
 	for (const flat of [false, true]) {
-		if (flat && strategy === 'json_agg') continue;
+		if (strategy === 'cte' || (flat && strategy === 'json_agg')) continue;
 		const read = `posts | select id, author.name${flat ? ' | flat' : ''}`;
 		for (const text of [
 			read,
-			`with enriched as (${read})\nenriched | select *`,
+			...(flat ? [`with enriched as (${read})\nenriched | select *`] : []),
 			`posts | select id | bind source\n${read}`,
-			`${read} | bind source\nsource | select *`,
+			...(flat ? [`${read} | bind source\nsource | select *`] : []),
 			`insert into users set id = 3, name = 'New' | select id | bind created\n${read}`,
 		]) {
 			it(`hydrates requested shape ${strategy} flat=${flat}: ${text}`, async () => {
@@ -262,7 +240,7 @@ for (const strategy of ['join', 'lateral', 'json_agg'] as const) {
 				);
 			});
 		}
-		if (strategy !== 'json_agg')
+		if (strategy !== 'json_agg' && strategy !== 'cte')
 			it(`allows flat ${strategy} ${op}`, () => {
 				const model = hintedModel(strategy);
 				const orm = createOrm({
@@ -276,3 +254,195 @@ for (const strategy of ['join', 'lateral', 'json_agg'] as const) {
 			});
 	}
 }
+
+const bodyRefusal = refusal.replace('Set operations', 'Relational bodies');
+for (const strategy of ['join', 'lateral', 'json_agg', 'cte'] as const) {
+	it.each([
+		cteRead,
+		'with enriched as (posts | select id, author.name)\nenriched | select id, "author.name"',
+		'posts | select id, author.name | bind enriched\nenriched | select *',
+	])(`refuses relational body ${strategy}: %s`, (text) => {
+		const model = hintedModel(strategy);
+		const orm = createOrm({
+			model,
+			adapter: createPgCompileOnlyAdapter({ model }),
+		});
+		expect(() => orm.nql`${nqlRaw(text)}`.dump()).toThrow(
+			new Error(bodyRefusal),
+		);
+	});
+}
+it('refuses left branch before compiling the right subtree', () => {
+	const adapter = createPgCompileOnlyAdapter({ model: db.model });
+	const left = adapter.compile(orm.nql`posts | select id, author.name`.plan(), {
+		model: db.model,
+	});
+	const compile = vi.fn(() => {
+		if (compile.mock.calls.length > 1)
+			throw new Error('right subtree compiled');
+		return left;
+	});
+	expect(() =>
+		compileSetOperation(
+			{
+				kind: 'setOperation',
+				op: 'union',
+				all: false,
+				left: { type: 'select', from: 'posts' },
+				right: { type: 'select', from: 'posts' },
+			},
+			compile,
+		),
+	).toThrow(new Error(refusal));
+	expect(compile).toHaveBeenCalledTimes(1);
+});
+it.each([nestedRead, programRead])(
+	'malformed JSON throws a named read error: %s',
+	async (text) => {
+		const query = vi.fn(async (sql: string) => ({
+			rows: sql.startsWith('SELECT')
+				? [{ id: 1, posts_json: 'invalid' }]
+				: [{ id: 3 }],
+		}));
+		const pool = {
+			query,
+			connect: vi.fn(async () => ({ query, release: vi.fn() })),
+		} as unknown as Pool;
+		const orm = createOrm({
+			model: db.model,
+			adapter: createPgAdapter(pool, { model: db.model }),
+		});
+		await expect(orm.nql`${nqlRaw(text)}`.all()).rejects.toMatchObject({
+			name: 'InvalidJsonAggPayloadError',
+			message: "Invalid JSON in json_agg payload 'posts'.",
+		});
+		await expect(orm.nql`${nqlRaw(text)}`.first()).rejects.toMatchObject({
+			name: 'InvalidJsonAggPayloadError',
+		});
+	},
+);
+
+it('skips hydration entirely when compiled read has no payload', async () => {
+	const json = vi.spyOn(ResultHydrator.prototype, 'hydrateJsonAggIncludes');
+	const join = vi.spyOn(ResultHydrator.prototype, 'hydrateJoinIncludes');
+	try {
+		const pool = {
+			query: vi.fn(async () => ({ rows: [{ id: 1 }] })),
+		} as unknown as Pool;
+		const orm = createOrm({
+			model: db.model,
+			adapter: createPgAdapter(pool, { model: db.model }),
+		});
+		expect(await orm.nql`users | select id`.all()).toEqual([{ id: 1 }]);
+		expect(json).not.toHaveBeenCalled();
+		expect(join).not.toHaveBeenCalled();
+	} finally {
+		json.mockRestore();
+		join.mockRestore();
+	}
+});
+
+for (const relations of [
+	['r'.repeat(62)],
+	[`${'r'.repeat(63)}a`, `${'r'.repeat(63)}b`],
+]) {
+	const [first, second] = relations;
+	const model = schema({
+		roots: { id: { type: 'integer', primaryKey: true } },
+		children: {
+			id: { type: 'integer', primaryKey: true },
+			rootId: ref('roots', { inverse: first! }),
+		},
+		...(second
+			? {
+					siblings: {
+						id: { type: 'integer', primaryKey: true },
+						rootId: ref('roots', { inverse: second }),
+					},
+				}
+			: {}),
+	}).model;
+	const read = `roots | where id = 1 | select id, ${relations.map((r) => `${r}.id`).join(', ')}`;
+	const expected = {
+		id: 1,
+		...Object.fromEntries(relations.map((r) => [r, [{ id: 2 }]])),
+	};
+	for (const program of [false, true]) {
+		const text = `${program ? 'insert into roots set id = 3 | select id | bind created\n' : ''}${read}`;
+		it(`terminal label all/first program=${program} relations=${relations.length}`, async () => {
+			const adapter = createPgCompileOnlyAdapter({ model });
+			const compileOrm = createOrm({ model, adapter });
+			const compiled = adapter.compile(compileOrm.nql`${nqlRaw(read)}`.plan(), {
+				model,
+			});
+			const shapes = compiled.hydrationPlan!.includePayloads!;
+			expect(Buffer.byteLength(shapes[0]!.outputLabel)).toBe(63);
+			if (second) expect(shapes[1]!.outputLabel).toBe(`${'r'.repeat(61)}_1`);
+			const raw = Object.fromEntries(
+				shapes.map((shape) => [shape.outputLabel, '[{"id":2}]']),
+			);
+			const query = vi.fn(async (sql: string) => ({
+				rows: sql.startsWith('SELECT') ? [{ id: 1, ...raw }] : [{ id: 3 }],
+			}));
+			const pool = {
+				query,
+				connect: vi.fn(async () => ({ query, release: vi.fn() })),
+			} as unknown as Pool;
+			const orm = createOrm({
+				model,
+				adapter: createPgAdapter(pool, { model }),
+			});
+			expect(await orm.nql`${nqlRaw(text)}`.all()).toEqual([expected]);
+			expect(await orm.nql`${nqlRaw(text)}`.first()).toEqual(expected);
+		});
+	}
+	for (const body of [
+		`with enriched as (${read})\nenriched | select *`,
+		`${read} | bind enriched\nenriched | select *`,
+	]) {
+		it(`refuses long/collision body ${relations.length}: ${body}`, () => {
+			const orm = createOrm({
+				model,
+				adapter: createPgCompileOnlyAdapter({ model }),
+			});
+			expect(() => orm.nql`${nqlRaw(body)}`.dump()).toThrow(
+				new Error(bodyRefusal),
+			);
+		});
+	}
+}
+
+it.each(['json_agg', 'cte'] as const)(
+	'terminal flat refuses %s hint',
+	(strategy) => {
+		const model = new Proxy(db.model, {
+			get(target, property) {
+				if (property === 'getRelation')
+					return (name: string) => {
+						const r = target.getRelation(name);
+						return r ? { ...r, includeStrategy: strategy } : r;
+					};
+				if (property === 'getRelationsFrom')
+					return (name: string) =>
+						target
+							.getRelationsFrom(name)
+							.map((r) => ({ ...r, includeStrategy: strategy }));
+				const value = Reflect.get(target, property, target);
+				return typeof value === 'function' ? value.bind(target) : value;
+			},
+		});
+		const orm = createOrm({
+			model,
+			adapter: createPgCompileOnlyAdapter({ model }),
+		});
+		const message = `Flat output for relation 'author' cannot use relation includeStrategy hint '${strategy}'. Use 'auto', 'join', or 'lateral'.`;
+		for (const prefix of [
+			'',
+			"insert into users set id = 3, name = 'New' | select id | bind created\n",
+		]) {
+			expect(() =>
+				orm.nql`${nqlRaw(`${prefix}posts | select id, author.name | flat`)}`.dump(),
+			).toThrow(message);
+		}
+	},
+);

@@ -91,7 +91,7 @@ export function resolveIncludePayloadShapes(
 		for (const d of items) {
 			if (
 				d.type === 'includeStrategy' &&
-				['json_agg', 'join', 'lateral'].includes(d.choice ?? '')
+				['json_agg', 'join', 'lateral', 'cte'].includes(d.choice ?? '')
 			)
 				all.push(d);
 			visit(d.children ?? []);
@@ -183,7 +183,14 @@ export function resolveIncludePayloadShapes(
 		const tableName = d.targetTable ?? d.relationName ?? d.relation ?? '';
 		const target = resolveRelationTarget(queryLocal(tableName), deps);
 		const table = model?.getTable(tableName);
-		const strategy = d.choice as IncludePayloadShape['strategy'];
+		const strategy = d.choice;
+		if (
+			strategy !== 'json_agg' &&
+			strategy !== 'join' &&
+			strategy !== 'lateral' &&
+			strategy !== 'cte'
+		)
+			throw new Error(`Invalid include payload strategy '${strategy}'.`);
 		let requested = d.columns;
 		if (d.emptyProjection) requested = [];
 		else if (
