@@ -1,3 +1,4 @@
+import { EXPRESSION_BRAND, REF_BRAND } from '@dbsp/types';
 /**
  * Unified WHERE compiler: compiles WhereIntent directly to PostgreSQL AST nodes.
  *
@@ -913,8 +914,8 @@ export function createConditionCompiler(
 	 * or a RefDefinition (schema `ref()`).
 	 *
 	 * Two distinct right-hand types arrive here:
-	 *  - ExpressionRef  (`__expr === true`)  — from `exprRef()` / expressions-layer ref
-	 *  - RefDefinition  (`__brand === 'ref'`) — from the public `ref()` exported by @dbsp/core
+	 *  - ExpressionRef  (expression symbol brand)  — from `exprRef()` / expressions-layer ref
+	 *  - RefDefinition  (reference symbol brand) — from the public `ref()` exported by @dbsp/core
 	 *
 	 * Both represent a column reference (not a literal value). The generic comparison
 	 * handler would call buildParamRef and parameterise the object — wrong.
@@ -956,10 +957,10 @@ export function createConditionCompiler(
 		}
 
 		// ExpressionRef path: already has a compiled ExpressionIntent — delegate directly.
-		// ExpressionRef implements the `ExpressionSpec` duck type: __expr === true.
-		if (rec.__expr === true) {
+		// ExpressionRef implements the `ExpressionSpec` shared expression symbol brand.
+		if (EXPRESSION_BRAND in v && v[EXPRESSION_BRAND] === true) {
 			const compileComparison = compileMappedComparison(cmpIntent.operator);
-			const exprRef = v as { intent: ExpressionIntent };
+			const exprRef = v as unknown as { intent: ExpressionIntent };
 			// buildColumnRef handles dotted field names like 'table.col' by splitting them.
 			const leftNode = buildColumnRef(cmpIntent.field, handlerCtx);
 			const rightNode = compileExpressionIntent(
@@ -971,11 +972,15 @@ export function createConditionCompiler(
 		}
 
 		// RefDefinition path: the public ref() from @dbsp/core (schema DSL) returns
-		// { __brand: 'ref', target: 'alias.col', options: {} }. When used in an ON
+		// a symbol-branded reference with target 'alias.col'. When used in an ON
 		// clause like eq('table.col', ref('alias.col')), `target` is a dotted column
 		// reference (table.column or just column) — compile it via RefExpressionIntent
 		// so it produces "alias"."col" instead of being parameterised as a literal.
-		if (rec.__brand === 'ref' && typeof rec.target === 'string') {
+		if (
+			REF_BRAND in v &&
+			v[REF_BRAND] === 'ref' &&
+			typeof rec.target === 'string'
+		) {
 			const compileComparison = compileMappedComparison(cmpIntent.operator);
 			// buildColumnRef handles dotted field names like 'table.col' by splitting them.
 			const leftNode = buildColumnRef(cmpIntent.field, handlerCtx);

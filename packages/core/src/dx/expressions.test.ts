@@ -1,3 +1,4 @@
+import { EXPRESSION_BRAND } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import type {
 	ArrayExpressionIntent,
@@ -37,8 +38,8 @@ describe('Expression Primitives', () => {
 			} satisfies RefExpressionIntent);
 		});
 
-		it('should set __expr marker', () => {
-			expect(ref('col').__expr).toBe(true);
+		it('should set expression symbol marker', () => {
+			expect(ref('col')[EXPRESSION_BRAND]).toBe(true);
 		});
 
 		it('should support table.column notation', () => {
@@ -452,9 +453,9 @@ describe('Expression Primitives', () => {
 			expect(where.operator).toBe('lte');
 		});
 
-		it('implements ExpressionSpec duck-type (__expr marker + intent)', () => {
+		it('implements ExpressionSpec duck-type (symbol marker + intent)', () => {
 			const r = ref('col');
-			expect(r.__expr).toBe(true);
+			expect(r[EXPRESSION_BRAND]).toBe(true);
 			expect('intent' in r).toBe(true);
 		});
 	});
@@ -595,8 +596,8 @@ describe('star()', () => {
 		expect(star()).toBeInstanceOf(ExpressionRef);
 	});
 
-	it('should set __expr marker', () => {
-		expect(star().__expr).toBe(true);
+	it('should set expression symbol marker', () => {
+		expect(star()[EXPRESSION_BRAND]).toBe(true);
 	});
 
 	it('composes with fn() for COUNT(*) pattern', () => {
@@ -669,28 +670,21 @@ describe('array()', () => {
 });
 
 // ============================================================================
-// toExpressionIntent — duck-type path (plain {__expr: true, intent} objects)
+// toExpressionIntent — duck-type path (factory-branded expression objects)
 // ============================================================================
 
 describe('toExpressionIntent duck-type path', () => {
-	it('should handle a plain {__expr: true, intent} object as op() left operand', () => {
-		// Simulates SubqueryExpression.asExpr() which returns plain {__expr: true, intent}
-		// not an ExpressionRef instance — triggers the duck-type branch in toExpressionIntent
-		const plainExprSpec = {
-			__expr: true as const,
-			intent: { kind: 'ref' as const, column: 'subq_col' },
-		};
+	it('should handle a factory-branded expression object as op() left operand', () => {
+		// Use a factory-created operand.
+		const plainExprSpec = ref('subq_col');
 		const result = op('=', plainExprSpec as unknown as ExpressionRef, ref('x'));
 		const intent =
 			result.intent as import('../intent-ast.js').CustomOpExpressionIntent;
 		expect(intent.left).toEqual({ kind: 'ref', column: 'subq_col' });
 	});
 
-	it('should handle a plain {__expr: true, intent} object as op() right operand', () => {
-		const plainExprSpec = {
-			__expr: true as const,
-			intent: { kind: 'param' as const, value: 42 },
-		};
+	it('should handle a factory-branded expression object as op() right operand', () => {
+		const plainExprSpec = param(42);
 		const result = op(
 			'=',
 			ref('id'),
@@ -701,11 +695,8 @@ describe('toExpressionIntent duck-type path', () => {
 		expect(intent.right).toEqual({ kind: 'param', value: 42 });
 	});
 
-	it('should handle a plain {__expr: true, intent} object as fn() argument', () => {
-		const plainExprSpec = {
-			__expr: true as const,
-			intent: { kind: 'literal' as const, value: 99 },
-		};
+	it('should handle a factory-branded expression object as fn() argument', () => {
+		const plainExprSpec = literal(99);
 		const result = fn('abs', plainExprSpec as unknown as ExpressionRef);
 		const intent =
 			result.intent as import('../intent-ast.js').CustomFnExpressionIntent;

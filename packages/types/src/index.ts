@@ -397,3 +397,10 @@ export {
 	type UnprojectableChainReason,
 	type UnprojectableLedgerChain,
 } from './transition/index.js';
+
+export {
+	brandValue,
+	EXPRESSION_BRAND,
+	PREDICATE_BRAND,
+	REF_BRAND,
+} from './value-brands.js';

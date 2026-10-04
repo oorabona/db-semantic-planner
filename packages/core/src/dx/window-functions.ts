@@ -1,3 +1,4 @@
+import { brandValue, EXPRESSION_BRAND } from '@dbsp/types';
 /**
  * @module window-functions
  * Fluent builders for SQL window functions (ROW_NUMBER, RANK, SUM OVER, etc.).
@@ -168,10 +169,13 @@ export class WindowBuilder {
 	 * columns(['id', rowNumber().orderBy('date').as('rn')])
 	 */
 	as(alias: string): ExpressionSpec {
-		return {
-			__expr: true,
-			intent: this.toWindowIntent(alias),
-		};
+		return brandValue(
+			{
+				intent: this.toWindowIntent(alias),
+			},
+			EXPRESSION_BRAND,
+			true as const,
+		);
 	}
 
 	/**

@@ -1,3 +1,4 @@
+import { EXPRESSION_BRAND } from '@dbsp/types';
 /**
  * DX-003: Filter Helpers Tests
  *
@@ -487,7 +488,6 @@ describe('Feature 8: Expression Helpers', () => {
 			const result = coalesce(['name_fr', 'name_en', 'name'], 'displayName');
 
 			expect(result).toEqual({
-				__expr: true,
 				intent: {
 					kind: 'coalesce',
 					fields: ['name_fr', 'name_en', 'name'],
@@ -500,7 +500,6 @@ describe('Feature 8: Expression Helpers', () => {
 			const result = coalesce(['name'], 'displayName');
 
 			expect(result).toEqual({
-				__expr: true,
 				intent: {
 					kind: 'coalesce',
 					fields: ['name'],
@@ -533,7 +532,6 @@ describe('Feature 8: Expression Helpers', () => {
 			const result = raw("CONCAT(first_name, ' ', last_name)", 'fullName');
 
 			expect(result).toEqual({
-				__expr: true,
 				intent: {
 					kind: 'raw',
 					sql: "CONCAT(first_name, ' ', last_name)",
@@ -548,7 +546,7 @@ describe('Feature 8: Expression Helpers', () => {
 				'statusLabel',
 			);
 
-			expect(result.__expr).toBe(true);
+			expect(result[EXPRESSION_BRAND]).toBe(true);
 			expect(result.intent.kind).toBe('raw');
 			if (result.intent.kind === 'raw') {
 				expect(result.intent.sql).toContain('CASE WHEN');
@@ -586,7 +584,6 @@ describe('Feature 8: Expression Helpers', () => {
 			const result = raw('', 'emptyExpr');
 
 			expect(result).toEqual({
-				__expr: true,
 				intent: {
 					kind: 'raw',
 					sql: '',
@@ -601,7 +598,6 @@ describe('Feature 8: Expression Helpers', () => {
 			const result = col('name', 'userName');
 
 			expect(result).toEqual({
-				__expr: true,
 				intent: {
 					kind: 'columnAlias',
 					column: 'name',
@@ -613,7 +609,7 @@ describe('Feature 8: Expression Helpers', () => {
 		it('should handle column names with underscore', () => {
 			const result = col('first_name', 'firstName');
 
-			expect(result.__expr).toBe(true);
+			expect(result[EXPRESSION_BRAND]).toBe(true);
 			expect(result.intent.kind).toBe('columnAlias');
 			if (result.intent.kind === 'columnAlias') {
 				expect(result.intent.column).toBe('first_name');
@@ -719,7 +715,6 @@ describe('relationColumn() helper', () => {
 			const result = relationColumn('category', 'name', 'categoryName');
 
 			expect(result).toEqual({
-				__expr: true,
 				intent: {
 					kind: 'relationColumn',
 					relation: 'category',
@@ -736,7 +731,7 @@ describe('relationColumn() helper', () => {
 				'parentCategoryName',
 			);
 
-			expect(result.__expr).toBe(true);
+			expect(result[EXPRESSION_BRAND]).toBe(true);
 			expect(result.intent.kind).toBe('relationColumn');
 			if (result.intent.kind === 'relationColumn') {
 				expect(result.intent.relation).toBe('category.parent');
@@ -806,7 +801,7 @@ describe('relationColumn() helper', () => {
 
 		it('should return correct intent for wildcard column "*"', () => {
 			const result = relationColumn('user', '*', 'user_data');
-			expect(result.__expr).toBe(true);
+			expect(result[EXPRESSION_BRAND]).toBe(true);
 			expect(result.intent.kind).toBe('relationColumn');
 			if (result.intent.kind === 'relationColumn') {
 				expect(result.intent.relation).toBe('user');

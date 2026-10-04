@@ -1,3 +1,4 @@
+import { brandValue, EXPRESSION_BRAND } from '@dbsp/types';
 /**
  * @module filters
  * Drizzle-like filter helpers for ergonomic WHERE clause building.
@@ -768,10 +769,13 @@ export function coalesce(
 		validateIdentifier(f, 'column');
 	}
 	validateIdentifier(as, 'column');
-	return {
-		__expr: true,
-		intent: { kind: 'coalesce', fields, as },
-	};
+	return brandValue(
+		{
+			intent: { kind: 'coalesce', fields, as },
+		},
+		EXPRESSION_BRAND,
+		true as const,
+	);
 }
 
 /**
@@ -824,10 +828,13 @@ export function raw(sqlFragment: string, as: string): ExpressionSpec {
 	}
 	// FIND-008: Validate the alias as a SQL identifier; sqlFragment is an intentional raw escape hatch
 	validateIdentifier(as, 'column');
-	return {
-		__expr: true,
-		intent: { kind: 'raw', sql: sqlFragment, as },
-	};
+	return brandValue(
+		{
+			intent: { kind: 'raw', sql: sqlFragment, as },
+		},
+		EXPRESSION_BRAND,
+		true as const,
+	);
 }
 
 /**
@@ -858,10 +865,13 @@ export function col(column: string, alias: string): ExpressionSpec {
 	// FIND-008: Validate column name and alias as SQL identifiers (same strictness as coalesce)
 	validateIdentifier(column, 'column');
 	validateIdentifier(alias, 'column');
-	return {
-		__expr: true,
-		intent: { kind: 'columnAlias', column, alias },
-	};
+	return brandValue(
+		{
+			intent: { kind: 'columnAlias', column, alias },
+		},
+		EXPRESSION_BRAND,
+		true as const,
+	);
 }
 
 /**
@@ -917,10 +927,13 @@ export function relationColumn<A extends string>(
 		validateIdentifier(column, 'column');
 	}
 	validateIdentifier(as as string, 'column');
-	return {
-		__expr: true,
-		intent: { kind: 'relationColumn', relation, column, as },
-	} as unknown as AliasedExprColumn<A>;
+	return brandValue(
+		{
+			intent: { kind: 'relationColumn', relation, column, as },
+		},
+		EXPRESSION_BRAND,
+		true as const,
+	) as unknown as AliasedExprColumn<A>;
 }
 
 // ============================================================================

@@ -114,14 +114,14 @@ it('reads a public param wrapper intent getter once', () => {
 		adapter: createPgCompileOnlyAdapter({ model: db.model }),
 	});
 	let reads = 0;
-	const obj = {
-		__expr: true,
-		get intent() {
+	const obj = param(17);
+	Object.defineProperty(obj, 'intent', {
+		get() {
 			return ++reads === 1
 				? { kind: 'param', value: 17 }
 				: { kind: 'fieldRef', scope: 'inner', column: 'id' };
 		},
-	};
+	});
 	const result = orm.select('t').where(eq('v', obj)).dump();
 	expect(result.sql).toBe('SELECT t.* FROM t WHERE t.v = $1');
 	expect(result.params).toEqual([17]);

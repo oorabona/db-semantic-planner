@@ -1,3 +1,4 @@
+import { brandValue, EXPRESSION_BRAND, PREDICATE_BRAND } from '@dbsp/types';
 /**
  * @module expressions
  * Dialect-agnostic expression primitives for custom operators, functions, and type casts.
@@ -102,14 +103,12 @@ type NonPredicateOperator<TOperator extends string> =
 function toExpressionIntent(input: ExprInput): ExpressionIntent {
 	// ExpressionRef check first — fastest path for the common case.
 	if (input instanceof ExpressionRef) return input.intent;
-	// Duck-type check AFTER instanceof: SubqueryExpression.asExpr() returns a plain
-	// { __expr: true, intent } object (not an ExpressionRef instance), so instanceof
-	// would miss it. Order matters: instanceof must come first.
+	// Shared brand check also recognizes plain factory wrappers and foreign expressions.
 	if (
 		typeof input === 'object' &&
 		input !== null &&
-		'__expr' in input &&
-		(input as { __expr: unknown }).__expr === true &&
+		EXPRESSION_BRAND in input &&
+		(input as { [EXPRESSION_BRAND]: unknown })[EXPRESSION_BRAND] === true &&
 		'intent' in input
 	) {
 		return (input as { intent: ExpressionIntent }).intent;
@@ -133,13 +132,14 @@ function toExpressionIntent(input: ExprInput): ExpressionIntent {
  * - `.where(expr.gte(0.5))` — WHERE with comparison
  * - `.orderBy(expr, 'asc')` — ORDER BY expression
  *
- * Implements the `ExpressionSpec` duck-type interface (`__expr: true`, `intent`).
+ * Implements the `ExpressionSpec` duck-type interface (a symbol brand and `intent`).
  */
 export class ExpressionRef {
-	readonly __expr: true = true;
+	declare readonly [EXPRESSION_BRAND]: true;
 	readonly intent: ExpressionIntent;
 
 	constructor(intent: ExpressionIntent) {
+		brandValue(this, EXPRESSION_BRAND, true);
 		this.intent = Object.freeze(intent);
 	}
 
@@ -226,11 +226,12 @@ export const PREDICATE_REF_DISCRIMINATOR = 'dbsp.predicate.v1' as const;
  * `ExpressionRef`; the WHERE form is derived when a builder consumes it.
  */
 class ExpressionPredicateRef extends ExpressionRef {
-	readonly __predicateRef = PREDICATE_REF_DISCRIMINATOR;
+	declare readonly [PREDICATE_BRAND]: typeof PREDICATE_REF_DISCRIMINATOR;
 	declare readonly intent: StandaloneWhereExpressionIntent;
 
 	constructor(intent: StandaloneWhereExpressionIntent) {
 		super(Object.freeze(intent));
+		brandValue(this, PREDICATE_BRAND, PREDICATE_REF_DISCRIMINATOR);
 		Object.freeze(this);
 	}
 
@@ -250,9 +251,10 @@ export type PredicateExpressionRef = ExpressionPredicateRef;
  * Its canonical representation is the complete WHERE intent.
  */
 class WhereOnlyPredicateRef {
-	readonly __predicateRef = PREDICATE_REF_DISCRIMINATOR;
+	declare readonly [PREDICATE_BRAND]: typeof PREDICATE_REF_DISCRIMINATOR;
 
 	constructor(readonly intent: WhereIntent) {
+		brandValue(this, PREDICATE_BRAND, PREDICATE_REF_DISCRIMINATOR);
 		if (intent.kind === 'and' || intent.kind === 'or') {
 			Object.freeze(intent.conditions);
 		}
@@ -290,7 +292,7 @@ export function hasPredicateRefDiscriminator(value: unknown): boolean {
 	return (
 		typeof value === 'object' &&
 		value !== null &&
-		(value as { __predicateRef?: unknown }).__predicateRef ===
+		(value as { [PREDICATE_BRAND]?: unknown })[PREDICATE_BRAND] ===
 			PREDICATE_REF_DISCRIMINATOR
 	);
 }
@@ -298,7 +300,7 @@ export function hasPredicateRefDiscriminator(value: unknown): boolean {
 function isExpressionPredicateRef(
 	predicate: PredicateRef,
 ): predicate is PredicateExpressionRef {
-	return '__expr' in predicate && predicate.__expr === true;
+	return EXPRESSION_BRAND in predicate && predicate[EXPRESSION_BRAND] === true;
 }
 
 /** Derive the WHERE representation from a predicate's single canonical intent. */
