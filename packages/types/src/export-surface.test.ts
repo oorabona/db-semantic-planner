@@ -57,8 +57,11 @@ const joinIncludeExports = [
 	'belongsToManyJoinIncludeRefusal',
 	'dropsJoinIncludeData',
 ];
+// The resolved relation path contract (#787, #891 step 5).
+const relationPathTypes = ['ResolvedRelationPath'];
 const internalNames = [
 	...joinIncludeExports,
+	...relationPathTypes,
 	...rootNames,
 	...names(before.internal.declarations).filter(
 		(name) => !names(before.root.declarations).includes(name),
