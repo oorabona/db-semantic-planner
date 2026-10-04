@@ -3,9 +3,17 @@ import type { QueryIntent } from './query-intent.js';
 import { NQL_SELECT_AGGREGATE_FUNCTIONS } from './select-function-allowlist.js';
 import type { WhereIntent } from './where-intent.js';
 
-const aggregateFunctions: ReadonlySet<string> = new Set(
-	NQL_SELECT_AGGREGATE_FUNCTIONS,
-);
+const aggregateFunctions: ReadonlySet<string> = new Set([
+	...NQL_SELECT_AGGREGATE_FUNCTIONS,
+	'array_agg',
+	'string_agg',
+	'json_agg',
+	'jsonb_agg',
+	'json_object_agg',
+	'jsonb_object_agg',
+	'bool_and',
+	'bool_or',
+]);
 
 /** Legacy operands can also be primitive values, rather than expression nodes. */
 function containsAggregateOperand(value: unknown): boolean {

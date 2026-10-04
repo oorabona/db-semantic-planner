@@ -11,6 +11,7 @@
 
 import {
 	createOrm,
+	exists,
 	rangeContainedBy,
 	rangeContains,
 	rangeOverlaps,
@@ -221,19 +222,37 @@ describe('PostgreSQL Range Types', () => {
 			const rooms = await orm
 				.withSchema(SCHEMA)
 				.select('rooms')
-				.include('bookings', {
-					join: 'inner',
-					where: rangeOverlaps('bookingPeriod', {
-						lower: '2024-01-15',
-						upper: '2024-01-20',
+				.where(
+					exists('roomBookings', {
+						where: rangeOverlaps('bookingPeriod', {
+							lower: '2024-01-15',
+							upper: '2024-01-20',
+						}),
 					}),
-				})
+				)
 				.columns(['id', 'name'])
 				.orderBy('id')
 				.execute();
 
 			// Team offsite, Interview and Monthly board meetings overlap Jan 15-20.
 			expect(rooms.map((room) => room.id)).toEqual([1, 2, 3]);
+
+			// Only the client meeting (room 1) and the monthly board meetings (room 3) overlap Jan 22-25.
+			const lateRooms = await orm
+				.withSchema(SCHEMA)
+				.select('rooms')
+				.where(
+					exists('roomBookings', {
+						where: rangeOverlaps('bookingPeriod', {
+							lower: '2024-01-22',
+							upper: '2024-01-25',
+						}),
+					}),
+				)
+				.columns(['id'])
+				.orderBy('id')
+				.execute();
+			expect(lateRooms.map((room) => room.id)).toEqual([1, 3]);
 		});
 	});
 

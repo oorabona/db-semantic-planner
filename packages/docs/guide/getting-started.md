@@ -208,7 +208,7 @@ const postsFiltered = await orm.select('posts')
   .dump();
 ```
 
-The planner selects the fetch strategy (`json_agg`, lateral join, or separate query) from the query shape by default. To-one join includes return the whole related row by default; explicit field selection returns only those fields. To-many join includes are refused; use `.join()`, NQL `| flat`, or a `json_agg`/`lateral` include. An include `where` is accepted only when the include compiles as a join; see [Includes](./includes.md).
+The planner selects the fetch strategy (`json_agg`, lateral join, or separate query) from the query shape by default. To-one join includes return the whole related row by default; explicit field selection returns only those fields. `hasMany` join includes are refused; use `.join()`, NQL `| flat`, or a `json_agg`/`lateral` include. For `belongsToMany`, join the junction and target tables explicitly with `.join(<table>, { on })`. An include `where` is accepted only when the include compiles as a join; see [Includes](./includes.md).
 
 ::: tip Try it
 Paste this NQL equivalent in the [Playground](/playground): `users | where active = true | select id, name`

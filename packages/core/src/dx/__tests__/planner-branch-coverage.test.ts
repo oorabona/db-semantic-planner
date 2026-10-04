@@ -253,7 +253,7 @@ describe('planner: processInclude depth exceeded warning', () => {
 // ============================================================================
 
 describe('planner: processInclude circular detection', () => {
-	it('emits CIRCULAR_INCLUDE when same relation visited again in traversal path', () => {
+	it('refuses circular includes when same relation visited again in traversal path', () => {
 		// posts → comments → post → comments (circular)
 		const intent: QueryIntent = {
 			type: 'select',
@@ -272,12 +272,9 @@ describe('planner: processInclude circular detection', () => {
 				},
 			],
 		};
-		const report = plan(intent, simpleSchema);
-		const circularWarning = report.warnings.find(
-			(w) => w.code === 'CIRCULAR_INCLUDE',
+		expect(() => plan(intent, simpleSchema)).toThrowError(
+			`Invalid include: Circular include detected: posts.comments`,
 		);
-		expect(circularWarning).toBeDefined();
-		expect(circularWarning?.code).toBe('CIRCULAR_INCLUDE');
 	});
 });
 
@@ -286,31 +283,26 @@ describe('planner: processInclude circular detection', () => {
 // ============================================================================
 
 describe('planner: processInclude unknown relation', () => {
-	it('emits AMBIGUOUS_RELATION warning for unknown relation name', () => {
+	it('refuses unknown relation names', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'users',
 			include: [{ relation: 'nonExistentRelation' }],
 		};
-		const report = plan(intent, simpleSchema);
-		const warning = report.warnings.find(
-			(w) => w.code === 'AMBIGUOUS_RELATION',
+		expect(() => plan(intent, simpleSchema)).toThrow(
+			'Invalid include: Unknown relation "nonExistentRelation" from table "users" at "nonExistentRelation"',
 		);
-		expect(warning).toBeDefined();
-		expect(warning?.message).toContain('nonExistentRelation');
 	});
 
-	it('no include-strategy decision when relation not found', () => {
+	it('refuses missing relations instead of returning an incomplete plan', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'users',
 			include: [{ relation: 'ghosts' }],
 		};
-		const report = plan(intent, simpleSchema);
-		const includeDecision = report.decisions.find(
-			(d) => d.type === 'include-strategy',
+		expect(() => plan(intent, simpleSchema)).toThrow(
+			'Invalid include: Unknown relation "ghosts" from table "users" at "ghosts"',
 		);
-		expect(includeDecision).toBeUndefined();
 	});
 });
 
@@ -431,16 +423,15 @@ describe('planner: virtual ancestors/descendants relations', () => {
 		).toBeDefined();
 	});
 
-	it('emits AMBIGUOUS_RELATION for "ancestors" on non-self-referential table', () => {
+	it('refuses "ancestors" on a non-self-referential table', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'users',
 			include: [{ relation: 'ancestors' }],
 		};
-		const report = plan(intent, simpleSchema);
-		expect(
-			report.warnings.find((w) => w.code === 'AMBIGUOUS_RELATION'),
-		).toBeDefined();
+		expect(() => plan(intent, simpleSchema)).toThrow(
+			'Invalid include: Unknown relation "ancestors" from table "users" at "ancestors"',
+		);
 	});
 });
 

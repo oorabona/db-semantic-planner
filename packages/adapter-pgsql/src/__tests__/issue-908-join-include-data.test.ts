@@ -239,7 +239,7 @@ it('keyless target keeps outer filter columns and exact private payload', () => 
 	const report = builder.plan();
 	const compiled = keylessAdapter.compile(report);
 	expect(compiled.sql).toBe(
-		'SELECT posts.*, author.name AS "author.name", author.__dbsp_presence_author AS __dbsp_presence_author FROM posts LEFT JOIN (SELECT *, 1 AS __dbsp_presence_author FROM users AS author) AS author ON posts."authorCode" = author.id WHERE author.email = $1',
+		'SELECT posts.*, author.name AS "author.name", author.__dbsp_presence_author AS __dbsp_presence_author FROM posts LEFT JOIN (SELECT author.id, author.name, author.email, 1 AS __dbsp_presence_author FROM users AS author) AS author ON posts."authorCode" = author.id WHERE author.email = $1',
 	);
 	const rows = [
 		{ 'author.name': null, __dbsp_presence_author: 1 },
@@ -252,7 +252,7 @@ it('keyless target keeps outer filter columns and exact private payload', () => 
 	);
 	expect(rows).toEqual([{ author: { name: null } }, { author: null }]);
 });
-it('adapter resolves to-many cardinality from the model when an external report omits it', () => {
+it('adapter refuses an external report that omits relation cardinality', () => {
 	const report = orm.select('users').include('posts').plan();
 	const decisions = report.decisions.map((d) => {
 		if (d.type !== 'include-strategy') return d;
@@ -261,7 +261,7 @@ it('adapter resolves to-many cardinality from the model when an external report 
 		return { ...d, choice: 'join', context };
 	});
 	expect(() => adapter.compile({ ...report, decisions }, { model })).toThrow(
-		refusal,
+		'Include include[0](posts) decision does not match its intent',
 	);
 });
 it('lateral transport uses a private marker even when selected fields are all null', () => {

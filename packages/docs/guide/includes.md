@@ -17,6 +17,8 @@ const usersWithPosts = await orm.select('users').include('posts').dump();
 
 The relation name maps to the `inverse` or `as` name defined in your schema's `ref()` declaration.
 
+Unknown relations are refused with the include path in both strict and lenient planning. Normalized-name collisions are always refused with an exported `AmbiguousIncludeError` carrying `candidates` and `includePath`; use the exact declared name or `via` to identify the relation. Compilation applies the same include option rules to external reports.
+
 ---
 
 ## Nested Includes (Dot Notation)
@@ -183,7 +185,7 @@ selections are root relation columns, so `users | select id, posts.title | flat`
 and `users | select id, posts.title | limit posts 5` retain their behaviour.
 
 Every resolved include, including camelCase names for snake_case relations, is
-validated during planning. Include `select` forms are checked during planning:
+validated during planning and before adapter handler dispatch, including external reports. An external report’s include decisions must match its intent; contradictory, duplicate, or unmatched decisions are refused by include path. Legacy decisions without a path must identify a unique include; nested coverage never suppresses a missing root join. Supplied foreign and parent keys must match the declared relation, and omitted keys are filled from that relation. Ordering options are validated in the same pass before handler dispatch. Include `select` forms are checked against the resolved strategy:
 `json_agg` accepts fields or all columns, `lateral` accepts only all columns, `join` accepts all columns or plain fields for to-one relations,
 and `cte` refuses explicit selection. Mixed wildcard lists such as `['*', 'id']`
 are refused for every strategy; `['*']` is the all-columns form. Both `json_agg`
@@ -202,3 +204,5 @@ Every root SELECT label owns its key, including function labels and expanded sta
 Compilation resolves these keys before generating SQL. Exact duplicate source/key requests deduplicate; two different owners of one public key fail with the payload path and key. A wildcard include over a target whose columns cannot be enumerated also fails.
 
 Scalar expression projections retain join include payloads. Expression projections containing a call in `NQL_SELECT_AGGREGATE_FUNCTIONS`, including nested calls, are aggregation. Join includes are refused when aggregation, `groupBy` or `DISTINCT` would drop their data; use `.join()` for relational columns, grouping or ordering.
+
+Circular include paths are refused during planning, in both strict and lenient modes.

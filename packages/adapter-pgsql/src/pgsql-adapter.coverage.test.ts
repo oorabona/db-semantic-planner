@@ -12,7 +12,7 @@
  * - Adapter capabilities (execution/streaming support)
  */
 
-import { schema } from '@dbsp/core';
+import { ref, schema } from '@dbsp/core';
 import type { ModelIR, PlanReport } from '@dbsp/types';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import { describe, expect, it } from 'vitest';
@@ -22,15 +22,7 @@ import { createPgPhysicalModel } from './physical-model/index.js';
 function completeModel(
 	definition: Record<string, Record<string, unknown>>,
 ): ModelIR {
-	const model = schema(definition as any).model;
-	return {
-		...model,
-		getTable: (name: string) => model.tables.get(name),
-		getRelation: () => undefined,
-		getRelationsFrom: () => [],
-		getRelationsTo: () => [],
-		isAmbiguous: () => ({ ambiguous: false }),
-	} as unknown as ModelIR;
+	return schema(definition as any).model;
 }
 
 const coverageModel = completeModel({
@@ -66,7 +58,7 @@ const coverageModel = completeModel({
 		id: 'integer',
 		title: 'text',
 		archived: 'boolean',
-		user_id: 'integer',
+		user_id: ref('users', { as: 'author' }),
 	},
 	archive: { id: 'integer', title: 'text' },
 });
@@ -1785,41 +1777,13 @@ describe('PgAdapter - Coverage Tests', () => {
 
 	describe('compile — intent path with model (column validation)', () => {
 		it('throws when include has invalid columns in target table', () => {
-			const model = {
-				tables: new Map([
-					[
-						'posts',
-						{
-							name: 'posts',
-							columns: [
-								{ name: 'id', type: 'integer', nullable: false },
-								{ name: 'author_id', type: 'integer', nullable: false },
-							],
-							primaryKey: 'id',
-							foreignKeys: [],
-							indexes: [],
-						},
-					],
-					[
-						'users',
-						{
-							name: 'users',
-							columns: [
-								{ name: 'id', type: 'integer', nullable: false },
-								{ name: 'name', type: 'text', nullable: false },
-							],
-							primaryKey: 'id',
-							foreignKeys: [],
-							indexes: [],
-						},
-					],
-				]),
-				relations: new Map(),
-				getTable: function (n) {
-					return this.tables.get(n);
+			const model = schema({
+				posts: {
+					id: { type: 'integer', primaryKey: true },
+					author_id: ref('users', { as: 'author' }),
 				},
-				getRelation: () => undefined,
-			} as any;
+				users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+			}).model;
 
 			// Use intent path: plan.intent triggers intentToDecisions which produces
 			// selectRelationColumn decisions. plan.decisions contains planner output
@@ -1844,6 +1808,7 @@ describe('PgAdapter - Coverage Tests', () => {
 				intent: {
 					type: 'query',
 					table: 'posts',
+					include: [{ relation: 'author' }],
 					select: {
 						type: 'expressions',
 						columns: [
@@ -2318,20 +2283,24 @@ describe('PgAdapter - Coverage Tests', () => {
 
 describe('synthetic binding includes', () => {
 	it('compiles synthetic binding json_agg include decisions with CTE parentKey correlation', () => {
-		const adapter = createPgCompileOnlyAdapter({
-			model: completeModel({
-				active_authors: { author_key: 'integer', id: 'integer' },
-				projected_authors: { id: 'integer' },
-				posts: {
-					id: { type: 'integer', primaryKey: true },
-					author_id: 'integer',
-				},
-				comments: {
-					id: { type: 'integer', primaryKey: true },
-					post_id: 'integer',
-				},
-			}),
+		const model = completeModel({
+			active_authors: { author_key: 'integer', id: 'integer' },
+			projected_authors: { id: 'integer' },
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				author_id: ref('active_authors', { inverse: 'author_posts' }),
+			},
+			comments: {
+				id: { type: 'integer', primaryKey: true },
+				post_id: ref('posts', { inverse: 'comments' }),
+			},
 		});
+		// This synthetic relation correlates on the projected author key.
+		Object.assign(model.getRelation('active_authors.author_posts'), {
+			sourceKey: ['author_key'],
+		});
+		const adapter = createPgCompileOnlyAdapter({ model });
+
 		const plan: PlanReport = {
 			rootTable: 'active_authors',
 			intent: {
@@ -2396,11 +2365,11 @@ describe('synthetic binding includes', () => {
 				projected_authors: { id: 'integer' },
 				posts: {
 					id: { type: 'integer', primaryKey: true },
-					author_id: 'integer',
+					author_id: ref('projected_authors', { inverse: 'author_posts' }),
 				},
 				comments: {
 					id: { type: 'integer', primaryKey: true },
-					post_id: 'integer',
+					post_id: ref('posts', { inverse: 'comments' }),
 				},
 			}),
 		});
@@ -2499,7 +2468,7 @@ describe('synthetic binding includes', () => {
 				},
 				comments: {
 					id: { type: 'integer', primaryKey: true },
-					post_id: 'integer',
+					post_id: ref('posts', { inverse: 'comments' }),
 				},
 			}),
 		});

@@ -30,14 +30,14 @@ imported from `@dbsp/adapter-pgsql`.
 ### Full Example
 
 ```typescript
-import { schema, createOrm } from '@dbsp/core';
+import { schema, createOrm, ref } from '@dbsp/core';
 import { createPgCompileOnlyAdapter, cosineDistance, rawDistance } from '@dbsp/adapter-pgsql';
 
 const db = schema({
   embeddings: {
     id: { type: 'integer', autoIncrement: true, primaryKey: true },
     vector: { type: 'text', dbType: 'vector(768)' },
-    symbolId: 'integer',
+    symbolId: ref('symbols'),
   },
   symbols: {
     id: { type: 'integer', primaryKey: true },
@@ -208,14 +208,14 @@ By default `include()` uses LEFT JOIN. Pass `{ join: 'inner' }` to filter out ro
 rows that have no matching related record:
 
 ```typescript
-import { schema, createOrm } from '@dbsp/core';
+import { schema, createOrm, ref } from '@dbsp/core';
 import { createPgCompileOnlyAdapter, cosineDistance, rawDistance } from '@dbsp/adapter-pgsql';
 
 const db = schema({
   embeddings: {
     id: { type: 'integer', autoIncrement: true, primaryKey: true },
     vector: { type: 'text', dbType: 'vector(768)' },
-    symbolId: 'integer',
+    symbolId: ref('symbols'),
   },
   symbols: {
     id: { type: 'integer', primaryKey: true },

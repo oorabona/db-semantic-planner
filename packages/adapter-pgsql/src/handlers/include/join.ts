@@ -10,7 +10,13 @@
  */
 
 import { type ColumnListInput, toColumnList } from '@dbsp/types';
-import type { JoinExpr, Node } from '@pgsql/types';
+import type {
+	ColumnRef,
+	JoinExpr,
+	Node,
+	ResTarget,
+	SelectStmt,
+} from '@pgsql/types';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
 import {
 	sqlColumnRef,
@@ -211,13 +217,25 @@ export const joinIncludeHandler: IncludeHandler = {
 		const presence = decision.payloadShape?.presence;
 		if (presence) {
 			if (!presence.physicalName) {
+				// The wrapper exposes only columns used outside it, plus its marker.
+				const required = new Set(toColumnList(targetColumn));
+				for (const column of decision.payloadShape?.columns ?? [])
+					required.add(column.logicalName);
 				const expr = join.JoinExpr;
 				expr.rarg = {
 					RangeSubselect: {
 						subquery: {
 							SelectStmt: {
 								targetList: [
-									sqlResTarget(sqlColumnRefStar()),
+									...Array.from(required, (column) =>
+										sqlResTarget(
+											expressionQualifiedColumnRef(
+												column,
+												targetAlias,
+												scopedCtx,
+											),
+										),
+									),
 									sqlResTarget(
 										{ A_Const: { ival: { ival: 1 } } },
 										queryLocal(presence.outputLabel),
@@ -246,3 +264,118 @@ export const joinIncludeHandler: IncludeHandler = {
 		};
 	},
 };
+
+/** Finish keyless wrappers from emitted SQL references, including expressions and ordering. */
+export function completeKeylessJoinProjection(
+	targets: Node[],
+	alias: string,
+	nodes: readonly unknown[],
+	includeWhere = false,
+): void {
+	completeKeylessJoinProjections(
+		new Map([[alias, targets]]),
+		nodes,
+		includeWhere,
+	);
+}
+
+/** Discover references once for all keyless include wrappers in a query. */
+export function completeKeylessJoinProjections(
+	projections: ReadonlyMap<string, Node[]>,
+	nodes: readonly unknown[],
+	includeWhere = false,
+): void {
+	if (projections.size === 0) return;
+	const fieldName = (field: Node | undefined): string | undefined =>
+		field && 'String' in field ? field.String.sval : undefined;
+	const entries = new Map(
+		[...projections].map(([alias, targets]) => {
+			const last = targets.at(-1);
+			return [
+				alias,
+				{
+					targets,
+					marker: last && 'ResTarget' in last ? last.ResTarget.name : undefined,
+					projected: new Set(
+						targets.map((target) => {
+							const value = (target as { ResTarget?: ResTarget }).ResTarget
+								?.val;
+							return value && 'ColumnRef' in value
+								? fieldName(value.ColumnRef.fields?.at(-1))
+								: undefined;
+						}),
+					),
+				},
+			];
+		}),
+	);
+	const bindings = (node: unknown, aliases: Set<string>): void => {
+		if (!node || typeof node !== 'object') return;
+		if (Array.isArray(node)) {
+			for (const child of node) bindings(child, aliases);
+			return;
+		}
+		const record = node as Record<string, unknown>;
+		for (const kind of [
+			'RangeVar',
+			'RangeSubselect',
+			'RangeFunction',
+			'JoinExpr',
+		]) {
+			const binding = record[kind] as
+				| {
+						alias?: { aliasname?: string };
+						relname?: string;
+						larg?: unknown;
+						rarg?: unknown;
+				  }
+				| undefined;
+			if (!binding) continue;
+			const name = binding.alias?.aliasname ?? binding.relname;
+			if (name) aliases.add(name);
+			if (kind === 'JoinExpr') {
+				bindings(binding.larg, aliases);
+				bindings(binding.rarg, aliases);
+			}
+		}
+	};
+	const visit = (node: unknown, hidden: ReadonlySet<string>): void => {
+		if (!node || typeof node !== 'object') return;
+		if (Array.isArray(node)) {
+			for (const child of node) visit(child, hidden);
+			return;
+		}
+		const ast = node as { SelectStmt?: SelectStmt; ColumnRef?: ColumnRef };
+		if (ast.SelectStmt) {
+			if (includeWhere) return;
+			const scoped = new Set(hidden);
+			bindings(ast.SelectStmt.fromClause, scoped);
+			for (const child of Object.values(ast.SelectStmt)) visit(child, scoped);
+			return;
+		}
+		const fields = ast.ColumnRef?.fields;
+		const unqualified = includeWhere && fields?.length === 1;
+		const alias = unqualified
+			? projections.keys().next().value
+			: fields && fieldName(fields[0]);
+		const entry = alias && !hidden.has(alias) ? entries.get(alias) : undefined;
+		const column = fieldName(fields?.[unqualified ? 0 : 1]);
+		if (
+			alias &&
+			entry &&
+			(unqualified || fields?.length === 2) &&
+			column &&
+			column !== entry.marker &&
+			!entry.projected.has(column)
+		) {
+			entry.projected.add(column);
+			entry.targets.splice(
+				entry.targets.length - 1,
+				0,
+				sqlResTarget(sqlColumnRef(queryLocal(column), queryLocal(alias))),
+			);
+		}
+		for (const child of Object.values(node)) visit(child, hidden);
+	};
+	for (const node of nodes) visit(node, new Set());
+}
