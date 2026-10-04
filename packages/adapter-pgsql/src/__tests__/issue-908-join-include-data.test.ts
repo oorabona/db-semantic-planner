@@ -1,11 +1,19 @@
 import {
+	cast,
 	createOrm,
 	eq,
+	exprRef,
+	fn,
+	param,
 	ResultHydrator,
 	ref,
 	relationColumn,
+	SubqueryExpression,
 	schema,
+	star,
+	subquery,
 } from '@dbsp/core';
+import type { ExpressionIntent } from '@dbsp/types';
 import { expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -15,6 +23,7 @@ const model = schema({
 		name: { type: 'text', nullable: true },
 		email: { type: 'text', nullable: true },
 	},
+	comments: { id: { type: 'integer', primaryKey: true } },
 	posts: {
 		id: { type: 'integer', primaryKey: true },
 		authorId: ref('users', { as: 'author', inverse: 'posts', nullable: true }),
@@ -350,4 +359,115 @@ it('presence collision checks use physical snake case root outputs', () => {
 	).toBe(
 		'SELECT posts.*, author.id AS "author.id", author.name AS "author.name", author.id AS __dbsp_presence_author_1 FROM posts LEFT JOIN users AS author ON posts.author_id = author.id',
 	);
+});
+
+const authorPayloadSql =
+	'author.id AS "author.id", author.name AS "author.name", author.email AS "author.email", author.id AS __dbsp_presence_author FROM posts LEFT JOIN users AS author ON posts."authorId" = author.id';
+it('908f: bound JSON is opaque to aggregate detection', () => {
+	const value = { kind: 'aggregate', value: 7 };
+	const compiled = orm
+		.select('posts')
+		.columns([cast(param(value), 'jsonb').as('doc')])
+		.include('author', { join: 'left' })
+		.dump();
+	expect(compiled.sql).toBe(
+		`SELECT CAST($1 AS jsonb) AS doc, ${authorPayloadSql}`,
+	);
+	expect(compiled.params).toEqual([value]);
+});
+it('908f: scalar subquery aggregation does not aggregate the outer projection', () => {
+	const compiled = orm
+		.select('posts')
+		.columns([subquery('comments').count().asExpr('n')])
+		.include('author', { join: 'left' })
+		.dump();
+	expect(compiled.sql).toBe(
+		`SELECT (SELECT count(*) FROM comments) AS n, ${authorPayloadSql}`,
+	);
+	expect(compiled.params).toEqual([]);
+});
+
+it('908f: aggregate expression inside a scalar subquery stays in its own scope', () => {
+	const compiled = orm
+		.select('posts')
+		.columns([
+			new SubqueryExpression({
+				type: 'select',
+				from: 'comments',
+				select: { type: 'expressions', columns: [fn('count', star()).intent] },
+			}).asExpr('n'),
+		])
+		.include('author', { join: 'left' })
+		.dump();
+	expect(compiled.sql).toBe(
+		`SELECT (SELECT count(*) FROM comments) AS n, ${authorPayloadSql}`,
+	);
+	expect(compiled.params).toEqual([]);
+});
+
+const aggregate: ExpressionIntent = {
+	kind: 'aggregate',
+	function: 'sum',
+	field: 'id',
+};
+const scalar: ExpressionIntent = { kind: 'literal', value: 1 };
+const nestedAggregates: readonly ExpressionIntent[] = [
+	fn('count', star()).intent,
+	fn('round', cast(fn('sum', exprRef('id')), 'numeric')).intent,
+	{ kind: 'function', name: 'abs', args: [aggregate] },
+	{ kind: 'unary', operator: '-', operand: aggregate },
+	{ kind: 'arithmetic', operator: '+', left: scalar, right: aggregate },
+	{ kind: 'customOp', operator: '+', left: aggregate, right: scalar },
+	{ kind: 'array', elements: [aggregate] },
+	{ kind: 'namedArg', name: 'value', value: aggregate },
+	{
+		kind: 'case',
+		when: [{ condition: eq('id', 1), result: aggregate }],
+		else: scalar,
+	},
+	{
+		kind: 'case',
+		when: [{ condition: eq('id', 1), result: scalar }],
+		else: aggregate,
+	},
+	{
+		kind: 'case',
+		when: [
+			{
+				condition: {
+					kind: 'not',
+					condition: {
+						kind: 'and',
+						conditions: [
+							{
+								kind: 'or',
+								conditions: [
+									{
+										kind: 'expression',
+										expr: aggregate,
+										operator: 'gt',
+										value: 0,
+									},
+								],
+							},
+						],
+					},
+				},
+				result: scalar,
+			},
+		],
+	},
+];
+it('908f: structural wrappers still refuse outer aggregates', () => {
+	for (const intent of nestedAggregates) {
+		expect(() =>
+			orm
+				.select('posts')
+				.columns([{ __expr: true, intent }])
+				.include('author', { join: 'left' })
+				.plan(),
+		).toThrow(
+			"Invalid include: Include include[0](author) cannot use 'join' with aggregation, groupBy or DISTINCT because its data would be dropped. Use .join() for relational columns, grouping or ordering.",
+		);
+	}
 });

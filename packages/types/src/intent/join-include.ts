@@ -1,23 +1,91 @@
+import type { ExpressionIntent } from './expression-intent.js';
 import type { QueryIntent } from './query-intent.js';
 import { NQL_SELECT_AGGREGATE_FUNCTIONS } from './select-function-allowlist.js';
+import type { WhereIntent } from './where-intent.js';
 
 const aggregateFunctions: ReadonlySet<string> = new Set(
 	NQL_SELECT_AGGREGATE_FUNCTIONS,
 );
 
-/** Inspect nested expression nodes, including wrappers and function arguments. */
-function containsAggregate(value: unknown): boolean {
-	if (!value || typeof value !== 'object') return false;
-	if (Array.isArray(value)) return value.some(containsAggregate);
-	const node = value as Record<string, unknown>;
-	if (node.kind === 'aggregate') return true;
-	if (
-		(node.kind === 'function' || node.kind === 'customFn') &&
-		typeof node.name === 'string' &&
-		aggregateFunctions.has(node.name.toLowerCase())
-	)
-		return true;
-	return Object.values(node).some(containsAggregate);
+/** Legacy operands can also be primitive values, rather than expression nodes. */
+function containsAggregateOperand(value: unknown): boolean {
+	return value !== null && typeof value === 'object' && 'kind' in value
+		? containsAggregate(value as ExpressionIntent)
+		: false;
+}
+
+/** CASE predicates contain expression structure only in explicit expression nodes. */
+function conditionContainsAggregate(condition: WhereIntent): boolean {
+	switch (condition.kind) {
+		case 'expression':
+			return containsAggregate(condition.expr);
+		case 'and':
+		case 'or':
+			return condition.conditions.some(conditionContainsAggregate);
+		case 'not':
+			return conditionContainsAggregate(condition.condition);
+		default:
+			return false;
+	}
+}
+
+/** Walk expression children, never bound data or a nested SELECT's scope. */
+function containsAggregate(node: ExpressionIntent): boolean {
+	switch (node.kind) {
+		case 'aggregate':
+			return true;
+		case 'function':
+		case 'customFn':
+			return (
+				aggregateFunctions.has(node.name.toLowerCase()) ||
+				node.args.some(containsAggregateOperand)
+			);
+		case 'cast':
+			return containsAggregate(node.expr);
+		case 'unary':
+			return containsAggregate(node.operand);
+		case 'arithmetic':
+		case 'customOp':
+			return (
+				containsAggregateOperand(node.left) ||
+				containsAggregateOperand(node.right)
+			);
+		case 'array':
+			return node.elements.some(containsAggregate);
+		case 'namedArg':
+			return containsAggregate(node.value);
+		case 'case':
+			return (
+				node.when.some(
+					(branch) =>
+						conditionContainsAggregate(branch.condition) ||
+						containsAggregate(branch.result),
+				) ||
+				(node.else !== undefined && containsAggregate(node.else))
+			);
+		case 'param':
+		case 'literal':
+		case 'subquery':
+		case 'window':
+		case 'column':
+		case 'columnAlias':
+		case 'coalesce':
+		case 'raw':
+		case 'relationColumn':
+		case 'pseudoColumn':
+		case 'comparison':
+		case 'jsonExtract':
+		case 'jsonContains':
+		case 'jsonExists':
+		case 'jsonPathExtract':
+		case 'ref':
+		case 'star':
+			return false;
+		default: {
+			const exhaustive: never = node;
+			throw new Error(`Unknown expression kind: ${exhaustive}`);
+		}
+	}
 }
 
 /** Shared by join-include refusal and relational projection stripping. */
@@ -25,7 +93,7 @@ export function dropsJoinIncludeData(intent: QueryIntent | undefined): boolean {
 	return (
 		intent?.select?.type === 'aggregate' ||
 		(intent?.select?.type === 'expressions' &&
-			containsAggregate(intent.select.columns)) ||
+			intent.select.columns.some(containsAggregate)) ||
 		intent?.distinct === true ||
 		(intent?.groupBy?.length ?? 0) > 0
 	);
