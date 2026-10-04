@@ -236,108 +236,30 @@ function buildExistsSubquery(
 			targetBinding,
 		]),
 	};
-	// Includes contribute range variables to this EXISTS query. Register all of
-	// their aliases before compiling the predicate: a WHERE condition is allowed
-	// to address an include alias even though FROM/JOIN AST assembly follows it.
+	// Resolve each include once, using prior joined tables before the predicate
+	// root. These descriptors own both the visible ranges and emitted JOINs.
 	const includeDecisions = decision.include as
 		| readonly { relation?: string; joinType?: string }[]
 		| undefined;
-	let predicateScope = scopedWithTarget.scope;
-	const queryRanges = [targetBinding];
-	let includeSourceTable = targetTable;
-	for (const include of includeDecisions ?? []) {
-		if (!include.relation) continue;
-		const includeTarget =
-			ctx.model?.getRelation(`${includeSourceTable}.${include.relation}`)
-				?.target ?? include.relation;
-		const includeBinding = relationBinding({
-			qualifier: queryLocal(include.relation),
-			kind: 'declared-table',
-			logicalTable: includeTarget,
-		});
-		queryRanges.push(includeBinding);
-		if (
-			relationBindingFor(predicateScope, includeBinding.qualifier) === undefined
-		) {
-			predicateScope = queryScope([
-				...(predicateScope?.bindings.values() ?? []),
-				includeBinding,
-			]);
-		}
-		includeSourceTable = includeTarget;
-	}
-	const predicateCtx: CompilerContext = {
-		...scopedWithTarget,
-		...(predicateScope !== undefined && { scope: predicateScope }),
-	};
-
-	// Build correlation condition
-	const correlation = buildKeyCorrelation(
-		sourceAlias,
-		sourceColumn,
-		targetAlias,
-		targetColumn,
-		predicateCtx,
-	);
-
-	// Build WHERE clause (correlation + nested conditions)
-	let whereClause = correlation;
-	if (decision.conditions && decision.conditions.length > 0) {
-		// Create context for subquery with target alias.
-		// NOTE: schema is intentionally KEPT in subCtx so that any nested EXISTS
-		// conditions can qualify their own FROM tables (rangeVar) with the schema
-		// name.  Column references are always query-scoped (alias-prefixed, no
-		// schema) — buildCorrelation and columnRef already pass undefined for schema
-		// independently of the context.  Stripping schema here was the root cause of
-		// the nested-exists schema-scoping bug: the inner rangeVar would receive
-		// undefined as schema and emit an unqualified table name.
-		const subCtx: CompilerContext = {
-			...predicateCtx,
-			rootTable: targetTable,
-			currentAlias: targetAlias,
-			outerAlias: sourceAlias,
-			queryRanges,
-			enclosingRanges: [
-				ctx.queryRanges ?? [sourceBinding],
-				...(ctx.enclosingRanges ?? []),
-			],
-			aliasColumnAuthorities,
-		};
-
-		// Compile nested conditions
-		const nestedConditions = decision.conditions.map((cond) =>
-			dispatch(cond, subCtx, state),
-		);
-
-		// AND correlation with nested conditions
-		whereClause = {
-			BoolExpr: {
-				boolop: 'AND_EXPR',
-				args: [correlation, ...nestedConditions],
-			},
-		};
-	}
-
-	// Build SELECT 1 FROM targetTable AS targetAlias [JOIN ...] WHERE ...
-	let fromNode: Node = sqlRangeVar(
-		resolveDeclaredIdentifier(ctx.declaredNames, ctx.dbCasing ?? 'preserve', {
-			kind: 'table',
-			table: targetTable,
-		}),
-		queryLocal(targetAlias),
-		ctx.schema === undefined ? undefined : queryLocal(ctx.schema),
-	);
-
-	// Add JOIN clauses for each include entry.
+	const resolvedIncludes: {
+		binding: ReturnType<typeof relationBinding>;
+		target: ReturnType<typeof resolveRelationTarget>;
+		sourceAlias: string;
+		sourceColumns: readonly string[];
+		targetColumns: ReturnType<typeof queryLocal>[];
+		joinType: 'JOIN_LEFT' | 'JOIN_INNER';
+	}[] = [];
+	// Resolve the JOIN descriptors for each include entry.
 	// Each include entry in decision.include has shape: { type:'existsInclude', relation, joinType }
 	// The relation is used as the join alias so dotted WHERE references (e.g. callerFile.project_id) resolve.
+	let predicateCtx: CompilerContext = scopedWithTarget;
 	if (includeDecisions && includeDecisions.length > 0) {
 		// Track alias → realTableName for multi-hop FK resolution.
 		// When the 2nd+ include is a relation on an intermediate joined table
 		// (not the root targetTable), we find the correct FK by scanning
 		// previously joined tables first, then falling back to root.
 		const joinedTables = new Map<string, string>(); // alias → realTableName
-		let joinCtx = scopedCtx;
+		let joinCtx: CompilerContext = scopedWithTarget;
 
 		for (const inc of includeDecisions) {
 			const joinRelation = inc.relation;
@@ -462,44 +384,102 @@ function buildExistsSubquery(
 					joinTarget,
 				),
 			};
-			const joinQuals = buildKeyCorrelation(
-				sourceAliasForJoin, // resolved source alias (root or intermediate)
-				joinSourceCols,
-				joinAlias,
-				(joinTargetCols ?? []).map(queryLocal),
-				joinCtx,
-			);
-			requireRelationTargetColumns(
-				joinTarget,
-				(joinTargetCols ?? []).map(queryLocal),
-				'join key',
-				joinRelation,
-			);
-
-			const joinType =
-				(inc.joinType as string | undefined) === 'left'
-					? 'JOIN_LEFT'
-					: 'JOIN_INNER';
-
-			const joinRangeVar = sqlRangeVar(
-				resolveDeclaredIdentifier(
-					ctx.declaredNames,
-					ctx.dbCasing ?? 'preserve',
-					{
-						kind: 'table',
-						table: joinTargetTable,
-					},
-				),
-				queryLocal(joinAlias),
-				ctx.schema === undefined ? undefined : queryLocal(ctx.schema),
-			);
-
-			// Wrap current fromNode with the new join: JoinExpr { larg: fromNode, rarg: joinRangeVar }
-			fromNode = joinExpr(joinType, fromNode, joinRangeVar, joinQuals);
-
-			// Track this join for subsequent iterations (multi-hop resolution).
+			resolvedIncludes.push({
+				binding: joinBinding,
+				target: joinTarget,
+				sourceAlias: sourceAliasForJoin,
+				sourceColumns: joinSourceCols,
+				targetColumns: (joinTargetCols ?? []).map(queryLocal),
+				joinType: inc.joinType === 'left' ? 'JOIN_LEFT' : 'JOIN_INNER',
+			});
 			joinedTables.set(joinAlias, joinTargetTable);
 		}
+		predicateCtx = joinCtx;
+	}
+	const queryRanges = [
+		targetBinding,
+		...resolvedIncludes.map(({ binding }) => binding),
+	];
+
+	// Build correlation condition
+	const correlation = buildKeyCorrelation(
+		sourceAlias,
+		sourceColumn,
+		targetAlias,
+		targetColumn,
+		predicateCtx,
+	);
+
+	// Build WHERE clause (correlation + nested conditions)
+	let whereClause = correlation;
+	if (decision.conditions && decision.conditions.length > 0) {
+		// Create context for subquery with target alias.
+		// NOTE: schema is intentionally KEPT in subCtx so that any nested EXISTS
+		// conditions can qualify their own FROM tables (rangeVar) with the schema
+		// name.  Column references are always query-scoped (alias-prefixed, no
+		// schema) — buildCorrelation and columnRef already pass undefined for schema
+		// independently of the context.  Stripping schema here was the root cause of
+		// the nested-exists schema-scoping bug: the inner rangeVar would receive
+		// undefined as schema and emit an unqualified table name.
+		const subCtx: CompilerContext = {
+			...predicateCtx,
+			rootTable: targetTable,
+			currentAlias: targetAlias,
+			outerAlias: sourceAlias,
+			queryRanges,
+			enclosingRanges: [
+				ctx.queryRanges ?? [sourceBinding],
+				...(ctx.enclosingRanges ?? []),
+			],
+		};
+
+		// Compile nested conditions
+		const nestedConditions = decision.conditions.map((cond) =>
+			dispatch(cond, subCtx, state),
+		);
+
+		// AND correlation with nested conditions
+		whereClause = {
+			BoolExpr: {
+				boolop: 'AND_EXPR',
+				args: [correlation, ...nestedConditions],
+			},
+		};
+	}
+
+	// Build SELECT 1 FROM targetTable AS targetAlias [JOIN ...] WHERE ...
+	let fromNode: Node = sqlRangeVar(
+		resolveDeclaredIdentifier(ctx.declaredNames, ctx.dbCasing ?? 'preserve', {
+			kind: 'table',
+			table: targetTable,
+		}),
+		queryLocal(targetAlias),
+		ctx.schema === undefined ? undefined : queryLocal(ctx.schema),
+	);
+
+	for (const include of resolvedIncludes) {
+		const joinQuals = buildKeyCorrelation(
+			include.sourceAlias,
+			include.sourceColumns,
+			include.binding.qualifier,
+			include.targetColumns,
+			predicateCtx,
+		);
+		requireRelationTargetColumns(
+			include.target,
+			include.targetColumns,
+			'join key',
+			include.binding.qualifier,
+		);
+		const joinRangeVar = sqlRangeVar(
+			resolveDeclaredIdentifier(ctx.declaredNames, ctx.dbCasing ?? 'preserve', {
+				kind: 'table',
+				table: include.binding.logicalTable!,
+			}),
+			include.binding.qualifier,
+			ctx.schema === undefined ? undefined : queryLocal(ctx.schema),
+		);
+		fromNode = joinExpr(include.joinType, fromNode, joinRangeVar, joinQuals);
 	}
 
 	const stmt: SelectStmt = {

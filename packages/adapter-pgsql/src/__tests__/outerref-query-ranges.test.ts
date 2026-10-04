@@ -373,3 +373,81 @@ for (const kind of ['rawExists', 'rawNotExists', 'inSubquery'] as const) {
 		expect(result.params).toEqual([]);
 	});
 }
+
+const includeDb = schema({
+	users: { id: { type: 'integer', primaryKey: true } },
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		userId: ref('users', { as: 'author', inverse: 'posts' }),
+		categoryId: ref('categories', { as: 'category' }),
+		editorId: ref('users', { as: 'editor', inverse: 'editedPosts' }),
+		reviewerId: ref('users', { as: 'reviewer', inverse: 'reviewedPosts' }),
+	},
+	categories: {
+		id: { type: 'integer', primaryKey: true },
+		ownerId: ref('users', { as: 'owner' }),
+	},
+	comments: { id: { type: 'integer', primaryKey: true }, userId: 'integer' },
+});
+const includeOrm = createOrm({
+	schema: includeDb,
+	adapter: createPgCompileOnlyAdapter({ model: includeDb.model }),
+});
+const includeBody = rawExists(
+	subquery('comments')
+		.select('id')
+		.where(eq('userId', outerRef('users.id'))),
+);
+
+it('relation predicate sibling includes bind the nearest emitted logical range', () => {
+	const result = includeOrm
+		.select('users')
+		.where(
+			exists('posts', {
+				include: { category: { join: 'inner' }, editor: { join: 'inner' } },
+				where: includeBody,
+			}),
+		)
+		.dump();
+	expect(result.sql).toBe(
+		'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 JOIN categories AS category ON posts_exists_0."categoryId" = category.id JOIN users AS editor ON posts_exists_0."editorId" = editor.id WHERE users.id = posts_exists_0."userId" AND EXISTS (SELECT comments_sq.id FROM comments AS comments_sq WHERE comments_sq."userId" = editor.id))',
+	);
+	expect(result.params).toEqual([]);
+});
+
+it('relation predicate linear includes retain their emitted SQL', () => {
+	const result = includeOrm
+		.select('users')
+		.where(
+			exists('posts', {
+				include: { category: { join: 'inner' }, owner: { join: 'inner' } },
+				where: includeBody,
+			}),
+		)
+		.dump();
+	expect(result.sql).toBe(
+		'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 JOIN categories AS category ON posts_exists_0."categoryId" = category.id JOIN users AS owner ON category."ownerId" = owner.id WHERE users.id = posts_exists_0."userId" AND EXISTS (SELECT comments_sq.id FROM comments AS comments_sq WHERE comments_sq."userId" = owner.id))',
+	);
+	expect(result.params).toEqual([]);
+});
+
+it('relation predicate sibling includes refuse duplicate logical ranges in both orders', () => {
+	for (const include of [
+		{ editor: { join: 'inner' }, reviewer: { join: 'inner' } },
+		{ reviewer: { join: 'inner' }, editor: { join: 'inner' } },
+	] as const) {
+		expect(() =>
+			includeOrm
+				.select('users')
+				.where(
+					exists('posts', {
+						include,
+						where: includeBody,
+					}),
+				)
+				.dump(),
+		).toThrow(
+			"outerRef qualifier 'users' is ambiguous between 'editor', 'reviewer' in an enclosing query.",
+		);
+	}
+});
