@@ -131,11 +131,11 @@ it('join includes bind emitted aliases and a unique logical table', () => {
 		[
 		  {
 		    "params": [],
-		    "sql": "SELECT calls.*, caller.id AS "caller.id", callee.id AS "callee.id" FROM calls LEFT JOIN symbols AS caller ON calls."callerId" = caller.id LEFT JOIN symbols AS callee ON calls."calleeId" = callee.id WHERE EXISTS (SELECT comments_sq.id FROM comments AS comments_sq WHERE comments_sq."postId" = caller.id)",
+		    "sql": "SELECT calls.*, caller.id AS "caller.id", caller.name AS "caller.name", caller.id AS __dbsp_presence_caller, callee.id AS "callee.id", callee.name AS "callee.name", callee.id AS __dbsp_presence_callee FROM calls LEFT JOIN symbols AS caller ON calls."callerId" = caller.id LEFT JOIN symbols AS callee ON calls."calleeId" = callee.id WHERE EXISTS (SELECT comments_sq.id FROM comments AS comments_sq WHERE comments_sq."postId" = caller.id)",
 		  },
 		  {
 		    "params": [],
-		    "sql": "SELECT calls.*, caller.id AS "caller.id" FROM calls LEFT JOIN symbols AS caller ON calls."callerId" = caller.id WHERE EXISTS (SELECT comments_sq.id FROM comments AS comments_sq WHERE comments_sq."postId" = caller.id)",
+		    "sql": "SELECT calls.*, caller.id AS "caller.id", caller.name AS "caller.name", caller.id AS __dbsp_presence_caller FROM calls LEFT JOIN symbols AS caller ON calls."callerId" = caller.id WHERE EXISTS (SELECT comments_sq.id FROM comments AS comments_sq WHERE comments_sq."postId" = caller.id)",
 		  },
 		]
 	`);
