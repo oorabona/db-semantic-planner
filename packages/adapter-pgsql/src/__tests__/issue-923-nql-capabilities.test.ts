@@ -1,4 +1,11 @@
-import { createOrm, nqlRaw, ResultHydrator, ref, schema } from '@dbsp/core';
+import {
+	createOrm,
+	InvalidOperationError,
+	nqlRaw,
+	ResultHydrator,
+	ref,
+	schema,
+} from '@dbsp/core';
 import type { Pool } from 'pg';
 import { expect, it, vi } from 'vitest';
 import {
@@ -202,7 +209,11 @@ for (const strategy of ['join', 'lateral', 'json_agg', 'cte'] as const) {
 							? [
 									strategy === 'json_agg'
 										? { id: 10, author_json: '[{"name":"Ada"}]' }
-										: { id: 10, 'author.name': 'Ada' },
+										: {
+												id: 10,
+												'author.name': 'Ada',
+												...(!flat ? { __dbsp_presence_author: 1 } : {}),
+											},
 								]
 							: [{ id: 3 }],
 				}));
@@ -215,6 +226,10 @@ for (const strategy of ['join', 'lateral', 'json_agg', 'cte'] as const) {
 					model,
 					adapter: createPgAdapter(pool, { model }),
 				});
+				if (!flat && strategy !== 'json_agg')
+					expect(orm.nql`${nqlRaw(text)}`.dump().sql).toContain(
+						'AS __dbsp_presence_author',
+					);
 				const expected = flat
 					? { id: 10, 'author.name': 'Ada' }
 					: { id: 10, author: { name: 'Ada' } };
@@ -268,7 +283,12 @@ for (const strategy of ['join', 'lateral', 'json_agg', 'cte'] as const) {
 			adapter: createPgCompileOnlyAdapter({ model }),
 		});
 		expect(() => orm.nql`${nqlRaw(text)}`.dump()).toThrow(
-			new Error(bodyRefusal),
+			strategy === 'join' && text === cteRead
+				? new InvalidOperationError(
+						'include',
+						"Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include.",
+					)
+				: new Error(bodyRefusal),
 		);
 	});
 }
@@ -446,3 +466,39 @@ it.each(['json_agg', 'cte'] as const)(
 		}
 	},
 );
+
+it('keeps fluent recursive CTE include root rows unchanged', async () => {
+	const db = schema({
+		categories: {
+			id: { type: 'integer', primaryKey: true },
+			parent_id: ref('categories', {
+				roles: { parent: 'parent', children: 'children' },
+				nullable: true,
+			}),
+		},
+	});
+	const roots = [
+		{ id: 1, parent_id: null },
+		{ id: 2, parent_id: null },
+	];
+	const query = vi.fn(async () => ({ rows: roots.map((row) => ({ ...row })) }));
+	const orm = createOrm({
+		schema: db,
+		adapter: createPgAdapter({ query } as unknown as Pool, { model: db.model }),
+	});
+	const read = orm.select('categories').include('children', {
+		recursive: true,
+		direction: 'descendants',
+	});
+	expect(
+		read
+			.plan()
+			.decisions.filter((d) => d.type === 'include-strategy')
+			.map((d) => d.choice),
+	).toEqual(['cte']);
+	expect(read.dump().sql).toBe(
+		'WITH children_cte AS (SELECT categories_inner_0.* FROM categories AS categories_inner_0) SELECT categories.* FROM categories LEFT JOIN children_cte AS children_ref_0 ON categories.id = children_ref_0.parent_id',
+	);
+	expect(await read.execute()).toEqual(roots);
+	expect(query).toHaveBeenCalledTimes(1);
+});

@@ -128,7 +128,7 @@ export function hydrateResolvedIncludes(
 				deletions.add(shape.outputLabel);
 			} else if (
 				strategy === 'flat' &&
-				shape.strategy !== 'json_agg' &&
+				(shape.strategy === 'join' || shape.strategy === 'lateral') &&
 				(shape.presence !== undefined ||
 					shape.columns.length > 0 ||
 					shape.children.length > 0)
