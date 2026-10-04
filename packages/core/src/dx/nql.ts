@@ -1519,7 +1519,13 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		if (compiled.kind === 'unplannedRead') {
 			throw new Error(UNPLANNED_NQL_READ_PLAN_ERROR);
 		}
-		return executePlan(compiled.intent, this.model);
+		return executePlan(
+			compiled.intent,
+			this.model,
+			this.adapter
+				? { dialectCapabilities: this.adapter.dialectCapabilities }
+				: undefined,
+		);
 	}
 
 	plan(): PlanReport {
@@ -2186,11 +2192,21 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		}
 
 		const planReport = this.planInternal();
-		const finalBundle = this.createFinalNqlStatementBundle(compiledIntent);
+		const finalBundle = this.createFinalNqlStatementBundle(
+			compiledIntent,
+			bindingFinalPlanHasJsonAggIncludes(planReport) ? planReport : undefined,
+		);
 		const compiled = hasNqlBindings(finalBundle)
 			? adapter.compile<T>(finalBundle, this.nqlBundleCompileOptions())
 			: adapter.compile<T>(planReport, this.nqlBundleCompileOptions());
-		return executeCompiledQuery(adapter, compiled, 'nql().all()');
+		const rows = await executeCompiledQuery(adapter, compiled, 'nql().all()');
+		if (bindingFinalPlanHasJsonAggIncludes(planReport)) {
+			hydrateJsonAggIncludes(
+				rows,
+				planForJsonAggHydration(planReport, compiled),
+			);
+		}
+		return rows;
 	}
 
 	async run(): Promise<void> {

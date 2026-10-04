@@ -74,7 +74,9 @@ describe('#793 exact include consumption', () => {
 				? orm.nql`posts | select *, author.file.path as fp | flat`.dump()
 				: orm.nql`posts | select *, author.file.path as fp`.dump();
 			expect(result.sql).toBe(
-				'SELECT posts.*, file.path AS fp FROM posts JOIN users AS author ON posts.author_id = author.id JOIN files AS file ON author.file_id = file.id',
+				flat
+					? 'SELECT posts.*, file.path AS fp FROM posts JOIN users AS author ON posts.author_id = author.id JOIN files AS file ON author.file_id = file.id'
+					: "SELECT posts.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'name', __t__.name, 'firstName', __t__.\"firstName\", 'lastName', __t__.\"lastName\", 'path', __t__.path, 'file_id', __t__.file_id) || jsonb_build_object('file', COALESCE((SELECT json_agg(jsonb_build_object('fp', __t1__.path) ORDER BY __t1__.id ASC NULLS LAST) FROM files AS __t1__ WHERE __t1__.id = __t__.file_id), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST) FROM users AS __t__ WHERE __t__.id = posts.author_id), '[]'::json) AS author_json FROM posts",
 			);
 			expect('params' in result && result.params).toEqual([]);
 		});
@@ -82,7 +84,7 @@ describe('#793 exact include consumption', () => {
 	it('preserves NQL same-path SQL and params', () => {
 		const result = orm.nql`posts | select *, author.name`.dump();
 		expect(result.sql).toBe(
-			'SELECT posts.*, author.name AS "author.name" FROM posts JOIN users AS author ON posts.author_id = author.id',
+			"SELECT posts.*, COALESCE((SELECT json_agg(jsonb_build_object('name', __t__.name) ORDER BY __t__.id ASC NULLS LAST) FROM users AS __t__ WHERE __t__.id = posts.author_id), '[]'::json) AS author_json FROM posts",
 		);
 		expect('params' in result && result.params).toEqual([]);
 	});
