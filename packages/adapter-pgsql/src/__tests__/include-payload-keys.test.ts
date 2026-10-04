@@ -382,7 +382,7 @@ it('907 collapses exact aggregate requests and refuses different owners', () => 
 	const orm = createOrm({ model, adapter });
 	const query = orm
 		.select('authors')
-		.include('posts', { join: 'left' })
+		.join('posts', { type: 'left' })
 		.count('id', 'n')
 		.count('id', 'n')
 		.dump();
@@ -394,7 +394,7 @@ it('907 collapses exact aggregate requests and refuses different owners', () => 
 	expect(() =>
 		orm
 			.select('authors')
-			.include('posts', { join: 'left' })
+			.join('posts', { type: 'left' })
 			.count('id', 'n')
 			.count('amount', 'n')
 			.dump(),
@@ -542,7 +542,7 @@ it('907k normalizes aggregate source and output key', () => {
 	for (const fn of ['count', 'sum', 'avg', 'min', 'max'] as const) {
 		const query = orm
 			.select('authors')
-			.include('posts', { join: 'left' })
+			.join('posts', { type: 'left' })
 			[fn]('id')
 			[fn]('id', fn)
 			.dump();
@@ -552,7 +552,7 @@ it('907k normalizes aggregate source and output key', () => {
 		expect(() =>
 			orm
 				.select('authors')
-				.include('posts', { join: 'left' })
+				.join('posts', { type: 'left' })
 				[fn]('id')
 				[fn]('amount', fn)
 				.dump(),

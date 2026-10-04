@@ -335,6 +335,9 @@ export function plan(
 					opts,
 					`include[${i}]`,
 					0,
+					false,
+					'',
+					intent,
 				);
 			}
 		}
@@ -1108,6 +1111,7 @@ function processInclude(
 	depth: number,
 	ancestorIsLeftJoin = false,
 	parentIncludePath = '',
+	queryIntent?: QueryIntent,
 ): void {
 	state.relationsAnalyzed++;
 	const pathSegment = include.via || include.relation;
@@ -1295,12 +1299,23 @@ function processInclude(
 
 	if (
 		includeStrategy === 'join' &&
-		relation.type === 'hasMany' &&
+		(relation.type === 'hasMany' || relation.type === 'belongsToMany') &&
 		include.strategy !== 'flat'
 	)
 		throw new InvalidOperationError(
 			'include',
 			`Include ${optionPath} cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include.`,
+		);
+	if (
+		includeStrategy === 'join' &&
+		include.strategy !== 'flat' &&
+		(queryIntent?.select?.type === 'aggregate' ||
+			queryIntent?.distinct === true ||
+			(queryIntent?.groupBy?.length ?? 0) > 0)
+	)
+		throw new InvalidOperationError(
+			'include',
+			`Include ${optionPath} cannot use 'join' with aggregation, groupBy or DISTINCT because its data would be dropped. Use .join() for relational columns, grouping or ordering.`,
 		);
 	// Pre-compute join type for include-strategy decision embedding
 	// (only relevant when strategy is 'join')
@@ -1498,6 +1513,7 @@ function processInclude(
 					depth + 1,
 					nextAncestorIsLeftJoin,
 					fullPath,
+					queryIntent,
 				);
 			}
 		}

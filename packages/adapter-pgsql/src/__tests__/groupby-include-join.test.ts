@@ -1,20 +1,4 @@
-/**
- * Issue 9: include() + groupBy() — hydration columns break GROUP BY
- *
- * When using include('file', { join: 'inner' }) with .groupBy(), the include
- * handler adds hydration columns (e.g. "file"."id" AS "file.id") to the SELECT.
- * These extra columns are not in the GROUP BY clause → PostgreSQL error:
- *   ERROR: column "file.id" must appear in the GROUP BY clause or be used in an aggregate function
- *
- * Fix: When GROUP BY is active, strip columns from join includeStrategy decisions
- * (same pattern as DISTINCT-VECTOR and INCLUDE-COUNT fixes).
- * Explicitly requested columns via relationColumn() are preserved (caller's responsibility).
- *
- * Schema:
- *   symbols: id (PK), name, kind, file_id (FK→files)
- *   files: id (PK), path, project_id (FK→projects)
- *   projects: id (PK), name
- */
+/** Grouped relational rowsets use .join(); includes carry data (#908). */
 
 import { createOrm, exprRef, op, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
@@ -53,15 +37,15 @@ function ws(sql: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Tests: include + groupBy interaction
+// Tests: relation join + groupBy interaction
 // ---------------------------------------------------------------------------
 
-describe('include(join) + groupBy — no hydration columns in SELECT', () => {
-	it('include with join + groupBy does not add hydration columns to SELECT', () => {
+describe('join() + groupBy — relational rowset without include data', () => {
+	it('relation join + groupBy does not add hydration columns to SELECT', () => {
 		const orm = buildOrm();
 		const dump = orm
 			.select('symbols')
-			.include('file', { join: 'inner' })
+			.join('file')
 			.groupBy(['id', 'file.path'])
 			.dump();
 
@@ -79,11 +63,11 @@ describe('include(join) + groupBy — no hydration columns in SELECT', () => {
 		expect(normalized).not.toMatch(/\bfile\.path\s+AS\s+"file\.path"/i);
 	});
 
-	it('include with join + groupBy + columns only selects requested columns', () => {
+	it('relation join + groupBy + columns only selects requested columns', () => {
 		const orm = buildOrm();
 		const dump = orm
 			.select('symbols')
-			.include('file', { join: 'inner' })
+			.join('file')
 			.groupBy(['id'])
 			.columns(['id'])
 			.dump();
@@ -98,14 +82,10 @@ describe('include(join) + groupBy — no hydration columns in SELECT', () => {
 		expect(normalized).not.toMatch(/\bfile\.\w+\s+AS\s+"file\./i);
 	});
 
-	it('include with join + count (aggregate-only, no groupBy) strips columns too', () => {
+	it('relation join + count (aggregate-only, no groupBy) selects only the aggregate', () => {
 		// This is the existing INCLUDE-COUNT behavior — regression guard
 		const orm = buildOrm();
-		const dump = orm
-			.select('symbols')
-			.include('file', { join: 'inner' })
-			.count()
-			.dump();
+		const dump = orm.select('symbols').join('file').count().dump();
 
 		const normalized = ws(dump.sql);
 
@@ -140,11 +120,11 @@ describe('include(join) + groupBy — no hydration columns in SELECT', () => {
 		expect(normalized).toMatch(/\bfile\b/i);
 	});
 
-	it('include + groupBy with expression orderBy does not add hydration columns', () => {
+	it('relation join + groupBy with expression orderBy does not add hydration columns', () => {
 		const orm = buildOrm();
 		const dump = orm
 			.select('symbols')
-			.include('file', { join: 'inner' })
+			.join('file')
 			.groupBy(['id', 'kind'])
 			.orderBy(op('-', exprRef('id'), exprRef('id')), 'desc', { nulls: 'last' })
 			.dump();

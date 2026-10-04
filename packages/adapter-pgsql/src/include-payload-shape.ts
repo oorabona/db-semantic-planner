@@ -199,13 +199,26 @@ export function resolveIncludePayloadShapes(
 						d.relationName ?? d.relation ?? path.split('.').at(-1)!,
 					)
 				: undefined;
+		// External reports can carry belongsToMany even though legacy decisions narrow the type.
+		const relationType: string | undefined = relation?.type ?? d.relationType;
 		if (
 			strategy === 'join' &&
-			(relation?.type === 'hasMany' || d.relationType === 'hasMany') &&
+			(relationType === 'hasMany' || relationType === 'belongsToMany') &&
 			!flatPaths.has(path)
 		)
 			throw new Error(
 				`Include ${d.intentPath ?? path}(${path}) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include.`,
+			);
+		const intent = plan.executableIntent ?? plan.intent;
+		if (
+			strategy === 'join' &&
+			!flatPaths.has(path) &&
+			(intent?.select?.type === 'aggregate' ||
+				intent?.distinct === true ||
+				(intent?.groupBy?.length ?? 0) > 0)
+		)
+			throw new Error(
+				`Include ${d.intentPath ?? path}(${path}) cannot use 'join' with aggregation, groupBy or DISTINCT because its data would be dropped. Use .join() for relational columns, grouping or ordering.`,
 			);
 		let requested = d.columns;
 		if (d.emptyProjection) requested = [];

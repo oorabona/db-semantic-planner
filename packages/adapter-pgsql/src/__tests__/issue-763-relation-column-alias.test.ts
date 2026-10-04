@@ -364,27 +364,19 @@ describe('issue 763: relation qualifiers require an emitted SQL alias', () => {
 		).toThrow(missingAlias);
 	});
 
-	it('requires the emitted via alias instead of the include display name', () => {
-		expect(() =>
-			orm()
-				.select('posts')
-				.include('files', { via: 'file', join: 'inner' })
-				.groupBy(['files.path'])
-				.dump(),
-		).toThrow(
-			'relation column "files"."path" has no emitted alias in this query',
-		);
-
-		const sql = orm()
-			.select('posts')
-			.include('files', { via: 'file', join: 'inner' })
-			.groupBy(['file.path'])
-			.dump().sql;
-
-		expect(sql).toContain('JOIN files AS file');
-		expect(sql).toContain('GROUP BY file.path');
+	it('refuses grouped join includes even with a via alias', () => {
+		for (const field of ['files.path', 'file.path']) {
+			expect(() =>
+				orm()
+					.select('posts')
+					.include('files', { via: 'file', join: 'inner' })
+					.groupBy([field])
+					.dump(),
+			).toThrow(
+				"Invalid include: Include include[0](file) cannot use 'join' with aggregation, groupBy or DISTINCT because its data would be dropped. Use .join() for relational columns, grouping or ordering.",
+			);
+		}
 	});
-
 	it('preallocates a filter join before its relation column is projected', () => {
 		const result = compilePlan({
 			rootTable: 'posts',

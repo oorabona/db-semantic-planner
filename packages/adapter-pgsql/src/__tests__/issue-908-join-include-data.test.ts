@@ -226,7 +226,7 @@ it('a keyless target uses a constant inside the joined target', () => {
 	const report = builder.plan();
 	const compiled = keylessAdapter.compile(report);
 	expect(compiled.sql).toBe(
-		'SELECT posts.*, author.name AS "author.name", author.__dbsp_presence_author AS __dbsp_presence_author FROM posts LEFT JOIN (SELECT *, 1 AS __dbsp_presence_author FROM users AS author) AS author ON posts."authorCode" = author.id',
+		'SELECT posts.*, author.name AS "author.name", author.__dbsp_presence_author AS __dbsp_presence_author FROM posts LEFT JOIN (SELECT author.id, author.name, 1 AS __dbsp_presence_author FROM users AS author) AS author ON posts."authorCode" = author.id',
 	);
 	const rows = [
 		{ 'author.name': null, __dbsp_presence_author: 1 },
