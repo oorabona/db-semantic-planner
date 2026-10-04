@@ -102,6 +102,7 @@ export function hydrateResolvedIncludes(
 		const assignments = new Map<string, unknown>();
 		const deletions = new Set<string>();
 		for (const shape of shapes) {
+			if (shape.outputMode === 'flat') continue;
 			if (strategy === 'json_agg' && shape.strategy === 'json_agg') {
 				if (!Object.hasOwn(row, shape.outputLabel)) continue;
 				assignments.set(

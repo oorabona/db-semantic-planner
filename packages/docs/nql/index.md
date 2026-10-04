@@ -1131,7 +1131,7 @@ WHERE EXISTS (
 
 *Schema: iam*
 
-Combine the results of two queries with `union`, `intersect`, `except`, or `union all`. Both sides must select the same columns. Nested relation output is refused for all set operations, including ALL variants; use `| flat` in each branch. The right-hand query is wrapped in parentheses.
+Combine the results of two queries with `union`, `intersect`, `except`, or `union all`. Both sides must select the same columns. Nested relation output is refused for all set operations, including ALL variants; use `| flat` in every branch. A relation whose `includeStrategy` hint is `json_agg` or `cte` cannot be flattened; change that hint or select from the joined table. The right-hand query is wrapped in parentheses.
 
 ### UNION (Deduplicated)
 

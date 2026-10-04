@@ -289,7 +289,9 @@ it('root star and relation star retain distinct public labels', () => {
 		{ id: 1, 'children.id': 2, 'children.rootId': 1, 'children.amount': '42' },
 	];
 	new ResultHydrator(model, 'roots').hydrateJoinIncludes(rows, report, query);
-	expect(rows).toEqual([{ id: 1, children: { id: 2, rootId: 1, amount: 42 } }]);
+	expect(rows).toEqual([
+		{ id: 1, 'children.id': 2, 'children.rootId': 1, 'children.amount': '42' },
+	]);
 });
 it('explicit root output and relation star retain distinct public labels', () => {
 	const adapter = createPgCompileOnlyAdapter({ model });
@@ -303,7 +305,9 @@ it('explicit root output and relation star retain distinct public labels', () =>
 		{ id: 1, 'children.id': 2, 'children.rootId': 1, 'children.amount': '42' },
 	];
 	new ResultHydrator(model, 'roots').hydrateJoinIncludes(rows, report, query);
-	expect(rows).toEqual([{ id: 1, children: { id: 2, rootId: 1, amount: 42 } }]);
+	expect(rows).toEqual([
+		{ id: 1, 'children.id': 2, 'children.rootId': 1, 'children.amount': '42' },
+	]);
 });
 it('root star expands independently of include projection', () => {
 	const adapter = createPgCompileOnlyAdapter({ model });

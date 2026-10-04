@@ -249,7 +249,7 @@ export function resolveIncludePayloadShapes(
 			const flatColumn =
 				strategy !== 'json_agg' &&
 				(flatPaths.has(path) || entry.nqlLabel === true);
-			const publicKey = flatColumn
+			const publicKey = flatPaths.has(path)
 				? (entry.alias ?? publicName)
 				: (chosenRelationColumnAlias(entry.alias, entry.defaultLabel) ??
 					publicName);
@@ -309,6 +309,7 @@ export function resolveIncludePayloadShapes(
 			path,
 			publicKey,
 			strategy,
+			outputMode: flatPaths.has(path) ? 'flat' : 'nested',
 			table: tableName,
 			isToOne: d.relationType === 'belongsTo' || d.relationType === 'hasOne',
 			outputLabel: transportLabel(

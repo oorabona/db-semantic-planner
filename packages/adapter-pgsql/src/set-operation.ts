@@ -100,12 +100,12 @@ export function compileSetOperationEnvelope(
 	if (
 		[left, right].some((branch) =>
 			branch.hydrationPlan?.includePayloads?.some(
-				(payload) => payload.strategy === 'json_agg',
+				(payload) => payload.outputMode !== 'flat',
 			),
 		)
 	) {
 		throw new Error(
-			'Set operations with nested relation output are not supported; use | flat in each branch.',
+			"Set operations with nested relation output are not supported; use | flat in every branch. A relation with includeStrategy hint 'json_agg' or 'cte' cannot be flattened; change that hint or select from the joined table.",
 		);
 	}
 

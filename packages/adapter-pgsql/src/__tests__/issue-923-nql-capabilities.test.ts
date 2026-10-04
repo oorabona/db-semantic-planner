@@ -175,3 +175,98 @@ it.each(['*', 'id, posts_json', 'id'])(
 		]);
 	},
 );
+
+function hintedModel(strategy: 'join' | 'lateral' | 'json_agg') {
+	return {
+		...db.model,
+		getTable: db.model.getTable.bind(db.model),
+		getRelation: (name: string) => {
+			const relation = db.model.getRelation(name);
+			return relation ? { ...relation, includeStrategy: strategy } : relation;
+		},
+		getRelationsFrom: (name: string) =>
+			db.model
+				.getRelationsFrom(name)
+				?.map((relation) => ({ ...relation, includeStrategy: strategy })),
+	};
+}
+const operators = [
+	'union',
+	'union all',
+	'intersect',
+	'intersect all',
+	'except',
+	'except all',
+];
+const refusal =
+	"Set operations with nested relation output are not supported; use | flat in every branch. A relation with includeStrategy hint 'json_agg' or 'cte' cannot be flattened; change that hint or select from the joined table.";
+for (const strategy of ['join', 'lateral', 'json_agg'] as const) {
+	for (const flat of [false, true]) {
+		if (flat && strategy === 'json_agg') continue;
+		const read = `posts | select id, author.name${flat ? ' | flat' : ''}`;
+		for (const text of [
+			read,
+			`with enriched as (${read})\nenriched | select *`,
+			`posts | select id | bind source\n${read}`,
+			`${read} | bind source\nsource | select *`,
+			`insert into users set id = 3, name = 'New' | select id | bind created\n${read}`,
+		]) {
+			it(`hydrates requested shape ${strategy} flat=${flat}: ${text}`, async () => {
+				const query = vi.fn(async (sql: string) => ({
+					rows:
+						sql.startsWith('SELECT') || sql.startsWith('WITH')
+							? [
+									strategy === 'json_agg'
+										? { id: 10, author_json: '[{"name":"Ada"}]' }
+										: { id: 10, 'author.name': 'Ada' },
+								]
+							: [{ id: 3 }],
+				}));
+				const pool = {
+					query,
+					connect: vi.fn(async () => ({ query, release: vi.fn() })),
+				} as unknown as Pool;
+				const model = hintedModel(strategy);
+				const orm = createOrm({
+					model,
+					adapter: createPgAdapter(pool, { model }),
+				});
+				const expected = flat
+					? { id: 10, 'author.name': 'Ada' }
+					: { id: 10, author: { name: 'Ada' } };
+				expect(await orm.nql`${nqlRaw(text)}`.all()).toEqual([expected]);
+				expect(await orm.nql`${nqlRaw(text)}`.first()).toEqual(expected);
+			});
+		}
+	}
+	for (const op of operators) {
+		for (const text of [
+			`posts | select id, author.name | ${op} (posts | select id, title)`,
+			`posts | select id, title | ${op} (posts | select id, author.name)`,
+			`posts | select id, title | ${op} (posts | select id, title | union (posts | select id, author.name))`,
+		]) {
+			it(`refuses nested ${strategy}: ${text}`, () => {
+				const model = hintedModel(strategy);
+				const orm = createOrm({
+					model,
+					adapter: createPgCompileOnlyAdapter({ model }),
+				});
+				expect(() => orm.nql`${nqlRaw(text)}`.dump()).toThrow(
+					new Error(refusal),
+				);
+			});
+		}
+		if (strategy !== 'json_agg')
+			it(`allows flat ${strategy} ${op}`, () => {
+				const model = hintedModel(strategy);
+				const orm = createOrm({
+					model,
+					adapter: createPgCompileOnlyAdapter({ model }),
+				});
+				const dump =
+					orm.nql`${nqlRaw(`posts | select id, author.name | flat | ${op} (posts | select id, author.name | flat)`)}`.dump();
+				expect(dump.sql).toContain(op.toUpperCase());
+				expect('params' in dump && dump.params).toEqual([]);
+			});
+	}
+}

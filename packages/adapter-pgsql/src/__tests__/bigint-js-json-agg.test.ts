@@ -419,6 +419,7 @@ describe('bigint js json_agg SQL projection', () => {
 			includePayloads: [
 				{
 					path: 'readings',
+					outputMode: 'nested',
 					publicKey: 'readings',
 					strategy: 'json_agg',
 					table: 'readings',

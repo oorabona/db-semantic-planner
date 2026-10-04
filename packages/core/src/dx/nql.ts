@@ -38,6 +38,7 @@ import {
 import {
 	type Adapter,
 	assertConnectionAvailable,
+	type CompiledQuery,
 	type CompileOptions,
 	type Dump,
 	type DumpMeta,
@@ -64,14 +65,11 @@ import type {
 	ObserverErrorHandler,
 } from './hooks.js';
 import {
-	hydrateJsonAggIncludes,
-	planForJsonAggHydration,
-} from './hydration-utils.js';
-import {
 	type MutationDump,
 	runMutationWithHooks,
 } from './mutation-builders.js';
 import type { DumpMetaInput } from './query-builder-types.js';
+import { ResultHydrator } from './result-hydrator.js';
 
 // ============================================================================
 // Types
@@ -731,10 +729,11 @@ function createBindingFinalPlan(
 	};
 }
 
-function bindingFinalPlanHasJsonAggIncludes(planReport: PlanReport): boolean {
+function bindingFinalPlanHasIncludes(planReport: PlanReport): boolean {
 	return planReport.decisions.some(
 		(decision) =>
-			decision.type === 'include-strategy' && decision.choice === 'json_agg',
+			decision.type === 'include-strategy' &&
+			['json_agg', 'join', 'lateral'].includes(decision.choice),
 	);
 }
 
@@ -1591,7 +1590,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 
 		const finalBundle = this.createFinalNqlStatementBundle(
 			compiledIntent,
-			bindingFinalPlanHasJsonAggIncludes(planReport) ? planReport : undefined,
+			bindingFinalPlanHasIncludes(planReport) ? planReport : undefined,
 		);
 		const compiled =
 			bindingFinalQuery || hasNqlBindings(finalBundle)
@@ -1918,8 +1917,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 						runtimeBindings,
 						sourceBundle,
 						step.bindingDependencies,
-						planReport !== undefined &&
-							bindingFinalPlanHasJsonAggIncludes(planReport)
+						planReport !== undefined && bindingFinalPlanHasIncludes(planReport)
 							? planReport
 							: undefined,
 					);
@@ -1929,7 +1927,11 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 					);
 					finalRows = await txAdapter.execute(compiled);
 					if (hydrateRows && compiled.hydrationPlan !== undefined) {
-						hydrateJsonAggIncludes(finalRows as T[], compiled.hydrationPlan);
+						this.hydrateReadRows(
+							finalRows as T[],
+							compiled.hydrationPlan,
+							compiled,
+						);
 					}
 				}
 
@@ -2014,8 +2016,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 					runtimeBindings,
 					sourceBundle,
 					step.bindingDependencies,
-					planReport !== undefined &&
-						bindingFinalPlanHasJsonAggIncludes(planReport)
+					planReport !== undefined && bindingFinalPlanHasIncludes(planReport)
 						? planReport
 						: undefined,
 				);
@@ -2157,7 +2158,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			);
 			const rows = await executeCompiledQuery(adapter, compiled, 'nql().all()');
 			if (hydrateRows && compiled.hydrationPlan !== undefined) {
-				hydrateJsonAggIncludes(rows, compiled.hydrationPlan);
+				this.hydrateReadRows(rows, compiled.hydrationPlan, compiled);
 			}
 			return rows;
 		}
@@ -2182,18 +2183,13 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			const compiled = adapter.compile<T>(
 				this.createFinalNqlStatementBundle(
 					compiledIntent,
-					bindingFinalPlanHasJsonAggIncludes(planReport)
-						? planReport
-						: undefined,
+					bindingFinalPlanHasIncludes(planReport) ? planReport : undefined,
 				),
 				this.nqlBundleCompileOptions(),
 			);
 			const rows = await executeCompiledQuery(adapter, compiled, 'nql().all()');
-			if (hydrateRows && bindingFinalPlanHasJsonAggIncludes(planReport)) {
-				hydrateJsonAggIncludes(
-					rows,
-					planForJsonAggHydration(planReport, compiled),
-				);
+			if (hydrateRows) {
+				this.hydrateReadRows(rows, planReport, compiled);
 			}
 			return rows;
 		}
@@ -2201,19 +2197,26 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		const planReport = this.planInternal();
 		const finalBundle = this.createFinalNqlStatementBundle(
 			compiledIntent,
-			bindingFinalPlanHasJsonAggIncludes(planReport) ? planReport : undefined,
+			bindingFinalPlanHasIncludes(planReport) ? planReport : undefined,
 		);
 		const compiled = hasNqlBindings(finalBundle)
 			? adapter.compile<T>(finalBundle, this.nqlBundleCompileOptions())
 			: adapter.compile<T>(planReport, this.nqlBundleCompileOptions());
 		const rows = await executeCompiledQuery(adapter, compiled, 'nql().all()');
-		if (hydrateRows && bindingFinalPlanHasJsonAggIncludes(planReport)) {
-			hydrateJsonAggIncludes(
-				rows,
-				planForJsonAggHydration(planReport, compiled),
-			);
+		if (hydrateRows) {
+			this.hydrateReadRows(rows, planReport, compiled);
 		}
 		return rows;
+	}
+
+	private hydrateReadRows(
+		rows: T[],
+		planReport: PlanReport,
+		compiled: CompiledQuery<T>,
+	): void {
+		const hydrator = new ResultHydrator<T>(this.model, planReport.rootTable);
+		hydrator.hydrateJsonAggIncludes(rows, planReport, compiled);
+		hydrator.hydrateJoinIncludes(rows, planReport, compiled);
 	}
 
 	async run(): Promise<void> {

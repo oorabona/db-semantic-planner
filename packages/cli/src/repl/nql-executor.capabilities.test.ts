@@ -56,7 +56,7 @@ it.each(cases)('CLI and tag agree for %s', async (text, sql) => {
 });
 
 const refusal =
-	'Set operations with nested relation output are not supported; use | flat in each branch.';
+	"Set operations with nested relation output are not supported; use | flat in every branch. A relation with includeStrategy hint 'json_agg' or 'cte' cannot be flattened; change that hint or select from the joined table.";
 const nested = 'users | select id, posts.title';
 const flat = 'users | select id, posts.title | flat';
 const setCases = [

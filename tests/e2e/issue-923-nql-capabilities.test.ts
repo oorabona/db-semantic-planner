@@ -78,3 +78,29 @@ enriched | select *`;
 	expect(await cte().all()).toEqual([expected]);
 	expect(await cte().first()).toEqual(expected);
 });
+
+it('hydrates a join-hinted author through tag all() and preserves flat labels', async () => {
+	const model = {
+		...db.model,
+		getRelation: (name: string) => {
+			const relation = db.model.getRelation(name);
+			return relation
+				? { ...relation, includeStrategy: 'join' as const }
+				: relation;
+		},
+		getRelationsFrom: (name: string) =>
+			db.model
+				.getRelationsFrom(name)
+				.map((relation) => ({ ...relation, includeStrategy: 'join' as const })),
+	};
+	const orm = createOrm({
+		model,
+		adapter: createPgAdapter(await getTestPool(), { model }),
+	}).withSchema(namespace);
+	expect(
+		await orm.nql`posts | where id = 10 | select id, author.name`.all(),
+	).toEqual([{ id: 10, author: { name: 'Ada' } }]);
+	expect(
+		await orm.nql`posts | where id = 10 | select id, author.name | flat`.all(),
+	).toEqual([{ id: 10, 'author.name': 'Ada' }]);
+});

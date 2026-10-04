@@ -10,6 +10,7 @@ const shape: IncludePayloadShape = {
 	path: 'posts',
 	publicKey: 'posts',
 	strategy: 'json_agg',
+	outputMode: 'nested',
 	table: 'posts',
 	isToOne: false,
 	outputLabel: 'owned_json',

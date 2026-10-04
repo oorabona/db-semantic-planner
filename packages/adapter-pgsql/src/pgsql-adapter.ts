@@ -2418,11 +2418,34 @@ function projectNqlBindingQueryEnvelope<T = unknown>(
 	hydrationPlan: PlanReport | undefined,
 ): ProjectionEnvelope<T> {
 	const shape = buildNqlBindingProjectionShape(source, query.select);
+	// Preserve only payloads whose owned transport labels survive this projection.
+	const visible = new Set(
+		shape.selections
+			.filter((selection) => selection.inputKey === selection.outputKey)
+			.map((selection) => selection.inputKey),
+	);
+	const survives = (
+		payload: import('@dbsp/types').IncludePayloadShape,
+	): boolean =>
+		payload.strategy === 'json_agg'
+			? visible.has(payload.outputLabel)
+			: payload.columns.some((column) => visible.has(column.outputLabel)) ||
+				payload.children.some(survives);
+	const inherited = source.hydrationPlan;
+	const payloads = inherited?.includePayloads?.filter(survives);
+	const projectedPlan =
+		hydrationPlan ??
+		(shape.preserveOneToOne
+			? inherited
+			: payloads?.length
+				? { ...inherited!, includePayloads: payloads }
+				: undefined);
+
 	if (shape.preserveOneToOne) {
 		return preserveOneToOne(source, {
 			sql,
 			parameters,
-			...(hydrationPlan !== undefined ? { hydrationPlan } : {}),
+			...(projectedPlan !== undefined ? { hydrationPlan: projectedPlan } : {}),
 			preserveHydrationPlan: false,
 		});
 	}
@@ -2431,7 +2454,7 @@ function projectNqlBindingQueryEnvelope<T = unknown>(
 		parameters,
 		selections: shape.selections,
 		expressions: shape.expressions,
-		...(hydrationPlan !== undefined ? { hydrationPlan } : {}),
+		...(projectedPlan !== undefined ? { hydrationPlan: projectedPlan } : {}),
 		preserveHydrationPlan: false,
 	});
 }
