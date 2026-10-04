@@ -54,6 +54,11 @@ import {
 	relationBinding,
 	relationBindingFor,
 } from './binding-registry.js';
+import { truncateIdentifier } from './column-metadata.js';
+import {
+	assertNoManyToManyRootRelations,
+	assertNoRecursiveRootRelations,
+} from './condition-compiler-factory.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -203,9 +208,8 @@ export function assertNoDroppedDecisionModifiers(
  *  2. `assertNoDroppedDecisionModifiers(decision, use)` — validates the Decision's
  *     own fields unconditionally.  Catches directly-constructed compilePlan
  *     decisions (no subqueryIntent) that carry forbidden modifiers directly.
- *  3. Rejects correlated subqueries (outerRef() inside the inner WHERE).
- *  4. Builds the SelectStmt from the lowered `decision` fields (targetTable,
- *     selectColumn, aggregate, conditions, orderBy, limit).
+ * The canonical body is compiled through the one condition compiler, with
+ * decision dispatch retained for legacy callers.
  *
  * Called by:
  *   - `buildScalarSubquery`  (handlers/where/subquery.ts) — scalar + IN handlers
@@ -216,8 +220,7 @@ export function assertNoDroppedDecisionModifiers(
  * parameter seeding).
  *
  * @param use           - How the subquery is used (drives modifier validation rules)
- * @param sourceIntent  - The ORIGINAL QueryIntent before lowering (provenance) —
- *                        used for validation only; SQL is built from `decision`.
+ * @param sourceIntent  - The ORIGINAL QueryIntent before lowering (provenance).
  * @param decision      - The lowered Decision (targetTable, selectColumn, conditions…)
  * @param ctx           - Immutable compiler context
  * @param state         - Mutable compiler state (params array, aliases, paramIndex)
@@ -242,8 +245,14 @@ export function buildPredicateSubquerySelect(
 	// whose own fields carry forbidden modifiers or a malformed projection.
 	assertNoDroppedDecisionModifiers(decision, use);
 
-	// Correlated subqueries (outerRef inside the inner WHERE) are not supported.
-	if (sourceIntent.where && containsOuterRef(sourceIntent.where)) {
+	// Correlation is refused only on the route without the condition callback.
+	// The subquery builder without a parent returns values for the caller to
+	// append; with a parent it shares parameter state and returns no values.
+	if (
+		!ctx.compileSubqueryCondition &&
+		sourceIntent.where &&
+		containsOuterRef(sourceIntent.where)
+	) {
 		const label =
 			use === 'rawExists' ? 'rawExists' : use === 'IN' ? 'IN' : 'scalar';
 		throw new Error(
@@ -263,9 +272,24 @@ export function buildPredicateSubquerySelect(
 	}
 
 	// Generate unique alias
-	const existingAliases = state.aliases.size;
-	const targetAlias = `${targetTable}_subq_${existingAliases}`;
-	state.aliases.set(`subquery_${targetTable}`, targetAlias);
+	let aliasIndex = state.aliases.size;
+	const aliasFor = (index: number) => {
+		const suffix = `_subq_${index}`;
+		return `${truncateIdentifier(targetTable, 63 - suffix.length)}${suffix}`;
+	};
+	const reserved = new Set(
+		[
+			...state.aliases.values(),
+			...(ctx.bindingNames ?? []),
+			...Array.from(ctx.scope?.bindings.keys() ?? []),
+			ctx.currentAlias ?? ctx.rootTable,
+		].map((name) => truncateIdentifier(name, 63)),
+	);
+	let targetAlias = aliasFor(aliasIndex);
+	while (reserved.has(targetAlias)) {
+		targetAlias = aliasFor(++aliasIndex);
+	}
+	state.aliases.set(`subquery_${targetAlias}`, targetAlias);
 	// A mutation may carry an outer scope and a newer CTE binding registry. Merge
 	// both at this boundary: the CTE entered before this subquery, so it remains a
 	// local relation even when the inherited scope predates that binding.
@@ -355,9 +379,16 @@ export function buildPredicateSubquerySelect(
 		);
 	}
 
+	if (sourceIntent.where && !ctx.compileSubqueryCondition) {
+		assertNoRecursiveRootRelations(sourceIntent.where);
+		assertNoManyToManyRootRelations(sourceIntent.where, targetTable, ctx.model);
+	}
 	// Build WHERE clause if conditions exist
 	let whereClause: Node | undefined;
-	if (decision.conditions && decision.conditions.length > 0) {
+	if (
+		sourceIntent.where ||
+		(decision.conditions && decision.conditions.length > 0)
+	) {
 		// NOTE: schema is intentionally KEPT in subCtx so any nested EXISTS or
 		// subquery conditions can qualify their FROM tables with the schema name.
 		// Column references are alias-prefixed (not schema-qualified) regardless.
@@ -372,10 +403,16 @@ export function buildPredicateSubquerySelect(
 			currentBinding: targetBinding,
 		};
 
-		if (decision.conditions.length === 1) {
+		if (sourceIntent.where && ctx.compileSubqueryCondition) {
+			whereClause = ctx.compileSubqueryCondition(
+				sourceIntent.where,
+				subCtx,
+				state,
+			);
+		} else if (decision.conditions?.length === 1) {
 			whereClause = dispatch(decision.conditions[0]!, subCtx, state);
 		} else {
-			const compiledConditions = decision.conditions.map((cond) =>
+			const compiledConditions = (decision.conditions ?? []).map((cond) =>
 				dispatch(cond, subCtx, state),
 			);
 			whereClause = {

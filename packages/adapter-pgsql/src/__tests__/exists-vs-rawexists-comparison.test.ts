@@ -12,8 +12,7 @@
  *       compiles to a correctly correlated subquery (FK auto-emitted, outerRef
  *       walks the outer query alias).
  *     → rawExists(subquery('files').select('id').where(gt(..., outerRef(...))))
- *       throws today — correlated subqueries are not yet supported in the
- *       rawExists code path.
+ *       compiles with explicit correlation to the enclosing query.
  *
  *   Case 2: Undeclared relation (polymorphic table, no FK)
  *     → exists('auditLog', { where: eq('entityType', 'login') }) from 'users'
@@ -133,21 +132,11 @@ describe('exists() vs rawExists() — API comparison TNR', () => {
 			expect(dump.params).toEqual([]);
 		});
 
-		/**
-		 * rawExists() with outerRef inside the subquery WHERE throws today.
-		 *
-		 * This is the documented boundary: use exists('relation', { where })
-		 * when a schema FK relation is declared.
-		 *
-		 * If/when the rawExists correlated path is wired up (see PR #99 follow-up
-		 * tracked locally — outerAlias context + SubqueryRefIntent normalization
-		 * in the rawExists handler path), this test should be updated to assert
-		 * the correct SQL instead of a throw.
-		 */
-		it('rawExists() with outerRef THROWS today (boundary documented)', () => {
+		/** Query WHERE subquery bodies retain their own scope and outer correlation. */
+		it('rawExists outerRef keeps the enclosing qualifier', () => {
 			const orm = buildOrm();
 
-			expect(() =>
+			expect(
 				(orm as any)
 					.select('communities')
 					.where(
@@ -157,8 +146,10 @@ describe('exists() vs rawExists() — API comparison TNR', () => {
 								.where(gt('lastParsed', outerRef('createdAt'))),
 						),
 					)
-					.dump(),
-			).toThrow(/correlated subqueries.*not yet supported/i);
+					.dump().sql,
+			).toBe(
+				'SELECT communities.* FROM communities WHERE EXISTS (SELECT files_sq.id FROM files AS files_sq WHERE files_sq."lastParsed" > communities."createdAt")',
+			);
 		});
 	});
 
@@ -324,11 +315,9 @@ describe('exists() vs rawExists() — API comparison TNR', () => {
 			expect(dump.params).toEqual([0]);
 		});
 
-		it('rawExists with genuine outerRef() STILL throws today (boundary preserved)', () => {
-			// This is the documented boundary: rawExists + outerRef is not yet
-			// supported.  Ensures the fix did not accidentally allow correlated subqueries.
+		it('rawExists outerRef keeps the enclosing qualifier', () => {
 			const orm = buildOrm();
-			expect(() =>
+			expect(
 				(orm as any)
 					.select('communities')
 					.where(
@@ -338,8 +327,10 @@ describe('exists() vs rawExists() — API comparison TNR', () => {
 								.where(gt('lastParsed', outerRef('createdAt'))),
 						),
 					)
-					.dump(),
-			).toThrow(/correlated subqueries.*not yet supported/i);
+					.dump().sql,
+			).toBe(
+				'SELECT communities.* FROM communities WHERE EXISTS (SELECT files_sq.id FROM files AS files_sq WHERE files_sq."lastParsed" > communities."createdAt")',
+			);
 		});
 	});
 });

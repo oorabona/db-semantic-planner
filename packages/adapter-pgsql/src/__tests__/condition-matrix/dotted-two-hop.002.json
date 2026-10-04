@@ -508,7 +508,7 @@
 			"position": "dotted-two-hop",
 			"kind": "rawExists-range",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $1)",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($1 AS daterange))",
 			"params": ["[2026-01-01,2026-02-01)"],
 			"error": null
 		},
@@ -532,7 +532,7 @@
 			"position": "dotted-two-hop",
 			"kind": "rawExists-range",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $1))",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($1 AS daterange)))",
 			"params": ["[2026-01-01,2026-02-01)"],
 			"error": null
 		},

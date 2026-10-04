@@ -1,4 +1,5 @@
 import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { EXPRESSION_BRAND } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import * as expressions from './expressions.js';
 import {
@@ -130,7 +131,6 @@ describe('predicate-branded expression primitives', () => {
 		);
 
 		expect(logical).toEqual({
-			__predicateRef: PREDICATE_REF_DISCRIMINATOR,
 			intent: {
 				kind: 'and',
 				conditions: [
@@ -155,7 +155,7 @@ describe('predicate-branded expression primitives', () => {
 				],
 			},
 		});
-		expect('__expr' in logical).toBe(false);
+		expect(EXPRESSION_BRAND in logical).toBe(false);
 		expect('whereIntent' in logical).toBe(false);
 	});
 
@@ -202,7 +202,7 @@ describe('predicate-branded expression primitives', () => {
 
 	it('rejects a discriminator-bearing non-local object in both builders', () => {
 		const foreignPredicate = {
-			__predicateRef: PREDICATE_REF_DISCRIMINATOR,
+			[Symbol.for('dbsp.predicate.v1')]: PREDICATE_REF_DISCRIMINATOR,
 			intent: 'foreign',
 		};
 

@@ -35,11 +35,21 @@ const manifest = JSON.parse(
 const names = (rows: Row[]) => rows.map((row) => row.name);
 const sorted = (values: Iterable<string>) => [...new Set(values)].sort();
 const excluded = new Set([...names(moved), ...names(removed)]);
+const brandExports = [
+	'EXPRESSION_BRAND',
+	'PREDICATE_BRAND',
+	'REF_BRAND',
+	'brandValue',
+];
 const rootNames = [
+	...brandExports,
 	...names(before.root.declarations).filter((name) => !excluded.has(name)),
 	'IncludePayloadShape',
 ];
-const rootRuntime = before.root.runtime.filter((name) => !excluded.has(name));
+const rootRuntime = [
+	...brandExports,
+	...before.root.runtime.filter((name) => !excluded.has(name)),
+];
 // Join include data rules shared by the planner and the adapter (#908).
 const joinIncludeExports = [
 	'belongsToManyJoinIncludeRefusal',

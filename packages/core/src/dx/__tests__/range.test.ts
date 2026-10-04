@@ -1,3 +1,4 @@
+import { EXPRESSION_BRAND } from '@dbsp/types';
 /**
  * Tests for range operator helpers (packages/core/src/dx/range.ts).
  *
@@ -78,8 +79,8 @@ describe('rangeOverlaps', () => {
 
 		it('ExpressionRef is a proper ExpressionRef instance', () => {
 			const expr = rangeOverlaps('col', ['a', 'b']);
-			expect(typeof (expr as { __expr?: unknown }).__expr).toBe('boolean');
-			expect((expr as { __expr?: unknown }).__expr).toBe(true);
+			expect(typeof expr[EXPRESSION_BRAND]).toBe('boolean');
+			expect(expr[EXPRESSION_BRAND]).toBe(true);
 		});
 	});
 

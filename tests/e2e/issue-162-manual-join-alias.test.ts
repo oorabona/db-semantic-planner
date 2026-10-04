@@ -100,7 +100,7 @@ describe('FIX-162 manual .join() alias collisions', () => {
 		expect(rows[0]?.id).toBe(1000);
 	});
 
-	it('leaves duplicate manual join aliases to PostgreSQL conflict semantics', async () => {
+	it('refuses duplicate manual join aliases in one scope before execution', async () => {
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ model: issue154Model, adapter });
 		const query = orm
@@ -116,11 +116,11 @@ describe('FIX-162 manual .join() alias collisions', () => {
 			})
 			.columns(['id']);
 
-		const sql = normalizeSql(query.dump().sql);
-		expect(occurrenceCount(sql, /JOIN issue_162_e2e\.files AS dup\b/g)).toBe(2);
-
+		expect(() => query.dump()).toThrow(
+			"Query scope already binds qualifier 'dup'.",
+		);
 		await expect(query.execute()).rejects.toThrow(
-			/specified more than once|dup/,
+			"Query scope already binds qualifier 'dup'.",
 		);
 	});
 });

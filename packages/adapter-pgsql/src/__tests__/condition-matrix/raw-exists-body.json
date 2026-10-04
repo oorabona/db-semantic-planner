@@ -660,7 +660,7 @@
 			"position": "raw-exists-body",
 			"kind": "any-empty",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = ANY (CAST($1 AS text[])))",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = ANY (CAST($1 AS int4[])))",
 			"params": [[]],
 			"error": null
 		},
@@ -668,7 +668,7 @@
 			"position": "raw-exists-body",
 			"kind": "any-empty",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = ANY (CAST($1 AS text[])) AND posts_sq.score = $2)",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = ANY (CAST($1 AS int4[])) AND posts_sq.score = $2)",
 			"params": [[], 13],
 			"error": null
 		},
@@ -676,7 +676,7 @@
 			"position": "raw-exists-body",
 			"kind": "any-empty",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = ANY (CAST($1 AS text[])) OR posts_sq.score = $2)",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = ANY (CAST($1 AS int4[])) OR posts_sq.score = $2)",
 			"params": [[], 13],
 			"error": null
 		},
@@ -684,7 +684,7 @@
 			"position": "raw-exists-body",
 			"kind": "any-empty",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (posts_sq.score = ANY (CAST($1 AS text[]))))",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (posts_sq.score = ANY (CAST($1 AS int4[]))))",
 			"params": [[]],
 			"error": null
 		},
@@ -692,7 +692,7 @@
 			"position": "raw-exists-body",
 			"kind": "any-empty",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1 AND (NOT (posts_sq.score = ANY (CAST($2 AS text[]))) OR posts_sq.score = $3))",
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1 AND (NOT (posts_sq.score = ANY (CAST($2 AS int4[]))) OR posts_sq.score = $3))",
 			"params": [13, [], 17],
 			"error": null
 		},

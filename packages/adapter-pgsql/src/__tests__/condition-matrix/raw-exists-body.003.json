@@ -6,7 +6,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"error": "WHERE notExists('comments'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "raw-exists-body",
@@ -14,247 +14,247 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"error": "WHERE notExists('comments'): recursive relation predicates are not supported inside WHERE."
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "rawNotExists",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "buildSubqueryFromIntent: nested subquery not supported"
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.score = $1)))",
+			"params": [53],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "rawNotExists",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "buildSubqueryFromIntent: nested subquery not supported"
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.score = $1)) AND posts_sq.score = $2)",
+			"params": [53, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "rawNotExists",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "buildSubqueryFromIntent: nested subquery not supported"
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.score = $1)) OR posts_sq.score = $2)",
+			"params": [53, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "rawNotExists",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "buildSubqueryFromIntent: nested subquery not supported"
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (NOT (EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.score = $1))))",
+			"params": [53],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "rawNotExists",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "buildSubqueryFromIntent: nested subquery not supported"
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1 AND (NOT (NOT (EXISTS (SELECT posts_sq_1.id FROM posts AS posts_sq_1 WHERE posts_sq_1.score = $2))) OR posts_sq.score = $3))",
+			"params": [13, 53, 17],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "exists",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "exists",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1) AND posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "exists",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1) OR posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "exists",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "exists",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1 AND (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $2)) OR posts_sq.score = $3))",
+			"params": [13, 61, 17],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "notExists",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "notExists",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)) AND posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "notExists",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)) OR posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "notExists",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1))))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "notExists",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $2))) OR posts_sq.score = $3))",
+			"params": [13, 61, 17],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "some",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "some",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1) AND posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "some",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1) OR posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "some",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "some",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1 AND (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $2)) OR posts_sq.score = $3))",
+			"params": [13, 61, 17],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "every",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND NOT (comments_exists_0.score = $1))))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "every",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND NOT (comments_exists_0.score = $1))) AND posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "every",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND NOT (comments_exists_0.score = $1))) OR posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "every",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND NOT (comments_exists_0.score = $1)))))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "every",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND NOT (comments_exists_0.score = $2)))) OR posts_sq.score = $3))",
+			"params": [13, 61, 17],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "none",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "none",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)) AND posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "none",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)) OR posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "none",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1))))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "none",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $2))) OR posts_sq.score = $3))",
+			"params": [13, 61, 17],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
@@ -340,465 +340,465 @@
 			"position": "raw-exists-body",
 			"kind": "exists-custom-authorities",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "exists-custom-authorities",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1) AND posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "exists-custom-authorities",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1) OR posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "exists-custom-authorities",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "exists-custom-authorities",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1 AND (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $2)) OR posts_sq.score = $3))",
+			"params": [13, 61, 17],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "notExists-custom-authorities",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "notExists-custom-authorities",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)) AND posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "notExists-custom-authorities",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)) OR posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "notExists-custom-authorities",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1))))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "notExists-custom-authorities",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $2))) OR posts_sq.score = $3))",
+			"params": [13, 61, 17],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "some-custom-authorities",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "some-custom-authorities",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1) AND posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "some-custom-authorities",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1) OR posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "some-custom-authorities",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "some-custom-authorities",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1 AND (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $2)) OR posts_sq.score = $3))",
+			"params": [13, 61, 17],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "every-custom-authorities",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND NOT (comments_exists_0.score = $1))))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "every-custom-authorities",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND NOT (comments_exists_0.score = $1))) AND posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "every-custom-authorities",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND NOT (comments_exists_0.score = $1))) OR posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "every-custom-authorities",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND NOT (comments_exists_0.score = $1)))))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "every-custom-authorities",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND NOT (comments_exists_0.score = $2)))) OR posts_sq.score = $3))",
+			"params": [13, 61, 17],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "none-custom-authorities",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "none-custom-authorities",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)) AND posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "none-custom-authorities",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)) OR posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "none-custom-authorities",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1))))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "none-custom-authorities",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $2))) OR posts_sq.score = $3))",
+			"params": [13, 61, 17],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "exists-no-pk-default-authorities",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "exists-no-pk-default-authorities",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1) AND posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "exists-no-pk-default-authorities",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1) OR posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "exists-no-pk-default-authorities",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "exists-no-pk-default-authorities",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1 AND (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $2)) OR posts_sq.score = $3))",
+			"params": [13, 61, 17],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "notExists-no-pk-default-authorities",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "notExists-no-pk-default-authorities",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)) AND posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "notExists-no-pk-default-authorities",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)) OR posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "notExists-no-pk-default-authorities",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1))))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "notExists-no-pk-default-authorities",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $2))) OR posts_sq.score = $3))",
+			"params": [13, 61, 17],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "some-no-pk-default-authorities",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "some-no-pk-default-authorities",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1) AND posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "some-no-pk-default-authorities",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1) OR posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "some-no-pk-default-authorities",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "some-no-pk-default-authorities",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1 AND (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $2)) OR posts_sq.score = $3))",
+			"params": [13, 61, 17],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "every-no-pk-default-authorities",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND NOT (comments_exists_0.score = $1))))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "every-no-pk-default-authorities",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND NOT (comments_exists_0.score = $1))) AND posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "every-no-pk-default-authorities",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND NOT (comments_exists_0.score = $1))) OR posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "every-no-pk-default-authorities",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND NOT (comments_exists_0.score = $1)))))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "every-no-pk-default-authorities",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND NOT (comments_exists_0.score = $2)))) OR posts_sq.score = $3))",
+			"params": [13, 61, 17],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "none-no-pk-default-authorities",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "none-no-pk-default-authorities",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)) AND posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "none-no-pk-default-authorities",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)) OR posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "none-no-pk-default-authorities",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $1))))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "none-no-pk-default-authorities",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1 AND (NOT (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.\"postId\" AND comments_exists_0.score = $2))) OR posts_sq.score = $3))",
+			"params": [13, 61, 17],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "exists-no-pk-custom-authorities",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.matrix_pk = comments_exists_0.\"postId\" AND comments_exists_0.score = $1))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "exists-no-pk-custom-authorities",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.matrix_pk = comments_exists_0.\"postId\" AND comments_exists_0.score = $1) AND posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "exists-no-pk-custom-authorities",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.matrix_pk = comments_exists_0.\"postId\" AND comments_exists_0.score = $1) OR posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "exists-no-pk-custom-authorities",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.matrix_pk = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "exists-no-pk-custom-authorities",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1 AND (NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.matrix_pk = comments_exists_0.\"postId\" AND comments_exists_0.score = $2)) OR posts_sq.score = $3))",
+			"params": [13, 61, 17],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "notExists-no-pk-custom-authorities",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.matrix_pk = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)))",
+			"params": [61],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "notExists-no-pk-custom-authorities",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.matrix_pk = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)) AND posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		},
 		{
 			"position": "raw-exists-body",
 			"kind": "notExists-no-pk-custom-authorities",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'comments.posts_sq_id' is absent from the physical model."
+			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.matrix_pk = comments_exists_0.\"postId\" AND comments_exists_0.score = $1)) OR posts_sq.score = $2)",
+			"params": [61, 13],
+			"error": null
 		}
 	]
 }

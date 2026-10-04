@@ -225,9 +225,10 @@ describe('FIX-162: manual join aliases reserve include-generated aliases', () =>
 			"Invalid include: Include include[0](file) cannot use 'join' with aggregation, groupBy or DISTINCT because its data would be dropped. Use .join() for relational columns, grouping or ordering.",
 		);
 	});
-	it('duplicate manual .join() aliases are preserved as user-authored SQL aliases', () => {
+
+	it('duplicate manual .join() aliases are refused in one scope', () => {
 		const orm = buildOrm();
-		const sql = compact(
+		expect(() =>
 			orm
 				.select('uses')
 				.join('files', {
@@ -238,9 +239,7 @@ describe('FIX-162: manual join aliases reserve include-generated aliases', () =>
 					as: 'dup',
 					on: eq('uses.alt_file_id', exprRef('dup.id')),
 				})
-				.dump().sql,
-		);
-
-		expect(occurrenceCount(sql, /JOIN files AS dup\b/g)).toBe(2);
+				.dump(),
+		).toThrow("Query scope already binds qualifier 'dup'.");
 	});
 });

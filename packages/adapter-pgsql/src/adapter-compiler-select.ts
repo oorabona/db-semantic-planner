@@ -81,7 +81,11 @@ import {
 	assertProjectedJsonContainerCanBeAggregated,
 	resolveRelationTarget,
 } from './relation-target-projection.js';
-import { queryLocal, resolveDeclaredIdentifier } from './sql-identifier.js';
+import {
+	identifierText,
+	queryLocal,
+	resolveDeclaredIdentifier,
+} from './sql-identifier.js';
 import { stableJson } from './transition/stable-json.js';
 
 /** Exact source/key duplicates have one SQL projection, including at the root. */
@@ -327,8 +331,25 @@ function compileJoinIntents(
 	const deriveFk = deps.deriveFk ?? defaultFkDerivation;
 	const defaultPk = deps.defaultPk;
 	const results: PlanDecision[] = [];
+	let joinScope = queryScope([
+		...(deps.scope?.bindings.values() ?? []),
+		...(!hasSourceBinding(rootTable, deps)
+			? [sourceBinding(rootTable, deps)]
+			: []),
+	]);
 
+	// Bindings are available for lookup, but only FROM ranges occupy qualifiers.
+	const occupiedQualifiers = new Set([rootTable]);
 	for (const intent of joins) {
+		const qualifier =
+			intent.alias ??
+			intent.relation ??
+			intent.batchValues?.alias ??
+			intent.table;
+		if (qualifier !== undefined && occupiedQualifiers.has(qualifier)) {
+			throw new Error(`Query scope already binds qualifier '${qualifier}'.`);
+		}
+		if (qualifier !== undefined) occupiedQualifiers.add(qualifier);
 		if (intent.relation !== undefined) {
 			// ── Relation mode: resolve FK from model ──────────────────────────
 			// If no model available, we can't resolve the FK — skip with warning.
@@ -375,6 +396,17 @@ function compileJoinIntents(
 				: fkColumns;
 			const alias = intent.alias ?? intent.relation;
 
+			joinScope = queryScope([
+				...Array.from(joinScope.bindings.values()).filter(
+					(binding) => identifierText(binding.qualifier) !== alias,
+				),
+				relationBinding({
+					qualifier: queryLocal(alias),
+					kind: 'declared-table',
+					logicalTable: rel.target,
+				}),
+			]);
+
 			results.push({
 				type: 'join',
 				targetTable: rel.target,
@@ -405,22 +437,22 @@ function compileJoinIntents(
 			const bvOnParamState = createCompilerState();
 			bvOnParamState.paramIndex = bvParams.length;
 
+			joinScope = queryScope([
+				...Array.from(joinScope.bindings.values()).filter(
+					(binding) => identifierText(binding.qualifier) !== alias,
+				),
+				batchValuesBinding(alias, [
+					...bv.columns,
+					...(bv.ordinality ? ['ord'] : []),
+				]),
+			]);
 			const bvCtx: WhereCompilerCtx = {
 				rootTable,
 				aliases: new Map<string, string>(),
 				paramState: bvOnParamState,
 				outerTable: alias,
 				...(schemaName !== undefined && { schemaName }),
-				scope: queryScope([
-					...(deps.scope?.bindings.values() ?? []),
-					...(!hasSourceBinding(rootTable, deps)
-						? [sourceBinding(rootTable, deps)]
-						: []),
-					batchValuesBinding(alias, [
-						...bv.columns,
-						...(bv.ordinality ? ['ord'] : []),
-					]),
-				]),
+				scope: joinScope,
 				dbCasing: deps.dbCasing ?? 'preserve',
 				...(deps.declaredNames !== undefined && {
 					declaredNames: deps.declaredNames,
@@ -503,16 +535,12 @@ function compileJoinIntents(
 								kind: 'declared-table',
 								logicalTable: intent.table,
 							});
-			const scopeBindings = [
-				...(deps.scope?.bindings.values() ?? []),
-				...(!hasSourceBinding(rootTable, deps)
-					? [sourceBinding(rootTable, deps)]
-					: []),
-				...(relationBindingFor(deps.scope, joinedBinding.qualifier) ===
-					undefined && tableAlias !== rootTable
-					? [joinedBinding]
-					: []),
-			];
+			joinScope = queryScope([
+				...Array.from(joinScope.bindings.values()).filter(
+					(binding) => identifierText(binding.qualifier) !== tableAlias,
+				),
+				joinedBinding,
+			]);
 			const ctx: WhereCompilerCtx = {
 				rootTable,
 				aliases: tableAliasMap,
@@ -521,7 +549,7 @@ function compileJoinIntents(
 				// joined alias (e.g. 'e2' in self-join ON conditions).
 				outerTable: tableAlias,
 				...(schemaName !== undefined && { schemaName }),
-				scope: queryScope([...scopeBindings]),
+				scope: joinScope,
 				dbCasing: deps.dbCasing ?? 'preserve',
 				...(deps.declaredNames !== undefined && {
 					declaredNames: deps.declaredNames,

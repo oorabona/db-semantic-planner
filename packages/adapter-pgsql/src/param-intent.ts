@@ -1,12 +1,12 @@
-import { isParamIntent } from '@dbsp/types';
+import { EXPRESSION_BRAND, isParamIntent } from '@dbsp/types';
 
 /** Normalize the public param() ExpressionSpec without inspecting its bound value. */
 export function normalizeParamIntent(value: unknown): unknown {
 	if (
 		value !== null &&
 		typeof value === 'object' &&
-		'__expr' in value &&
-		value.__expr === true &&
+		EXPRESSION_BRAND in value &&
+		value[EXPRESSION_BRAND] === true &&
 		'intent' in value
 	) {
 		const intent = value.intent;
