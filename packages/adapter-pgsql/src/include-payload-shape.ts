@@ -2,6 +2,7 @@ import type { IncludePayloadShape, ModelIR, PlanReport } from '@dbsp/types';
 import { resolveOutputReadHandling } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
+import { truncateIdentifier } from './column-metadata.js';
 import { chosenRelationColumnAlias } from './handlers/include/json-agg.js';
 import {
 	jsonAggContainerShape,
@@ -51,6 +52,21 @@ export function resolveIncludePayloadShapes(
 		wildcard: () => readonly string[],
 	) => readonly { key: string; owner: PayloadOwner }[],
 ): readonly IncludePayloadShape[] {
+	const transportLabels = new Map<string, string>();
+	const usedLabels = new Set<string>();
+	const transportLabel = (label: string): string => {
+		const existing = transportLabels.get(label);
+		if (existing !== undefined) return existing;
+		let emitted = truncateIdentifier(label, 63);
+		let counter = 0;
+		while (usedLabels.has(emitted)) {
+			const suffix = `_${++counter}`;
+			emitted = `${truncateIdentifier(label, 63 - suffix.length)}${suffix}`;
+		}
+		transportLabels.set(label, emitted);
+		usedLabels.add(emitted);
+		return emitted;
+	};
 	const flatPaths = new Set<string>();
 	const requestedPathsByLeaf = new Map<string, string[]>();
 	const collectFlatPaths = (
@@ -262,9 +278,11 @@ export function resolveIncludePayloadShapes(
 				outputLabel:
 					strategy === 'json_agg'
 						? publicKey
-						: flatColumn
-							? (entry.alias ?? `${path}.${publicKey}`)
-							: `${path}.${publicKey}`,
+						: transportLabel(
+								flatColumn
+									? (entry.alias ?? `${path}.${publicKey}`)
+									: `${path}.${publicKey}`,
+							),
 				...(readHandling && { readHandling }),
 			});
 		}
@@ -293,7 +311,9 @@ export function resolveIncludePayloadShapes(
 			strategy,
 			table: tableName,
 			isToOne: d.relationType === 'belongsTo' || d.relationType === 'hasOne',
-			outputLabel: `${d.relationName ?? d.relation ?? publicKey}_json`,
+			outputLabel: transportLabel(
+				`${d.relationName ?? d.relation ?? publicKey}_json`,
+			),
 			columns,
 			children,
 		};

@@ -612,7 +612,10 @@ function finalizeProjections(
 	return projections.size > 0 ? projections : undefined;
 }
 
-function truncateIdentifier(identifier: string, maxBytes: number): string {
+export function truncateIdentifier(
+	identifier: string,
+	maxBytes: number,
+): string {
 	let result = '';
 	let byteLength = 0;
 	for (const character of identifier) {
