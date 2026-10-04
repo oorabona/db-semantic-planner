@@ -42,6 +42,7 @@ import {
 } from './binding-registry.js';
 import {
 	aggregateProjectionIdentity,
+	compiledProjectionLabels,
 	rootProjectionLabels,
 } from './column-metadata.js';
 import { compileWhereIntent, type WhereCompilerCtx } from './compile-where.js';
@@ -576,54 +577,6 @@ function compileJoinIntents(
 // ============================================================================
 // Phase helpers — extracted from compileSelect for CC reduction
 // ============================================================================
-
-/**
- * Strip auto-selected columns from join includeStrategy decisions when the query
- * uses aggregation, DISTINCT, GROUP BY, or explicit column selection.
- *
- * In all four cases the JOIN itself is kept (for filtering / INNER JOIN semantics)
- * but its auto-hydration columns would produce invalid SQL — they are cleared.
- * Explicitly requested columns (via relationColumn()) are re-injected later by
- * injectAndValidateRelationColumns().
- *
- * Mutates `decisions` in place (same pattern as the original code).
- */
-function stripJoinColumnsForAggregation(
-	decisions: PlanDecision[],
-	intent: NonNullable<PlanReport['intent']>,
-): void {
-	// INCLUDE-COUNT: aggregate-only query (COUNT(*), no GROUP BY fields)
-	const isAggregateOnly =
-		intent.select &&
-		'type' in intent.select &&
-		intent.select.type === 'aggregate' &&
-		!(
-			'fields' in intent.select &&
-			(intent.select as { fields?: unknown }).fields
-		);
-
-	// DISTINCT-VECTOR: SELECT DISTINCT — vector cols have no equality operator
-	const isDistinct = intent.distinct === true;
-
-	// GROUP-BY-JOIN: GROUP BY — non-aggregate cols must appear in GROUP BY
-	const hasGroupBy = intent.groupBy && intent.groupBy.length > 0;
-
-	// EXPLICIT-COLUMNS: .columns([...]) — user declared exactly what they want
-	const hasExplicitColumns =
-		intent.select &&
-		'type' in intent.select &&
-		intent.select.type === 'expressions';
-
-	if (isAggregateOnly || isDistinct || hasGroupBy || hasExplicitColumns) {
-		for (const d of decisions) {
-			if (d.type === 'includeStrategy' && d.choice === 'join') {
-				(d as Mutable<PlanDecision>).columns = [];
-				// Suppressed aggregate/root projections do not hydrate an empty include.
-				(d as Mutable<PlanDecision>).emptyProjection = false;
-			}
-		}
-	}
-}
 
 /** Visit the exact-path consumers retained in include decision trees. */
 function* includeDecisions(
@@ -1461,12 +1414,6 @@ export function compileSelectEnvelope<T = unknown>(
 			...allUnifiedIncludeDecisions,
 		];
 
-		// Strip auto-selected columns from join includes when aggregation, DISTINCT,
-		// GROUP BY, or explicit column selection is active. Keeps the JOIN for
-		// filtering/inner join semantics but prevents invalid SELECT column lists.
-		// select/distinct/groupBy fields are unchanged by the IN→EXISTS WHERE optimization,
-		// so execIntent and plan.intent are equivalent here; execIntent is used for consistency.
-		stripJoinColumnsForAggregation(enrichedUnifiedDecisions, execIntent);
 		applyJoinHydrationPrefixes(enrichedUnifiedDecisions);
 
 		// Deduplicate: remove selectRelationColumn decisions for relations
@@ -1492,6 +1439,14 @@ export function compileSelectEnvelope<T = unknown>(
 			);
 		}
 
+		// Compile explicit JoinIntent[] from execIntent.joins into 'join' decisions.
+		// These are non-hydrating SQL JOINs (flat result, no relation columns added).
+		// joins are not affected by the IN→EXISTS WHERE optimization; execIntent and
+		// plan.intent carry the same joins value.
+		const joinIntentDecisions = execIntent.joins?.length
+			? compileJoinIntents(execIntent.joins, plan.rootTable, schemaName, deps)
+			: [];
+
 		const includePayloads = resolveIncludePayloadShapes(
 			enrichedUnifiedDecisions,
 			planForCompilation,
@@ -1504,6 +1459,48 @@ export function compileSelectEnvelope<T = unknown>(
 					includedRelations,
 					includedRelations.size > 0,
 				),
+			() => {
+				// Lower the root projection through the SQL compiler before allocating
+				// markers. Included relation columns are already owned by payload shapes.
+				const withoutPayload = (d: PlanDecision): PlanDecision => {
+					const relational: Mutable<PlanDecision> = {
+						...d,
+						columns: [],
+						emptyProjection: false,
+					};
+					delete relational.payloadShape;
+					if (d.children) relational.children = d.children.map(withoutPayload);
+					return relational;
+				};
+				const projection = compilePlan(
+					{
+						rootTable: plan.rootTable,
+						decisions: [
+							...intentToDecisions(
+								{
+									type: 'select',
+									from: plan.rootTable,
+									...(execIntent.select && { select: execIntent.select }),
+								},
+								plan.rootTable,
+							).filter(
+								(d) =>
+									d.type !== 'selectRelationColumn' ||
+									!includedRelations.has(d.relation ?? ''),
+							),
+							...enrichedUnifiedDecisions.map(withoutPayload),
+							...joinIntentDecisions,
+						],
+					},
+					compilerOptions,
+				);
+				return compiledProjectionLabels(
+					projection.ast,
+					plan.rootTable,
+					resolvedModelForCompiler,
+					deps.declaredNames,
+				);
+			},
 		);
 		hydrationPlan =
 			includePayloads.length > 0 ? { ...plan, includePayloads } : undefined;
@@ -1519,20 +1516,6 @@ export function compileSelectEnvelope<T = unknown>(
 						return true;
 					})
 				: decisions;
-
-		// Compile explicit JoinIntent[] from execIntent.joins into 'join' decisions.
-		// These are non-hydrating SQL JOINs (flat result, no relation columns added).
-		// joins are not affected by the IN→EXISTS WHERE optimization; execIntent and
-		// plan.intent carry the same joins value.
-		const joinIntentDecisions =
-			execIntent?.joins && (execIntent.joins as JoinIntent[]).length > 0
-				? compileJoinIntents(
-						execIntent.joins as JoinIntent[],
-						plan.rootTable,
-						schemaName,
-						deps,
-					)
-				: [];
 
 		// exists decisions are now inline inside deduplicatedDecisions (in their boolean
 		// tree position), so we no longer spread them separately here.

@@ -20,7 +20,11 @@ import type {
 	ResolvedIncludeStrategy,
 } from '@dbsp/types';
 import { resolveJsonAggOrderKey, toColumnList } from '@dbsp/types';
-import { resolveIncludeRelationName } from '@dbsp/types/internal';
+import {
+	belongsToManyJoinIncludeRefusal,
+	dropsJoinIncludeData,
+	resolveIncludeRelationName,
+} from '@dbsp/types/internal';
 import { InvalidOperationError } from './dx/errors.js';
 import { validateLimit } from './dx/limit-validation.js';
 import {
@@ -1297,6 +1301,11 @@ function processInclude(
 			`Include ${optionPath} select must select all columns with '${includeStrategy}' strategy`,
 		);
 
+	if (includeStrategy === 'join' && relation.type === 'belongsToMany')
+		throw new InvalidOperationError(
+			'include',
+			belongsToManyJoinIncludeRefusal(optionPath),
+		);
 	if (
 		includeStrategy === 'join' &&
 		isToManyInclude(relation) &&
@@ -1860,14 +1869,6 @@ function selectsWholeIncludeRow(include: IncludeIntent): boolean {
 
 function isToManyInclude(relation: RelationIR): boolean {
 	return relation.type === 'hasMany' || relation.type === 'belongsToMany';
-}
-
-function dropsJoinIncludeData(intent: QueryIntent | undefined): boolean {
-	return (
-		intent?.select?.type === 'aggregate' ||
-		intent?.distinct === true ||
-		(intent?.groupBy?.length ?? 0) > 0
-	);
 }
 
 /** Get alternatives that honour the include options and dialect capabilities. */

@@ -1,0 +1,20 @@
+{
+	"entries": [
+		{
+			"position": "include-left-to-many-refusal",
+			"kind": "eq",
+			"shape": "leaf",
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
+		},
+		{
+			"position": "include-left-to-many-refusal",
+			"kind": "eq",
+			"shape": "or",
+			"sql": null,
+			"params": null,
+			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
+		}
+	]
+}

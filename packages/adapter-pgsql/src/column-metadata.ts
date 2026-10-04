@@ -642,21 +642,51 @@ function targetListForAst(ast: Node): readonly unknown[] | undefined {
 	return Array.isArray(targetList) ? targetList : undefined;
 }
 
+/** Candidate collection shared by output validation and private label allocation. */
+function compiledProjectionCandidates(
+	ast: Node,
+	rootTable: string,
+	model: ModelIR | undefined,
+	declaredNames?: DeclaredNameResolver,
+): Map<string, ProjectionCandidate[]> {
+	const candidates = new Map<string, ProjectionCandidate[]>();
+	if (!model || !hasTableMap(model)) return candidates;
+	const targets = targetListForAst(ast);
+	if (!targets) return candidates;
+	const ctx = buildAliasContext(ast, rootTable, model, declaredNames);
+	for (const target of targets) {
+		addTargetCandidates(target, candidates, ctx, model, declaredNames);
+	}
+	return candidates;
+}
+
+export function compiledProjectionLabels(
+	ast: Node,
+	rootTable: string,
+	model: ModelIR | undefined,
+	declaredNames?: DeclaredNameResolver,
+): ReadonlySet<string> {
+	return new Set(
+		[
+			...compiledProjectionCandidates(
+				ast,
+				rootTable,
+				model,
+				declaredNames,
+			).keys(),
+		].map((label) => truncateIdentifier(label, 63)),
+	);
+}
+
 export function buildCompiledColumnProjections(
 	ast: Node,
 	rootTable: string,
 	model: ModelIR | undefined,
 	declaredNames?: DeclaredNameResolver,
 ): ReadonlyMap<string, ColumnMetadataProjection> | undefined {
-	if (!model || !hasTableMap(model)) return undefined;
-	const targets = targetListForAst(ast);
-	if (!targets || targets.length === 0) return undefined;
-	const ctx = buildAliasContext(ast, rootTable, model, declaredNames);
-	const candidates = new Map<string, ProjectionCandidate[]>();
-	for (const target of targets) {
-		addTargetCandidates(target, candidates, ctx, model, declaredNames);
-	}
-	return finalizeProjections(candidates);
+	return finalizeProjections(
+		compiledProjectionCandidates(ast, rootTable, model, declaredNames),
+	);
 }
 
 export function buildModelColumnProjections(

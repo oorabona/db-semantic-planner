@@ -1,6 +1,16 @@
-import type { IncludePayloadShape, ModelIR, PlanReport } from '@dbsp/types';
+import type {
+	IncludePayloadShape,
+	ModelIR,
+	PlanReport,
+	QueryIntent,
+} from '@dbsp/types';
 import { resolveOutputReadHandling, toColumnList } from '@dbsp/types';
-import { type Mutable, resolveIncludeRelationName } from '@dbsp/types/internal';
+import {
+	belongsToManyJoinIncludeRefusal,
+	dropsJoinIncludeData,
+	type Mutable,
+	resolveIncludeRelationName,
+} from '@dbsp/types/internal';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { truncateIdentifier } from './column-metadata.js';
 import { chosenRelationColumnAlias } from './handlers/include/json-agg.js';
@@ -42,6 +52,25 @@ export function claimPayloadKey(
 	return previous === undefined;
 }
 
+/** Only flat relational projections reach this after join payload refusal. */
+function stripJoinColumnsForAggregation(
+	d: PlanDecision,
+	intent: QueryIntent | undefined,
+	flat: boolean,
+): void {
+	if (!flat) return;
+	if (
+		d.choice !== 'join' ||
+		!(dropsJoinIncludeData(intent) || intent?.select?.type === 'expressions')
+	)
+		return;
+	const mutable = d as Mutable<PlanDecision>;
+	// Keep explicit relationColumn requests; only automatic columns are suppressed.
+	mutable.columns =
+		d.payloadColumnRequests?.map((request) => request.col) ?? [];
+	mutable.emptyProjection = false;
+}
+
 /** Runs after injection, before SQL. SQL handlers and hydration consume the same objects. */
 export function resolveIncludePayloadShapes(
 	decisions: readonly PlanDecision[],
@@ -51,6 +80,7 @@ export function resolveIncludePayloadShapes(
 	resolveRootLabels: (
 		wildcard: () => readonly string[],
 	) => readonly { key: string; owner: PayloadOwner }[],
+	emittedRootLabels: () => ReadonlySet<string>,
 ): readonly IncludePayloadShape[] {
 	const transportLabels = new Map<string, string>();
 	const usedLabels = new Set<string>();
@@ -201,9 +231,13 @@ export function resolveIncludePayloadShapes(
 				: undefined;
 		// External reports can carry belongsToMany even though legacy decisions narrow the type.
 		const relationType: string | undefined = relation?.type ?? d.relationType;
+		if (strategy === 'join' && relationType === 'belongsToMany')
+			throw new Error(
+				belongsToManyJoinIncludeRefusal(`${d.intentPath ?? path}(${path})`),
+			);
 		if (
 			strategy === 'join' &&
-			(relationType === 'hasMany' || relationType === 'belongsToMany') &&
+			relationType === 'hasMany' &&
 			!flatPaths.has(path)
 		)
 			throw new Error(
@@ -213,13 +247,12 @@ export function resolveIncludePayloadShapes(
 		if (
 			strategy === 'join' &&
 			!flatPaths.has(path) &&
-			(intent?.select?.type === 'aggregate' ||
-				intent?.distinct === true ||
-				(intent?.groupBy?.length ?? 0) > 0)
+			dropsJoinIncludeData(intent)
 		)
 			throw new Error(
 				`Include ${d.intentPath ?? path}(${path}) cannot use 'join' with aggregation, groupBy or DISTINCT because its data would be dropped. Use .join() for relational columns, grouping or ordering.`,
 			);
+		stripJoinColumnsForAggregation(d, intent, flatPaths.has(path));
 		let requested = d.columns;
 		if (d.emptyProjection) requested = [];
 		else if (
@@ -391,31 +424,8 @@ export function resolveIncludePayloadShapes(
 		? []
 		: resolveRootLabels(rootColumns);
 	const needsPresence = [...resolved.values()].some((shape) => shape.presence);
-	const rootTarget = resolveRelationTarget(queryLocal(plan.rootTable), deps);
-	for (const { key, owner } of rootLabels) {
-		const select = plan.intent?.select;
-		const explicitlyAliased =
-			select?.type === 'expressions' &&
-			select.columns.some(
-				(column) => column.kind === 'columnAlias' && column.alias === key,
-			);
-		const emitted =
-			needsPresence && !explicitlyAliased && owner === `column:${key}`
-				? identifierText(
-						requireRelationTargetColumn(
-							rootTarget,
-							queryLocal(key),
-							'presence marker collision',
-						)?.outputKey ??
-							resolveDeclaredIdentifier(
-								deps.declaredNames,
-								deps.dbCasing ?? 'preserve',
-								{ kind: 'column', table: plan.rootTable, column: key },
-							),
-					)
-				: key;
-		usedLabels.add(emitted);
-	}
+	if (needsPresence && rootLabels.length > 0)
+		for (const label of emittedRootLabels()) usedLabels.add(label);
 	for (const shape of resolved.values()) {
 		if (!shape.presence) continue;
 		const target = resolveRelationTarget(queryLocal(shape.table), deps);

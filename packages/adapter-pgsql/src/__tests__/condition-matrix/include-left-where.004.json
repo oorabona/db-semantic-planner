@@ -6,7 +6,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -14,7 +14,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -22,7 +22,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -30,7 +30,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -38,7 +38,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -46,7 +46,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -54,7 +54,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -62,7 +62,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -70,7 +70,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -78,7 +78,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -86,7 +86,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -94,7 +94,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -102,7 +102,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -110,7 +110,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -118,7 +118,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -126,7 +126,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -134,7 +134,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -142,7 +142,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -150,7 +150,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Invalid include: Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		}
 	]
 }

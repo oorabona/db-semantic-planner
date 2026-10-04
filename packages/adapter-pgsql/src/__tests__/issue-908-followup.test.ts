@@ -1,4 +1,11 @@
-import { createOrm, ref, relationColumn, schema } from '@dbsp/core';
+import {
+	createOrm,
+	eq,
+	exprRef,
+	ref,
+	relationColumn,
+	schema,
+} from '@dbsp/core';
 import type { CompiledQuery, RelationIR } from '@dbsp/types';
 import { expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -90,7 +97,7 @@ it('belongsToMany refuses every join include source and external report', () => 
 	const manyAdapter = createPgCompileOnlyAdapter({ model: manyModel });
 	const manyOrm = createOrm({ model: manyModel, adapter: manyAdapter });
 	const refusal =
-		"Include include[0](tags) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include.";
+		"Include include[0](tags) cannot use 'join' for a belongsToMany relation. The relation goes through a junction table that join includes, .join(<relation>), NQL | flat and json_agg/lateral includes do not traverse yet. Join the junction and target tables explicitly with .join(<table>, { on }).";
 	for (const join of ['left', 'inner'] as const)
 		expect(() =>
 			manyOrm.select('posts').include('tags', { join }).plan(),
@@ -117,6 +124,18 @@ it('belongsToMany refuses every join include source and external report', () => 
 			manyAdapter.compile({ ...report, decisions }, { model: manyModel }),
 		).toThrow(refusal);
 	}
+	// The refusal's suggested table joins actually traverse the junction.
+	expect(
+		manyOrm
+			.select('posts')
+			.join('postTags', { on: eq('posts.id', exprRef('postTags.postId')) })
+			.join('tags', { as: 'tag', on: eq('postTags.tagId', exprRef('tag.id')) })
+			.columns([relationColumn('tag', 'id', 'tagId')])
+			.dump(),
+	).toMatchObject({
+		sql: 'SELECT tag.id AS "tagId" FROM posts JOIN "postTags" AS "postTags" ON posts.id = "postTags"."postId" JOIN tags AS tag ON "postTags"."tagId" = tag.id',
+		params: [],
+	});
 	Object.assign(relation, { includeStrategy: 'join' });
 	expect(() => manyOrm.select('posts').include('tags').plan()).toThrow(
 		`Invalid include: ${refusal}`,

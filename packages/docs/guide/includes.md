@@ -84,7 +84,12 @@ Include `select` support by strategy:
 | `cte` | Omitted `select` only; any explicit `select` is refused |
 | `lateral` | All columns only: omitted select, `all`, or fields `['*']` |
 
-A to-one join include with omitted `select` or `select: { type: 'all' }` returns every target column, enumerated with `"relation.column"` transport labels and declared public keys. Explicit field selection returns exactly those fields, with no unrequested primary key. A private presence marker distinguishes an existing row of null values from a missing row; hydration removes it. To-many join includes are refused at planning and compilation, including join hints and defaults. Use `.join()`, NQL `| flat`, or a `json_agg`/`lateral` include instead.
+A to-one join include with omitted `select` or `select: { type: 'all' }` returns every target column, enumerated with `"relation.column"` transport labels and declared public keys. Explicit field selection returns exactly those fields, with no unrequested primary key. A private presence marker distinguishes an existing row of null values from a missing row; hydration removes it. `hasMany` join includes are refused at planning and compilation, including join hints and defaults. Use `.join()`, NQL `| flat`, or a `json_agg`/`lateral` include instead.
+
+A `belongsToMany` join include has a separate refusal, including explicit strategies, hints, defaults and external reports. For a `tags` include, the exact message is:
+
+> `Include include[0](tags) cannot use 'join' for a belongsToMany relation. The relation goes through a junction table that join includes, .join(<relation>), NQL | flat and json_agg/lateral includes do not traverse yet. Join the junction and target tables explicitly with .join(<table>, { on }).`
+
 To-one join includes accept omitted `select`, `select: { type: 'all' }`, or `select: { type: 'fields', fields: [...] }` with plain column names and no `'*'`.
 CTE includes refuse any explicit `select` with the include path because they add no related targets to the outer `SELECT`.
 
@@ -142,7 +147,7 @@ The planner picks the SQL strategy from the query shape by default:
 
 | Strategy | When used | Notes |
 |----------|-----------|-------|
-| `json_agg` | Nested non-recursive includes of any cardinality, when supported | JSON subquery aggregation |
+| `json_agg` | Nested non-recursive to-one and `hasMany` includes, when supported | JSON subquery aggregation |
 | `lateral` | Flat includes with a direct or nested per-parent `limit`, when supported | Uses `LATERAL` join for per-row subqueries |
 | `join` | Flat includes without limits, or nested output without JSON aggregation support | SQL JOIN |
 
@@ -196,4 +201,4 @@ Every root SELECT label owns its key, including function labels and expanded sta
 
 Compilation resolves these keys before generating SQL. Exact duplicate source/key requests deduplicate; two different owners of one public key fail with the payload path and key. A wildcard include over a target whose columns cannot be enumerated also fails.
 
-Join includes are refused when aggregation, `groupBy` or `DISTINCT` would drop their data; use `.join()` for relational columns, grouping or ordering.
+Scalar expression projections retain join include payloads. Expression projections containing a call in `NQL_SELECT_AGGREGATE_FUNCTIONS`, including nested calls, are aggregation. Join includes are refused when aggregation, `groupBy` or `DISTINCT` would drop their data; use `.join()` for relational columns, grouping or ordering.

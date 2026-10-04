@@ -17,6 +17,10 @@ import type {
 
 // Internal-only build utilities (NOT part of public API)
 export type { IntentBuilder, Mutable } from './builders.js';
+export {
+	belongsToManyJoinIncludeRefusal,
+	dropsJoinIncludeData,
+} from './intent/join-include.js';
 
 /** @internal Minimal relation shape needed to validate NQL binding include hops. */
 export interface NqlBindingIncludeRelationShape {
