@@ -73,7 +73,7 @@ it('join includes refuse payload-dropping shapes at plan and external compile', 
 		).toThrow(shapeRefusal);
 	}
 });
-it('belongsToMany refuses every join include source and external report', () => {
+it('belongsToMany refuses every planned join include source', () => {
 	const manyModel = schema({
 		posts: { id: { type: 'integer', primaryKey: true } },
 		tags: { id: { type: 'integer', primaryKey: true } },
@@ -110,7 +110,7 @@ it('belongsToMany refuses every join include source and external report', () => 
 			.plan(),
 	).toThrow(`Invalid include: ${refusal}`);
 	expect(() => manyOrm.select('posts').include('tags').plan()).toThrow(refusal);
-	// The refusal's suggested table joins actually traverse the junction.
+	// Explicit table joins through the junction remain the manual route.
 	expect(
 		manyOrm
 			.select('posts')
