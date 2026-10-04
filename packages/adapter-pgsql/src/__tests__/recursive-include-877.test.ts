@@ -1,7 +1,11 @@
 import { createOrm, eq, plan, ref, schema } from '@dbsp/core';
 import type { ModelIR, QueryIntent } from '@dbsp/types';
-import { describe, expect, it } from 'vitest';
-import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
+import type { Pool } from 'pg';
+import { describe, expect, it, vi } from 'vitest';
+import {
+	createPgAdapter,
+	createPgCompileOnlyAdapter,
+} from '../pgsql-adapter.js';
 
 const db = schema({
 	categories: {
@@ -22,6 +26,51 @@ const db = schema({
 const adapter = createPgCompileOnlyAdapter({ model: db.model });
 const orm = createOrm({ schema: db, adapter });
 describe('#877 recursive includes', () => {
+	it('hydrates compiled managementChain payloads through orm.nql', async () => {
+		const pool = {
+			query: vi.fn(async () => ({
+				rows: [
+					{ name: 'Alice', managementChain_json: [] },
+					{
+						name: 'Dave',
+						managementChain_json: JSON.stringify([
+							{
+								id: 2,
+								name: 'Bob',
+								parentId: 1,
+								__dbsp_node: '2',
+								__dbsp_parent: '1',
+								__dbsp_depth: 1,
+							},
+							{
+								id: 1,
+								name: 'Alice',
+								parentId: null,
+								__dbsp_node: '1',
+								__dbsp_parent: null,
+								__dbsp_depth: 2,
+							},
+						]),
+					},
+				],
+			})),
+		} as unknown as Pool;
+		const fake = createPgAdapter(pool, { model: db.model });
+		const executingOrm = createOrm({ schema: db, adapter: fake });
+		const query = executingOrm.nql`categories | select name, managementChain.*`;
+		const compiled = fake.compile(query.plan(), { model: db.model });
+		expect(compiled.hydrationPlan?.includePayloads?.[0]?.strategy).toBe('cte');
+		expect(await query.all()).toEqual([
+			{ name: 'Alice', managementChain: [] },
+			{
+				name: 'Dave',
+				managementChain: [
+					{ id: 2, name: 'Bob', parentId: 1, depth: 1 },
+					{ id: 1, name: 'Alice', parentId: null, depth: 2 },
+				],
+			},
+		]);
+	});
 	it('ancestors maxDepth=undefined', () => {
 		const query = orm
 			.select('categories')
