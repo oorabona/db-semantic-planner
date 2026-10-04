@@ -1299,7 +1299,7 @@ function processInclude(
 
 	if (
 		includeStrategy === 'join' &&
-		(relation.type === 'hasMany' || relation.type === 'belongsToMany') &&
+		isToManyInclude(relation) &&
 		include.strategy !== 'flat'
 	)
 		throw new InvalidOperationError(
@@ -1309,9 +1309,7 @@ function processInclude(
 	if (
 		includeStrategy === 'join' &&
 		include.strategy !== 'flat' &&
-		(queryIntent?.select?.type === 'aggregate' ||
-			queryIntent?.distinct === true ||
-			(queryIntent?.groupBy?.length ?? 0) > 0)
+		dropsJoinIncludeData(queryIntent)
 	)
 		throw new InvalidOperationError(
 			'include',
@@ -1424,6 +1422,7 @@ function processInclude(
 					opts.dialectCapabilities,
 					include,
 					relation,
+					queryIntent,
 				),
 	});
 
@@ -1859,12 +1858,25 @@ function selectsWholeIncludeRow(include: IncludeIntent): boolean {
 	);
 }
 
+function isToManyInclude(relation: RelationIR): boolean {
+	return relation.type === 'hasMany' || relation.type === 'belongsToMany';
+}
+
+function dropsJoinIncludeData(intent: QueryIntent | undefined): boolean {
+	return (
+		intent?.select?.type === 'aggregate' ||
+		intent?.distinct === true ||
+		(intent?.groupBy?.length ?? 0) > 0
+	);
+}
+
 /** Get alternatives that honour the include options and dialect capabilities. */
 function getAlternativeStrategies(
 	strategy: ResolvedIncludeStrategy,
 	capabilities: DialectCapabilities | undefined,
 	include: IncludeIntent,
 	relation: RelationIR,
+	queryIntent: QueryIntent | undefined,
 ): string[] {
 	const allStrategies: ResolvedIncludeStrategy[] =
 		include.strategy === 'flat'
@@ -1876,8 +1888,8 @@ function getAlternativeStrategies(
 		if (s === strategy) return false;
 		if (
 			s === 'join' &&
-			relation.type === 'hasMany' &&
-			include.strategy !== 'flat'
+			include.strategy !== 'flat' &&
+			(isToManyInclude(relation) || dropsJoinIncludeData(queryIntent))
 		)
 			return false;
 		if (include.join !== undefined && s !== 'join') return false;

@@ -390,7 +390,32 @@ export function resolveIncludePayloadShapes(
 	const rootLabels = plan.intent?.existsWrap
 		? []
 		: resolveRootLabels(rootColumns);
-	for (const { key } of rootLabels) usedLabels.add(key);
+	const needsPresence = [...resolved.values()].some((shape) => shape.presence);
+	const rootTarget = resolveRelationTarget(queryLocal(plan.rootTable), deps);
+	for (const { key, owner } of rootLabels) {
+		const select = plan.intent?.select;
+		const explicitlyAliased =
+			select?.type === 'expressions' &&
+			select.columns.some(
+				(column) => column.kind === 'columnAlias' && column.alias === key,
+			);
+		const emitted =
+			needsPresence && !explicitlyAliased && owner === `column:${key}`
+				? identifierText(
+						requireRelationTargetColumn(
+							rootTarget,
+							queryLocal(key),
+							'presence marker collision',
+						)?.outputKey ??
+							resolveDeclaredIdentifier(
+								deps.declaredNames,
+								deps.dbCasing ?? 'preserve',
+								{ kind: 'column', table: plan.rootTable, column: key },
+							),
+					)
+				: key;
+		usedLabels.add(emitted);
+	}
 	for (const shape of resolved.values()) {
 		if (!shape.presence) continue;
 		const target = resolveRelationTarget(queryLocal(shape.table), deps);

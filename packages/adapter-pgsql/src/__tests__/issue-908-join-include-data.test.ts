@@ -201,12 +201,13 @@ it('presence labels cannot collide with root or payload keys', () => {
 		},
 	]);
 });
-it('a keyless target uses a constant inside the joined target', () => {
+it('keyless target keeps outer filter columns and exact private payload', () => {
 	const keylessModel = schema(
 		{
 			users: {
 				id: { type: 'text', unique: true },
 				name: { type: 'text', nullable: true },
+				email: { type: 'text' },
 			},
 			posts: {
 				id: { type: 'integer', primaryKey: true },
@@ -222,11 +223,13 @@ it('a keyless target uses a constant inside the joined target', () => {
 		.include('author', {
 			join: 'left',
 			select: { type: 'fields', fields: ['name'] },
+			where: eq('email', 'a@example.test'),
 		});
+	expect(builder.dump().params).toEqual(['a@example.test']);
 	const report = builder.plan();
 	const compiled = keylessAdapter.compile(report);
 	expect(compiled.sql).toBe(
-		'SELECT posts.*, author.name AS "author.name", author.__dbsp_presence_author AS __dbsp_presence_author FROM posts LEFT JOIN (SELECT author.id, author.name, 1 AS __dbsp_presence_author FROM users AS author) AS author ON posts."authorCode" = author.id',
+		'SELECT posts.*, author.name AS "author.name", author.__dbsp_presence_author AS __dbsp_presence_author FROM posts LEFT JOIN (SELECT *, 1 AS __dbsp_presence_author FROM users AS author) AS author ON posts."authorCode" = author.id WHERE author.email = $1',
 	);
 	const rows = [
 		{ 'author.name': null, __dbsp_presence_author: 1 },
@@ -299,4 +302,52 @@ it('an explicit empty field selection returns an empty object or null using only
 		compiled,
 	);
 	expect(rows).toEqual([{ author: {} }, { author: null }]);
+});
+
+it('alternatives exclude every refused join data strategy', () => {
+	const queries = [
+		orm.select('posts').distinct(),
+		orm.select('posts').groupBy(['id']),
+		orm.select('posts').count(),
+	];
+	for (const query of queries) {
+		expect(
+			query
+				.include('author')
+				.plan()
+				.decisions.find((d) => d.type === 'include-strategy')?.alternatives,
+		).toEqual(['cte', 'lateral']);
+		expect(() => query.include('author', { join: 'left' }).plan()).toThrow(
+			"Invalid include: Include include[0](author) cannot use 'join' with aggregation, groupBy or DISTINCT because its data would be dropped. Use .join() for relational columns, grouping or ordering.",
+		);
+	}
+	expect(
+		orm
+			.select('users')
+			.include('posts')
+			.plan()
+			.decisions.find((d) => d.type === 'include-strategy')?.alternatives,
+	).toEqual(['cte', 'lateral']);
+});
+it('presence collision checks use physical snake case root outputs', () => {
+	const collisionModel = schema({
+		users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			authorId: ref('users', { as: 'author' }),
+			__dbspPresenceAuthor: 'text',
+		},
+	}).model;
+	const collisionOrm = createOrm({
+		model: collisionModel,
+		adapter: createPgCompileOnlyAdapter({
+			model: collisionModel,
+			dbCasing: 'snake_case',
+		}),
+	});
+	expect(
+		collisionOrm.select('posts').include('author', { join: 'left' }).dump().sql,
+	).toBe(
+		'SELECT posts.*, author.id AS "author.id", author.name AS "author.name", author.id AS __dbsp_presence_author_1 FROM posts LEFT JOIN users AS author ON posts.author_id = author.id',
+	);
 });

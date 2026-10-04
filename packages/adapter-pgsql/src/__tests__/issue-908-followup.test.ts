@@ -103,6 +103,9 @@ it('belongsToMany refuses every join include source and external report', () => 
 			.plan(),
 	).toThrow(`Invalid include: ${refusal}`);
 	const report = manyOrm.select('posts').include('tags').plan();
+	expect(
+		report.decisions.find((d) => d.type === 'include-strategy')?.alternatives,
+	).toEqual(['cte', 'lateral']);
 	for (const omit of [false, true]) {
 		const decisions = report.decisions.map((d) => {
 			if (d.type !== 'include-strategy') return d;

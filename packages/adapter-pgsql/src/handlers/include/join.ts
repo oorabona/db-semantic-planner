@@ -28,11 +28,7 @@ import {
 	requireRelationTargetColumns,
 	resolveRelationTarget,
 } from '../../relation-target-projection.js';
-import {
-	identifierText,
-	queryLocal,
-	resolveDeclaredIdentifier,
-} from '../../sql-identifier.js';
+import { queryLocal, resolveDeclaredIdentifier } from '../../sql-identifier.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -40,11 +36,7 @@ import type {
 	IncludeHandler,
 	IncludeResult,
 } from '../types.js';
-import {
-	expressionColumnIdentifier,
-	expressionQualifiedColumnRef,
-	expressionRelationBinding,
-} from '../types.js';
+import { expressionQualifiedColumnRef } from '../types.js';
 import { buildKeyCorrelation } from '../where/exists.js';
 
 /**
@@ -225,30 +217,7 @@ export const joinIncludeHandler: IncludeHandler = {
 						subquery: {
 							SelectStmt: {
 								targetList: [
-									...Array.from(
-										new Set([
-											...toColumnList(targetColumn).map((column) =>
-												identifierText(
-													expressionColumnIdentifier(
-														column,
-														expressionRelationBinding(targetAlias, scopedCtx),
-														scopedCtx.declaredNames,
-														scopedCtx.dbCasing,
-													),
-												),
-											),
-											...decision.payloadShape!.columns.map(
-												(column) => column.physicalName,
-											),
-										]),
-										(column) =>
-											sqlResTarget(
-												sqlColumnRef(
-													queryLocal(column),
-													queryLocal(targetAlias),
-												),
-											),
-									),
+									sqlResTarget(sqlColumnRefStar()),
 									sqlResTarget(
 										{ A_Const: { ival: { ival: 1 } } },
 										queryLocal(presence.outputLabel),
