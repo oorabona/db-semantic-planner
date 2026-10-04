@@ -54,6 +54,10 @@ import {
 	relationBinding,
 	relationBindingFor,
 } from './binding-registry.js';
+import {
+	assertNoManyToManyRootRelations,
+	assertNoRecursiveRootRelations,
+} from './condition-compiler-factory.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -243,7 +247,11 @@ export function buildPredicateSubquerySelect(
 	assertNoDroppedDecisionModifiers(decision, use);
 
 	// Correlated subqueries (outerRef inside the inner WHERE) are not supported.
-	if (sourceIntent.where && containsOuterRef(sourceIntent.where)) {
+	if (
+		!ctx.compileSubqueryCondition &&
+		sourceIntent.where &&
+		containsOuterRef(sourceIntent.where)
+	) {
 		const label =
 			use === 'rawExists' ? 'rawExists' : use === 'IN' ? 'IN' : 'scalar';
 		throw new Error(
@@ -355,9 +363,16 @@ export function buildPredicateSubquerySelect(
 		);
 	}
 
+	if (sourceIntent.where) {
+		assertNoRecursiveRootRelations(sourceIntent.where);
+		assertNoManyToManyRootRelations(sourceIntent.where, targetTable, ctx.model);
+	}
 	// Build WHERE clause if conditions exist
 	let whereClause: Node | undefined;
-	if (decision.conditions && decision.conditions.length > 0) {
+	if (
+		sourceIntent.where ||
+		(decision.conditions && decision.conditions.length > 0)
+	) {
 		// NOTE: schema is intentionally KEPT in subCtx so any nested EXISTS or
 		// subquery conditions can qualify their FROM tables with the schema name.
 		// Column references are alias-prefixed (not schema-qualified) regardless.
@@ -372,10 +387,16 @@ export function buildPredicateSubquerySelect(
 			currentBinding: targetBinding,
 		};
 
-		if (decision.conditions.length === 1) {
+		if (sourceIntent.where && ctx.compileSubqueryCondition) {
+			whereClause = ctx.compileSubqueryCondition(
+				sourceIntent.where,
+				subCtx,
+				state,
+			);
+		} else if (decision.conditions?.length === 1) {
 			whereClause = dispatch(decision.conditions[0]!, subCtx, state);
 		} else {
-			const compiledConditions = decision.conditions.map((cond) =>
+			const compiledConditions = (decision.conditions ?? []).map((cond) =>
 				dispatch(cond, subCtx, state),
 			);
 			whereClause = {

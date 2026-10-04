@@ -116,7 +116,6 @@ The correlation predicate (`author_id = users.id`) is resolved automatically fro
 `outerRef(column)` creates a reference to a column in the outer query for use in a subquery's WHERE condition:
 
 ```typescript
-// doctest: skip — correlated outerRef() is not yet supported (see warning below); shown as the intended future syntax
 import { schema, createOrm, subquery, outerRef, eq } from '@dbsp/core';
 import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
@@ -139,9 +138,7 @@ orm.select('products')
 
 Source: `packages/core/src/dx/subquery-builder.ts:288` — `outerRef(column)` returns a `SubqueryRefIntent`.
 
-::: warning Correlated subqueries with `outerRef()` are not yet supported
-Wiring `outerRef()` through the correlation pipeline is not yet implemented for **either** a scalar subquery (as in the example above) **or** `rawExists()`. Passing `outerRef()` inside either is detected at compile time and throws a clear error (e.g. `"scalar subquery with correlated outerRef() is not yet supported"` / `"rawExists: correlated subqueries (outerRef inside the inner WHERE) are not yet supported"`). The example above shows the intended future syntax. Today, use the `exists('relation', { where })` builder (FK-correlated) or expression-primitive `op()` patterns instead. Tracked as a known limitation.
-:::
+Query WHERE scalar comparisons, `inSubquery()` and `rawExists()` compile the body with its own alias and resolve `outerRef()` to the immediately enclosing query. All levels share one parameter sequence. Legacy `compilePlan()` and SELECT expression subqueries retain their existing correlation restrictions.
 
 ---
 

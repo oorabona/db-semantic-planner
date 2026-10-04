@@ -287,16 +287,18 @@ describe('rawExists + outerRef on direct compileWhereIntent path', () => {
 		expect(() => compileWhereIntent(safeIntent as any, ctx)).not.toThrow();
 	});
 
-	it('rawExists + outerRef on ORM path (decisions path) → still throws', () => {
+	it('rawExists + outerRef on ORM path keeps outer qualifier', () => {
 		const orm = buildOrm();
 		const correlated = rawExists(
 			subquery('posts')
 				.select('id')
 				.where(eq('author_id', outerRef('id') as any)),
 		);
-		expect(() => {
-			(orm as any).select('users').where(correlated).dump();
-		}).toThrow(/correlated subqueries.*not yet supported/i);
+		const result = (orm as any).select('users').where(correlated).dump();
+		expect(result.sql).toBe(
+			'SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.author_id = users.id)',
+		);
+		expect(result.params).toEqual([]);
 	});
 });
 

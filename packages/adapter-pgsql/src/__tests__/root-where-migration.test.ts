@@ -286,7 +286,7 @@ it('validates raw entries but trusts already-shaped descendant handler decisions
 		'users.score = posts_exists_0."authorId"',
 	);
 });
-it('dotted fields retain legacy lowering and scalar and ANY bodies retain their current route', () => {
+it('dotted fields retain legacy lowering and scalar and ANY bodies keep canonical range casts', () => {
 	const spy = vi.spyOn(conditions, 'compileCondition');
 	createOrm({
 		schema: db,
@@ -310,7 +310,9 @@ it('dotted fields retain legacy lowering and scalar and ANY bodies retain their 
 			),
 		},
 	};
-	expect(orm.select('users').where(scalar).dump().sql).not.toContain('CAST(');
+	expect(orm.select('users').where(scalar).dump().sql).toContain(
+		'CAST($1 AS daterange)',
+	);
 	const any = orm
 		.select('users')
 		.where(
@@ -321,7 +323,7 @@ it('dotted fields retain legacy lowering and scalar and ANY bodies retain their 
 		)
 		.dump();
 	expect(any.sql).toContain('= ANY (SELECT');
-	expect(any.sql).not.toContain('CAST(');
+	expect(any.sql).toContain('CAST($1 AS daterange)');
 });
 it('root context sees manual JOIN aliases allocated before predicate compilation', () => {
 	const spy = vi.spyOn(conditions, 'compileCondition');

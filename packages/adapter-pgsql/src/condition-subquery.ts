@@ -13,7 +13,10 @@ import {
 	relationBinding,
 	relationBindingFor,
 } from './binding-registry.js';
-import type { WhereCompilerCtx } from './condition-context.js';
+import type {
+	ConditionCompilerCtx,
+	WhereCompilerCtx,
+} from './condition-context.js';
 import type { DeclaredNameResolver } from './declared-name-resolver.js';
 import {
 	createCompilerState,
@@ -32,6 +35,16 @@ export type SubqueryConditionCompiler = (
 
 export function createSubqueryBuilder(
 	compileWhereIntent: SubqueryConditionCompiler,
+	compileCondition: (intent: WhereIntent, ctx: ConditionCompilerCtx) => Node = (
+		intent,
+		ctx,
+	) =>
+		compileWhereIntent(intent, {
+			...ctx,
+			rootTable: ctx.logicalSourceTable,
+			currentAlias: ctx.emittedAlias,
+			aliases: ctx.visibleAliases,
+		}),
 ) {
 	// ============================================================================
 	// Public: buildSubqueryFromIntent
@@ -53,13 +66,28 @@ export function createSubqueryBuilder(
 	return function buildSubqueryFromIntent(
 		intent: QueryIntent,
 		paramOffset: number,
-		declaredNames: DeclaredNameResolver | undefined = undefined,
+		declaredNames:
+			| DeclaredNameResolver
+			| WhereCompilerCtx
+			| undefined = undefined,
 		schemaName?: string,
 		use: 'rawExists' | 'scalar-direct' = 'rawExists',
 		scope?: QueryScope,
 		dialectCapabilities?: DialectCapabilities,
 		dbCasing: DbCasing = 'preserve',
+		parent?: WhereCompilerCtx,
 	): { sql: Node; paramCount: number; parameters?: unknown[] } {
+		if (declaredNames && 'rootTable' in declaredNames) {
+			parent = declaredNames;
+			declaredNames = parent.declaredNames;
+		}
+		if (parent) {
+			declaredNames = parent.declaredNames;
+			schemaName = parent.schemaName;
+			scope = parent.scope;
+			dialectCapabilities = parent.dialectCapabilities;
+			dbCasing = parent.dbCasing ?? 'preserve';
+		}
 		// CHOKEPOINT GUARD: buildSubqueryFromIntent emits ONLY SELECT/FROM/WHERE —
 		// it never emits LIMIT, ORDER BY, OFFSET, GROUP BY, HAVING, DISTINCT, DISTINCT ON,
 		// JOINs, or relation hydration (include). Any caller passing an intent with those
@@ -75,11 +103,8 @@ export function createSubqueryBuilder(
 		//   • rawExistsHandler.compile  (handlers/where/raw-exists.ts) — use='rawExists'
 		//   • adapter-compiler-mutations compileSubquery callback       — use='rawExists'
 		assertNoUnsupportedSubqueryModifiers(intent, use);
-		// Correlated subqueries (outerRef inside the inner WHERE) are not supported:
-		// buildSubqueryFromIntent builds a fresh inner WhereCompilerCtx with no outer alias,
-		// so SubqueryRefIntent values fall back to being serialized as object $N parameters,
-		// producing invalid SQL at best and a runtime panic at worst.
-		if (intent.where && containsOuterRef(intent.where)) {
+		// Legacy callers have no enclosing scope; retain their correlation refusal.
+		if (!parent && intent.where && containsOuterRef(intent.where)) {
 			throw new Error(
 				'buildSubqueryFromIntent: correlated subqueries (outerRef inside the inner WHERE) are not yet supported. ' +
 					'Workaround: use exists("relation", { where: ... }) when a schema relation exists, or wait for the rawExists correlation pipeline.',
@@ -112,6 +137,11 @@ export function createSubqueryBuilder(
 						}),
 					},
 		);
+
+		const innerScope = queryScope([
+			...(scope?.bindings.values() ?? []),
+			innerBinding,
+		]);
 
 		// Build target list: SELECT col or SELECT agg(col)... or SELECT 1
 		const select = intent.select as
@@ -194,13 +224,15 @@ export function createSubqueryBuilder(
 
 		// Compile inner WHERE if present, using a nested WhereCompilerCtx
 		if (intent.where) {
-			const innerState = createCompilerState();
+			const innerState = parent?.paramState ?? createCompilerState();
 			// Seed inner param index from outer offset so params are contiguous ($offset+1, $offset+2, ...)
-			innerState.paramIndex = paramOffset;
+			if (!parent) innerState.paramIndex = paramOffset;
 			const innerCtx: WhereCompilerCtx = {
-				// Bug 2 fix: use the alias name as rootTable so WHERE handlers emit
-				// "posts_sq"."col" = $N instead of "posts"."col" = $N (table is aliased).
-				rootTable: innerAlias,
+				// Keep logical model lookup separate from the emitted qualifier.
+				...parent,
+				rootTable: targetTable,
+				currentAlias: innerAlias,
+				...(parent && { outerTable: parent.currentAlias ?? parent.rootTable }),
 				position: 'subquery',
 				dbCasing,
 				aliases: new Map(),
@@ -208,21 +240,31 @@ export function createSubqueryBuilder(
 				...(schemaName !== undefined && { schemaName }),
 				...(dialectCapabilities !== undefined && { dialectCapabilities }),
 				...(declaredNames !== undefined && { declaredNames }),
-				scope: queryScope([...(scope?.bindings.values() ?? []), innerBinding]),
+				scope: innerScope,
 				currentBinding: innerBinding,
-				compileSubquery: (_nestedIntent, _nestedOffset) => {
-					throw new Error(
-						'buildSubqueryFromIntent: nested subquery not supported',
-					);
-				},
+				compileSubquery:
+					parent?.compileSubquery ??
+					(() => {
+						throw new Error(
+							'buildSubqueryFromIntent: nested subquery not supported',
+						);
+					}),
 			};
-			stmt.whereClause = compileWhereIntent(
-				intent.where as WhereIntent,
-				innerCtx,
-			);
-			// Expose inner parameters so callers (P2-3 fix) can push them to the outer state.
-			paramCount = innerState.paramIndex - paramOffset;
-			innerParameters = innerState.parameters;
+			stmt.whereClause = parent
+				? compileCondition(intent.where, {
+						...innerCtx,
+						logicalSourceTable: targetTable,
+						emittedAlias: innerAlias,
+						visibleAliases: new Map(),
+						position: 'subquery',
+					})
+				: compileWhereIntent(intent.where, {
+						...innerCtx,
+						rootTable: targetTable,
+					});
+			// Only legacy callers append parameters; canonical bodies already share state.
+			paramCount = parent ? 0 : innerState.paramIndex - paramOffset;
+			innerParameters = parent ? [] : innerState.parameters;
 		}
 
 		return {

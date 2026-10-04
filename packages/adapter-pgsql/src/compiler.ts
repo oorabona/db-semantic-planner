@@ -2999,7 +2999,7 @@ export class PlanCompiler {
 			visibleAliases: new Map(this.visibleSqlQualifiers),
 			paramState: this.state,
 			...(handlerCtx.schema !== undefined && { schemaName: handlerCtx.schema }),
-			compileSubquery: (query, offset) =>
+			compileSubquery: (query, offset, parent) =>
 				buildSubqueryFromIntent(
 					query,
 					offset,
@@ -3009,6 +3009,7 @@ export class PlanCompiler {
 					handlerCtx.scope,
 					this.dialectCapabilities,
 					this.dbCasing,
+					parent,
 				),
 		});
 		// A positive planned JOIN without an inner predicate already supplies the

@@ -27,7 +27,7 @@ Use this table to decide which API to reach for:
 | Cross-column comparison across FK tables (`f.lastParsed > c.createdAt`) | `exists('relation', { where: gt(..., outerRef(...)) })` |
 | Target table has **no FK** to the source (polymorphic, ad-hoc) | `rawExists(subquery(...))` |
 | You need control over the inner `SELECT` list (e.g. `select('1')` vs `select(['col'])`) | `rawExists(subquery(...))` |
-| You want to correlate with `outerRef()` **and** there is no FK | Not yet supported — see [Known Limitations](#known-limitations) |
+| You want to correlate with `outerRef()` **and** there is no FK | `rawExists(subquery(...).where(...))` |
 
 ## Cheat sheet
 
@@ -35,9 +35,9 @@ Use this table to decide which API to reach for:
 |----------|-----|--------|
 | FK-declared relation, simple existence check | `exists('files')` | Works |
 | FK-declared relation + cross-column `where` | `exists('files', { where: gt('lastParsed', outerRef('createdAt')) })` | Works |
-| FK-declared relation + `rawExists` + `outerRef` | `rawExists(subquery('files').select('id').where(gt(..., outerRef(...))))` | Throws today |
+| FK-declared relation + `rawExists` + `outerRef` | `rawExists(subquery('files').select('id').where(gt(..., outerRef(...))))` | Works in query WHERE |
 | No FK (polymorphic), plain filter | `rawExists(subquery('auditLog').select('id').where(eq('entityType', 'login')))` | Works |
-| No FK + `outerRef` correlation inside `rawExists` | `rawExists(subquery('t').select('id').where(eq('col', outerRef(...))))` | Throws today |
+| No FK + `outerRef` correlation inside `rawExists` | `rawExists(subquery('t').select('id').where(eq('col', outerRef(...))))` | Works in query WHERE |
 | No FK + `exists('table', { where })` | `exists('auditLog', { where: ... })` from unrelated table | Silently drops WHERE today |
 
 ---
@@ -87,31 +87,34 @@ Key observations:
 - `outerRef('createdAt')` resolves to the outer table alias (`communities."createdAt"`).
 - No bound parameters — both sides of `>` are column references, not values.
 
-### Why rawExists() does not work for this case today
+### Explicit correlation with rawExists()
 
-Attempting to use `rawExists()` with an `outerRef()` inside the subquery `WHERE` throws
-at compile time:
+A subquery body in query WHERE resolves `outerRef()` against its immediately enclosing query:
 
 ```typescript
-// doctest: skip — rawExists + outerRef throws today; use exists() when FK is declared
 import { createOrm, rawExists, subquery, gt, outerRef, ref, schema } from '@dbsp/core';
 import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
-const __rawExistsThrowDb = schema({
+const __rawExistsCorrelatedDb = schema({
   communities: { id: { type: 'integer', primaryKey: true }, createdAt: 'timestamp' },
   files: { id: { type: 'integer', primaryKey: true }, communityId: ref('communities'), lastParsed: 'timestamp' },
 } as const);
 
-const __rawExistsThrowOrm = createOrm({
-  schema: __rawExistsThrowDb,
+const __rawExistsCorrelatedOrm = createOrm({
+  schema: __rawExistsCorrelatedDb,
   adapter: createPgCompileOnlyAdapter(),
 });
 
-// This throws: "correlated subqueries (outerRef inside the inner WHERE) are not yet supported"
-(__rawExistsThrowOrm as any)
+__rawExistsCorrelatedOrm
   .select('communities')
   .where(rawExists(subquery('files').select('id').where(gt('lastParsed', outerRef('createdAt')))))
   .dump();
+```
+
+Generated SQL:
+
+```sql
+SELECT communities.* FROM communities WHERE EXISTS (SELECT files_sq.id FROM files AS files_sq WHERE files_sq."lastParsed" > communities."createdAt")
 ```
 
 **Use `exists('relation', { where })` whenever you have an FK-declared relation.**
@@ -192,20 +195,9 @@ polymorphic or ad-hoc join targets.
 
 ## Known limitations
 
-### `rawExists` + `outerRef` throws today
+### Correlation scope
 
-Correlated subqueries using `outerRef()` inside a `rawExists(subquery(...).where(...))`
-are not yet supported. The compiler throws at plan time:
-
-```
-Error: correlated subqueries (outerRef inside the inner WHERE) are not yet supported
-```
-
-**Workaround:** If the target table has a declared FK relation, use
-`exists('relation', { where: gt('innerCol', outerRef('outerCol')) })` — that path
-is fully wired for correlated queries. The `rawExists` correlated path is tracked
-as a follow-up (outerAlias context + SubqueryRefIntent normalization in the
-rawExists handler).
+Query WHERE subquery bodies support `outerRef()` for scalar comparisons, `inSubquery()` and `rawExists()`. Nested bodies refer to their immediately enclosing query and share parameter numbering. A nested `rawExists()` that reuses the enclosing generated qualifier is refused with `Query scope already binds qualifier 'posts_sq'.` Legacy `compilePlan()` lowering retains its correlation refusal.
 
 ### `exists()` silently drops the WHERE for undeclared relations
 

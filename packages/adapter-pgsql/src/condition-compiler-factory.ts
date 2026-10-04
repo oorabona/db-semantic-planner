@@ -272,6 +272,22 @@ export function createConditionCompiler(
 		dispatcher: WhereDispatcher,
 	): CompilerContext {
 		return {
+			compileSubqueryCondition: (intent, child, state) => {
+				assertNoRecursiveRootRelations(intent);
+				return compileCondition(intent, {
+					...ctx,
+					logicalSourceTable: child.rootTable,
+					emittedAlias: child.currentAlias ?? child.rootTable,
+					visibleAliases: new Map(),
+					position: 'subquery',
+					outerTable: ctx.currentAlias ?? ctx.rootTable,
+					...(child.currentBinding !== undefined && {
+						currentBinding: child.currentBinding,
+					}),
+					...(child.scope !== undefined && { scope: child.scope }),
+					paramState: state,
+				});
+			},
 			rootTable: ctx.rootTable,
 			position: ctx.position,
 			...(ctx.directRootWhere !== undefined && {
@@ -494,7 +510,7 @@ export function createConditionCompiler(
 			sql: subqueryNode,
 			paramCount,
 			parameters: innerParams,
-		} = ctx.compileSubquery(subquery, ctx.paramState.paramIndex);
+		} = ctx.compileSubquery(subquery, ctx.paramState.paramIndex, ctx);
 
 		if (innerParams) {
 			for (const p of innerParams) {
@@ -685,7 +701,8 @@ export function createConditionCompiler(
 			let singleHopTargetColumn: ColumnListInput;
 			if (resolvedRelation) {
 				if (
-					(ctx.position === 'where' && ctx.directRootWhere) ||
+					((ctx.position === 'where' || ctx.position === 'subquery') &&
+						ctx.directRootWhere) ||
 					ctx.position === 'filter' ||
 					ctx.position === 'recursive-anchor'
 				) {
@@ -768,7 +785,8 @@ export function createConditionCompiler(
 			// For belongsTo: FK is on the source side (sourceTable.fkCol → targetTable.pk)
 			// For hasMany/hasOne: FK is on the target side (targetTable.fkCol → sourceTable.pk)
 			if (
-				(ctx.position === 'where' && ctx.directRootWhere) ||
+				((ctx.position === 'where' || ctx.position === 'subquery') &&
+					ctx.directRootWhere) ||
 				ctx.position === 'filter' ||
 				ctx.position === 'recursive-anchor'
 			) {
@@ -842,6 +860,7 @@ export function createConditionCompiler(
 		// need the guard to fire here first.
 		assertNoUnsupportedSubqueryModifiers(subIntent as QueryIntent, 'rawExists');
 		if (
+			!ctx.directRootWhere &&
 			(subIntent as QueryIntent).where &&
 			containsOuterRef((subIntent as QueryIntent).where!)
 		) {
@@ -858,7 +877,7 @@ export function createConditionCompiler(
 			sql: subNode,
 			paramCount,
 			parameters: innerParams,
-		} = ctx.compileSubquery(subIntent, ctx.paramState.paramIndex);
+		} = ctx.compileSubquery(subIntent, ctx.paramState.paramIndex, ctx);
 
 		if (innerParams) {
 			for (const p of innerParams) ctx.paramState.parameters.push(p);
@@ -999,7 +1018,8 @@ export function createConditionCompiler(
 		handlerCtx: CompilerContext,
 	): Node {
 		if (
-			((ctx.position === 'where' && ctx.directRootWhere) ||
+			(((ctx.position === 'where' || ctx.position === 'subquery') &&
+				ctx.directRootWhere) ||
 				ctx.position === 'recursive-anchor') &&
 			![
 				'comparison',
@@ -1023,22 +1043,24 @@ export function createConditionCompiler(
 			].includes(intent.kind)
 		) {
 			throw new Error(
-				`Unsupported ${ctx.position === 'where' && ctx.directRootWhere ? 'root WHERE' : 'recursive start.where'} predicate kind '${String(intent.kind)}'.`,
+				`Unsupported ${(ctx.position === 'where' || ctx.position === 'subquery') && ctx.directRootWhere ? 'root WHERE' : 'recursive start.where'} predicate kind '${String(intent.kind)}'.`,
 			);
 		}
 		if (
-			((ctx.position === 'where' && ctx.directRootWhere) ||
+			(((ctx.position === 'where' || ctx.position === 'subquery') &&
+				ctx.directRootWhere) ||
 				ctx.position === 'filter' ||
 				ctx.position === 'recursive-anchor') &&
 			(intent.kind === 'exists' || intent.kind === 'notExists')
 		) {
 			if (
 				(ctx.position === 'filter' ||
-					(ctx.position === 'where' && ctx.directRootWhere)) &&
+					((ctx.position === 'where' || ctx.position === 'subquery') &&
+						ctx.directRootWhere)) &&
 				intent.recursive !== undefined
 			)
 				throw new Error(
-					`${ctx.position === 'where' && ctx.directRootWhere ? 'WHERE' : 'FILTER'} ${intent.kind}('${intent.relation}'): recursive relation predicates are not supported inside ${ctx.position === 'where' && ctx.directRootWhere ? 'WHERE' : 'FILTER'}.`,
+					`${(ctx.position === 'where' || ctx.position === 'subquery') && ctx.directRootWhere ? 'WHERE' : 'FILTER'} ${intent.kind}('${intent.relation}'): recursive relation predicates are not supported inside ${(ctx.position === 'where' || ctx.position === 'subquery') && ctx.directRootWhere ? 'WHERE' : 'FILTER'}.`,
 				);
 			// Internal hints come from validated relation paths or frozen NQL proofs.
 			// Projected NQL bindings need not exist in the physical model.
@@ -1122,19 +1144,32 @@ export function createConditionCompiler(
 			);
 		}
 		if (
-			((ctx.position === 'where' && ctx.directRootWhere) ||
+			(((ctx.position === 'where' || ctx.position === 'subquery') &&
+				ctx.directRootWhere) ||
 				ctx.position === 'filter' ||
 				ctx.position === 'recursive-anchor') &&
 			(intent.kind === 'subquery' || (intent.kind === 'in' && intent.subquery))
 		) {
-			const decision = convertWhereCondition(intent, ctx.rootTable);
+			// Lower only the projection and comparison. The original body is compiled
+			// once below, with its own scope and the shared parameter state.
+			const query = intent.subquery;
+			if (!query)
+				throw new Error(
+					'fn().filter(): the FILTER (WHERE ...) condition could not be compiled (kind: subquery).',
+				);
+			const { where: body, ...projection } = query;
+			const decision = convertWhereCondition(
+				{ ...intent, subquery: projection },
+				ctx.rootTable,
+			);
+
 			if (!decision)
 				throw new Error(
 					'fn().filter(): the FILTER (WHERE ...) condition could not be compiled (kind: subquery).',
 				);
 			return dispatcher(
 				mapToHandlerDecision(
-					decision,
+					{ ...decision, subqueryIntent: body ? query : projection },
 					ctx.rootTable,
 					ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
 					ctx.deriveFkColumnName ?? defaultFkDerivation,
@@ -1206,7 +1241,8 @@ export function createConditionCompiler(
 		const bridged = needsColumn
 			? ({
 					...intent,
-					...(((ctx.position === 'where' && ctx.directRootWhere) ||
+					...((((ctx.position === 'where' || ctx.position === 'subquery') &&
+						ctx.directRootWhere) ||
 						ctx.position === 'filter' ||
 						ctx.position === 'recursive-anchor') && { type: 'where' }),
 					column: rawIntent.field,
@@ -1216,7 +1252,8 @@ export function createConditionCompiler(
 				} as unknown as Decision)
 			: ({
 					...intent,
-					...(((ctx.position === 'where' && ctx.directRootWhere) ||
+					...((((ctx.position === 'where' || ctx.position === 'subquery') &&
+						ctx.directRootWhere) ||
 						ctx.position === 'filter' ||
 						ctx.position === 'recursive-anchor') && { type: 'where' }),
 				} as unknown as Decision);
@@ -1228,6 +1265,7 @@ export function createConditionCompiler(
 		intent: WhereIntent,
 		ctx: ConditionCompilerCtx,
 	): Node {
+		if (ctx.position === 'subquery') assertNoRecursiveRootRelations(intent);
 		assertNoManyToManyRootRelations(intent, ctx.logicalSourceTable, ctx.model);
 		return compileTopLevel(intent, ctx);
 	}
@@ -1271,7 +1309,8 @@ export function createConditionCompiler(
 						},
 			);
 		const dispatcher = createWhereDispatcher((child, inner) => {
-			if (inner.position !== 'recursive-anchor') return recurse(child, inner);
+			if (inner.position !== 'recursive-anchor' && !inner.directRootWhere)
+				return recurse(child, inner);
 			// EXISTS changes the table and alias but inherits its parent's binding.
 			// Rebuild the child authority before compiling any raw descendant.
 			const binding = relationBinding({
@@ -1295,7 +1334,8 @@ export function createConditionCompiler(
 				? {
 						...ctx,
 						rootTable: ctx.logicalSourceTable,
-						directRootWhere: ctx.position === 'where',
+						directRootWhere:
+							ctx.position === 'where' || ctx.position === 'subquery',
 						currentAlias: ctx.emittedAlias,
 						aliases: ctx.visibleAliases,
 						compileCondition: recurse,
@@ -1305,11 +1345,16 @@ export function createConditionCompiler(
 						position: ctx.position ?? 'where',
 						compileCondition: recurse,
 					};
+
 		return recurse(intent, normalized);
 	}
+	const buildSubqueryFromIntent = createSubqueryBuilder(
+		compileWhereIntent,
+		compileCondition,
+	);
 	return {
 		compileCondition,
 		compileWhereIntent,
-		buildSubqueryFromIntent: createSubqueryBuilder(compileWhereIntent),
+		buildSubqueryFromIntent,
 	};
 }

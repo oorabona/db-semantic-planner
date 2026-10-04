@@ -693,7 +693,8 @@ export function createWhereDispatcher(
 		// FILTER and anchor descendants enter it in the EXISTS child scope;
 		// already-shaped descendant handler decisions are trusted here.
 		if (
-			((ctx.position === 'where' && ctx.directRootWhere) ||
+			(((ctx.position === 'where' || ctx.position === 'subquery') &&
+				ctx.directRootWhere) ||
 				ctx.position === 'filter' ||
 				ctx.position === 'recursive-anchor') &&
 			'kind' in decision &&

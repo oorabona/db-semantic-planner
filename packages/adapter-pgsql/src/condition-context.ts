@@ -53,6 +53,7 @@ export type WhereCompilerCtx = {
 	readonly compileSubquery: (
 		intent: QueryIntent,
 		paramOffset: number,
+		parent?: WhereCompilerCtx,
 	) => { sql: Node; paramCount: number; parameters?: unknown[] };
 	/**
 	 * Optional callback to compile an ExpressionIntent to a Node.
