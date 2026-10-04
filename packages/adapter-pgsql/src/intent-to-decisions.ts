@@ -45,13 +45,18 @@ export class UnknownSelectExpressionKindError extends Error {
 export function intentToDecisions(
 	intent: QueryIntent,
 	rootTable: string,
-	options?: { readonly omitRootWhere?: boolean },
+	options?: {
+		readonly omitRootWhere?: boolean;
+		readonly directConditions?: boolean;
+	},
 ): PlanDecision[] {
 	const decisions: PlanDecision[] = [];
 
 	// 1. SELECT clause
 	if (intent.select) {
-		decisions.push(...convertSelect(intent.select, rootTable));
+		decisions.push(
+			...convertSelect(intent.select, rootTable, options?.directConditions),
+		);
 	} else {
 		// Default to SELECT *
 		decisions.push({ type: 'select', column: '*', table: rootTable });
@@ -77,7 +82,7 @@ export function intentToDecisions(
 	}
 
 	// 5. HAVING clause
-	if (intent.having) {
+	if (intent.having && !options?.directConditions) {
 		const havingDecisions = convertWhere(intent.having, rootTable);
 		for (const d of havingDecisions) {
 			decisions.push({ type: 'having', conditions: [d] });
@@ -125,6 +130,7 @@ function applyFilterCondition(
 function convertSelect(
 	select: SelectIntent,
 	rootTable: string,
+	directConditions = false,
 ): PlanDecision[] {
 	// Handle different SelectIntent types using discriminator
 	const selectType = 'type' in select ? select.type : undefined;
@@ -152,6 +158,15 @@ function convertSelect(
 			const expr = exprUnknown as Record<string, unknown>;
 			const kind =
 				typeof expr.kind === 'string' ? expr.kind : String(expr.kind);
+			if (directConditions && kind === 'case') {
+				decisions.push({
+					type: 'selectCustomExpression',
+					expressionIntent: expr,
+					table: rootTable,
+					...(typeof expr.as === 'string' && { alias: expr.as }),
+				});
+				continue;
+			}
 			const handler = EXPRESSION_HANDLERS[kind];
 			if (!handler) {
 				throw new UnknownSelectExpressionKindError(kind);

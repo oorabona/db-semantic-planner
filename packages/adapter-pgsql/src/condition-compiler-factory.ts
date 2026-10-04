@@ -54,6 +54,7 @@ import {
 import { compileExpressionIntent } from './handlers/expression/custom.js';
 import type {
 	CompilerContext,
+	CompilerState,
 	Decision,
 	WhereDispatcher,
 } from './handlers/types.js';
@@ -273,6 +274,21 @@ export function createConditionCompiler(
 		dispatcher: WhereDispatcher,
 	): CompilerContext {
 		return {
+			...(ctx.directRootWhere && {
+				compileCaseCondition: (
+					intent: WhereIntent,
+					child: CompilerContext,
+					state: CompilerState,
+				) =>
+					compileCondition(intent, {
+						...ctx,
+						logicalSourceTable: child.rootTable,
+						emittedAlias: child.currentAlias ?? child.rootTable,
+						visibleAliases: new Map(child.aliases),
+						position: 'case-when',
+						paramState: state,
+					}),
+			}),
 			compileSubqueryCondition: (intent, child, state) => {
 				return compileCondition(intent, {
 					...ctx,
@@ -711,6 +727,8 @@ export function createConditionCompiler(
 					((ctx.position === 'where' || ctx.position === 'subquery') &&
 						ctx.directRootWhere) ||
 					ctx.position === 'filter' ||
+					ctx.position === 'having' ||
+					ctx.position === 'case-when' ||
 					ctx.position === 'recursive-anchor'
 				) {
 					const keys = resolveRelationKeys(
@@ -795,6 +813,8 @@ export function createConditionCompiler(
 				((ctx.position === 'where' || ctx.position === 'subquery') &&
 					ctx.directRootWhere) ||
 				ctx.position === 'filter' ||
+				ctx.position === 'having' ||
+				ctx.position === 'case-when' ||
 				ctx.position === 'recursive-anchor'
 			) {
 				const keys = resolveRelationKeys(currentSource, rel, ctx);
@@ -1061,11 +1081,15 @@ export function createConditionCompiler(
 			(((ctx.position === 'where' || ctx.position === 'subquery') &&
 				ctx.directRootWhere) ||
 				ctx.position === 'filter' ||
+				ctx.position === 'having' ||
+				ctx.position === 'case-when' ||
 				ctx.position === 'recursive-anchor') &&
 			(intent.kind === 'exists' || intent.kind === 'notExists')
 		) {
 			if (
 				(ctx.position === 'filter' ||
+					ctx.position === 'having' ||
+					ctx.position === 'case-when' ||
 					((ctx.position === 'where' || ctx.position === 'subquery') &&
 						ctx.directRootWhere)) &&
 				intent.recursive !== undefined
@@ -1158,6 +1182,8 @@ export function createConditionCompiler(
 			(((ctx.position === 'where' || ctx.position === 'subquery') &&
 				ctx.directRootWhere) ||
 				ctx.position === 'filter' ||
+				ctx.position === 'having' ||
+				ctx.position === 'case-when' ||
 				ctx.position === 'recursive-anchor') &&
 			(intent.kind === 'subquery' || (intent.kind === 'in' && intent.subquery))
 		) {
@@ -1189,6 +1215,12 @@ export function createConditionCompiler(
 				ctx.paramState,
 			);
 		}
+		const havingOperand =
+			ctx.position === 'having'
+				? ctx.resolveHavingOperand?.(intent)
+				: undefined;
+		if (havingOperand)
+			return dispatcher(havingOperand, handlerCtx, ctx.paramState);
 		if (intent.kind === 'range') {
 			return handleRangeIntent(intent, ctx, dispatcher, handlerCtx);
 		}
@@ -1255,6 +1287,8 @@ export function createConditionCompiler(
 					...((((ctx.position === 'where' || ctx.position === 'subquery') &&
 						ctx.directRootWhere) ||
 						ctx.position === 'filter' ||
+						ctx.position === 'having' ||
+						ctx.position === 'case-when' ||
 						ctx.position === 'recursive-anchor') && { type: 'where' }),
 					column: rawIntent.field,
 					...('value' in rawIntent && {
@@ -1266,6 +1300,8 @@ export function createConditionCompiler(
 					...((((ctx.position === 'where' || ctx.position === 'subquery') &&
 						ctx.directRootWhere) ||
 						ctx.position === 'filter' ||
+						ctx.position === 'having' ||
+						ctx.position === 'case-when' ||
 						ctx.position === 'recursive-anchor') && { type: 'where' }),
 				} as unknown as Decision);
 		return dispatcher(bridged, handlerCtx, ctx.paramState);
@@ -1276,7 +1312,8 @@ export function createConditionCompiler(
 		intent: WhereIntent,
 		ctx: ConditionCompilerCtx,
 	): Node {
-		if (ctx.position === 'subquery') assertNoRecursiveRootRelations(intent);
+		if (['subquery', 'having', 'case-when'].includes(ctx.position))
+			assertNoRecursiveRootRelations(intent);
 		assertNoManyToManyRootRelations(intent, ctx.logicalSourceTable, ctx.model);
 		return compileTopLevel(intent, ctx);
 	}
@@ -1345,8 +1382,12 @@ export function createConditionCompiler(
 				? {
 						...ctx,
 						rootTable: ctx.logicalSourceTable,
-						directRootWhere:
-							ctx.position === 'where' || ctx.position === 'subquery',
+						directRootWhere: [
+							'where',
+							'subquery',
+							'having',
+							'case-when',
+						].includes(ctx.position),
 						currentAlias: ctx.emittedAlias,
 						aliases: ctx.visibleAliases,
 						compileCondition: recurse,
