@@ -98,13 +98,17 @@ export function includeOptionsToIntent(
 
 	// Handle recursive options (DX-017)
 	if (isRecursiveIncludeOptions(options)) {
-		const recursiveOpts: Mutable<IncludeRecursiveOptions> = {};
+		const recursiveOpts: Mutable<IncludeRecursiveOptions> = {
+			direction: options.direction,
+			flat: options.flat ?? false,
+			omitSelf: options.omitSelf ?? false,
+		};
 		// Only set maxDepth if defined
 		if (options.maxDepth !== undefined) {
 			recursiveOpts.maxDepth = options.maxDepth;
 		}
 		// Convert includeDepth to track.depth
-		if (options.includeDepth) {
+		if (options.includeDepth || options.flat) {
 			recursiveOpts.track = { depth: true };
 		}
 		intent.recursive = recursiveOpts;
@@ -196,7 +200,7 @@ export function validateRecursiveInclude(
 	options: RecursiveIncludeOptions,
 ): void {
 	// Get the relation from the model
-	const qualifiedName = `${sourceTable}.${relationName}`;
+	const qualifiedName = `${sourceTable}.${options.via ?? relationName}`;
 	const relation = model.getRelation(qualifiedName);
 
 	if (!relation) {
@@ -223,6 +227,16 @@ export function validateRecursiveInclude(
 		);
 	}
 
+	if (relation.recursive) {
+		const expected =
+			relation.recursive.direction === 'up' ? 'ancestors' : 'descendants';
+		if (options.direction !== expected)
+			throw new InvalidOperationError(
+				'recursive include',
+				`Option direction '${options.direction}' conflicts with recursive relation '${relationName}' (${expected}).`,
+			);
+		return;
+	}
 	// Check direction vs relation type (PRE-2, PRE-3, ERR-3)
 	// ancestors requires belongsTo/hasOne (to-one), descendants requires hasMany (to-many)
 	const { direction } = options;

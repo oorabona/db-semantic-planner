@@ -207,7 +207,12 @@ describe('Intent conversion (DX-017)', () => {
 		expect(intent.include?.length).toBe(1);
 		expect(intent.include?.[0]!.relation).toBe('children');
 		expect(intent.include?.[0]!.recursive).toBeDefined();
-		expect(intent.include?.[0]!.recursive).toEqual({ maxDepth: 10 });
+		expect(intent.include?.[0]!.recursive).toEqual({
+			direction: 'descendants',
+			flat: false,
+			omitSelf: false,
+			maxDepth: 10,
+		});
 	});
 
 	it('should convert includeDepth to track.depth', () => {

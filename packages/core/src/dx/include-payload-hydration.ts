@@ -73,6 +73,86 @@ function readPayload(value: unknown, shape: IncludePayloadShape): unknown {
 	return converted;
 }
 
+function readRecursivePayload(
+	raw: unknown,
+	shape: IncludePayloadShape,
+): unknown {
+	if (typeof raw === 'string') {
+		try {
+			raw = JSON.parse(raw);
+		} catch (cause) {
+			throw new InvalidJsonAggPayloadError(shape.path, cause);
+		}
+	}
+	if (!Array.isArray(raw) || raw.some((item) => !record(item)))
+		throw new Error(
+			`Invalid recursive include payload '${shape.path}': expected an array of objects.`,
+		);
+	const options = shape.recursive!;
+	const fields = shape.privateFields!;
+	const key = (role: 'node' | 'parent' | 'depth') =>
+		fields.find((field) => field.role === role)!.jsonKey;
+	const nodes = raw.map((item) => {
+		const value = readPayload(item, { ...shape, isToOne: false }) as Record<
+			string,
+			unknown
+		>;
+		for (const field of fields) {
+			if (!Object.hasOwn(item, field.jsonKey))
+				throw new Error(
+					`Invalid recursive include payload '${shape.path}': missing '${field.jsonKey}'.`,
+				);
+			setValue(
+				value,
+				field.jsonKey,
+				readColumn(item[field.jsonKey], {
+					publicKey: field.jsonKey,
+					readHandling: field.readHandling,
+				} as IncludePayloadShape['columns'][number]),
+			);
+		}
+		const depth = value[key('depth')];
+		if (!Number.isSafeInteger(depth) || (depth as number) < 0)
+			throw new Error(
+				`Invalid recursive include payload '${shape.path}': invalid depth.`,
+			);
+		return {
+			value,
+			node: value[key('node')],
+			parent: value[key('parent')],
+			depth: depth as number,
+		};
+	});
+	for (const node of nodes) {
+		for (const field of fields) delete node.value[field.jsonKey];
+		if (options.includeDepth || options.flat)
+			setValue(node.value, 'depth', node.depth);
+	}
+	if (options.flat) return nodes.map((node) => node.value);
+	if (options.direction === 'ancestors') {
+		let chain: Record<string, unknown> | null = null;
+		for (let i = nodes.length - 1; i >= 0; i--) {
+			setValue(nodes[i]!.value, shape.publicKey, chain);
+			chain = nodes[i]!.value;
+		}
+		return chain;
+	}
+	const byKey = new Map(
+		nodes
+			.filter((node) => node.node !== null && node.node !== undefined)
+			.map((node) => [node.node, node]),
+	);
+	const roots: Record<string, unknown>[] = [];
+	for (const node of nodes) setValue(node.value, shape.publicKey, []);
+	for (const node of nodes) {
+		const parent = byKey.get(node.parent);
+		if (parent && parent.depth < node.depth)
+			(parent.value[shape.publicKey] as unknown[]).push(node.value);
+		else roots.push(node.value);
+	}
+	return roots;
+}
+
 /** SQL has already chosen keys. Hydration reads exact owned labels only. */
 export function hydrateResolvedIncludes(
 	rows: readonly unknown[],
@@ -119,11 +199,16 @@ export function hydrateResolvedIncludes(
 		const deletions = new Set<string>();
 		for (const shape of shapes) {
 			if (shape.outputMode === 'flat') continue;
-			if (strategy === 'json_agg' && shape.strategy === 'json_agg') {
+			if (
+				strategy === 'json_agg' &&
+				(shape.strategy === 'json_agg' || shape.recursive)
+			) {
 				if (!Object.hasOwn(row, shape.outputLabel)) continue;
 				assignments.set(
 					shape.publicKey,
-					readPayload(row[shape.outputLabel], shape),
+					shape.recursive
+						? readRecursivePayload(row[shape.outputLabel], shape)
+						: readPayload(row[shape.outputLabel], shape),
 				);
 				deletions.add(shape.outputLabel);
 			} else if (

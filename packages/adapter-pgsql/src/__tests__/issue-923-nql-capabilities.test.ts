@@ -481,7 +481,9 @@ it('keeps fluent recursive CTE include root rows unchanged', async () => {
 		{ id: 1, parent_id: null },
 		{ id: 2, parent_id: null },
 	];
-	const query = vi.fn(async () => ({ rows: roots.map((row) => ({ ...row })) }));
+	const query = vi.fn(async () => ({
+		rows: roots.map((row) => ({ ...row, children_json: [] })),
+	}));
 	const orm = createOrm({
 		schema: db,
 		adapter: createPgAdapter({ query } as unknown as Pool, { model: db.model }),
@@ -489,6 +491,7 @@ it('keeps fluent recursive CTE include root rows unchanged', async () => {
 	const read = orm.select('categories').include('children', {
 		recursive: true,
 		direction: 'descendants',
+		omitSelf: true,
 	});
 	expect(
 		read
@@ -496,9 +499,9 @@ it('keeps fluent recursive CTE include root rows unchanged', async () => {
 			.decisions.filter((d) => d.type === 'include-strategy')
 			.map((d) => d.choice),
 	).toEqual(['cte']);
-	expect(read.dump().sql).toBe(
-		'WITH children_cte AS (SELECT categories_inner_0.* FROM categories AS categories_inner_0) SELECT categories.* FROM categories LEFT JOIN children_cte AS children_ref_0 ON categories.id = children_ref_0.parent_id',
+	expect(read.dump().sql).toMatchSnapshot();
+	expect(await read.execute()).toEqual(
+		roots.map((row) => ({ ...row, children: [] })),
 	);
-	expect(await read.execute()).toEqual(roots);
 	expect(query).toHaveBeenCalledTimes(1);
 });

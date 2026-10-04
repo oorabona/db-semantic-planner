@@ -230,7 +230,7 @@ for (const option of ['limit', 'orderBy'] as const) {
 					tree,
 					{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
 				),
-			`Invalid include: Include include[0](children) ${option} is not supported by 'cte' strategy.`,
+			`Recursive include option ${option} is not supported`,
 		);
 	});
 }
@@ -318,7 +318,7 @@ for (const option of ['limit', 'orderBy'] as const) {
 					tree,
 					{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
 				),
-			`Invalid include: Include include[0].include[0](children.children) ${option} is not supported by 'cte' strategy.`,
+			'Recursive include option include is not supported',
 		);
 	});
 }

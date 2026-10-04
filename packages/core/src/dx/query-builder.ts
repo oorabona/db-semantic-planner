@@ -19,6 +19,7 @@ import {
 	AmbiguousPlanError,
 	plan,
 	validateIncludeStrategy,
+	validateRecursiveIncludeStrategy,
 } from '../planner.js';
 import type { BatchValuesRef } from './batch-values.js';
 import { isBatchValuesRef } from './batch-values.js';
@@ -1303,6 +1304,8 @@ export class QueryBuilderImpl<TResult = unknown>
 			intent.batchValuesSource = this.batchValuesSource;
 		}
 
+		if (applyDefaultFilters)
+			this.assertRecursiveDefaultFilters(intent as QueryIntent);
 		return intent as QueryIntent;
 	}
 
@@ -1311,7 +1314,39 @@ export class QueryBuilderImpl<TResult = unknown>
 	 * @internal
 	 */
 	/** @internal — called by stream-impl */
+	private assertRecursiveDefaultFilters(intent: QueryIntent): void {
+		const inspect = (
+			includes: QueryIntent['include'],
+			source: string,
+		): void => {
+			for (const include of includes ?? []) {
+				const relation = this.ctx.model.getRelation(
+					`${source}.${include.via ?? include.relation}`,
+				);
+				if (
+					relation &&
+					(include.recursive || relation.recursive) &&
+					!this.skipDefaultFilters &&
+					this.ctx.defaultFilters?.[relation.target]
+				)
+					validateRecursiveIncludeStrategy(
+						include,
+						relation,
+						'include',
+						include.relation,
+						this.ctx.dialectCapabilities,
+						undefined,
+						intent,
+						false,
+						true,
+					);
+				inspect(include.include, relation?.target ?? source);
+			}
+		};
+		inspect(intent.include, intent.from);
+	}
 	applyDefaultFiltersToIntent(intent: QueryIntent): QueryIntent {
+		this.assertRecursiveDefaultFilters(intent);
 		if (this.skipDefaultFilters || !this.ctx.defaultFilters) return intent;
 		const tableDefaultFilter = this.ctx.defaultFilters[this.from];
 		if (!tableDefaultFilter) return intent;

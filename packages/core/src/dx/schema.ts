@@ -1701,6 +1701,10 @@ function buildRelations(
 					source: tableName,
 					target: tableName,
 					foreignKey: ref.columnName,
+					...(ref.options.roles && {
+						sourceKey: ref.options.references ?? ['id'],
+						targetKey: ref.options.references ?? ['id'],
+					}),
 					cardinality: 'one',
 					optionality: ref.options.nullable ? 'optional' : 'required',
 					includeStrategy: 'auto',
@@ -1715,6 +1719,10 @@ function buildRelations(
 					source: tableName,
 					target: tableName,
 					foreignKey: ref.columnName,
+					...(ref.options.roles && {
+						sourceKey: ref.options.references ?? ['id'],
+						targetKey: ref.options.references ?? ['id'],
+					}),
 					cardinality: 'many',
 					optionality: 'optional', // Children are always optional
 					includeStrategy: 'auto',
@@ -1730,6 +1738,10 @@ function buildRelations(
 					source: tableName,
 					target: tableName,
 					foreignKey: ref.columnName,
+					...(ref.options.roles && {
+						sourceKey: ref.options.references ?? ['id'],
+						targetKey: ref.options.references ?? ['id'],
+					}),
 					cardinality: 'many',
 					optionality: 'optional',
 					includeStrategy: 'auto',
@@ -1750,6 +1762,10 @@ function buildRelations(
 					source: tableName,
 					target: tableName,
 					foreignKey: ref.columnName,
+					...(ref.options.roles && {
+						sourceKey: ref.options.references ?? ['id'],
+						targetKey: ref.options.references ?? ['id'],
+					}),
 					cardinality: 'many',
 					optionality: 'optional',
 					includeStrategy: 'auto',

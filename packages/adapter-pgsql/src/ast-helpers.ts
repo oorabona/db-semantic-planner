@@ -933,3 +933,22 @@ export function sqlWindowFuncCall(
 		} as FuncCall,
 	};
 }
+
+/** Build one JSON object without exceeding PostgreSQL's 100 function arguments. */
+export function buildChunkedJsonObject(args: Node[]): Node {
+	if (args.length <= 100) return funcCall('json_build_object', args);
+	const chunks: Node[] = [];
+	for (let start = 0; start < args.length; start += 100)
+		chunks.push(
+			typeCast(
+				funcCall('json_build_object', args.slice(start, start + 100)),
+				'jsonb',
+			),
+		);
+	return typeCast(
+		chunks
+			.slice(1)
+			.reduce((object, chunk) => binaryExpr('||', object, chunk), chunks[0]!),
+		'json',
+	);
+}

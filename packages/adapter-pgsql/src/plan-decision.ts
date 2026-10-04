@@ -84,6 +84,7 @@ export interface PlanDecision {
 	readonly traversal?: string;
 	readonly pkColumn?: string;
 	readonly fkColumn?: string;
+	readonly recursiveInclude?: import('@dbsp/types').IncludeRecursiveOptions;
 	readonly maxDepth?: number;
 	readonly role?: string;
 	// JSON extraction metadata

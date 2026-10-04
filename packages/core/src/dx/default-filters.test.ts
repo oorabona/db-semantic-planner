@@ -205,3 +205,32 @@ describe('E17: Default Filters (Soft Delete)', () => {
 		});
 	});
 });
+
+describe('createOrm default filter authority', () => {
+	it('combines configured and schema filters rather than discarding either', () => {
+		const db = schema(
+			{ nodes: { id: { type: 'integer', primaryKey: true } } },
+			undefined,
+			{ defaultFilters: { nodes: eq('id', 1) } },
+		);
+		const instance = createOrm({
+			schema: db,
+			adapter: createMockAdapter(),
+			defaultFilters: { nodes: eq('id', 2) },
+		});
+		expect(instance.select('nodes').plan().intent?.where).toEqual({
+			kind: 'and',
+			conditions: [eq('id', 1), eq('id', 2)],
+		});
+	});
+	it('refuses a configured filter for an unknown table', () => {
+		const db = schema({ nodes: { id: { type: 'integer', primaryKey: true } } });
+		expect(() =>
+			createOrm({
+				schema: db,
+				adapter: createMockAdapter(),
+				defaultFilters: { missing: eq('id', 1) },
+			}),
+		).toThrow("Default filter for non-existent table 'missing'.");
+	});
+});

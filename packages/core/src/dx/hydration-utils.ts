@@ -33,7 +33,7 @@ export function requireIncludePayloads(
 	const decision = [...original.decisions, ...resolved.decisions].find(
 		(d) =>
 			d.type === 'include-strategy' &&
-			['json_agg', 'join', 'lateral'].includes(d.choice),
+			['json_agg', 'join', 'lateral', 'cte'].includes(d.choice),
 	);
 	if (decision) {
 		const error = new Error(

@@ -529,6 +529,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 		onHookError,
 		inTransaction,
 		onObserverError,
+		defaultFilters,
 	);
 
 	// Helper: build a MutationBuilder options object (shared across mutation methods)

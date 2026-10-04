@@ -25,6 +25,9 @@ import type { WhereIntent } from './where-intent.js';
  * `RecursiveIncludeOptions` in dx/types.ts.
  */
 export interface IncludeRecursiveOptions {
+	readonly direction?: 'ancestors' | 'descendants';
+	readonly flat?: boolean;
+	readonly omitSelf?: boolean;
 	/**
 	 * Maximum recursion depth (default: 100).
 	 * Safety limit to prevent infinite recursion.

@@ -1,3 +1,4 @@
+import { validateRecursiveSetOperation } from '@dbsp/core/internal';
 import { compileWhereIntent } from './condition-compiler.js';
 import { createWhereDispatcher } from './handlers/index.js';
 import { assertRelationalOutput } from './relational-output.js';
@@ -3778,6 +3779,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 		bindingNames?: BindingNameRegistry,
 		bindingProjections?: NqlBindingProjectionRegistry,
 	): CompiledQuery<T> {
+		validateRecursiveSetOperation(intent, model, this.dialectCapabilities);
 		const compileFn: LeafCompileFn = (query) => {
 			const leafOptions: CompileOptions & { model: ModelIR } = {
 				...options,

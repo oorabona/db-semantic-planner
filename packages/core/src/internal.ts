@@ -94,6 +94,7 @@ export {
 	validateIncludeOrdering,
 	validateIncludeStrategy,
 	validateRecursiveIncludeStrategy,
+	validateRecursiveSetOperation,
 	validateResolvedIncludeStrategy,
 } from './planner.js';
 export {

@@ -16,6 +16,7 @@ import {
 	sqlResTarget,
 } from '../../ast-helpers.js';
 import { queryScope, relationBinding } from '../../binding-registry.js';
+import { compileRecursiveInclude } from '../../recursive/include-compiler.js';
 import {
 	bindAliasAuthority,
 	queryScopeForBindingProjections,
@@ -192,6 +193,8 @@ export const cteIncludeHandler: IncludeHandler = {
 		ctx: CompilerContext,
 		state: CompilerState,
 	): IncludeResult {
+		if (decision.recursiveInclude)
+			return compileRecursiveInclude(decision, ctx, state);
 		const relation = decision.relation;
 		const targetTable = decision.targetTable ?? relation;
 		const sourceColumn = toColumnList(decision.sourceColumn);
