@@ -187,6 +187,12 @@ export function compileValueOrFieldRef(
 		}
 		if (
 			value.scope === 'outer' &&
+			ctx.enclosingRanges !== undefined &&
+			!ctx.enclosingRanges.some((ranges) => ranges.length > 0)
+		)
+			throw new Error('outerRef() requires an enclosing query range.');
+		if (
+			value.scope === 'outer' &&
 			ctx.position === 'subquery' &&
 			value.column.includes('.')
 		) {

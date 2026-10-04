@@ -710,7 +710,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
+			"error": "CASE WHEN exists('posts'): recursive relation predicates are not supported inside CASE WHEN."
 		},
 		{
 			"position": "case-when",
@@ -718,7 +718,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
+			"error": "CASE WHEN exists('posts'): recursive relation predicates are not supported inside CASE WHEN."
 		},
 		{
 			"position": "case-when",
@@ -726,7 +726,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
+			"error": "CASE WHEN exists('posts'): recursive relation predicates are not supported inside CASE WHEN."
 		},
 		{
 			"position": "case-when",
@@ -734,7 +734,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
+			"error": "CASE WHEN exists('posts'): recursive relation predicates are not supported inside CASE WHEN."
 		},
 		{
 			"position": "case-when",
@@ -742,7 +742,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
+			"error": "CASE WHEN exists('posts'): recursive relation predicates are not supported inside CASE WHEN."
 		},
 		{
 			"position": "case-when",
@@ -750,7 +750,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
+			"error": "CASE WHEN exists('posts'): recursive relation predicates are not supported inside CASE WHEN."
 		},
 		{
 			"position": "case-when",
@@ -758,7 +758,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
+			"error": "CASE WHEN exists('posts'): recursive relation predicates are not supported inside CASE WHEN."
 		},
 		{
 			"position": "case-when",
@@ -766,7 +766,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
+			"error": "CASE WHEN exists('posts'): recursive relation predicates are not supported inside CASE WHEN."
 		},
 		{
 			"position": "case-when",
@@ -774,7 +774,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
+			"error": "CASE WHEN exists('posts'): recursive relation predicates are not supported inside CASE WHEN."
 		},
 		{
 			"position": "case-when",
@@ -782,7 +782,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "WHERE exists('posts'): recursive relation predicates are not supported inside WHERE."
+			"error": "CASE WHEN exists('posts'): recursive relation predicates are not supported inside CASE WHEN."
 		},
 		{
 			"position": "case-when",
@@ -790,7 +790,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
+			"error": "CASE WHEN notExists('posts'): recursive relation predicates are not supported inside CASE WHEN."
 		},
 		{
 			"position": "case-when",
@@ -798,7 +798,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
+			"error": "CASE WHEN notExists('posts'): recursive relation predicates are not supported inside CASE WHEN."
 		},
 		{
 			"position": "case-when",
@@ -806,7 +806,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
+			"error": "CASE WHEN notExists('posts'): recursive relation predicates are not supported inside CASE WHEN."
 		},
 		{
 			"position": "case-when",
@@ -814,7 +814,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
+			"error": "CASE WHEN notExists('posts'): recursive relation predicates are not supported inside CASE WHEN."
 		},
 		{
 			"position": "case-when",
@@ -822,7 +822,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
+			"error": "CASE WHEN notExists('posts'): recursive relation predicates are not supported inside CASE WHEN."
 		},
 		{
 			"position": "case-when",
@@ -830,7 +830,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
+			"error": "CASE WHEN notExists('posts'): recursive relation predicates are not supported inside CASE WHEN."
 		},
 		{
 			"position": "case-when",
@@ -838,7 +838,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
+			"error": "CASE WHEN notExists('posts'): recursive relation predicates are not supported inside CASE WHEN."
 		},
 		{
 			"position": "case-when",
@@ -846,7 +846,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
+			"error": "CASE WHEN notExists('posts'): recursive relation predicates are not supported inside CASE WHEN."
 		}
 	]
 }

@@ -3,6 +3,7 @@ import {
 	caseWhen,
 	createOrm,
 	eq,
+	exists,
 	inSubquery,
 	literal,
 	op,
@@ -213,3 +214,88 @@ it('nested SELECT HAVING uses its own logical source', () => {
 	);
 	expect(result.parameters).toEqual(['[2026-01-01,2026-02-01)']);
 });
+
+for (const field of ['id', 'calls.id']) {
+	it(`FROM-less SELECT refuses outerRef('${field}') without an enclosing query`, () => {
+		expect(() =>
+			adapter.compileSelectExpression(
+				subquery('calls')
+					.where(eq('symbolId', outerRef(field)))
+					.count()
+					.asExpr('n').intent,
+			),
+		).toThrow('outerRef() requires an enclosing query range.');
+	});
+}
+it('HAVING alias resolves through nested CASE conditions', () => {
+	const condition = caseWhen(eq('n', 1), literal(true)).else(literal(false));
+	const result = orm
+		.select('symbols')
+		.count({ as: 'n' })
+		.groupBy(['id'])
+		.having(
+			caseWhen(condition.eq(true), literal(true)).else(literal(false)).eq(true),
+		)
+		.dump();
+	expect(result.sql).toBe(
+		'SELECT symbols.id, count(*) AS n FROM symbols GROUP BY symbols.id HAVING CASE WHEN CASE WHEN count(*) = CAST($1 AS bigint) THEN true ELSE false END = $2 THEN true ELSE false END = $3',
+	);
+	expect(result.params).toEqual([1, true, true]);
+});
+it('CASE outside HAVING refuses an aggregate alias', () => {
+	expect(() =>
+		orm
+			.select('symbols')
+			.count({ as: 'n' })
+			.orderBy(
+				caseWhen(eq('n', 1), literal(true)).else(literal(false)).as('flag'),
+			)
+			.dump(),
+	).toThrow("Declared column 'symbols.n' is absent from the physical model.");
+});
+for (const position of ['HAVING', 'CASE WHEN'] as const) {
+	it(`${position} recursive condition refusal names its position`, () => {
+		const condition = exists('calls', {
+			recursive: { direction: 'down', through: 'calls', maxDepth: 2 },
+		});
+		expect(() =>
+			position === 'HAVING'
+				? adapter.compileSelectExpression({
+						kind: 'subquery',
+						query: { type: 'select', from: 'symbols', having: condition },
+					})
+				: orm
+						.select('symbols')
+						.columns([
+							caseWhen(condition, literal(1)).else(literal(0)).as('flag'),
+						])
+						.dump(),
+		).toThrow(
+			`${position} exists('calls'): recursive relation predicates are not supported inside ${position}.`,
+		);
+	});
+}
+
+for (const position of ['HAVING', 'CASE WHEN'] as const) {
+	it(`${position} operator refusal names its position`, () => {
+		const condition = {
+			...eq('id', 1),
+			operator: 'invalid',
+		} as unknown as ReturnType<typeof eq>;
+		expect(() =>
+			position === 'HAVING'
+				? orm
+						.select('symbols')
+						.count({ as: 'n' })
+						.groupBy(['id'])
+						.having(condition)
+						.dump()
+				: orm
+						.select('symbols')
+						.columns([
+							caseWhen(condition, literal(1)).else(literal(0)).as('flag'),
+						])
+						.dump(),
+		).toThrow(`No ${position} handler registered for operator: invalid`);
+	});
+}

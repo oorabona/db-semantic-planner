@@ -141,6 +141,7 @@ export function assertNoManyToManyRootRelations(
 	intent: WhereIntent,
 	source: string,
 	model: WhereCompilerCtx['model'],
+	position = 'WHERE',
 ): void {
 	if (!model) return;
 	const visit = (node: WhereIntent, table: string): void => {
@@ -163,7 +164,7 @@ export function assertNoManyToManyRootRelations(
 				if (!relation) return;
 				if (relation.type === 'belongsToMany') {
 					throw new Error(
-						`WHERE ${node.kind}('${path.join('.')}'): many-to-many relation predicates need the junction declaration (#787).`,
+						`${position} ${node.kind}('${path.join('.')}'): many-to-many relation predicates need the junction declaration (#787).`,
 					);
 				}
 				target = relation.target;
@@ -175,7 +176,10 @@ export function assertNoManyToManyRootRelations(
 }
 
 /** Refuse root relation recursion before routing or lowering can discard it. */
-export function assertNoRecursiveRootRelations(intent: WhereIntent): void {
+export function assertNoRecursiveRootRelations(
+	intent: WhereIntent,
+	position = 'WHERE',
+): void {
 	const seen = new WeakSet<object>();
 	function visit(value: unknown): void {
 		if (!value || typeof value !== 'object' || seen.has(value)) return;
@@ -196,7 +200,7 @@ export function assertNoRecursiveRootRelations(intent: WhereIntent): void {
 			) {
 				const relation = trusted?.relation ?? node.relation;
 				throw new Error(
-					`WHERE ${node.kind}('${Array.isArray(relation) ? relation.join('.') : relation}'): recursive relation predicates are not supported inside WHERE.`,
+					`${position} ${node.kind}('${Array.isArray(relation) ? relation.join('.') : relation}'): recursive relation predicates are not supported inside ${position}.`,
 				);
 			}
 		}
@@ -1215,10 +1219,7 @@ export function createConditionCompiler(
 				ctx.paramState,
 			);
 		}
-		const havingOperand =
-			ctx.position === 'having'
-				? ctx.resolveHavingOperand?.(intent)
-				: undefined;
+		const havingOperand = ctx.resolveHavingOperand?.(intent);
 		if (havingOperand)
 			return dispatcher(havingOperand, handlerCtx, ctx.paramState);
 		if (intent.kind === 'range') {
@@ -1312,9 +1313,20 @@ export function createConditionCompiler(
 		intent: WhereIntent,
 		ctx: ConditionCompilerCtx,
 	): Node {
+		const position =
+			ctx.position === 'having'
+				? 'HAVING'
+				: ctx.position === 'case-when'
+					? 'CASE WHEN'
+					: 'WHERE';
 		if (['subquery', 'having', 'case-when'].includes(ctx.position))
-			assertNoRecursiveRootRelations(intent);
-		assertNoManyToManyRootRelations(intent, ctx.logicalSourceTable, ctx.model);
+			assertNoRecursiveRootRelations(intent, position);
+		assertNoManyToManyRootRelations(
+			intent,
+			ctx.logicalSourceTable,
+			ctx.model,
+			position,
+		);
 		return compileTopLevel(intent, ctx);
 	}
 
@@ -1398,7 +1410,22 @@ export function createConditionCompiler(
 						compileCondition: recurse,
 					};
 
-		return recurse(intent, normalized);
+		try {
+			return recurse(intent, normalized);
+		} catch (error) {
+			if (
+				error instanceof Error &&
+				(ctx.position === 'having' || ctx.position === 'case-when') &&
+				error.message.startsWith('No WHERE handler')
+			) {
+				const position = ctx.position === 'having' ? 'HAVING' : 'CASE WHEN';
+				throw new Error(
+					error.message.replace('No WHERE handler', `No ${position} handler`),
+					{ cause: error },
+				);
+			}
+			throw error;
+		}
 	}
 	const buildSubqueryFromIntent = createSubqueryBuilder(
 		compileWhereIntent,

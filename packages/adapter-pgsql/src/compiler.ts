@@ -3063,23 +3063,25 @@ export class PlanCompiler {
 			visibleAliases: new Map(ctx.aliases),
 			paramState: state,
 			...(ctx.schema !== undefined && { schemaName: ctx.schema }),
-			resolveHavingOperand: (condition) => {
-				if (!('field' in condition)) return undefined;
-				const lowered = convertWhereCondition(condition, ctx.rootTable);
-				if (!lowered) return undefined;
-				const resolved = this.resolveHavingAggregateAlias(
-					lowered,
-					plan.decisions,
-				);
-				return resolved.type === 'having'
-					? mapToHandlerDecision(
-							resolved,
-							ctx.rootTable,
-							this.defaultPk,
-							this.deriveFk,
-						)
-					: undefined;
-			},
+			...(position === 'having' && {
+				resolveHavingOperand: (condition: WhereIntent) => {
+					if (!('field' in condition)) return undefined;
+					const lowered = convertWhereCondition(condition, ctx.rootTable);
+					if (!lowered) return undefined;
+					const resolved = this.resolveHavingAggregateAlias(
+						lowered,
+						plan.decisions,
+					);
+					return resolved.type === 'having'
+						? mapToHandlerDecision(
+								resolved,
+								ctx.rootTable,
+								this.defaultPk,
+								this.deriveFk,
+							)
+						: undefined;
+				},
+			}),
 			compileSubquery: (query, offset, parent) =>
 				buildSubqueryFromIntent(
 					query,

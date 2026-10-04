@@ -6,7 +6,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
+			"error": "HAVING notExists('posts'): recursive relation predicates are not supported inside HAVING."
 		},
 		{
 			"position": "having-alias",
@@ -14,7 +14,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "WHERE notExists('posts'): recursive relation predicates are not supported inside WHERE."
+			"error": "HAVING notExists('posts'): recursive relation predicates are not supported inside HAVING."
 		},
 		{
 			"position": "having-alias",

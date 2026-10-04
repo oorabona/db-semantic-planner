@@ -77,7 +77,7 @@ orm.select('symbols')
 
 `.asExpr('alias')` wraps the `SubqueryExpression` as an `ExpressionSpec` for use in `.columns([...])`. Source: `packages/core/src/dx/subquery-builder.ts:175`.
 
-SELECT-expression subqueries, including those nested in `op(...)`, support `outerRef()` in their WHERE body. Unqualified references bind the immediately enclosing query; qualified references use the nearest enclosing range, preferring an exact emitted qualifier and otherwise requiring a unique logical table. Ambiguous logical tables are refused. A FROM-less `compileSelectExpression()` can correlate nested subqueries to their enclosing subquery, but has no outer table of its own.
+SELECT-expression subqueries, including those nested in `op(...)`, support `outerRef()` in their WHERE body. Unqualified references bind the immediately enclosing query; qualified references use the nearest enclosing range, preferring an exact emitted qualifier and otherwise requiring a unique logical table. Ambiguous logical tables are refused. A FROM-less `compileSelectExpression()` can correlate nested subqueries to their enclosing subquery, but has no outer table of its own. An `outerRef()` (qualified or unqualified) in its immediate subquery body is refused with `outerRef() requires an enclosing query range.`; it never binds that subquery's own range.
 
 Aggregate methods available on `SubqueryBuilder`:
 
