@@ -19,10 +19,10 @@ import type {
 	IncludeIntent,
 	JoinIntent,
 	ModelIR,
-	NestedOutputReadHandling,
 	OutputDescriptor,
 	OutputValueShape,
 	PlanReport,
+	QueryIntent,
 	WhereIntent,
 } from '@dbsp/types';
 import { resolveOutputReadHandling, toColumnList } from '@dbsp/types';
@@ -40,6 +40,10 @@ import {
 	relationBinding,
 	relationBindingFor,
 } from './binding-registry.js';
+import {
+	aggregateProjectionIdentity,
+	rootProjectionLabels,
+} from './column-metadata.js';
 import { compileWhereIntent, type WhereCompilerCtx } from './compile-where.js';
 import {
 	type CompilerOptions,
@@ -52,6 +56,7 @@ import { inferPgArrayType, stripArraySuffix } from './compiler-utils.js';
 import { validateDbType } from './db-type.js';
 import { declaredColumnName } from './declared-name-resolver.js';
 import { createCompilerState } from './handlers/types.js';
+import { resolveIncludePayloadShapes } from './include-payload-shape.js';
 import { intentToDecisions } from './intent-to-decisions.js';
 import {
 	jsonAggColumnDescriptor,
@@ -76,6 +81,74 @@ import {
 	resolveRelationTarget,
 } from './relation-target-projection.js';
 import { queryLocal, resolveDeclaredIdentifier } from './sql-identifier.js';
+import { stableJson } from './transition/stable-json.js';
+
+/** Exact source/key duplicates have one SQL projection, including at the root. */
+function deduplicateRootProjection(
+	intent: QueryIntent | undefined,
+): QueryIntent | undefined {
+	const select = intent?.select;
+	if (!intent || !select) return intent;
+	if (select.type === 'fields')
+		return {
+			...intent,
+			select: { ...select, fields: [...new Set(select.fields)] },
+		};
+	if (select.type === 'aggregate') {
+		const seen = new Set<string>();
+		const aliased = new Map(
+			select.aggregates
+				.filter((aggregate) => aggregate.as !== undefined)
+				.map((aggregate) => [
+					aggregateProjectionIdentity(aggregate),
+					aggregate,
+				]),
+		);
+		return {
+			...intent,
+			select: {
+				...select,
+				...(select.fields !== undefined && {
+					fields: [...new Set(select.fields)],
+				}),
+				aggregates: select.aggregates
+					.map(
+						(aggregate) =>
+							aliased.get(aggregateProjectionIdentity(aggregate)) ?? aggregate,
+					)
+					.filter((aggregate) => {
+						const identity = aggregateProjectionIdentity(aggregate);
+						if (seen.has(identity)) return false;
+						seen.add(identity);
+						return true;
+					}),
+			},
+		};
+	}
+	if (select.type !== 'expressions' || !Array.isArray(select.columns))
+		return intent;
+	const seen = new Set<string>();
+	return {
+		...intent,
+		select: {
+			...select,
+			columns: select.columns.filter((expr) => {
+				const identity =
+					expr.kind === 'column' || expr.kind === 'columnAlias'
+						? stableJson([
+								expr.column,
+								expr.kind === 'column' ? (expr.as ?? expr.column) : expr.alias,
+							])
+						: expr.kind === 'aggregate'
+							? aggregateProjectionIdentity(expr)
+							: stableJson(expr);
+				if (seen.has(identity)) return false;
+				seen.add(identity);
+				return true;
+			}),
+		},
+	};
+}
 
 /** Establish the output authority of an unnest() range at the point it enters. */
 function batchValuesBinding(
@@ -572,7 +645,12 @@ function includedRelationPaths(
 	return paths;
 }
 
-type RelationColumnEntry = { col: string; alias?: string };
+type RelationColumnEntry = {
+	col: string;
+	alias?: string;
+	defaultLabel?: boolean;
+	nqlLabel?: boolean;
+};
 
 /**
  * Collect specific columns per relation from selectRelationColumn decisions.
@@ -599,34 +677,33 @@ function buildRelationColumnsMap(
 		// Use full path as map key so 'callee.file' is stored separately
 		// from 'callee' — avoids injecting 2-hop columns into 1-hop includes.
 		const mapKey = fullRelation;
-		if (col === '*') {
-			// Wildcard: select all columns from relation (no aliases)
-			map.set(mapKey, [{ col: '*' }]);
-			continue;
-		}
+
 		const existing = map.get(mapKey);
 		if (existing) {
-			if (existing.length === 1 && existing[0]?.col === '*') continue; // wildcard already set
-			const previous = existing.find((e) => e.col === col);
-			if (previous && (previous.alias ?? col) !== (alias ?? col)) {
-				throw new Error(
-					`Relation column projection '${fullRelation}' requests column '${col}' with conflicting aliases '${previous.alias ?? col}' and '${alias ?? col}'.`,
-				);
-			}
-			const outputName = alias ?? col;
-			const conflicting = existing.find(
-				(e) => e.col !== col && (e.alias ?? e.col) === outputName,
-			);
-			if (conflicting) {
-				throw new Error(
-					`Relation column projection '${fullRelation}' requests output name '${outputName}' for conflicting columns '${conflicting.col}' and '${col}'.`,
-				);
-			}
-			if (!previous) {
-				existing.push({ col, ...(alias !== undefined && { alias }) });
-			}
+			if (
+				!existing.some(
+					(e) =>
+						e.col === col &&
+						e.alias === alias &&
+						e.defaultLabel === (d.defaultRelationColumnLabel || undefined) &&
+						e.nqlLabel === (d.relationColumnLabelOrigin === 'nql' || undefined),
+				)
+			)
+				existing.push({
+					col,
+					...(alias !== undefined && { alias }),
+					...(d.defaultRelationColumnLabel && { defaultLabel: true }),
+					...(d.relationColumnLabelOrigin === 'nql' && { nqlLabel: true }),
+				});
 		} else {
-			map.set(mapKey, [{ col, ...(alias !== undefined && { alias }) }]);
+			map.set(mapKey, [
+				{
+					col,
+					...(alias !== undefined && { alias }),
+					...(d.defaultRelationColumnLabel && { defaultLabel: true }),
+					...(d.relationColumnLabelOrigin === 'nql' && { nqlLabel: true }),
+				},
+			]);
 		}
 	}
 
@@ -653,8 +730,12 @@ function injectAndValidateRelationColumns(
 				const mut = d as Mutable<PlanDecision>;
 				// columns: plain string array (preserves existing contract)
 				mut.columns = entries.map((e) => e.col);
+				mut.payloadColumnRequests = entries;
 				// columnAliases: map col -> user alias (only non-trivial aliases)
 				const aliasMap: Record<string, string> = {};
+				mut.defaultRelationColumnLabels = Object.fromEntries(
+					entries.map((e) => [e.col, e.defaultLabel === true]),
+				);
 				for (const { col, alias } of entries) {
 					if (alias) aliasMap[col] = alias;
 				}
@@ -683,7 +764,7 @@ function injectAndValidateRelationColumns(
 					targetTable.columns.map((c) => c.name),
 				);
 				const invalid = (d.columns as string[]).filter(
-					(c) => !validColumnNames.has(c),
+					(c) => c !== '*' && !validColumnNames.has(c),
 				);
 				if (invalid.length > 0) {
 					throw new Error(
@@ -692,39 +773,6 @@ function injectAndValidateRelationColumns(
 							`Available: ${[...validColumnNames].join(', ')}`,
 					);
 				}
-			}
-		}
-	}
-	// LATERAL children correlate through the parent's projected subquery.
-	// Refuse a nested relationColumn projection that removes that authority.
-	for (const d of includeDecisions(enrichedUnifiedDecisions)) {
-		const path = d.relationPath;
-		const entries = path ? relationColumnsMap.get(path) : undefined;
-		if (
-			d.choice !== 'lateral' ||
-			!path ||
-			!entries ||
-			entries.some(({ col }) => col === '*') ||
-			!d.targetTable
-		)
-			continue;
-		const table = model.getTable(d.targetTable);
-		for (const child of d.children ?? []) {
-			const relation = model.getRelation(
-				`${d.targetTable}.${child.relationName}`,
-			);
-			const keys = toColumnList(
-				relation?.type === 'belongsTo'
-					? relation.foreignKey
-					: (relation?.sourceKey ?? table?.primaryKey),
-			);
-			const missing = keys.filter(
-				(key) => !entries.some(({ col }) => col === key),
-			);
-			if (missing.length > 0) {
-				throw new Error(
-					`Nested relation column projection '${path}' cannot be compiled with lateral: child '${child.relationPath ?? child.relationName}' requires column(s) ${missing.map((key) => `'${key}'`).join(', ')}.`,
-				);
 			}
 		}
 	}
@@ -823,110 +871,6 @@ function jsonAggProjectedColumns(
 
 	const table = model?.getTable(targetTable);
 	return table ? table.columns.map((column) => column.name) : requested;
-}
-
-function buildJsonAggColumnKeyMap(
-	decision: PlanDecision,
-	targetTable: string,
-	model: ModelIR | undefined,
-	deps?: AdapterCompilerDeps,
-): Record<string, string> | undefined {
-	const columns = jsonAggProjectedColumns(decision, targetTable, model, deps);
-	if (!columns || columns.length === 0) return undefined;
-	const projected = deps
-		? resolveRelationTarget(queryLocal(targetTable), deps).outputs
-		: undefined;
-	if (projected !== undefined) {
-		const map: Record<string, string> = {};
-		for (const outputKey of columns) {
-			const descriptor = projected.get(outputKey);
-			if (descriptor) {
-				const logicalKey = (
-					descriptor as OutputDescriptor & { logicalKey?: string }
-				).logicalKey;
-				map[outputKey] =
-					logicalKey ??
-					(descriptor.source.kind === 'modelColumn'
-						? descriptor.source.column
-						: outputKey);
-			}
-		}
-		return Object.keys(map).length > 0 ? map : undefined;
-	}
-	const table = model?.getTable(targetTable);
-	const map: Record<string, string> = {};
-	for (const columnName of columns) {
-		if (columnName === '*') continue;
-		const modelColumn =
-			table?.columns.find((column) => column.name === columnName)?.name ??
-			columnName;
-		map[declaredColumnName(deps?.declaredNames, targetTable, modelColumn)] =
-			modelColumn;
-	}
-	return Object.keys(map).length > 0 ? map : undefined;
-}
-
-function buildJsonAggNestedReadTransforms(
-	decision: PlanDecision,
-	targetTable: string,
-	model: ModelIR | undefined,
-	deps?: AdapterCompilerDeps,
-): readonly NestedOutputReadHandling[] | undefined {
-	const columns = jsonAggProjectedColumns(decision, targetTable, model, deps);
-	if (!columns || columns.length === 0) return undefined;
-	const projected = deps
-		? resolveRelationTarget(queryLocal(targetTable), deps).outputs
-		: undefined;
-	if (projected !== undefined) {
-		const shape = jsonAggContainerShape(decision.relationType);
-		const transforms: NestedOutputReadHandling[] = [];
-		for (const columnName of columns) {
-			const descriptor = projected.get(columnName);
-			if (!descriptor) continue;
-			assertProjectedJsonContainerCanBeAggregated(
-				resolveRelationTarget(queryLocal(targetTable), deps!),
-				descriptor,
-			);
-			const handling = resolveOutputReadHandling({ ...descriptor, shape });
-			if (handling.kind === 'nestedTransform') {
-				transforms.push({
-					kind: handling.kind,
-					table: handling.table,
-					column: handling.column,
-					js: handling.js,
-					...(descriptor.outputKey !== handling.column
-						? { outputKey: descriptor.outputKey }
-						: {}),
-				});
-			}
-		}
-		return transforms.length > 0 ? transforms : undefined;
-	}
-	const table = model?.getTable(targetTable);
-	if (!table) return undefined;
-	const shape = jsonAggContainerShape(decision.relationType);
-	const transforms: NestedOutputReadHandling[] = [];
-	for (const columnName of columns) {
-		if (columnName === '*') continue;
-		const column = table.columns.find(
-			(candidate) => candidate.name === columnName,
-		);
-		if (!column) continue;
-		const handling = resolveJsonAggColumnReadHandling(
-			targetTable,
-			column,
-			shape,
-		);
-		if (handling) {
-			transforms.push({
-				kind: handling.kind,
-				table: handling.table,
-				column: handling.column,
-				js: handling.js,
-			});
-		}
-	}
-	return transforms.length > 0 ? transforms : undefined;
 }
 
 function buildJsonAggOutputDescriptor(
@@ -1167,88 +1111,6 @@ function buildPhysicalRelationColumnOutputDescriptors(
 	return descriptors;
 }
 
-function findJsonAggPlanDecision(
-	plan: PlanReport,
-	decision: PlanDecision,
-): PlanReport['decisions'][number] | undefined {
-	if (decision.intentPath) {
-		const byIntentPath = plan.decisions.find(
-			(candidate) =>
-				candidate.type === 'include-strategy' &&
-				candidate.choice === 'json_agg' &&
-				candidate.context.intentPath === decision.intentPath,
-		);
-		if (byIntentPath) return byIntentPath;
-	}
-	return plan.decisions.find((candidate) => {
-		if (candidate.type !== 'include-strategy') return false;
-		if (candidate.choice !== 'json_agg') return false;
-		const relationName =
-			candidate.context.relation ?? candidate.context.includeAlias;
-		return (
-			relationName === decision.relationName &&
-			candidate.context.target === decision.targetTable
-		);
-	});
-}
-
-function annotateJsonAggColumnKeyMaps(
-	plan: PlanReport,
-	decisions: readonly PlanDecision[],
-	model: ModelIR | undefined,
-	deps?: AdapterCompilerDeps,
-): boolean {
-	let annotated = false;
-	for (const decision of decisions) {
-		if (decision.type === 'includeStrategy' && decision.choice === 'json_agg') {
-			const targetTable = decision.targetTable;
-			const planDecision = targetTable
-				? findJsonAggPlanDecision(plan, decision)
-				: undefined;
-			const keyMap =
-				targetTable && planDecision
-					? buildJsonAggColumnKeyMap(decision, targetTable, model, deps)
-					: undefined;
-			const nestedReadTransforms =
-				targetTable && planDecision
-					? buildJsonAggNestedReadTransforms(decision, targetTable, model, deps)
-					: undefined;
-			if ((keyMap || nestedReadTransforms) && planDecision) {
-				const context = planDecision.context as Mutable<
-					PlanReport['decisions'][number]['context']
-				>;
-				if (keyMap) {
-					context.jsonAggColumnKeyMap = keyMap;
-				}
-				if (nestedReadTransforms) {
-					context.jsonAggNestedReadTransforms = nestedReadTransforms;
-				}
-				annotated = true;
-			}
-		}
-		if (decision.children && decision.children.length > 0) {
-			annotated =
-				annotateJsonAggColumnKeyMaps(plan, decision.children, model, deps) ||
-				annotated;
-		}
-	}
-	return annotated;
-}
-
-function clonePlanReportForHydration(plan: PlanReport): PlanReport {
-	return {
-		...plan,
-		decisions: plan.decisions.map((decision) => {
-			const context = (decision as { context?: unknown }).context;
-			if (context === null || typeof context !== 'object') return decision;
-			return {
-				...decision,
-				context: { ...(context as Record<string, unknown>) },
-			};
-		}) as PlanReport['decisions'],
-	};
-}
-
 /**
  * Assemble the SimplifiedPlanReport from the compiled decisions and plan metadata.
  * Handles BatchValues FROM source construction and optional fields (existsWrap, lock, schema).
@@ -1435,7 +1297,9 @@ export function compileSelectEnvelope<T = unknown>(
 	// rewritten WHERE (EXISTS form); plan.intent retains the original submitted intent
 	// (observable via dump()). All SQL-generation paths below use execIntent so that
 	// compiled SQL matches plan.decisions (which were built from the optimized WHERE).
-	const execIntent = plan.executableIntent ?? plan.intent;
+	const execIntent = deduplicateRootProjection(
+		plan.executableIntent ?? plan.intent,
+	);
 	if (!execIntent) {
 		for (const decision of plan.decisions) {
 			if (decision.type === 'include-strategy')
@@ -1626,6 +1490,22 @@ export function compileSelectEnvelope<T = unknown>(
 			);
 		}
 
+		const includePayloads = resolveIncludePayloadShapes(
+			enrichedUnifiedDecisions,
+			planForCompilation,
+			resolvedModelForCompiler,
+			deps,
+			(rootColumns) =>
+				rootProjectionLabels(
+					planForCompilation.intent?.select,
+					rootColumns,
+					includedRelations,
+					includedRelations.size > 0,
+				),
+		);
+		hydrationPlan =
+			includePayloads.length > 0 ? { ...plan, includePayloads } : undefined;
+
 		const deduplicatedDecisions =
 			includedRelations.size > 0
 				? decisions.filter((d) => {
@@ -1665,16 +1545,6 @@ export function compileSelectEnvelope<T = unknown>(
 		// Use deps.model as fallback so ORM queries through deps also get enriched.
 		const rangeModel = options?.model ?? deps.model;
 		enrichRangeDecisions(allDecisions, rangeModel, plan.rootTable);
-		const candidateHydrationPlan = clonePlanReportForHydration(plan);
-		const hasJsonAggColumnKeyMaps = annotateJsonAggColumnKeyMaps(
-			candidateHydrationPlan,
-			allDecisions,
-			resolvedModelForCompiler,
-			deps,
-		);
-		if (hasJsonAggColumnKeyMaps) {
-			hydrationPlan = candidateHydrationPlan;
-		}
 
 		// planForCompilation carries executableIntent as .intent, so
 		// buildSimplifiedPlanReport reads batchValuesSource / existsWrap / lock

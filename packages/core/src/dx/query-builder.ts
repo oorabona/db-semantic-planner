@@ -770,7 +770,7 @@ export class QueryBuilderImpl<TResult = unknown>
 		hydrator.hydrateJsonAggIncludes(mainResults, planReport, compiled);
 
 		// E2E-004: Hydrate JOIN includes by grouping dot-prefixed columns
-		hydrator.hydrateJoinIncludes(mainResults, planReport);
+		hydrator.hydrateJoinIncludes(mainResults, planReport, compiled);
 
 		// Process recursive includes if any
 		if (this.recursiveIncludes.length > 0) {
@@ -1444,7 +1444,7 @@ export class QueryBuilderImpl<TResult = unknown>
 			this.ctx.schemaName,
 		);
 		hydrator.hydrateJsonAggIncludes(mainResults, planReport, compiled);
-		hydrator.hydrateJoinIncludes(mainResults, planReport);
+		hydrator.hydrateJoinIncludes(mainResults, planReport, compiled);
 		if (this.recursiveIncludes.length > 0) {
 			await hydrator.processRecursiveIncludes(
 				mainResults,

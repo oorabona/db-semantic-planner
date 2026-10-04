@@ -412,11 +412,9 @@ projected_authors
 		const dump = readNqlDump(query);
 		const rows = await query.all();
 
-		expect(dump.sql).toMatch(/^WITH "projected_authors" as \(/);
-		expect(dump.sql).toContain(
-			'json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST)',
+		expect(dump.sql).toBe(
+			"WITH \"projected_authors\" as (SELECT authors.id, authors.name FROM nql_params_e2e.authors WHERE authors.id = CAST($1 AS integer) OR authors.id = CAST($2 AS integer)) SELECT projected_authors.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'title', __t__.title, 'content', __t__.content, 'authorId', __t__.author_id, 'published', __t__.published, 'createdAt', __t__.created_at) ORDER BY __t__.id ASC NULLS LAST) FROM nql_params_e2e.posts AS __t__ WHERE __t__.author_id = projected_authors.id), '[]'::json) AS author_posts_json FROM projected_authors ORDER BY projected_authors.id ASC",
 		);
-		expect(dump.sql).toContain('AS author_posts_json');
 		const alice = rows.find((row) => row.id === 1);
 		expect(alice?.author_posts).toHaveLength(3);
 		expect(alice?.author_posts.map((post) => post.id)).toEqual([1, 2, 4]);
@@ -462,12 +460,9 @@ projected_authors
 		const dump = readNqlDump(query);
 		const rows = await query.all();
 
-		expect(dump.sql).toMatch(/^WITH "projected_authors" as \(/);
-		expect(dump.sql).toContain('json_agg(to_jsonb(__t__)');
-		expect(dump.sql).toContain('ORDER BY __t__.id ASC NULLS LAST');
-		expect(dump.sql).toContain('ORDER BY __t1__.id ASC NULLS LAST');
-		expect(dump.sql).toContain('jsonb_build_object');
-		expect(dump.sql).toContain('AS author_posts_json');
+		expect(dump.sql).toBe(
+			"WITH \"projected_authors\" as (SELECT authors.id, authors.name FROM nql_params_e2e.authors WHERE authors.id = CAST($1 AS integer) OR authors.id = CAST($2 AS integer)) SELECT projected_authors.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'title', __t__.title, 'content', __t__.content, 'authorId', __t__.author_id, 'published', __t__.published, 'createdAt', __t__.created_at) || jsonb_build_object('post_comments', COALESCE((SELECT json_agg(jsonb_build_object('id', __t1__.id, 'postId', __t1__.post_id, 'authorName', __t1__.author_name, 'content', __t1__.content, 'createdAt', __t1__.created_at) ORDER BY __t1__.id ASC NULLS LAST) FROM nql_params_e2e.comments AS __t1__ WHERE __t1__.post_id = __t__.id), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST) FROM nql_params_e2e.posts AS __t__ WHERE __t__.author_id = projected_authors.id), '[]'::json) AS author_posts_json FROM projected_authors",
+		);
 		if (dump.plan === undefined) throw new Error('Expected a query plan');
 		expect(
 			dump.plan.decisions.map((decision) => decision.context.intentPath),

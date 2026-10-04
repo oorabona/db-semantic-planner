@@ -183,3 +183,15 @@ validated during planning. Include `select` forms are checked during planning:
 and `cte` refuses explicit selection. Mixed wildcard lists such as `['*', 'id']`
 are refused for every strategy; `['*']` is the all-columns form. Both `json_agg`
 and `lateral` limit rows per parent. Refusals identify the full nested include path.
+
+## Include payload keys
+
+Each include column uses its explicit alias, or its declared model name when no alias is supplied. Physical database names never become payload keys: `dbCasing` affects SQL references only. This includes aliases that happen to equal a physical name and bigint read conversions, which run under the public key.
+
+A relation uses the requested include name at every depth. For example, `include('posts', { include: [{ relation: 'comments' }] })` returns `posts[].comments`, even when the model resolves that child to a relation named `post_comments`.
+
+NQL's unaliased `relation.column` label is a default flat label, not an explicit alias. Flat SQL keeps that label; nested JSON uses the column's declared name. An explicit `as` supplies the public column key.
+
+Every root SELECT label owns its key, including function labels and expanded stars. Use `.as(...)` for expressions whose returned label cannot be established. Exact duplicate aggregate requests emit one SQL target. Hydration stages all conversions and child reads before changing each row; a conversion failure leaves that row unchanged.
+
+Compilation resolves these keys before generating SQL. Exact duplicate source/key requests deduplicate; two different owners of one public key fail with the payload path and key. A wildcard include over a target whose columns cannot be enumerated also fails.

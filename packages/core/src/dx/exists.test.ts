@@ -685,7 +685,7 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 				.existsDump();
 
 			expect(dump.sql).toBe(
-				'SELECT EXISTS (SELECT 1 FROM users LEFT JOIN LATERAL (SELECT posts_inner_0.* FROM posts AS posts_inner_0 WHERE posts_inner_0.author = users.id) AS posts_lat_0 ON true LIMIT 1) AS "exists"',
+				'SELECT EXISTS (SELECT 1 FROM users LEFT JOIN LATERAL (SELECT posts_inner_0.id, posts_inner_0.title, posts_inner_0.author FROM posts AS posts_inner_0 WHERE posts_inner_0.author = users.id) AS posts_lat_0 ON true LIMIT 1) AS "exists"',
 			);
 			expect(dump.params).toEqual([]);
 		});

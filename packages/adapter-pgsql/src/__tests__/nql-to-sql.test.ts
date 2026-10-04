@@ -1068,10 +1068,11 @@ u | select postTitle`.dump();
 		);
 	});
 
-	it('compiles flat includes with duplicate returned labels', () => {
+	it('enumerates flat includes with owned labels', () => {
 		const sql = nqlToSQL('departments | select *, employees.* | flat');
 		expect(sql).toContain('departments.*');
-		expect(sql).toContain('employees.*');
+		expect(sql).toContain('employees.id as "employees.id"');
+		expect(sql).not.toContain('employees.*');
 	});
 
 	it('propagates specific columns through flat include', () => {
@@ -1091,12 +1092,10 @@ u | select postTitle`.dump();
 		expect(sql).toContain('.email');
 	});
 
-	it('refuses an explicit output that collides with a relation star label', () => {
+	it('keeps an explicit root output distinct from relation wildcard labels', () => {
 		expect(() =>
 			nqlToSQL('departments | select id, employees.* | flat'),
-		).toThrow(
-			"Projection output label 'id' is produced by multiple candidates and cannot be returned losslessly.",
-		);
+		).not.toThrow();
 	});
 
 	it('compiles include without flat (json_agg or join)', () => {
@@ -1594,7 +1593,7 @@ filtered_posts
 		);
 
 		expect(sql).toBe(
-			'with "authors" as (select authors.id, authors.name from tenant_42.authors) select posts.title, coalesce((select json_agg(to_jsonb(__t__) order by __t__.id asc nulls last) from authors as __t__ where __t__.id = posts."authorid"), \'[]\'::json) as author_json from tenant_42.posts',
+			"with \"authors\" as (select authors.id, authors.name from tenant_42.authors) select posts.title, coalesce((select json_agg(jsonb_build_object('id', __t__.id, 'name', __t__.name) order by __t__.id asc nulls last) from authors as __t__ where __t__.id = posts.\"authorid\"), '[]'::json) as author_json from tenant_42.posts",
 		);
 	});
 
@@ -1664,9 +1663,7 @@ filtered_posts
 			blogCteToSQL(
 				'with authors as (authors | select id, id, name) posts | select title, author.id | flat',
 			),
-		).toThrow(
-			"Projection output label 'id' is produced by multiple candidates and cannot be returned losslessly.",
-		);
+		).not.toThrow();
 	});
 
 	it('uses emitted CTE projection keys for snake_case relation targets', () => {
@@ -1732,7 +1729,7 @@ authors | select name, posts.title | flat`.dump(),
 				'with enriched as (posts | select title, author.*) enriched | select *',
 			),
 		).toBe(
-			'with "enriched" as (select posts.title, coalesce((select json_agg(to_jsonb(__t__) order by __t__.id asc nulls last) from authors as __t__ where __t__.id = posts."authorid"), \'[]\'::json) as author_json from posts) select enriched.* from enriched',
+			"with \"enriched\" as (select posts.title, coalesce((select json_agg(jsonb_build_object('id', __t__.id, 'name', __t__.name) order by __t__.id asc nulls last) from authors as __t__ where __t__.id = posts.\"authorid\"), '[]'::json) as author_json from posts) select enriched.* from enriched",
 		);
 	});
 

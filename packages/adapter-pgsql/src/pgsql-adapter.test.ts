@@ -2977,6 +2977,17 @@ describe('PgAdapter', () => {
 	// ========================================================================
 
 	describe('column propagation to include strategy', () => {
+		const propagationModel = schema({
+			customers: { id: 'integer' },
+			orders: {
+				id: 'integer',
+				name: 'text',
+				total: 'integer',
+				anything: 'text',
+			},
+			symbols: { id: 'integer', name: 'text', file_id: 'integer' },
+			files: { id: 'integer', path: 'text' },
+		}).model;
 		/**
 		 * Build a PlanReport that triggers:
 		 * 1. intentToDecisions → selectRelationColumn decisions
@@ -3016,7 +3027,7 @@ describe('PgAdapter', () => {
 		}
 
 		it('propagates specific columns from selectRelationColumn to lateral include', () => {
-			const adapter = new PgAdapter(undefined, {});
+			const adapter = new PgAdapter(undefined, { model: propagationModel });
 			const plan = buildPlanWithRelationColumns(
 				'customers',
 				[
@@ -3037,7 +3048,7 @@ describe('PgAdapter', () => {
 		});
 
 		it('propagates multiple columns for same relation', () => {
-			const adapter = new PgAdapter(undefined, {});
+			const adapter = new PgAdapter(undefined, { model: propagationModel });
 			const plan = buildPlanWithRelationColumns(
 				'customers',
 				[
@@ -3062,7 +3073,7 @@ describe('PgAdapter', () => {
 			expect(compiled.sql).not.toContain('orders_lat_0.*');
 		});
 
-		it('keeps star expansion when column is *', () => {
+		it('refuses star expansion over an opaque relation target', () => {
 			const adapter = new PgAdapter(undefined, {});
 			const plan = buildPlanWithRelationColumns(
 				'customers',
@@ -3077,8 +3088,9 @@ describe('PgAdapter', () => {
 				[lateralInclude('orders', 'orders')],
 			);
 
-			const compiled = adapter.compile(plan);
-			expect(compiled.sql).toContain('orders_lat_0.*');
+			expect(() => adapter.compile(plan)).toThrow(
+				"cannot enumerate wildcard keys for opaque target 'orders'",
+			);
 		});
 
 		it('validates columns against model schema', () => {
@@ -3087,7 +3099,7 @@ describe('PgAdapter', () => {
 				orders: { id: 'integer', name: 'string', total: 'decimal' },
 			}).model;
 
-			const adapter = new PgAdapter(undefined, {});
+			const adapter = new PgAdapter(undefined, { model: propagationModel });
 			const plan = buildPlanWithRelationColumns(
 				'customers',
 				[
@@ -3106,7 +3118,7 @@ describe('PgAdapter', () => {
 			);
 		});
 
-		it('skips validation when no model is provided', () => {
+		it('refuses missing read authority when no model is provided', () => {
 			const adapter = new PgAdapter(undefined, {});
 			const plan = buildPlanWithRelationColumns(
 				'customers',
@@ -3121,9 +3133,11 @@ describe('PgAdapter', () => {
 				[lateralInclude('orders', 'orders')],
 			);
 
-			// Should not throw — no model means no validation
-			const compiled = adapter.compile(plan);
-			expect(compiled.sql).toContain('orders_lat_0.anything');
+			expect(() => adapter.compile(plan)).toThrow(
+				new Error(
+					"Include payload 'orders' cannot establish read conversions for column 'anything' without a compile model.",
+				),
+			);
 		});
 
 		it('propagates relation columns with a complete model', () => {
@@ -3132,7 +3146,7 @@ describe('PgAdapter', () => {
 				orders: { id: 'integer', anything: 'string' },
 			}).model;
 
-			const adapter = new PgAdapter(undefined, {});
+			const adapter = new PgAdapter(undefined, { model: propagationModel });
 			const plan = buildPlanWithRelationColumns(
 				'customers',
 				[
@@ -3171,7 +3185,7 @@ describe('PgAdapter', () => {
 		}
 
 		it('propagates user-supplied alias for join include (RELATION-COL-RESULT)', () => {
-			const adapter = new PgAdapter(undefined, {});
+			const adapter = new PgAdapter(undefined, { model: propagationModel });
 			const plan = buildPlanWithRelationColumns(
 				'symbols',
 				[
@@ -3196,7 +3210,7 @@ describe('PgAdapter', () => {
 		});
 
 		it('falls back to relation.column alias when no alias provided (join)', () => {
-			const adapter = new PgAdapter(undefined, {});
+			const adapter = new PgAdapter(undefined, { model: propagationModel });
 			const plan = buildPlanWithRelationColumns(
 				'symbols',
 				[

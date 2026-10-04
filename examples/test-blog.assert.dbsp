@@ -67,7 +67,7 @@ params.equals: [true]
 # ─────────────────────────────────────────
 --- query: 7
 success: true
-sql.equals: SELECT posts.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM authors AS __t__ WHERE __t__.id = posts.author_id), '[]'::json) AS author_json FROM posts
+sql.equals: SELECT posts.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'name', __t__.name, 'email', __t__.email, 'bio', __t__.bio, 'createdAt', __t__.created_at) ORDER BY __t__.id ASC NULLS LAST) FROM authors AS __t__ WHERE __t__.id = posts.author_id), '[]'::json) AS author_json FROM posts
 
 # ─────────────────────────────────────────
 # Query 8: posts | select *, author.* | flat
@@ -75,7 +75,7 @@ sql.equals: SELECT posts.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY _
 # ─────────────────────────────────────────
 --- query: 8
 success: true
-sql.equals: SELECT posts.*, author.* FROM posts JOIN authors AS author ON posts.author_id = author.id
+sql.equals: SELECT posts.*, author.id AS "author.id", author.name AS "author.name", author.email AS "author.email", author.bio AS "author.bio", author.created_at AS "author.createdAt" FROM posts JOIN authors AS author ON posts.author_id = author.id
 
 # ─────────────────────────────────────────
 # Query 9: authors | select *, posts.* | flat
@@ -83,7 +83,7 @@ sql.equals: SELECT posts.*, author.* FROM posts JOIN authors AS author ON posts.
 # ─────────────────────────────────────────
 --- query: 9
 success: true
-sql.equals: SELECT authors.*, posts.* FROM authors LEFT JOIN posts AS posts ON authors.id = posts.author_id
+sql.equals: SELECT authors.*, posts.id AS "posts.id", posts.title AS "posts.title", posts.slug AS "posts.slug", posts.content AS "posts.content", posts.published AS "posts.published", posts.author_id AS "posts.authorId", posts.created_at AS "posts.createdAt", posts.updated_at AS "posts.updatedAt" FROM authors LEFT JOIN posts AS posts ON authors.id = posts.author_id
 
 # ─────────────────────────────────────────
 # Query 10: posts select distinct *

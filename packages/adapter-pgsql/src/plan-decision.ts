@@ -70,6 +70,16 @@ export interface PlanDecision {
 	// User-supplied aliases for specific relation columns (col -> alias).
 	// Populated when selectRelationColumn decisions carry an `alias` field.
 	readonly columnAliases?: Readonly<Record<string, string>>;
+	readonly defaultRelationColumnLabel?: boolean;
+	readonly relationColumnLabelOrigin?: 'nql';
+	readonly defaultRelationColumnLabels?: Readonly<Record<string, boolean>>;
+	readonly payloadColumnRequests?: readonly {
+		col: string;
+		alias?: string | undefined;
+		defaultLabel?: boolean | undefined;
+		nqlLabel?: boolean | undefined;
+	}[];
+	readonly payloadShape?: import('@dbsp/types').IncludePayloadShape;
 	// Pseudo-column (recursive traversal) properties
 	readonly traversal?: string;
 	readonly pkColumn?: string;

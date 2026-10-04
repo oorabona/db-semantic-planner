@@ -52,20 +52,23 @@ describe('FIX-162 manual .join() alias collisions', () => {
 		const dump = query.dump();
 		const sql = normalizeSql(dump.sql);
 
-		expect(sql).toMatch(/JOIN issue_162_e2e\.files AS file_1\b/);
-		expect(sql).toMatch(/JOIN issue_162_e2e\.files AS file_2\b/);
-		expect(sql).toContain('alt_file_id = file_1.id');
-		expect(sql).toContain('uses.file_id = file_2.id');
-		expect(sql).toContain('file.path AS def_file');
-		expect(sql).toContain('file_2.path AS use_file');
+		expect(sql).toBe(
+			'SELECT file.path AS "definition.file.def_file", file_2.path AS "file.use_file" FROM issue_162_e2e.uses JOIN issue_162_e2e.files AS file_1 ON uses.alt_file_id = file_1.id JOIN issue_162_e2e.definitions AS definition ON uses.def_id = definition.id JOIN issue_162_e2e.files AS file ON definition.file_id = file.id JOIN issue_162_e2e.files AS file_2 ON uses.file_id = file_2.id ORDER BY uses.id ASC',
+		);
 
 		const rows = (await query.execute()) as unknown as Array<{
-			def_file: string;
-			use_file: string;
+			definition: { file: { def_file: string } };
+			file: { use_file: string };
 		}>;
 		expect(rows).toEqual([
-			{ def_file: '/def.ts', use_file: '/use.ts' },
-			{ def_file: '/def.ts', use_file: '/use.ts' },
+			{
+				definition: { file: { def_file: '/def.ts' } },
+				file: { use_file: '/use.ts' },
+			},
+			{
+				definition: { file: { def_file: '/def.ts' } },
+				file: { use_file: '/use.ts' },
+			},
 		]);
 	});
 

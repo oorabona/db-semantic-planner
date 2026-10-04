@@ -380,7 +380,10 @@ function mergeDuplicateJoinIncludeDecisions(
 			];
 		}
 		if (decision.children && decision.children.length > 0) {
-			mutable.children = [...(existing.children ?? []), ...decision.children];
+			mutable.children = mergeDuplicateJoinIncludeDecisions(
+				[...(existing.children ?? []), ...decision.children],
+				rootTable,
+			);
 		}
 	}
 

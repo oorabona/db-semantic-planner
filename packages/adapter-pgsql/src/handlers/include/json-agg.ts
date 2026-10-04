@@ -48,15 +48,11 @@ import type {
 import { buildKeyCorrelation } from '../where/exists.js';
 import { deriveFkColumns, resolveIncludeOrder } from './shared.js';
 
-// NQL compile-select.ts labels unaliased relation columns `${relationPath}.${column}`.
-// ORM relationColumn aliases must be identifiers, so a dotted default label cannot
-// be a chosen ORM alias and must not become a nested JSON key.
 export function chosenRelationColumnAlias(
-	relationPath: string,
-	column: string,
 	alias: string | undefined,
+	defaultRelationColumnLabel: boolean | undefined,
 ): string | undefined {
-	return alias === `${relationPath}.${column}` ? undefined : alias;
+	return defaultRelationColumnLabel ? undefined : alias;
 }
 
 function resolveJsonAggProjection(
@@ -341,7 +337,7 @@ function compileJsonAggRecursive(
 				const resTarget = childResTarget as ResTargetNode;
 				if (resTarget.ResTarget?.val) {
 					childNodes.push({
-						key: queryLocal(childRelation),
+						key: queryLocal(child.payloadShape?.publicKey ?? childRelation),
 						node: resTarget.ResTarget.val,
 					});
 				}
@@ -359,29 +355,45 @@ function compileJsonAggRecursive(
 		innerCtx,
 	);
 	const shape = jsonAggContainerShape(decision.relationType);
-	let columns = resolveJsonAggProjection(
-		decision,
-		targetTable,
-		innerCtx,
-		shape,
-	);
-	let columnValueOverrides = buildJsonAggColumnValueOverrides(
-		targetTable,
-		columns,
-		innerAlias,
-		innerCtx,
-		shape,
-	);
+	let columns = decision.payloadShape
+		? decision.payloadShape.columns.map((column) =>
+				queryLocal(column.publicKey),
+			)
+		: resolveJsonAggProjection(decision, targetTable, innerCtx, shape);
+	let columnValueOverrides = decision.payloadShape
+		? new Map(
+				decision.payloadShape.columns.map((column) => [
+					column.publicKey,
+					column.readHandling
+						? typeCast(
+								sqlColumnRef(
+									queryLocal(column.physicalName),
+									queryLocal(innerAlias),
+								),
+								'text',
+							)
+						: sqlColumnRef(
+								queryLocal(column.physicalName),
+								queryLocal(innerAlias),
+							),
+				]),
+			)
+		: buildJsonAggColumnValueOverrides(
+				targetTable,
+				columns,
+				innerAlias,
+				innerCtx,
+				shape,
+			);
 
-	if (decision.columnAliases && columns) {
+	if (!decision.payloadShape && decision.columnAliases && columns) {
 		const values = new Map<string, Node>();
 		columns = columns.map((column, index) => {
 			const requested = decision.columns?.[index];
 			const alias = requested
 				? chosenRelationColumnAlias(
-						decision.relationPath ?? relation,
-						requested,
 						decision.columnAliases?.[requested],
+						decision.defaultRelationColumnLabels?.[requested],
 					)
 				: undefined;
 			const key = identifierText(column);
@@ -396,43 +408,6 @@ function compileJsonAggRecursive(
 		columnValueOverrides = values;
 	}
 
-	// Child relation values and projected columns share one JSON object.
-	const projectedKeyNames =
-		columns && !columns.some((column) => identifierText(column) === '*')
-			? columns.map(identifierText)
-			: resolvedTarget.outputs !== undefined
-				? [...resolvedTarget.outputs.keys()]
-				: (ctx.model?.getTable(targetTable)?.columns ?? []).map((column) =>
-						identifierText(
-							resolveDeclaredIdentifier(
-								ctx.declaredNames,
-								ctx.dbCasing ?? 'preserve',
-								{
-									kind: 'column',
-									table: targetTable,
-									column: column.name,
-								},
-							),
-						),
-					);
-	const projectedKeys = new Set<string>();
-	for (const key of projectedKeyNames) {
-		if (projectedKeys.has(key)) {
-			throw new Error(
-				`JSON_AGG relation projection '${decision.relationPath ?? relation}' has conflicting output key '${key}'.`,
-			);
-		}
-		projectedKeys.add(key);
-	}
-	for (const child of childNodes ?? []) {
-		const key = identifierText(child.key);
-		if (projectedKeys.has(key)) {
-			throw new Error(
-				`JSON_AGG relation projection '${decision.relationPath ?? relation}' has conflicting output key '${key}'.`,
-			);
-		}
-	}
-
 	return sqlJsonAggSubquery(
 		resolvedTarget.cteName ??
 			resolveDeclaredIdentifier(ctx.declaredNames, ctx.dbCasing ?? 'preserve', {
@@ -440,7 +415,7 @@ function compileJsonAggRecursive(
 				table: targetTable,
 			}),
 		whereExpr,
-		queryLocal(`${relation}_json`),
+		queryLocal(decision.payloadShape?.outputLabel ?? `${relation}_json`),
 		resolvedTarget.cteName === undefined && ctx.schema !== undefined
 			? queryLocal(ctx.schema)
 			: undefined,

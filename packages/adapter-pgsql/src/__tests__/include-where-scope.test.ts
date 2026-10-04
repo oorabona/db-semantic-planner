@@ -1,3 +1,5 @@
+import { schema } from '@dbsp/core';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 /**
  * INCLUDE-WHERE-SCOPE regression tests.
  *
@@ -12,27 +14,24 @@
 
 import type { PlanReport } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import type { AdapterCompilerDeps } from '../adapter-compiler-deps.js';
-import { compileSelect } from '../adapter-compiler-select.js';
-import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../assert-field.js';
 import { normalizeSQL } from '../ast-helpers.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const deps: AdapterCompilerDeps = {
-	schemaName: undefined,
-	model: undefined,
-	defaultPk: DEFAULT_PK_COLUMN,
-	deriveFk: defaultFkDerivation,
-};
+const compileModel = schema({
+	symbols: { id: 'integer', name: 'text', type: 'text', file_id: 'integer' },
+	files: { id: 'integer', project_id: 'integer' },
+	posts: { id: 'integer', user_id: 'integer' },
+	users: { id: 'integer', active: 'boolean' },
+}).model;
 
 function compile(plan: PlanReport): {
 	sql: string;
 	parameters: readonly unknown[];
 } {
-	return compileSelect(plan, undefined, deps);
+	return createPgCompileOnlyAdapter({ model: compileModel }).compile(plan);
 }
 
 // ---------------------------------------------------------------------------

@@ -22,6 +22,9 @@ export function compiledQueryFromProjection<T>(fields: {
 	parameters: readonly unknown[];
 	columnMetadata: ReadonlyMap<string, CompiledColumnMetadata>;
 	outputKeyMap?: ReadonlyMap<string, string>;
+	/** Required for hydratable includes: carries adapter-resolved includePayloads.
+	 * Hydration without this shape throws MissingIncludePayloadShapeError.
+	 */
 	hydrationPlan?: PlanReport;
 }): CompiledQuery<T> {
 	const query = Object.freeze({

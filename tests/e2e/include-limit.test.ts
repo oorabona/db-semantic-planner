@@ -97,12 +97,12 @@ describe('json_agg per-parent limit', () => {
 			.execute();
 		expect(rows).toEqual([
 			{ id: 1, posts: [] },
-			{ id: 2, posts: [{ id: 10, post_comments: [] }] },
+			{ id: 2, posts: [{ id: 10, comments: [] }] },
 			{
 				id: 3,
 				posts: [
-					{ id: 22, post_comments: [{ id: 2, content: 'First selected' }] },
-					{ id: 23, post_comments: [{ id: 4, content: 'Second selected' }] },
+					{ id: 22, comments: [{ id: 2, content: 'First selected' }] },
+					{ id: 23, comments: [{ id: 4, content: 'Second selected' }] },
 				],
 			},
 		]);
@@ -145,9 +145,14 @@ it('lateral orders the top row independently per parent', async () => {
 			orderBy: [{ field: 'rank', direction: 'desc' }],
 		})
 		.dump();
+	expect(dump.sql).toBe(
+		'SELECT authors.name, posts_lat_0.id AS "posts.id", posts_lat_0.title AS "posts.title", posts_lat_0.content AS "posts.content", posts_lat_0.author_id AS "posts.authorId", posts_lat_0.published AS "posts.published", posts_lat_0.created_at AS "posts.createdAt", posts_lat_0.rank AS "posts.rank" FROM include_limit_e2e.authors LEFT JOIN LATERAL (SELECT posts_inner_0.id, posts_inner_0.title, posts_inner_0.content, posts_inner_0.author_id, posts_inner_0.published, posts_inner_0.created_at, posts_inner_0.rank FROM include_limit_e2e.posts AS posts_inner_0 WHERE posts_inner_0.author_id = authors.id ORDER BY posts_inner_0.rank DESC, posts_inner_0.id ASC NULLS LAST LIMIT 1) AS posts_lat_0 ON true ORDER BY authors.id ASC',
+	);
 	const pool = await getTestPool();
 	const { rows } = await pool.query(dump.sql, [...dump.params]);
-	expect(rows.map((row) => ({ name: row.name, postId: row.id }))).toEqual([
+	expect(
+		rows.map((row) => ({ name: row.name, postId: row['posts.id'] })),
+	).toEqual([
 		{ name: 'Empty', postId: null },
 		{ name: 'One', postId: 10 },
 		{ name: 'Four', postId: 21 },

@@ -523,14 +523,7 @@ customers | select *, orders.*
 <details><summary>SQL</summary>
 
 ```sql
-SELECT customers.*,
-  COALESCE(
-    (SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST)
-     FROM ch5_ecommerce.orders AS __t__
-     WHERE __t__.customer_id = customers.id),
-    '[]'::json
-  ) AS orders_json
-FROM ch5_ecommerce.customers
+SELECT customers.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'orderNumber', __t__.order_number, 'customerId', __t__.customer_id, 'status', __t__.status, 'total', __t__.total, 'shippingAddressId', __t__.shipping_address_id, 'billingAddressId', __t__.billing_address_id, 'createdAt', __t__.created_at, 'updatedAt', __t__.updated_at) ORDER BY __t__.id ASC NULLS LAST) FROM ch5_ecommerce.orders AS __t__ WHERE __t__.customer_id = customers.id), '[]'::json) AS orders_json FROM ch5_ecommerce.customers
 ```
 </details>
 
@@ -557,10 +550,7 @@ categories | select *, products.* | flat
 <details><summary>SQL</summary>
 
 ```sql
-SELECT categories.*, products.*
-FROM ch5_ecommerce.categories
-LEFT JOIN ch5_ecommerce.products AS products
-  ON categories.id = products.category_id
+SELECT categories.*, products.id AS "products.id", products.sku AS "products.sku", products.name AS "products.name", products.description AS "products.description", products.price AS "products.price", products.stock AS "products.stock", products.category_id AS "products.categoryId", products.active AS "products.active", products.created_at AS "products.createdAt" FROM ch5_ecommerce.categories LEFT JOIN ch5_ecommerce.products AS products ON categories.id = products.category_id
 ```
 </details>
 
@@ -587,7 +577,7 @@ users | select *, userRoles.* | limit userRoles 2
 <details><summary>SQL</summary>
 
 ```sql
-SELECT users.*, "userRoles_lat_0".* FROM iam_example.users LEFT JOIN LATERAL (SELECT "userRoles_inner_0".* FROM iam_example.user_roles AS "userRoles_inner_0" WHERE "userRoles_inner_0".user_id = users.id ORDER BY "userRoles_inner_0".id ASC NULLS LAST LIMIT 2) AS "userRoles_lat_0" ON true
+SELECT users.*, "userRoles_lat_0".id AS "userRoles.id", "userRoles_lat_0".user_id AS "userRoles.userId", "userRoles_lat_0".role_id AS "userRoles.roleId", "userRoles_lat_0".granted_at AS "userRoles.grantedAt" FROM iam_example.users LEFT JOIN LATERAL (SELECT "userRoles_inner_0".id, "userRoles_inner_0".user_id, "userRoles_inner_0".role_id, "userRoles_inner_0".granted_at FROM iam_example.user_roles AS "userRoles_inner_0" WHERE "userRoles_inner_0".user_id = users.id ORDER BY "userRoles_inner_0".id ASC NULLS LAST LIMIT 2) AS "userRoles_lat_0" ON true
 ```
 </details>
 
@@ -618,38 +608,18 @@ users | where active = true \
 <details><summary>SQL</summary>
 
 ```sql
-SELECT users.*,
-  COALESCE((
-    SELECT json_agg(
-      jsonb_build_object('role_id', __t__.role_id) || jsonb_build_object('role', COALESCE((
-        SELECT json_agg(to_jsonb(__t1__) || jsonb_build_object('rolePermissions', COALESCE((
-          SELECT json_agg(to_jsonb(__t2__) || jsonb_build_object('permission', COALESCE((
-            SELECT json_agg(to_jsonb(__t3__) ORDER BY __t3__.id ASC NULLS LAST)
-            FROM iam_example.permissions AS __t3__
-            WHERE __t3__.id = __t2__.permission_id
-          ), '[]'::json)) ORDER BY __t2__.id ASC NULLS LAST)
-          FROM iam_example.role_permissions AS __t2__
-          WHERE __t2__.role_id = __t1__.id
-        ), '[]'::json)) ORDER BY __t1__.id ASC NULLS LAST)
-        FROM iam_example.roles AS __t1__
-        WHERE __t1__.id = __t__.role_id
-      ), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST)
-    FROM iam_example.user_roles AS __t__
-    WHERE __t__.user_id = users.id
-  ), '[]'::json) AS "userRoles_json"
-FROM iam_example.users
-WHERE users.active = $1
+SELECT users.*, COALESCE((SELECT json_agg(jsonb_build_object('roleId', __t__.role_id) || jsonb_build_object('role', COALESCE((SELECT json_agg(jsonb_build_object('id', __t1__.id, 'name', __t1__.name, 'description', __t1__.description, 'active', __t1__.active) || jsonb_build_object('rolePermissions', COALESCE((SELECT json_agg(jsonb_build_object('id', __t2__.id, 'roleId', __t2__.role_id, 'permissionId', __t2__.permission_id) || jsonb_build_object('permission', COALESCE((SELECT json_agg(jsonb_build_object('id', __t3__.id, 'name', __t3__.name, 'resource', __t3__.resource, 'action', __t3__.action, 'description', __t3__.description) ORDER BY __t3__.id ASC NULLS LAST) FROM iam_example.permissions AS __t3__ WHERE __t3__.id = __t2__.permission_id), '[]'::json)) ORDER BY __t2__.id ASC NULLS LAST) FROM iam_example.role_permissions AS __t2__ WHERE __t2__.role_id = __t1__.id), '[]'::json)) ORDER BY __t1__.id ASC NULLS LAST) FROM iam_example.roles AS __t1__ WHERE __t1__.id = __t__.role_id), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST) FROM iam_example.user_roles AS __t__ WHERE __t__.user_id = users.id), '[]'::json) AS "userRoles_json" FROM iam_example.users WHERE users.active = $1
 -- params: [true]
 ```
 </details>
 
 | id | username | email              | active | userRoles_json                                         |
 |----|----------|--------------------|--------|--------------------------------------------------------|
-| 1  | alice    | alice@example.com  | True   | [{"role_id":1,"role":[{"id":1,"name":"super_admin",...}]}]  |
-| 2  | bob      | bob@example.com    | True   | [{"role_id":2,"role":[{"id":2,"name":"admin",...}]}]        |
-| 3  | carol    | carol@example.com  | True   | [{"role_id":3,"role":[{"id":3,"name":"manager",...}]},...]  |
-| 4  | dave     | dave@example.com   | True   | [{"role_id":4,"role":[{"id":4,"name":"editor",...}]}]       |
-| 5  | eve      | eve@example.com    | True   | [{"role_id":5,"role":[{"id":5,"name":"viewer",...}]}]       |
+| 1  | alice    | alice@example.com  | True   | [{"roleId":1,"role":[{"id":1,"name":"super_admin",...}]}]  |
+| 2  | bob      | bob@example.com    | True   | [{"roleId":2,"role":[{"id":2,"name":"admin",...}]}]        |
+| 3  | carol    | carol@example.com  | True   | [{"roleId":3,"role":[{"id":3,"name":"manager",...}]},...]  |
+| 4  | dave     | dave@example.com   | True   | [{"roleId":4,"role":[{"id":4,"name":"editor",...}]}]       |
+| 5  | eve      | eve@example.com    | True   | [{"roleId":5,"role":[{"id":5,"name":"viewer",...}]}]       |
 
 *(5 rows — the planner traverses: users → userRoles → roles → rolePermissions → permissions)*
 
@@ -674,12 +644,7 @@ roleEdges | select *, parentRole.*, childRole.*
 <details><summary>SQL</summary>
 
 ```sql
-SELECT role_edges.*,
-  COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM iam_example.roles AS __t__
-    WHERE __t__.id = role_edges.parent_role_id), '[]'::json) AS "parentRole_json",
-  COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM iam_example.roles AS __t__
-    WHERE __t__.id = role_edges.child_role_id), '[]'::json) AS "childRole_json"
-FROM iam_example.role_edges
+SELECT role_edges.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'name', __t__.name, 'description', __t__.description, 'active', __t__.active) ORDER BY __t__.id ASC NULLS LAST) FROM iam_example.roles AS __t__ WHERE __t__.id = role_edges.parent_role_id), '[]'::json) AS "parentRole_json", COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'name', __t__.name, 'description', __t__.description, 'active', __t__.active) ORDER BY __t__.id ASC NULLS LAST) FROM iam_example.roles AS __t__ WHERE __t__.id = role_edges.child_role_id), '[]'::json) AS "childRole_json" FROM iam_example.role_edges
 ```
 </details>
 
@@ -1411,24 +1376,7 @@ employees | select name, managementChain.*
 <details><summary>SQL</summary>
 
 ```sql
-WITH RECURSIVE management_chain_cte AS (
-  SELECT employees.id, employees.name, employees.title,
-    employees.manager_id, 1 AS depth
-  FROM hierarchy_example.employees
-  WHERE employees.id IN (SELECT manager_id FROM hierarchy_example.employees)
-  UNION ALL
-  SELECT e.id, e.name, e.title, e.manager_id, mc.depth + 1
-  FROM hierarchy_example.employees e
-  INNER JOIN management_chain_cte mc ON e.id = mc.manager_id
-)
-SELECT employees.name,
-  COALESCE(
-    (SELECT json_agg(to_jsonb(mc))
-     FROM management_chain_cte mc
-     WHERE mc.id = employees.manager_id),
-    '[]'::json
-  ) AS management_chain_json
-FROM hierarchy_example.employees
+WITH "managementChain_cte" AS (SELECT employees_inner_0.* FROM hierarchy.employees AS employees_inner_0) SELECT employees.name FROM hierarchy.employees LEFT JOIN "managementChain_cte" AS "managementChain_ref_0" ON employees.id = "managementChain_ref_0".manager_id
 ```
 </details>
 
@@ -2080,14 +2028,7 @@ users | select *, userRoles.* | limit userRoles 2
 <details><summary>SQL</summary>
 
 ```sql
-SELECT users.*, "userRoles_lat_0".*
-FROM iam_example.users
-LEFT JOIN LATERAL (
-  SELECT "userRoles_inner_0".*
-  FROM iam_example.user_roles AS "userRoles_inner_0"
-  WHERE "userRoles_inner_0".user_id = users.id
-  LIMIT 2
-) AS "userRoles_lat_0" ON true
+SELECT users.*, "userRoles_lat_0".id AS "userRoles.id", "userRoles_lat_0".user_id AS "userRoles.userId", "userRoles_lat_0".role_id AS "userRoles.roleId", "userRoles_lat_0".granted_at AS "userRoles.grantedAt" FROM iam_example.users LEFT JOIN LATERAL (SELECT "userRoles_inner_0".id, "userRoles_inner_0".user_id, "userRoles_inner_0".role_id, "userRoles_inner_0".granted_at FROM iam_example.user_roles AS "userRoles_inner_0" WHERE "userRoles_inner_0".user_id = users.id ORDER BY "userRoles_inner_0".id ASC NULLS LAST LIMIT 2) AS "userRoles_lat_0" ON true
 ```
 </details>
 
@@ -2301,3 +2242,13 @@ Requires a self-referencing FK with roles defined in the schema:
 | `manager.manager` | Skip-level (2 levels up) |
 | `managementChain` | All ancestors (recursive CTE) |
 | `allReports` | All descendants (recursive CTE) |
+
+## Include payload keys
+
+Each include column uses its explicit alias, or its declared model name when no alias is supplied. Physical database names never become payload keys: `dbCasing` affects SQL references only. This includes aliases that happen to equal a physical name and bigint read conversions, which run under the public key.
+
+A relation uses the requested include name at every depth. For example, `include('posts', { include: [{ relation: 'comments' }] })` returns `posts[].comments`, even when the model resolves that child to a relation named `post_comments`.
+
+NQL's unaliased `relation.column` label is a default flat label, not an explicit alias. Flat SQL keeps that label; nested JSON uses the column's declared name. An explicit `as` supplies the public column key.
+
+Compilation resolves these keys before generating SQL. Exact duplicate source/key requests deduplicate; two different owners of one public key fail with the payload path and key. A wildcard include over a target whose columns cannot be enumerated also fails.

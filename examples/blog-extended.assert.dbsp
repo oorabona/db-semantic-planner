@@ -153,16 +153,16 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 12
 success: true
-sql.equals: SELECT categories.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM ch3_blog_extended.categories AS __t__ WHERE __t__.parent_id = categories.id), '[]'::json) AS children_json FROM ch3_blog_extended.categories
+sql.equals: SELECT categories.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'name', __t__.name, 'parentId', __t__.parent_id) ORDER BY __t__.id ASC NULLS LAST) FROM ch3_blog_extended.categories AS __t__ WHERE __t__.parent_id = categories.id), '[]'::json) AS children_json FROM ch3_blog_extended.categories
 db.rows.equals: 4
 output.contains: children_json
 db.output:
-| id | name            | parent_id | children_json                                                                               |
-|----|-----------------|-----------|---------------------------------------------------------------------------------------------|
-| 1  | Technology      | NULL      | [{"id":2,"name":"Web Development","parent_id":1},{"id":3,"name":"Databases","parent_id":1}] |
-| 2  | Web Development | 1         | []                                                                                          |
-| 3  | Databases       | 1         | []                                                                                          |
-| 4  | Lifestyle       | NULL      | []                                                                                          |
+| id | name            | parent_id | children_json                                                                             |
+|----|-----------------|-----------|-------------------------------------------------------------------------------------------|
+| 1  | Technology      | NULL      | [{"id":2,"name":"Web Development","parentId":1},{"id":3,"name":"Databases","parentId":1}] |
+| 2  | Web Development | 1         | []                                                                                        |
+| 3  | Databases       | 1         | []                                                                                        |
+| 4  | Lifestyle       | NULL      | []                                                                                        |
 
 # ─────────────────────────────────────────
 # Query 13 categories | where parentId is null | select *, children.*
@@ -170,16 +170,16 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 13
 success: true
-sql.equals: SELECT categories.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM ch3_blog_extended.categories AS __t__ WHERE __t__.parent_id = categories.id), '[]'::json) AS children_json FROM ch3_blog_extended.categories WHERE categories.parent_id IS NULL
+sql.equals: SELECT categories.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'name', __t__.name, 'parentId', __t__.parent_id) ORDER BY __t__.id ASC NULLS LAST) FROM ch3_blog_extended.categories AS __t__ WHERE __t__.parent_id = categories.id), '[]'::json) AS children_json FROM ch3_blog_extended.categories WHERE categories.parent_id IS NULL
 db.rows.equals: 2
 db.output.contains: Technology
 db.output.contains: Lifestyle
 db.output.contains: children_json
 db.output:
-| id | name       | parent_id | children_json                                                                               |
-|----|------------|-----------|---------------------------------------------------------------------------------------------|
-| 1  | Technology | NULL      | [{"id":2,"name":"Web Development","parent_id":1},{"id":3,"name":"Databases","parent_id":1}] |
-| 4  | Lifestyle  | NULL      | []                                                                                          |
+| id | name       | parent_id | children_json                                                                             |
+|----|------------|-----------|-------------------------------------------------------------------------------------------|
+| 1  | Technology | NULL      | [{"id":2,"name":"Web Development","parentId":1},{"id":3,"name":"Databases","parentId":1}] |
+| 4  | Lifestyle  | NULL      | []                                                                                        |
 
 # ─────────────────────────────────────────
 # Query 14 posts | where featured = true
@@ -228,12 +228,12 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 17
 success: true
-sql.equals: SELECT authors.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM ch3_blog_extended.posts AS __t__ WHERE __t__.author_id = authors.id), '[]'::json) AS posts_json FROM ch3_blog_extended.authors WHERE authors.active = $1
+sql.equals: SELECT authors.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'title', __t__.title, 'content', __t__.content, 'authorId', __t__.author_id, 'categoryId', __t__.category_id, 'published', __t__.published, 'featured', __t__.featured, 'viewCount', __t__.view_count, 'createdAt', __t__.created_at) ORDER BY __t__.id ASC NULLS LAST) FROM ch3_blog_extended.posts AS __t__ WHERE __t__.author_id = authors.id), '[]'::json) AS posts_json FROM ch3_blog_extended.authors WHERE authors.active = $1
 db.output:
-| id | name          | email             | active | posts_json                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-|----|---------------|-------------------|--------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 1  | Alice Johnson | alice@example.com | true   | [{"id":1,"title":"TypeScript Fundamentals","content":"Learn TS basics...","featured":true,"author_id":1,"published":true,"created_at":"2024-01-15T00:00:00+00:00","view_count":1500,"category_id":2},{"id":2,"title":"Advanced TypeScript","content":"Generics and beyond...","featured":false,"author_id":1,"published":true,"created_at":"2024-02-20T00:00:00+00:00","view_count":800,"category_id":2},{"id":5,"title":"Work-Life Balance","content":"Tips for developers...","featured":false,"author_id":1,"published":true,"created_at":"2024-04-01T00:00:00+00:00","view_count":300,"category_id":4},{"id":6,"title":"Draft: React Patterns","content":"WIP...","featured":false,"author_id":1,"published":false,"created_at":"2024-04-10T00:00:00+00:00","view_count":0,"category_id":2}] |
-| 2  | Bob Smith     | bob@example.com   | true   | [{"id":3,"title":"PostgreSQL Deep Dive","content":"Master PostgreSQL...","featured":true,"author_id":2,"published":true,"created_at":"2024-03-10T00:00:00+00:00","view_count":2000,"category_id":3},{"id":4,"title":"MongoDB vs PostgreSQL","content":"Comparison guide...","featured":false,"author_id":2,"published":true,"created_at":"2024-03-15T00:00:00+00:00","view_count":600,"category_id":3},{"id":7,"title":"Draft: Redis Caching","content":"Coming soon...","featured":false,"author_id":2,"published":false,"created_at":"2024-04-15T00:00:00+00:00","view_count":0,"category_id":3}]                                                                                                                                                                                              |
+| id | name          | email             | active | posts_json                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+|----|---------------|-------------------|--------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1  | Alice Johnson | alice@example.com | true   | [{"id":1,"title":"TypeScript Fundamentals","content":"Learn TS basics...","authorId":1,"featured":true,"createdAt":"2024-01-15T00:00:00+00:00","published":true,"viewCount":1500,"categoryId":2},{"id":2,"title":"Advanced TypeScript","content":"Generics and beyond...","authorId":1,"featured":false,"createdAt":"2024-02-20T00:00:00+00:00","published":true,"viewCount":800,"categoryId":2},{"id":5,"title":"Work-Life Balance","content":"Tips for developers...","authorId":1,"featured":false,"createdAt":"2024-04-01T00:00:00+00:00","published":true,"viewCount":300,"categoryId":4},{"id":6,"title":"Draft: React Patterns","content":"WIP...","authorId":1,"featured":false,"createdAt":"2024-04-10T00:00:00+00:00","published":false,"viewCount":0,"categoryId":2}] |
+| 2  | Bob Smith     | bob@example.com   | true   | [{"id":3,"title":"PostgreSQL Deep Dive","content":"Master PostgreSQL...","authorId":2,"featured":true,"createdAt":"2024-03-10T00:00:00+00:00","published":true,"viewCount":2000,"categoryId":3},{"id":4,"title":"MongoDB vs PostgreSQL","content":"Comparison guide...","authorId":2,"featured":false,"createdAt":"2024-03-15T00:00:00+00:00","published":true,"viewCount":600,"categoryId":3},{"id":7,"title":"Draft: Redis Caching","content":"Coming soon...","authorId":2,"featured":false,"createdAt":"2024-04-15T00:00:00+00:00","published":false,"viewCount":0,"categoryId":3}]                                                                                                                                                                                          |
 
 # ─────────────────────────────────────────
 # Query 18 posts | order by viewCount desc

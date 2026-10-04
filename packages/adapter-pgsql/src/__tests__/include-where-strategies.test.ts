@@ -128,9 +128,9 @@ describe('#888 non-join include refusal', () => {
 // Captured by compiling these same inputs with the source at 1ff4fb15.
 const mainSql = {
 	json_agg:
-		'SELECT users.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM posts AS __t__ WHERE __t__."authorId" = users.id), \'[]\'::json) AS posts_json FROM users',
+		"SELECT users.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'published', __t__.published, 'score', __t__.score, 'authorId', __t__.\"authorId\") ORDER BY __t__.id ASC NULLS LAST) FROM posts AS __t__ WHERE __t__.\"authorId\" = users.id), '[]'::json) AS posts_json FROM users",
 	lateral:
-		'SELECT users.*, posts_lat_0.* FROM users LEFT JOIN LATERAL (SELECT posts_inner_0.* FROM posts AS posts_inner_0 WHERE posts_inner_0."authorId" = users.id) AS posts_lat_0 ON true',
+		'SELECT users.*, posts_lat_0.id AS "posts.id", posts_lat_0.published AS "posts.published", posts_lat_0.score AS "posts.score", posts_lat_0."authorId" AS "posts.authorId" FROM users LEFT JOIN LATERAL (SELECT posts_inner_0.id, posts_inner_0.published, posts_inner_0.score, posts_inner_0."authorId" FROM posts AS posts_inner_0 WHERE posts_inner_0."authorId" = users.id) AS posts_lat_0 ON true',
 	cte: 'WITH posts_cte AS (SELECT posts_inner_0.* FROM posts AS posts_inner_0) SELECT users.* FROM users LEFT JOIN posts_cte AS posts_ref_0 ON users.id = posts_ref_0."authorId"',
 	join: 'SELECT users.*, posts.id AS "posts.id" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId"',
 };

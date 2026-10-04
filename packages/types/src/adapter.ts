@@ -132,6 +132,9 @@ export interface CompiledQuery<T = unknown> {
 	 * reversible through a naming convention.
 	 */
 	readonly outputKeyMap?: ReadonlyMap<string, string>;
+	/** Required for hydratable includes: carries adapter-resolved includePayloads.
+	 * Hydration without this shape throws MissingIncludePayloadShapeError.
+	 */
 	readonly hydrationPlan?: PlanReport;
 	/** Phantom type for result inference - not used at runtime */
 	readonly __resultType?: T;

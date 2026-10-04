@@ -62,7 +62,12 @@ const coverageModel = completeModel({
 	},
 	archive_users: { id: 'integer', name: 'text', email: 'text' },
 	staging: { id: 'integer', name: 'text', email: 'text', active: 'boolean' },
-	posts: { id: 'integer', title: 'text', archived: 'boolean' },
+	posts: {
+		id: 'integer',
+		title: 'text',
+		archived: 'boolean',
+		user_id: 'integer',
+	},
 	archive: { id: 'integer', title: 'text' },
 });
 function testQuery<T = unknown>(
@@ -1910,7 +1915,7 @@ describe('PgAdapter - Coverage Tests', () => {
 
 	describe('compile — intent path with relationColumnsMap', () => {
 		it('deduplicates selectRelationColumn when covered by include', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan = {
 				rootTable: 'posts',
 				decisions: [
@@ -1948,7 +1953,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('keeps selectRelationColumn when no include covers the relation', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan = {
 				rootTable: 'posts',
 				decisions: [],
@@ -1969,7 +1974,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('handles wildcard column in selectRelationColumn dedup', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan = {
 				rootTable: 'posts',
 				decisions: [
@@ -2313,7 +2318,20 @@ describe('PgAdapter - Coverage Tests', () => {
 
 describe('synthetic binding includes', () => {
 	it('compiles synthetic binding json_agg include decisions with CTE parentKey correlation', () => {
-		const adapter = createPgCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter({
+			model: completeModel({
+				active_authors: { author_key: 'integer', id: 'integer' },
+				projected_authors: { id: 'integer' },
+				posts: {
+					id: { type: 'integer', primaryKey: true },
+					author_id: 'integer',
+				},
+				comments: {
+					id: { type: 'integer', primaryKey: true },
+					post_id: 'integer',
+				},
+			}),
+		});
 		const plan: PlanReport = {
 			rootTable: 'active_authors',
 			intent: {
@@ -2364,9 +2382,7 @@ describe('synthetic binding includes', () => {
 
 		const result = adapter.compile(plan);
 
-		expect(result.sql).toContain(
-			'json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST)',
-		);
+		expect(result.sql).toContain('json_agg(jsonb_build_object(');
 		expect(result.sql).toContain('AS author_posts_json');
 		expect(result.sql).toMatch(
 			/WHERE __t__\.author_id = active_authors\.author_key/i,
@@ -2374,7 +2390,20 @@ describe('synthetic binding includes', () => {
 	});
 
 	it('compiles synthetic binding nested json_agg includes from flat chained intent paths', () => {
-		const adapter = createPgCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter({
+			model: completeModel({
+				active_authors: { author_key: 'integer', id: 'integer' },
+				projected_authors: { id: 'integer' },
+				posts: {
+					id: { type: 'integer', primaryKey: true },
+					author_id: 'integer',
+				},
+				comments: {
+					id: { type: 'integer', primaryKey: true },
+					post_id: 'integer',
+				},
+			}),
+		});
 		const plan: PlanReport = {
 			rootTable: 'projected_authors',
 			intent: {
@@ -2448,9 +2477,7 @@ describe('synthetic binding includes', () => {
 
 		const result = adapter.compile(plan);
 
-		expect(result.sql).toContain(
-			'json_agg(to_jsonb(__t__) || jsonb_build_object',
-		);
+		expect(result.sql).toContain('json_agg(jsonb_build_object(');
 		expect(result.sql).toContain('ORDER BY __t__.id ASC NULLS LAST');
 		expect(result.sql).toContain('ORDER BY __t1__.id ASC NULLS LAST');
 		expect(result.sql).toContain('jsonb_build_object');
@@ -2462,7 +2489,20 @@ describe('synthetic binding includes', () => {
 	});
 
 	it('rejects synthetic binding json_agg includes when the dialect disables JSON aggregation', () => {
-		const adapter = createPgCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter({
+			model: completeModel({
+				active_authors: { author_key: 'integer', id: 'integer' },
+				projected_authors: { id: 'integer' },
+				posts: {
+					id: { type: 'integer', primaryKey: true },
+					author_id: 'integer',
+				},
+				comments: {
+					id: { type: 'integer', primaryKey: true },
+					post_id: 'integer',
+				},
+			}),
+		});
 		const plan: PlanReport = {
 			rootTable: 'active_authors',
 			intent: {

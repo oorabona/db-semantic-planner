@@ -337,14 +337,10 @@ describe('E2E: NQL v2.1 Strategy Behavior', () => {
 			console.log('Include strategy decision:', includeDecision?.choice);
 			console.log('Generated SQL:', compiled.sql);
 
-			// Then: SQL should have EXISTS for WHERE check
-			expect(compiled.sql.toLowerCase()).toContain('exists');
-			// And: SQL should have json_agg for include
-			expect(compiled.sql.toLowerCase()).toContain('json_agg');
-			// After decoupling, "published" appears exactly ONCE — only in the EXISTS WHERE,
-			// NOT in the json_agg subquery (include is unfiltered).
-			const publishedMatches = compiled.sql.match(/published/gi);
-			expect(publishedMatches?.length).toBe(1);
+			// Enumerated payload fields mention published as a key and value; only EXISTS filters it.
+			expect(compiled.sql).toBe(
+				"SELECT authors.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'title', __t__.title, 'content', __t__.content, 'authorId', __t__.author_id, 'published', __t__.published, 'createdAt', __t__.created_at) ORDER BY __t__.id ASC NULLS LAST) FROM nql_v21_flat_e2e.posts AS __t__ WHERE __t__.author_id = authors.id), '[]'::json) AS author_posts_json FROM nql_v21_flat_e2e.authors WHERE EXISTS (SELECT 1 FROM nql_v21_flat_e2e.posts AS posts_exists_0 WHERE authors.id = posts_exists_0.author_id AND posts_exists_0.published = $1)",
+			);
 
 			// Execute and verify results
 			const rows = await adapter.execute(compiled);

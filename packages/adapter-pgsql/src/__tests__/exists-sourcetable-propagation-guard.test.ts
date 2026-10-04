@@ -74,7 +74,7 @@ describe('decoupled include: exists filter never propagates regardless of source
 		expect(
 			sql,
 			`Include subquery must not reference __t__.flag. SQL: ${sql}`,
-		).not.toContain('__t__.flag');
+		).not.toContain('__t__.flag =');
 	});
 
 	it('top-level users.comments exists does NOT propagate to users.comments include (decoupled)', () => {
@@ -101,7 +101,7 @@ describe('decoupled include: exists filter never propagates regardless of source
 		expect(
 			sql,
 			`Include subquery must NOT carry flag predicate after decoupling. SQL: ${sql}`,
-		).not.toContain('__t__.flag');
+		).not.toContain('__t__.flag =');
 	});
 
 	it('cross-source: exists(posts,{where:exists(comments,flag)}) + include(comments) — flag NOT in include', () => {
@@ -124,7 +124,7 @@ describe('decoupled include: exists filter never propagates regardless of source
 		expect(
 			sql,
 			`Include subquery must not contain __t__.flag. SQL: ${sql}`,
-		).not.toContain('__t__.flag');
+		).not.toContain('__t__.flag =');
 
 		// The value false must appear exactly once (in the nested EXISTS only).
 		const falseCount = (dump.params as unknown[]).filter(

@@ -32,8 +32,9 @@ QueryBuilder.all()
 ```
 
 The planner encodes its decision in `PlanReport.decisions[]` as an
-`include-strategy` entry. The hydrator reads those decisions to know how
-to reassemble the rows.
+`include-strategy` entry. The adapter resolves an include payload shape after relation-column injection and carries it in compilation metadata. The hydrator reads that shape to reassemble rows and apply read conversions without renaming keys.
+
+Hydration requires `CompiledQuery.hydrationPlan.includePayloads` (or the compiled plan containing those shapes). Pass the compiled query when calling `ResultHydrator` directly. A planner report alone is insufficient: hydratable include decisions without the compiled shape throw `MissingIncludePayloadShapeError` instead of exposing transport columns.
 
 ## Hydration Strategies
 
@@ -49,181 +50,23 @@ These defaults apply to non-recursive includes with nested output. Recursive inc
 
 For every non-recursive include, explicit `include.join` takes precedence, then the relation `includeStrategy` hint, then an applicable `defaultIncludeStrategy`, then shape selection; explicit join conflicts with concrete hints other than `join` (`json_agg`, `lateral`, `cte`) and is refused, while a plan-level default only fills the gap.
 
-The planner encodes this as:
-```typescript
-// doctest: skip — illustrative data/type literal fragment (not executable code)
-{ type: 'include-strategy', choice: 'json_agg' | 'join' | 'lateral' | 'cte' }
-```
+## Compiled shape contract
 
-### `json_agg` — correlated subquery aggregate
+Include payload keys are explicit aliases or declared model names. Physical database
+names affect SQL references only. JSON includes return nested payloads; join and
+lateral includes return transport columns that the compiled shape owns.
 
-**When used:** to-one and to-many relations when the dialect supports it and the
-output is nested (no `| flat`). Also the default for NQL implicit path notation
-(`posts.title` without `| flat`).
+Transport labels are at most 63 UTF-8 bytes. The compiled shape records the exact
+emitted labels and their public keys, including nested includes. Hydration reads
+only those owned labels; unrelated row keys remain untouched.
 
-**How it works:** The adapter compiles a correlated subquery per included
-relation using PostgreSQL `json_agg(to_jsonb(...))`. The related rows are
-aggregated into a single JSON column (`relation_json`) in the outer SELECT.
+Pass the compiled query to `hydrateJoinIncludes(rows, report, compiled)` or
+`hydrateJsonAggIncludes(rows, report, compiled)`. JSON values may arrive as parsed
+values or strings. To-one payloads become an object or `null`; to-many JSON
+payloads become arrays. Read conversions use public payload keys.
 
-```sql
-SELECT
-  "users"."id",
-  "users"."name",
-  (
-    SELECT COALESCE(json_agg(to_jsonb("posts".*)), '[]'::json)
-    FROM "posts"
-    WHERE "posts"."user_id" = "users"."id"
-  ) AS "posts_json"
-FROM "users"
-```
-
-**Hydration:** compiler projections carry an emitted-label → logical-key map.
-`hydrateJsonAggIncludes()` therefore reads the exact query-local
-`{relation}_json` label, parses the JSON string, and renames the key to the
-relation name. For to-one relations it unwraps the single-element array to a
-plain object; it does not infer camel/snake spellings from returned keys.
-
-```typescript
-// doctest: skip — illustrative data/type literal fragment (not executable code)
-// Before hydration (raw DB row):
-{ id: 1, name: 'Alice', posts_json: '[{"id":10,"title":"Hello"}]' }
-
-// After hydration:
-{ id: 1, name: 'Alice', posts: [{ id: 10, title: 'Hello' }] }
-```
-
-**Key files:**
-- `packages/adapter-pgsql/src/handlers/include/json-agg.ts` — SQL compilation
-- `packages/core/src/dx/hydration-utils.ts` — `hydrateJsonAggIncludes()`
-
-### `join` — LEFT JOIN (flat columns)
-
-**When used:** explicit join overrides or the automatic fallback when JSON
-aggregation is excluded or unavailable and no supported lateral limit applies.
-For to-one relations, at most one matching row per parent avoids row explosion.
-
-**How it works:** The handler adds a `LEFT JOIN` to the main query and emits
-column targets aliased as `"relation.column"` using the dot-separator
-convention:
-
-```sql
-SELECT
-  "users"."id",
-  "users"."name",
-  "org"."id"   AS "org.id",
-  "org"."name" AS "org.name"
-FROM "users"
-LEFT JOIN "orgs" AS "org" ON "org"."id" = "users"."org_id"
-```
-
-**Column aliasing convention:** The dot separator (`relation.col`) is the
-contract between the SQL compiler and the hydrator. The adapter writes
-`relation.col`; `hydrateJoinIncludes()` reads back every key that starts with
-`relation.` and builds the nested object.
-
-**Hydration:** `hydrateJoinIncludes()` iterates `PlanReport.decisions`, finds
-`choice === 'join'`, extracts relation names, then for each row collects all
-`relation.*` keys into a nested object and deletes the prefixed keys. If every
-prefixed column is `null` (LEFT JOIN with no match), the relation is set to
-`null`.
-
-```typescript
-// doctest: skip — illustrative data/type literal fragment (not executable code)
-// Before hydration:
-{ id: 1, name: 'Alice', 'org.id': 42, 'org.name': 'Acme' }
-
-// After hydration:
-{ id: 1, name: 'Alice', org: { id: 42, name: 'Acme' } }
-```
-
-**Key files:**
-- `packages/adapter-pgsql/src/handlers/include/join.ts`
-- `packages/core/src/dx/result-hydrator.ts` — `hydrateJoinIncludes()`
-
-### `lateral` — LEFT JOIN LATERAL
-
-**When used:** to-many includes that need a per-parent `LIMIT`, or when the
-include has complex correlated filtering. Avoids row explosion while still
-allowing `ORDER BY / LIMIT` per parent row.
-
-**How it works:** Each included relation becomes a `LEFT JOIN LATERAL` subquery
-correlated to the outer row. Supports arbitrarily deep nesting — each child
-relation adds another `LEFT JOIN LATERAL` correlated with its parent's lateral
-alias.
-
-```sql
-SELECT "users".*, "latest_post"."id", "latest_post"."title"
-FROM "users"
-LEFT JOIN LATERAL (
-  SELECT "id", "title"
-  FROM "posts"
-  WHERE "posts"."user_id" = "users"."id"
-  ORDER BY "created_at" DESC
-  LIMIT 1
-) AS "latest_post" ON TRUE
-```
-
-**Hydration:** Uses the same dot-notation column aliasing as `join`. The lateral
-handler emits `relation.column` aliases, and `hydrateJoinIncludes()` reassembles
-them.
-
-**Key file:** `packages/adapter-pgsql/src/handlers/include/lateral.ts`
-
-### `cte` — Common Table Expression
-
-**When used:** When the same related table is referenced multiple times in a
-query, or when complex transformations on the related data need to be computed
-once and reused.
-
-**How it works:** The handler registers a CTE (`WITH relation_cte AS (...)`) in
-`CompilerState.ctes` and emits a JOIN to the CTE reference alias. The CTE is
-computed once by PostgreSQL and can be joined multiple times.
-
-```sql
-WITH "org_cte" AS (
-  SELECT * FROM "orgs" WHERE "active" = $1
-)
-SELECT "users".*, "org_ref_0"."name" AS "org.name"
-FROM "users"
-LEFT JOIN "org_cte" AS "org_ref_0" ON "org_ref_0"."id" = "users"."org_id"
-```
-
-**Trade-off:** CTEs are optimization barriers in PostgreSQL < 12 (always
-materialized). PostgreSQL 12+ may inline them. Prefer `join` or `lateral` for
-simple cases.
-
-**Key file:** `packages/adapter-pgsql/src/handlers/include/cte.ts`
-
-## Column Aliasing: The Dot Convention
-
-The `join` and `lateral` strategies share a column aliasing contract:
-
-```
-SQL alias:    "relation.column"
-Hydrator key: "relation.column"  →  result.relation.column
-```
-
-The adapter handler (`join.ts`, `lateral.ts`) writes:
-```typescript
-// doctest: skip — illustrative excerpt of internal handler implementation; references local variables (columnAliases, col, relation, targetAlias, ctx) only available inside the handler scope
-const outputAlias = columnAliases?.[col] ?? `${relation}.${col}`;
-targets.push(columnTarget(col, outputAlias, targetAlias, ctx.naming));
-```
-
-`hydrateJoinIncludes()` recovers the nested object:
-```typescript
-// doctest: skip — illustrative excerpt of internal handler implementation; references local variables (record, relationName, prefix, nestedObj) only available inside the hydrator scope
-for (const key of Object.keys(record)) {
-  if (key.startsWith(`${relationName}.`)) {
-    nestedObj[key.slice(prefix.length)] = record[key];
-    // delete the prefixed key from the flat record
-  }
-}
-```
-
-If a user supplies explicit `columnAliases` on the include decision, those
-override the `relation.col` default — the hydrator must receive matching
-`context.relation` from the plan decision to know which keys to collect.
+Hydration is atomic per row: if a read conversion fails, that row retains its
+original keys and values.
 
 ## Row Explosion Risk
 
@@ -354,16 +197,6 @@ foreign keys and measure the query cost for your workload.
 
 ## Gotchas
 
-- **`json_agg` returns a string, not a parsed object.** The pg driver returns
-  JSON columns as strings in some configurations. `hydrateJsonAggIncludes()`
-  always calls `JSON.parse()` defensively.
-- **Projection-label authority.** Returned labels are mapped by the compiler,
-  including PostgreSQL's 63-byte identifier truncation. Do not depend on
-  camel/snake inference for a result or JSON key.
-- **LEFT JOIN null propagation.** When a `join` strategy include has no match
-  (LEFT JOIN returns all-null columns), the hydrator sets `relation: null`
-  rather than an empty object. Check `allNull` logic in `hydrateJoinIncludes()`.
-
 Include options are honoured or refused at every depth. Limits must be non-negative
 safe integers. `json_agg` honours field-only `orderBy` with or without a limit;
 its array follows that order, with primary-key tie-breakers last. Ordered includes
@@ -382,3 +215,15 @@ properties independently in chunks of at most 50 key/value pairs joined with
 `['*']`); partial projections are refused with the include path. NQL relation
 selections are root relation columns, so `users | select id, posts.title | flat`
 and `users | select id, posts.title | limit posts 5` retain their behaviour.
+
+## Include payload keys
+
+Each include column uses its explicit alias, or its declared model name when no alias is supplied. Physical database names never become payload keys: `dbCasing` affects SQL references only. This includes aliases that happen to equal a physical name and bigint read conversions, which run under the public key.
+
+A relation uses the requested include name at every depth. For example, `include('posts', { include: [{ relation: 'comments' }] })` returns `posts[].comments`, even when the model resolves that child to a relation named `post_comments`.
+
+NQL's unaliased `relation.column` label is a default flat label, not an explicit alias. Flat SQL uses that label subject to the transport byte limit; nested JSON uses the column's declared name. The compiled shape records the emitted flat label. An explicit `as` supplies the public column key.
+
+Every root SELECT label owns its key, including function labels and expanded stars. Use `.as(...)` for expressions whose returned label cannot be established. Exact duplicate aggregate requests emit one SQL target. Hydration stages all conversions and child reads before changing each row; a conversion failure leaves that row unchanged.
+
+Compilation resolves these keys before generating SQL. Exact duplicate source/key requests deduplicate; two different owners of one public key fail with the payload path and key. A wildcard include over a target whose columns cannot be enumerated also fails.

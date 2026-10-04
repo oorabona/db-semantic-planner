@@ -179,7 +179,7 @@ describe('5. include + exists — decoupled: include never inherits exists filte
 		// Include subquery must appear
 		expect(normalized).toMatch(/json_agg|lateral|posts/i);
 		// `published` must appear EXACTLY ONCE (in the EXISTS WHERE only, not in include).
-		const publishedCount = (normalized.match(/published/gi) ?? []).length;
+		const publishedCount = (normalized.match(/published =/gi) ?? []).length;
 		expect(publishedCount).toBe(1);
 	});
 
@@ -198,7 +198,7 @@ describe('5. include + exists — decoupled: include never inherits exists filte
 		// EXISTS must be in WHERE
 		expect(normalized).toContain('EXISTS');
 		// published must appear EXACTLY ONCE — in the WHERE EXISTS only, NOT in include.
-		const publishedCount = (normalized.match(/published/gi) ?? []).length;
+		const publishedCount = (normalized.match(/published =/gi) ?? []).length;
 		expect(publishedCount).toBe(1);
 	});
 });
