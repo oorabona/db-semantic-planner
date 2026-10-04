@@ -77,7 +77,7 @@ orm.select('symbols')
 
 `.asExpr('alias')` wraps the `SubqueryExpression` as an `ExpressionSpec` for use in `.columns([...])`. Source: `packages/core/src/dx/subquery-builder.ts:175`.
 
-`outerRef()` inside a SELECT-expression subquery is refused at compile time.
+Correlated subqueries using `outerRef()` are not supported in SELECT expressions and are refused at compile time, including when nested inside an expression such as `op(...)`. Use an uncorrelated subquery or a `.join()` with `groupBy` and an aggregate to produce a value.
 
 Aggregate methods available on `SubqueryBuilder`:
 

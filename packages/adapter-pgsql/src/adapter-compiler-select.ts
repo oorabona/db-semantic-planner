@@ -80,7 +80,11 @@ import {
 	assertProjectedJsonContainerCanBeAggregated,
 	resolveRelationTarget,
 } from './relation-target-projection.js';
-import { queryLocal, resolveDeclaredIdentifier } from './sql-identifier.js';
+import {
+	identifierText,
+	queryLocal,
+	resolveDeclaredIdentifier,
+} from './sql-identifier.js';
 import { stableJson } from './transition/stable-json.js';
 
 /** Exact source/key duplicates have one SQL projection, including at the root. */
@@ -333,15 +337,18 @@ function compileJoinIntents(
 			: []),
 	]);
 
+	// Bindings are available for lookup, but only FROM ranges occupy qualifiers.
+	const occupiedQualifiers = new Set([rootTable]);
 	for (const intent of joins) {
 		const qualifier =
 			intent.alias ??
 			intent.relation ??
 			intent.batchValues?.alias ??
 			intent.table;
-		if (qualifier !== undefined && joinScope.bindings.has(qualifier)) {
+		if (qualifier !== undefined && occupiedQualifiers.has(qualifier)) {
 			throw new Error(`Query scope already binds qualifier '${qualifier}'.`);
 		}
+		if (qualifier !== undefined) occupiedQualifiers.add(qualifier);
 		if (intent.relation !== undefined) {
 			// ── Relation mode: resolve FK from model ──────────────────────────
 			// If no model available, we can't resolve the FK — skip with warning.
@@ -389,7 +396,9 @@ function compileJoinIntents(
 			const alias = intent.alias ?? intent.relation;
 
 			joinScope = queryScope([
-				...joinScope.bindings.values(),
+				...Array.from(joinScope.bindings.values()).filter(
+					(binding) => identifierText(binding.qualifier) !== alias,
+				),
 				relationBinding({
 					qualifier: queryLocal(alias),
 					kind: 'declared-table',
@@ -428,7 +437,9 @@ function compileJoinIntents(
 			bvOnParamState.paramIndex = bvParams.length;
 
 			joinScope = queryScope([
-				...joinScope.bindings.values(),
+				...Array.from(joinScope.bindings.values()).filter(
+					(binding) => identifierText(binding.qualifier) !== alias,
+				),
 				batchValuesBinding(alias, [
 					...bv.columns,
 					...(bv.ordinality ? ['ord'] : []),
@@ -523,7 +534,12 @@ function compileJoinIntents(
 								kind: 'declared-table',
 								logicalTable: intent.table,
 							});
-			joinScope = queryScope([...joinScope.bindings.values(), joinedBinding]);
+			joinScope = queryScope([
+				...Array.from(joinScope.bindings.values()).filter(
+					(binding) => identifierText(binding.qualifier) !== tableAlias,
+				),
+				joinedBinding,
+			]);
 			const ctx: WhereCompilerCtx = {
 				rootTable,
 				aliases: tableAliasMap,

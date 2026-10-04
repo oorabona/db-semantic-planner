@@ -1,4 +1,13 @@
-import { createOrm, eq, outerRef, ref, schema, subquery } from '@dbsp/core';
+import {
+	createOrm,
+	eq,
+	literal,
+	op,
+	outerRef,
+	ref,
+	schema,
+	subquery,
+} from '@dbsp/core';
 import { expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -36,24 +45,62 @@ it('refuses repeated implicit join qualifiers', () => {
 		orm.select('uses').join('files', { on }).join('files', { on }).dump(),
 	).toThrowError(new Error("Query scope already binds qualifier 'files'."));
 });
-it('refuses correlated SELECT-expression subqueries', () => {
-	expect(() =>
-		orm
-			.select('symbols')
-			.columns([
-				'id',
-				subquery('calls')
-					.where(eq('symbolId', outerRef('id')))
-					.count()
-					.asExpr('callCount'),
-			])
-			.dump(),
-	).toThrowError(
-		new Error(
-			'scalar subquery with correlated outerRef() is not yet supported — use exists("relation", { where: ... }) when a schema relation exists, or restructure the query to avoid the correlation.',
-		),
-	);
-});
+const correlationMessage =
+	'Correlated subqueries are not supported in SELECT expressions — use an uncorrelated subquery or a .join() with groupBy and an aggregate.';
+for (const nested of [false, true]) {
+	for (const entry of ['compileSelectExpression', 'columns'] as const) {
+		it(`refuses ${nested ? 'op-nested' : 'direct'} correlation through ${entry}`, () => {
+			const sub = subquery('calls')
+				.where(eq('symbolId', outerRef('id')))
+				.count()
+				.asExpr('n');
+			const expr = nested ? op('+', sub, literal(1)) : sub;
+			expect(() =>
+				entry === 'compileSelectExpression'
+					? createPgCompileOnlyAdapter().compileSelectExpression(expr.intent)
+					: orm.select('symbols').columns(['id', expr]).dump(),
+			).toThrowError(new Error(correlationMessage));
+		});
+	}
+}
+for (const alias of [undefined, 'draft_posts']) {
+	it(`joins a CTE binding with ${alias ? 'explicit' : 'implicit'} natural qualifier`, () => {
+		const model = schema({
+			posts: { id: 'integer', published: 'boolean' },
+			comments: { id: 'integer', postId: 'integer' },
+		}).model;
+		const result = createPgCompileOnlyAdapter({ model }).compile({
+			bindings: new Map([
+				[
+					'draft_posts',
+					{
+						type: 'select',
+						from: 'posts',
+						select: { type: 'fields', fields: ['id'] },
+						where: eq('published', false),
+					},
+				],
+			]),
+			query: {
+				type: 'select',
+				from: 'comments',
+				select: { type: 'fields', fields: ['id'] },
+				joins: [
+					{
+						table: 'draft_posts',
+						...(alias !== undefined && { alias }),
+						type: 'inner',
+						on: eq('comments.postId', ref('draft_posts.id')),
+					},
+				],
+			},
+		});
+		expect(result.sql).toBe(
+			'WITH "draft_posts" as (SELECT posts.id FROM posts WHERE posts.published = $1) SELECT comments.id FROM comments JOIN draft_posts AS draft_posts ON comments."postId" = draft_posts.id',
+		);
+		expect(result.parameters).toEqual([false]);
+	});
+}
 it('preserves exact SQL for distinct qualifiers and an uncorrelated SELECT expression', () => {
 	const result = orm
 		.select('uses')

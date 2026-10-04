@@ -128,7 +128,10 @@ import {
 import { deparseQuoted } from './deparse.js';
 import { compileExpressionIntent } from './handlers/expression/custom.js';
 import { createCompilerState } from './handlers/types.js';
-import { intentToDecisions } from './intent-to-decisions.js';
+import {
+	assertNoSelectExpressionCorrelation,
+	intentToDecisions,
+} from './intent-to-decisions.js';
 import {
 	type IntrospectedModelIR,
 	type IntrospectionOptions,
@@ -3484,6 +3487,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 				query: import('@dbsp/types').QueryIntent,
 				paramOffset: number,
 			): CompileSubqueryResult {
+				assertNoSelectExpressionCorrelation(query);
 				const innerCompiler = new PlanCompiler({
 					dbCasing: deps.dbCasing ?? 'preserve',
 					...(schemaName !== undefined && { schema: schemaName }),
