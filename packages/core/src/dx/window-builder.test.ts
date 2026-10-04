@@ -1,3 +1,4 @@
+import { EXPRESSION_BRAND } from '@dbsp/types';
 /**
  * @file WindowBuilder Unit Tests (DX-021)
  * Tests for the fluent window function builder pattern
@@ -25,7 +26,7 @@ import type { ExpressionSpec } from './types.js';
 // ============================================================================
 
 function getWindowIntent(spec: ExpressionSpec): WindowIntent {
-	expect(spec.__expr).toBe(true);
+	expect(spec[EXPRESSION_BRAND]).toBe(true);
 	expect(spec.intent).toBeDefined();
 	expect((spec.intent as WindowIntent).kind).toBe('window');
 	return spec.intent as WindowIntent;
@@ -322,10 +323,10 @@ describe('DX-021: Window Functions Builder Pattern', () => {
 	// ============================================================================
 
 	describe('ExpressionSpec compatibility', () => {
-		it('should return valid ExpressionSpec with __expr marker', () => {
+		it('should return valid ExpressionSpec with expression symbol marker', () => {
 			const spec = rowNumber().orderBy('id').as('rn');
 
-			expect(spec.__expr).toBe(true);
+			expect(spec[EXPRESSION_BRAND]).toBe(true);
 			expect(spec.intent).toBeDefined();
 			expect(spec.intent.kind).toBe('window');
 		});
@@ -342,8 +343,8 @@ describe('DX-021: Window Functions Builder Pattern', () => {
 			expect(columns).toHaveLength(4);
 			expect(typeof columns[0]).toBe('string');
 			expect(typeof columns[1]).toBe('string');
-			expect((columns[2] as ExpressionSpec).__expr).toBe(true);
-			expect((columns[3] as ExpressionSpec).__expr).toBe(true);
+			expect((columns[2] as ExpressionSpec)[EXPRESSION_BRAND]).toBe(true);
+			expect((columns[3] as ExpressionSpec)[EXPRESSION_BRAND]).toBe(true);
 		});
 	});
 

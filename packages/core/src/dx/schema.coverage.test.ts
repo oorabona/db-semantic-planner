@@ -1,4 +1,5 @@
 // @ts-nocheck — coverage test: runtime assertions on AST nodes
+import { REF_BRAND } from '@dbsp/types';
 /**
  * Coverage tests for schema.ts
  *
@@ -12,7 +13,7 @@ describe('schema coverage', () => {
 	describe('ref()', () => {
 		it('should create ref with no options', () => {
 			const result = ref('users');
-			expect(result.__brand).toBe('ref');
+			expect(result[REF_BRAND]).toBe('ref');
 			expect(result.target).toBe('users');
 			expect(result.options).toEqual({});
 		});

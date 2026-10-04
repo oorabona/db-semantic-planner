@@ -1,3 +1,4 @@
+import { EXPRESSION_BRAND } from '@dbsp/types';
 import { createWhereDispatcher } from './handlers/index.js';
 /**
  * Mutation compilation: INSERT, UPDATE, DELETE, UPSERT.
@@ -1035,8 +1036,8 @@ export function compileUpsert(
 				scalarSet[key] =
 					val &&
 					typeof val === 'object' &&
-					'__expr' in val &&
-					val.__expr === true &&
+					EXPRESSION_BRAND in val &&
+					val[EXPRESSION_BRAND] === true &&
 					'intent' in val &&
 					isParamIntent(val.intent)
 						? val.intent

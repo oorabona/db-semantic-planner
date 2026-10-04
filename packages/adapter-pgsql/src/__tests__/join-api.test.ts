@@ -261,20 +261,22 @@ describe('FR-10 Block 2: JOIN ON aliases pre-population', () => {
 		expect(ws(dump.sql)).toContain('embeddings.id = e2.id');
 	});
 
-	it('T10: table mode — alias=rootTable case (no alias entry needed)', () => {
+	it('T10: table mode — implicit alias colliding with root is refused', () => {
 		const orm = buildOrm();
-		// ON embeddings.id = embeddings.id (degenerate self-join without alias)
+		// An unaliased self-join would emit the root qualifier twice.
 		const onCond = {
 			kind: 'comparison',
 			field: 'embeddings.id',
 			operator: 'eq',
 			value: { kind: 'fieldRef', column: 'id', scope: 'outer' as const },
 		};
-		const dump = (orm as any)
-			.select('embeddings')
-			.join('embeddings', { on: onCond, type: 'inner' })
-			.dump();
-		expect(ws(dump.sql)).toContain('JOIN embeddings');
-		expect(dump.params).toEqual([]);
+		expect(() =>
+			(orm as any)
+				.select('embeddings')
+				.join('embeddings', { on: onCond, type: 'inner' })
+				.dump(),
+		).toThrowError(
+			new Error("Query scope already binds qualifier 'embeddings'."),
+		);
 	});
 });

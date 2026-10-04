@@ -508,7 +508,7 @@
 			"position": "relation-notExists",
 			"kind": "rawExists-range",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $1)))",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($1 AS daterange))))",
 			"params": ["[2026-01-01,2026-02-01)"],
 			"error": null
 		},
@@ -516,7 +516,7 @@
 			"position": "relation-notExists",
 			"kind": "rawExists-range",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $1) AND posts_exists_0.score = $2))",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($1 AS daterange)) AND posts_exists_0.score = $2))",
 			"params": ["[2026-01-01,2026-02-01)", 13],
 			"error": null
 		},
@@ -524,7 +524,7 @@
 			"position": "relation-notExists",
 			"kind": "rawExists-range",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $1) OR posts_exists_0.score = $2)))",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($1 AS daterange)) OR posts_exists_0.score = $2)))",
 			"params": ["[2026-01-01,2026-02-01)", 13],
 			"error": null
 		},
@@ -532,7 +532,7 @@
 			"position": "relation-notExists",
 			"kind": "rawExists-range",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $1))))",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($1 AS daterange)))))",
 			"params": ["[2026-01-01,2026-02-01)"],
 			"error": null
 		},
@@ -540,7 +540,7 @@
 			"position": "relation-notExists",
 			"kind": "rawExists-range",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1 AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $2)) OR posts_exists_0.score = $3)))",
+			"sql": "SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1 AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($2 AS daterange))) OR posts_exists_0.score = $3)))",
 			"params": [13, "[2026-01-01,2026-02-01)", 17],
 			"error": null
 		},

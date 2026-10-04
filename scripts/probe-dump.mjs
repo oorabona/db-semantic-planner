@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// schema exports may be objects or (core) => objects using core.ref().
 // Compare built checkouts: node scripts/probe-dump.mjs <checkout-dir> <cases-module>
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -26,14 +27,14 @@ try {
 	usage(`cannot load cases module ${casesPath}: ${error.message}`);
 }
 for (const name of ['schema', 'cases']) {
-	if (!Object.hasOwn(inputs, name) || inputs[name] === null || typeof inputs[name] !== 'object' || Array.isArray(inputs[name])) {
+	if (!Object.hasOwn(inputs, name) || inputs[name] === null || (typeof inputs[name] !== 'object' && !(name === 'schema' && typeof inputs[name] === 'function')) || Array.isArray(inputs[name])) {
 		usage(`missing or invalid ${name} export in ${casesPath} (expected an object)`);
 	}
 }
 
 const core = await import(pathToFileURL(entries[0]).href);
 const { createPgCompileOnlyAdapter } = await import(pathToFileURL(entries[1]).href);
-const db = core.schema(inputs.schema);
+const db = core.schema(typeof inputs.schema === 'function' ? inputs.schema(core) : inputs.schema);
 const orm = core.createOrm({ schema: db, adapter: createPgCompileOnlyAdapter({ model: db.model }) });
 for (const [name, build] of Object.entries(inputs.cases)) {
 	try {

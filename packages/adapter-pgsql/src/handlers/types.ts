@@ -54,6 +54,11 @@ export type IncludeHandlerStrategy = (typeof INCLUDE_STRATEGIES)[number];
  * Immutable context passed to all handlers during compilation.
  */
 export interface CompilerContext {
+	readonly compileSubqueryCondition?: (
+		intent: import('@dbsp/types').WhereIntent,
+		ctx: CompilerContext,
+		state: CompilerState,
+	) => Node;
 	readonly directRootWhere?: boolean;
 	readonly position?: import('../condition-context.js').ConditionPosition;
 	readonly createWhereDispatcher?: () => WhereDispatcher;

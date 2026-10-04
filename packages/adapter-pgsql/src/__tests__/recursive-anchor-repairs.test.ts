@@ -511,3 +511,27 @@ it('unknown traversal kinds retain their named refusal', () => {
 		adapter.compileRecursive({ ...report, intent: unknown }, db.model),
 	).toThrow("Unsupported traversal kind 'unknownTraversal'");
 });
+
+for (const kind of ['rawExists', 'rawNotExists'] as const) {
+	for (const adjacency of [false, true]) {
+		it(`${kind} anchor body keeps model array typing adjacency ${adjacency}`, () => {
+			const result = compile(
+				{
+					...rawExists(subquery('posts').select('id').where(any('score', []))),
+					kind,
+				},
+				adjacency,
+			);
+			const condition = `${kind === 'rawNotExists' ? 'NOT (' : ''}EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = ANY (CAST($1 AS int4[])))${kind === 'rawNotExists' ? ')' : ''}`;
+			expect(result.sql).toBe(
+				adjacency
+					? edgeSql(condition).replace(
+							'tree JOIN edges AS __e ON __e.from_id = tree.id JOIN users AS __n ON __n.id = __e.to_id',
+							'tree JOIN users AS __n ON __n.score = tree.id',
+						)
+					: edgeSql(condition),
+			);
+			expect(result.parameters).toEqual([[]]);
+		});
+	}
+}

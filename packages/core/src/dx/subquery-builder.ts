@@ -1,3 +1,4 @@
+import { brandValue, EXPRESSION_BRAND } from '@dbsp/types';
 /**
  * @module subquery-builder
  * Subquery builder for scalar subquery expressions in WHERE clauses.
@@ -242,10 +243,13 @@ export class SubqueryExpression {
 	 * ])
 	 */
 	asExpr(alias: string): ExpressionSpec {
-		return {
-			__expr: true,
-			intent: { kind: 'subquery', query: this.intent, as: alias },
-		};
+		return brandValue(
+			{
+				intent: { kind: 'subquery', query: this.intent, as: alias },
+			},
+			EXPRESSION_BRAND,
+			true as const,
+		);
 	}
 }
 

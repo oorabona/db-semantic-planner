@@ -185,6 +185,27 @@ export function compileValueOrFieldRef(
 				anchorQualifiedBinding(value.alias, ctx),
 			);
 		}
+		if (
+			value.scope === 'outer' &&
+			ctx.position === 'subquery' &&
+			value.column.includes('.')
+		) {
+			const dot = value.column.lastIndexOf('.');
+			const qualifier = value.column.slice(0, dot);
+			const binding = Array.from(ctx.scope?.bindings.values() ?? [])
+				.reverse()
+				.find(
+					(candidate) =>
+						candidate.qualifier !== ctx.currentBinding?.qualifier &&
+						(candidate.qualifier === qualifier ||
+							candidate.logicalTable === qualifier),
+				);
+			if (!binding)
+				throw new Error(
+					`outerRef qualifier '${qualifier}' is not visible in an enclosing query.`,
+				);
+			return expressionColumnRef(value.column.slice(dot + 1), ctx, binding);
+		}
 		if (value.column.includes('.')) return buildColumnRef(value.column, ctx);
 		const alias =
 			value.scope === 'outer'

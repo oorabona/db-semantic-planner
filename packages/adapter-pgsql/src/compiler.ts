@@ -96,6 +96,7 @@ import {
 import { buildKeyCorrelation } from './handlers/where/exists.js';
 import { buildColumnRef, compileValue } from './handlers/where/utils.js';
 import {
+	assertNoSelectExpressionCorrelation,
 	assertNoUnsupportedSubqueryModifiers,
 	convertWhereCondition,
 	intentToDecisions,
@@ -1809,6 +1810,7 @@ export class PlanCompiler {
 		ast: Node;
 		parameters: readonly unknown[];
 	} {
+		assertNoSelectExpressionCorrelation(query);
 		const innerCompiler = new PlanCompiler(this.childCompilerOptions());
 		const innerPlan: SimplifiedPlanReport = {
 			rootTable: query.from,
@@ -2999,7 +3001,7 @@ export class PlanCompiler {
 			visibleAliases: new Map(this.visibleSqlQualifiers),
 			paramState: this.state,
 			...(handlerCtx.schema !== undefined && { schemaName: handlerCtx.schema }),
-			compileSubquery: (query, offset) =>
+			compileSubquery: (query, offset, parent) =>
 				buildSubqueryFromIntent(
 					query,
 					offset,
@@ -3009,6 +3011,7 @@ export class PlanCompiler {
 					handlerCtx.scope,
 					this.dialectCapabilities,
 					this.dbCasing,
+					parent,
 				),
 		});
 		// A positive planned JOIN without an inner predicate already supplies the

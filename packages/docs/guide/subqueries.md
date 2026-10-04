@@ -49,10 +49,10 @@ orm.select('users')
 
 ## Pattern: scalar subquery in SELECT
 
-Embed an aggregate from a related table as a column in the outer SELECT:
+Embed an aggregate from another table as a column in the outer SELECT:
 
 ```typescript
-import { schema, createOrm, subquery, outerRef, eq } from '@dbsp/core';
+import { schema, createOrm, subquery } from '@dbsp/core';
 import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({
@@ -66,17 +66,18 @@ orm.select('symbols')
     'id',
     'name',
     subquery('calls')
-      .where(eq('symbolId', outerRef('id')))
       .count()
       .asExpr('callCount'),
   ])
   .dump();
 // SQL: SELECT "id", "name",
-//   (SELECT COUNT(*) FROM "calls" WHERE "symbolId" = "symbols"."id") AS "callCount"
+//   (SELECT COUNT(*) FROM "calls") AS "callCount"
 // FROM "symbols"
 ```
 
 `.asExpr('alias')` wraps the `SubqueryExpression` as an `ExpressionSpec` for use in `.columns([...])`. Source: `packages/core/src/dx/subquery-builder.ts:175`.
+
+Correlated subqueries using `outerRef()` are not supported in SELECT expressions and are refused at compile time, including when nested inside an expression such as `op(...)`. Use an uncorrelated subquery or a `.join()` with `groupBy` and an aggregate to produce a value.
 
 Aggregate methods available on `SubqueryBuilder`:
 
@@ -116,7 +117,6 @@ The correlation predicate (`author_id = users.id`) is resolved automatically fro
 `outerRef(column)` creates a reference to a column in the outer query for use in a subquery's WHERE condition:
 
 ```typescript
-// doctest: skip — correlated outerRef() is not yet supported (see warning below); shown as the intended future syntax
 import { schema, createOrm, subquery, outerRef, eq } from '@dbsp/core';
 import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
@@ -139,17 +139,27 @@ orm.select('products')
 
 Source: `packages/core/src/dx/subquery-builder.ts:288` — `outerRef(column)` returns a `SubqueryRefIntent`.
 
-::: warning Correlated subqueries with `outerRef()` are not yet supported
-Wiring `outerRef()` through the correlation pipeline is not yet implemented for **either** a scalar subquery (as in the example above) **or** `rawExists()`. Passing `outerRef()` inside either is detected at compile time and throws a clear error (e.g. `"scalar subquery with correlated outerRef() is not yet supported"` / `"rawExists: correlated subqueries (outerRef inside the inner WHERE) are not yet supported"`). The example above shows the intended future syntax. Today, use the `exists('relation', { where })` builder (FK-correlated) or expression-primitive `op()` patterns instead. Tracked as a known limitation.
-:::
+Query WHERE scalar comparisons and `inSubquery()` compile the body with its own alias and resolve unqualified `outerRef()` to the immediately enclosing query and qualified references to the nearest matching enclosing table or alias. `rawExists()` and `rawNotExists()` use the same body compiler in WHERE, aggregate FILTER and recursive `start.where` anchors. All levels share one parameter sequence. Legacy `compilePlan()` and SELECT expression subqueries retain their existing correlation restrictions.
 
 ---
 
 ## Common pitfalls
 
-### Alias collisions in scalar subqueries
+### Nested aliases and correlation
 
-If you reference the same table in both the outer query and the subquery, PostgreSQL may alias them identically. The planner handles table-level aliasing in the outer query, but the subquery compiles to bare table references. Disambiguate by ensuring the two SELECT targets are different tables or by using a CTE.
+Predicate subqueries allocate distinct aliases at every nesting depth and across siblings, including repeated queries on the same table. Unqualified `outerRef()` binds to the immediately enclosing query; qualified `outerRef('posts.id')` binds to the nearest enclosing query whose table or alias is `posts`; all levels share one parameter sequence. Duplicate explicit aliases in one scope are rejected.
+
+```typescript
+import { schema, createOrm, and, eq, inSubquery, outerRef, subquery } from '@dbsp/core';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+
+const db = schema({ users: { id: 'integer' }, posts: { id: 'integer', score: 'integer' } } as const);
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter({ model: db.model }) });
+const deepest = subquery('posts').select('id').where(and(eq('score', 3), eq('id', outerRef('id'))));
+const middle = subquery('posts').select('id').where(and(eq('score', 2), eq('id', outerRef('id')), inSubquery('id', deepest)));
+orm.select('users').where(inSubquery('id', subquery('posts').select('id').where(and(eq('score', 1), eq('id', outerRef('id')), inSubquery('id', middle))))).dump();
+// params: [1, 2, 3]
+```
 
 ### Performance: subquery vs JOIN
 

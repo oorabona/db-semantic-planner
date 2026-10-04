@@ -1,3 +1,4 @@
+import { REF_BRAND } from '@dbsp/types';
 /**
  * @fileoverview Type utilities for inferring TableRef types from schema definitions.
  *
@@ -69,7 +70,7 @@ interface RefDefinition<
 	TTarget extends string = string,
 	TOptions extends RefOptionsShape = RefOptionsShape,
 > {
-	readonly __brand: 'ref';
+	readonly [REF_BRAND]: 'ref';
 	readonly target: TTarget;
 	readonly options: TOptions;
 }
@@ -103,7 +104,7 @@ type SchemaDefinition = Record<string, TableDef>;
 /**
  * Check if a definition is a RefDefinition.
  */
-type IsRef<T> = T extends { __brand: 'ref' } ? true : false;
+type IsRef<T> = T extends { [REF_BRAND]: 'ref' } ? true : false;
 
 /**
  * Extract the column type from a ColumnDef.

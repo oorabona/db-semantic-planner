@@ -518,7 +518,7 @@
 			"position": "having-filter",
 			"kind": "rawExists-range",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $1)) > $2",
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($1 AS daterange))) > $2",
 			"params": ["[2026-01-01,2026-02-01)", 19],
 			"error": null
 		},
@@ -526,7 +526,7 @@
 			"position": "having-filter",
 			"kind": "rawExists-range",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $1) AND users.score = $2) > $3",
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($1 AS daterange)) AND users.score = $2) > $3",
 			"params": ["[2026-01-01,2026-02-01)", 13, 19],
 			"error": null
 		},
@@ -534,7 +534,7 @@
 			"position": "having-filter",
 			"kind": "rawExists-range",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $1) OR users.score = $2) > $3",
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($1 AS daterange)) OR users.score = $2) > $3",
 			"params": ["[2026-01-01,2026-02-01)", 13, 19],
 			"error": null
 		},
@@ -542,7 +542,7 @@
 			"position": "having-filter",
 			"kind": "rawExists-range",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $1))) > $2",
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($1 AS daterange)))) > $2",
 			"params": ["[2026-01-01,2026-02-01)", 19],
 			"error": null
 		},
@@ -550,7 +550,7 @@
 			"position": "having-filter",
 			"kind": "rawExists-range",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.score = $1 AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $2)) OR users.score = $3)) > $4",
+			"sql": "SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.score = $1 AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($2 AS daterange))) OR users.score = $3)) > $4",
 			"params": [13, "[2026-01-01,2026-02-01)", 17, 19],
 			"error": null
 		},

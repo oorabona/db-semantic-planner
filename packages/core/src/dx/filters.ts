@@ -1,3 +1,4 @@
+import { brandValue, EXPRESSION_BRAND } from '@dbsp/types';
 /**
  * @module filters
  * Drizzle-like filter helpers for ergonomic WHERE clause building.
@@ -558,9 +559,8 @@ export function notExists(
  * Accepts a SubqueryBuilder (must have `.build()`) or any builder
  * exposing `buildIntent(): QueryIntent` (e.g. QueryBuilder).
  *
- * **Limitation:** correlated subqueries (using `outerRef()` inside the inner WHERE)
- * are NOT supported and will throw at compile time. For correlated EXISTS over an
- * FK-declared relation, use `exists('relation', { where: ... outerRef(...) })` instead.
+ * Correlated bodies using `outerRef()` compile in query WHERE, aggregate FILTER,
+ * and recursive `start.where`. Other positions refuse correlated bodies at compile time.
  *
  * @param subquery - A SubqueryBuilder or any object with buildIntent()
  *
@@ -590,9 +590,8 @@ export function rawExists(
  * Accepts a SubqueryBuilder (must have `.build()`) or any builder
  * exposing `buildIntent(): QueryIntent` (e.g. QueryBuilder).
  *
- * **Limitation:** correlated subqueries (using `outerRef()` inside the inner WHERE)
- * are NOT supported and will throw at compile time. For correlated NOT EXISTS over an
- * FK-declared relation, use `notExists('relation', { where: ... outerRef(...) })` instead.
+ * Correlated bodies using `outerRef()` compile in query WHERE, aggregate FILTER,
+ * and recursive `start.where`. Other positions refuse correlated bodies at compile time.
  *
  * @param subquery - A SubqueryBuilder or any object with buildIntent()
  *
@@ -600,6 +599,12 @@ export function rawExists(
  * // NOT EXISTS (SELECT 1 FROM bans WHERE bans.reason = 'spam')
  * // Uncorrelated: inner filter is a plain value, no reference to the outer row.
  * rawNotExists(subquery('bans').select('id').where(eq('reason', 'spam')))
+ *
+ * @example
+ * // Correlated body in query WHERE
+ * orm.select('users').where(rawNotExists(
+ *   subquery('bans').select('id').where(eq('userId', outerRef('id')))
+ * ))
  */
 export function rawNotExists(
 	sq: SubqueryBuilder | { buildIntent(): QueryIntent },
@@ -768,10 +773,13 @@ export function coalesce(
 		validateIdentifier(f, 'column');
 	}
 	validateIdentifier(as, 'column');
-	return {
-		__expr: true,
-		intent: { kind: 'coalesce', fields, as },
-	};
+	return brandValue(
+		{
+			intent: { kind: 'coalesce', fields, as },
+		},
+		EXPRESSION_BRAND,
+		true as const,
+	);
 }
 
 /**
@@ -824,10 +832,13 @@ export function raw(sqlFragment: string, as: string): ExpressionSpec {
 	}
 	// FIND-008: Validate the alias as a SQL identifier; sqlFragment is an intentional raw escape hatch
 	validateIdentifier(as, 'column');
-	return {
-		__expr: true,
-		intent: { kind: 'raw', sql: sqlFragment, as },
-	};
+	return brandValue(
+		{
+			intent: { kind: 'raw', sql: sqlFragment, as },
+		},
+		EXPRESSION_BRAND,
+		true as const,
+	);
 }
 
 /**
@@ -858,10 +869,13 @@ export function col(column: string, alias: string): ExpressionSpec {
 	// FIND-008: Validate column name and alias as SQL identifiers (same strictness as coalesce)
 	validateIdentifier(column, 'column');
 	validateIdentifier(alias, 'column');
-	return {
-		__expr: true,
-		intent: { kind: 'columnAlias', column, alias },
-	};
+	return brandValue(
+		{
+			intent: { kind: 'columnAlias', column, alias },
+		},
+		EXPRESSION_BRAND,
+		true as const,
+	);
 }
 
 /**
@@ -917,10 +931,13 @@ export function relationColumn<A extends string>(
 		validateIdentifier(column, 'column');
 	}
 	validateIdentifier(as as string, 'column');
-	return {
-		__expr: true,
-		intent: { kind: 'relationColumn', relation, column, as },
-	} as unknown as AliasedExprColumn<A>;
+	return brandValue(
+		{
+			intent: { kind: 'relationColumn', relation, column, as },
+		},
+		EXPRESSION_BRAND,
+		true as const,
+	) as unknown as AliasedExprColumn<A>;
 }
 
 // ============================================================================

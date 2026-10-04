@@ -471,7 +471,7 @@ export function compileRecursive<T = unknown>(
 				}),
 				scope: anchorScope,
 				currentBinding: anchorBinding,
-				compileSubquery: (query, offset) =>
+				compileSubquery: (query, offset, parent) =>
 					buildSubqueryFromIntent(
 						query,
 						offset,
@@ -481,6 +481,7 @@ export function compileRecursive<T = unknown>(
 						anchorScope,
 						deps.dialectCapabilities,
 						deps.dbCasing,
+						parent,
 					),
 			})
 		: undefined;
