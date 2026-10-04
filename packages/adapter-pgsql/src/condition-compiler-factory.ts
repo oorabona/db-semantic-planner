@@ -54,6 +54,7 @@ import {
 import { compileExpressionIntent } from './handlers/expression/custom.js';
 import type {
 	CompilerContext,
+	CompilerState,
 	Decision,
 	WhereDispatcher,
 } from './handlers/types.js';
@@ -140,6 +141,7 @@ export function assertNoManyToManyRootRelations(
 	intent: WhereIntent,
 	source: string,
 	model: WhereCompilerCtx['model'],
+	position = 'WHERE',
 ): void {
 	if (!model) return;
 	const visit = (node: WhereIntent, table: string): void => {
@@ -162,7 +164,7 @@ export function assertNoManyToManyRootRelations(
 				if (!relation) return;
 				if (relation.type === 'belongsToMany') {
 					throw new Error(
-						`WHERE ${node.kind}('${path.join('.')}'): many-to-many relation predicates need the junction declaration (#787).`,
+						`${position} ${node.kind}('${path.join('.')}'): many-to-many relation predicates need the junction declaration (#787).`,
 					);
 				}
 				target = relation.target;
@@ -174,9 +176,12 @@ export function assertNoManyToManyRootRelations(
 }
 
 /** Refuse root relation recursion before routing or lowering can discard it. */
-export function assertNoRecursiveRootRelations(intent: WhereIntent): void {
+export function assertNoRecursiveRootRelations(
+	intent: WhereIntent,
+	position = 'WHERE',
+): void {
 	const seen = new WeakSet<object>();
-	function visit(value: unknown): void {
+	function visit(value: unknown, position: string): void {
 		if (!value || typeof value !== 'object' || seen.has(value)) return;
 		seen.add(value);
 		const node = value as WhereIntent;
@@ -195,7 +200,7 @@ export function assertNoRecursiveRootRelations(intent: WhereIntent): void {
 			) {
 				const relation = trusted?.relation ?? node.relation;
 				throw new Error(
-					`WHERE ${node.kind}('${Array.isArray(relation) ? relation.join('.') : relation}'): recursive relation predicates are not supported inside WHERE.`,
+					`${position} ${node.kind}('${Array.isArray(relation) ? relation.join('.') : relation}'): recursive relation predicates are not supported inside ${position}.`,
 				);
 			}
 		}
@@ -208,10 +213,10 @@ export function assertNoRecursiveRootRelations(intent: WhereIntent): void {
 				key === 'query'
 			)
 				continue;
-			visit(child);
+			visit(child, key === 'filter' ? 'FILTER' : position);
 		}
 	}
-	visit(intent);
+	visit(intent, position);
 }
 
 /** Private recursion state, created by the top-level entry and shared by descendants. */
@@ -273,6 +278,21 @@ export function createConditionCompiler(
 		dispatcher: WhereDispatcher,
 	): CompilerContext {
 		return {
+			...(ctx.directRootWhere && {
+				compileCaseCondition: (
+					intent: WhereIntent,
+					child: CompilerContext,
+					state: CompilerState,
+				) =>
+					compileCondition(intent, {
+						...ctx,
+						logicalSourceTable: child.rootTable,
+						emittedAlias: child.currentAlias ?? child.rootTable,
+						visibleAliases: new Map(child.aliases),
+						position: 'case-when',
+						paramState: state,
+					}),
+			}),
 			compileSubqueryCondition: (intent, child, state) => {
 				return compileCondition(intent, {
 					...ctx,
@@ -711,6 +731,8 @@ export function createConditionCompiler(
 					((ctx.position === 'where' || ctx.position === 'subquery') &&
 						ctx.directRootWhere) ||
 					ctx.position === 'filter' ||
+					ctx.position === 'having' ||
+					ctx.position === 'case-when' ||
 					ctx.position === 'recursive-anchor'
 				) {
 					const keys = resolveRelationKeys(
@@ -795,6 +817,8 @@ export function createConditionCompiler(
 				((ctx.position === 'where' || ctx.position === 'subquery') &&
 					ctx.directRootWhere) ||
 				ctx.position === 'filter' ||
+				ctx.position === 'having' ||
+				ctx.position === 'case-when' ||
 				ctx.position === 'recursive-anchor'
 			) {
 				const keys = resolveRelationKeys(currentSource, rel, ctx);
@@ -1061,11 +1085,15 @@ export function createConditionCompiler(
 			(((ctx.position === 'where' || ctx.position === 'subquery') &&
 				ctx.directRootWhere) ||
 				ctx.position === 'filter' ||
+				ctx.position === 'having' ||
+				ctx.position === 'case-when' ||
 				ctx.position === 'recursive-anchor') &&
 			(intent.kind === 'exists' || intent.kind === 'notExists')
 		) {
 			if (
 				(ctx.position === 'filter' ||
+					ctx.position === 'having' ||
+					ctx.position === 'case-when' ||
 					((ctx.position === 'where' || ctx.position === 'subquery') &&
 						ctx.directRootWhere)) &&
 				intent.recursive !== undefined
@@ -1158,6 +1186,8 @@ export function createConditionCompiler(
 			(((ctx.position === 'where' || ctx.position === 'subquery') &&
 				ctx.directRootWhere) ||
 				ctx.position === 'filter' ||
+				ctx.position === 'having' ||
+				ctx.position === 'case-when' ||
 				ctx.position === 'recursive-anchor') &&
 			(intent.kind === 'subquery' || (intent.kind === 'in' && intent.subquery))
 		) {
@@ -1189,6 +1219,9 @@ export function createConditionCompiler(
 				ctx.paramState,
 			);
 		}
+		const havingOperand = ctx.resolveHavingOperand?.(intent);
+		if (havingOperand)
+			return dispatcher(havingOperand, handlerCtx, ctx.paramState);
 		if (intent.kind === 'range') {
 			return handleRangeIntent(intent, ctx, dispatcher, handlerCtx);
 		}
@@ -1255,6 +1288,8 @@ export function createConditionCompiler(
 					...((((ctx.position === 'where' || ctx.position === 'subquery') &&
 						ctx.directRootWhere) ||
 						ctx.position === 'filter' ||
+						ctx.position === 'having' ||
+						ctx.position === 'case-when' ||
 						ctx.position === 'recursive-anchor') && { type: 'where' }),
 					column: rawIntent.field,
 					...('value' in rawIntent && {
@@ -1266,6 +1301,8 @@ export function createConditionCompiler(
 					...((((ctx.position === 'where' || ctx.position === 'subquery') &&
 						ctx.directRootWhere) ||
 						ctx.position === 'filter' ||
+						ctx.position === 'having' ||
+						ctx.position === 'case-when' ||
 						ctx.position === 'recursive-anchor') && { type: 'where' }),
 				} as unknown as Decision);
 		return dispatcher(bridged, handlerCtx, ctx.paramState);
@@ -1276,8 +1313,20 @@ export function createConditionCompiler(
 		intent: WhereIntent,
 		ctx: ConditionCompilerCtx,
 	): Node {
-		if (ctx.position === 'subquery') assertNoRecursiveRootRelations(intent);
-		assertNoManyToManyRootRelations(intent, ctx.logicalSourceTable, ctx.model);
+		const position =
+			ctx.position === 'having'
+				? 'HAVING'
+				: ctx.position === 'case-when'
+					? 'CASE WHEN'
+					: 'WHERE';
+		if (['subquery', 'having', 'case-when'].includes(ctx.position))
+			assertNoRecursiveRootRelations(intent, position);
+		assertNoManyToManyRootRelations(
+			intent,
+			ctx.logicalSourceTable,
+			ctx.model,
+			position,
+		);
 		return compileTopLevel(intent, ctx);
 	}
 
@@ -1301,12 +1350,34 @@ export function createConditionCompiler(
 				handlerCtx = toHandlerContext(inner, dispatcher);
 				contexts.set(inner, handlerCtx);
 			}
-			return compileConditionWithLegacyContext(
-				child,
-				inner,
-				dispatcher,
-				handlerCtx,
-			);
+			try {
+				return compileConditionWithLegacyContext(
+					child,
+					inner,
+					dispatcher,
+					handlerCtx,
+				);
+			} catch (error) {
+				if (
+					error instanceof Error &&
+					error.message.startsWith('No WHERE handler') &&
+					(inner.position === 'having' ||
+						inner.position === 'case-when' ||
+						inner.position === 'filter')
+				) {
+					const position =
+						inner.position === 'having'
+							? 'HAVING'
+							: inner.position === 'case-when'
+								? 'CASE WHEN'
+								: 'FILTER';
+					throw new Error(
+						error.message.replace('No WHERE handler', `No ${position} handler`),
+						{ cause: error },
+					);
+				}
+				throw error;
+			}
 		};
 		const recurse = (child: WhereIntent, inner: WhereCompilerCtx): Node =>
 			compile(
@@ -1345,8 +1416,12 @@ export function createConditionCompiler(
 				? {
 						...ctx,
 						rootTable: ctx.logicalSourceTable,
-						directRootWhere:
-							ctx.position === 'where' || ctx.position === 'subquery',
+						directRootWhere: [
+							'where',
+							'subquery',
+							'having',
+							'case-when',
+						].includes(ctx.position),
 						currentAlias: ctx.emittedAlias,
 						aliases: ctx.visibleAliases,
 						compileCondition: recurse,

@@ -559,7 +559,8 @@ export function notExists(
  * Accepts a SubqueryBuilder (must have `.build()`) or any builder
  * exposing `buildIntent(): QueryIntent` (e.g. QueryBuilder).
  *
- * Correlated bodies using `outerRef()` compile in query WHERE. Aggregate FILTER
+ * Correlated bodies using `outerRef()` compile in query WHERE and SELECT-expression
+ * subquery WHERE bodies, including expressions nested in `op(...)`. Aggregate FILTER
  * and recursive `start.where` refuse correlated bodies at compile time.
  *
  * @param subquery - A SubqueryBuilder or any object with buildIntent()
@@ -590,7 +591,8 @@ export function rawExists(
  * Accepts a SubqueryBuilder (must have `.build()`) or any builder
  * exposing `buildIntent(): QueryIntent` (e.g. QueryBuilder).
  *
- * Correlated bodies using `outerRef()` compile in query WHERE. Aggregate FILTER
+ * Correlated bodies using `outerRef()` compile in query WHERE and SELECT-expression
+ * subquery WHERE bodies, including expressions nested in `op(...)`. Aggregate FILTER
  * and recursive `start.where` refuse correlated bodies at compile time.
  *
  * @param subquery - A SubqueryBuilder or any object with buildIntent()

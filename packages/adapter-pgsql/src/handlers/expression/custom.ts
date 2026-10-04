@@ -23,9 +23,7 @@ import type { SubqueryExpressionIntent } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import {
 	booleanConstNode,
-	floatNode,
 	funcCall,
-	integerNode,
 	nullConstNode,
 	sortBy,
 	stringConstNode,
@@ -42,10 +40,13 @@ import type {
 	ExpressionHandler,
 } from '../types.js';
 import {
+	expressionColumnRef,
 	expressionQualifiedColumnRef,
 	expressionUnqualifiedColumnRef,
 	expressionWholeRowRef,
 } from '../types.js';
+import { resolveCaseValue } from './case-value.js';
+import { numericLiteralNode } from './numeric-literal.js';
 
 // The condition compiler supplies the runtime dispatcher factory through context.
 // compile-where.ts preserves the compatibility re-export surface.
@@ -257,15 +258,7 @@ export function compileExpressionIntent(
 				return booleanConstNode(i.value);
 			}
 			if (typeof i.value === 'number') {
-				if (!Number.isFinite(i.value)) {
-					throw new Error(
-						`literal(): numeric value must be finite; got ${i.value}. Use param() for computed values.`,
-					);
-				}
-				if (Number.isInteger(i.value)) {
-					return integerNode(i.value);
-				}
-				return floatNode(String(i.value));
+				return numericLiteralNode(i.value);
 			}
 			if (typeof i.value === 'string') {
 				return stringConstNode(i.value);
@@ -338,12 +331,13 @@ export function compileExpressionIntent(
 			if (!ctx.compileSubquery) {
 				throw new Error(
 					"compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. " +
-						'Use asExpr() only in .columns() context, not in standalone expressions.',
+						'Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context.',
 				);
 			}
 			const { ast: innerAst, parameters: innerParams } = ctx.compileSubquery(
 				sq.query,
 				state.paramIndex,
+				ctx,
 			);
 			// Append inner parameters to outer state (shared array, appended in order)
 			for (const p of innerParams) {
@@ -377,11 +371,13 @@ export function compileExpressionIntent(
 		case 'case': {
 			// CaseExpressionIntent: CASE WHEN condition THEN result [...] [ELSE default] END
 			// The compiler supplies the dispatcher through the runtime context.
-			if (!ctx.createWhereDispatcher)
+			const dispatch = ctx.compileCaseCondition
+				? undefined
+				: ctx.createWhereDispatcher?.();
+			if (!ctx.compileCaseCondition && !dispatch)
 				throw new Error(
 					'Condition requires a compiler-supplied WHERE dispatcher',
 				);
-			const dispatch = ctx.createWhereDispatcher();
 
 			const caseIntent = intent as import('@dbsp/types').CaseExpressionIntent;
 
@@ -389,17 +385,38 @@ export function compileExpressionIntent(
 				throw new Error('CASE expression requires at least one WHEN clause');
 			}
 
+			const resolveBranch = (value: unknown): Node =>
+				resolveCaseValue(
+					value,
+					ctx.currentAlias ?? ctx.rootTable,
+					undefined,
+					(column) => expressionColumnRef(column, ctx),
+					state,
+					(expr) =>
+						compileExpressionIntent(
+							expr as unknown as ExpressionIntent,
+							ctx,
+							state,
+						),
+					(expr) =>
+						compileExpressionIntent(
+							expr as unknown as ExpressionIntent,
+							ctx,
+							state,
+						),
+				);
+
 			const caseArgs: Node[] = caseIntent.when.map((branch) => {
 				// dispatch accepts WhereIntent (via normalizeToDecision which handles `kind` field)
-				// WHERE compilation remains a lot-5 boundary. The dispatcher is
-				// installed by the compiler, whose runtime context is complete; this
-				// cast is limited to handing that legacy callback its own context.
-				const whenNode = dispatch(
-					branch.condition as unknown as import('../types.js').Decision,
-					ctx as CompilerContext,
-					state,
-				);
-				const thenNode = compileExpressionIntent(branch.result, ctx, state);
+				// Executable queries retain raw conditions; compilePlan keeps its legacy dispatcher.
+				const whenNode = ctx.compileCaseCondition
+					? ctx.compileCaseCondition(branch.condition, ctx, state)
+					: dispatch!(
+							branch.condition as unknown as import('../types.js').Decision,
+							ctx as CompilerContext,
+							state,
+						);
+				const thenNode = resolveBranch(branch.result);
 				return {
 					CaseWhen: { expr: whenNode, result: thenNode },
 				} as unknown as Node;
@@ -407,7 +424,7 @@ export function compileExpressionIntent(
 
 			let defresult: Node | undefined;
 			if (caseIntent.else !== undefined) {
-				defresult = compileExpressionIntent(caseIntent.else, ctx, state);
+				defresult = resolveBranch(caseIntent.else);
 			}
 
 			return {

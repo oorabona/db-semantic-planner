@@ -45,21 +45,39 @@ it('refuses repeated implicit join qualifiers', () => {
 		orm.select('uses').join('files', { on }).join('files', { on }).dump(),
 	).toThrowError(new Error("Query scope already binds qualifier 'files'."));
 });
-const correlationMessage =
-	'Correlated subqueries are not supported in SELECT expressions — use an uncorrelated subquery or a .join() with groupBy and an aggregate.';
+// #891 arbitration, 2026-10-04: SELECT-expression correlation binds the enclosing range.
 for (const nested of [false, true]) {
 	for (const entry of ['compileSelectExpression', 'columns'] as const) {
-		it(`refuses ${nested ? 'op-nested' : 'direct'} correlation through ${entry}`, () => {
+		it(`binds ${nested ? 'op-nested' : 'direct'} correlation through ${entry} (#891 step 4c decision)`, () => {
 			const sub = subquery('calls')
 				.where(eq('symbolId', outerRef('id')))
 				.count()
 				.asExpr('n');
 			const expr = nested ? op('+', sub, literal(1)) : sub;
-			expect(() =>
+			const innerSql =
+				'(SELECT count(*) FROM calls AS calls WHERE calls."symbolId" = symbols.id)';
+			const result =
 				entry === 'compileSelectExpression'
-					? createPgCompileOnlyAdapter().compileSelectExpression(expr.intent)
-					: orm.select('symbols').columns(['id', expr]).dump(),
-			).toThrowError(new Error(correlationMessage));
+					? createPgCompileOnlyAdapter({
+							model: db.model,
+						}).compileSelectExpression({
+							kind: 'subquery',
+							query: {
+								type: 'select',
+								from: 'symbols',
+								select: { type: 'expressions', columns: [expr.intent] },
+							},
+						})
+					: orm.select('symbols').columns(['id', expr]).dump();
+			const projected = nested ? `${innerSql} + 1` : `${innerSql} AS n`;
+			expect(result.sql).toBe(
+				entry === 'compileSelectExpression'
+					? `SELECT (SELECT ${projected} FROM symbols AS symbols)`
+					: `SELECT symbols.id, ${projected} FROM symbols`,
+			);
+			expect('params' in result ? result.params : result.parameters).toEqual(
+				[],
+			);
 		});
 	}
 }
@@ -101,6 +119,7 @@ for (const alias of [undefined, 'draft_posts']) {
 		expect(result.parameters).toEqual([false]);
 	});
 }
+// #891 arbitration, 2026-10-04: expression subqueries emit their natural alias.
 it('preserves exact SQL for distinct qualifiers and an uncorrelated SELECT expression', () => {
 	const result = orm
 		.select('uses')
@@ -109,6 +128,6 @@ it('preserves exact SQL for distinct qualifiers and an uncorrelated SELECT expre
 		.join('symbols', { as: 's', on: eq('files.id', ref('s.id')) })
 		.dump();
 	expect(result.sql).toBe(
-		'SELECT uses.id, (SELECT count(*) FROM calls) AS "callCount" FROM uses JOIN files AS files ON uses.file_id = files.id JOIN symbols AS s ON files.id = s.id',
+		'SELECT uses.id, (SELECT count(*) FROM calls AS calls) AS "callCount" FROM uses JOIN files AS files ON uses.file_id = files.id JOIN symbols AS s ON files.id = s.id',
 	);
 });

@@ -1378,6 +1378,7 @@ export function compileSelectEnvelope<T = unknown>(
 				: undefined;
 		let decisions = intentToDecisions(execIntent, plan.rootTable, {
 			omitRootWhere: rawWhere !== undefined,
+			directConditions: true,
 		});
 		const resolvedModel = options?.model ?? deps.model;
 
@@ -1570,6 +1571,11 @@ export function compileSelectEnvelope<T = unknown>(
 			allDecisions,
 			schemaName,
 		);
+		simplifiedPlan = {
+			...simplifiedPlan,
+			directConditions: true,
+			...(execIntent.having && { rawHaving: execIntent.having }),
+		};
 		if (rawWhere)
 			simplifiedPlan = {
 				...simplifiedPlan,

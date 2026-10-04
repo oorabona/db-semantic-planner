@@ -19,6 +19,9 @@ export type WhereCompilerCtx = {
 	readonly rootWhereJoinRelations?: ReadonlySet<string>;
 	/** Internal migration provenance; legacy where callers retain their lowering. */
 	readonly directRootWhere?: boolean;
+	readonly resolveHavingOperand?: (
+		intent: import('@dbsp/types').WhereIntent,
+	) => import('./handlers/types.js').Decision | undefined;
 	readonly position?: ConditionPosition;
 	/** Current root table name (or alias) */
 	readonly rootTable: string;

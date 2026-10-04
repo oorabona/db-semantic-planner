@@ -1003,13 +1003,13 @@ describe('resolveCaseValue', () => {
 		});
 	});
 
-	it('case without nestedCaseHandler → falls through to ParamRef', () => {
+	it('case without a compiler handler is refused without binding', () => {
 		const s = createCompilerState();
 		const caseExpr = { kind: 'case', conditions: [] };
-		expect(
+		expect(() =>
 			resolveCaseValue(caseExpr, 't', undefined, undefined, s),
-		).toMatchObject({ ParamRef: { number: 1 } });
-		expect(s.parameters[0]).toBe(caseExpr);
+		).toThrow("resolveCaseValue: unsupported expression kind 'case'");
+		expect(s.parameters).toEqual([]);
 	});
 
 	it('case with nestedCaseHandler → handler invoked', () => {
@@ -1023,13 +1023,13 @@ describe('resolveCaseValue', () => {
 		expect(handler).toHaveBeenCalledWith(caseExpr);
 	});
 
-	it('unknown kind → default ParamRef', () => {
+	it('unknown kind is refused without binding', () => {
 		const s = createCompilerState();
 		const weird = { kind: 'unknown_expr' };
-		expect(resolveCaseValue(weird, 't', undefined, undefined, s)).toMatchObject(
-			{ ParamRef: { number: 1 } },
+		expect(() => resolveCaseValue(weird, 't', undefined, undefined, s)).toThrow(
+			"resolveCaseValue: unsupported expression kind 'unknown_expr'",
 		);
-		expect(s.parameters[0]).toBe(weird);
+		expect(s.parameters).toEqual([]);
 	});
 });
 
