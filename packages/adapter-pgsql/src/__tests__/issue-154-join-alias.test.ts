@@ -417,7 +417,7 @@ describe('FIX-154: path-based join identity for multi-path includes', () => {
 		);
 
 		expect(sql).toBe(
-			'SELECT file.path AS "definition.file.def_file", file_1.path AS "file.use_file" FROM tenant_s.uses JOIN tenant_s.definitions AS definition ON uses.def_id = definition.id JOIN tenant_s.files AS file ON definition.file_id = file.id JOIN tenant_s.files AS file_1 ON uses.file_id = file_1.id LIMIT 10 OFFSET 5',
+			'SELECT definition.id AS "definition.id", definition.file_id AS "definition.file_id", definition.id AS __dbsp_presence_definition, file.path AS "definition.file.def_file", file.id AS "__dbsp_presence_definition.file", file_1.path AS "file.use_file", file_1.id AS __dbsp_presence_file FROM tenant_s.uses JOIN tenant_s.definitions AS definition ON uses.def_id = definition.id JOIN tenant_s.files AS file ON definition.file_id = file.id JOIN tenant_s.files AS file_1 ON uses.file_id = file_1.id LIMIT 10 OFFSET 5',
 		);
 	});
 

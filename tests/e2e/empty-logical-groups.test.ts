@@ -13,11 +13,12 @@ const testSchema = schema({
 	users: {
 		id: { type: 'integer', primaryKey: true },
 		tenantId: { type: 'integer' },
+		postId: ref('posts', { as: 'posts', inverse: 'featuredBy' }),
 	},
 	posts: {
 		id: { type: 'integer', primaryKey: true },
 		published: { type: 'boolean' },
-		authorId: ref('users', { as: 'author', inverse: 'posts' }),
+		authorId: ref('users', { as: 'author', inverse: 'authoredPosts' }),
 	},
 } as const);
 beforeAll(async () => {
@@ -25,7 +26,7 @@ beforeAll(async () => {
 	await createSchema(SCHEMA);
 	await execInSchema(
 		SCHEMA,
-		'CREATE TABLE users (id integer PRIMARY KEY, tenant_id integer NOT NULL); INSERT INTO users VALUES (1, 1), (2, 1), (3, 2); CREATE TABLE posts (id integer PRIMARY KEY, published boolean NOT NULL, author_id integer REFERENCES users(id)); INSERT INTO posts VALUES (11, true, 1), (12, false, 1), (21, false, 2), (22, true, 2);',
+		'CREATE TABLE users (id integer PRIMARY KEY, tenant_id integer NOT NULL, post_id integer); INSERT INTO users VALUES (1, 1, 11), (2, 1, 22), (3, 2, 21); CREATE TABLE posts (id integer PRIMARY KEY, published boolean NOT NULL, author_id integer REFERENCES users(id)); INSERT INTO posts VALUES (11, true, 1), (12, false, 1), (21, false, 2), (22, true, 2);',
 	);
 });
 afterAll(async () => {
@@ -62,6 +63,7 @@ describe('#888 empty logical groups with rows', () => {
 			.select('users')
 			.include('posts', {
 				join: 'inner',
+				select: { type: 'fields', fields: ['id'] },
 				where: eq('published', true),
 			})
 			.orderBy('id')
@@ -69,7 +71,7 @@ describe('#888 empty logical groups with rows', () => {
 			id: number;
 			posts: { id: number };
 		}>;
-		// A join include projects the related key only (posts.id AS "posts.id").
+		// A to-one join include returns exactly the explicitly selected fields.
 		expect(
 			published.map((user) => ({
 				id: user.id,
@@ -81,7 +83,11 @@ describe('#888 empty logical groups with rows', () => {
 		]);
 		const empty = (await orm
 			.select('users')
-			.include('posts', { join: 'inner', where: or() })
+			.include('posts', {
+				join: 'inner',
+				select: { type: 'fields', fields: ['id'] },
+				where: or(),
+			})
 			.orderBy('id')
 			.execute()) as unknown as Array<{
 			id: number;
@@ -89,7 +95,7 @@ describe('#888 empty logical groups with rows', () => {
 		}>;
 		expect(empty).toEqual([]);
 		await expect(
-			orm.select('users').include('posts', { where: or() }).all(),
-		).rejects.toThrow(/strategy json_agg.*include\[0\]\(posts\).*#892/);
+			orm.select('users').include('authoredPosts', { where: or() }).all(),
+		).rejects.toThrow(/strategy json_agg.*include\[0\]\(authoredPosts\).*#892/);
 	});
 });

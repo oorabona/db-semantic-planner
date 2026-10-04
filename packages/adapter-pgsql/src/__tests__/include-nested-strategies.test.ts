@@ -11,11 +11,11 @@ const db = schema({
 	users: { id: { type: 'integer', primaryKey: true } },
 	posts: {
 		id: { type: 'integer', primaryKey: true },
-		authorId: ref('users', { as: 'author', inverse: 'posts' }),
+		authorId: ref('users', { unique: true, as: 'author', inverse: 'posts' }),
 	},
 	comments: {
 		id: { type: 'integer', primaryKey: true },
-		postId: ref('posts', { as: 'post', inverse: 'comments' }),
+		postId: ref('posts', { unique: true, as: 'post', inverse: 'comments' }),
 	},
 	categories: {
 		id: { type: 'integer', primaryKey: true },
@@ -136,11 +136,11 @@ describe('#894 nested strategy refusal', () => {
 	});
 });
 const sameSql: Record<string, string> = {
-	join: 'SELECT users.*, posts.id AS "posts.id", comments.id AS "posts.comments.id" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId" LEFT JOIN comments AS comments ON posts.id = comments."postId"',
+	join: 'SELECT users.*, posts.id AS "posts.id", posts."authorId" AS "posts.authorId", posts.id AS __dbsp_presence_posts, comments.id AS "posts.comments.id", comments."postId" AS "posts.comments.postId", comments.id AS "__dbsp_presence_posts.comments" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId" LEFT JOIN comments AS comments ON posts.id = comments."postId"',
 	json_agg:
 		"SELECT users.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'authorId', __t__.\"authorId\") || jsonb_build_object('comments', COALESCE((SELECT json_agg(jsonb_build_object('id', __t1__.id, 'postId', __t1__.\"postId\") ORDER BY __t1__.id ASC NULLS LAST) FROM comments AS __t1__ WHERE __t1__.\"postId\" = __t__.id), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST) FROM posts AS __t__ WHERE __t__.\"authorId\" = users.id), '[]'::json) AS posts_json FROM users",
 	lateral:
-		'SELECT users.*, posts_lat_0.id AS "posts.id", posts_lat_0."authorId" AS "posts.authorId", comments_lat_1.id AS "posts.comments.id", comments_lat_1."postId" AS "posts.comments.postId" FROM users LEFT JOIN LATERAL (SELECT posts_inner_0.id, posts_inner_0."authorId" FROM posts AS posts_inner_0 WHERE posts_inner_0."authorId" = users.id) AS posts_lat_0 ON true LEFT JOIN LATERAL (SELECT comments_inner_1.id, comments_inner_1."postId" FROM comments AS comments_inner_1 WHERE comments_inner_1."postId" = posts_lat_0.id) AS comments_lat_1 ON true',
+		'SELECT users.*, posts_lat_0.id AS "posts.id", posts_lat_0."authorId" AS "posts.authorId", posts_lat_0.__dbsp_presence_posts AS __dbsp_presence_posts, comments_lat_1.id AS "posts.comments.id", comments_lat_1."postId" AS "posts.comments.postId", comments_lat_1."__dbsp_presence_posts.comments" AS "__dbsp_presence_posts.comments" FROM users LEFT JOIN LATERAL (SELECT posts_inner_0.id, posts_inner_0."authorId", posts_inner_0.id AS __dbsp_presence_posts FROM posts AS posts_inner_0 WHERE posts_inner_0."authorId" = users.id) AS posts_lat_0 ON true LEFT JOIN LATERAL (SELECT comments_inner_1.id, comments_inner_1."postId", comments_inner_1.id AS "__dbsp_presence_posts.comments" FROM comments AS comments_inner_1 WHERE comments_inner_1."postId" = posts_lat_0.id) AS comments_lat_1 ON true',
 };
 describe('#894 supported SQL', () => {
 	for (const strategy of ['join', 'json_agg', 'lateral'] as const) {
@@ -159,7 +159,7 @@ describe('#894 supported SQL', () => {
 			})
 			.dump();
 		expect(result.sql).toBe(
-			'SELECT users.*, posts.id AS "posts.id", comments.id AS "posts.comments.id" FROM users JOIN posts AS posts ON users.id = posts."authorId" JOIN comments AS comments ON posts.id = comments."postId"',
+			'SELECT users.*, posts.id AS "posts.id", posts."authorId" AS "posts.authorId", posts.id AS __dbsp_presence_posts, comments.id AS "posts.comments.id", comments."postId" AS "posts.comments.postId", comments.id AS "__dbsp_presence_posts.comments" FROM users JOIN posts AS posts ON users.id = posts."authorId" JOIN comments AS comments ON posts.id = comments."postId"',
 		);
 		expect(result.params).toEqual([]);
 	});
@@ -223,11 +223,15 @@ describe('#894 pathless include assignments', () => {
 			users: { id: { type: 'integer', primaryKey: true } },
 			posts: {
 				id: { type: 'integer', primaryKey: true },
-				authorId: ref('users', { as: 'author', inverse: 'children' }),
+				authorId: ref('users', {
+					unique: true,
+					as: 'author',
+					inverse: 'children',
+				}),
 			},
 			comments: {
 				id: { type: 'integer', primaryKey: true },
-				postId: ref('posts', { as: 'post', inverse: 'children' }),
+				postId: ref('posts', { unique: true, as: 'post', inverse: 'children' }),
 			},
 		} as const);
 		const p = plan(
@@ -321,7 +325,9 @@ describe('#900 flat strategy precedence', () => {
 			},
 		);
 		const result = adapter.compile(p);
-		expect(result.sql).toBe(sameSql.lateral);
+		expect(result.sql).toBe(
+			'SELECT users.*, posts_lat_0.id AS "posts.id", posts_lat_0."authorId" AS "posts.authorId", comments_lat_1.id AS "posts.comments.id", comments_lat_1."postId" AS "posts.comments.postId" FROM users LEFT JOIN LATERAL (SELECT posts_inner_0.id, posts_inner_0."authorId" FROM posts AS posts_inner_0 WHERE posts_inner_0."authorId" = users.id) AS posts_lat_0 ON true LEFT JOIN LATERAL (SELECT comments_inner_1.id, comments_inner_1."postId" FROM comments AS comments_inner_1 WHERE comments_inner_1."postId" = posts_lat_0.id) AS comments_lat_1 ON true',
+		);
 		expect(result.parameters).toEqual([]);
 	});
 	it('preserves include.where refusal with applicable lateral default', () => {

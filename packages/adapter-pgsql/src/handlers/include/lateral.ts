@@ -88,6 +88,19 @@ function buildLateralSubquery(
 
 	// Build target list
 	const targetList = buildLateralTargets(columns, innerAlias, ctx);
+	const presence = decision.payloadShape?.presence;
+	if (presence)
+		targetList.push(
+			sqlResTarget(
+				presence.physicalName
+					? sqlColumnRef(
+							queryLocal(presence.physicalName),
+							queryLocal(innerAlias),
+						)
+					: { A_Const: { ival: { ival: 1 } } },
+				queryLocal(presence.outputLabel),
+			),
+		);
 
 	const stmt: SelectStmt = {
 		targetList,
@@ -268,6 +281,18 @@ function compileLateralCascade(
 				),
 			)
 		: buildLateralTargets(columns, lateralAlias, scopedCtx);
+
+	const presence = decision.payloadShape?.presence;
+	if (presence)
+		targets.push(
+			sqlResTarget(
+				sqlColumnRef(
+					queryLocal(presence.outputLabel),
+					queryLocal(lateralAlias),
+				),
+				queryLocal(presence.outputLabel),
+			),
+		);
 
 	// Recursively compile children
 	if (decision.children && decision.children.length > 0) {

@@ -853,7 +853,7 @@ describe('plan-decision-extractor - coverage', () => {
 			};
 			const result = extractAllIncludeDecisions(plan);
 			expect(result[0].choice).toBe('join');
-			expect(result[0].columns).toContain('id');
+			expect(result[0].columns).toEqual(['bio']);
 			expect(result[0].columns).toContain('bio');
 		});
 
@@ -1046,10 +1046,10 @@ describe('plan-decision-extractor - coverage', () => {
 			const result = extractLeftJoinIncludeDecisions(plan);
 			expect(result).toHaveLength(1);
 			expect(result[0].type).toBe('selectLeftJoinInclude');
-			expect(result[0].columns).toEqual(['id', 'bio', 'avatar']);
+			expect(result[0].columns).toEqual(['bio', 'avatar']);
 		});
 
-		it('defaults to [id] if no select fields', () => {
+		it('defaults to wildcard if no select fields', () => {
 			const plan = {
 				rootTable: 'users',
 				intent: { include: [{ relation: 'profile' }] },
@@ -1062,7 +1062,7 @@ describe('plan-decision-extractor - coverage', () => {
 				],
 			};
 			const result = extractLeftJoinIncludeDecisions(plan);
-			expect(result[0].columns).toEqual(['id']);
+			expect(result[0].columns).toEqual(['*']);
 		});
 
 		it('skips decision without target or relationName', () => {

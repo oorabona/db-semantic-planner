@@ -43,6 +43,10 @@ describe('condition compilation differential matrix (#891)', () => {
 			const entries = conditionMatrix.filter(
 				(entry) => entry.position === position,
 			);
+			if (position.endsWith('-to-many-refusal')) {
+				expect(entries).toHaveLength(2);
+				continue;
+			}
 			const kinds = ['eq'];
 			if (
 				position === 'in-subquery-body' ||

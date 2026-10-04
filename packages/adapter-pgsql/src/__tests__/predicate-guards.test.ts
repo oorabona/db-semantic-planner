@@ -30,12 +30,12 @@ const testSchema = schema({
 	},
 	posts: {
 		id: { type: 'integer', primaryKey: true },
-		authorId: ref('users', { as: 'author', inverse: 'posts' }),
+		authorId: ref('users', { unique: true, as: 'author', inverse: 'posts' }),
 	},
 	comments: {
 		id: { type: 'integer', primaryKey: true },
 		published: { type: 'boolean' },
-		postId: ref('posts', { as: 'post', inverse: 'comments' }),
+		postId: ref('posts', { unique: true, as: 'post', inverse: 'comments' }),
 	},
 	edges: {
 		id: { type: 'integer', primaryKey: true },
@@ -211,6 +211,7 @@ for (const declaredPk of [true, false]) {
 				posts: {
 					id: { type: 'integer', primaryKey: true },
 					authorId: ref('users', {
+						unique: true,
 						as: 'author',
 						inverse: 'posts',
 						references: [declaredPk ? 'id' : 'matrix_pk'],
@@ -287,8 +288,8 @@ for (const join of ['inner', 'left'] as const) {
 			.dump();
 		expect(result.sql).toBe(
 			join === 'inner'
-				? 'SELECT users.*, posts.id AS "posts.id" FROM users JOIN posts AS posts ON users.id = posts."authorId" WHERE posts.id = $1'
-				: 'SELECT users.*, posts.id AS "posts.id" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId" WHERE posts.id = $1',
+				? 'SELECT users.*, posts.id AS "posts.id", posts."authorId" AS "posts.authorId", posts.id AS __dbsp_presence_posts FROM users JOIN posts AS posts ON users.id = posts."authorId" WHERE posts.id = $1'
+				: 'SELECT users.*, posts.id AS "posts.id", posts."authorId" AS "posts.authorId", posts.id AS __dbsp_presence_posts FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId" WHERE posts.id = $1',
 		);
 		expect(result.params).toEqual([7]);
 	});
@@ -367,7 +368,7 @@ it('treats parameter payloads as opaque in join include where', () => {
 		.include('posts', { join: 'inner', where: eq('id', value) })
 		.dump();
 	expect(result.sql).toBe(
-		'SELECT users.*, posts.id AS "posts.id" FROM users JOIN posts AS posts ON users.id = posts."authorId" WHERE posts.id = $1',
+		'SELECT users.*, posts.id AS "posts.id", posts."authorId" AS "posts.authorId", posts.id AS __dbsp_presence_posts FROM users JOIN posts AS posts ON users.id = posts."authorId" WHERE posts.id = $1',
 	);
 	expect(result.params).toEqual([value]);
 });
@@ -384,7 +385,7 @@ it('keeps a join include IN query body without relation predicates', () => {
 		})
 		.dump();
 	expect(result.sql).toBe(
-		'SELECT users.*, posts.id AS "posts.id" FROM users JOIN posts AS posts ON users.id = posts."authorId" WHERE posts.id = ANY (SELECT comments_subq_1."postId" FROM comments AS comments_subq_1 WHERE comments_subq_1.published = $1)',
+		'SELECT users.*, posts.id AS "posts.id", posts."authorId" AS "posts.authorId", posts.id AS __dbsp_presence_posts FROM users JOIN posts AS posts ON users.id = posts."authorId" WHERE posts.id = ANY (SELECT comments_subq_1."postId" FROM comments AS comments_subq_1 WHERE comments_subq_1.published = $1)',
 	);
 	expect(result.params).toEqual([true]);
 });

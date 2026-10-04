@@ -265,7 +265,7 @@ describe('E2E-004: Strategy Matrix', () => {
 	// =========================================================================
 	describe('Section F: Explicit Overrides', () => {
 		describe('E2E-004-F1: relation hint overrides auto', () => {
-			it('should use JOIN when schema hint specifies it', async () => {
+			it('should refuse a to-many JOIN selected by a schema hint', async () => {
 				// Create schema with relations
 				const schemaWithJoinHint = schema({
 					users: {
@@ -283,10 +283,11 @@ describe('E2E-004: Strategy Matrix', () => {
 				// Relations are stored at model.relations keyed by "source.relationName"
 				const model = schemaWithJoinHint.model;
 				const usersPostsRel = model.relations.get('users.user_posts');
-				if (usersPostsRel) {
-					(usersPostsRel as { includeStrategy?: string }).includeStrategy =
-						'join';
-				}
+				expect(usersPostsRel).toBeDefined();
+				if (!usersPostsRel)
+					throw new Error('Missing users.user_posts relation');
+				(usersPostsRel as { includeStrategy?: string }).includeStrategy =
+					'join';
 
 				const adapter = await getTestAdapter();
 				const orm = createOrm({
@@ -296,19 +297,9 @@ describe('E2E-004: Strategy Matrix', () => {
 
 				// ARCH-005: relation name is user_posts (auto-inferred: localRelation 'user' + '_' + sourceTable 'posts')
 				const query = orm.select('users').include('user_posts');
-				const dump = query.dump();
-
-				// Then: uses JOIN (not json_agg) due to explicit hint
-				const decision = getIncludeStrategyDecision(dump.plan!, 'user_posts');
-				expect(decision).toBeDefined();
-				expect(decision?.choice).toBe('join');
-
-				// SQL uses LEFT JOIN, not json_agg
-				// Note: pgsql-adapter always compiles includes as json_agg subqueries;
-				// LEFT JOIN compilation is a future enhancement (TODO_ADAPTER_PGSQL.md).
-				// The planner decision above is the authoritative contract test.
-				// expect(dump.sql.toLowerCase()).toContain('left join');
-				// expect(dump.sql.toLowerCase()).not.toMatch(/json_agg/);
+				expect(() => query.plan()).toThrow(
+					"Invalid include: Include include[0](user_posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include.",
+				);
 			});
 		});
 

@@ -1,21 +1,4 @@
-/**
- * DISTINCT-VECTOR regression test.
- *
- * Bug: `.distinct()` combined with `.include('rel', {join:'inner'})` includes
- * ALL columns from the joined table in the SELECT DISTINCT list. If the joined
- * table contains a `vector(1024)` column, PostgreSQL rejects the query because
- * vector has no equality operator (required for DISTINCT).
- *
- * Fix (adapter-compiler-select.ts: compileSelect): when `plan.intent?.distinct`
- * is true, clear the `columns` list from join includeStrategy decisions — same
- * pattern as the INCLUDE-COUNT fix for aggregate-only queries. The JOIN itself
- * is kept (for filtering), but the joined table's columns are not added to the
- * SELECT list unless explicitly requested via `relationColumn()`.
- *
- * Schema:
- *   symbols: id (PK), name (text), embedding (vector(1024))
- *   symbol_parents: id (PK), symbol_id (FK → symbols)
- */
+/** DISTINCT relational joins use .join(); include data cannot be silently dropped (#908). */
 
 import { createOrm, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
@@ -47,12 +30,12 @@ function buildOrm() {
 // ---------------------------------------------------------------------------
 
 describe('DISTINCT-VECTOR: DISTINCT with join include does not leak vector columns', () => {
-	it('.distinct().include("symbol", {join:"inner"}) does NOT add symbol.* to SELECT', () => {
+	it('.distinct().join("symbol") does NOT add symbol.* to SELECT', () => {
 		const orm = buildOrm();
 		const dump = (orm as any)
 			.select('symbol_parents')
 			.distinct()
-			.include('symbol', { join: 'inner' })
+			.join('symbol')
 			.dump();
 
 		const sql = normalizeSQL(dump.sql);
@@ -75,13 +58,13 @@ describe('DISTINCT-VECTOR: DISTINCT with join include does not leak vector colum
 		).not.toContain('symbol.embedding');
 	});
 
-	it('.distinct().include("symbol", {join:"inner"}).columns(["id", "symbol_id"]) selects only explicit columns', () => {
+	it('.distinct().join("symbol").columns(["id", "symbol_id"]) selects only explicit columns', () => {
 		const orm = buildOrm();
 		const dump = (orm as any)
 			.select('symbol_parents')
 			.distinct()
 			.columns(['id', 'symbol_id'])
-			.include('symbol', { join: 'inner' })
+			.join('symbol')
 			.dump();
 
 		const sql = normalizeSQL(dump.sql);

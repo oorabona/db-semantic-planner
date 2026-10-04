@@ -6,7 +6,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -14,13 +14,13 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "rawNotExists",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $2))",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $2))",
 			"params": [31, 53],
 			"error": null
 		},
@@ -28,7 +28,7 @@
 			"position": "include-left-where",
 			"kind": "rawNotExists",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $2)) AND posts.score = $3",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $2)) AND post.score = $3",
 			"params": [31, 53, 13],
 			"error": null
 		},
@@ -36,7 +36,7 @@
 			"position": "include-left-where",
 			"kind": "rawNotExists",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $2)) OR posts.score = $3)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $2)) OR post.score = $3)",
 			"params": [31, 53, 13],
 			"error": null
 		},
@@ -44,7 +44,7 @@
 			"position": "include-left-where",
 			"kind": "rawNotExists",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $2)))",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $2)))",
 			"params": [31, 53],
 			"error": null
 		},
@@ -52,7 +52,7 @@
 			"position": "include-left-where",
 			"kind": "rawNotExists",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $3))) OR posts.score = $4)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $3))) OR post.score = $4)",
 			"params": [31, 13, 53, 17],
 			"error": null
 		},
@@ -62,7 +62,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -70,7 +70,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -78,7 +78,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -86,7 +86,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -94,7 +94,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -102,7 +102,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -110,7 +110,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -118,7 +118,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -126,7 +126,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -134,7 +134,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -142,7 +142,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -150,7 +150,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -158,7 +158,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -166,7 +166,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -174,7 +174,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -182,7 +182,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -190,7 +190,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -198,7 +198,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -206,7 +206,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -214,7 +214,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -222,7 +222,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -230,7 +230,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -238,7 +238,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -246,7 +246,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -254,13 +254,13 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "expression",
 			"shape": "leaf",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND length(name) > $2",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND length(name) > $2",
 			"params": [31, 2],
 			"error": null
 		},
@@ -268,7 +268,7 @@
 			"position": "include-left-where",
 			"kind": "expression",
 			"shape": "and",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND length(name) > $2 AND posts.score = $3",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND length(name) > $2 AND post.score = $3",
 			"params": [31, 2, 13],
 			"error": null
 		},
@@ -276,7 +276,7 @@
 			"position": "include-left-where",
 			"kind": "expression",
 			"shape": "or",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND (length(name) > $2 OR posts.score = $3)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND (length(name) > $2 OR post.score = $3)",
 			"params": [31, 2, 13],
 			"error": null
 		},
@@ -284,7 +284,7 @@
 			"position": "include-left-where",
 			"kind": "expression",
 			"shape": "not",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND NOT (length(name) > $2)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (length(name) > $2)",
 			"params": [31, 2],
 			"error": null
 		},
@@ -292,7 +292,7 @@
 			"position": "include-left-where",
 			"kind": "expression",
 			"shape": "two-level",
-			"sql": "SELECT users.*, posts.id AS \"posts.id\" FROM users LEFT JOIN posts AS posts ON users.id = posts.\"authorId\" WHERE users.score = $1 AND posts.score = $2 AND (NOT (length(name) > $3) OR posts.score = $4)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (length(name) > $3) OR post.score = $4)",
 			"params": [31, 13, 2, 17],
 			"error": null
 		},
@@ -342,7 +342,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -350,7 +350,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -358,7 +358,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -366,13 +366,13 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
 			"kind": "exists-custom-authorities",
 			"shape": "empty-or",
-			"sql": "SELECT users.*, posts.matrix_pk AS \"posts.matrix_pk\" FROM users LEFT JOIN posts AS posts ON users.matrix_pk = posts.\"authorId\" WHERE users.score = $1 AND false",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.matrix_pk AS \"post.matrix_pk\", post.matrix_users_matrix_pk AS \"post.matrix_users_matrix_pk\", post.matrix_posts_matrix_pk AS \"post.matrix_posts_matrix_pk\", post.matrix_comments_matrix_pk AS \"post.matrix_comments_matrix_pk\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.matrix_pk WHERE comments.score = $1 AND false",
 			"params": [31],
 			"error": null
 		},
@@ -380,7 +380,7 @@
 			"position": "include-left-where",
 			"kind": "exists-custom-authorities",
 			"shape": "empty-and",
-			"sql": "SELECT users.*, posts.matrix_pk AS \"posts.matrix_pk\" FROM users LEFT JOIN posts AS posts ON users.matrix_pk = posts.\"authorId\" WHERE users.score = $1 AND true",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.matrix_pk AS \"post.matrix_pk\", post.matrix_users_matrix_pk AS \"post.matrix_users_matrix_pk\", post.matrix_posts_matrix_pk AS \"post.matrix_posts_matrix_pk\", post.matrix_comments_matrix_pk AS \"post.matrix_comments_matrix_pk\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.matrix_pk WHERE comments.score = $1 AND true",
 			"params": [31],
 			"error": null
 		},
@@ -390,7 +390,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -398,7 +398,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -406,7 +406,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -414,7 +414,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -422,7 +422,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -430,7 +430,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -438,7 +438,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -446,7 +446,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -454,7 +454,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -462,7 +462,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -470,7 +470,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -478,7 +478,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -486,7 +486,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -494,7 +494,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -502,7 +502,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -510,7 +510,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -518,7 +518,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -526,7 +526,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -534,7 +534,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -542,7 +542,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -550,7 +550,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -558,7 +558,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -566,7 +566,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -574,7 +574,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -582,7 +582,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -590,7 +590,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -598,7 +598,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -606,7 +606,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -614,7 +614,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -622,7 +622,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -630,7 +630,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -638,7 +638,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -646,7 +646,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -654,7 +654,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -662,7 +662,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -670,7 +670,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -678,7 +678,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -686,7 +686,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -694,7 +694,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -702,7 +702,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -710,7 +710,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -718,7 +718,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -726,7 +726,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -734,7 +734,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -742,7 +742,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -750,7 +750,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -758,7 +758,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -766,7 +766,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -774,7 +774,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -782,7 +782,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -790,7 +790,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		},
 		{
 			"position": "include-left-where",
@@ -798,7 +798,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Relation predicates inside an include where are not supported yet at include[0](posts).where for strategy join (oorabona/db-semantic-planner#892)."
+			"error": "Relation predicates inside an include where are not supported yet at include[0](post).where for strategy join (oorabona/db-semantic-planner#892)."
 		}
 	]
 }

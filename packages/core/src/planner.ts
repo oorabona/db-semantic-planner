@@ -20,7 +20,11 @@ import type {
 	ResolvedIncludeStrategy,
 } from '@dbsp/types';
 import { resolveJsonAggOrderKey, toColumnList } from '@dbsp/types';
-import { resolveIncludeRelationName } from '@dbsp/types/internal';
+import {
+	belongsToManyJoinIncludeRefusal,
+	dropsJoinIncludeData,
+	resolveIncludeRelationName,
+} from '@dbsp/types/internal';
 import { InvalidOperationError } from './dx/errors.js';
 import { validateLimit } from './dx/limit-validation.js';
 import {
@@ -335,6 +339,9 @@ export function plan(
 					opts,
 					`include[${i}]`,
 					0,
+					false,
+					'',
+					intent,
 				);
 			}
 		}
@@ -1108,6 +1115,7 @@ function processInclude(
 	depth: number,
 	ancestorIsLeftJoin = false,
 	parentIncludePath = '',
+	queryIntent?: QueryIntent,
 ): void {
 	state.relationsAnalyzed++;
 	const pathSegment = include.via || include.relation;
@@ -1293,6 +1301,29 @@ function processInclude(
 			`Include ${optionPath} select must select all columns with '${includeStrategy}' strategy`,
 		);
 
+	if (includeStrategy === 'join' && relation.type === 'belongsToMany')
+		throw new InvalidOperationError(
+			'include',
+			belongsToManyJoinIncludeRefusal(optionPath),
+		);
+	if (
+		includeStrategy === 'join' &&
+		isToManyInclude(relation) &&
+		include.strategy !== 'flat'
+	)
+		throw new InvalidOperationError(
+			'include',
+			`Include ${optionPath} cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include.`,
+		);
+	if (
+		includeStrategy === 'join' &&
+		include.strategy !== 'flat' &&
+		dropsJoinIncludeData(queryIntent)
+	)
+		throw new InvalidOperationError(
+			'include',
+			`Include ${optionPath} cannot use 'join' with aggregation, groupBy or DISTINCT because its data would be dropped. Use .join() for relational columns, grouping or ordering.`,
+		);
 	// Pre-compute join type for include-strategy decision embedding
 	// (only relevant when strategy is 'join')
 	// When an ancestor used LEFT JOIN (optional relation), cascade LEFT to preserve
@@ -1399,6 +1430,8 @@ function processInclude(
 					includeStrategy,
 					opts.dialectCapabilities,
 					include,
+					relation,
+					queryIntent,
 				),
 	});
 
@@ -1488,6 +1521,7 @@ function processInclude(
 					depth + 1,
 					nextAncestorIsLeftJoin,
 					fullPath,
+					queryIntent,
 				);
 			}
 		}
@@ -1811,11 +1845,12 @@ export class UnsupportedStrategyError extends Error {
 	}
 }
 
-/** Join includes honour only omitted select or plain field selections. */
+/** Join includes honour omitted select, all, or plain field selections. */
 function supportsJoinIncludeSelect(include: IncludeIntent): boolean {
 	const select = include.select;
 	return (
 		select === undefined ||
+		select.type === 'all' ||
 		(select.type === 'fields' && !select.fields.includes('*'))
 	);
 }
@@ -1832,11 +1867,17 @@ function selectsWholeIncludeRow(include: IncludeIntent): boolean {
 	);
 }
 
+function isToManyInclude(relation: RelationIR): boolean {
+	return relation.type === 'hasMany' || relation.type === 'belongsToMany';
+}
+
 /** Get alternatives that honour the include options and dialect capabilities. */
 function getAlternativeStrategies(
 	strategy: ResolvedIncludeStrategy,
 	capabilities: DialectCapabilities | undefined,
 	include: IncludeIntent,
+	relation: RelationIR,
+	queryIntent: QueryIntent | undefined,
 ): string[] {
 	const allStrategies: ResolvedIncludeStrategy[] =
 		include.strategy === 'flat'
@@ -1846,6 +1887,12 @@ function getAlternativeStrategies(
 	// Filter out current strategy and unsupported ones
 	return allStrategies.filter((s) => {
 		if (s === strategy) return false;
+		if (
+			s === 'join' &&
+			include.strategy !== 'flat' &&
+			(isToManyInclude(relation) || dropsJoinIncludeData(queryIntent))
+		)
+			return false;
 		if (include.join !== undefined && s !== 'join') return false;
 		if (include.where && s !== 'join') return false;
 		if (

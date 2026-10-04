@@ -63,7 +63,7 @@ describe('issue #256: multi-hop dotted WHERE relation paths', () => {
 			.dump();
 
 		expect(ws(dump.sql)).toEqual(
-			'SELECT uses.id, file.id AS "file.id" FROM uses JOIN files AS file ON uses.file_id = file.id WHERE EXISTS (SELECT 1 FROM definitions AS definitions_exists_1 WHERE uses.def_id = definitions_exists_1.id AND EXISTS (SELECT 1 FROM files AS files_exists_2 WHERE definitions_exists_1.file_id = files_exists_2.id AND files_exists_2.id = $1)) AND file.path = $2',
+			'SELECT uses.id, file.id AS "file.id", file.path AS "file.path", file.id AS __dbsp_presence_file FROM uses JOIN files AS file ON uses.file_id = file.id WHERE EXISTS (SELECT 1 FROM definitions AS definitions_exists_1 WHERE uses.def_id = definitions_exists_1.id AND EXISTS (SELECT 1 FROM files AS files_exists_2 WHERE definitions_exists_1.file_id = files_exists_2.id AND files_exists_2.id = $1)) AND file.path = $2',
 		);
 		expect(dump.params).toEqual([1, '/direct.ts']);
 	});

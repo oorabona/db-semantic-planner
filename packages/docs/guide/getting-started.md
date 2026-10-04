@@ -198,17 +198,17 @@ const usersWithComments = await orm.select('users')
   .dump();
 // usersWithComments[0].posts[0].comments — Comment[]
 
-// Keep users with a published post, selecting columns on the joined posts
-const usersFiltered = await orm.select('users')
-  .include('posts', {
+// Keep posts by Alice, selecting only the author's name
+const postsFiltered = await orm.select('posts')
+  .include('author', {
     join: 'inner',
-    where: eq('published', true),
-    select: { type: 'fields', fields: ['id', 'title'] },
+    where: eq('name', 'Alice'),
+    select: { type: 'fields', fields: ['name'] },
   })
   .dump();
 ```
 
-The planner selects the fetch strategy (`json_agg`, lateral join, or separate query) from the query shape by default. An include `where` is accepted only when the include compiles as a join; see [Includes](./includes.md).
+The planner selects the fetch strategy (`json_agg`, lateral join, or separate query) from the query shape by default. To-one join includes return the whole related row by default; explicit field selection returns only those fields. To-many join includes are refused; use `.join()`, NQL `| flat`, or a `json_agg`/`lateral` include. An include `where` is accepted only when the include compiles as a join; see [Includes](./includes.md).
 
 ::: tip Try it
 Paste this NQL equivalent in the [Playground](/playground): `users | where active = true | select id, name`

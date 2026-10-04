@@ -43,7 +43,7 @@ Hydration requires `CompiledQuery.hydrationPlan.includePayloads` (or the compile
 | Relation cardinality | PostgreSQL default strategy | Rationale |
 |----------------------|-----------------|-----------|
 | `belongsTo` / `hasOne` (to-one) | `json_agg` | Same capability-based selection as to-many |
-| `hasMany` / `manyToMany` (to-many) | `json_agg` | Avoids row explosion |
+| `hasMany` (to-many) | `json_agg` | Avoids row explosion |
 | Non-recursive include without explicit join + relation `includeStrategy` hint | Requested compatible strategy | The hint is honoured; flat output accepts only `join` or `lateral`, otherwise planning fails |
 
 These defaults apply to non-recursive includes with nested output. Recursive includes always compile as `cte`, require recursive CTE support, ignore `defaultIncludeStrategy`, and accept only `auto` or `cte` as the relation hint. For flat output (`| flat` or `strategy: 'flat'`), a relation hint of `join` or `lateral` is honoured, while `json_agg` or `cte` is refused. A `defaultIncludeStrategy` of `join` or `lateral` applies to flat output; `json_agg`, `cte`, and `auto` do not apply to that branch. If no compatible hint or default applies, the planner selects `lateral` when the include or any nested include has a per-parent limit, and `join` otherwise. When flat output with a limit requires `lateral`, planning fails if `join` was selected or the dialect does not support lateral joins; the planner never silently drops the limit or replaces a selected strategy. Selected strategies remain subject to dialect capabilities and existing operation constraints. Mixed parent/child strategies and includes nested under a `cte` include are refused before SQL is generated.
@@ -54,7 +54,9 @@ For every non-recursive include, explicit `include.join` takes precedence, then 
 
 Include payload keys are explicit aliases or declared model names. Physical database
 names affect SQL references only. JSON includes return nested payloads; join and
-lateral includes return transport columns that the compiled shape owns.
+lateral includes return transport columns that the compiled shape owns. A to-one join include with no selection or `select: { type: 'all' }` returns the whole related row with `"relation.column"` labels and declared public keys. Explicit field selection returns only those fields.
+
+For join and lateral flat hydration, the compiled shape records a private presence marker. It projects a non-null target key, or a constant within the joined target when there is no key. Hydration reads and removes that marker: only a null marker means a missing row. An existing row whose selected values are all null remains an object of nulls. The marker cannot collide with any emitted projection label, including unaliased column references and casts, or public payload keys. NQL `| flat` retains its flat rowset.
 
 Transport labels are at most 63 UTF-8 bytes. The compiled shape records the exact
 emitted labels and their public keys, including nested includes. Hydration reads
@@ -67,6 +69,10 @@ payloads become arrays. Read conversions use public payload keys.
 
 Hydration is atomic per row: if a read conversion fails, that row retains its
 original keys and values.
+
+A `belongsToMany` join include has a separate refusal, including explicit strategies, hints, defaults and external reports. For a `tags` include, the exact message is:
+
+> `Include include[0](tags) cannot use 'join' for a belongsToMany relation. The relation goes through a junction table that join includes, .join(<relation>), NQL | flat and json_agg/lateral includes do not traverse yet. Join the junction and target tables explicitly with .join(<table>, { on }).`
 
 ## Row Explosion Risk
 
@@ -97,15 +103,7 @@ No deduplication is needed in the hydrator.
 
 ### Explicit JOIN for hasMany
 
-You can force `join` on a `hasMany` via:
-```typescript
-orm.select('users').include('posts', { join: 'inner' })
-```
-
-Only do this when:
-- You know each parent has at most one matching child (effectively to-one)
-- You are filtering to a single child and want the JOIN semantics
-- You understand the row explosion and need flat rows for aggregation
+`hasMany` join includes are refused by `plan()` and by the adapter for external reports, whether selected explicitly, by a relation hint, or by a default. Use `.join()` or NQL `| flat` for a flat rowset, or use a `json_agg`/`lateral` include.
 
 ## Recursive Include Depth
 
@@ -172,8 +170,7 @@ orm.select('categories')
 
 ### Mixing `join` strategy on hasMany
 
-**Wrong:** Forcing `join` on a `hasMany` and then filtering/counting distinct
-parents in application code to undo the duplication.
+**Refused:** Forcing `join` on a `hasMany`, including through relation hints or defaults.
 
 **Right:** Use `json_agg` (the default) to aggregate child rows in SQL. Both `json_agg` and `lateral` support `LIMIT` per parent.
 
@@ -227,3 +224,5 @@ NQL's unaliased `relation.column` label is a default flat label, not an explicit
 Every root SELECT label owns its key, including function labels and expanded stars. Use `.as(...)` for expressions whose returned label cannot be established. Exact duplicate aggregate requests emit one SQL target. Hydration stages all conversions and child reads before changing each row; a conversion failure leaves that row unchanged.
 
 Compilation resolves these keys before generating SQL. Exact duplicate source/key requests deduplicate; two different owners of one public key fail with the payload path and key. A wildcard include over a target whose columns cannot be enumerated also fails.
+
+Scalar expression projections retain join include payloads. Expression projections containing a call in `NQL_SELECT_AGGREGATE_FUNCTIONS`, including nested calls, are aggregation. Join includes are refused when aggregation, `groupBy` or `DISTINCT` would drop their data; use `.join()` for relational columns, grouping or ordering.

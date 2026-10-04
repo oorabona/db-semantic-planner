@@ -13,13 +13,13 @@ const model = schema({
 	users: { id: { type: 'integer', primaryKey: true } },
 	posts: {
 		id: { type: 'integer', primaryKey: true },
-		authorId: ref('users', { inverse: 'posts' }),
+		authorId: ref('users', { unique: true, inverse: 'posts' }),
 		rank: { type: 'integer', nullable: true },
 		title: 'text',
 	},
 	comments: {
 		id: { type: 'integer', primaryKey: true },
-		postId: ref('posts', { inverse: 'comments' }),
+		postId: ref('posts', { unique: true, inverse: 'comments' }),
 	},
 }).model;
 function compile(include: IncludeIntent, includeStrategy?: 'cte' | 'lateral') {
@@ -175,7 +175,10 @@ describe('ordered includes', () => {
 it('refuses missing total order', () => {
 	const keyed = schema({
 		users: { id: { type: 'integer', primaryKey: true } },
-		posts: { authorId: ref('users', { inverse: 'posts' }), rank: 'integer' },
+		posts: {
+			authorId: ref('users', { unique: true, inverse: 'posts' }),
+			rank: 'integer',
+		},
 	}).model;
 	const noKey: typeof keyed = Object.assign(Object.create(keyed), {
 		getTable(name: string) {
@@ -238,7 +241,7 @@ it('chunks 51 selected fields independently', () => {
 		users: { id: { type: 'integer', primaryKey: true } },
 		posts: {
 			id: { type: 'integer', primaryKey: true },
-			authorId: ref('users', { inverse: 'posts' }),
+			authorId: ref('users', { unique: true, inverse: 'posts' }),
 			...Object.fromEntries(fields.map((field) => [field, 'text' as const])),
 		},
 	}).model;
@@ -352,8 +355,8 @@ for (const strategy of ['join', 'cte'] as const) {
 	]) {
 		if (
 			strategy === 'join' &&
-			select.type === 'fields' &&
-			select.fields[0] !== '*'
+			(select.type === 'all' || select.type === 'fields') &&
+			(select.type === 'all' || select.fields[0] !== '*')
 		)
 			continue;
 		it(`refuses ${strategy} select ${JSON.stringify(select)}`, () =>
@@ -378,7 +381,7 @@ it('refuses sparse order entries', () =>
 	));
 it('preserves the omitted-select join projection', () => {
 	expect(compile({ relation: 'posts', join: 'left' }).sql).toBe(
-		'SELECT users.*, posts.id AS "posts.id" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId"',
+		'SELECT users.*, posts.id AS "posts.id", posts."authorId" AS "posts.authorId", posts.rank AS "posts.rank", posts.title AS "posts.title", posts.id AS __dbsp_presence_posts FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId"',
 	);
 });
 it('excludes partial-select alternatives', () => {
@@ -398,36 +401,52 @@ it('excludes partial-select alternatives', () => {
 	).toEqual(['join']);
 });
 
-it('refuses builder join all', () => {
+it('accepts builder join all as the whole related row', () => {
 	const orm = createOrm({ model, adapter: createPgCompileOnlyAdapter() });
-	exactError(
-		() =>
-			orm
-				.select('users')
-				.include('posts', { join: 'left', select: { type: 'all' } })
-				.dump(),
-		"Invalid include: Include include[0](posts) select is not supported by 'join' strategy. Received select form: all.",
-	);
+	expect(
+		orm
+			.select('users')
+			.include('posts', { join: 'left', select: { type: 'all' } })
+			.dump().sql,
+	).toBe(compile({ relation: 'posts', join: 'left' }).sql);
 });
+
 for (const strategy of ['join', 'cte'] as const) {
+	if (strategy === 'join') {
+		it('accepts nested all join selection', () => {
+			const result = compile({
+				relation: 'posts',
+				join: 'left',
+				include: [
+					{ relation: 'comments', join: 'left', select: { type: 'all' } },
+				],
+			});
+			expect(
+				result.hydrationPlan?.includePayloads?.[0]?.children[0]?.columns.map(
+					(column) => column.publicKey,
+				),
+			).toEqual(['id', 'postId']);
+		});
+		continue;
+	}
 	it(`names nested all ${strategy} select`, () =>
 		exactError(
 			() =>
 				compile(
 					{
 						relation: 'posts',
-						...(strategy === 'join' && { join: 'left' }),
+
 						include: [
 							{
 								relation: 'comments',
-								...(strategy === 'join' && { join: 'left' }),
+
 								select: { type: 'all' },
 							},
 						],
 					},
-					strategy === 'cte' ? 'cte' : undefined,
+					'cte',
 				),
-			`Invalid include: Include include[0].include[0](posts.comments) select is not supported by '${strategy}' strategy.${strategy === 'join' ? ' Received select form: all.' : ''}`,
+			`Invalid include: Include include[0].include[0](posts.comments) select is not supported by '${strategy}' strategy.`,
 		));
 }
 
@@ -456,7 +475,7 @@ it('preserves explicit join field projection', () => {
 		select: { type: 'fields', fields: ['title'] },
 	});
 	expect(result.sql).toBe(
-		'SELECT users.*, posts.id AS "posts.id", posts.title AS "posts.title" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId"',
+		'SELECT users.*, posts.title AS "posts.title", posts.id AS __dbsp_presence_posts FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId"',
 	);
 	expect(result.parameters).toEqual([]);
 });
@@ -648,7 +667,7 @@ for (const strategy of ['json_agg', 'lateral'] as const) {
 		expect(adapter.compile(makePlan()).sql).toBe(
 			strategy === 'json_agg'
 				? `SELECT users.*, COALESCE((SELECT json_agg(__lim.__row ORDER BY __lim.__key0 ASC NULLS LAST) FROM (SELECT jsonb_build_object('id', __t__.id, 'authorId', __t__."authorId", 'rank', __t__.rank, 'title', __t__.title) AS __row, __t__.id AS __key0 FROM posts AS __t__ WHERE __t__."authorId" = users.id ORDER BY __t__.id ASC NULLS LAST LIMIT 1) AS __lim), '[]'::json) AS posts_json FROM users`
-				: `SELECT users.*, posts_lat_0.id AS "posts.id", posts_lat_0."authorId" AS "posts.authorId", posts_lat_0.rank AS "posts.rank", posts_lat_0.title AS "posts.title" FROM users LEFT JOIN LATERAL (SELECT posts_inner_0.id, posts_inner_0."authorId", posts_inner_0.rank, posts_inner_0.title FROM posts AS posts_inner_0 WHERE posts_inner_0."authorId" = users.id ORDER BY posts_inner_0.id ASC NULLS LAST LIMIT 1) AS posts_lat_0 ON true`,
+				: 'SELECT users.*, posts_lat_0.id AS "posts.id", posts_lat_0."authorId" AS "posts.authorId", posts_lat_0.rank AS "posts.rank", posts_lat_0.title AS "posts.title", posts_lat_0.__dbsp_presence_posts AS __dbsp_presence_posts FROM users LEFT JOIN LATERAL (SELECT posts_inner_0.id, posts_inner_0."authorId", posts_inner_0.rank, posts_inner_0.title, posts_inner_0.id AS __dbsp_presence_posts FROM posts AS posts_inner_0 WHERE posts_inner_0."authorId" = users.id ORDER BY posts_inner_0.id ASC NULLS LAST LIMIT 1) AS posts_lat_0 ON true',
 		);
 	});
 }

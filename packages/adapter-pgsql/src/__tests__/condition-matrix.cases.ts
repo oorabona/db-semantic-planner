@@ -196,9 +196,9 @@ function makePositions(
 			table: 'posts' as const,
 			run: (c: WhereIntent) =>
 				orm
-					.select('users')
+					.select('comments')
 					.where(eq('score', 31))
-					.include('posts', { join, where: c })
+					.include('post', { join, where: c })
 					.dump(),
 		})),
 		{
@@ -615,6 +615,32 @@ export const conditionMatrix = positions.flatMap((position) =>
 		}));
 	}),
 );
+
+// Keep bounded refusal probes alongside the to-one condition compilation positions.
+for (const join of ['inner', 'left'] as const) {
+	for (const [shape, condition] of [
+		['leaf', eq('score', 19)],
+		['or', or(eq('score', 19), eq('score', 23))],
+	] as const) {
+		conditionMatrix.push({
+			position: `include-${join}-to-many-refusal`,
+			kind: 'eq',
+			shape,
+			run(): MatrixOutcome {
+				try {
+					const result = orm
+						.select('users')
+						.include('posts', { join, where: condition })
+						.dump();
+					return { sql: result.sql, params: result.params, error: null };
+				} catch (error) {
+					if (!(error instanceof Error)) throw error;
+					return { sql: null, params: null, error: error.message };
+				}
+			},
+		});
+	}
+}
 
 /** The directory holds only generated JSON parts; explicit rewrite prunes stale parts. */
 export function prepareConditionMatrix(

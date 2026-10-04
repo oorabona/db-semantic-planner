@@ -224,8 +224,9 @@ describe('planner: processInclude depth exceeded warning', () => {
 			from: 'a',
 			include: [
 				{
+					strategy: 'flat',
 					relation: 'bs',
-					include: [{ relation: 'cs' }],
+					include: [{ strategy: 'flat', relation: 'cs' }],
 				},
 			],
 		};
@@ -239,7 +240,7 @@ describe('planner: processInclude depth exceeded warning', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'a',
-			include: [{ relation: 'bs' }],
+			include: [{ strategy: 'flat', relation: 'bs' }],
 		};
 		const report = plan(intent, deepSchema, { maxIncludeDepth: 5 });
 		const warning = report.warnings.find((w) => w.code === 'DEEP_NESTING');
@@ -259,11 +260,13 @@ describe('planner: processInclude circular detection', () => {
 			from: 'posts',
 			include: [
 				{
+					strategy: 'flat',
 					relation: 'comments',
 					include: [
 						{
+							strategy: 'flat',
 							relation: 'post',
-							include: [{ relation: 'comments' }],
+							include: [{ strategy: 'flat', relation: 'comments' }],
 						},
 					],
 				},
@@ -573,8 +576,9 @@ describe('planner: LEFT JOIN ancestor cascade', () => {
 			from: 'posts',
 			include: [
 				{
+					strategy: 'flat',
 					relation: 'editor', // optional → LEFT
-					include: [{ relation: 'posts' }],
+					include: [{ strategy: 'flat', relation: 'posts' }],
 				},
 			],
 		};
@@ -596,8 +600,9 @@ describe('planner: LEFT JOIN ancestor cascade', () => {
 			from: 'posts',
 			include: [
 				{
+					strategy: 'flat',
 					relation: 'editor',
-					include: [{ relation: 'posts', join: 'inner' }],
+					include: [{ strategy: 'flat', relation: 'posts', join: 'inner' }],
 				},
 			],
 		};
@@ -729,7 +734,7 @@ describe('planner: UnsupportedStrategyError branches', () => {
 		).toThrow(/cte.*not supported/i);
 	});
 
-	it('strategy=auto does not throw', () => {
+	it('strategy=auto refuses a to-many join fallback', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'users',
@@ -737,7 +742,9 @@ describe('planner: UnsupportedStrategyError branches', () => {
 		};
 		expect(() =>
 			plan(intent, simpleSchema, { dialectCapabilities: SQLITE_CAPABILITIES }),
-		).not.toThrow();
+		).toThrow(
+			"Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include.",
+		);
 	});
 });
 
