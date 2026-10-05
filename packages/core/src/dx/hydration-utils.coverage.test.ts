@@ -116,11 +116,14 @@ describe('metadata-owned JSON hydration', () => {
 
 it('utilities refuse hydratable planner reports without compiled shapes', () => {
 	const planned = {
+		execution: {
+			includes: [{ nodeId: 'include:posts', publicKey: 'posts', children: [] }],
+		},
 		decisions: [
 			{
 				type: 'include-strategy',
 				choice: 'json_agg',
-				context: { relation: 'posts' },
+				context: { nodeId: 'include:posts' },
 			},
 		],
 	} as unknown as PlanReport;
@@ -128,4 +131,37 @@ it('utilities refuse hydratable planner reports without compiled shapes', () => 
 		"Include hydration 'posts' requires compiled includePayloads; supply the compiled query hydrationPlan.";
 	expect(() => hydrateJsonAggIncludes([], planned)).toThrow(message);
 	expect(() => planForJsonAggHydration(planned)).toThrow(message);
+});
+
+it('names the nested public key when only its decision requires missing payloads', () => {
+	const planned = {
+		execution: {
+			includes: [
+				{
+					nodeId: 'include:posts',
+					publicKey: 'posts',
+					children: [
+						{
+							nodeId: 'include:posts.comments',
+							publicKey: 'readerComments',
+							children: [],
+						},
+					],
+				},
+			],
+		},
+		decisions: [
+			{
+				type: 'include-strategy',
+				choice: 'json_agg',
+				context: { nodeId: 'include:posts.comments' },
+			},
+		],
+	} as unknown as PlanReport;
+	const error = new Error(
+		"Include hydration 'readerComments' requires compiled includePayloads; supply the compiled query hydrationPlan.",
+	);
+	error.name = 'MissingIncludePayloadShapeError';
+	expect(() => hydrateJsonAggIncludes([], planned)).toThrow(error);
+	expect(() => planForJsonAggHydration(planned)).toThrow(error);
 });

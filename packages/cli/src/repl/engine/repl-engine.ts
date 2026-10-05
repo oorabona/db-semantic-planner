@@ -6,6 +6,7 @@
  */
 
 import type { ModelIR } from '@dbsp/core';
+import { getResolvedIncludeNode } from '@dbsp/types/internal';
 import {
 	config as appConfig,
 	isValidTableOption,
@@ -783,6 +784,11 @@ export class ReplEngine {
 				tables: [
 					...new Set([
 						...(pr?.decisions
+							.filter(
+								(d) =>
+									d.type !== 'include-strategy' &&
+									!(d.type === 'join-type' && d.context.nodeId),
+							)
 							.map((d) => d.context.sourceTable)
 							.filter((table): table is string => table !== undefined) ?? []),
 						...(pr?.execution
@@ -794,33 +800,53 @@ export class ReplEngine {
 					]),
 				],
 				decisions:
-					pr?.decisions.map((d) => ({
-						type: d.type,
-						context: [d.context.sourceTable, d.context.target, d.context.nodeId]
-							.filter(Boolean)
-							.join(' → '),
-						choice: d.choice,
-						reasoning: d.reasoning,
-						...(d.alternatives.length > 0 && {
-							alternatives: [...d.alternatives],
-						}),
-						...(d.context.foreignKey !== undefined && {
-							foreignKey:
-								typeof d.context.foreignKey === 'string'
-									? d.context.foreignKey
-									: [...d.context.foreignKey],
-						}),
-						...(d.context.relationType !== undefined && {
-							relationType: d.context.relationType,
-						}),
-						...(d.context.intentPath !== undefined && {
-							intentPath: d.context.intentPath,
-						}),
-						...(d.context.relationPath !== undefined && {
-							relationPath: d.context.relationPath,
-						}),
-						...(d.id !== undefined && { decisionId: d.id }),
-					})) ?? [],
+					pr?.decisions.map((d) => {
+						const node = getResolvedIncludeNode(pr.execution, d);
+						const context = node
+							? {
+									sourceTable: node.sourceRange.table,
+									target: node.targetRange.table,
+									nodeId: node.nodeId,
+									intentPath: node.intentPath,
+									foreignKey: node.path.hops.flatMap((hop) =>
+										hop.pairs.map((pair) =>
+											node.relationType === 'belongsTo'
+												? pair.fromColumn
+												: pair.toColumn,
+										),
+									),
+									relationType: node.relationType,
+									relationPath: node.relationPath,
+								}
+							: d.context;
+						return {
+							type: d.type,
+							context: [context.sourceTable, context.target, context.nodeId]
+								.filter(Boolean)
+								.join(' → '),
+							choice: d.choice,
+							reasoning: d.reasoning,
+							...(d.alternatives.length > 0 && {
+								alternatives: [...d.alternatives],
+							}),
+							...(context.foreignKey !== undefined && {
+								foreignKey:
+									typeof context.foreignKey === 'string'
+										? context.foreignKey
+										: [...context.foreignKey],
+							}),
+							...(context.relationType !== undefined && {
+								relationType: context.relationType,
+							}),
+							...(context.intentPath !== undefined && {
+								intentPath: context.intentPath,
+							}),
+							...(context.relationPath !== undefined && {
+								relationPath: context.relationPath,
+							}),
+							...(d.id !== undefined && { decisionId: d.id }),
+						};
+					}) ?? [],
 				warnings: [
 					...(isDryRun
 						? [{ message: 'This is a dry-run. Add ! suffix to execute.' }]

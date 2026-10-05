@@ -1,5 +1,6 @@
 /** Include hydration consumes only the adapter-resolved public payload contract. */
 import type { IncludePayloadShape } from '@dbsp/types';
+import { getResolvedIncludeNode } from '@dbsp/types/internal';
 import type { CompiledQuery } from '../adapter.js';
 import type { PlanReport } from '../planner.js';
 import { hydrateResolvedIncludes } from './include-payload-hydration.js';
@@ -51,7 +52,7 @@ export function requireIncludePayloads(
 	);
 	if (decision) {
 		const error = new Error(
-			`Include hydration '${original.execution?.includes.find((node) => node.nodeId === decision.context.nodeId)?.publicKey ?? decision.context.relation ?? decision.context.includeAlias ?? '?'}' requires compiled includePayloads; supply the compiled query hydrationPlan.`,
+			`Include hydration '${getResolvedIncludeNode(original.execution, decision)?.publicKey ?? '?'}' requires compiled includePayloads; supply the compiled query hydrationPlan.`,
 		);
 		error.name = 'MissingIncludePayloadShapeError';
 		throw error;

@@ -566,3 +566,28 @@ export function resolveIncludeRelationName(
 		);
 	return aliases[0] ?? disambiguate?.();
 }
+
+/** Resolve observational include decisions, including nested include join decisions. */
+export function getResolvedIncludeNode(
+	execution: import('./resolved-includes.js').IncludeExecution | undefined,
+	decision: {
+		readonly type: string;
+		readonly context: { readonly nodeId?: string | undefined };
+	},
+): import('./resolved-includes.js').ResolvedIncludeNode | undefined {
+	if (decision.type !== 'include-strategy' && decision.type !== 'join-type')
+		return undefined;
+	const nodeId = decision.context.nodeId;
+	if (!nodeId) return undefined;
+	const find = (
+		nodes: readonly import('./resolved-includes.js').ResolvedIncludeNode[],
+	): import('./resolved-includes.js').ResolvedIncludeNode | undefined => {
+		for (const node of nodes) {
+			if (node.nodeId === nodeId) return node;
+			const child = find(node.children);
+			if (child) return child;
+		}
+		return undefined;
+	};
+	return find(execution?.includes ?? []);
+}

@@ -1,3 +1,4 @@
+import { getResolvedIncludeNode } from '@dbsp/types/internal';
 /**
  * E2E: NQL v2.1 Grammar Simplification - ORM Strategy Tests
  *
@@ -32,10 +33,13 @@ const dialectCapabilities = POSTGRESQL_CAPABILITIES;
  * Helper to extract include-strategy decision from plan report.
  */
 function getIncludeStrategyDecision(report: PlanReport, relationName: string) {
-	return report.decisions.find(
-		(d) =>
-			d.type === 'include-strategy' && d.context?.relation === relationName,
-	);
+	return report.decisions.find((d) => {
+		if (d.type !== 'include-strategy') return false;
+		const node = getResolvedIncludeNode(report.execution, d);
+		return (
+			node?.publicKey === relationName || node?.relationName === relationName
+		);
+	});
 }
 
 describe('E2E: NQL v2.1 Strategy Behavior', () => {
@@ -173,7 +177,10 @@ describe('E2E: NQL v2.1 Strategy Behavior', () => {
 			const decision = getIncludeStrategyDecision(dump.plan!, 'author_posts');
 			expect(decision).toBeDefined();
 			expect(decision?.type).toBe('include-strategy');
-			expect(decision?.context?.relation).toBe('author_posts');
+			expect(
+				decision &&
+					getResolvedIncludeNode(dump.plan!.execution, decision)?.relationName,
+			).toBe('author_posts');
 			expect(['json_agg', 'join']).toContain(decision?.choice);
 		});
 
