@@ -226,4 +226,4 @@ Compilation resolves these keys before generating SQL. Exact duplicate source/ke
 
 Scalar expression projections retain join include payloads. Expression projections containing a call in `NQL_SELECT_AGGREGATE_FUNCTIONS`, including nested calls, are aggregation. Join includes are refused when aggregation, `groupBy` or `DISTINCT` would drop their data; use `.join()` for relational columns, grouping or ordering.
 
-External reports with includes are re-planned from their intent, model and recorded planning inputs; any supplied `execution` must match the re-planned execution.
+External reports are re-planned from intent, model and recorded planning inputs. Supplied execution must match the re-planned execution; decisions are observations. Decision matching applies to legacy reports without execution or planning inputs. Binding-final reports compile only in the process that planned them; JSON, spread and reports from a second package instance lose that authority and are refused.

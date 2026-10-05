@@ -592,43 +592,54 @@ export function getResolvedIncludeNode(
 	return find(execution?.includes ?? []);
 }
 
-/** In-process planning authority; intentionally lost by JSON and object spread. */
-const PLANNED_REPORT = Symbol.for('@dbsp/types/plannedReport');
+/** Authority belongs only to reports issued by this module instance. */
+const plannedReports = new WeakSet<object>();
 
 export function isPlannedReport(
 	report: import('./planner.js').PlanReport,
 ): boolean {
-	return (
-		Object.hasOwn(report, PLANNED_REPORT) &&
-		Reflect.get(report, PLANNED_REPORT) === true
-	);
+	return plannedReports.has(report);
 }
 
-function freezePlanningValue(
-	value: unknown,
-	seen = new WeakSet<object>(),
-): void {
-	if (value === null || typeof value !== 'object' || seen.has(value)) return;
-	seen.add(value);
-	// Do not evaluate accessors in opaque parameter values during planning.
-	for (const descriptor of Object.values(
-		Object.getOwnPropertyDescriptors(value),
-	)) {
-		if ('value' in descriptor) freezePlanningValue(descriptor.value, seen);
+/** Copy structural planning data; parameter slots retain opaque caller values. */
+function snapshotPlanningValue<T>(
+	value: T,
+	seen = new WeakMap<object, unknown>(),
+): T {
+	if (value === null || typeof value !== 'object') return value;
+	const prior = seen.get(value);
+	if (prior) return prior as T;
+	const copy = (Array.isArray(value) ? new Array(value.length) : {}) as Record<
+		PropertyKey,
+		unknown
+	>;
+	seen.set(value, copy);
+	for (const key of Reflect.ownKeys(value)) {
+		const descriptor = Object.getOwnPropertyDescriptor(value, key);
+		if (!descriptor || !('value' in descriptor) || key === 'length') continue;
+		Object.defineProperty(copy, key, {
+			enumerable: descriptor.enumerable === true,
+			value:
+				typeof key === 'symbol' || key === 'value' || key === 'values'
+					? descriptor.value
+					: snapshotPlanningValue(descriptor.value, seen),
+		});
 	}
-	Object.freeze(value);
+	return Object.freeze(copy) as T;
 }
 
-export function brandPlannedReport<T extends import('./planner.js').PlanReport>(
+export function markPlannedReport<T extends import('./planner.js').PlanReport>(
 	report: T,
 ): T {
-	freezePlanningValue(report.intent);
-	freezePlanningValue(report.executableIntent);
-	freezePlanningValue(report.execution);
-	freezePlanningValue(report.planningInputs);
-	Object.defineProperty(report, PLANNED_REPORT, {
-		value: true,
-		enumerable: false,
-	});
-	return Object.freeze(report);
+	const issued = {
+		...report,
+		...(report.execution && {
+			execution: snapshotPlanningValue(report.execution),
+		}),
+		...(report.planningInputs && {
+			planningInputs: snapshotPlanningValue(report.planningInputs),
+		}),
+	};
+	plannedReports.add(issued);
+	return Object.freeze(issued);
 }

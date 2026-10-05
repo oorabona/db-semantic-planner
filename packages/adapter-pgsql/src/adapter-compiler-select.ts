@@ -37,10 +37,10 @@ import type {
 import { resolveOutputReadHandling, toColumnList } from '@dbsp/types';
 import {
 	belongsToManyJoinIncludeRefusal,
-	brandPlannedReport,
 	getTrustedNqlRelationFilterFields,
 	isPlannedReport,
 	type Mutable,
+	markPlannedReport,
 	resolveIncludeRelationName,
 } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
@@ -1395,6 +1395,64 @@ function hasDottedRootField(where: WhereIntent): boolean {
 	return false;
 }
 
+/** Reject lost binding authority before physical table validation or include re-planning. */
+export function assertPlannedReportBindingAuthority(
+	plan: PlanReport,
+	deps: AdapterCompilerDeps,
+	resolvedModelForCompiler = deps.model,
+): void {
+	if (!isPlannedReport(plan)) {
+		const readsBinding = (table: string): boolean =>
+			table !== plan.intent?.batchValuesSource?.alias &&
+			(deps.bindingNames?.has(table) === true ||
+				deps.scope?.bindings.get(table)?.kind === 'cte-bind' ||
+				((plan.execution !== undefined || plan.planningInputs !== undefined) &&
+					resolvedModelForCompiler !== undefined &&
+					!resolvedModelForCompiler.getTable(table)));
+		const intentReadsBinding = (
+			value: unknown,
+			seen = new WeakSet<object>(),
+		): boolean => {
+			if (!value || typeof value !== 'object' || seen.has(value)) return false;
+			seen.add(value);
+			for (const [key, descriptor] of Object.entries(
+				Object.getOwnPropertyDescriptors(value),
+			)) {
+				if (!('value' in descriptor) || key === 'value' || key === 'values')
+					continue;
+				if (
+					(key === 'from' || key === 'table') &&
+					typeof descriptor.value === 'string' &&
+					readsBinding(descriptor.value)
+				)
+					return true;
+				if (intentReadsBinding(descriptor.value, seen)) return true;
+			}
+			return false;
+		};
+		const executionReadsBinding = (
+			nodes: readonly import('@dbsp/types').ResolvedIncludeNode[],
+		): boolean =>
+			nodes.some(
+				(node) =>
+					readsBinding(node.sourceRange.table) ||
+					readsBinding(node.targetRange.table) ||
+					executionReadsBinding(node.children),
+			);
+		if (
+			plan.bindingFinal ||
+			intentReadsBinding(plan.intent) ||
+			(plan.execution &&
+				(readsBinding(plan.execution.rootRange.table) ||
+					executionReadsBinding(plan.execution.includes)))
+		) {
+			throw new Error(
+				'Binding-final reports compile only in the process that planned them',
+			);
+		}
+	}
+}
+
 /**
  * Compile a PlanReport to a parameterised SELECT query.
  * Extracted body of PgAdapter.compile().
@@ -1408,12 +1466,17 @@ export function compileSelectEnvelope<T = unknown>(
 	const schemaName = deps.schemaName;
 
 	const resolvedModelForCompiler = options?.model ?? deps.model;
+	assertPlannedReportBindingAuthority(plan, deps, resolvedModelForCompiler);
 	if (
 		!isPlannedReport(plan) &&
-		(plan.intent?.include?.length || plan.execution?.includes.length)
+		(plan.intent?.include?.length || plan.execution || plan.planningInputs)
 	) {
 		if (!resolvedModelForCompiler)
-			throw new Error('External report with includes requires a model');
+			throw new Error(
+				plan.intent?.include?.length || plan.execution?.includes.length
+					? 'External report with includes requires a model'
+					: 'External report with execution or planning inputs requires a model',
+			);
 		if (plan.execution || plan.planningInputs) {
 			const planned = replan(
 				plan.intent,
@@ -1429,10 +1492,7 @@ export function compileSelectEnvelope<T = unknown>(
 				if (difference)
 					throw new Error(`External report execution differs at ${difference}`);
 			}
-			plan = {
-				...plan,
-				...(planned.execution && { execution: planned.execution }),
-			};
+			plan = planned;
 		}
 	}
 	const batchValuesSource = plan.intent?.batchValuesSource;
@@ -1603,7 +1663,7 @@ export function compileSelectEnvelope<T = unknown>(
 					(d) => resolvedByOriginal.get(d) ?? d,
 				),
 			};
-			planForCompilation = brandPlannedReport({
+			planForCompilation = markPlannedReport({
 				...planForCompilation,
 				execution: resolveReportIncludes(
 					{ ...execIntent, from: execIntent.from ?? plan.rootTable },
@@ -1768,7 +1828,7 @@ export function compileSelectEnvelope<T = unknown>(
 		);
 		hydrationPlan =
 			includePayloads.length > 0
-				? brandPlannedReport({
+				? markPlannedReport({
 						...planForCompilation,
 						intent: plan.intent,
 						includePayloads,

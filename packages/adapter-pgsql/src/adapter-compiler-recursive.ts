@@ -1,3 +1,4 @@
+import { markPlannedReport } from '@dbsp/types/internal';
 import {
 	buildSubqueryFromIntent,
 	compileCondition,
@@ -97,8 +98,12 @@ function getRegisteredProjection(
 	return registry.get(name);
 }
 
-function createPlanReportForQuery(query: QueryIntent): PlanReport {
-	return {
+function createPlanReportForQuery(
+	query: QueryIntent,
+	bindingFinal = false,
+): PlanReport {
+	return markPlannedReport({
+		...(bindingFinal && { bindingFinal: true as const }),
 		rootTable: query.from,
 		decisions: [],
 		warnings: [],
@@ -109,7 +114,7 @@ function createPlanReportForQuery(query: QueryIntent): PlanReport {
 			relationsAnalyzed: 0,
 			isAmbiguous: false,
 		},
-	};
+	});
 }
 
 function createPlanReportForCteQuery(
@@ -118,7 +123,7 @@ function createPlanReportForCteQuery(
 	hasRegisteredSource = false,
 ): PlanReport {
 	if (hasRegisteredSource || hasBindingName(deps.bindingNames, query.from)) {
-		return createPlanReportForQuery(query);
+		return createPlanReportForQuery(query, true);
 	}
 	if (
 		deps.model === undefined ||

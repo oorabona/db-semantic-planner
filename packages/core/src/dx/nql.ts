@@ -37,9 +37,9 @@ import type {
 } from '@dbsp/types';
 import { resolveJsonAggOrderKey } from '@dbsp/types';
 import {
-	brandPlannedReport,
 	explainUnsupportedNqlBindingIncludeHop,
 	getTrustedNqlRelationFilterFields,
+	markPlannedReport,
 	NQL_INTERNAL_COMPILER_OPTIONS,
 	type NqlBindingIncludeNodeShape,
 	type NqlBindingIncludeRelationShape,
@@ -734,7 +734,8 @@ export function createBindingFinalPlan(
 			),
 		];
 	});
-	return brandPlannedReport({
+	return markPlannedReport({
+		bindingFinal: true,
 		planningInputs: {
 			defaultIncludeStrategy: 'json_agg',
 			...(dialectCapabilities && { dialectCapabilities }),

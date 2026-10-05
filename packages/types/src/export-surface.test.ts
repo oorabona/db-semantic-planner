@@ -68,7 +68,7 @@ const relationPathTypes = ['ResolvedRelationPath'];
 // Readers of include decisions find their resolved include node (#891 step 5).
 const resolvedIncludeExports = [
 	'getResolvedIncludeNode',
-	'brandPlannedReport',
+	'markPlannedReport',
 	'isPlannedReport',
 ];
 const internalNames = [

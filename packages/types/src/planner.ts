@@ -205,6 +205,8 @@ export interface PlanReport {
 	>;
 	/** Required at hydration time for json_agg, join and lateral include decisions. */
 	readonly includePayloads?: readonly IncludePayloadShape[];
+	/** Binding-final reports require the issuing process, even without includes. */
+	readonly bindingFinal?: true;
 	/** Root table for the query */
 	readonly rootTable: string;
 

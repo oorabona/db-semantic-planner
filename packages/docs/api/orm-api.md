@@ -1274,6 +1274,8 @@ const next = await orm.select('users')
 
 ### Observability
 
+External reports are re-planned from intent, model and recorded planning inputs. Supplied execution must match the re-planned execution; decisions are observations. Decision matching applies to legacy reports without execution or planning inputs. Binding-final reports compile only in the process that planned them; JSON, spread and reports from a second package instance lose that authority and are refused.
+
 `dump().plan` preserves the original intent, decisions, warnings and metadata. `execution` holds resolved includes; include decisions describe the choice without carrying execution authority.
 
 ```typescript

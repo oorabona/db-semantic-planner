@@ -26,8 +26,8 @@ import type {
 import { resolveJsonAggOrderKey, toColumnList } from '@dbsp/types';
 import {
 	belongsToManyJoinIncludeRefusal,
-	brandPlannedReport,
 	dropsJoinIncludeData,
+	markPlannedReport,
 	resolveDeclaredRelationPath,
 	resolveIncludeRelationName,
 } from '@dbsp/types/internal';
@@ -456,7 +456,7 @@ export function plan(
 		metadata,
 	};
 
-	return brandPlannedReport(report);
+	return markPlannedReport(report);
 }
 
 // ============================================================================

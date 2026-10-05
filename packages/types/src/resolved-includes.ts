@@ -14,7 +14,11 @@ export interface ResolvedRange {
 	readonly table: string;
 	readonly alias: string;
 }
-/** One namespace for root, explicit joins, includes and recursive ranges. */
+/**
+ * One allocator for root, explicit joins, includes and recursive ranges.
+ * Reserved names and range ids are unique across the query. Aliases are unique
+ * within each SQL scope and may be reused across scalar subquery scopes.
+ */
 export class RangeAllocator {
 	private readonly names: Set<string>;
 	private nextId = 0;
