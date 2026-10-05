@@ -1,0 +1,979 @@
+{
+  "external/join/3/via-alias/flat/composite/all": {
+    "rootTable": "roots",
+    "decisions": [
+      {
+        "id": "includestrategy-001",
+        "type": "include-strategy",
+        "context": {
+          "sourceTable": "roots",
+          "target": "children",
+          "relation": "compositeChildren",
+          "relationType": "hasOne",
+          "includeAlias": "payload0",
+          "intentPath": "include[0]",
+          "foreignKey": [
+            "rootId",
+            "tenant"
+          ],
+          "parentKey": [
+            "id",
+            "tenant"
+          ],
+          "targetOrderKey": [
+            "id",
+            "tenant"
+          ]
+        },
+        "choice": "join",
+        "joinType": "left",
+        "reasoning": "Relation roots.compositeChildren (hasOne, cardinality: one) - using join selected by defaultIncludeStrategy",
+        "alternatives": []
+      },
+      {
+        "id": "jointype-001",
+        "type": "join-type",
+        "context": {
+          "sourceTable": "roots",
+          "target": "children",
+          "relation": "compositeChildren",
+          "intentPath": "include[0]"
+        },
+        "choice": "left",
+        "reasoning": "Relation roots.compositeChildren is optional without filter - using LEFT JOIN to preserve parent rows without matches",
+        "alternatives": [
+          "inner"
+        ]
+      },
+      {
+        "id": "includestrategy-002",
+        "type": "include-strategy",
+        "context": {
+          "sourceTable": "children",
+          "target": "leaves",
+          "relation": "compositeLeaves",
+          "relationType": "hasOne",
+          "includeAlias": "payload1",
+          "intentPath": "include[0].include[0]",
+          "foreignKey": [
+            "childId",
+            "tenant"
+          ],
+          "parentKey": [
+            "id",
+            "tenant"
+          ],
+          "targetOrderKey": [
+            "id",
+            "tenant"
+          ]
+        },
+        "choice": "join",
+        "joinType": "left",
+        "reasoning": "Relation children.compositeLeaves (hasOne, cardinality: one) - using join selected by defaultIncludeStrategy",
+        "alternatives": []
+      },
+      {
+        "id": "jointype-002",
+        "type": "join-type",
+        "context": {
+          "sourceTable": "children",
+          "target": "leaves",
+          "relation": "compositeLeaves",
+          "intentPath": "include[0].include[0]"
+        },
+        "choice": "left",
+        "reasoning": "Relation children.compositeLeaves is optional without filter - using LEFT JOIN to preserve parent rows without matches",
+        "alternatives": [
+          "inner"
+        ]
+      },
+      {
+        "id": "includestrategy-003",
+        "type": "include-strategy",
+        "context": {
+          "sourceTable": "leaves",
+          "target": "tips",
+          "relation": "compositeTips",
+          "relationType": "hasOne",
+          "includeAlias": "payload2",
+          "intentPath": "include[0].include[0].include[0]",
+          "foreignKey": [
+            "leafId",
+            "tenant"
+          ],
+          "parentKey": [
+            "id",
+            "tenant"
+          ],
+          "targetOrderKey": [
+            "id",
+            "tenant"
+          ]
+        },
+        "choice": "join",
+        "joinType": "left",
+        "reasoning": "Relation leaves.compositeTips (hasOne, cardinality: one) - using join selected by defaultIncludeStrategy",
+        "alternatives": []
+      },
+      {
+        "id": "jointype-003",
+        "type": "join-type",
+        "context": {
+          "sourceTable": "leaves",
+          "target": "tips",
+          "relation": "compositeTips",
+          "intentPath": "include[0].include[0].include[0]"
+        },
+        "choice": "left",
+        "reasoning": "Relation leaves.compositeTips is optional without filter - using LEFT JOIN to preserve parent rows without matches",
+        "alternatives": [
+          "inner"
+        ]
+      }
+    ],
+    "warnings": [],
+    "ctes": [],
+    "intent": {
+      "type": "select",
+      "from": "roots",
+      "include": [
+        {
+          "relation": "payload0",
+          "via": "compositeChildren",
+          "strategy": "flat",
+          "include": [
+            {
+              "relation": "payload1",
+              "via": "compositeLeaves",
+              "strategy": "flat",
+              "include": [
+                {
+                  "relation": "payload2",
+                  "via": "compositeTips",
+                  "strategy": "flat"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "metadata": {
+      "planningTimeMs": 0,
+      "relationsAnalyzed": 3,
+      "isAmbiguous": false
+    }
+  },
+  "external/join/3/via-alias/flat/composite/projection": {
+    "rootTable": "roots",
+    "decisions": [
+      {
+        "id": "includestrategy-001",
+        "type": "include-strategy",
+        "context": {
+          "sourceTable": "roots",
+          "target": "children",
+          "relation": "compositeChildren",
+          "relationType": "hasOne",
+          "includeAlias": "payload0",
+          "intentPath": "include[0]",
+          "foreignKey": [
+            "rootId",
+            "tenant"
+          ],
+          "parentKey": [
+            "id",
+            "tenant"
+          ],
+          "targetOrderKey": [
+            "id",
+            "tenant"
+          ]
+        },
+        "choice": "join",
+        "joinType": "left",
+        "reasoning": "Relation roots.compositeChildren (hasOne, cardinality: one) - using join selected by defaultIncludeStrategy",
+        "alternatives": []
+      },
+      {
+        "id": "jointype-001",
+        "type": "join-type",
+        "context": {
+          "sourceTable": "roots",
+          "target": "children",
+          "relation": "compositeChildren",
+          "intentPath": "include[0]"
+        },
+        "choice": "left",
+        "reasoning": "Relation roots.compositeChildren is optional without filter - using LEFT JOIN to preserve parent rows without matches",
+        "alternatives": [
+          "inner"
+        ]
+      },
+      {
+        "id": "includestrategy-002",
+        "type": "include-strategy",
+        "context": {
+          "sourceTable": "children",
+          "target": "leaves",
+          "relation": "compositeLeaves",
+          "relationType": "hasOne",
+          "includeAlias": "payload1",
+          "intentPath": "include[0].include[0]",
+          "foreignKey": [
+            "childId",
+            "tenant"
+          ],
+          "parentKey": [
+            "id",
+            "tenant"
+          ],
+          "targetOrderKey": [
+            "id",
+            "tenant"
+          ]
+        },
+        "choice": "join",
+        "joinType": "left",
+        "reasoning": "Relation children.compositeLeaves (hasOne, cardinality: one) - using join selected by defaultIncludeStrategy",
+        "alternatives": []
+      },
+      {
+        "id": "jointype-002",
+        "type": "join-type",
+        "context": {
+          "sourceTable": "children",
+          "target": "leaves",
+          "relation": "compositeLeaves",
+          "intentPath": "include[0].include[0]"
+        },
+        "choice": "left",
+        "reasoning": "Relation children.compositeLeaves is optional without filter - using LEFT JOIN to preserve parent rows without matches",
+        "alternatives": [
+          "inner"
+        ]
+      },
+      {
+        "id": "includestrategy-003",
+        "type": "include-strategy",
+        "context": {
+          "sourceTable": "leaves",
+          "target": "tips",
+          "relation": "compositeTips",
+          "relationType": "hasOne",
+          "includeAlias": "payload2",
+          "intentPath": "include[0].include[0].include[0]",
+          "foreignKey": [
+            "leafId",
+            "tenant"
+          ],
+          "parentKey": [
+            "id",
+            "tenant"
+          ],
+          "targetOrderKey": [
+            "id",
+            "tenant"
+          ]
+        },
+        "choice": "join",
+        "joinType": "left",
+        "reasoning": "Relation leaves.compositeTips (hasOne, cardinality: one) - using join selected by defaultIncludeStrategy",
+        "alternatives": []
+      },
+      {
+        "id": "jointype-003",
+        "type": "join-type",
+        "context": {
+          "sourceTable": "leaves",
+          "target": "tips",
+          "relation": "compositeTips",
+          "intentPath": "include[0].include[0].include[0]"
+        },
+        "choice": "left",
+        "reasoning": "Relation leaves.compositeTips is optional without filter - using LEFT JOIN to preserve parent rows without matches",
+        "alternatives": [
+          "inner"
+        ]
+      }
+    ],
+    "warnings": [],
+    "ctes": [],
+    "intent": {
+      "type": "select",
+      "from": "roots",
+      "include": [
+        {
+          "relation": "payload0",
+          "via": "compositeChildren",
+          "strategy": "flat",
+          "select": {
+            "type": "fields",
+            "fields": [
+              "name",
+              "amount"
+            ]
+          },
+          "include": [
+            {
+              "relation": "payload1",
+              "via": "compositeLeaves",
+              "strategy": "flat",
+              "select": {
+                "type": "fields",
+                "fields": [
+                  "name",
+                  "amount"
+                ]
+              },
+              "include": [
+                {
+                  "relation": "payload2",
+                  "via": "compositeTips",
+                  "strategy": "flat",
+                  "select": {
+                    "type": "fields",
+                    "fields": [
+                      "name",
+                      "amount"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "metadata": {
+      "planningTimeMs": 0,
+      "relationsAnalyzed": 3,
+      "isAmbiguous": false
+    }
+  },
+  "external/join/3/via-alias/flat/composite/predicate": {
+    "rootTable": "roots",
+    "decisions": [
+      {
+        "id": "includestrategy-001",
+        "type": "include-strategy",
+        "context": {
+          "sourceTable": "roots",
+          "target": "children",
+          "relation": "compositeChildren",
+          "relationType": "hasOne",
+          "includeAlias": "payload0",
+          "intentPath": "include[0]",
+          "foreignKey": [
+            "rootId",
+            "tenant"
+          ],
+          "parentKey": [
+            "id",
+            "tenant"
+          ],
+          "targetOrderKey": [
+            "id",
+            "tenant"
+          ]
+        },
+        "choice": "join",
+        "joinType": "inner",
+        "reasoning": "Relation roots.compositeChildren (hasOne, cardinality: one) - using join selected by defaultIncludeStrategy",
+        "alternatives": []
+      },
+      {
+        "id": "jointype-001",
+        "type": "join-type",
+        "context": {
+          "sourceTable": "roots",
+          "target": "children",
+          "relation": "compositeChildren",
+          "intentPath": "include[0]"
+        },
+        "choice": "inner",
+        "reasoning": "Relation roots.compositeChildren has filter - using INNER JOIN (filter implies existence)",
+        "alternatives": [
+          "left"
+        ]
+      },
+      {
+        "id": "includestrategy-002",
+        "type": "include-strategy",
+        "context": {
+          "sourceTable": "children",
+          "target": "leaves",
+          "relation": "compositeLeaves",
+          "relationType": "hasOne",
+          "includeAlias": "payload1",
+          "intentPath": "include[0].include[0]",
+          "foreignKey": [
+            "childId",
+            "tenant"
+          ],
+          "parentKey": [
+            "id",
+            "tenant"
+          ],
+          "targetOrderKey": [
+            "id",
+            "tenant"
+          ]
+        },
+        "choice": "join",
+        "joinType": "inner",
+        "reasoning": "Relation children.compositeLeaves (hasOne, cardinality: one) - using join selected by defaultIncludeStrategy",
+        "alternatives": []
+      },
+      {
+        "id": "jointype-002",
+        "type": "join-type",
+        "context": {
+          "sourceTable": "children",
+          "target": "leaves",
+          "relation": "compositeLeaves",
+          "intentPath": "include[0].include[0]"
+        },
+        "choice": "inner",
+        "reasoning": "Relation children.compositeLeaves has filter - using INNER JOIN (filter implies existence)",
+        "alternatives": [
+          "left"
+        ]
+      },
+      {
+        "id": "includestrategy-003",
+        "type": "include-strategy",
+        "context": {
+          "sourceTable": "leaves",
+          "target": "tips",
+          "relation": "compositeTips",
+          "relationType": "hasOne",
+          "includeAlias": "payload2",
+          "intentPath": "include[0].include[0].include[0]",
+          "foreignKey": [
+            "leafId",
+            "tenant"
+          ],
+          "parentKey": [
+            "id",
+            "tenant"
+          ],
+          "targetOrderKey": [
+            "id",
+            "tenant"
+          ]
+        },
+        "choice": "join",
+        "joinType": "inner",
+        "reasoning": "Relation leaves.compositeTips (hasOne, cardinality: one) - using join selected by defaultIncludeStrategy",
+        "alternatives": []
+      },
+      {
+        "id": "jointype-003",
+        "type": "join-type",
+        "context": {
+          "sourceTable": "leaves",
+          "target": "tips",
+          "relation": "compositeTips",
+          "intentPath": "include[0].include[0].include[0]"
+        },
+        "choice": "inner",
+        "reasoning": "Relation leaves.compositeTips has filter - using INNER JOIN (filter implies existence)",
+        "alternatives": [
+          "left"
+        ]
+      }
+    ],
+    "warnings": [],
+    "ctes": [],
+    "intent": {
+      "type": "select",
+      "from": "roots",
+      "include": [
+        {
+          "relation": "payload0",
+          "via": "compositeChildren",
+          "strategy": "flat",
+          "where": {
+            "kind": "comparison",
+            "field": "name",
+            "operator": "eq",
+            "value": "child"
+          },
+          "include": [
+            {
+              "relation": "payload1",
+              "via": "compositeLeaves",
+              "strategy": "flat",
+              "where": {
+                "kind": "comparison",
+                "field": "name",
+                "operator": "eq",
+                "value": "child"
+              },
+              "include": [
+                {
+                  "relation": "payload2",
+                  "via": "compositeTips",
+                  "strategy": "flat",
+                  "where": {
+                    "kind": "comparison",
+                    "field": "name",
+                    "operator": "eq",
+                    "value": "child"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "metadata": {
+      "planningTimeMs": 0,
+      "relationsAnalyzed": 3,
+      "isAmbiguous": false
+    }
+  },
+  "external/join/3/via-alias/flat/composite/expression": {
+    "rootTable": "roots",
+    "decisions": [
+      {
+        "id": "includestrategy-001",
+        "type": "include-strategy",
+        "context": {
+          "sourceTable": "roots",
+          "target": "children",
+          "relation": "compositeChildren",
+          "relationType": "hasOne",
+          "includeAlias": "payload0",
+          "intentPath": "include[0]",
+          "foreignKey": [
+            "rootId",
+            "tenant"
+          ],
+          "parentKey": [
+            "id",
+            "tenant"
+          ],
+          "targetOrderKey": [
+            "id",
+            "tenant"
+          ]
+        },
+        "choice": "join",
+        "joinType": "inner",
+        "reasoning": "Relation roots.compositeChildren (hasOne, cardinality: one) - using join selected by defaultIncludeStrategy",
+        "alternatives": []
+      },
+      {
+        "id": "jointype-001",
+        "type": "join-type",
+        "context": {
+          "sourceTable": "roots",
+          "target": "children",
+          "relation": "compositeChildren",
+          "intentPath": "include[0]"
+        },
+        "choice": "inner",
+        "reasoning": "Relation roots.compositeChildren has filter - using INNER JOIN (filter implies existence)",
+        "alternatives": [
+          "left"
+        ]
+      },
+      {
+        "id": "includestrategy-002",
+        "type": "include-strategy",
+        "context": {
+          "sourceTable": "children",
+          "target": "leaves",
+          "relation": "compositeLeaves",
+          "relationType": "hasOne",
+          "includeAlias": "payload1",
+          "intentPath": "include[0].include[0]",
+          "foreignKey": [
+            "childId",
+            "tenant"
+          ],
+          "parentKey": [
+            "id",
+            "tenant"
+          ],
+          "targetOrderKey": [
+            "id",
+            "tenant"
+          ]
+        },
+        "choice": "join",
+        "joinType": "inner",
+        "reasoning": "Relation children.compositeLeaves (hasOne, cardinality: one) - using join selected by defaultIncludeStrategy",
+        "alternatives": []
+      },
+      {
+        "id": "jointype-002",
+        "type": "join-type",
+        "context": {
+          "sourceTable": "children",
+          "target": "leaves",
+          "relation": "compositeLeaves",
+          "intentPath": "include[0].include[0]"
+        },
+        "choice": "inner",
+        "reasoning": "Relation children.compositeLeaves has filter - using INNER JOIN (filter implies existence)",
+        "alternatives": [
+          "left"
+        ]
+      },
+      {
+        "id": "includestrategy-003",
+        "type": "include-strategy",
+        "context": {
+          "sourceTable": "leaves",
+          "target": "tips",
+          "relation": "compositeTips",
+          "relationType": "hasOne",
+          "includeAlias": "payload2",
+          "intentPath": "include[0].include[0].include[0]",
+          "foreignKey": [
+            "leafId",
+            "tenant"
+          ],
+          "parentKey": [
+            "id",
+            "tenant"
+          ],
+          "targetOrderKey": [
+            "id",
+            "tenant"
+          ]
+        },
+        "choice": "join",
+        "joinType": "inner",
+        "reasoning": "Relation leaves.compositeTips (hasOne, cardinality: one) - using join selected by defaultIncludeStrategy",
+        "alternatives": []
+      },
+      {
+        "id": "jointype-003",
+        "type": "join-type",
+        "context": {
+          "sourceTable": "leaves",
+          "target": "tips",
+          "relation": "compositeTips",
+          "intentPath": "include[0].include[0].include[0]"
+        },
+        "choice": "inner",
+        "reasoning": "Relation leaves.compositeTips has filter - using INNER JOIN (filter implies existence)",
+        "alternatives": [
+          "left"
+        ]
+      }
+    ],
+    "warnings": [],
+    "ctes": [],
+    "intent": {
+      "type": "select",
+      "from": "roots",
+      "include": [
+        {
+          "relation": "payload0",
+          "via": "compositeChildren",
+          "strategy": "flat",
+          "where": {
+            "kind": "expression",
+            "expr": {
+              "kind": "customFn",
+              "name": "lower",
+              "args": [
+                {
+                  "kind": "ref",
+                  "column": "name"
+                }
+              ]
+            },
+            "operator": "eq",
+            "value": "child"
+          },
+          "include": [
+            {
+              "relation": "payload1",
+              "via": "compositeLeaves",
+              "strategy": "flat",
+              "where": {
+                "kind": "expression",
+                "expr": {
+                  "kind": "customFn",
+                  "name": "lower",
+                  "args": [
+                    {
+                      "kind": "ref",
+                      "column": "name"
+                    }
+                  ]
+                },
+                "operator": "eq",
+                "value": "child"
+              },
+              "include": [
+                {
+                  "relation": "payload2",
+                  "via": "compositeTips",
+                  "strategy": "flat",
+                  "where": {
+                    "kind": "expression",
+                    "expr": {
+                      "kind": "customFn",
+                      "name": "lower",
+                      "args": [
+                        {
+                          "kind": "ref",
+                          "column": "name"
+                        }
+                      ]
+                    },
+                    "operator": "eq",
+                    "value": "child"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "metadata": {
+      "planningTimeMs": 0,
+      "relationsAnalyzed": 3,
+      "isAmbiguous": false
+    }
+  },
+  "external/join/3/via-alias/flat/composite/outer": {
+    "rootTable": "roots",
+    "decisions": [
+      {
+        "id": "includestrategy-001",
+        "type": "include-strategy",
+        "context": {
+          "sourceTable": "roots",
+          "target": "children",
+          "relation": "compositeChildren",
+          "relationType": "hasOne",
+          "includeAlias": "payload0",
+          "intentPath": "include[0]",
+          "foreignKey": [
+            "rootId",
+            "tenant"
+          ],
+          "parentKey": [
+            "id",
+            "tenant"
+          ],
+          "targetOrderKey": [
+            "id",
+            "tenant"
+          ]
+        },
+        "choice": "join",
+        "joinType": "inner",
+        "reasoning": "Relation roots.compositeChildren (hasOne, cardinality: one) - using join selected by defaultIncludeStrategy",
+        "alternatives": []
+      },
+      {
+        "id": "jointype-001",
+        "type": "join-type",
+        "context": {
+          "sourceTable": "roots",
+          "target": "children",
+          "relation": "compositeChildren",
+          "intentPath": "include[0]"
+        },
+        "choice": "inner",
+        "reasoning": "Relation roots.compositeChildren has filter - using INNER JOIN (filter implies existence)",
+        "alternatives": [
+          "left"
+        ]
+      },
+      {
+        "id": "includestrategy-002",
+        "type": "include-strategy",
+        "context": {
+          "sourceTable": "children",
+          "target": "leaves",
+          "relation": "compositeLeaves",
+          "relationType": "hasOne",
+          "includeAlias": "payload1",
+          "intentPath": "include[0].include[0]",
+          "foreignKey": [
+            "childId",
+            "tenant"
+          ],
+          "parentKey": [
+            "id",
+            "tenant"
+          ],
+          "targetOrderKey": [
+            "id",
+            "tenant"
+          ]
+        },
+        "choice": "join",
+        "joinType": "inner",
+        "reasoning": "Relation children.compositeLeaves (hasOne, cardinality: one) - using join selected by defaultIncludeStrategy",
+        "alternatives": []
+      },
+      {
+        "id": "jointype-002",
+        "type": "join-type",
+        "context": {
+          "sourceTable": "children",
+          "target": "leaves",
+          "relation": "compositeLeaves",
+          "intentPath": "include[0].include[0]"
+        },
+        "choice": "inner",
+        "reasoning": "Relation children.compositeLeaves has filter - using INNER JOIN (filter implies existence)",
+        "alternatives": [
+          "left"
+        ]
+      },
+      {
+        "id": "includestrategy-003",
+        "type": "include-strategy",
+        "context": {
+          "sourceTable": "leaves",
+          "target": "tips",
+          "relation": "compositeTips",
+          "relationType": "hasOne",
+          "includeAlias": "payload2",
+          "intentPath": "include[0].include[0].include[0]",
+          "foreignKey": [
+            "leafId",
+            "tenant"
+          ],
+          "parentKey": [
+            "id",
+            "tenant"
+          ],
+          "targetOrderKey": [
+            "id",
+            "tenant"
+          ]
+        },
+        "choice": "join",
+        "joinType": "inner",
+        "reasoning": "Relation leaves.compositeTips (hasOne, cardinality: one) - using join selected by defaultIncludeStrategy",
+        "alternatives": []
+      },
+      {
+        "id": "jointype-003",
+        "type": "join-type",
+        "context": {
+          "sourceTable": "leaves",
+          "target": "tips",
+          "relation": "compositeTips",
+          "intentPath": "include[0].include[0].include[0]"
+        },
+        "choice": "inner",
+        "reasoning": "Relation leaves.compositeTips has filter - using INNER JOIN (filter implies existence)",
+        "alternatives": [
+          "left"
+        ]
+      }
+    ],
+    "warnings": [],
+    "ctes": [],
+    "intent": {
+      "type": "select",
+      "from": "roots",
+      "include": [
+        {
+          "relation": "payload0",
+          "via": "compositeChildren",
+          "strategy": "flat",
+          "where": {
+            "kind": "and",
+            "conditions": [
+              {
+                "kind": "comparison",
+                "field": "name",
+                "operator": "eq",
+                "value": "child"
+              },
+              {
+                "kind": "comparison",
+                "field": "id",
+                "operator": "eq",
+                "value": {
+                  "kind": "ref",
+                  "column": "id",
+                  "outer": true
+                }
+              }
+            ]
+          },
+          "include": [
+            {
+              "relation": "payload1",
+              "via": "compositeLeaves",
+              "strategy": "flat",
+              "where": {
+                "kind": "and",
+                "conditions": [
+                  {
+                    "kind": "comparison",
+                    "field": "name",
+                    "operator": "eq",
+                    "value": "child"
+                  },
+                  {
+                    "kind": "comparison",
+                    "field": "id",
+                    "operator": "eq",
+                    "value": {
+                      "kind": "ref",
+                      "column": "id",
+                      "outer": true
+                    }
+                  }
+                ]
+              },
+              "include": [
+                {
+                  "relation": "payload2",
+                  "via": "compositeTips",
+                  "strategy": "flat",
+                  "where": {
+                    "kind": "and",
+                    "conditions": [
+                      {
+                        "kind": "comparison",
+                        "field": "name",
+                        "operator": "eq",
+                        "value": "child"
+                      },
+                      {
+                        "kind": "comparison",
+                        "field": "id",
+                        "operator": "eq",
+                        "value": {
+                          "kind": "ref",
+                          "column": "id",
+                          "outer": true
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "metadata": {
+      "planningTimeMs": 0,
+      "relationsAnalyzed": 3,
+      "isAmbiguous": false
+    }
+  }
+}

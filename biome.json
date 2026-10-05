@@ -60,7 +60,7 @@
 		{
 			"includes": [
 				"packages/adapter-pgsql/src/__tests__/include-matrix/*.json",
-				"packages/adapter-pgsql/src/__tests__/include-matrix-inputs.json"
+				"packages/adapter-pgsql/src/__tests__/include-matrix-inputs/*.json"
 			],
 			"formatter": { "enabled": false }
 		},

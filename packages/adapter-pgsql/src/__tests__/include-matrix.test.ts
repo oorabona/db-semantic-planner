@@ -1,5 +1,11 @@
 /** Main-code include oracle. Rewriting is explicit; normal runs never write shards. */
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	unlinkSync,
+	writeFileSync,
+} from 'node:fs';
 import {
 	and,
 	createOrm,
@@ -24,6 +30,7 @@ import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const strategies = ['join', 'lateral', 'json_agg', 'cte'] as const;
 const directory = new URL('./include-matrix/', import.meta.url);
+const inputsDirectory = new URL('./include-matrix-inputs/', import.meta.url);
 const rewrite = process.env.REWRITE_INCLUDE_MATRIX === '1';
 function makeModel(composite: boolean) {
 	const fields = {
@@ -144,12 +151,47 @@ type Entry = {
 const entries: Entry[] = [];
 const legacyInputs: Record<string, PlanReport> = rewrite
 	? {}
-	: JSON.parse(
-			readFileSync(
-				new URL('./include-matrix-inputs.json', import.meta.url),
-				'utf8',
-			),
+	: Object.assign(
+			{},
+			...readdirSync(inputsDirectory)
+				.sort()
+				.map((name) =>
+					JSON.parse(readFileSync(new URL(name, inputsDirectory), 'utf8')),
+				),
 		);
+/** Preserve insertion order within each strategy and bound serialized bytes. */
+function inputShards(inputs: Record<string, PlanReport>) {
+	const prefixes = [...strategies, 'recursive'];
+	for (const key of Object.keys(inputs))
+		if (!prefixes.some((strategy) => key.startsWith(`external/${strategy}/`)))
+			throw new Error(`Unknown include input prefix: ${key}`);
+	return prefixes.flatMap((strategy) => {
+		const result: { name: string; bytes: string }[] = [];
+		let parts: string[] = [];
+		let size = 3; // Opening brace, closing brace and final newline.
+		const flush = () => {
+			if (parts.length === 0) return;
+			result.push({
+				name: `${strategy}.${String(result.length + 1).padStart(3, '0')}.json`,
+				bytes: `{\n${parts.join(',\n')}\n}\n`,
+			});
+			parts = [];
+			size = 3;
+		};
+		for (const [key, value] of Object.entries(inputs)) {
+			if (!key.startsWith(`external/${strategy}/`)) continue;
+			const part = JSON.stringify({ [key]: value }, null, 2).slice(2, -2);
+			const bytes = Buffer.byteLength(part);
+			if (bytes + 5 > 200_000)
+				throw new Error(`Include input exceeds 200 KB: ${key}`);
+			if (size + bytes + 2 > 200_000) flush();
+			parts.push(part);
+			size += bytes + 2;
+		}
+		flush();
+		return result;
+	});
+}
 const record = (
 	key: string,
 	model: (typeof models)[number],
@@ -392,10 +434,13 @@ const shards = [...strategies, 'recursive'].flatMap((strategy) => {
 });
 if (rewrite) {
 	mkdirSync(directory, { recursive: true });
-	writeFileSync(
-		new URL('./include-matrix-inputs.json', import.meta.url),
-		`${JSON.stringify(legacyInputs, null, 2)}\n`,
-	);
+	mkdirSync(inputsDirectory, { recursive: true });
+	const inputs = inputShards(legacyInputs);
+	for (const shard of inputs)
+		writeFileSync(new URL(shard.name, inputsDirectory), shard.bytes);
+	for (const name of readdirSync(inputsDirectory))
+		if (!inputs.some((shard) => shard.name === name))
+			unlinkSync(new URL(name, inputsDirectory));
 	for (const shard of shards)
 		writeFileSync(
 			new URL(shard.name, directory),
@@ -403,6 +448,18 @@ if (rewrite) {
 		);
 }
 describe('include differential matrix (#891 PR 2)', () => {
+	it('pins the input shard layout and size', () => {
+		const inputs = inputShards(legacyInputs);
+		expect(readdirSync(inputsDirectory).sort()).toEqual(
+			inputs.map((shard) => shard.name).sort(),
+		);
+		for (const shard of inputs) {
+			expect(Buffer.byteLength(shard.bytes)).toBeLessThanOrEqual(200_000);
+			expect(readFileSync(new URL(shard.name, inputsDirectory), 'utf8')).toBe(
+				shard.bytes,
+			);
+		}
+	});
 	it('pins the ordered shard inventory', () =>
 		expect(readdirSync(directory).sort()).toEqual(
 			shards.map((shard) => shard.name).sort(),
