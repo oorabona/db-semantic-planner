@@ -1,6 +1,6 @@
 [
   {
-    "key": "orm/join/1/direct/flat/single/expression",
+    "case": "orm/join/1/direct/flat/single/expression",
     "sql": "SELECT roots.*, children.id AS \"children.id\", children.tenant AS \"children.tenant\", children.name AS \"children.name\", children.amount AS \"children.amount\", children.\"rootId\" AS \"children.rootId\", children.id AS __dbsp_presence_children FROM roots JOIN children AS children ON roots.id = children.\"rootId\" WHERE lower(name) = $1",
     "params": [
       "child"
@@ -75,7 +75,7 @@
     ]
   },
   {
-    "key": "external/join/1/direct/flat/single/expression",
+    "case": "external/join/1/direct/flat/single/expression",
     "sql": "SELECT roots.*, children.id AS \"children.id\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" WHERE lower(name) = $1",
     "params": [
       "child"
@@ -109,7 +109,7 @@
     ]
   },
   {
-    "key": "nql/join/1/direct/flat/single/expression",
+    "case": "nql/join/1/direct/flat/single/expression",
     "sql": "SELECT roots.id, children.id AS \"children.id\", children.tenant AS \"children.tenant\", children.name AS \"children.name\", children.amount AS \"children.amount\", children.\"rootId\" AS \"children.rootId\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" WHERE lower(name) = $1",
     "params": [
       "child"
@@ -178,7 +178,7 @@
     ]
   },
   {
-    "key": "orm/join/1/direct/flat/single/outer",
+    "case": "orm/join/1/direct/flat/single/outer",
     "sql": "SELECT roots.*, children.id AS \"children.id\", children.tenant AS \"children.tenant\", children.name AS \"children.name\", children.amount AS \"children.amount\", children.\"rootId\" AS \"children.rootId\", children.id AS __dbsp_presence_children FROM roots JOIN children AS children ON roots.id = children.\"rootId\" WHERE children.name = $1 AND children.id = roots.id",
     "params": [
       "child"
@@ -253,7 +253,7 @@
     ]
   },
   {
-    "key": "external/join/1/direct/flat/single/outer",
+    "case": "external/join/1/direct/flat/single/outer",
     "sql": "SELECT roots.*, children.id AS \"children.id\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" WHERE children.name = $1 AND children.id = roots.id",
     "params": [
       "child"
@@ -287,7 +287,7 @@
     ]
   },
   {
-    "key": "nql/join/1/direct/flat/single/outer",
+    "case": "nql/join/1/direct/flat/single/outer",
     "sql": "SELECT roots.id, children.id AS \"children.id\", children.tenant AS \"children.tenant\", children.name AS \"children.name\", children.amount AS \"children.amount\", children.\"rootId\" AS \"children.rootId\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" WHERE children.name = $1 AND children.id = roots.id",
     "params": [
       "child"
@@ -356,7 +356,7 @@
     ]
   },
   {
-    "key": "orm/join/1/direct/flat/composite/all",
+    "case": "orm/join/1/direct/flat/composite/all",
     "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\" FROM roots LEFT JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant",
     "params": [],
     "error": null,
@@ -429,7 +429,7 @@
     ]
   },
   {
-    "key": "external/join/1/direct/flat/composite/all",
+    "case": "external/join/1/direct/flat/composite/all",
     "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\" FROM roots LEFT JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant",
     "params": [],
     "error": null,
@@ -461,7 +461,7 @@
     ]
   },
   {
-    "key": "nql/join/1/direct/flat/composite/all",
+    "case": "nql/join/1/direct/flat/composite/all",
     "sql": "SELECT roots.id, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\" FROM roots LEFT JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant",
     "params": [],
     "error": null,
@@ -528,7 +528,7 @@
     ]
   },
   {
-    "key": "orm/join/1/direct/flat/composite/projection",
+    "case": "orm/join/1/direct/flat/composite/projection",
     "sql": "SELECT roots.*, \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\" FROM roots LEFT JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant",
     "params": [],
     "error": null,
@@ -580,7 +580,7 @@
     ]
   },
   {
-    "key": "external/join/1/direct/flat/composite/projection",
+    "case": "external/join/1/direct/flat/composite/projection",
     "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\" FROM roots LEFT JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant",
     "params": [],
     "error": null,
@@ -633,7 +633,7 @@
     ]
   },
   {
-    "key": "nql/join/1/direct/flat/composite/projection",
+    "case": "nql/join/1/direct/flat/composite/projection",
     "sql": "SELECT roots.id, \"compositeChildren\".name AS \"compositeChildren.name\" FROM roots LEFT JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant",
     "params": [],
     "error": null,
@@ -665,7 +665,7 @@
     ]
   },
   {
-    "key": "orm/join/1/direct/flat/composite/ordered-limit",
+    "case": "orm/join/1/direct/flat/composite/ordered-limit",
     "sql": null,
     "params": [],
     "error": {
@@ -676,7 +676,7 @@
     "rows": []
   },
   {
-    "key": "external/join/1/direct/flat/composite/ordered-limit",
+    "case": "external/join/1/direct/flat/composite/ordered-limit",
     "sql": null,
     "params": [],
     "error": {
@@ -687,7 +687,7 @@
     "rows": []
   },
   {
-    "key": "nql/join/1/direct/flat/composite/ordered-limit",
+    "case": "nql/join/1/direct/flat/composite/ordered-limit",
     "sql": null,
     "params": [],
     "error": {
@@ -698,7 +698,7 @@
     "rows": []
   },
   {
-    "key": "orm/join/1/direct/flat/composite/predicate",
+    "case": "orm/join/1/direct/flat/composite/predicate",
     "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE \"compositeChildren\".name = $1",
     "params": [
       "child"
@@ -773,7 +773,7 @@
     ]
   },
   {
-    "key": "external/join/1/direct/flat/composite/predicate",
+    "case": "external/join/1/direct/flat/composite/predicate",
     "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE \"compositeChildren\".name = $1",
     "params": [
       "child"
@@ -807,7 +807,7 @@
     ]
   },
   {
-    "key": "nql/join/1/direct/flat/composite/predicate",
+    "case": "nql/join/1/direct/flat/composite/predicate",
     "sql": "SELECT roots.id, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE \"compositeChildren\".name = $1",
     "params": [
       "child"
@@ -876,7 +876,7 @@
     ]
   },
   {
-    "key": "orm/join/1/direct/flat/composite/expression",
+    "case": "orm/join/1/direct/flat/composite/expression",
     "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE lower(name) = $1",
     "params": [
       "child"
@@ -951,7 +951,7 @@
     ]
   },
   {
-    "key": "external/join/1/direct/flat/composite/expression",
+    "case": "external/join/1/direct/flat/composite/expression",
     "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE lower(name) = $1",
     "params": [
       "child"
@@ -985,7 +985,7 @@
     ]
   },
   {
-    "key": "nql/join/1/direct/flat/composite/expression",
+    "case": "nql/join/1/direct/flat/composite/expression",
     "sql": "SELECT roots.id, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE lower(name) = $1",
     "params": [
       "child"
@@ -1054,7 +1054,7 @@
     ]
   },
   {
-    "key": "orm/join/1/direct/flat/composite/outer",
+    "case": "orm/join/1/direct/flat/composite/outer",
     "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeChildren\".id = roots.id",
     "params": [
       "child"
@@ -1129,7 +1129,7 @@
     ]
   },
   {
-    "key": "external/join/1/direct/flat/composite/outer",
+    "case": "external/join/1/direct/flat/composite/outer",
     "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeChildren\".id = roots.id",
     "params": [
       "child"
@@ -1163,7 +1163,7 @@
     ]
   },
   {
-    "key": "nql/join/1/direct/flat/composite/outer",
+    "case": "nql/join/1/direct/flat/composite/outer",
     "sql": "SELECT roots.id, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeChildren\".id = roots.id",
     "params": [
       "child"

@@ -141,7 +141,7 @@ function fakeRows(shapes: readonly IncludePayloadShape[]) {
 	return [row];
 }
 type Entry = {
-	key: string;
+	case: string;
 	sql: string | null;
 	params: readonly unknown[];
 	error: { class: string; message: string } | null;
@@ -249,7 +249,7 @@ const record = (
 			message: (e as Error).message,
 		};
 	}
-	entries.push({ key, sql, params, error, payloads, rows });
+	entries.push({ case: key, sql, params, error, payloads, rows });
 };
 type OrmInclude = {
 	relation: string;
@@ -422,7 +422,7 @@ for (const direction of ['ancestors', 'descendants'] as const)
 		}
 const shards = [...strategies, 'recursive'].flatMap((strategy) => {
 	const outcomes = entries.filter((entry) =>
-		entry.key.includes(`/${strategy}/`),
+		entry.case.includes(`/${strategy}/`),
 	);
 	return Array.from(
 		{ length: Math.ceil(outcomes.length / 24) },

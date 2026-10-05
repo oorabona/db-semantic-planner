@@ -1,6 +1,6 @@
 [
   {
-    "key": "orm/json_agg/2/via-alias/nested/single/all",
+    "case": "orm/json_agg/2/via-alias/nested/single/all",
     "sql": "SELECT roots.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'tenant', __t__.tenant, 'name', __t__.name, 'amount', CAST(__t__.amount AS text), 'rootId', __t__.\"rootId\") || jsonb_build_object('leaves', COALESCE((SELECT json_agg(jsonb_build_object('id', __t1__.id, 'tenant', __t1__.tenant, 'name', __t1__.name, 'amount', CAST(__t1__.amount AS text), 'childId', __t1__.\"childId\") ORDER BY __t1__.id ASC NULLS LAST) FROM leaves AS __t1__ WHERE __t1__.\"childId\" = __t__.id), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST) FROM children AS __t__ WHERE __t__.\"rootId\" = roots.id), '[]'::json) AS children_json FROM roots",
     "params": [],
     "error": null,
@@ -126,7 +126,7 @@
     ]
   },
   {
-    "key": "external/json_agg/2/via-alias/nested/single/all",
+    "case": "external/json_agg/2/via-alias/nested/single/all",
     "sql": "SELECT roots.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'tenant', __t__.tenant, 'name', __t__.name, 'amount', CAST(__t__.amount AS text), 'rootId', __t__.\"rootId\") || jsonb_build_object('leaves', COALESCE((SELECT json_agg(jsonb_build_object('id', __t1__.id, 'tenant', __t1__.tenant, 'name', __t1__.name, 'amount', CAST(__t1__.amount AS text), 'childId', __t1__.\"childId\") ORDER BY __t1__.id ASC NULLS LAST) FROM leaves AS __t1__ WHERE __t1__.\"childId\" = __t__.id), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST) FROM children AS __t__ WHERE __t__.\"rootId\" = roots.id), '[]'::json) AS children_json FROM roots",
     "params": [],
     "error": null,
@@ -252,7 +252,7 @@
     ]
   },
   {
-    "key": "nql/json_agg/2/via-alias/nested/single/all",
+    "case": "nql/json_agg/2/via-alias/nested/single/all",
     "sql": "SELECT roots.id, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'tenant', __t__.tenant, 'name', __t__.name, 'amount', CAST(__t__.amount AS text), 'rootId', __t__.\"rootId\") || jsonb_build_object('leaves', COALESCE((SELECT json_agg(jsonb_build_object('id', __t1__.id, 'tenant', __t1__.tenant, 'name', __t1__.name, 'amount', CAST(__t1__.amount AS text), 'childId', __t1__.\"childId\") ORDER BY __t1__.id ASC NULLS LAST) FROM leaves AS __t1__ WHERE __t1__.\"childId\" = __t__.id), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST) FROM children AS __t__ WHERE __t__.\"rootId\" = roots.id), '[]'::json) AS children_json FROM roots",
     "params": [],
     "error": null,
@@ -378,7 +378,7 @@
     ]
   },
   {
-    "key": "orm/json_agg/2/via-alias/nested/single/projection",
+    "case": "orm/json_agg/2/via-alias/nested/single/projection",
     "sql": "SELECT roots.*, COALESCE((SELECT json_agg(jsonb_build_object('name', __t__.name, 'amount', CAST(__t__.amount AS text)) || jsonb_build_object('leaves', COALESCE((SELECT json_agg(jsonb_build_object('name', __t1__.name, 'amount', CAST(__t1__.amount AS text)) ORDER BY __t1__.id ASC NULLS LAST) FROM leaves AS __t1__ WHERE __t1__.\"childId\" = __t__.id), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST) FROM children AS __t__ WHERE __t__.\"rootId\" = roots.id), '[]'::json) AS children_json FROM roots",
     "params": [],
     "error": null,
@@ -462,7 +462,7 @@
     ]
   },
   {
-    "key": "external/json_agg/2/via-alias/nested/single/projection",
+    "case": "external/json_agg/2/via-alias/nested/single/projection",
     "sql": "SELECT roots.*, COALESCE((SELECT json_agg(jsonb_build_object('name', __t__.name, 'amount', CAST(__t__.amount AS text)) || jsonb_build_object('leaves', COALESCE((SELECT json_agg(jsonb_build_object('name', __t1__.name, 'amount', CAST(__t1__.amount AS text)) ORDER BY __t1__.id ASC NULLS LAST) FROM leaves AS __t1__ WHERE __t1__.\"childId\" = __t__.id), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST) FROM children AS __t__ WHERE __t__.\"rootId\" = roots.id), '[]'::json) AS children_json FROM roots",
     "params": [],
     "error": null,
@@ -546,7 +546,7 @@
     ]
   },
   {
-    "key": "nql/json_agg/2/via-alias/nested/single/projection",
+    "case": "nql/json_agg/2/via-alias/nested/single/projection",
     "sql": null,
     "params": [],
     "error": {
@@ -557,7 +557,7 @@
     "rows": []
   },
   {
-    "key": "orm/json_agg/2/via-alias/nested/single/ordered-limit",
+    "case": "orm/json_agg/2/via-alias/nested/single/ordered-limit",
     "sql": "SELECT roots.*, COALESCE((SELECT json_agg(__lim.__row ORDER BY __lim.__key0 DESC NULLS LAST, __lim.__key1 ASC NULLS LAST) FROM (SELECT jsonb_build_object('id', __t__.id, 'tenant', __t__.tenant, 'name', __t__.name, 'amount', CAST(__t__.amount AS text), 'rootId', __t__.\"rootId\") || jsonb_build_object('leaves', COALESCE((SELECT json_agg(__lim.__row ORDER BY __lim.__key0 DESC NULLS LAST, __lim.__key1 ASC NULLS LAST) FROM (SELECT jsonb_build_object('id', __t1__.id, 'tenant', __t1__.tenant, 'name', __t1__.name, 'amount', CAST(__t1__.amount AS text), 'childId', __t1__.\"childId\") AS __row, __t1__.name AS __key0, __t1__.id AS __key1 FROM leaves AS __t1__ WHERE __t1__.\"childId\" = __t__.id ORDER BY __t1__.name DESC NULLS LAST, __t1__.id ASC NULLS LAST LIMIT 2) AS __lim), '[]'::json)) AS __row, __t__.name AS __key0, __t__.id AS __key1 FROM children AS __t__ WHERE __t__.\"rootId\" = roots.id ORDER BY __t__.name DESC NULLS LAST, __t__.id ASC NULLS LAST LIMIT 2) AS __lim), '[]'::json) AS children_json FROM roots",
     "params": [],
     "error": null,
@@ -683,7 +683,7 @@
     ]
   },
   {
-    "key": "external/json_agg/2/via-alias/nested/single/ordered-limit",
+    "case": "external/json_agg/2/via-alias/nested/single/ordered-limit",
     "sql": "SELECT roots.*, COALESCE((SELECT json_agg(__lim.__row ORDER BY __lim.__key0 DESC NULLS LAST, __lim.__key1 ASC NULLS LAST) FROM (SELECT jsonb_build_object('id', __t__.id, 'tenant', __t__.tenant, 'name', __t__.name, 'amount', CAST(__t__.amount AS text), 'rootId', __t__.\"rootId\") || jsonb_build_object('leaves', COALESCE((SELECT json_agg(__lim.__row ORDER BY __lim.__key0 DESC NULLS LAST, __lim.__key1 ASC NULLS LAST) FROM (SELECT jsonb_build_object('id', __t1__.id, 'tenant', __t1__.tenant, 'name', __t1__.name, 'amount', CAST(__t1__.amount AS text), 'childId', __t1__.\"childId\") AS __row, __t1__.name AS __key0, __t1__.id AS __key1 FROM leaves AS __t1__ WHERE __t1__.\"childId\" = __t__.id ORDER BY __t1__.name DESC NULLS LAST, __t1__.id ASC NULLS LAST LIMIT 2) AS __lim), '[]'::json)) AS __row, __t__.name AS __key0, __t__.id AS __key1 FROM children AS __t__ WHERE __t__.\"rootId\" = roots.id ORDER BY __t__.name DESC NULLS LAST, __t__.id ASC NULLS LAST LIMIT 2) AS __lim), '[]'::json) AS children_json FROM roots",
     "params": [],
     "error": null,
@@ -809,7 +809,7 @@
     ]
   },
   {
-    "key": "nql/json_agg/2/via-alias/nested/single/ordered-limit",
+    "case": "nql/json_agg/2/via-alias/nested/single/ordered-limit",
     "sql": "SELECT roots.id, COALESCE((SELECT json_agg(__lim.__row ORDER BY __lim.__key0 DESC NULLS LAST, __lim.__key1 ASC NULLS LAST) FROM (SELECT jsonb_build_object('id', __t__.id, 'tenant', __t__.tenant, 'name', __t__.name, 'amount', CAST(__t__.amount AS text), 'rootId', __t__.\"rootId\") || jsonb_build_object('leaves', COALESCE((SELECT json_agg(__lim.__row ORDER BY __lim.__key0 DESC NULLS LAST, __lim.__key1 ASC NULLS LAST) FROM (SELECT jsonb_build_object('id', __t1__.id, 'tenant', __t1__.tenant, 'name', __t1__.name, 'amount', CAST(__t1__.amount AS text), 'childId', __t1__.\"childId\") AS __row, __t1__.name AS __key0, __t1__.id AS __key1 FROM leaves AS __t1__ WHERE __t1__.\"childId\" = __t__.id ORDER BY __t1__.name DESC NULLS LAST, __t1__.id ASC NULLS LAST LIMIT 2) AS __lim), '[]'::json)) AS __row, __t__.name AS __key0, __t__.id AS __key1 FROM children AS __t__ WHERE __t__.\"rootId\" = roots.id ORDER BY __t__.name DESC NULLS LAST, __t__.id ASC NULLS LAST LIMIT 2) AS __lim), '[]'::json) AS children_json FROM roots",
     "params": [],
     "error": null,
@@ -935,7 +935,7 @@
     ]
   },
   {
-    "key": "orm/json_agg/2/via-alias/nested/single/predicate",
+    "case": "orm/json_agg/2/via-alias/nested/single/predicate",
     "sql": null,
     "params": [],
     "error": {
@@ -946,7 +946,7 @@
     "rows": []
   },
   {
-    "key": "external/json_agg/2/via-alias/nested/single/predicate",
+    "case": "external/json_agg/2/via-alias/nested/single/predicate",
     "sql": null,
     "params": [],
     "error": {
@@ -957,7 +957,7 @@
     "rows": []
   },
   {
-    "key": "nql/json_agg/2/via-alias/nested/single/predicate",
+    "case": "nql/json_agg/2/via-alias/nested/single/predicate",
     "sql": null,
     "params": [],
     "error": {
@@ -968,7 +968,7 @@
     "rows": []
   },
   {
-    "key": "orm/json_agg/2/via-alias/nested/single/expression",
+    "case": "orm/json_agg/2/via-alias/nested/single/expression",
     "sql": null,
     "params": [],
     "error": {
@@ -979,7 +979,7 @@
     "rows": []
   },
   {
-    "key": "external/json_agg/2/via-alias/nested/single/expression",
+    "case": "external/json_agg/2/via-alias/nested/single/expression",
     "sql": null,
     "params": [],
     "error": {
@@ -990,7 +990,7 @@
     "rows": []
   },
   {
-    "key": "nql/json_agg/2/via-alias/nested/single/expression",
+    "case": "nql/json_agg/2/via-alias/nested/single/expression",
     "sql": null,
     "params": [],
     "error": {
@@ -1001,7 +1001,7 @@
     "rows": []
   },
   {
-    "key": "orm/json_agg/2/via-alias/nested/single/outer",
+    "case": "orm/json_agg/2/via-alias/nested/single/outer",
     "sql": null,
     "params": [],
     "error": {
@@ -1012,7 +1012,7 @@
     "rows": []
   },
   {
-    "key": "external/json_agg/2/via-alias/nested/single/outer",
+    "case": "external/json_agg/2/via-alias/nested/single/outer",
     "sql": null,
     "params": [],
     "error": {
@@ -1023,7 +1023,7 @@
     "rows": []
   },
   {
-    "key": "nql/json_agg/2/via-alias/nested/single/outer",
+    "case": "nql/json_agg/2/via-alias/nested/single/outer",
     "sql": null,
     "params": [],
     "error": {
@@ -1034,7 +1034,7 @@
     "rows": []
   },
   {
-    "key": "orm/json_agg/2/via-alias/nested/composite/all",
+    "case": "orm/json_agg/2/via-alias/nested/composite/all",
     "sql": "SELECT roots.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'tenant', __t__.tenant, 'name', __t__.name, 'amount', CAST(__t__.amount AS text), 'rootId', __t__.\"rootId\") || jsonb_build_object('compositeLeaves', COALESCE((SELECT json_agg(jsonb_build_object('id', __t1__.id, 'tenant', __t1__.tenant, 'name', __t1__.name, 'amount', CAST(__t1__.amount AS text), 'childId', __t1__.\"childId\") ORDER BY __t1__.id ASC NULLS LAST, __t1__.tenant ASC NULLS LAST) FROM leaves AS __t1__ WHERE __t1__.\"childId\" = __t__.id AND __t1__.tenant = __t__.tenant), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST, __t__.tenant ASC NULLS LAST) FROM children AS __t__ WHERE __t__.\"rootId\" = roots.id AND __t__.tenant = roots.tenant), '[]'::json) AS \"compositeChildren_json\" FROM roots",
     "params": [],
     "error": null,
@@ -1160,7 +1160,7 @@
     ]
   },
   {
-    "key": "external/json_agg/2/via-alias/nested/composite/all",
+    "case": "external/json_agg/2/via-alias/nested/composite/all",
     "sql": "SELECT roots.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'tenant', __t__.tenant, 'name', __t__.name, 'amount', CAST(__t__.amount AS text), 'rootId', __t__.\"rootId\") || jsonb_build_object('compositeLeaves', COALESCE((SELECT json_agg(jsonb_build_object('id', __t1__.id, 'tenant', __t1__.tenant, 'name', __t1__.name, 'amount', CAST(__t1__.amount AS text), 'childId', __t1__.\"childId\") ORDER BY __t1__.id ASC NULLS LAST, __t1__.tenant ASC NULLS LAST) FROM leaves AS __t1__ WHERE __t1__.\"childId\" = __t__.id AND __t1__.tenant = __t__.tenant), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST, __t__.tenant ASC NULLS LAST) FROM children AS __t__ WHERE __t__.\"rootId\" = roots.id AND __t__.tenant = roots.tenant), '[]'::json) AS \"compositeChildren_json\" FROM roots",
     "params": [],
     "error": null,
@@ -1286,7 +1286,7 @@
     ]
   },
   {
-    "key": "nql/json_agg/2/via-alias/nested/composite/all",
+    "case": "nql/json_agg/2/via-alias/nested/composite/all",
     "sql": "SELECT roots.id, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'tenant', __t__.tenant, 'name', __t__.name, 'amount', CAST(__t__.amount AS text), 'rootId', __t__.\"rootId\") || jsonb_build_object('compositeLeaves', COALESCE((SELECT json_agg(jsonb_build_object('id', __t1__.id, 'tenant', __t1__.tenant, 'name', __t1__.name, 'amount', CAST(__t1__.amount AS text), 'childId', __t1__.\"childId\") ORDER BY __t1__.id ASC NULLS LAST, __t1__.tenant ASC NULLS LAST) FROM leaves AS __t1__ WHERE __t1__.\"childId\" = __t__.id AND __t1__.tenant = __t__.tenant), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST, __t__.tenant ASC NULLS LAST) FROM children AS __t__ WHERE __t__.\"rootId\" = roots.id AND __t__.tenant = roots.tenant), '[]'::json) AS \"compositeChildren_json\" FROM roots",
     "params": [],
     "error": null,
@@ -1412,7 +1412,7 @@
     ]
   },
   {
-    "key": "orm/json_agg/2/via-alias/nested/composite/projection",
+    "case": "orm/json_agg/2/via-alias/nested/composite/projection",
     "sql": "SELECT roots.*, COALESCE((SELECT json_agg(jsonb_build_object('name', __t__.name, 'amount', CAST(__t__.amount AS text)) || jsonb_build_object('compositeLeaves', COALESCE((SELECT json_agg(jsonb_build_object('name', __t1__.name, 'amount', CAST(__t1__.amount AS text)) ORDER BY __t1__.id ASC NULLS LAST, __t1__.tenant ASC NULLS LAST) FROM leaves AS __t1__ WHERE __t1__.\"childId\" = __t__.id AND __t1__.tenant = __t__.tenant), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST, __t__.tenant ASC NULLS LAST) FROM children AS __t__ WHERE __t__.\"rootId\" = roots.id AND __t__.tenant = roots.tenant), '[]'::json) AS \"compositeChildren_json\" FROM roots",
     "params": [],
     "error": null,
@@ -1496,7 +1496,7 @@
     ]
   },
   {
-    "key": "external/json_agg/2/via-alias/nested/composite/projection",
+    "case": "external/json_agg/2/via-alias/nested/composite/projection",
     "sql": "SELECT roots.*, COALESCE((SELECT json_agg(jsonb_build_object('name', __t__.name, 'amount', CAST(__t__.amount AS text)) || jsonb_build_object('compositeLeaves', COALESCE((SELECT json_agg(jsonb_build_object('name', __t1__.name, 'amount', CAST(__t1__.amount AS text)) ORDER BY __t1__.id ASC NULLS LAST, __t1__.tenant ASC NULLS LAST) FROM leaves AS __t1__ WHERE __t1__.\"childId\" = __t__.id AND __t1__.tenant = __t__.tenant), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST, __t__.tenant ASC NULLS LAST) FROM children AS __t__ WHERE __t__.\"rootId\" = roots.id AND __t__.tenant = roots.tenant), '[]'::json) AS \"compositeChildren_json\" FROM roots",
     "params": [],
     "error": null,
@@ -1580,7 +1580,7 @@
     ]
   },
   {
-    "key": "nql/json_agg/2/via-alias/nested/composite/projection",
+    "case": "nql/json_agg/2/via-alias/nested/composite/projection",
     "sql": "SELECT roots.id, COALESCE((SELECT json_agg(jsonb_build_object('name', __t__.name, 'amount', CAST(__t__.amount AS text)) || jsonb_build_object('compositeLeaves', COALESCE((SELECT json_agg(jsonb_build_object('name', __t1__.name) ORDER BY __t1__.id ASC NULLS LAST, __t1__.tenant ASC NULLS LAST) FROM leaves AS __t1__ WHERE __t1__.\"childId\" = __t__.id AND __t1__.tenant = __t__.tenant), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST, __t__.tenant ASC NULLS LAST) FROM children AS __t__ WHERE __t__.\"rootId\" = roots.id AND __t__.tenant = roots.tenant), '[]'::json) AS \"compositeChildren_json\" FROM roots",
     "params": [],
     "error": null,

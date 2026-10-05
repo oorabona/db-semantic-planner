@@ -1,6 +1,6 @@
 [
   {
-    "key": "orm/json_agg/1/direct/flat/single/expression",
+    "case": "orm/json_agg/1/direct/flat/single/expression",
     "sql": null,
     "params": [],
     "error": {
@@ -11,7 +11,7 @@
     "rows": []
   },
   {
-    "key": "external/json_agg/1/direct/flat/single/expression",
+    "case": "external/json_agg/1/direct/flat/single/expression",
     "sql": "SELECT roots.*, children.id AS \"children.id\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" WHERE lower(name) = $1",
     "params": [
       "child"
@@ -45,7 +45,7 @@
     ]
   },
   {
-    "key": "nql/json_agg/1/direct/flat/single/expression",
+    "case": "nql/json_agg/1/direct/flat/single/expression",
     "sql": "SELECT roots.id, children.id AS \"children.id\", children.tenant AS \"children.tenant\", children.name AS \"children.name\", children.amount AS \"children.amount\", children.\"rootId\" AS \"children.rootId\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" WHERE lower(name) = $1",
     "params": [
       "child"
@@ -114,7 +114,7 @@
     ]
   },
   {
-    "key": "orm/json_agg/1/direct/flat/single/outer",
+    "case": "orm/json_agg/1/direct/flat/single/outer",
     "sql": null,
     "params": [],
     "error": {
@@ -125,7 +125,7 @@
     "rows": []
   },
   {
-    "key": "external/json_agg/1/direct/flat/single/outer",
+    "case": "external/json_agg/1/direct/flat/single/outer",
     "sql": "SELECT roots.*, children.id AS \"children.id\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" WHERE children.name = $1 AND children.id = roots.id",
     "params": [
       "child"
@@ -159,7 +159,7 @@
     ]
   },
   {
-    "key": "nql/json_agg/1/direct/flat/single/outer",
+    "case": "nql/json_agg/1/direct/flat/single/outer",
     "sql": "SELECT roots.id, children.id AS \"children.id\", children.tenant AS \"children.tenant\", children.name AS \"children.name\", children.amount AS \"children.amount\", children.\"rootId\" AS \"children.rootId\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" WHERE children.name = $1 AND children.id = roots.id",
     "params": [
       "child"
@@ -228,7 +228,7 @@
     ]
   },
   {
-    "key": "orm/json_agg/1/direct/flat/composite/all",
+    "case": "orm/json_agg/1/direct/flat/composite/all",
     "sql": "SELECT roots.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'tenant', __t__.tenant, 'name', __t__.name, 'amount', CAST(__t__.amount AS text), 'rootId', __t__.\"rootId\") ORDER BY __t__.id ASC NULLS LAST, __t__.tenant ASC NULLS LAST) FROM children AS __t__ WHERE __t__.\"rootId\" = roots.id AND __t__.tenant = roots.tenant), '[]'::json) AS \"compositeChildren_json\" FROM roots",
     "params": [],
     "error": null,
@@ -297,7 +297,7 @@
     ]
   },
   {
-    "key": "external/json_agg/1/direct/flat/composite/all",
+    "case": "external/json_agg/1/direct/flat/composite/all",
     "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\" FROM roots LEFT JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant",
     "params": [],
     "error": null,
@@ -329,7 +329,7 @@
     ]
   },
   {
-    "key": "nql/json_agg/1/direct/flat/composite/all",
+    "case": "nql/json_agg/1/direct/flat/composite/all",
     "sql": "SELECT roots.id, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\" FROM roots LEFT JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant",
     "params": [],
     "error": null,
@@ -396,7 +396,7 @@
     ]
   },
   {
-    "key": "orm/json_agg/1/direct/flat/composite/projection",
+    "case": "orm/json_agg/1/direct/flat/composite/projection",
     "sql": "SELECT roots.*, COALESCE((SELECT json_agg(jsonb_build_object('name', __t__.name, 'amount', CAST(__t__.amount AS text)) ORDER BY __t__.id ASC NULLS LAST, __t__.tenant ASC NULLS LAST) FROM children AS __t__ WHERE __t__.\"rootId\" = roots.id AND __t__.tenant = roots.tenant), '[]'::json) AS \"compositeChildren_json\" FROM roots",
     "params": [],
     "error": null,
@@ -444,7 +444,7 @@
     ]
   },
   {
-    "key": "external/json_agg/1/direct/flat/composite/projection",
+    "case": "external/json_agg/1/direct/flat/composite/projection",
     "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\" FROM roots LEFT JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant",
     "params": [],
     "error": null,
@@ -497,7 +497,7 @@
     ]
   },
   {
-    "key": "nql/json_agg/1/direct/flat/composite/projection",
+    "case": "nql/json_agg/1/direct/flat/composite/projection",
     "sql": "SELECT roots.id, \"compositeChildren\".name AS \"compositeChildren.name\" FROM roots LEFT JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant",
     "params": [],
     "error": null,
@@ -529,7 +529,7 @@
     ]
   },
   {
-    "key": "orm/json_agg/1/direct/flat/composite/ordered-limit",
+    "case": "orm/json_agg/1/direct/flat/composite/ordered-limit",
     "sql": "SELECT roots.*, COALESCE((SELECT json_agg(__lim.__row ORDER BY __lim.__key0 DESC NULLS LAST, __lim.__key1 ASC NULLS LAST, __lim.__key2 ASC NULLS LAST) FROM (SELECT jsonb_build_object('id', __t__.id, 'tenant', __t__.tenant, 'name', __t__.name, 'amount', CAST(__t__.amount AS text), 'rootId', __t__.\"rootId\") AS __row, __t__.name AS __key0, __t__.id AS __key1, __t__.tenant AS __key2 FROM children AS __t__ WHERE __t__.\"rootId\" = roots.id AND __t__.tenant = roots.tenant ORDER BY __t__.name DESC NULLS LAST, __t__.id ASC NULLS LAST, __t__.tenant ASC NULLS LAST LIMIT 2) AS __lim), '[]'::json) AS \"compositeChildren_json\" FROM roots",
     "params": [],
     "error": null,
@@ -598,7 +598,7 @@
     ]
   },
   {
-    "key": "external/json_agg/1/direct/flat/composite/ordered-limit",
+    "case": "external/json_agg/1/direct/flat/composite/ordered-limit",
     "sql": "SELECT roots.*, children_lat_0.id AS \"compositeChildren.id\", children_lat_0.tenant AS \"compositeChildren.tenant\", children_lat_0.name AS \"compositeChildren.name\", children_lat_0.amount AS \"compositeChildren.amount\", children_lat_0.\"rootId\" AS \"compositeChildren.rootId\" FROM roots LEFT JOIN LATERAL (SELECT children_inner_0.id, children_inner_0.tenant, children_inner_0.name, children_inner_0.amount, children_inner_0.\"rootId\" FROM children AS children_inner_0 WHERE children_inner_0.\"rootId\" = roots.id AND children_inner_0.tenant = roots.tenant ORDER BY children_inner_0.name DESC NULLS LAST, children_inner_0.id ASC NULLS LAST, children_inner_0.tenant ASC NULLS LAST LIMIT 2) AS children_lat_0 ON true",
     "params": [],
     "error": null,
@@ -665,7 +665,7 @@
     ]
   },
   {
-    "key": "nql/json_agg/1/direct/flat/composite/ordered-limit",
+    "case": "nql/json_agg/1/direct/flat/composite/ordered-limit",
     "sql": "SELECT roots.id, children_lat_0.id AS \"compositeChildren.id\", children_lat_0.tenant AS \"compositeChildren.tenant\", children_lat_0.name AS \"compositeChildren.name\", children_lat_0.amount AS \"compositeChildren.amount\", children_lat_0.\"rootId\" AS \"compositeChildren.rootId\" FROM roots LEFT JOIN LATERAL (SELECT children_inner_0.id, children_inner_0.tenant, children_inner_0.name, children_inner_0.amount, children_inner_0.\"rootId\" FROM children AS children_inner_0 WHERE children_inner_0.\"rootId\" = roots.id AND children_inner_0.tenant = roots.tenant ORDER BY children_inner_0.name DESC NULLS LAST, children_inner_0.id ASC NULLS LAST, children_inner_0.tenant ASC NULLS LAST LIMIT 2) AS children_lat_0 ON true",
     "params": [],
     "error": null,
@@ -732,7 +732,7 @@
     ]
   },
   {
-    "key": "orm/json_agg/1/direct/flat/composite/predicate",
+    "case": "orm/json_agg/1/direct/flat/composite/predicate",
     "sql": null,
     "params": [],
     "error": {
@@ -743,7 +743,7 @@
     "rows": []
   },
   {
-    "key": "external/json_agg/1/direct/flat/composite/predicate",
+    "case": "external/json_agg/1/direct/flat/composite/predicate",
     "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE \"compositeChildren\".name = $1",
     "params": [
       "child"
@@ -777,7 +777,7 @@
     ]
   },
   {
-    "key": "nql/json_agg/1/direct/flat/composite/predicate",
+    "case": "nql/json_agg/1/direct/flat/composite/predicate",
     "sql": "SELECT roots.id, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE \"compositeChildren\".name = $1",
     "params": [
       "child"
@@ -846,7 +846,7 @@
     ]
   },
   {
-    "key": "orm/json_agg/1/direct/flat/composite/expression",
+    "case": "orm/json_agg/1/direct/flat/composite/expression",
     "sql": null,
     "params": [],
     "error": {
@@ -857,7 +857,7 @@
     "rows": []
   },
   {
-    "key": "external/json_agg/1/direct/flat/composite/expression",
+    "case": "external/json_agg/1/direct/flat/composite/expression",
     "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE lower(name) = $1",
     "params": [
       "child"
@@ -891,7 +891,7 @@
     ]
   },
   {
-    "key": "nql/json_agg/1/direct/flat/composite/expression",
+    "case": "nql/json_agg/1/direct/flat/composite/expression",
     "sql": "SELECT roots.id, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE lower(name) = $1",
     "params": [
       "child"
@@ -960,7 +960,7 @@
     ]
   },
   {
-    "key": "orm/json_agg/1/direct/flat/composite/outer",
+    "case": "orm/json_agg/1/direct/flat/composite/outer",
     "sql": null,
     "params": [],
     "error": {
@@ -971,7 +971,7 @@
     "rows": []
   },
   {
-    "key": "external/json_agg/1/direct/flat/composite/outer",
+    "case": "external/json_agg/1/direct/flat/composite/outer",
     "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeChildren\".id = roots.id",
     "params": [
       "child"
@@ -1005,7 +1005,7 @@
     ]
   },
   {
-    "key": "nql/json_agg/1/direct/flat/composite/outer",
+    "case": "nql/json_agg/1/direct/flat/composite/outer",
     "sql": "SELECT roots.id, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeChildren\".id = roots.id",
     "params": [
       "child"

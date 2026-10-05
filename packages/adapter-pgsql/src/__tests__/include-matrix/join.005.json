@@ -1,6 +1,6 @@
 [
   {
-    "key": "orm/join/1/via-alias/nested/composite/ordered-limit",
+    "case": "orm/join/1/via-alias/nested/composite/ordered-limit",
     "sql": null,
     "params": [],
     "error": {
@@ -11,7 +11,7 @@
     "rows": []
   },
   {
-    "key": "external/join/1/via-alias/nested/composite/ordered-limit",
+    "case": "external/join/1/via-alias/nested/composite/ordered-limit",
     "sql": null,
     "params": [],
     "error": {
@@ -22,7 +22,7 @@
     "rows": []
   },
   {
-    "key": "nql/join/1/via-alias/nested/composite/ordered-limit",
+    "case": "nql/join/1/via-alias/nested/composite/ordered-limit",
     "sql": null,
     "params": [],
     "error": {
@@ -33,7 +33,7 @@
     "rows": []
   },
   {
-    "key": "orm/join/1/via-alias/nested/composite/predicate",
+    "case": "orm/join/1/via-alias/nested/composite/predicate",
     "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE \"compositeChildren\".name = $1",
     "params": [
       "child"
@@ -108,7 +108,7 @@
     ]
   },
   {
-    "key": "external/join/1/via-alias/nested/composite/predicate",
+    "case": "external/join/1/via-alias/nested/composite/predicate",
     "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE \"compositeChildren\".name = $1",
     "params": [
       "child"
@@ -183,7 +183,7 @@
     ]
   },
   {
-    "key": "nql/join/1/via-alias/nested/composite/predicate",
+    "case": "nql/join/1/via-alias/nested/composite/predicate",
     "sql": "SELECT roots.id, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE \"compositeChildren\".name = $1",
     "params": [
       "child"
@@ -258,7 +258,7 @@
     ]
   },
   {
-    "key": "orm/join/1/via-alias/nested/composite/expression",
+    "case": "orm/join/1/via-alias/nested/composite/expression",
     "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE lower(name) = $1",
     "params": [
       "child"
@@ -333,7 +333,7 @@
     ]
   },
   {
-    "key": "external/join/1/via-alias/nested/composite/expression",
+    "case": "external/join/1/via-alias/nested/composite/expression",
     "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE lower(name) = $1",
     "params": [
       "child"
@@ -408,7 +408,7 @@
     ]
   },
   {
-    "key": "nql/join/1/via-alias/nested/composite/expression",
+    "case": "nql/join/1/via-alias/nested/composite/expression",
     "sql": "SELECT roots.id, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE lower(name) = $1",
     "params": [
       "child"
@@ -483,7 +483,7 @@
     ]
   },
   {
-    "key": "orm/join/1/via-alias/nested/composite/outer",
+    "case": "orm/join/1/via-alias/nested/composite/outer",
     "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeChildren\".id = roots.id",
     "params": [
       "child"
@@ -558,7 +558,7 @@
     ]
   },
   {
-    "key": "external/join/1/via-alias/nested/composite/outer",
+    "case": "external/join/1/via-alias/nested/composite/outer",
     "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeChildren\".id = roots.id",
     "params": [
       "child"
@@ -633,7 +633,7 @@
     ]
   },
   {
-    "key": "nql/join/1/via-alias/nested/composite/outer",
+    "case": "nql/join/1/via-alias/nested/composite/outer",
     "sql": "SELECT roots.id, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeChildren\".id = roots.id",
     "params": [
       "child"
@@ -708,7 +708,7 @@
     ]
   },
   {
-    "key": "orm/join/1/via-alias/flat/single/all",
+    "case": "orm/join/1/via-alias/flat/single/all",
     "sql": "SELECT roots.*, children.id AS \"children.id\", children.tenant AS \"children.tenant\", children.name AS \"children.name\", children.amount AS \"children.amount\", children.\"rootId\" AS \"children.rootId\", children.id AS __dbsp_presence_children FROM roots LEFT JOIN children AS children ON roots.id = children.\"rootId\"",
     "params": [],
     "error": null,
@@ -781,7 +781,7 @@
     ]
   },
   {
-    "key": "external/join/1/via-alias/flat/single/all",
+    "case": "external/join/1/via-alias/flat/single/all",
     "sql": "SELECT roots.*, children.id AS \"children.id\" FROM roots LEFT JOIN children AS children ON roots.id = children.\"rootId\"",
     "params": [],
     "error": null,
@@ -813,7 +813,7 @@
     ]
   },
   {
-    "key": "nql/join/1/via-alias/flat/single/all",
+    "case": "nql/join/1/via-alias/flat/single/all",
     "sql": "SELECT roots.id, children.id AS \"children.id\", children.tenant AS \"children.tenant\", children.name AS \"children.name\", children.amount AS \"children.amount\", children.\"rootId\" AS \"children.rootId\" FROM roots LEFT JOIN children AS children ON roots.id = children.\"rootId\"",
     "params": [],
     "error": null,
@@ -880,7 +880,7 @@
     ]
   },
   {
-    "key": "orm/join/1/via-alias/flat/single/projection",
+    "case": "orm/join/1/via-alias/flat/single/projection",
     "sql": "SELECT roots.*, children.name AS \"children.name\", children.amount AS \"children.amount\", children.id AS __dbsp_presence_children FROM roots LEFT JOIN children AS children ON roots.id = children.\"rootId\"",
     "params": [],
     "error": null,
@@ -932,7 +932,7 @@
     ]
   },
   {
-    "key": "external/join/1/via-alias/flat/single/projection",
+    "case": "external/join/1/via-alias/flat/single/projection",
     "sql": "SELECT roots.*, children.id AS \"children.id\", children.name AS \"children.name\", children.amount AS \"children.amount\" FROM roots LEFT JOIN children AS children ON roots.id = children.\"rootId\"",
     "params": [],
     "error": null,
@@ -985,7 +985,7 @@
     ]
   },
   {
-    "key": "nql/join/1/via-alias/flat/single/projection",
+    "case": "nql/join/1/via-alias/flat/single/projection",
     "sql": "SELECT roots.id FROM roots LEFT JOIN children AS children ON roots.id = children.\"rootId\"",
     "params": [],
     "error": null,
@@ -1009,7 +1009,7 @@
     ]
   },
   {
-    "key": "orm/join/1/via-alias/flat/single/ordered-limit",
+    "case": "orm/join/1/via-alias/flat/single/ordered-limit",
     "sql": null,
     "params": [],
     "error": {
@@ -1020,7 +1020,7 @@
     "rows": []
   },
   {
-    "key": "external/join/1/via-alias/flat/single/ordered-limit",
+    "case": "external/join/1/via-alias/flat/single/ordered-limit",
     "sql": null,
     "params": [],
     "error": {
@@ -1031,7 +1031,7 @@
     "rows": []
   },
   {
-    "key": "nql/join/1/via-alias/flat/single/ordered-limit",
+    "case": "nql/join/1/via-alias/flat/single/ordered-limit",
     "sql": null,
     "params": [],
     "error": {
@@ -1042,7 +1042,7 @@
     "rows": []
   },
   {
-    "key": "orm/join/1/via-alias/flat/single/predicate",
+    "case": "orm/join/1/via-alias/flat/single/predicate",
     "sql": "SELECT roots.*, children.id AS \"children.id\", children.tenant AS \"children.tenant\", children.name AS \"children.name\", children.amount AS \"children.amount\", children.\"rootId\" AS \"children.rootId\", children.id AS __dbsp_presence_children FROM roots JOIN children AS children ON roots.id = children.\"rootId\" WHERE children.name = $1",
     "params": [
       "child"
@@ -1117,7 +1117,7 @@
     ]
   },
   {
-    "key": "external/join/1/via-alias/flat/single/predicate",
+    "case": "external/join/1/via-alias/flat/single/predicate",
     "sql": "SELECT roots.*, children.id AS \"children.id\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" WHERE children.name = $1",
     "params": [
       "child"
@@ -1151,7 +1151,7 @@
     ]
   },
   {
-    "key": "nql/join/1/via-alias/flat/single/predicate",
+    "case": "nql/join/1/via-alias/flat/single/predicate",
     "sql": "SELECT roots.id, children.id AS \"children.id\", children.tenant AS \"children.tenant\", children.name AS \"children.name\", children.amount AS \"children.amount\", children.\"rootId\" AS \"children.rootId\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" WHERE children.name = $1",
     "params": [
       "child"

@@ -1,6 +1,6 @@
 [
   {
-    "key": "orm/cte/1/direct/nested/single/all",
+    "case": "orm/cte/1/direct/nested/single/all",
     "sql": "WITH children_cte AS (SELECT children_inner_0.* FROM children AS children_inner_0) SELECT roots.* FROM roots LEFT JOIN children_cte AS children_ref_0 ON roots.id = children_ref_0.\"rootId\"",
     "params": [],
     "error": null,
@@ -67,7 +67,7 @@
     ]
   },
   {
-    "key": "external/cte/1/direct/nested/single/all",
+    "case": "external/cte/1/direct/nested/single/all",
     "sql": "WITH children_cte AS (SELECT children_inner_0.* FROM children AS children_inner_0) SELECT roots.* FROM roots LEFT JOIN children_cte AS children_ref_0 ON roots.id = children_ref_0.\"rootId\"",
     "params": [],
     "error": null,
@@ -134,7 +134,7 @@
     ]
   },
   {
-    "key": "nql/cte/1/direct/nested/single/all",
+    "case": "nql/cte/1/direct/nested/single/all",
     "sql": "WITH children_cte AS (SELECT children_inner_0.* FROM children AS children_inner_0) SELECT roots.id FROM roots LEFT JOIN children_cte AS children_ref_0 ON roots.id = children_ref_0.\"rootId\"",
     "params": [],
     "error": null,
@@ -201,7 +201,7 @@
     ]
   },
   {
-    "key": "orm/cte/1/direct/nested/single/projection",
+    "case": "orm/cte/1/direct/nested/single/projection",
     "sql": null,
     "params": [],
     "error": {
@@ -212,7 +212,7 @@
     "rows": []
   },
   {
-    "key": "external/cte/1/direct/nested/single/projection",
+    "case": "external/cte/1/direct/nested/single/projection",
     "sql": null,
     "params": [],
     "error": {
@@ -223,7 +223,7 @@
     "rows": []
   },
   {
-    "key": "nql/cte/1/direct/nested/single/projection",
+    "case": "nql/cte/1/direct/nested/single/projection",
     "sql": null,
     "params": [],
     "error": {
@@ -234,7 +234,7 @@
     "rows": []
   },
   {
-    "key": "orm/cte/1/direct/nested/single/ordered-limit",
+    "case": "orm/cte/1/direct/nested/single/ordered-limit",
     "sql": null,
     "params": [],
     "error": {
@@ -245,7 +245,7 @@
     "rows": []
   },
   {
-    "key": "external/cte/1/direct/nested/single/ordered-limit",
+    "case": "external/cte/1/direct/nested/single/ordered-limit",
     "sql": null,
     "params": [],
     "error": {
@@ -256,7 +256,7 @@
     "rows": []
   },
   {
-    "key": "nql/cte/1/direct/nested/single/ordered-limit",
+    "case": "nql/cte/1/direct/nested/single/ordered-limit",
     "sql": null,
     "params": [],
     "error": {
@@ -267,7 +267,7 @@
     "rows": []
   },
   {
-    "key": "orm/cte/1/direct/nested/single/predicate",
+    "case": "orm/cte/1/direct/nested/single/predicate",
     "sql": null,
     "params": [],
     "error": {
@@ -278,7 +278,7 @@
     "rows": []
   },
   {
-    "key": "external/cte/1/direct/nested/single/predicate",
+    "case": "external/cte/1/direct/nested/single/predicate",
     "sql": null,
     "params": [],
     "error": {
@@ -289,7 +289,7 @@
     "rows": []
   },
   {
-    "key": "nql/cte/1/direct/nested/single/predicate",
+    "case": "nql/cte/1/direct/nested/single/predicate",
     "sql": null,
     "params": [],
     "error": {
@@ -300,7 +300,7 @@
     "rows": []
   },
   {
-    "key": "orm/cte/1/direct/nested/single/expression",
+    "case": "orm/cte/1/direct/nested/single/expression",
     "sql": null,
     "params": [],
     "error": {
@@ -311,7 +311,7 @@
     "rows": []
   },
   {
-    "key": "external/cte/1/direct/nested/single/expression",
+    "case": "external/cte/1/direct/nested/single/expression",
     "sql": null,
     "params": [],
     "error": {
@@ -322,7 +322,7 @@
     "rows": []
   },
   {
-    "key": "nql/cte/1/direct/nested/single/expression",
+    "case": "nql/cte/1/direct/nested/single/expression",
     "sql": null,
     "params": [],
     "error": {
@@ -333,7 +333,7 @@
     "rows": []
   },
   {
-    "key": "orm/cte/1/direct/nested/single/outer",
+    "case": "orm/cte/1/direct/nested/single/outer",
     "sql": null,
     "params": [],
     "error": {
@@ -344,7 +344,7 @@
     "rows": []
   },
   {
-    "key": "external/cte/1/direct/nested/single/outer",
+    "case": "external/cte/1/direct/nested/single/outer",
     "sql": null,
     "params": [],
     "error": {
@@ -355,7 +355,7 @@
     "rows": []
   },
   {
-    "key": "nql/cte/1/direct/nested/single/outer",
+    "case": "nql/cte/1/direct/nested/single/outer",
     "sql": null,
     "params": [],
     "error": {
@@ -366,7 +366,7 @@
     "rows": []
   },
   {
-    "key": "orm/cte/1/direct/nested/composite/all",
+    "case": "orm/cte/1/direct/nested/composite/all",
     "sql": "WITH \"compositeChildren_cte\" AS (SELECT children_inner_0.* FROM children AS children_inner_0) SELECT roots.* FROM roots LEFT JOIN \"compositeChildren_cte\" AS \"compositeChildren_ref_0\" ON roots.id = \"compositeChildren_ref_0\".\"rootId\" AND roots.tenant = \"compositeChildren_ref_0\".tenant",
     "params": [],
     "error": null,
@@ -433,7 +433,7 @@
     ]
   },
   {
-    "key": "external/cte/1/direct/nested/composite/all",
+    "case": "external/cte/1/direct/nested/composite/all",
     "sql": "WITH \"compositeChildren_cte\" AS (SELECT children_inner_0.* FROM children AS children_inner_0) SELECT roots.* FROM roots LEFT JOIN \"compositeChildren_cte\" AS \"compositeChildren_ref_0\" ON roots.id = \"compositeChildren_ref_0\".\"rootId\" AND roots.tenant = \"compositeChildren_ref_0\".tenant",
     "params": [],
     "error": null,
@@ -500,7 +500,7 @@
     ]
   },
   {
-    "key": "nql/cte/1/direct/nested/composite/all",
+    "case": "nql/cte/1/direct/nested/composite/all",
     "sql": "WITH \"compositeChildren_cte\" AS (SELECT children_inner_0.* FROM children AS children_inner_0) SELECT roots.id FROM roots LEFT JOIN \"compositeChildren_cte\" AS \"compositeChildren_ref_0\" ON roots.id = \"compositeChildren_ref_0\".\"rootId\" AND roots.tenant = \"compositeChildren_ref_0\".tenant",
     "params": [],
     "error": null,
@@ -567,7 +567,7 @@
     ]
   },
   {
-    "key": "orm/cte/1/direct/nested/composite/projection",
+    "case": "orm/cte/1/direct/nested/composite/projection",
     "sql": null,
     "params": [],
     "error": {
@@ -578,7 +578,7 @@
     "rows": []
   },
   {
-    "key": "external/cte/1/direct/nested/composite/projection",
+    "case": "external/cte/1/direct/nested/composite/projection",
     "sql": null,
     "params": [],
     "error": {
@@ -589,7 +589,7 @@
     "rows": []
   },
   {
-    "key": "nql/cte/1/direct/nested/composite/projection",
+    "case": "nql/cte/1/direct/nested/composite/projection",
     "sql": null,
     "params": [],
     "error": {

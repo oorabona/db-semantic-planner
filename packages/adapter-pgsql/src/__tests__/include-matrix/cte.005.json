@@ -1,6 +1,6 @@
 [
   {
-    "key": "orm/cte/1/via-alias/nested/composite/ordered-limit",
+    "case": "orm/cte/1/via-alias/nested/composite/ordered-limit",
     "sql": null,
     "params": [],
     "error": {
@@ -11,7 +11,7 @@
     "rows": []
   },
   {
-    "key": "external/cte/1/via-alias/nested/composite/ordered-limit",
+    "case": "external/cte/1/via-alias/nested/composite/ordered-limit",
     "sql": null,
     "params": [],
     "error": {
@@ -22,7 +22,7 @@
     "rows": []
   },
   {
-    "key": "nql/cte/1/via-alias/nested/composite/ordered-limit",
+    "case": "nql/cte/1/via-alias/nested/composite/ordered-limit",
     "sql": null,
     "params": [],
     "error": {
@@ -33,7 +33,7 @@
     "rows": []
   },
   {
-    "key": "orm/cte/1/via-alias/nested/composite/predicate",
+    "case": "orm/cte/1/via-alias/nested/composite/predicate",
     "sql": null,
     "params": [],
     "error": {
@@ -44,7 +44,7 @@
     "rows": []
   },
   {
-    "key": "external/cte/1/via-alias/nested/composite/predicate",
+    "case": "external/cte/1/via-alias/nested/composite/predicate",
     "sql": null,
     "params": [],
     "error": {
@@ -55,7 +55,7 @@
     "rows": []
   },
   {
-    "key": "nql/cte/1/via-alias/nested/composite/predicate",
+    "case": "nql/cte/1/via-alias/nested/composite/predicate",
     "sql": null,
     "params": [],
     "error": {
@@ -66,7 +66,7 @@
     "rows": []
   },
   {
-    "key": "orm/cte/1/via-alias/nested/composite/expression",
+    "case": "orm/cte/1/via-alias/nested/composite/expression",
     "sql": null,
     "params": [],
     "error": {
@@ -77,7 +77,7 @@
     "rows": []
   },
   {
-    "key": "external/cte/1/via-alias/nested/composite/expression",
+    "case": "external/cte/1/via-alias/nested/composite/expression",
     "sql": null,
     "params": [],
     "error": {
@@ -88,7 +88,7 @@
     "rows": []
   },
   {
-    "key": "nql/cte/1/via-alias/nested/composite/expression",
+    "case": "nql/cte/1/via-alias/nested/composite/expression",
     "sql": null,
     "params": [],
     "error": {
@@ -99,7 +99,7 @@
     "rows": []
   },
   {
-    "key": "orm/cte/1/via-alias/nested/composite/outer",
+    "case": "orm/cte/1/via-alias/nested/composite/outer",
     "sql": null,
     "params": [],
     "error": {
@@ -110,7 +110,7 @@
     "rows": []
   },
   {
-    "key": "external/cte/1/via-alias/nested/composite/outer",
+    "case": "external/cte/1/via-alias/nested/composite/outer",
     "sql": null,
     "params": [],
     "error": {
@@ -121,7 +121,7 @@
     "rows": []
   },
   {
-    "key": "nql/cte/1/via-alias/nested/composite/outer",
+    "case": "nql/cte/1/via-alias/nested/composite/outer",
     "sql": null,
     "params": [],
     "error": {
@@ -132,7 +132,7 @@
     "rows": []
   },
   {
-    "key": "orm/cte/1/via-alias/flat/single/all",
+    "case": "orm/cte/1/via-alias/flat/single/all",
     "sql": "WITH children_cte AS (SELECT children_inner_0.* FROM children AS children_inner_0) SELECT roots.* FROM roots LEFT JOIN children_cte AS children_ref_0 ON roots.id = children_ref_0.\"rootId\"",
     "params": [],
     "error": null,
@@ -199,7 +199,7 @@
     ]
   },
   {
-    "key": "external/cte/1/via-alias/flat/single/all",
+    "case": "external/cte/1/via-alias/flat/single/all",
     "sql": "SELECT roots.*, children.id AS \"children.id\" FROM roots LEFT JOIN children AS children ON roots.id = children.\"rootId\"",
     "params": [],
     "error": null,
@@ -231,7 +231,7 @@
     ]
   },
   {
-    "key": "nql/cte/1/via-alias/flat/single/all",
+    "case": "nql/cte/1/via-alias/flat/single/all",
     "sql": "SELECT roots.id, children.id AS \"children.id\", children.tenant AS \"children.tenant\", children.name AS \"children.name\", children.amount AS \"children.amount\", children.\"rootId\" AS \"children.rootId\" FROM roots LEFT JOIN children AS children ON roots.id = children.\"rootId\"",
     "params": [],
     "error": null,
@@ -298,7 +298,7 @@
     ]
   },
   {
-    "key": "orm/cte/1/via-alias/flat/single/projection",
+    "case": "orm/cte/1/via-alias/flat/single/projection",
     "sql": null,
     "params": [],
     "error": {
@@ -309,7 +309,7 @@
     "rows": []
   },
   {
-    "key": "external/cte/1/via-alias/flat/single/projection",
+    "case": "external/cte/1/via-alias/flat/single/projection",
     "sql": "SELECT roots.*, children.id AS \"children.id\", children.name AS \"children.name\", children.amount AS \"children.amount\" FROM roots LEFT JOIN children AS children ON roots.id = children.\"rootId\"",
     "params": [],
     "error": null,
@@ -362,7 +362,7 @@
     ]
   },
   {
-    "key": "nql/cte/1/via-alias/flat/single/projection",
+    "case": "nql/cte/1/via-alias/flat/single/projection",
     "sql": "SELECT roots.id FROM roots LEFT JOIN children AS children ON roots.id = children.\"rootId\"",
     "params": [],
     "error": null,
@@ -386,7 +386,7 @@
     ]
   },
   {
-    "key": "orm/cte/1/via-alias/flat/single/ordered-limit",
+    "case": "orm/cte/1/via-alias/flat/single/ordered-limit",
     "sql": null,
     "params": [],
     "error": {
@@ -397,7 +397,7 @@
     "rows": []
   },
   {
-    "key": "external/cte/1/via-alias/flat/single/ordered-limit",
+    "case": "external/cte/1/via-alias/flat/single/ordered-limit",
     "sql": "SELECT roots.*, children_lat_0.id AS \"children.id\", children_lat_0.tenant AS \"children.tenant\", children_lat_0.name AS \"children.name\", children_lat_0.amount AS \"children.amount\", children_lat_0.\"rootId\" AS \"children.rootId\" FROM roots LEFT JOIN LATERAL (SELECT children_inner_0.id, children_inner_0.tenant, children_inner_0.name, children_inner_0.amount, children_inner_0.\"rootId\" FROM children AS children_inner_0 WHERE children_inner_0.\"rootId\" = roots.id ORDER BY children_inner_0.name DESC NULLS LAST, children_inner_0.id ASC NULLS LAST LIMIT 2) AS children_lat_0 ON true",
     "params": [],
     "error": null,
@@ -464,7 +464,7 @@
     ]
   },
   {
-    "key": "nql/cte/1/via-alias/flat/single/ordered-limit",
+    "case": "nql/cte/1/via-alias/flat/single/ordered-limit",
     "sql": "SELECT roots.id, children_lat_0.id AS \"children.id\", children_lat_0.tenant AS \"children.tenant\", children_lat_0.name AS \"children.name\", children_lat_0.amount AS \"children.amount\", children_lat_0.\"rootId\" AS \"children.rootId\" FROM roots LEFT JOIN LATERAL (SELECT children_inner_0.id, children_inner_0.tenant, children_inner_0.name, children_inner_0.amount, children_inner_0.\"rootId\" FROM children AS children_inner_0 WHERE children_inner_0.\"rootId\" = roots.id ORDER BY children_inner_0.name DESC NULLS LAST, children_inner_0.id ASC NULLS LAST LIMIT 2) AS children_lat_0 ON true",
     "params": [],
     "error": null,
@@ -531,7 +531,7 @@
     ]
   },
   {
-    "key": "orm/cte/1/via-alias/flat/single/predicate",
+    "case": "orm/cte/1/via-alias/flat/single/predicate",
     "sql": null,
     "params": [],
     "error": {
@@ -542,7 +542,7 @@
     "rows": []
   },
   {
-    "key": "external/cte/1/via-alias/flat/single/predicate",
+    "case": "external/cte/1/via-alias/flat/single/predicate",
     "sql": "SELECT roots.*, children.id AS \"children.id\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" WHERE children.name = $1",
     "params": [
       "child"
@@ -576,7 +576,7 @@
     ]
   },
   {
-    "key": "nql/cte/1/via-alias/flat/single/predicate",
+    "case": "nql/cte/1/via-alias/flat/single/predicate",
     "sql": "SELECT roots.id, children.id AS \"children.id\", children.tenant AS \"children.tenant\", children.name AS \"children.name\", children.amount AS \"children.amount\", children.\"rootId\" AS \"children.rootId\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" WHERE children.name = $1",
     "params": [
       "child"

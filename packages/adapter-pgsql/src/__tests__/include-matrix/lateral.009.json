@@ -1,6 +1,6 @@
 [
   {
-    "key": "orm/lateral/2/direct/flat/single/expression",
+    "case": "orm/lateral/2/direct/flat/single/expression",
     "sql": null,
     "params": [],
     "error": {
@@ -11,7 +11,7 @@
     "rows": []
   },
   {
-    "key": "external/lateral/2/direct/flat/single/expression",
+    "case": "external/lateral/2/direct/flat/single/expression",
     "sql": null,
     "params": [],
     "error": {
@@ -22,7 +22,7 @@
     "rows": []
   },
   {
-    "key": "nql/lateral/2/direct/flat/single/expression",
+    "case": "nql/lateral/2/direct/flat/single/expression",
     "sql": null,
     "params": [],
     "error": {
@@ -33,7 +33,7 @@
     "rows": []
   },
   {
-    "key": "orm/lateral/2/direct/flat/single/outer",
+    "case": "orm/lateral/2/direct/flat/single/outer",
     "sql": null,
     "params": [],
     "error": {
@@ -44,7 +44,7 @@
     "rows": []
   },
   {
-    "key": "external/lateral/2/direct/flat/single/outer",
+    "case": "external/lateral/2/direct/flat/single/outer",
     "sql": null,
     "params": [],
     "error": {
@@ -55,7 +55,7 @@
     "rows": []
   },
   {
-    "key": "nql/lateral/2/direct/flat/single/outer",
+    "case": "nql/lateral/2/direct/flat/single/outer",
     "sql": null,
     "params": [],
     "error": {
@@ -66,7 +66,7 @@
     "rows": []
   },
   {
-    "key": "orm/lateral/2/direct/flat/composite/all",
+    "case": "orm/lateral/2/direct/flat/composite/all",
     "sql": "SELECT roots.*, children_lat_0.id AS \"compositeChildren.id\", children_lat_0.tenant AS \"compositeChildren.tenant\", children_lat_0.name AS \"compositeChildren.name\", children_lat_0.amount AS \"compositeChildren.amount\", children_lat_0.\"rootId\" AS \"compositeChildren.rootId\", children_lat_0.\"__dbsp_presence_compositeChildren\" AS \"__dbsp_presence_compositeChildren\", leaves_lat_1.id AS \"compositeChildren.compositeLeaves.id\", leaves_lat_1.tenant AS \"compositeChildren.compositeLeaves.tenant\", leaves_lat_1.name AS \"compositeChildren.compositeLeaves.name\", leaves_lat_1.amount AS \"compositeChildren.compositeLeaves.amount\", leaves_lat_1.\"childId\" AS \"compositeChildren.compositeLeaves.childId\", leaves_lat_1.\"__dbsp_presence_compositeChildren.compositeLeaves\" AS \"__dbsp_presence_compositeChildren.compositeLeaves\" FROM roots LEFT JOIN LATERAL (SELECT children_inner_0.id, children_inner_0.tenant, children_inner_0.name, children_inner_0.amount, children_inner_0.\"rootId\", children_inner_0.id AS \"__dbsp_presence_compositeChildren\" FROM children AS children_inner_0 WHERE children_inner_0.\"rootId\" = roots.id AND children_inner_0.tenant = roots.tenant) AS children_lat_0 ON true LEFT JOIN LATERAL (SELECT leaves_inner_1.id, leaves_inner_1.tenant, leaves_inner_1.name, leaves_inner_1.amount, leaves_inner_1.\"childId\", leaves_inner_1.id AS \"__dbsp_presence_compositeChildren.compositeLeaves\" FROM leaves AS leaves_inner_1 WHERE leaves_inner_1.\"childId\" = children_lat_0.id AND leaves_inner_1.tenant = children_lat_0.tenant) AS leaves_lat_1 ON true",
     "params": [],
     "error": null,
@@ -200,7 +200,7 @@
     ]
   },
   {
-    "key": "external/lateral/2/direct/flat/composite/all",
+    "case": "external/lateral/2/direct/flat/composite/all",
     "sql": "SELECT roots.*, children_lat_0.id AS \"compositeChildren.id\", children_lat_0.tenant AS \"compositeChildren.tenant\", children_lat_0.name AS \"compositeChildren.name\", children_lat_0.amount AS \"compositeChildren.amount\", children_lat_0.\"rootId\" AS \"compositeChildren.rootId\", leaves_lat_1.id AS \"compositeChildren.compositeLeaves.id\", leaves_lat_1.tenant AS \"compositeChildren.compositeLeaves.tenant\", leaves_lat_1.name AS \"compositeChildren.compositeLeaves.name\", leaves_lat_1.amount AS \"compositeChildren.compositeLeaves.amount\", leaves_lat_1.\"childId\" AS \"compositeChildren.compositeLeaves.childId\" FROM roots LEFT JOIN LATERAL (SELECT children_inner_0.id, children_inner_0.tenant, children_inner_0.name, children_inner_0.amount, children_inner_0.\"rootId\" FROM children AS children_inner_0 WHERE children_inner_0.\"rootId\" = roots.id AND children_inner_0.tenant = roots.tenant) AS children_lat_0 ON true LEFT JOIN LATERAL (SELECT leaves_inner_1.id, leaves_inner_1.tenant, leaves_inner_1.name, leaves_inner_1.amount, leaves_inner_1.\"childId\" FROM leaves AS leaves_inner_1 WHERE leaves_inner_1.\"childId\" = children_lat_0.id AND leaves_inner_1.tenant = children_lat_0.tenant) AS leaves_lat_1 ON true",
     "params": [],
     "error": null,
@@ -322,7 +322,7 @@
     ]
   },
   {
-    "key": "nql/lateral/2/direct/flat/composite/all",
+    "case": "nql/lateral/2/direct/flat/composite/all",
     "sql": "SELECT roots.id, children_lat_0.id AS \"compositeChildren.id\", children_lat_0.tenant AS \"compositeChildren.tenant\", children_lat_0.name AS \"compositeChildren.name\", children_lat_0.amount AS \"compositeChildren.amount\", children_lat_0.\"rootId\" AS \"compositeChildren.rootId\", leaves_lat_1.id AS \"compositeChildren.compositeLeaves.id\", leaves_lat_1.tenant AS \"compositeChildren.compositeLeaves.tenant\", leaves_lat_1.name AS \"compositeChildren.compositeLeaves.name\", leaves_lat_1.amount AS \"compositeChildren.compositeLeaves.amount\", leaves_lat_1.\"childId\" AS \"compositeChildren.compositeLeaves.childId\" FROM roots LEFT JOIN LATERAL (SELECT children_inner_0.id, children_inner_0.tenant, children_inner_0.name, children_inner_0.amount, children_inner_0.\"rootId\" FROM children AS children_inner_0 WHERE children_inner_0.\"rootId\" = roots.id AND children_inner_0.tenant = roots.tenant) AS children_lat_0 ON true LEFT JOIN LATERAL (SELECT leaves_inner_1.id, leaves_inner_1.tenant, leaves_inner_1.name, leaves_inner_1.amount, leaves_inner_1.\"childId\" FROM leaves AS leaves_inner_1 WHERE leaves_inner_1.\"childId\" = children_lat_0.id AND leaves_inner_1.tenant = children_lat_0.tenant) AS leaves_lat_1 ON true",
     "params": [],
     "error": null,
@@ -444,7 +444,7 @@
     ]
   },
   {
-    "key": "orm/lateral/2/direct/flat/composite/projection",
+    "case": "orm/lateral/2/direct/flat/composite/projection",
     "sql": null,
     "params": [],
     "error": {
@@ -455,7 +455,7 @@
     "rows": []
   },
   {
-    "key": "external/lateral/2/direct/flat/composite/projection",
+    "case": "external/lateral/2/direct/flat/composite/projection",
     "sql": null,
     "params": [],
     "error": {
@@ -466,7 +466,7 @@
     "rows": []
   },
   {
-    "key": "nql/lateral/2/direct/flat/composite/projection",
+    "case": "nql/lateral/2/direct/flat/composite/projection",
     "sql": null,
     "params": [],
     "error": {
@@ -477,7 +477,7 @@
     "rows": []
   },
   {
-    "key": "orm/lateral/2/direct/flat/composite/ordered-limit",
+    "case": "orm/lateral/2/direct/flat/composite/ordered-limit",
     "sql": "SELECT roots.*, children_lat_0.id AS \"compositeChildren.id\", children_lat_0.tenant AS \"compositeChildren.tenant\", children_lat_0.name AS \"compositeChildren.name\", children_lat_0.amount AS \"compositeChildren.amount\", children_lat_0.\"rootId\" AS \"compositeChildren.rootId\", children_lat_0.\"__dbsp_presence_compositeChildren\" AS \"__dbsp_presence_compositeChildren\", leaves_lat_1.id AS \"compositeChildren.compositeLeaves.id\", leaves_lat_1.tenant AS \"compositeChildren.compositeLeaves.tenant\", leaves_lat_1.name AS \"compositeChildren.compositeLeaves.name\", leaves_lat_1.amount AS \"compositeChildren.compositeLeaves.amount\", leaves_lat_1.\"childId\" AS \"compositeChildren.compositeLeaves.childId\", leaves_lat_1.\"__dbsp_presence_compositeChildren.compositeLeaves\" AS \"__dbsp_presence_compositeChildren.compositeLeaves\" FROM roots LEFT JOIN LATERAL (SELECT children_inner_0.id, children_inner_0.tenant, children_inner_0.name, children_inner_0.amount, children_inner_0.\"rootId\", children_inner_0.id AS \"__dbsp_presence_compositeChildren\" FROM children AS children_inner_0 WHERE children_inner_0.\"rootId\" = roots.id AND children_inner_0.tenant = roots.tenant ORDER BY children_inner_0.name DESC NULLS LAST, children_inner_0.id ASC NULLS LAST, children_inner_0.tenant ASC NULLS LAST LIMIT 2) AS children_lat_0 ON true LEFT JOIN LATERAL (SELECT leaves_inner_1.id, leaves_inner_1.tenant, leaves_inner_1.name, leaves_inner_1.amount, leaves_inner_1.\"childId\", leaves_inner_1.id AS \"__dbsp_presence_compositeChildren.compositeLeaves\" FROM leaves AS leaves_inner_1 WHERE leaves_inner_1.\"childId\" = children_lat_0.id AND leaves_inner_1.tenant = children_lat_0.tenant ORDER BY leaves_inner_1.name DESC NULLS LAST, leaves_inner_1.id ASC NULLS LAST, leaves_inner_1.tenant ASC NULLS LAST LIMIT 2) AS leaves_lat_1 ON true",
     "params": [],
     "error": null,
@@ -611,7 +611,7 @@
     ]
   },
   {
-    "key": "external/lateral/2/direct/flat/composite/ordered-limit",
+    "case": "external/lateral/2/direct/flat/composite/ordered-limit",
     "sql": "SELECT roots.*, children_lat_0.id AS \"compositeChildren.id\", children_lat_0.tenant AS \"compositeChildren.tenant\", children_lat_0.name AS \"compositeChildren.name\", children_lat_0.amount AS \"compositeChildren.amount\", children_lat_0.\"rootId\" AS \"compositeChildren.rootId\", leaves_lat_1.id AS \"compositeChildren.compositeLeaves.id\", leaves_lat_1.tenant AS \"compositeChildren.compositeLeaves.tenant\", leaves_lat_1.name AS \"compositeChildren.compositeLeaves.name\", leaves_lat_1.amount AS \"compositeChildren.compositeLeaves.amount\", leaves_lat_1.\"childId\" AS \"compositeChildren.compositeLeaves.childId\" FROM roots LEFT JOIN LATERAL (SELECT children_inner_0.id, children_inner_0.tenant, children_inner_0.name, children_inner_0.amount, children_inner_0.\"rootId\" FROM children AS children_inner_0 WHERE children_inner_0.\"rootId\" = roots.id AND children_inner_0.tenant = roots.tenant ORDER BY children_inner_0.name DESC NULLS LAST, children_inner_0.id ASC NULLS LAST, children_inner_0.tenant ASC NULLS LAST LIMIT 2) AS children_lat_0 ON true LEFT JOIN LATERAL (SELECT leaves_inner_1.id, leaves_inner_1.tenant, leaves_inner_1.name, leaves_inner_1.amount, leaves_inner_1.\"childId\" FROM leaves AS leaves_inner_1 WHERE leaves_inner_1.\"childId\" = children_lat_0.id AND leaves_inner_1.tenant = children_lat_0.tenant ORDER BY leaves_inner_1.name DESC NULLS LAST, leaves_inner_1.id ASC NULLS LAST, leaves_inner_1.tenant ASC NULLS LAST LIMIT 2) AS leaves_lat_1 ON true",
     "params": [],
     "error": null,
@@ -733,7 +733,7 @@
     ]
   },
   {
-    "key": "nql/lateral/2/direct/flat/composite/ordered-limit",
+    "case": "nql/lateral/2/direct/flat/composite/ordered-limit",
     "sql": "SELECT roots.id, children_lat_0.id AS \"compositeChildren.id\", children_lat_0.tenant AS \"compositeChildren.tenant\", children_lat_0.name AS \"compositeChildren.name\", children_lat_0.amount AS \"compositeChildren.amount\", children_lat_0.\"rootId\" AS \"compositeChildren.rootId\", leaves_lat_1.id AS \"compositeChildren.compositeLeaves.id\", leaves_lat_1.tenant AS \"compositeChildren.compositeLeaves.tenant\", leaves_lat_1.name AS \"compositeChildren.compositeLeaves.name\", leaves_lat_1.amount AS \"compositeChildren.compositeLeaves.amount\", leaves_lat_1.\"childId\" AS \"compositeChildren.compositeLeaves.childId\" FROM roots LEFT JOIN LATERAL (SELECT children_inner_0.id, children_inner_0.tenant, children_inner_0.name, children_inner_0.amount, children_inner_0.\"rootId\" FROM children AS children_inner_0 WHERE children_inner_0.\"rootId\" = roots.id AND children_inner_0.tenant = roots.tenant ORDER BY children_inner_0.name DESC NULLS LAST, children_inner_0.id ASC NULLS LAST, children_inner_0.tenant ASC NULLS LAST LIMIT 2) AS children_lat_0 ON true LEFT JOIN LATERAL (SELECT leaves_inner_1.id, leaves_inner_1.tenant, leaves_inner_1.name, leaves_inner_1.amount, leaves_inner_1.\"childId\" FROM leaves AS leaves_inner_1 WHERE leaves_inner_1.\"childId\" = children_lat_0.id AND leaves_inner_1.tenant = children_lat_0.tenant ORDER BY leaves_inner_1.name DESC NULLS LAST, leaves_inner_1.id ASC NULLS LAST, leaves_inner_1.tenant ASC NULLS LAST LIMIT 2) AS leaves_lat_1 ON true",
     "params": [],
     "error": null,
@@ -855,7 +855,7 @@
     ]
   },
   {
-    "key": "orm/lateral/2/direct/flat/composite/predicate",
+    "case": "orm/lateral/2/direct/flat/composite/predicate",
     "sql": null,
     "params": [],
     "error": {
@@ -866,7 +866,7 @@
     "rows": []
   },
   {
-    "key": "external/lateral/2/direct/flat/composite/predicate",
+    "case": "external/lateral/2/direct/flat/composite/predicate",
     "sql": null,
     "params": [],
     "error": {
@@ -877,7 +877,7 @@
     "rows": []
   },
   {
-    "key": "nql/lateral/2/direct/flat/composite/predicate",
+    "case": "nql/lateral/2/direct/flat/composite/predicate",
     "sql": null,
     "params": [],
     "error": {
@@ -888,7 +888,7 @@
     "rows": []
   },
   {
-    "key": "orm/lateral/2/direct/flat/composite/expression",
+    "case": "orm/lateral/2/direct/flat/composite/expression",
     "sql": null,
     "params": [],
     "error": {
@@ -899,7 +899,7 @@
     "rows": []
   },
   {
-    "key": "external/lateral/2/direct/flat/composite/expression",
+    "case": "external/lateral/2/direct/flat/composite/expression",
     "sql": null,
     "params": [],
     "error": {
@@ -910,7 +910,7 @@
     "rows": []
   },
   {
-    "key": "nql/lateral/2/direct/flat/composite/expression",
+    "case": "nql/lateral/2/direct/flat/composite/expression",
     "sql": null,
     "params": [],
     "error": {
@@ -921,7 +921,7 @@
     "rows": []
   },
   {
-    "key": "orm/lateral/2/direct/flat/composite/outer",
+    "case": "orm/lateral/2/direct/flat/composite/outer",
     "sql": null,
     "params": [],
     "error": {
@@ -932,7 +932,7 @@
     "rows": []
   },
   {
-    "key": "external/lateral/2/direct/flat/composite/outer",
+    "case": "external/lateral/2/direct/flat/composite/outer",
     "sql": null,
     "params": [],
     "error": {
@@ -943,7 +943,7 @@
     "rows": []
   },
   {
-    "key": "nql/lateral/2/direct/flat/composite/outer",
+    "case": "nql/lateral/2/direct/flat/composite/outer",
     "sql": null,
     "params": [],
     "error": {

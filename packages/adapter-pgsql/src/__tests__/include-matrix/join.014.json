@@ -1,6 +1,6 @@
 [
   {
-    "key": "orm/join/3/direct/nested/composite/ordered-limit",
+    "case": "orm/join/3/direct/nested/composite/ordered-limit",
     "sql": null,
     "params": [],
     "error": {
@@ -11,7 +11,7 @@
     "rows": []
   },
   {
-    "key": "external/join/3/direct/nested/composite/ordered-limit",
+    "case": "external/join/3/direct/nested/composite/ordered-limit",
     "sql": null,
     "params": [],
     "error": {
@@ -22,7 +22,7 @@
     "rows": []
   },
   {
-    "key": "nql/join/3/direct/nested/composite/ordered-limit",
+    "case": "nql/join/3/direct/nested/composite/ordered-limit",
     "sql": null,
     "params": [],
     "error": {
@@ -33,7 +33,7 @@
     "rows": []
   },
   {
-    "key": "orm/join/3/direct/nested/composite/predicate",
+    "case": "orm/join/3/direct/nested/composite/predicate",
     "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".tenant AS \"compositeChildren.compositeLeaves.tenant\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".\"childId\" AS \"compositeChildren.compositeLeaves.childId\", \"compositeLeaves\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves\", \"compositeTips\".id AS \"compositeChildren.compositeLeaves.compositeTips.id\", \"compositeTips\".tenant AS \"compositeChildren.compositeLeaves.compositeTips.tenant\", \"compositeTips\".name AS \"compositeChildren.compositeLeaves.compositeTips.name\", \"compositeTips\".amount AS \"compositeChildren.compositeLeaves.compositeTips.amount\", \"compositeTips\".\"leafId\" AS \"compositeChildren.compositeLeaves.compositeTips.leafId\", \"compositeTips\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves.compositeTips\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant JOIN tips AS \"compositeTips\" ON \"compositeLeaves\".id = \"compositeTips\".\"leafId\" AND \"compositeLeaves\".tenant = \"compositeTips\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeLeaves\".name = $2 AND \"compositeTips\".name = $3",
     "params": [
       "child",
@@ -232,7 +232,7 @@
     ]
   },
   {
-    "key": "external/join/3/direct/nested/composite/predicate",
+    "case": "external/join/3/direct/nested/composite/predicate",
     "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".tenant AS \"compositeChildren.compositeLeaves.tenant\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".\"childId\" AS \"compositeChildren.compositeLeaves.childId\", \"compositeLeaves\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves\", \"compositeTips\".id AS \"compositeChildren.compositeLeaves.compositeTips.id\", \"compositeTips\".tenant AS \"compositeChildren.compositeLeaves.compositeTips.tenant\", \"compositeTips\".name AS \"compositeChildren.compositeLeaves.compositeTips.name\", \"compositeTips\".amount AS \"compositeChildren.compositeLeaves.compositeTips.amount\", \"compositeTips\".\"leafId\" AS \"compositeChildren.compositeLeaves.compositeTips.leafId\", \"compositeTips\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves.compositeTips\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant JOIN tips AS \"compositeTips\" ON \"compositeLeaves\".id = \"compositeTips\".\"leafId\" AND \"compositeLeaves\".tenant = \"compositeTips\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeLeaves\".name = $2 AND \"compositeTips\".name = $3",
     "params": [
       "child",
@@ -431,7 +431,7 @@
     ]
   },
   {
-    "key": "nql/join/3/direct/nested/composite/predicate",
+    "case": "nql/join/3/direct/nested/composite/predicate",
     "sql": "SELECT roots.id, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".tenant AS \"compositeChildren.compositeLeaves.tenant\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".\"childId\" AS \"compositeChildren.compositeLeaves.childId\", \"compositeLeaves\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves\", \"compositeTips\".id AS \"compositeChildren.compositeLeaves.compositeTips.id\", \"compositeTips\".tenant AS \"compositeChildren.compositeLeaves.compositeTips.tenant\", \"compositeTips\".name AS \"compositeChildren.compositeLeaves.compositeTips.name\", \"compositeTips\".amount AS \"compositeChildren.compositeLeaves.compositeTips.amount\", \"compositeTips\".\"leafId\" AS \"compositeChildren.compositeLeaves.compositeTips.leafId\", \"compositeTips\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves.compositeTips\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant JOIN tips AS \"compositeTips\" ON \"compositeLeaves\".id = \"compositeTips\".\"leafId\" AND \"compositeLeaves\".tenant = \"compositeTips\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeLeaves\".name = $2 AND \"compositeTips\".name = $3",
     "params": [
       "child",
@@ -630,7 +630,7 @@
     ]
   },
   {
-    "key": "orm/join/3/direct/nested/composite/expression",
+    "case": "orm/join/3/direct/nested/composite/expression",
     "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".tenant AS \"compositeChildren.compositeLeaves.tenant\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".\"childId\" AS \"compositeChildren.compositeLeaves.childId\", \"compositeLeaves\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves\", \"compositeTips\".id AS \"compositeChildren.compositeLeaves.compositeTips.id\", \"compositeTips\".tenant AS \"compositeChildren.compositeLeaves.compositeTips.tenant\", \"compositeTips\".name AS \"compositeChildren.compositeLeaves.compositeTips.name\", \"compositeTips\".amount AS \"compositeChildren.compositeLeaves.compositeTips.amount\", \"compositeTips\".\"leafId\" AS \"compositeChildren.compositeLeaves.compositeTips.leafId\", \"compositeTips\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves.compositeTips\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant JOIN tips AS \"compositeTips\" ON \"compositeLeaves\".id = \"compositeTips\".\"leafId\" AND \"compositeLeaves\".tenant = \"compositeTips\".tenant WHERE lower(name) = $1 AND lower(name) = $2 AND lower(name) = $3",
     "params": [
       "child",
@@ -829,7 +829,7 @@
     ]
   },
   {
-    "key": "external/join/3/direct/nested/composite/expression",
+    "case": "external/join/3/direct/nested/composite/expression",
     "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".tenant AS \"compositeChildren.compositeLeaves.tenant\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".\"childId\" AS \"compositeChildren.compositeLeaves.childId\", \"compositeLeaves\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves\", \"compositeTips\".id AS \"compositeChildren.compositeLeaves.compositeTips.id\", \"compositeTips\".tenant AS \"compositeChildren.compositeLeaves.compositeTips.tenant\", \"compositeTips\".name AS \"compositeChildren.compositeLeaves.compositeTips.name\", \"compositeTips\".amount AS \"compositeChildren.compositeLeaves.compositeTips.amount\", \"compositeTips\".\"leafId\" AS \"compositeChildren.compositeLeaves.compositeTips.leafId\", \"compositeTips\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves.compositeTips\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant JOIN tips AS \"compositeTips\" ON \"compositeLeaves\".id = \"compositeTips\".\"leafId\" AND \"compositeLeaves\".tenant = \"compositeTips\".tenant WHERE lower(name) = $1 AND lower(name) = $2 AND lower(name) = $3",
     "params": [
       "child",
@@ -1028,7 +1028,7 @@
     ]
   },
   {
-    "key": "nql/join/3/direct/nested/composite/expression",
+    "case": "nql/join/3/direct/nested/composite/expression",
     "sql": "SELECT roots.id, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".tenant AS \"compositeChildren.compositeLeaves.tenant\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".\"childId\" AS \"compositeChildren.compositeLeaves.childId\", \"compositeLeaves\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves\", \"compositeTips\".id AS \"compositeChildren.compositeLeaves.compositeTips.id\", \"compositeTips\".tenant AS \"compositeChildren.compositeLeaves.compositeTips.tenant\", \"compositeTips\".name AS \"compositeChildren.compositeLeaves.compositeTips.name\", \"compositeTips\".amount AS \"compositeChildren.compositeLeaves.compositeTips.amount\", \"compositeTips\".\"leafId\" AS \"compositeChildren.compositeLeaves.compositeTips.leafId\", \"compositeTips\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves.compositeTips\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant JOIN tips AS \"compositeTips\" ON \"compositeLeaves\".id = \"compositeTips\".\"leafId\" AND \"compositeLeaves\".tenant = \"compositeTips\".tenant WHERE lower(name) = $1 AND lower(name) = $2 AND lower(name) = $3",
     "params": [
       "child",
@@ -1227,7 +1227,7 @@
     ]
   },
   {
-    "key": "orm/join/3/direct/nested/composite/outer",
+    "case": "orm/join/3/direct/nested/composite/outer",
     "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".tenant AS \"compositeChildren.compositeLeaves.tenant\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".\"childId\" AS \"compositeChildren.compositeLeaves.childId\", \"compositeLeaves\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves\", \"compositeTips\".id AS \"compositeChildren.compositeLeaves.compositeTips.id\", \"compositeTips\".tenant AS \"compositeChildren.compositeLeaves.compositeTips.tenant\", \"compositeTips\".name AS \"compositeChildren.compositeLeaves.compositeTips.name\", \"compositeTips\".amount AS \"compositeChildren.compositeLeaves.compositeTips.amount\", \"compositeTips\".\"leafId\" AS \"compositeChildren.compositeLeaves.compositeTips.leafId\", \"compositeTips\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves.compositeTips\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant JOIN tips AS \"compositeTips\" ON \"compositeLeaves\".id = \"compositeTips\".\"leafId\" AND \"compositeLeaves\".tenant = \"compositeTips\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeChildren\".id = roots.id AND \"compositeLeaves\".name = $2 AND \"compositeLeaves\".id = roots.id AND \"compositeTips\".name = $3 AND \"compositeTips\".id = roots.id",
     "params": [
       "child",
@@ -1426,7 +1426,7 @@
     ]
   },
   {
-    "key": "external/join/3/direct/nested/composite/outer",
+    "case": "external/join/3/direct/nested/composite/outer",
     "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".tenant AS \"compositeChildren.compositeLeaves.tenant\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".\"childId\" AS \"compositeChildren.compositeLeaves.childId\", \"compositeLeaves\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves\", \"compositeTips\".id AS \"compositeChildren.compositeLeaves.compositeTips.id\", \"compositeTips\".tenant AS \"compositeChildren.compositeLeaves.compositeTips.tenant\", \"compositeTips\".name AS \"compositeChildren.compositeLeaves.compositeTips.name\", \"compositeTips\".amount AS \"compositeChildren.compositeLeaves.compositeTips.amount\", \"compositeTips\".\"leafId\" AS \"compositeChildren.compositeLeaves.compositeTips.leafId\", \"compositeTips\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves.compositeTips\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant JOIN tips AS \"compositeTips\" ON \"compositeLeaves\".id = \"compositeTips\".\"leafId\" AND \"compositeLeaves\".tenant = \"compositeTips\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeChildren\".id = roots.id AND \"compositeLeaves\".name = $2 AND \"compositeLeaves\".id = roots.id AND \"compositeTips\".name = $3 AND \"compositeTips\".id = roots.id",
     "params": [
       "child",
@@ -1625,7 +1625,7 @@
     ]
   },
   {
-    "key": "nql/join/3/direct/nested/composite/outer",
+    "case": "nql/join/3/direct/nested/composite/outer",
     "sql": "SELECT roots.id, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".tenant AS \"compositeChildren.compositeLeaves.tenant\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".\"childId\" AS \"compositeChildren.compositeLeaves.childId\", \"compositeLeaves\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves\", \"compositeTips\".id AS \"compositeChildren.compositeLeaves.compositeTips.id\", \"compositeTips\".tenant AS \"compositeChildren.compositeLeaves.compositeTips.tenant\", \"compositeTips\".name AS \"compositeChildren.compositeLeaves.compositeTips.name\", \"compositeTips\".amount AS \"compositeChildren.compositeLeaves.compositeTips.amount\", \"compositeTips\".\"leafId\" AS \"compositeChildren.compositeLeaves.compositeTips.leafId\", \"compositeTips\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves.compositeTips\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant JOIN tips AS \"compositeTips\" ON \"compositeLeaves\".id = \"compositeTips\".\"leafId\" AND \"compositeLeaves\".tenant = \"compositeTips\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeChildren\".id = roots.id AND \"compositeLeaves\".name = $2 AND \"compositeLeaves\".id = roots.id AND \"compositeTips\".name = $3 AND \"compositeTips\".id = roots.id",
     "params": [
       "child",
@@ -1824,7 +1824,7 @@
     ]
   },
   {
-    "key": "orm/join/3/direct/flat/single/all",
+    "case": "orm/join/3/direct/flat/single/all",
     "sql": "SELECT roots.*, children.id AS \"children.id\", children.tenant AS \"children.tenant\", children.name AS \"children.name\", children.amount AS \"children.amount\", children.\"rootId\" AS \"children.rootId\", children.id AS __dbsp_presence_children, leaves.id AS \"children.leaves.id\", leaves.tenant AS \"children.leaves.tenant\", leaves.name AS \"children.leaves.name\", leaves.amount AS \"children.leaves.amount\", leaves.\"childId\" AS \"children.leaves.childId\", leaves.id AS \"__dbsp_presence_children.leaves\", tips.id AS \"children.leaves.tips.id\", tips.tenant AS \"children.leaves.tips.tenant\", tips.name AS \"children.leaves.tips.name\", tips.amount AS \"children.leaves.tips.amount\", tips.\"leafId\" AS \"children.leaves.tips.leafId\", tips.id AS \"__dbsp_presence_children.leaves.tips\" FROM roots LEFT JOIN children AS children ON roots.id = children.\"rootId\" LEFT JOIN leaves AS leaves ON children.id = leaves.\"childId\" LEFT JOIN tips AS tips ON leaves.id = tips.\"leafId\"",
     "params": [],
     "error": null,
@@ -2019,7 +2019,7 @@
     ]
   },
   {
-    "key": "external/join/3/direct/flat/single/all",
+    "case": "external/join/3/direct/flat/single/all",
     "sql": "SELECT roots.*, children.id AS \"children.id\", leaves.id AS \"children.leaves.id\", tips.id AS \"children.leaves.tips.id\" FROM roots LEFT JOIN children AS children ON roots.id = children.\"rootId\" LEFT JOIN leaves AS leaves ON children.id = leaves.\"childId\" LEFT JOIN tips AS tips ON leaves.id = tips.\"leafId\"",
     "params": [],
     "error": null,
@@ -2091,7 +2091,7 @@
     ]
   },
   {
-    "key": "nql/join/3/direct/flat/single/all",
+    "case": "nql/join/3/direct/flat/single/all",
     "sql": "SELECT roots.id, tips.id AS \"children.leaves.tips.id\", tips.tenant AS \"children.leaves.tips.tenant\", tips.name AS \"children.leaves.tips.name\", tips.amount AS \"children.leaves.tips.amount\", tips.\"leafId\" AS \"children.leaves.tips.leafId\" FROM roots LEFT JOIN children AS children ON roots.id = children.\"rootId\" LEFT JOIN leaves AS leaves ON children.id = leaves.\"childId\" LEFT JOIN tips AS tips ON leaves.id = tips.\"leafId\"",
     "params": [],
     "error": null,
@@ -2182,7 +2182,7 @@
     ]
   },
   {
-    "key": "orm/join/3/direct/flat/single/projection",
+    "case": "orm/join/3/direct/flat/single/projection",
     "sql": "SELECT roots.*, children.name AS \"children.name\", children.amount AS \"children.amount\", children.id AS __dbsp_presence_children, leaves.name AS \"children.leaves.name\", leaves.amount AS \"children.leaves.amount\", leaves.id AS \"__dbsp_presence_children.leaves\", tips.name AS \"children.leaves.tips.name\", tips.amount AS \"children.leaves.tips.amount\", tips.id AS \"__dbsp_presence_children.leaves.tips\" FROM roots LEFT JOIN children AS children ON roots.id = children.\"rootId\" LEFT JOIN leaves AS leaves ON children.id = leaves.\"childId\" LEFT JOIN tips AS tips ON leaves.id = tips.\"leafId\"",
     "params": [],
     "error": null,
@@ -2314,7 +2314,7 @@
     ]
   },
   {
-    "key": "external/join/3/direct/flat/single/projection",
+    "case": "external/join/3/direct/flat/single/projection",
     "sql": "SELECT roots.*, children.id AS \"children.id\", children.name AS \"children.name\", children.amount AS \"children.amount\", leaves.id AS \"children.leaves.id\", leaves.name AS \"children.leaves.name\", leaves.amount AS \"children.leaves.amount\", tips.id AS \"children.leaves.tips.id\", tips.name AS \"children.leaves.tips.name\", tips.amount AS \"children.leaves.tips.amount\" FROM roots LEFT JOIN children AS children ON roots.id = children.\"rootId\" LEFT JOIN leaves AS leaves ON children.id = leaves.\"childId\" LEFT JOIN tips AS tips ON leaves.id = tips.\"leafId\"",
     "params": [],
     "error": null,
@@ -2449,7 +2449,7 @@
     ]
   },
   {
-    "key": "nql/join/3/direct/flat/single/projection",
+    "case": "nql/join/3/direct/flat/single/projection",
     "sql": null,
     "params": [],
     "error": {
@@ -2460,7 +2460,7 @@
     "rows": []
   },
   {
-    "key": "orm/join/3/direct/flat/single/ordered-limit",
+    "case": "orm/join/3/direct/flat/single/ordered-limit",
     "sql": null,
     "params": [],
     "error": {
@@ -2471,7 +2471,7 @@
     "rows": []
   },
   {
-    "key": "external/join/3/direct/flat/single/ordered-limit",
+    "case": "external/join/3/direct/flat/single/ordered-limit",
     "sql": null,
     "params": [],
     "error": {
@@ -2482,7 +2482,7 @@
     "rows": []
   },
   {
-    "key": "nql/join/3/direct/flat/single/ordered-limit",
+    "case": "nql/join/3/direct/flat/single/ordered-limit",
     "sql": null,
     "params": [],
     "error": {
@@ -2493,7 +2493,7 @@
     "rows": []
   },
   {
-    "key": "orm/join/3/direct/flat/single/predicate",
+    "case": "orm/join/3/direct/flat/single/predicate",
     "sql": "SELECT roots.*, children.id AS \"children.id\", children.tenant AS \"children.tenant\", children.name AS \"children.name\", children.amount AS \"children.amount\", children.\"rootId\" AS \"children.rootId\", children.id AS __dbsp_presence_children, leaves.id AS \"children.leaves.id\", leaves.tenant AS \"children.leaves.tenant\", leaves.name AS \"children.leaves.name\", leaves.amount AS \"children.leaves.amount\", leaves.\"childId\" AS \"children.leaves.childId\", leaves.id AS \"__dbsp_presence_children.leaves\", tips.id AS \"children.leaves.tips.id\", tips.tenant AS \"children.leaves.tips.tenant\", tips.name AS \"children.leaves.tips.name\", tips.amount AS \"children.leaves.tips.amount\", tips.\"leafId\" AS \"children.leaves.tips.leafId\", tips.id AS \"__dbsp_presence_children.leaves.tips\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" JOIN leaves AS leaves ON children.id = leaves.\"childId\" JOIN tips AS tips ON leaves.id = tips.\"leafId\" WHERE children.name = $1 AND leaves.name = $2 AND tips.name = $3",
     "params": [
       "child",
@@ -2692,7 +2692,7 @@
     ]
   },
   {
-    "key": "external/join/3/direct/flat/single/predicate",
+    "case": "external/join/3/direct/flat/single/predicate",
     "sql": "SELECT roots.*, children.id AS \"children.id\", leaves.id AS \"children.leaves.id\", tips.id AS \"children.leaves.tips.id\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" JOIN leaves AS leaves ON children.id = leaves.\"childId\" JOIN tips AS tips ON leaves.id = tips.\"leafId\" WHERE children.name = $1 AND leaves.name = $2 AND tips.name = $3",
     "params": [
       "child",
@@ -2768,7 +2768,7 @@
     ]
   },
   {
-    "key": "nql/join/3/direct/flat/single/predicate",
+    "case": "nql/join/3/direct/flat/single/predicate",
     "sql": "SELECT roots.id, tips.id AS \"children.leaves.tips.id\", tips.tenant AS \"children.leaves.tips.tenant\", tips.name AS \"children.leaves.tips.name\", tips.amount AS \"children.leaves.tips.amount\", tips.\"leafId\" AS \"children.leaves.tips.leafId\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" JOIN leaves AS leaves ON children.id = leaves.\"childId\" JOIN tips AS tips ON leaves.id = tips.\"leafId\" WHERE children.name = $1 AND leaves.name = $2 AND tips.name = $3",
     "params": [
       "child",
