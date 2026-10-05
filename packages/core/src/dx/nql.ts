@@ -675,8 +675,8 @@ function createBindingTailIncludeDecisions(
 					...(relation.foreignKey !== undefined && {
 						foreignKey: relation.foreignKey,
 					}),
-					// Leave parentKey absent when RelationIR does not specify it so the
-					// adapter applies the same defaultPkColumnName fallback as real-table includes.
+					// Leave parentKey absent when RelationIR does not specify it; the
+					// shared relation-key resolver supplies the referenced table's declared primary key.
 					...(parentKey !== undefined && { parentKey }),
 					...(targetOrder &&
 						targetOrder.columns.length > 0 && {

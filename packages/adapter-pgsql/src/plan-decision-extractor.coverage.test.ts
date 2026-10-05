@@ -79,6 +79,8 @@ describe('plan-decision-extractor - coverage', () => {
 				getRelation: (key: string) =>
 					key === 'users.posts'
 						? {
+								name: 'posts',
+								sourceKey: 'id',
 								target: 'posts',
 								foreignKey: 'user_id',
 								type: 'hasMany',
@@ -98,6 +100,8 @@ describe('plan-decision-extractor - coverage', () => {
 				getRelation: (key: string) =>
 					key === 'posts.author'
 						? {
+								name: 'author',
+								targetKey: ['id', 'tenant_id'],
 								target: 'users',
 								foreignKey: ['user_id', 'tenant_id'],
 								type: 'belongsTo',
@@ -406,9 +410,21 @@ describe('plan-decision-extractor - coverage', () => {
 		const mockModel = {
 			getRelation: (key: string) => {
 				if (key === 'users.posts')
-					return { target: 'posts', foreignKey: 'user_id', type: 'hasMany' };
+					return {
+						name: 'posts',
+						sourceKey: 'id',
+						target: 'posts',
+						foreignKey: 'user_id',
+						type: 'hasMany',
+					};
 				if (key === 'posts.author')
-					return { target: 'users', foreignKey: 'user_id', type: 'belongsTo' };
+					return {
+						name: 'author',
+						targetKey: 'id',
+						target: 'users',
+						foreignKey: 'user_id',
+						type: 'belongsTo',
+					};
 				return undefined;
 			},
 		};
@@ -686,7 +702,13 @@ describe('plan-decision-extractor - coverage', () => {
 			const model = {
 				getRelation: (key: string) =>
 					key === 'users.posts'
-						? { target: 'posts', foreignKey: 'user_id' }
+						? {
+								name: 'posts',
+								sourceKey: 'id',
+								target: 'posts',
+								foreignKey: 'user_id',
+								type: 'hasMany',
+							}
 						: undefined,
 			};
 			const plan = {

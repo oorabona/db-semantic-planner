@@ -1,4 +1,5 @@
 import { type ModelIR, type RelationIR, toColumnList } from '@dbsp/types';
+import { resolveDeclaredRelationKeys } from '@dbsp/types/internal';
 import {
 	DEFAULT_PK_COLUMN,
 	defaultFkDerivation,
@@ -10,7 +11,7 @@ export function resolveRelationKeys(
 	sourceTable: string,
 	relation: Pick<
 		RelationIR,
-		'type' | 'target' | 'foreignKey' | 'sourceKey' | 'targetKey'
+		'name' | 'type' | 'target' | 'foreignKey' | 'sourceKey' | 'targetKey'
 	>,
 	authorities: {
 		model?: ModelIR;
@@ -24,26 +25,21 @@ export function resolveRelationKeys(
 		belongsTo ? relation.targetKey : relation.sourceKey,
 	);
 	const foreign = toColumnList(relation.foreignKey);
-	const foreignTable = belongsTo ? sourceTable : relation.target;
-	const references =
-		authorities.model
-			?.getTable(foreignTable)
-			?.foreignKeys.find(
-				(fk) =>
-					fk.references.table === referencedTable &&
-					fk.columns.length === foreign.length &&
-					fk.columns.every((column, index) => column === foreign[index]),
-			)?.references.columns ?? [];
-	const declared = toColumnList(
-		authorities.model?.getTable(referencedTable)?.primaryKey,
-	);
+	if (authorities.model) {
+		const keys = resolveDeclaredRelationKeys(
+			authorities.model,
+			sourceTable,
+			relation,
+		);
+		const referencedKey = belongsTo ? keys.targetKey : keys.sourceKey;
+		return {
+			sourceColumn: belongsTo ? keys.foreignKey : referencedKey,
+			targetColumn: belongsTo ? referencedKey : keys.foreignKey,
+		};
+	}
 	const referencedKey = explicit.length
 		? explicit
-		: references.length
-			? references
-			: declared.length
-				? declared
-				: [authorities.defaultPkColumnName ?? DEFAULT_PK_COLUMN];
+		: [authorities.defaultPkColumnName ?? DEFAULT_PK_COLUMN];
 	const foreignKey = foreign.length
 		? foreign
 		: referencedKey.map((key) =>

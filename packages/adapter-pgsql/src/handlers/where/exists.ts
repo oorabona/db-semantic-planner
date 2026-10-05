@@ -312,9 +312,9 @@ function buildExistsSubquery(
 					// sourceAliasForJoin stays as targetAlias (root EXISTS alias)
 				}
 
-				if (!rel && ctx.position === 'filter') {
+				if (!rel) {
 					throw new Error(
-						`FILTER include('${joinRelation}'): no relation '${joinRelation}' is declared on table '${sourceTableForJoin}'.`,
+						`${(ctx.position ?? 'where').toUpperCase()} include('${joinRelation}'): no relation '${joinRelation}' is declared on table '${sourceTableForJoin}'.`,
 					);
 				}
 				if (rel) {
@@ -324,42 +324,16 @@ function buildExistsSubquery(
 						);
 					}
 					joinTargetTable = rel.target;
-					if (ctx.position === 'filter') {
-						const keys = resolveRelationKeys(sourceTableForJoin, rel, ctx);
-						joinSourceCols = keys.sourceColumn;
-						joinTargetCols = keys.targetColumn;
-					} else if (rel.type === 'belongsTo') {
-						// FK is on the source side (sourceTable.fkCol → joinTargetTable.id)
-						const fk = toColumnList(rel.foreignKey);
-						joinSourceCols = fk.length > 0 ? fk : undefined;
-						const targetKey = toColumnList(rel.targetKey);
-						joinTargetCols =
-							targetKey.length > 0
-								? targetKey
-								: [
-										(ctx.defaultPkColumnName as string | undefined) ??
-											DEFAULT_PK_COLUMN,
-									];
-					} else {
-						// hasMany/hasOne: FK is on the target side (joinTargetTable.fkCol → sourceTable.id)
-						const fk = toColumnList(rel.foreignKey);
-						const sourceKey = toColumnList(rel.sourceKey);
-						joinSourceCols =
-							sourceKey.length > 0
-								? sourceKey
-								: [
-										(ctx.defaultPkColumnName as string | undefined) ??
-											DEFAULT_PK_COLUMN,
-									];
-						joinTargetCols = fk.length > 0 ? fk : undefined;
-					}
+					const keys = resolveRelationKeys(sourceTableForJoin, rel, ctx);
+					joinSourceCols = keys.sourceColumn;
+					joinTargetCols = keys.targetColumn;
 				}
 			}
 
 			if (!model && ctx.position === 'filter') {
 				const keys = resolveRelationKeys(
 					sourceTableForJoin,
-					{ type: 'belongsTo', target: joinTargetTable },
+					{ name: joinRelation, type: 'belongsTo', target: joinTargetTable },
 					ctx,
 				);
 				joinSourceCols = keys.sourceColumn;

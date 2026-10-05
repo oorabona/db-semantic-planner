@@ -127,7 +127,7 @@ it('declared relation keys precede custom authorities and nested relations share
 	expect(result.sql).toContain('users.id = posts_exists_0."authorId"');
 	expect(result.sql).toContain('posts_exists_0.id = posts_exists_1."parentId"');
 });
-it('missing model keys use configured PK and FK authorities', () => {
+it('hand-built relations declare their intended keys', () => {
 	const context = ctx();
 	const model = {
 		...db.model,
@@ -137,8 +137,8 @@ it('missing model keys use configured PK and FK authorities', () => {
 			return (
 				relation && {
 					...relation,
-					foreignKey: undefined,
-					sourceKey: undefined,
+					foreignKey: 'z_users_custom_pk',
+					sourceKey: 'custom_pk',
 					targetKey: undefined,
 				}
 			);

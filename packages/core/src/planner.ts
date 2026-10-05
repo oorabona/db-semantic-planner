@@ -28,6 +28,7 @@ import {
 	belongsToManyJoinIncludeRefusal,
 	dropsJoinIncludeData,
 	markPlannedReport,
+	resolveDeclaredRelationKeys,
 	resolveDeclaredRelationPath,
 	resolveIncludeRelationName,
 } from '@dbsp/types/internal';
@@ -1057,6 +1058,9 @@ function processRelationFilter(
 			return; // Error already added to warnings or exception thrown
 		}
 
+		// Validate traversal even for plan() callers; compilation resolves physical pairs.
+		resolveDeclaredRelationKeys(model, currentSource, relation);
+
 		// Track relation access for CTE extraction
 		const relPath = `${currentSource}.${relation.name}`;
 		const paths = state.relationAccessCounts.get(relPath) ?? [];
@@ -1218,6 +1222,9 @@ function processInclude(
 		opts.dialectCapabilities,
 		undefined,
 		queryIntent,
+		false,
+		false,
+		model,
 	);
 	if (!isRecursiveInclude) {
 		validateIncludeStrategy(
@@ -2106,6 +2113,7 @@ export function validateRecursiveIncludeStrategy(
 	rootIntent?: QueryIntent,
 	inSetOperation = false,
 	applicableDefaultFilter = false,
+	model?: ModelIR,
 ): boolean {
 	const recursive = !!include.recursive || !!relation.recursive;
 	if (!recursive) return false;
@@ -2158,8 +2166,13 @@ export function validateRecursiveIncludeStrategy(
 		throw new Error(
 			'Recursive include option select requires at least one field',
 		);
+	const keys = model
+		? resolveDeclaredRelationKeys(model, relation.source, relation)
+		: undefined;
 	const key = toColumnList(
-		relation.type === 'belongsTo' ? relation.targetKey : relation.sourceKey,
+		relation.type === 'belongsTo'
+			? (keys?.targetKey ?? relation.targetKey)
+			: (keys?.sourceKey ?? relation.sourceKey),
 	);
 	if (!key.length)
 		throw new Error('Recursive include requires a declared referenced key');
@@ -2327,6 +2340,8 @@ export function validateRecursiveSetOperation(
 					undefined,
 					query,
 					true,
+					false,
+					model,
 				);
 				includes(
 					include.include ?? [],

@@ -1,10 +1,14 @@
 # FEAT-192-B — NQL `include()` hydration from a `| bind` / CTE source
 
+> **Superseded.** Include SQL no longer comes from flat include decisions: since #944, `plan()` produces resolved
+> include nodes (`PlanReport.execution.includes`) and the adapter compiles only those. The decision-driven route
+> described below no longer exists. Kept as a record of the original design.
+
 ```yaml
 doc-meta:
   story: FEAT-192-binding-include-hydration
   issue: 192
-  status: canonical
+  status: superseded
   adversarial_applied: true
   llm_consensus_applied: true
   production_audit_applied: true

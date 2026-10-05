@@ -72,6 +72,7 @@ const resolvedIncludeExports = [
 	'isPlannedReport',
 ];
 const internalNames = [
+	'resolveDeclaredRelationKeys',
 	...joinIncludeExports,
 	...resolvedIncludeExports,
 	...relationPathTypes,
@@ -85,6 +86,7 @@ const movedRuntime = before.root.runtime.filter((name) =>
 	names(moved).includes(name),
 );
 const internalRuntime = [
+	'resolveDeclaredRelationKeys',
 	...joinIncludeExports,
 	...resolvedIncludeExports,
 	...rootRuntime,

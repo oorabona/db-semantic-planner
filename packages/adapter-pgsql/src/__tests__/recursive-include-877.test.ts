@@ -462,7 +462,10 @@ describe('#877 shared plan/compile refusals', () => {
 				name === 'categories.children'
 					? { ...relation, sourceKey: undefined }
 					: db.model.getRelation(name),
-			getTable: db.model.getTable.bind(db.model),
+			getTable: (name: string) => {
+				const table = db.model.getTable(name);
+				return table ? { ...table, primaryKey: undefined } : undefined;
+			},
 			getRelationsFrom: db.model.getRelationsFrom.bind(db.model),
 		} as ModelIR;
 		const report = asExternalReport(valid());
@@ -470,7 +473,7 @@ describe('#877 shared plan/compile refusals', () => {
 			plan(report.intent!, model, {
 				dialectCapabilities: adapter.dialectCapabilities,
 			}),
-		).toThrow('Recursive include requires a declared referenced key');
+		).toThrow("Relation 'categories.children' has mismatched key arity.");
 		expect(() => createPgCompileOnlyAdapter({ model }).compile(report)).toThrow(
 			new Error('Includes compile only from a report planned in this process'),
 		);

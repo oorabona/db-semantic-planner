@@ -11,6 +11,7 @@ import {
 } from '@dbsp/types';
 import {
 	getTrustedNqlRelationFilterFields,
+	resolveDeclaredRelationKeys,
 	resolveDeclaredRelationPath,
 	resolveIncludeRelationName,
 } from '@dbsp/types/internal';
@@ -71,7 +72,13 @@ export function resolveReportIncludes(
 			if (!targetTable)
 				throw new Error(`Include ${intentPath} has no resolved target`);
 			const relationType = relation?.type ?? context?.relationType ?? 'hasMany';
-			let fk = toColumnList(context?.foreignKey ?? relation?.foreignKey);
+			const keys =
+				model && relation
+					? resolveDeclaredRelationKeys(model, sourceRange.table, relation)
+					: undefined;
+			let fk =
+				keys?.foreignKey ??
+				toColumnList(context?.foreignKey ?? relation?.foreignKey);
 			const defaultPk = options.defaultPk ?? 'id';
 			if (!fk.length)
 				fk = [
@@ -80,12 +87,16 @@ export function resolveReportIncludes(
 						defaultPk,
 					),
 				];
-			let pk = toColumnList(
-				context?.parentKey ??
-					(relationType === 'belongsTo'
-						? relation?.targetKey
-						: relation?.sourceKey),
-			);
+			let pk = keys
+				? relationType === 'belongsTo'
+					? keys.targetKey
+					: keys.sourceKey
+				: toColumnList(
+						context?.parentKey ??
+							(relationType === 'belongsTo'
+								? relation?.targetKey
+								: relation?.sourceKey),
+					);
 			if (!pk.length) pk = [defaultPk];
 			const recursion = context?.recursiveInclude;
 			const ancestors = recursion?.direction === 'ancestors';
@@ -106,7 +117,7 @@ export function resolveReportIncludes(
 			const declaredPath =
 				!recursion && relation
 					? resolveDeclaredRelationPath(
-							{
+							model ?? {
 								getRelation: () => relation,
 								getRelationsFrom: () => [relation],
 							},

@@ -1124,7 +1124,11 @@ export function createConditionCompiler(
 						}
 					: resolveRelationKeys(
 							ctx.rootTable,
-							resolved ?? { type: 'hasMany', target: intent.relation },
+							resolved ?? {
+								name: intent.relation,
+								type: 'hasMany',
+								target: intent.relation,
+							},
 							ctx,
 						);
 			const targetTable = resolved?.target ?? intent.relation;
