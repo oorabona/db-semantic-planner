@@ -92,7 +92,7 @@ A `belongsToMany` include of the query is refused in every strategy, including e
 
 > `Invalid include: Relation 'posts.tags': many-to-many traversal is not supported yet (#787).`
 
-The provisional refusal applies when planning the query's includes (any strategy, NQL relation columns and `| flat`), relation `.join()` and relation predicates. Other traversal routes, such as an include inside `exists(..., { include })`, are not refused yet and fail at compilation until the junction lowering lands.
+The provisional refusal applies to the query's includes (any strategy, NQL relation columns and `| flat`), relation `.join()`, relation predicates and the includes of a relation predicate (`exists(..., { include })`).
 
 To-one join includes accept omitted `select`, `select: { type: 'all' }`, or `select: { type: 'fields', fields: [...] }` with plain column names and no `'*'`.
 Ordinary non-recursive CTE includes refuse any explicit `select` with the include path because they add no related targets to the outer `SELECT`.
