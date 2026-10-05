@@ -8,7 +8,7 @@
 doc-meta:
   story: FEAT-192-binding-multilevel-includes
   issue: 192
-  status: canonical
+  status: superseded
   adversarial_applied: true
   llm_consensus_applied: true
   production_audit_applied: true

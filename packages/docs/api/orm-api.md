@@ -1465,7 +1465,7 @@ const adapter = createPgAdapter(pool, {
 | `defaultPkColumnName` | `string` | `'id'` | Primary-key convention when compiling without a model |
 | `deriveFkColumnName` | `(table: string, pk: string) => string` | `singularize(table)_pk` | Derives FK column names when compiling without a model |
 
-Hand-built `ModelIR` relations use their declared key vectors, falling back only to the referenced table’s declared primary key; traversing a relation without a declared foreign key column is refused by relation name.
+Hand-built `ModelIR` relations use their declared key vectors, falling back only to the referenced table’s declared primary key, when included, joined or used in a relation predicate; traversing such a relation without a declared foreign key column is refused by relation name. Relation guards of UPDATE, DELETE and upsert do not follow this rule yet.
 
 ### NamingPlugin — Physical Column Names
 
