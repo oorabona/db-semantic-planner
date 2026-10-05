@@ -53,6 +53,8 @@ const includeValidationExports = [
 	'validateIncludeOptions',
 	'validateIncludeOrdering',
 	'validateRecursiveIncludeStrategy',
+	'normalizeRecursiveIncludeOptions',
+	'validateRecursiveSetOperation',
 ];
 const internalNames = [
 	...includeValidationExports,

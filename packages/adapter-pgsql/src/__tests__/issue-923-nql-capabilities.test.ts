@@ -508,7 +508,9 @@ it('keeps fluent recursive CTE include root rows unchanged', async () => {
 		{ id: 1, parent_id: null },
 		{ id: 2, parent_id: null },
 	];
-	const query = vi.fn(async () => ({ rows: roots.map((row) => ({ ...row })) }));
+	const query = vi.fn(async () => ({
+		rows: roots.map((row) => ({ ...row, children_json: [] })),
+	}));
 	const orm = createOrm({
 		schema: db,
 		adapter: createPgAdapter({ query } as unknown as Pool, { model: db.model }),
@@ -516,6 +518,7 @@ it('keeps fluent recursive CTE include root rows unchanged', async () => {
 	const read = orm.select('categories').include('children', {
 		recursive: true,
 		direction: 'descendants',
+		omitSelf: true,
 	});
 	expect(
 		read
@@ -524,9 +527,11 @@ it('keeps fluent recursive CTE include root rows unchanged', async () => {
 			.map((d) => d.choice),
 	).toEqual(['cte']);
 	expect(read.dump().sql).toBe(
-		'WITH children_cte AS (SELECT categories_inner_0.* FROM categories AS categories_inner_0) SELECT categories.* FROM categories LEFT JOIN children_cte AS children_ref_0 ON categories.id = children_ref_0.parent_id',
+		"SELECT categories.*, COALESCE((WITH RECURSIVE children_walk AS (SELECT __n.id AS id, __n.parent_id AS parent_id, 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.parent_id AS text) AS __parent_text FROM categories AS __n WHERE __n.parent_id = categories.id AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.parent_id AS parent_id, children_walk.__depth + 1 AS __depth, children_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.parent_id AS text) AS __parent_text FROM children_walk JOIN categories AS __n ON __n.parent_id = children_walk.id WHERE children_walk.__depth < 100 AND __n.id <> ALL (children_walk.__visited)) SELECT json_agg(json_build_object('id', children_walk.id, 'parent_id', children_walk.parent_id, '__dbsp_node', children_walk.__node_text, '__dbsp_parent', children_walk.__parent_text, '__dbsp_depth', children_walk.__depth) ORDER BY children_walk.__depth, children_walk.id) FROM children_walk), '[]'::json) AS children_json FROM categories",
 	);
-	expect(await read.execute()).toEqual(roots);
+	expect(await read.execute()).toEqual(
+		roots.map((row) => ({ ...row, children: [] })),
+	);
 	expect(query).toHaveBeenCalledTimes(1);
 });
 

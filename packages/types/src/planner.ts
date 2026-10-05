@@ -77,6 +77,7 @@ export interface PlanDecision {
 		/** True when the target order key is the no-PK deterministic fallback. */
 		readonly orderByFallback?: boolean;
 		/** Whether the relation is self-referential (source === target) */
+		readonly recursiveInclude?: import('./intent/include-intent.js').IncludeRecursiveOptions;
 		readonly isSelfRef?: boolean;
 	};
 
@@ -174,6 +175,17 @@ export interface IncludePayloadShape {
 		readonly outputLabel: string;
 		readonly readHandling?: NestedOutputReadHandling;
 	}[];
+	readonly privateFields?: readonly {
+		readonly role: 'node' | 'parent' | 'depth';
+		readonly jsonKey: string;
+		readonly physicalName: string;
+	}[];
+	readonly recursive?: {
+		readonly direction: 'ancestors' | 'descendants';
+		readonly flat: boolean;
+		readonly omitSelf: boolean;
+		readonly includeDepth: boolean;
+	};
 	readonly children: readonly IncludePayloadShape[];
 }
 

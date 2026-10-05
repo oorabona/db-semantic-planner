@@ -283,7 +283,7 @@ export interface RecursiveIncludeOptions extends IncludeOptions {
 	 * - false (default): Nested object structure (parent: { parent: { ... } })
 	 * - true: Flat array with depth field ([{ id: 2, depth: 1 }, { id: 1, depth: 2 }])
 	 *
-	 * When flat=true, property is renamed: parent → ancestors, children → descendants
+	 * The property retains the requested include name in every mode (parent, children, or an alias).
 	 */
 	readonly flat?: boolean;
 

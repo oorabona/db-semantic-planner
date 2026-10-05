@@ -682,7 +682,12 @@ export function schema<const T extends SchemaDefinition>(
 	const tableNames = Object.keys(definition) as (keyof T)[];
 
 	// Validate default filters reference existing tables
-	const defaultFilters = options?.defaultFilters;
+	const defaultFilters = options?.defaultFilters
+		? (Object.assign(
+				Object.create(null),
+				options.defaultFilters,
+			) as DefaultFilters)
+		: undefined;
 	if (defaultFilters) {
 		const tableNameSet = new Set(tableNames as string[]);
 		for (const tableName of Object.keys(defaultFilters)) {
@@ -1701,6 +1706,10 @@ function buildRelations(
 					source: tableName,
 					target: tableName,
 					foreignKey: ref.columnName,
+					...(ref.options.roles && {
+						sourceKey: ref.options.references ?? ['id'],
+						targetKey: ref.options.references ?? ['id'],
+					}),
 					cardinality: 'one',
 					optionality: ref.options.nullable ? 'optional' : 'required',
 					includeStrategy: 'auto',
@@ -1715,6 +1724,10 @@ function buildRelations(
 					source: tableName,
 					target: tableName,
 					foreignKey: ref.columnName,
+					...(ref.options.roles && {
+						sourceKey: ref.options.references ?? ['id'],
+						targetKey: ref.options.references ?? ['id'],
+					}),
 					cardinality: 'many',
 					optionality: 'optional', // Children are always optional
 					includeStrategy: 'auto',
@@ -1730,6 +1743,10 @@ function buildRelations(
 					source: tableName,
 					target: tableName,
 					foreignKey: ref.columnName,
+					...(ref.options.roles && {
+						sourceKey: ref.options.references ?? ['id'],
+						targetKey: ref.options.references ?? ['id'],
+					}),
 					cardinality: 'many',
 					optionality: 'optional',
 					includeStrategy: 'auto',
@@ -1750,6 +1767,10 @@ function buildRelations(
 					source: tableName,
 					target: tableName,
 					foreignKey: ref.columnName,
+					...(ref.options.roles && {
+						sourceKey: ref.options.references ?? ['id'],
+						targetKey: ref.options.references ?? ['id'],
+					}),
 					cardinality: 'many',
 					optionality: 'optional',
 					includeStrategy: 'auto',

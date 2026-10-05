@@ -112,6 +112,43 @@ function _buildCorrelation(
 	);
 }
 
+/** Allocate and reserve a fresh query-local name without shadowing SQL scope. */
+export function allocateScopeAlias(
+	ctx: CompilerContext,
+	state: CompilerState,
+	candidateForSuffix: (suffix: number) => string,
+	initialSuffix = state.aliases.size,
+	additionalNames: Iterable<string> = [],
+): string {
+	const scopeName = (identifier: string): string => identifier;
+	const outerAliases = new Set<string>(additionalNames);
+	if (ctx.currentAlias) outerAliases.add(scopeName(ctx.currentAlias));
+	if (ctx.rootTable) outerAliases.add(scopeName(ctx.rootTable));
+	if (ctx.outerAlias) outerAliases.add(scopeName(ctx.outerAlias));
+	for (const binding of ctx.scope?.bindings.values() ?? []) {
+		outerAliases.add(scopeName(binding.qualifier));
+	}
+	const aliasInUse = (candidate: string): boolean => {
+		if (outerAliases.has(candidate)) return true;
+		for (const key of state.aliases.keys()) {
+			if (key === candidate) return true;
+		}
+		for (const value of state.aliases.values()) {
+			if (value === candidate) return true;
+		}
+		return false;
+	};
+	let suffix = initialSuffix;
+	let targetAlias = candidateForSuffix(suffix);
+	while (aliasInUse(targetAlias)) {
+		suffix += 1;
+		targetAlias = candidateForSuffix(suffix);
+	}
+	state.aliases.set(targetAlias, targetAlias);
+
+	return targetAlias;
+}
+
 /**
  * Build a basic EXISTS subquery
  *
@@ -186,31 +223,11 @@ function buildExistsSubquery(
 	// reference and degenerate the correlation into a self-comparison. Aliases
 	// are query-local, so collision checks deliberately compare their verbatim
 	// spelling.
-	const scopeName = (identifier: string): string => identifier;
-	const outerAliases = new Set<string>();
-	if (ctx.currentAlias) outerAliases.add(scopeName(ctx.currentAlias));
-	if (ctx.rootTable) outerAliases.add(scopeName(ctx.rootTable));
-	if (ctx.outerAlias) outerAliases.add(scopeName(ctx.outerAlias));
-	for (const binding of ctx.scope?.bindings.values() ?? []) {
-		outerAliases.add(scopeName(binding.qualifier));
-	}
-	const aliasInUse = (candidate: string): boolean => {
-		if (outerAliases.has(candidate)) return true;
-		for (const key of state.aliases.keys()) {
-			if (key === candidate) return true;
-		}
-		for (const value of state.aliases.values()) {
-			if (value === candidate) return true;
-		}
-		return false;
-	};
-	let suffix = state.aliases.size;
-	let targetAlias = `${targetTable}_exists_${suffix}`;
-	while (aliasInUse(targetAlias)) {
-		suffix += 1;
-		targetAlias = `${targetTable}_exists_${suffix}`;
-	}
-	state.aliases.set(targetAlias, targetAlias);
+	const targetAlias = allocateScopeAlias(
+		ctx,
+		state,
+		(suffix) => `${targetTable}_exists_${suffix}`,
+	);
 
 	const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
 	const targetAuthority = resolveRelationTarget(queryLocal(targetTable), ctx);

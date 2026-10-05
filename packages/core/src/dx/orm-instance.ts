@@ -518,6 +518,9 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 	tablesProxy?: object,
 	onObserverError?: ObserverErrorHandler,
 ): OrmInstanceInternal<DB> {
+	defaultFilters = defaultFilters
+		? Object.assign(Object.create(null), defaultFilters)
+		: undefined;
 	// Create NQL template tag (DX-040)
 	// NQL compiler is now integrated directly - @dbsp/nql is imported in nql.ts
 	const nql: NqlTag = createNqlTag(
@@ -529,6 +532,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 		onHookError,
 		inTransaction,
 		onObserverError,
+		defaultFilters,
 	);
 
 	// Helper: build a MutationBuilder options object (shared across mutation methods)
@@ -736,9 +740,8 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 				})
 				.first();
 
-			// Result shape from include({ recursive, direction: 'ancestors' }):
-			// { id, ..., ancestors: [...] }
-			return extractRecursiveField<TResult>(result, 'ancestors');
+			// Flat recursive results retain the requested self-relation key.
+			return extractRecursiveField<TResult>(result, selfRefRelation.name);
 		},
 
 		/**
@@ -812,9 +815,8 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 				})
 				.first();
 
-			// Result shape from include({ recursive, direction: 'descendants' }):
-			// { id, ..., descendants: [...] }
-			return extractRecursiveField<TResult>(result, 'descendants');
+			// Flat recursive results retain the requested self-relation key.
+			return extractRecursiveField<TResult>(result, selfRefRelation.name);
 		},
 
 		// =====================================================================

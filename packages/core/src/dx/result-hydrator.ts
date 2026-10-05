@@ -7,7 +7,7 @@
  * @module result-hydrator
  */
 
-import { toColumnList } from '@dbsp/types';
+import { type IncludePayloadShape, toColumnList } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
 import {
 	type Adapter,
@@ -30,6 +30,17 @@ import type { RecursiveIncludeConfig } from './intent-builder.js';
 // ============================================================================
 // Helper Types
 // ============================================================================
+
+/** Every compiled payload strategy must select a hydration pass. */
+const includeHydrationPass = {
+	json_agg: 'hydrateJsonAggIncludes',
+	cte: 'hydrateJsonAggIncludes',
+	join: 'hydrateJoinIncludes',
+	lateral: 'hydrateJoinIncludes',
+} satisfies Record<
+	IncludePayloadShape['strategy'],
+	'hydrateJsonAggIncludes' | 'hydrateJoinIncludes'
+>;
 
 /** A database result row — typed loosely since row shapes are dynamic. */
 type ResultRow = Record<string, unknown>;
@@ -55,6 +66,26 @@ export class ResultHydrator<TResult = unknown> {
 		this.model = model;
 		this.from = from;
 		this.schemaName = schemaName;
+	}
+
+	/** Run each pass required by the compiled payloads exactly once. */
+	hydrateIncludes(
+		results: TResult[],
+		planReport: PlanReport,
+		query: CompiledQuery,
+	): void {
+		const payloads = requireIncludePayloads(
+			query.hydrationPlan ?? planReport,
+			planReport,
+		);
+		const passes = new Set(
+			payloads.map((payload) => includeHydrationPass[payload.strategy]),
+		);
+		// Keep JSON hydration before join assembly for mixed payloads.
+		if (passes.has('hydrateJsonAggIncludes'))
+			this.hydrateJsonAggIncludes(results, planReport, query);
+		if (passes.has('hydrateJoinIncludes'))
+			this.hydrateJoinIncludes(results, planReport, query);
 	}
 
 	/**

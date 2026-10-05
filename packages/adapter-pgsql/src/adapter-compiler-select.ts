@@ -12,6 +12,7 @@ import {
 import { POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 import {
 	countDistinctRelationPathsByName,
+	normalizeRecursiveIncludeOptions,
 	validateIncludeInput,
 	validateIncludeOptions,
 	validateIncludeOrdering,
@@ -1224,6 +1225,7 @@ function validateReportIncludes(
 	sourceTable: string,
 	assignments: Record<string, IncludeAssignment | undefined>,
 	compilerOptions: CompilerOptions,
+	rootIntent: QueryIntent,
 	parent = '',
 	intentParent = '',
 	matched = new Set<object>(),
@@ -1291,6 +1293,7 @@ function validateReportIncludes(
 				fullPath,
 				POSTGRESQL_CAPABILITIES,
 				strategy,
+				rootIntent,
 			);
 
 		if (chosen && relation) {
@@ -1329,6 +1332,12 @@ function validateReportIncludes(
 					intentPath,
 					foreignKey: resolvedForeignKey,
 					parentKey: resolvedParentKey,
+					...((include.recursive || relation.recursive) && {
+						recursiveInclude: normalizeRecursiveIncludeOptions(
+							include.recursive,
+							relation,
+						),
+					}),
 				},
 			};
 			if (
@@ -1349,7 +1358,13 @@ function validateReportIncludes(
 					`Include ${intentPath}(${fullPath}) decision does not match its intent`,
 				);
 		}
-		validateIncludeOptions(include, strategy, intentPath, fullPath);
+		validateIncludeOptions(
+			include,
+			strategy,
+			intentPath,
+			fullPath,
+			!!(include.recursive || relation?.recursive),
+		);
 		if (strategy === 'json_agg' || strategy === 'lateral') {
 			const targetOrder = validateIncludeOrdering(
 				include,
@@ -1377,6 +1392,7 @@ function validateReportIncludes(
 				sourceTable,
 			assignments,
 			compilerOptions,
+			rootIntent,
 			fullPath,
 			`${intentPath}.`,
 			matched,
@@ -1568,6 +1584,7 @@ export function compileSelectEnvelope<T = unknown>(
 			plan.rootTable,
 			includeAssignments,
 			compilerOptions,
+			execIntent,
 		);
 		assertSupportedIncludeWhere(execIntent.include, strategies);
 		const resolvedByOriginal = new Map<

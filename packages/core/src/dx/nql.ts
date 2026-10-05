@@ -1,3 +1,7 @@
+import {
+	validateRecursiveIncludeStrategy,
+	validateRecursiveSetOperation,
+} from '../planner.js';
 /**
  * @fileoverview NQL template literal integration for type-safe queries (DX-040 Block 8).
  *
@@ -1447,7 +1451,11 @@ export function createNqlTag(
 	onHookError?: HookErrorHandler,
 	inTransaction?: boolean,
 	onObserverError?: ObserverErrorHandler,
+	defaultFilters?: import('./schema.js').DefaultFilters,
 ): NqlTag {
+	defaultFilters = defaultFilters
+		? Object.assign(Object.create(null), defaultFilters)
+		: undefined;
 	return function nql<T>(
 		strings: TemplateStringsArray,
 		...values: unknown[]
@@ -1466,6 +1474,7 @@ export function createNqlTag(
 			onHookError,
 			onObserverError,
 			inTransaction,
+			defaultFilters,
 		);
 	};
 }
@@ -1500,6 +1509,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		onHookError: HookErrorHandler | undefined,
 		onObserverError: ObserverErrorHandler | undefined,
 		inTransaction: boolean | undefined,
+		private readonly defaultFilters?: import('./schema.js').DefaultFilters,
 	) {
 		this.query = query;
 		this.params = params;
@@ -1554,6 +1564,31 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			throw new Error('NQL compilation failed: no query AST produced');
 		}
 		if (bundle.query) {
+			const inspect = (
+				includes: QueryIntent['include'],
+				source: string,
+			): void => {
+				for (const include of includes ?? []) {
+					const relation = this.model.getRelation(
+						`${source}.${include.via ?? include.relation}`,
+					);
+					if (!relation) continue;
+					if (this.defaultFilters?.[relation.target])
+						validateRecursiveIncludeStrategy(
+							include,
+							relation,
+							'include',
+							include.relation,
+							this.adapter?.dialectCapabilities,
+							undefined,
+							bundle.query,
+							false,
+							true,
+						);
+					inspect(include.include, relation.target);
+				}
+			};
+			inspect(bundle.query.include, bundle.query.from);
 			// Type assertion: NQL imports QueryIntent from @dbsp/types (ARCH-007),
 			// structurally identical to core's re-export.
 			this._compiled = {
@@ -1580,6 +1615,11 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			return this._compiled;
 		}
 		if (bundle.setOperation !== undefined) {
+			validateRecursiveSetOperation(
+				bundle.setOperation,
+				this.model,
+				this.adapter?.dialectCapabilities,
+			);
 			this._compiled = {
 				kind: 'unplannedRead',
 				bundle,
@@ -2247,16 +2287,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 	): void {
 		if (!compiled.hydrationPlan?.includePayloads?.length) return;
 		const hydrator = new ResultHydrator<T>(this.model, planReport.rootTable);
-		const payloads = compiled.hydrationPlan.includePayloads;
-		if (payloads.some((payload) => payload.strategy === 'json_agg'))
-			hydrator.hydrateJsonAggIncludes(rows, planReport, compiled);
-		if (
-			payloads.some(
-				(payload) =>
-					payload.strategy === 'join' || payload.strategy === 'lateral',
-			)
-		)
-			hydrator.hydrateJoinIncludes(rows, planReport, compiled);
+		hydrator.hydrateIncludes(rows, planReport, compiled);
 	}
 
 	async run(): Promise<void> {

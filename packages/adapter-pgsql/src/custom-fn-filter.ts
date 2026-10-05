@@ -98,6 +98,7 @@ export function mapToHandlerDecision(
 		relationPath: pd.relationPath,
 		hydrationPrefix: pd.hydrationPrefix,
 		payloadShape: pd.payloadShape,
+		recursiveInclude: pd.recursiveInclude,
 		defaultRelationColumnLabels: pd.defaultRelationColumnLabels,
 		relationType: pd.relationType,
 		foreignKey: pd.foreignKey,

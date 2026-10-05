@@ -1184,6 +1184,8 @@ function processInclude(
 		intentPath,
 		fullPath,
 		opts.dialectCapabilities,
+		undefined,
+		queryIntent,
 	);
 	if (!isRecursiveInclude) {
 		validateIncludeStrategy(
@@ -1219,7 +1221,13 @@ function processInclude(
 	}
 	const includeStrategy = resolution.strategy;
 
-	validateIncludeOptions(include, includeStrategy, intentPath, fullPath);
+	validateIncludeOptions(
+		include,
+		includeStrategy,
+		intentPath,
+		fullPath,
+		isRecursiveInclude,
+	);
 	const optionPath = `${intentPath}(${fullPath})`;
 
 	if (includeStrategy === 'join' && relation.type === 'belongsToMany')
@@ -1276,6 +1284,12 @@ function processInclude(
 			relationType: relation.type,
 			includeAlias: include.relation,
 			intentPath,
+			...(isRecursiveInclude && {
+				recursiveInclude: normalizeRecursiveIncludeOptions(
+					include.recursive,
+					relation,
+				),
+			}),
 			// Foreign key info for json_agg compilation (Phase 3)
 			...(relation.foreignKey !== undefined && {
 				foreignKey: relation.foreignKey,
@@ -1302,15 +1316,6 @@ function processInclude(
 					queryIntent,
 				),
 	});
-
-	// CLI-012c: Warn if recursive is set but relation is not self-referential
-	if (include.recursive && !isRecursiveInclude) {
-		state.warnings.push({
-			code: 'INVALID_RECURSIVE_INCLUDE',
-			message: `recursive option on "${relation.name}" ignored: relation is not self-referential (source=${relation.source}, target=${relation.target})`,
-			suggestion: `Remove recursive option or use RecursiveIntent for cross-table recursion`,
-		});
-	}
 
 	// CLI-012/CLI-012c: Create CTE when strategy is 'cte' (recursive or not)
 	if (includeStrategy === 'cte') {
@@ -1734,10 +1739,14 @@ export function validateIncludeOptions(
 	includeStrategy: string,
 	intentPath: string,
 	fullPath: string,
+	recursive = false,
 ): void {
 	validateIncludeInput(include, intentPath, fullPath);
 	const optionPath = `${intentPath}(${fullPath})`;
-	if (includeStrategy === 'cte' || includeStrategy === 'join') {
+	if (
+		(includeStrategy === 'cte' && !recursive && !include.recursive) ||
+		includeStrategy === 'join'
+	) {
 		for (const option of ['limit', 'orderBy'] as const) {
 			if (include[option] !== undefined) {
 				throw new InvalidOperationError(
@@ -1776,7 +1785,7 @@ export function validateIncludeOptions(
 		);
 	if (
 		include.select !== undefined &&
-		(includeStrategy === 'cte' ||
+		((includeStrategy === 'cte' && !recursive && !include.recursive) ||
 			(includeStrategy === 'join' && !supportsJoinIncludeSelect(include)))
 	)
 		throw new InvalidOperationError(
@@ -2067,11 +2076,81 @@ export function validateRecursiveIncludeStrategy(
 	fullPath: string,
 	capabilities: DialectCapabilities | undefined,
 	strategy?: string,
+	rootIntent?: QueryIntent,
+	inSetOperation = false,
+	applicableDefaultFilter = false,
 ): boolean {
-	const recursive =
-		(!!include.recursive || !!relation.recursive) &&
-		relation.source === relation.target;
+	const recursive = !!include.recursive || !!relation.recursive;
 	if (!recursive) return false;
+	validateRecursiveIncludeRelation(include.recursive, relation);
+	if (applicableDefaultFilter)
+		throw new Error(
+			'Recursive include with applicable defaultFilters on traversed nodes is not yet supported (#906).',
+		);
+	if (inSetOperation)
+		throw new Error('Recursive include option set operations is not supported');
+	const refuse = (name: string): never => {
+		throw new Error(`Recursive include option ${name} is not supported`);
+	};
+	if (intentPath.includes('.include['))
+		refuse('include does not support nested recursive includes');
+	if (include.include !== undefined) refuse('include');
+	for (const [name, value] of Object.entries({
+		where: include.where,
+		limit: include.limit,
+		orderBy: include.orderBy,
+		foreignKey: include.recursive?.foreignKey,
+		'track.path': include.recursive?.track?.path,
+	}))
+		if (value !== undefined) refuse(name);
+	if (
+		include.recursive?.track?.depth &&
+		typeof include.recursive.track.depth !== 'boolean'
+	)
+		refuse('track.depth.as');
+	if (
+		include.recursive?.direction !== undefined &&
+		!['ancestors', 'descendants'].includes(include.recursive.direction)
+	)
+		throw new Error(
+			'Recursive include option direction must be ancestors or descendants',
+		);
+	const maxDepth =
+		include.recursive?.maxDepth ?? relation.recursive?.maxDepth ?? 100;
+	if (!Number.isSafeInteger(maxDepth) || maxDepth < 1 || maxDepth > 2147483647)
+		throw new Error(
+			'Recursive include option maxDepth must be a positive integer at most 2147483647',
+		);
+	if (
+		include.select &&
+		include.select.type !== 'fields' &&
+		include.select.type !== 'all'
+	)
+		refuse('select supports only fields or all');
+	if (include.select?.type === 'fields' && include.select.fields.length === 0)
+		throw new Error(
+			'Recursive include option select requires at least one field',
+		);
+	const key = toColumnList(
+		relation.type === 'belongsTo' ? relation.targetKey : relation.sourceKey,
+	);
+	if (!key.length)
+		throw new Error('Recursive include requires a declared referenced key');
+	if (key.length !== 1 || toColumnList(relation.foreignKey).length !== 1)
+		throw new Error(
+			'Recursive include requires a single parentKey and foreignKey',
+		);
+	if (rootIntent) {
+		if (
+			rootIntent.having ||
+			dropsJoinIncludeData({ ...rootIntent, distinct: false })
+		)
+			refuse('grouped or aggregated roots');
+		if (rootIntent.distinct && !rootIntent.distinctOn?.length)
+			refuse('DISTINCT');
+		if (rootIntent.lock) refuse('row locks');
+	}
+
 	if (relation.includeStrategy !== 'auto' && relation.includeStrategy !== 'cte')
 		throw new UnsupportedStrategyError(
 			`Recursive include at ${intentPath}(${fullPath}) requires strategy 'cte', but relation '${relation.name}' declares includeStrategy '${relation.includeStrategy}'. Use 'auto' or 'cte'.`,
@@ -2183,4 +2262,95 @@ export function validateIncludeOrdering(
 	}
 
 	return targetOrder;
+}
+
+/** Set-operation leaves cannot carry correlated recursive payloads. */
+export function validateRecursiveSetOperation(
+	intent: import('@dbsp/types').SetOperationIntent,
+	model: ModelIR,
+	capabilities: DialectCapabilities | undefined,
+): void {
+	const visit = (
+		node: import('@dbsp/types').SetOperationIntent | QueryIntent,
+	): void => {
+		if ('kind' in node && node.kind === 'setOperation') {
+			visit(node.left);
+			visit(node.right);
+			return;
+		}
+		const query = node as QueryIntent;
+		const includes = (
+			items: readonly IncludeIntent[],
+			source: string,
+			parent = '',
+		): void => {
+			for (const [index, include] of items.entries()) {
+				const relation = resolveIncludeRelationName(
+					model,
+					source,
+					include.via ?? include.relation,
+				);
+				if (!relation) continue;
+				validateRecursiveIncludeStrategy(
+					include,
+					relation,
+					`${parent}include[${index}]`,
+					include.relation,
+					capabilities,
+					undefined,
+					query,
+					true,
+				);
+				includes(
+					include.include ?? [],
+					relation.target,
+					`${parent}include[${index}].`,
+				);
+			}
+		};
+		includes(query.include ?? [], query.from);
+	};
+	visit(intent);
+}
+
+/** Canonical recursive options for every public include entry point. */
+export function normalizeRecursiveIncludeOptions(
+	options: IncludeIntent['recursive'],
+	relation?: RelationIR,
+): NonNullable<IncludeIntent['recursive']> {
+	return {
+		...options,
+		direction:
+			options?.direction ??
+			(relation?.recursive
+				? relation?.recursive.direction === 'up'
+					? 'ancestors'
+					: 'descendants'
+				: relation?.type === 'belongsTo' || relation?.type === 'hasOne'
+					? 'ancestors'
+					: 'descendants'),
+		maxDepth: options?.maxDepth ?? relation?.recursive?.maxDepth ?? 100,
+		flat: options?.flat ?? false,
+		omitSelf: options?.omitSelf ?? false,
+		track: { ...options?.track, depth: options?.track?.depth ?? false },
+	};
+}
+
+/** Relation correctness is shared by DX validation and planning. */
+function validateRecursiveIncludeRelation(
+	options: IncludeIntent['recursive'],
+	relation: RelationIR,
+): void {
+	if (relation.source !== relation.target)
+		throw new Error(
+			`Recursive include requires a self-referential relation. Relation '${relation.name}' connects '${relation.source}' to '${relation.target}', but both must be the same table for recursive traversal.`,
+		);
+	const expected = normalizeRecursiveIncludeOptions(
+		undefined,
+		relation,
+	).direction;
+	if (options?.direction !== undefined && options.direction !== expected)
+		throw new Error(
+			`Option direction '${options.direction}' conflicts with recursive relation '${relation.name}' (${expected}). Direction '${options.direction}' requires a ${options.direction === 'ancestors' ? 'to-one' : 'to-many'} relation. Relation '${relation.name}' has type '${relation.type}'.`,
+		);
 }

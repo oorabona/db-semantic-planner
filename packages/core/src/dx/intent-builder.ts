@@ -8,6 +8,7 @@
  */
 
 import type { Mutable } from '@dbsp/types/internal';
+import { POSTGRESQL_CAPABILITIES } from '../dialects/index.js';
 import type {
 	AggregateIntent,
 	ColumnExpressionIntent,
@@ -21,7 +22,7 @@ import type {
 	WhereIntent,
 } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
-
+import { validateRecursiveIncludeStrategy } from '../planner.js';
 import { InvalidOperationError } from './errors.js';
 import { and } from './filters.js';
 import { applyHintToIncludeRecursive } from './include-hints.js';
@@ -98,13 +99,17 @@ export function includeOptionsToIntent(
 
 	// Handle recursive options (DX-017)
 	if (isRecursiveIncludeOptions(options)) {
-		const recursiveOpts: Mutable<IncludeRecursiveOptions> = {};
+		const recursiveOpts: Mutable<IncludeRecursiveOptions> = {
+			direction: options.direction,
+			...(options.flat !== undefined && { flat: options.flat }),
+			...(options.omitSelf !== undefined && { omitSelf: options.omitSelf }),
+		};
 		// Only set maxDepth if defined
 		if (options.maxDepth !== undefined) {
 			recursiveOpts.maxDepth = options.maxDepth;
 		}
 		// Convert includeDepth to track.depth
-		if (options.includeDepth) {
+		if (options.includeDepth || options.flat) {
 			recursiveOpts.track = { depth: true };
 		}
 		intent.recursive = recursiveOpts;
@@ -196,7 +201,7 @@ export function validateRecursiveInclude(
 	options: RecursiveIncludeOptions,
 ): void {
 	// Get the relation from the model
-	const qualifiedName = `${sourceTable}.${relationName}`;
+	const qualifiedName = `${sourceTable}.${options.via ?? relationName}`;
 	const relation = model.getRelation(qualifiedName);
 
 	if (!relation) {
@@ -213,43 +218,19 @@ export function validateRecursiveInclude(
 		);
 	}
 
-	// Check if relation is self-referential (INV-1, PRE-1)
-	if (relation.source !== relation.target) {
+	try {
+		validateRecursiveIncludeStrategy(
+			includeOptionsToIntent(relationName, options),
+			relation,
+			'include[0]',
+			relationName,
+			POSTGRESQL_CAPABILITIES,
+		);
+	} catch (error) {
 		throw new InvalidOperationError(
 			'recursive include',
-			`Recursive include requires a self-referential relation. ` +
-				`Relation '${relationName}' connects '${relation.source}' to '${relation.target}', ` +
-				`but both must be the same table for recursive traversal.`,
+			(error as Error).message,
 		);
-	}
-
-	// Check direction vs relation type (PRE-2, PRE-3, ERR-3)
-	// ancestors requires belongsTo/hasOne (to-one), descendants requires hasMany (to-many)
-	const { direction } = options;
-	const relType = relation.type;
-
-	if (direction === 'ancestors') {
-		// ancestors traversal: follow the "parent" direction (N:1 or 1:1)
-		// The relation should be belongsTo or hasOne (e.g., category -> parent category)
-		if (relType === 'hasMany' || relType === 'belongsToMany') {
-			throw new InvalidOperationError(
-				'recursive include',
-				`Direction 'ancestors' requires a to-one relation (belongsTo or hasOne). ` +
-					`Relation '${relationName}' has type '${relType}'. ` +
-					`Use 'descendants' for hasMany/belongsToMany relations.`,
-			);
-		}
-	} else if (direction === 'descendants') {
-		// descendants traversal: follow the "children" direction (1:N)
-		// The relation should be hasMany (e.g., category -> child categories)
-		if (relType === 'belongsTo' || relType === 'hasOne') {
-			throw new InvalidOperationError(
-				'recursive include',
-				`Direction 'descendants' requires a to-many relation (hasMany). ` +
-					`Relation '${relationName}' has type '${relType}'. ` +
-					`Use 'ancestors' for belongsTo/hasOne relations.`,
-			);
-		}
 	}
 }
 

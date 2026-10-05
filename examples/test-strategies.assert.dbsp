@@ -127,22 +127,31 @@ db.rows.equals: 6
 # ─────────────────────────────────────────
 # Query 12: orgs | select name, ancestors.* — CTE (recursive ancestors)
 # CTE LEFT JOIN: each org joined with orgs where org.id = cte.parent_id
-# org1(Corp): no children with parent_id=1? → Engineering(parent=1), Sales(parent=1) → 2 matches
-# org2(Eng): no children with parent_id=2 → 0 matches → 1 NULL row
-# org3(Sales): no children with parent_id=3 → 0 matches → 1 NULL row
-# Total: 2+1+1 = 4? Actually depends on exact CTE semantics. Use false to discover.
+# Three root rows; ancestors are aggregated independently for each root.
 # ─────────────────────────────────────────
 --- query: 12
 success: true
-sql.equals: WITH ancestors_cte AS (SELECT orgs_inner_0.* FROM test_strategies.orgs AS orgs_inner_0) SELECT orgs.name FROM test_strategies.orgs LEFT JOIN ancestors_cte AS ancestors_ref_0 ON orgs.id = ancestors_ref_0.parent_id
+sql.equals: SELECT orgs.name, COALESCE((WITH RECURSIVE ancestors_walk AS (SELECT __n.id AS id, __n.name AS name, __n.parent_id AS parent_id, __n.active AS active, 1 AS __depth, array_remove(ARRAY[orgs.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.parent_id AS text) AS __parent_text FROM test_strategies.orgs AS __n WHERE __n.id = orgs.parent_id AND __n.id IS DISTINCT FROM orgs.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.name AS name, __n.parent_id AS parent_id, __n.active AS active, ancestors_walk.__depth + 1 AS __depth, ancestors_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.parent_id AS text) AS __parent_text FROM ancestors_walk JOIN test_strategies.orgs AS __n ON __n.id = ancestors_walk.parent_id WHERE ancestors_walk.__depth < 10 AND __n.id <> ALL (ancestors_walk.__visited)) SELECT json_agg(json_build_object('id', ancestors_walk.id, 'name', ancestors_walk.name, 'parentId', ancestors_walk.parent_id, 'active', ancestors_walk.active, '__dbsp_node', ancestors_walk.__node_text, '__dbsp_parent', ancestors_walk.__parent_text, '__dbsp_depth', ancestors_walk.__depth) ORDER BY ancestors_walk.__depth, ancestors_walk.id) FROM ancestors_walk), '[]'::json) AS ancestors_json FROM test_strategies.orgs
+db.output:
+| name | ancestors_json |
+| --- | --- |
+| Corp | [] |
+| Engineering | [{"id":1,"name":"Corp","parentId":null,"active":true,"__dbsp_node":"1","__dbsp_parent":null,"__dbsp_depth":1}] |
+| Sales | [{"id":1,"name":"Corp","parentId":null,"active":true,"__dbsp_node":"1","__dbsp_parent":null,"__dbsp_depth":1}] |
 
 # ─────────────────────────────────────────
 # Query 13: orgs | select name, descendants.* — CTE (recursive descendants)
-# Same CTE structure, same join condition → same row count
+# One correlated scalar recursive payload per root; root count is unchanged
 # ─────────────────────────────────────────
 --- query: 13
 success: true
-sql.equals: WITH descendants_cte AS (SELECT orgs_inner_0.* FROM test_strategies.orgs AS orgs_inner_0) SELECT orgs.name FROM test_strategies.orgs LEFT JOIN descendants_cte AS descendants_ref_0 ON orgs.id = descendants_ref_0.parent_id
+sql.equals: SELECT orgs.name, COALESCE((WITH RECURSIVE descendants_walk AS (SELECT __n.id AS id, __n.name AS name, __n.parent_id AS parent_id, __n.active AS active, 1 AS __depth, array_remove(ARRAY[orgs.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.parent_id AS text) AS __parent_text FROM test_strategies.orgs AS __n WHERE __n.parent_id = orgs.id AND __n.id IS DISTINCT FROM orgs.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.name AS name, __n.parent_id AS parent_id, __n.active AS active, descendants_walk.__depth + 1 AS __depth, descendants_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.parent_id AS text) AS __parent_text FROM descendants_walk JOIN test_strategies.orgs AS __n ON __n.parent_id = descendants_walk.id WHERE descendants_walk.__depth < 10 AND __n.id <> ALL (descendants_walk.__visited)) SELECT json_agg(json_build_object('id', descendants_walk.id, 'name', descendants_walk.name, 'parentId', descendants_walk.parent_id, 'active', descendants_walk.active, '__dbsp_node', descendants_walk.__node_text, '__dbsp_parent', descendants_walk.__parent_text, '__dbsp_depth', descendants_walk.__depth) ORDER BY descendants_walk.__depth, descendants_walk.id) FROM descendants_walk), '[]'::json) AS descendants_json FROM test_strategies.orgs
+db.output:
+| name | descendants_json |
+| --- | --- |
+| Corp | [{"id":2,"name":"Engineering","parentId":1,"active":true,"__dbsp_node":"2","__dbsp_parent":"1","__dbsp_depth":1},{"id":3,"name":"Sales","parentId":1,"active":true,"__dbsp_node":"3","__dbsp_parent":"1","__dbsp_depth":1}] |
+| Engineering | [] |
+| Sales | [] |
 
 # =============================================================================
 # Deep nesting 4 levels (queries 14–15)

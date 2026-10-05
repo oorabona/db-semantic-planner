@@ -278,3 +278,15 @@ console.log(params); // [7, 20]
 - **`UNION ALL` (default) does not deduplicate.** For trees this is fine — each path is unique. For graphs where the same node is reachable via multiple paths, use `unionAll: false` to avoid duplicate rows, at the cost of a deduplication pass per iteration.
 - **No adapter = runtime error.** Calling `.dump()` or `.all()` on a builder constructed without an adapter throws `InvalidOperationError`. Always obtain the builder via `orm.recursive()` (which has an adapter bound), not via `createRawCteBuilder()` directly unless you pass an adapter explicitly.
 - **Schema scoping is inherited.** If you obtained the ORM via `orm.withSchema('tenant_123')`, the recursive query will use `"tenant_123"."table"` in the base and step queries automatically.
+
+## Recursive relation includes
+
+For a walk correlated to each row of an ordinary select, use `.include('children', { recursive: true, direction: 'descendants' })` or the ancestors direction on a parent relation. This is a single statement: a per-row `WITH RECURSIVE` walk aggregates into `<relation>_json`, ordered by depth, the declared referenced node key and primary key, with an empty JSON-array fallback. It tracks non-null visited keys (including the source when non-null), uses the same FK at each step and preserves the number of root rows.
+
+The correlated include walk runs one recursive step per level per parent row. An index on the self-referencing foreign key is required for efficient recursive steps.
+
+Core hydrates the flat SQL list into a nested descendants tree or ancestors chain. `flat: true` keeps the depth-bearing list under the requested include name; `omitSelf: true` removes the depth-zero source; `includeDepth: true` exposes depth in nested nodes. ORM defaults include self and omit depth. The default bound is 100 levels, or the recursive relation metadata bound when present. Schema recursive pseudo-columns such as `managementChain.*` return an omitted-self flat list with depth under `managementChain`, bounded by their recursive metadata (10 in the hierarchy example).
+
+See [Recursive Includes](./includes#recursive-includes-hierarchies) for shapes and explicitly refused options. These correlated includes differ from the standalone `orm.recursive()` API described above, whose base and step queries are authored explicitly.
+
+Recursive include options default to `flat: false`, `omitSelf: false`, and `includeDepth: false`. NQL hierarchy pseudo-columns explicitly request flat output with self omitted. Planning refuses `maxDepth` outside 1–2147483647, an empty `select` fields list, recursion on a non-self-reference, and `direction` contradicting the relation's recursive metadata or cardinality.

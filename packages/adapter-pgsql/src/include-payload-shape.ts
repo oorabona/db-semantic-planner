@@ -1,3 +1,4 @@
+import { normalizeRecursiveIncludeOptions } from '@dbsp/core/internal';
 import type {
 	IncludePayloadShape,
 	ModelIR,
@@ -131,6 +132,15 @@ export function resolveIncludePayloadShapes(
 		}
 	};
 	visit(decisions);
+	// Recursive includes are root-only: the requested name owns each payload,
+	// while via remains the relation authority. Different public names must not merge.
+	for (const d of all) {
+		if (!d.recursiveInclude) continue;
+		const index = d.intentPath?.match(/^include\[(\d+)\]$/)?.[1];
+		const include =
+			index === undefined ? undefined : plan.intent?.include?.[Number(index)];
+		if (include) (d as Mutable<PlanDecision>).relationPath = include.relation;
+	}
 	// Refuse unsupported nested select forms before resolving any wildcard payload.
 	// Otherwise an opaque parent masks the child strategy's established refusal.
 	for (const d of all) {
@@ -160,6 +170,30 @@ export function resolveIncludePayloadShapes(
 	for (const d of all) {
 		const path = d.relationPath ?? d.relationName ?? d.relation ?? '';
 		const previous = byPath.get(path);
+		if (previous && (previous.recursiveInclude || d.recursiveInclude)) {
+			const identity = (entry: PlanDecision) =>
+				JSON.stringify([
+					entry.relation,
+					entry.relationName,
+					entry.sourceTable,
+					entry.targetTable,
+					toColumnList(entry.parentKey),
+					toColumnList(entry.foreignKey),
+					entry.recursiveInclude
+						? [
+								entry.recursiveInclude.direction,
+								entry.recursiveInclude.maxDepth,
+								entry.recursiveInclude.flat,
+								entry.recursiveInclude.omitSelf,
+								entry.recursiveInclude.track?.depth,
+							]
+						: null,
+				]);
+			if (identity(previous) !== identity(d))
+				throw new Error(
+					`Include payload '$' has conflicting public key '${path}' (recursive traversals).`,
+				);
+		}
 		if (
 			previous &&
 			(previous.targetTable !== d.targetTable || previous.choice !== d.choice)
@@ -385,6 +419,7 @@ export function resolveIncludePayloadShapes(
 		let presence: IncludePayloadShape['presence'];
 		if (
 			strategy !== 'json_agg' &&
+			strategy !== 'cte' &&
 			!plan.intent?.existsWrap &&
 			!flatPaths.has(path) &&
 			(d.emptyProjection || columns.length > 0 || children.length > 0)
@@ -407,7 +442,56 @@ export function resolveIncludePayloadShapes(
 				: undefined;
 			presence = { outputLabel: '', ...(physicalName && { physicalName }) };
 		}
+		let privateFields: IncludePayloadShape['privateFields'];
+		let recursive: IncludePayloadShape['recursive'];
+		if (d.recursiveInclude) {
+			if (
+				table?.columns.some((column) => column.name === publicKey) &&
+				!owners.has(publicKey)
+			)
+				claimPayloadKey(owners, path, publicKey, `column:${publicKey}`);
+			claimPayloadKey(owners, path, publicKey, `relation:${path}`);
+			const opts = normalizeRecursiveIncludeOptions(
+				d.recursiveInclude,
+				relation,
+			);
+			recursive = {
+				direction: opts.direction!,
+				flat: opts.flat!,
+				omitSelf: opts.omitSelf!,
+				includeDepth: !!opts.track?.depth || !!opts.flat,
+			};
+			if (recursive.includeDepth)
+				claimPayloadKey(owners, path, 'depth', 'traversal:depth');
+			const reserved = new Set(columns.map((c) => c.publicKey));
+			privateFields = (['node', 'parent', 'depth'] as const).map((role) => {
+				let jsonKey = `__dbsp_${role}`;
+				while (reserved.has(jsonKey)) jsonKey += '_';
+				reserved.add(jsonKey);
+				const logical =
+					role === 'node'
+						? toColumnList(d.parentKey)[0]!
+						: role === 'parent'
+							? toColumnList(d.foreignKey)[0]!
+							: '';
+				return {
+					role,
+					jsonKey,
+					physicalName: logical
+						? identifierText(
+								resolveDeclaredIdentifier(
+									deps.declaredNames,
+									deps.dbCasing ?? 'preserve',
+									{ kind: 'column', table: tableName, column: logical },
+								),
+							)
+						: '',
+				};
+			});
+		}
 		const shape: IncludePayloadShape = {
+			...(recursive && { recursive }),
+			...(privateFields && { privateFields }),
 			path,
 			publicKey,
 			strategy,
@@ -415,7 +499,7 @@ export function resolveIncludePayloadShapes(
 			table: tableName,
 			isToOne: d.relationType === 'belongsTo' || d.relationType === 'hasOne',
 			outputLabel: transportLabel(
-				`${d.relationName ?? d.relation ?? publicKey}_json`,
+				`${d.recursiveInclude ? publicKey : (d.relationName ?? d.relation ?? publicKey)}_json`,
 			),
 			columns,
 			children,
@@ -482,7 +566,7 @@ export function resolveIncludePayloadShapes(
 	)) {
 		claimPayloadKey(owners, '$', shape.publicKey, `relation:${shape.path}`);
 		const claimLabels = (payload: IncludePayloadShape): void => {
-			if (payload.strategy === 'json_agg')
+			if (payload.strategy === 'json_agg' || payload.strategy === 'cte')
 				claimPayloadKey(
 					owners,
 					'$',

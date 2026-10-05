@@ -1181,6 +1181,33 @@ function compileQueryInternal(
 		}
 	}
 
+	// Hierarchy projections request their flat transport explicitly.
+	const hierarchyIncludes = (
+		includes: IncludeIntent[],
+		source: string,
+	): IncludeIntent[] =>
+		includes.map((include) => {
+			const relation = ctx.validator?.getRelation(source, include.relation);
+			const direction = recursiveDirection(relation?.recursive);
+			return {
+				...include,
+				...(direction && {
+					recursive: {
+						direction:
+							direction === 'up'
+								? ('ancestors' as const)
+								: ('descendants' as const),
+						flat: true,
+						omitSelf: true,
+						track: { depth: true },
+					},
+				}),
+				...(include.include &&
+					relation && {
+						include: hierarchyIncludes([...include.include], relation.target),
+					}),
+			};
+		});
 	// Auto-generate includes from relation paths in SELECT
 	if (select && select.type === 'expressions') {
 		const relationPaths = new Set<string>();
@@ -1196,7 +1223,10 @@ function compileQueryInternal(
 				for (const relation of relationPaths) {
 					resolveBindingRelationInclude(ctx, query.table, relation.split('.'));
 				}
-				const nestedIncludes = buildNestedIncludes(relationPaths, flatMode);
+				const nestedIncludes = hierarchyIncludes(
+					buildNestedIncludes(relationPaths, flatMode),
+					query.table,
+				);
 				for (const inc of nestedIncludes) {
 					const exists = allIncludes.some(
 						(existing) => existing.relation === inc.relation,
@@ -1206,7 +1236,10 @@ function compileQueryInternal(
 					}
 				}
 			} else {
-				const nestedIncludes = buildNestedIncludes(relationPaths, flatMode);
+				const nestedIncludes = hierarchyIncludes(
+					buildNestedIncludes(relationPaths, flatMode),
+					query.table,
+				);
 				for (const inc of nestedIncludes) {
 					const exists = allIncludes.some(
 						(existing) => existing.relation === inc.relation,
