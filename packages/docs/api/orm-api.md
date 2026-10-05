@@ -218,10 +218,7 @@ Relations are auto-inferred from `ref()` calls. The planner detects:
 - **hasMany** (1:N) — the target table
 - **hasOne** (1:1) — the inverse of a unique FK
 
-`schema()` + `ref()` declares no many-to-many relation: a junction table is
-reached through its own relations, one hop at a time (`userRoles.role` in the
-iam example), and a path that skips the junction (`posts.tags` over `postTags`)
-is refused.
+Declare many-to-many relations explicitly with `SchemaOptions.relations` and `manyToMany()` (see below). The declaration retains both junction foreign keys and their referenced key vectors. Traversal remains provisional until the junction lowering lands.
 
 ```typescript
 const db = schema({
@@ -278,15 +275,38 @@ const db = schema({
 ### Many-to-Many (Junction Tables)
 
 ```typescript
+import { schema, ref, manyToMany } from '@dbsp/core';
 const db = schema({
-  posts: { id: { type: 'integer', primaryKey: true, autoIncrement: true }, title: 'string' },
-  tags: { id: { type: 'integer', primaryKey: true, autoIncrement: true }, name: 'string' },
-  postTags: {
-    postId: ref('posts', { onDelete: 'CASCADE' }),
-    tagId: ref('tags', { onDelete: 'CASCADE' }),
+  posts: { id: 'integer', title: 'string' },
+  tags: { id: 'integer', name: 'string' },
+  postTags: { postId: ref('posts'), tagId: ref('tags') },
+}, undefined, {
+  relations: {
+    posts: {
+      tags: manyToMany('tags', {
+        through: 'postTags',
+        sourceForeignKey: ['postId'],
+        targetForeignKey: ['tagId'],
+        inverse: 'posts',
+      }),
+    },
   },
 });
 ```
+
+This declares `posts.tags` and `tags.posts`. Composite foreign keys use ordered
+column lists matching declared junction foreign keys. The junction must have a
+primary key, unique constraint or B-tree unique index covered by the two foreign key lists; the
+inferred junction primary key satisfies this requirement. Names must not collide
+with columns or existing relations.
+
+Traversal of a declared many-to-many relation is refused when planning one of the
+query's includes (any strategy, including NQL relation columns and `| flat`) or a
+relation `.join()`; the message contains
+`Relation 'posts.tags': many-to-many traversal is not supported yet (#787).`
+Relation predicates keep their #787 refusal. Other traversal routes, such as an
+include inside `exists(..., { include })`, are not refused yet and fail at
+compilation until the junction lowering lands.
 
 ### Schema Options (`dbCasing`)
 

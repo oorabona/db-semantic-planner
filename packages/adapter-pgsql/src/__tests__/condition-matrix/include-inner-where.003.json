@@ -372,7 +372,7 @@
 			"position": "include-inner-where",
 			"kind": "exists-custom-authorities",
 			"shape": "empty-or",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.matrix_pk AS \"post.matrix_pk\", post.matrix_users_matrix_pk AS \"post.matrix_users_matrix_pk\", post.matrix_posts_matrix_pk AS \"post.matrix_posts_matrix_pk\", post.matrix_comments_matrix_pk AS \"post.matrix_comments_matrix_pk\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments JOIN posts AS post ON comments.\"postId\" = post.matrix_pk WHERE comments.score = $1 AND false",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.matrix_pk AS \"post.matrix_pk\", post.matrix_users_matrix_pk AS \"post.matrix_users_matrix_pk\", post.matrix_posts_matrix_pk AS \"post.matrix_posts_matrix_pk\", post.matrix_comments_matrix_pk AS \"post.matrix_comments_matrix_pk\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND false",
 			"params": [31],
 			"error": null
 		},
@@ -380,7 +380,7 @@
 			"position": "include-inner-where",
 			"kind": "exists-custom-authorities",
 			"shape": "empty-and",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.matrix_pk AS \"post.matrix_pk\", post.matrix_users_matrix_pk AS \"post.matrix_users_matrix_pk\", post.matrix_posts_matrix_pk AS \"post.matrix_posts_matrix_pk\", post.matrix_comments_matrix_pk AS \"post.matrix_comments_matrix_pk\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments JOIN posts AS post ON comments.\"postId\" = post.matrix_pk WHERE comments.score = $1 AND true",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.matrix_pk AS \"post.matrix_pk\", post.matrix_users_matrix_pk AS \"post.matrix_users_matrix_pk\", post.matrix_posts_matrix_pk AS \"post.matrix_posts_matrix_pk\", post.matrix_comments_matrix_pk AS \"post.matrix_comments_matrix_pk\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND true",
 			"params": [31],
 			"error": null
 		},

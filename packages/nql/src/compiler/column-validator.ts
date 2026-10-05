@@ -11,6 +11,7 @@ import type {
 } from '@dbsp/types';
 import { toColumnList } from '@dbsp/types';
 import {
+	type DeclaredRelationPathResult,
 	explainUnsupportedNqlBindingIncludeHop,
 	type NqlBindingIncludeRelationShape,
 	resolveDeclaredRelationPath,
@@ -616,7 +617,10 @@ export class ColumnValidator {
 		}
 	}
 
-	resolveDeclaredPath(sourceTable: string, segments: readonly string[]) {
+	resolveDeclaredPath(
+		sourceTable: string,
+		segments: readonly string[],
+	): DeclaredRelationPathResult<ColumnValidatorRelation> {
 		return resolveDeclaredRelationPath(this.schema, sourceTable, segments);
 	}
 

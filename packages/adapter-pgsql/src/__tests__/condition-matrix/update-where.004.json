@@ -4,7 +4,7 @@
 			"position": "update-where",
 			"kind": "notExists-no-pk-custom-authorities",
 			"shape": "not",
-			"sql": "UPDATE users SET score = $1 WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)))",
+			"sql": "UPDATE users SET score = $1 WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)))",
 			"params": [41, 61],
 			"error": null
 		},
@@ -12,7 +12,7 @@
 			"position": "update-where",
 			"kind": "notExists-no-pk-custom-authorities",
 			"shape": "two-level",
-			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $3))) OR users.score = $4)",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.matrix_pk = posts_exists_0.\"authorId\" AND posts_exists_0.score = $3))) OR users.score = $4)",
 			"params": [41, 13, 61, 17],
 			"error": null
 		},

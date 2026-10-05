@@ -164,7 +164,7 @@ export function assertNoManyToManyRootRelations(
 				if (!relation) return;
 				if (relation.type === 'belongsToMany') {
 					throw new Error(
-						`${position} ${node.kind}('${path.join('.')}'): many-to-many relation predicates need the junction declaration (#787).`,
+						`${position} ${node.kind}('${path.join('.')}'): many-to-many traversal is not supported yet (#787).`,
 					);
 				}
 				target = relation.target;

@@ -444,6 +444,7 @@ export {
 	type DeclaredRelationPathModel,
 	type DeclaredRelationPathRelation,
 	type DeclaredRelationPathResult,
+	type ResolvedRelationPath,
 	resolveDeclaredRelationPath,
 } from './declared-relation-path.js';
 // Re-export all public types for convenience

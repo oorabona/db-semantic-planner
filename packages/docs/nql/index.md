@@ -627,7 +627,9 @@ SELECT users.*, COALESCE((SELECT json_agg(jsonb_build_object('roleId', __t__.rol
 
 *Schema: blog*
 
-`posts | select *, tags.*` is refused, and reports `relation column "tags"."*" has no emitted alias in this query`. Nothing declares a `posts.tags` foreign key; the two hops through `postTags` are not synthesised.
+With `posts.tags` declared using `manyToMany()`, `posts | select *, tags.*`, `posts | select id, tags.name` and `| flat` are refused at planning with a message containing `Relation 'posts.tags': many-to-many traversal is not supported yet (#787).` NQL validates the leaf column against `tags`; the declaration does not yet enable traversal. Without the declaration, the query reports an unknown relation.
+
+The provisional refusal applies when planning the query's includes (any strategy, NQL relation columns and `| flat`), relation `.join()` and relation predicates. Other traversal routes, such as an include inside an `exists` predicate, are not refused yet and fail at compilation until the junction lowering lands.
 
 [#787](https://github.com/oorabona/db-semantic-planner/issues/787) tracks it, and carries the measurements for the neighbouring forms.
 
@@ -1367,7 +1369,7 @@ employees | select name, manager.name, manager.manager.name
 
 ### Recursive Ancestors (CTE)
 
-`managementChain` walks from the immediate manager toward the root. The correlated scalar aggregate tracks non-null referenced keys, stops before a node repeats (a cycle returns each node once, without an error) and stops at the relation's `maxDepth` (10 here).
+`managementChain` walks from the immediate manager toward the root. The correlated scalar aggregate tracks non-null referenced keys, stops before a node repeats, without an error, and stops at the relation's `maxDepth` (10 here).
 
 ```nql
 employees | select name, managementChain.*

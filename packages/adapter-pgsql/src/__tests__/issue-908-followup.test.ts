@@ -73,7 +73,7 @@ it('join includes refuse payload-dropping shapes at plan and external compile', 
 		).toThrow(shapeRefusal);
 	}
 });
-it('belongsToMany refuses every join include source and external report', () => {
+it('belongsToMany refuses every planned join include source', () => {
 	const manyModel = schema({
 		posts: { id: { type: 'integer', primaryKey: true } },
 		tags: { id: { type: 'integer', primaryKey: true } },
@@ -97,7 +97,7 @@ it('belongsToMany refuses every join include source and external report', () => 
 	const manyAdapter = createPgCompileOnlyAdapter({ model: manyModel });
 	const manyOrm = createOrm({ model: manyModel, adapter: manyAdapter });
 	const refusal =
-		"Include include[0](tags) cannot use 'join' for a belongsToMany relation. The relation goes through a junction table that join includes, .join(<relation>), NQL | flat and json_agg/lateral includes do not traverse yet. Join the junction and target tables explicitly with .join(<table>, { on }).";
+		"Relation 'posts.tags': many-to-many traversal is not supported yet (#787).";
 	for (const join of ['left', 'inner'] as const)
 		expect(() =>
 			manyOrm.select('posts').include('tags', { join }).plan(),
@@ -109,26 +109,8 @@ it('belongsToMany refuses every join include source and external report', () => 
 			.include('tags')
 			.plan(),
 	).toThrow(`Invalid include: ${refusal}`);
-	const report = manyOrm.select('posts').include('tags').plan();
-	expect(
-		report.decisions.find((d) => d.type === 'include-strategy')?.alternatives,
-	).toEqual(['cte', 'lateral']);
-	for (const omit of [false, true]) {
-		const decisions = report.decisions.map((d) => {
-			if (d.type !== 'include-strategy') return d;
-			const context = { ...d.context };
-			if (omit) delete context.relationType;
-			return { ...d, choice: 'join', context };
-		});
-		expect(() =>
-			manyAdapter.compile({ ...report, decisions }, { model: manyModel }),
-		).toThrow(
-			omit
-				? 'Include include[0](tags) decision does not match its intent'
-				: refusal,
-		);
-	}
-	// The refusal's suggested table joins actually traverse the junction.
+	expect(() => manyOrm.select('posts').include('tags').plan()).toThrow(refusal);
+	// Explicit table joins through the junction remain the manual route.
 	expect(
 		manyOrm
 			.select('posts')

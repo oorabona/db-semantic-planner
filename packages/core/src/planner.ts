@@ -23,6 +23,7 @@ import { resolveJsonAggOrderKey, toColumnList } from '@dbsp/types';
 import {
 	belongsToManyJoinIncludeRefusal,
 	dropsJoinIncludeData,
+	resolveDeclaredRelationPath,
 	resolveIncludeRelationName,
 } from '@dbsp/types/internal';
 import { InvalidOperationError } from './dx/errors.js';
@@ -262,6 +263,23 @@ export function plan(
 	options: PlanOptions = {},
 ): PlanReport {
 	const startTime = performance.now();
+	const refusePath = (source: string, path: string) => {
+		const resolved = resolveDeclaredRelationPath(
+			model,
+			source,
+			path.split('.'),
+		);
+		if (
+			resolved.ok &&
+			resolved.relations.some((r) => r.type === 'belongsToMany')
+		)
+			throw new InvalidOperationError(
+				'relation',
+				belongsToManyJoinIncludeRefusal(`${source}.${path}`),
+			);
+	};
+	for (const join of intent.joins ?? [])
+		if (join.relation) refusePath(intent.from, join.relation);
 
 	const state: PlannerState = {
 		decisions: [],
@@ -1161,6 +1179,14 @@ function processInclude(
 		);
 	}
 
+	if (relation.type === 'belongsToMany')
+		throw new InvalidOperationError(
+			'include',
+			belongsToManyJoinIncludeRefusal(
+				`${queryIntent?.from ?? sourceTable}.${fullPath}`,
+			),
+		);
+
 	// Check for circular includes
 	const includePath = `${sourceTable}.${relation.name}`;
 	const isSelfReferentialRelation = relation.source === relation.target;
@@ -1230,11 +1256,6 @@ function processInclude(
 	);
 	const optionPath = `${intentPath}(${fullPath})`;
 
-	if (includeStrategy === 'join' && relation.type === 'belongsToMany')
-		throw new InvalidOperationError(
-			'include',
-			belongsToManyJoinIncludeRefusal(optionPath),
-		);
 	if (
 		includeStrategy === 'join' &&
 		isToManyInclude(relation) &&

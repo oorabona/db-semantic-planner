@@ -79,7 +79,7 @@ for (const form of forms) {
 					where: eq('name', 'admin'),
 					mode: form === 'relationFilter' ? 'some' : form,
 				};
-	const message = `WHERE ${predicate.kind}('tags'): many-to-many relation predicates need the junction declaration (#787).`;
+	const message = `WHERE ${predicate.kind}('tags'): many-to-many traversal is not supported yet (#787).`;
 	for (const [route, wrap] of [
 		['direct', (p: WhereIntent) => p],
 		['legacy dotted', (p: WhereIntent) => and(p, eq('posts.id', 1))],
@@ -120,7 +120,7 @@ it('refuses a path containing a many-to-many hop', () => {
 			.dump(),
 	).toThrowError(
 		new Error(
-			"WHERE relationFilter('posts.tags'): many-to-many relation predicates need the junction declaration (#787).",
+			"WHERE relationFilter('posts.tags'): many-to-many traversal is not supported yet (#787).",
 		),
 	);
 });
