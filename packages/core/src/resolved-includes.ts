@@ -12,6 +12,7 @@ import {
 } from '@dbsp/types';
 import {
 	belongsToManyJoinIncludeRefusal,
+	getNamingPluginForDbCasing,
 	getTrustedNqlRelationFilterFields,
 	resolveDeclaredRelationKeys,
 	resolveDeclaredRelationPath,
@@ -42,6 +43,9 @@ export function resolveReportIncludes(
 	>();
 	const occupied = new Set([
 		rootRange.alias,
+		...(['snake_case', 'camelCase', 'preserve'] as const).map((casing) =>
+			getNamingPluginForDbCasing(casing).toDatabase(intent.from),
+		),
 		...(options.whereReservedNames ?? []),
 	]);
 	const joins: ResolvedJoin[] = (intent.joins ?? []).map(

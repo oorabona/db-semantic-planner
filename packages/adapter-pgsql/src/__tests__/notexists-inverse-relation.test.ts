@@ -49,7 +49,7 @@ function ws(sql: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// SELECT path (goes through extractExistsDecisions + planner)
+// SELECT path (goes through resolveSelectWhere + execution.where)
 // ---------------------------------------------------------------------------
 
 describe('notExists() with inverse relation — SELECT path', () => {

@@ -141,17 +141,6 @@ export class QueryBuilderImpl<TResult = unknown>
 	/** When set, FROM clause is a BatchValues unnest() source, not a table */
 	batchValuesSource?: import('@dbsp/types').BatchValuesJoinPayload;
 
-	private whereReservedNames(): readonly string[] {
-		return this.ctx.adapter?.dbCasing === 'snake_case'
-			? [
-					this.from
-						.replace(/([a-z0-9])([A-Z])/g, '$1_$2')
-						.replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
-						.toLowerCase(),
-				]
-			: [];
-	}
-
 	constructor(
 		ctx: QueryBuilderContext,
 		from: string,
@@ -726,7 +715,6 @@ export class QueryBuilderImpl<TResult = unknown>
 
 		// Build plan options: dialectCapabilities + per-query overrides
 		const planOptions: PlanOptions = {
-			whereReservedNames: this.whereReservedNames(),
 			...(this.ctx.dialectCapabilities && {
 				dialectCapabilities: this.ctx.dialectCapabilities,
 			}),
@@ -959,7 +947,6 @@ export class QueryBuilderImpl<TResult = unknown>
 		const intentWithHints = this.applyRelationHints(existsIntent);
 
 		const planOptions: PlanOptions = {
-			whereReservedNames: this.whereReservedNames(),
 			...(this.ctx.dialectCapabilities && {
 				dialectCapabilities: this.ctx.dialectCapabilities,
 			}),
@@ -1035,7 +1022,6 @@ export class QueryBuilderImpl<TResult = unknown>
 		const existsIntent = this.buildExistsIntentFromIntent(intent);
 		const intentWithHints = this.applyRelationHints(existsIntent);
 		const planOptions: PlanOptions = {
-			whereReservedNames: this.whereReservedNames(),
 			...(this.ctx.dialectCapabilities && {
 				dialectCapabilities: this.ctx.dialectCapabilities,
 			}),
@@ -1109,7 +1095,6 @@ export class QueryBuilderImpl<TResult = unknown>
 		const intentWithHints = this.applyRelationHints(existsIntent);
 
 		const planOptions: PlanOptions = {
-			whereReservedNames: this.whereReservedNames(),
 			...(this.ctx.dialectCapabilities && {
 				dialectCapabilities: this.ctx.dialectCapabilities,
 			}),
@@ -1440,7 +1425,6 @@ export class QueryBuilderImpl<TResult = unknown>
 		// 5. Apply relation hints and plan
 		const intentWithHints = this.applyRelationHints(intent);
 		const planOptions: PlanOptions = {
-			whereReservedNames: this.whereReservedNames(),
 			...(this.ctx.dialectCapabilities && {
 				dialectCapabilities: this.ctx.dialectCapabilities,
 			}),
@@ -1627,7 +1611,6 @@ export class QueryBuilderImpl<TResult = unknown>
 
 		const disambiguateKey = `${error.sourceTable}.${error.targetTable}`;
 		const planOptions: PlanOptions = {
-			whereReservedNames: this.whereReservedNames(),
 			...basePlanOptions,
 			disambiguate: {
 				...basePlanOptions.disambiguate,

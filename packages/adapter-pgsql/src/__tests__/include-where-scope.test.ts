@@ -12,9 +12,8 @@ import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
  * root rows because the WHERE conditions from the include intent were dropped
  * in toJoinIncludeDecision() (plan-decision-extractor.ts).
  *
- * Fix: toJoinIncludeDecision() now extracts `where` from the include intent and
- * converts it to `conditions` scoped to the joined table's alias. The compiler's
- * compileSelect() loop folds those conditions into the root WHERE clause.
+ * Fix: resolved include lowering retains the include WHERE and scopes it to
+ * the joined range before SQL emission folds it into the root WHERE.
  */
 
 import type { PlanReport } from '@dbsp/types';

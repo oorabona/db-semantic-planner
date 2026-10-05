@@ -83,7 +83,16 @@ const resolvedIncludeExports = [
 	'markPlannedReport',
 	'isPlannedReport',
 ];
+const namingRuntime = [
+	'CamelCaseNamingPlugin',
+	'IdentityNamingPlugin',
+	'camelCaseNaming',
+	'identityNaming',
+	'getNamingPluginForDbCasing',
+];
 const internalNames = [
+	...namingRuntime,
+	'NamingPlugin',
 	'resolveDeclaredRelationKeys',
 	...joinIncludeExports,
 	...resolvedIncludeExports,
@@ -98,6 +107,7 @@ const movedRuntime = before.root.runtime.filter((name) =>
 	names(moved).includes(name),
 );
 const internalRuntime = [
+	...namingRuntime,
 	'resolveDeclaredRelationKeys',
 	...joinIncludeExports,
 	...resolvedIncludeExports,

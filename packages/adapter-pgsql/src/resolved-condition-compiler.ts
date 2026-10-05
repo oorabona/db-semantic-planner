@@ -1,4 +1,4 @@
-import { validateTypeName } from '@dbsp/core/internal';
+import { escapeDiagnosticText, validateTypeName } from '@dbsp/core/internal';
 import type {
 	ResolvedColumnOperand,
 	ResolvedCondition,
@@ -78,7 +78,9 @@ const operators: Record<string, string> = {
 };
 function assertComparisonOperator(operator: string): void {
 	if (!Object.hasOwn(operators, operator))
-		throw new Error(`Unsupported comparison operator '${operator}'`);
+		throw new Error(
+			`Unsupported comparison operator '${escapeDiagnosticText(operator)}'`,
+		);
 }
 function op(operator: string): string {
 	assertComparisonOperator(operator);
@@ -95,7 +97,9 @@ function rangeOp(operator: string): string {
 		case 'overlaps':
 			return '&&';
 		default:
-			throw new Error(`Unsupported range operator '${operator}'`);
+			throw new Error(
+				`Unsupported range operator '${escapeDiagnosticText(operator)}'`,
+			);
 	}
 }
 
@@ -112,7 +116,9 @@ function validateOperators(input: unknown): void {
 		switch (node.syntax) {
 			case 'arithmetic':
 				if (!['+', '-', '*', '/', '%'].includes(operator))
-					throw new Error(`Unsupported arithmetic operator '${operator}'`);
+					throw new Error(
+						`Unsupported arithmetic operator '${escapeDiagnosticText(operator)}'`,
+					);
 				break;
 			case 'comparison':
 				assertComparisonOperator(operator);
@@ -124,7 +130,9 @@ function validateOperators(input: unknown): void {
 				assertSafeOperator(operator, { allowWords: ['NOT'] });
 				break;
 			default:
-				throw new Error(`Unsupported operator syntax '${node.syntax}'`);
+				throw new Error(
+					`Unsupported operator syntax '${escapeDiagnosticText(String(node.syntax))}'`,
+				);
 		}
 	}
 	if (
@@ -420,7 +428,9 @@ function compileResolvedExpressionUnchecked(
 				expr.syntax === 'arithmetic' &&
 				!['+', '-', '*', '/', '%'].includes(expr.operator)
 			)
-				throw new Error(`Unsupported arithmetic operator '${expr.operator}'`);
+				throw new Error(
+					`Unsupported arithmetic operator '${escapeDiagnosticText(expr.operator)}'`,
+				);
 			const comparisonOperator =
 				expr.syntax === 'comparison' ? op(expr.operator) : undefined;
 			if (expr.syntax === 'custom' || expr.syntax === 'unary')

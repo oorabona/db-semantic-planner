@@ -734,9 +734,9 @@ describe('NULL-safety: positive inSubquery on nullable FK still rewrites to EXIS
 });
 
 // ---------------------------------------------------------------------------
-// Suite: FIX 2 — enrichExistsDecisionsInPlace uses constructor model fallback
+// Suite: resolved execution.where preserves constructor model fallback
 // ---------------------------------------------------------------------------
-describe('enrichExistsDecisionsInPlace: constructor model used when compile options omit model', () => {
+describe('resolved execution.where: constructor model used when compile options omit model', () => {
 	// Schema: posts --(belongsTo users via authorId)
 	// When the adapter is created with { model } at construction time and
 	// compile(plan) is called WITHOUT { model } in compile options, the EXISTS
@@ -746,17 +746,12 @@ describe('enrichExistsDecisionsInPlace: constructor model used when compile opti
 	//   outer.id = inner.author_id   (wrong has-many direction fallback)
 	//
 	// The exists() inside or() forces the planner to emit filter-strategy: 'exists'
-	// (not 'join'), so enrichExistsDecisionsInPlace processes it.
+	// (not 'join'); resolveSelectWhere retains it in execution.where.
 	const belongsToSchema = schemaWithNullableFK; // posts.authorId → users (belongsTo)
 
 	it('belongsTo exists filter compiled with constructor model: FK direction matches compile-with-options', () => {
-		// Regression gate (FIX 2 — FIND-130): enrichExistsDecisionsInPlace previously
-		// received only options?.model (undefined when compile options omit it), so the
-		// constructor-configured model was never used for FK direction resolution.
-		// This caused belongsTo EXISTS filters to fall back to the has-many FK direction.
-		//
-		// Test: a plan containing an OR exists filter (which forces exists strategy, not join)
-		// compiled via adapter constructed with model but compile() called without model option.
+		// resolveSelectWhere captures declared FK direction in execution.where.
+		// Compiling with the constructor model must preserve the same direction.
 		const queryIntent: QueryIntent = {
 			type: 'select',
 			from: 'posts',
@@ -774,7 +769,7 @@ describe('enrichExistsDecisionsInPlace: constructor model used when compile opti
 		});
 
 		// Verify the plan has a filter-strategy decision (choice may be 'join' or 'exists'
-		// depending on relation cardinality — either way enrichExistsDecisionsInPlace runs).
+		// depending on relation cardinality — execution.where preserves the predicate).
 		const filterDecision = planReport.decisions.find(
 			(d) => d.type === 'filter-strategy',
 		);
@@ -788,10 +783,7 @@ describe('enrichExistsDecisionsInPlace: constructor model used when compile opti
 		);
 
 		// Under test: compile with model in CONSTRUCTOR, no model in compile options.
-		// Before FIX 2: enrichExistsDecisionsInPlace received undefined model →
-		//   relationType not resolved → hasMany fallback → wrong FK direction.
-		// After FIX 2: deps.model (= constructor model) is used → belongsTo resolved →
-		//   correct FK direction.
+		// Resolved execution.where carries the belongsTo direction into emission.
 		const adapterWithCtorModel = createPgCompileOnlyAdapter({
 			model: belongsToSchema.model,
 		});

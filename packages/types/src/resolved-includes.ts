@@ -5,6 +5,7 @@ import type {
 	WhereIntent,
 } from './intent-ast.js';
 import type { RelationType } from './model-ir.js';
+import { getNamingPluginForDbCasing } from './naming-plugin.js';
 import type { ResolvedIncludeStrategy } from './planner.js';
 import type { ResolvedCondition } from './resolved-conditions.js';
 
@@ -22,23 +23,42 @@ export interface ResolvedRange {
  */
 export class RangeAllocator {
 	private readonly names: Set<string>;
+	private readonly tableSpellings = new Map<string, Set<string>>();
 	private nextId = 0;
 	private nameWork = 0;
 	get namesScanned(): number {
 		return this.nameWork;
 	}
-	hasReserved(alias: string): boolean {
+	// A written logical table name can be reused beneath an aliased range of that
+	// same table. Generated names consult every table spelling; bound aliases
+	// remain reserved in both cases.
+	hasReserved(alias: string, ownTable?: string): boolean {
 		this.nameWork++;
-		return this.names.has(alias);
+		return (
+			this.names.has(alias) ||
+			[...(this.tableSpellings.get(alias) ?? [])].some(
+				(table) => table !== ownTable,
+			)
+		);
 	}
 	private readonly scopedNames = new Map<string, Set<string>>();
 	constructor(reserved: readonly string[] = []) {
 		this.names = new Set(reserved);
 		this.nameWork += reserved.length;
 	}
-	reserve(alias: string): void {
+	reserve(alias: string, table?: string): void {
 		this.names.add(alias);
 		this.nameWork++;
+		if (table !== undefined) this.reserveTable(table);
+	}
+	private reserveTable(table: string): void {
+		for (const casing of ['snake_case', 'camelCase', 'preserve'] as const) {
+			const spelling = getNamingPluginForDbCasing(casing).toDatabase(table);
+			const owners = this.tableSpellings.get(spelling) ?? new Set<string>();
+			owners.add(table);
+			this.tableSpellings.set(spelling, owners);
+			this.nameWork++;
+		}
 	}
 	allocate(
 		table: string,
@@ -48,9 +68,15 @@ export class RangeAllocator {
 		const names = this.scopedNames.get(scope) ?? new Set<string>();
 		this.scopedNames.set(scope, names);
 		let alias = preferredAlias;
-		for (let suffix = 1; this.hasReserved(alias) || names.has(alias); suffix++)
+		for (
+			let suffix = 1;
+			this.hasReserved(alias, alias === table ? table : undefined) ||
+			names.has(alias);
+			suffix++
+		)
 			alias = `${preferredAlias}_${suffix}`;
 		names.add(alias);
+		this.reserveTable(table);
 		return { id: `r${this.nextId++}` as RangeId, table, alias };
 	}
 }

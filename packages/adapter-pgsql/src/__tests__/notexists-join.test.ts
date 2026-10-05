@@ -202,7 +202,7 @@ describe('notExists() with include — DELETE mutation path', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Tests: SELECT path (goes through extractExistsDecisions + planner)
+// Tests: SELECT path (goes through resolveSelectWhere + execution.where)
 // ---------------------------------------------------------------------------
 
 describe('notExists() with include — SELECT path via ORM', () => {

@@ -26,6 +26,8 @@ import {
 	resolveDeclaredRelationPath,
 } from '@dbsp/types/internal';
 
+import { escapeDiagnosticText } from './transition/diagnostic-text.js';
+
 function isExpression(value: unknown): value is { intent: ExpressionIntent } {
 	return (
 		value !== null && typeof value === 'object' && EXPRESSION_BRAND in value
@@ -88,8 +90,12 @@ export function resolveSelectWhere(
 	initialAliasCount = 0,
 	additionalOuterRanges: readonly ResolvedRange[] = [],
 ): ResolvedCondition | undefined {
-	for (const range of [root, ...visible, ...additionalOuterRanges])
-		allocator.reserve(range.alias);
+	const rootScope = [...new Set([root, ...visible, ...additionalOuterRanges])];
+	const enclosingScope = (ranges: readonly ResolvedRange[]) =>
+		ranges === visible ? rootScope : ranges;
+	for (const range of rootScope) {
+		allocator.reserve(range.alias, range.table);
+	}
 	let aliasCount = initialAliasCount;
 	const rawNext = new Map<string, number>();
 	const expressionNext = new Map<string, number>();
@@ -243,7 +249,10 @@ export function resolveSelectWhere(
 					? query.from
 					: generated(query.from, next === 1 ? '_sq' : `_sq_${next - 1}`);
 			alias = candidate();
-			while (activeNames.has(alias) || allocator.hasReserved(alias)) {
+			while (
+				activeNames.has(alias) ||
+				allocator.hasReserved(alias, next === 0 ? query.from : undefined)
+			) {
 				next++;
 				alias = candidate();
 			}
@@ -266,10 +275,7 @@ export function resolveSelectWhere(
 		);
 		if (!isExpressionBody) allocator.reserve(range.alias);
 		activeNames.add(range.alias);
-		const innerEnclosing = [
-			ranges === visible ? [...ranges, ...additionalOuterRanges] : ranges,
-			...enclosing,
-		];
+		const innerEnclosing = [enclosingScope(ranges), ...enclosing];
 		const where = query.where
 			? visit(query.where, range, [range], innerEnclosing)
 			: undefined;
@@ -488,10 +494,13 @@ export function resolveSelectWhere(
 								dotted.node,
 								target,
 								innerRanges,
-								[ranges, ...enclosing],
+								[enclosingScope(ranges), ...enclosing],
 								dotted.field,
 							)
-						: visit(nested!, target, innerRanges, [ranges, ...enclosing]),
+						: visit(nested!, target, innerRanges, [
+								enclosingScope(ranges),
+								...enclosing,
+							]),
 				}),
 		};
 	};
@@ -896,6 +905,10 @@ export function resolveSelectWhere(
 						},
 					}),
 				};
+			default:
+				throw new Error(
+					`Unsupported predicate kind '${escapeDiagnosticText(String((node as { kind: unknown }).kind))}'`,
+				);
 		}
 	};
 	return where ? visit(where, root, visible, []) : undefined;

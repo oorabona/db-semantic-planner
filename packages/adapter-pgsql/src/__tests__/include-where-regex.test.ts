@@ -7,8 +7,8 @@ import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
  * op().eq() intents passed to include({ where }) were silently dropped —
  * the regex filter was never emitted in SQL.
  *
- * Fix: added `case 'expression'` to convertWhereToDecisions() in
- * plan-decision-extractor.ts.
+ * Fix: the retained include-WHERE route preserves expression predicates
+ * during resolved include lowering.
  */
 
 import type { PlanReport } from '@dbsp/types';
