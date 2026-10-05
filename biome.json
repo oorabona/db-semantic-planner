@@ -58,6 +58,13 @@
 	},
 	"overrides": [
 		{
+			"includes": [
+				"packages/adapter-pgsql/src/__tests__/include-matrix/*.json",
+				"packages/adapter-pgsql/src/__tests__/include-matrix-inputs/*.json"
+			],
+			"formatter": { "enabled": false }
+		},
+		{
 			"includes": ["**/*.test.ts", "**/*.test.tsx", "**/testkit/**"],
 			"linter": {
 				"rules": {

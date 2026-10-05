@@ -1,0 +1,1076 @@
+[
+  {
+    "case": "orm/json_agg/1/via-alias/flat/single/expression",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Include where is not supported for strategy json_agg at include[0](payload0).where (oorabona/db-semantic-planner#892)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "external/json_agg/1/via-alias/flat/single/expression",
+    "sql": "SELECT roots.*, children.id AS \"children.id\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" WHERE lower(name) = $1",
+    "params": [
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "children",
+        "publicKey": "children",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "children_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "children.id"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "children.id": 2
+      }
+    ]
+  },
+  {
+    "case": "nql/json_agg/1/via-alias/flat/single/expression",
+    "sql": "SELECT roots.id, children.id AS \"children.id\", children.tenant AS \"children.tenant\", children.name AS \"children.name\", children.amount AS \"children.amount\", children.\"rootId\" AS \"children.rootId\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" WHERE lower(name) = $1",
+    "params": [
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "children",
+        "publicKey": "children",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "children_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "children.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "children.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "children.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "children.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "children.rootId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "children.id": 2,
+        "children.tenant": 2,
+        "children.name": "child",
+        "children.amount": "42",
+        "children.rootId": 2
+      }
+    ]
+  },
+  {
+    "case": "orm/json_agg/1/via-alias/flat/single/outer",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Include where is not supported for strategy json_agg at include[0](payload0).where (oorabona/db-semantic-planner#892)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "external/json_agg/1/via-alias/flat/single/outer",
+    "sql": "SELECT roots.*, children.id AS \"children.id\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" WHERE children.name = $1 AND children.id = roots.id",
+    "params": [
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "children",
+        "publicKey": "children",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "children_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "children.id"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "children.id": 2
+      }
+    ]
+  },
+  {
+    "case": "nql/json_agg/1/via-alias/flat/single/outer",
+    "sql": "SELECT roots.id, children.id AS \"children.id\", children.tenant AS \"children.tenant\", children.name AS \"children.name\", children.amount AS \"children.amount\", children.\"rootId\" AS \"children.rootId\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" WHERE children.name = $1 AND children.id = roots.id",
+    "params": [
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "children",
+        "publicKey": "children",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "children_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "children.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "children.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "children.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "children.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "children.rootId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "children.id": 2,
+        "children.tenant": 2,
+        "children.name": "child",
+        "children.amount": "42",
+        "children.rootId": 2
+      }
+    ]
+  },
+  {
+    "case": "orm/json_agg/1/via-alias/flat/composite/all",
+    "sql": "SELECT roots.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'tenant', __t__.tenant, 'name', __t__.name, 'amount', CAST(__t__.amount AS text), 'rootId', __t__.\"rootId\") ORDER BY __t__.id ASC NULLS LAST, __t__.tenant ASC NULLS LAST) FROM children AS __t__ WHERE __t__.\"rootId\" = roots.id AND __t__.tenant = roots.tenant), '[]'::json) AS \"compositeChildren_json\" FROM roots",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "json_agg",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "rootId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren": {
+          "id": 2,
+          "tenant": 2,
+          "name": "child",
+          "amount": 42,
+          "rootId": 2
+        }
+      }
+    ]
+  },
+  {
+    "case": "external/json_agg/1/via-alias/flat/composite/all",
+    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\" FROM roots LEFT JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren.id": 2
+      }
+    ]
+  },
+  {
+    "case": "nql/json_agg/1/via-alias/flat/composite/all",
+    "sql": "SELECT roots.id, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\" FROM roots LEFT JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "compositeChildren.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "compositeChildren.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "compositeChildren.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "compositeChildren.rootId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren.id": 2,
+        "compositeChildren.tenant": 2,
+        "compositeChildren.name": "child",
+        "compositeChildren.amount": "42",
+        "compositeChildren.rootId": 2
+      }
+    ]
+  },
+  {
+    "case": "orm/json_agg/1/via-alias/flat/composite/projection",
+    "sql": "SELECT roots.*, COALESCE((SELECT json_agg(jsonb_build_object('name', __t__.name, 'amount', CAST(__t__.amount AS text)) ORDER BY __t__.id ASC NULLS LAST, __t__.tenant ASC NULLS LAST) FROM children AS __t__ WHERE __t__.\"rootId\" = roots.id AND __t__.tenant = roots.tenant), '[]'::json) AS \"compositeChildren_json\" FROM roots",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "json_agg",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren": {
+          "name": "child",
+          "amount": 42
+        }
+      }
+    ]
+  },
+  {
+    "case": "external/json_agg/1/via-alias/flat/composite/projection",
+    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\" FROM roots LEFT JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "compositeChildren.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "compositeChildren.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren.id": 2,
+        "compositeChildren.name": "child",
+        "compositeChildren.amount": "42"
+      }
+    ]
+  },
+  {
+    "case": "nql/json_agg/1/via-alias/flat/composite/projection",
+    "sql": "SELECT roots.id, \"compositeChildren\".name AS \"compositeChildren.name\" FROM roots LEFT JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "compositeChildren.name",
+            "outputLabel": "compositeChildren.name"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren.name": "child"
+      }
+    ]
+  },
+  {
+    "case": "orm/json_agg/1/via-alias/flat/composite/ordered-limit",
+    "sql": "SELECT roots.*, COALESCE((SELECT json_agg(__lim.__row ORDER BY __lim.__key0 DESC NULLS LAST, __lim.__key1 ASC NULLS LAST, __lim.__key2 ASC NULLS LAST) FROM (SELECT jsonb_build_object('id', __t__.id, 'tenant', __t__.tenant, 'name', __t__.name, 'amount', CAST(__t__.amount AS text), 'rootId', __t__.\"rootId\") AS __row, __t__.name AS __key0, __t__.id AS __key1, __t__.tenant AS __key2 FROM children AS __t__ WHERE __t__.\"rootId\" = roots.id AND __t__.tenant = roots.tenant ORDER BY __t__.name DESC NULLS LAST, __t__.id ASC NULLS LAST, __t__.tenant ASC NULLS LAST LIMIT 2) AS __lim), '[]'::json) AS \"compositeChildren_json\" FROM roots",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "json_agg",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "rootId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren": {
+          "id": 2,
+          "tenant": 2,
+          "name": "child",
+          "amount": 42,
+          "rootId": 2
+        }
+      }
+    ]
+  },
+  {
+    "case": "external/json_agg/1/via-alias/flat/composite/ordered-limit",
+    "sql": "SELECT roots.*, children_lat_0.id AS \"compositeChildren.id\", children_lat_0.tenant AS \"compositeChildren.tenant\", children_lat_0.name AS \"compositeChildren.name\", children_lat_0.amount AS \"compositeChildren.amount\", children_lat_0.\"rootId\" AS \"compositeChildren.rootId\" FROM roots LEFT JOIN LATERAL (SELECT children_inner_0.id, children_inner_0.tenant, children_inner_0.name, children_inner_0.amount, children_inner_0.\"rootId\" FROM children AS children_inner_0 WHERE children_inner_0.\"rootId\" = roots.id AND children_inner_0.tenant = roots.tenant ORDER BY children_inner_0.name DESC NULLS LAST, children_inner_0.id ASC NULLS LAST, children_inner_0.tenant ASC NULLS LAST LIMIT 2) AS children_lat_0 ON true",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "lateral",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "compositeChildren.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "compositeChildren.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "compositeChildren.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "compositeChildren.rootId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren.id": 2,
+        "compositeChildren.tenant": 2,
+        "compositeChildren.name": "child",
+        "compositeChildren.amount": "42",
+        "compositeChildren.rootId": 2
+      }
+    ]
+  },
+  {
+    "case": "nql/json_agg/1/via-alias/flat/composite/ordered-limit",
+    "sql": "SELECT roots.id, children_lat_0.id AS \"compositeChildren.id\", children_lat_0.tenant AS \"compositeChildren.tenant\", children_lat_0.name AS \"compositeChildren.name\", children_lat_0.amount AS \"compositeChildren.amount\", children_lat_0.\"rootId\" AS \"compositeChildren.rootId\" FROM roots LEFT JOIN LATERAL (SELECT children_inner_0.id, children_inner_0.tenant, children_inner_0.name, children_inner_0.amount, children_inner_0.\"rootId\" FROM children AS children_inner_0 WHERE children_inner_0.\"rootId\" = roots.id AND children_inner_0.tenant = roots.tenant ORDER BY children_inner_0.name DESC NULLS LAST, children_inner_0.id ASC NULLS LAST, children_inner_0.tenant ASC NULLS LAST LIMIT 2) AS children_lat_0 ON true",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "lateral",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "compositeChildren.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "compositeChildren.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "compositeChildren.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "compositeChildren.rootId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren.id": 2,
+        "compositeChildren.tenant": 2,
+        "compositeChildren.name": "child",
+        "compositeChildren.amount": "42",
+        "compositeChildren.rootId": 2
+      }
+    ]
+  },
+  {
+    "case": "orm/json_agg/1/via-alias/flat/composite/predicate",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Include where is not supported for strategy json_agg at include[0](payload0).where (oorabona/db-semantic-planner#892)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "external/json_agg/1/via-alias/flat/composite/predicate",
+    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE \"compositeChildren\".name = $1",
+    "params": [
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren.id": 2
+      }
+    ]
+  },
+  {
+    "case": "nql/json_agg/1/via-alias/flat/composite/predicate",
+    "sql": "SELECT roots.id, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE \"compositeChildren\".name = $1",
+    "params": [
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "compositeChildren.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "compositeChildren.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "compositeChildren.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "compositeChildren.rootId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren.id": 2,
+        "compositeChildren.tenant": 2,
+        "compositeChildren.name": "child",
+        "compositeChildren.amount": "42",
+        "compositeChildren.rootId": 2
+      }
+    ]
+  },
+  {
+    "case": "orm/json_agg/1/via-alias/flat/composite/expression",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Include where is not supported for strategy json_agg at include[0](payload0).where (oorabona/db-semantic-planner#892)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "external/json_agg/1/via-alias/flat/composite/expression",
+    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE lower(name) = $1",
+    "params": [
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren.id": 2
+      }
+    ]
+  },
+  {
+    "case": "nql/json_agg/1/via-alias/flat/composite/expression",
+    "sql": "SELECT roots.id, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE lower(name) = $1",
+    "params": [
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "compositeChildren.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "compositeChildren.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "compositeChildren.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "compositeChildren.rootId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren.id": 2,
+        "compositeChildren.tenant": 2,
+        "compositeChildren.name": "child",
+        "compositeChildren.amount": "42",
+        "compositeChildren.rootId": 2
+      }
+    ]
+  },
+  {
+    "case": "orm/json_agg/1/via-alias/flat/composite/outer",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Include where is not supported for strategy json_agg at include[0](payload0).where (oorabona/db-semantic-planner#892)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "external/json_agg/1/via-alias/flat/composite/outer",
+    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeChildren\".id = roots.id",
+    "params": [
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren.id": 2
+      }
+    ]
+  },
+  {
+    "case": "nql/json_agg/1/via-alias/flat/composite/outer",
+    "sql": "SELECT roots.id, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeChildren\".id = roots.id",
+    "params": [
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "compositeChildren.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "compositeChildren.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "compositeChildren.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "compositeChildren.rootId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren.id": 2,
+        "compositeChildren.tenant": 2,
+        "compositeChildren.name": "child",
+        "compositeChildren.amount": "42",
+        "compositeChildren.rootId": 2
+      }
+    ]
+  }
+]

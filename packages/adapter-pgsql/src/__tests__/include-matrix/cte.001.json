@@ -1,0 +1,602 @@
+[
+  {
+    "case": "orm/cte/1/direct/nested/single/all",
+    "sql": "WITH children_cte AS (SELECT children_inner_0.* FROM children AS children_inner_0) SELECT roots.* FROM roots LEFT JOIN children_cte AS children_ref_0 ON roots.id = children_ref_0.\"rootId\"",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "path": "children",
+        "publicKey": "children",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "children_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "children.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "children.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "children.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "children.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "children.rootId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "children.id": 2,
+        "children.tenant": 2,
+        "children.name": "child",
+        "children.amount": "42",
+        "children.rootId": 2
+      }
+    ]
+  },
+  {
+    "case": "external/cte/1/direct/nested/single/all",
+    "sql": "WITH children_cte AS (SELECT children_inner_0.* FROM children AS children_inner_0) SELECT roots.* FROM roots LEFT JOIN children_cte AS children_ref_0 ON roots.id = children_ref_0.\"rootId\"",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "path": "children",
+        "publicKey": "children",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "children_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "children.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "children.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "children.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "children.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "children.rootId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "children.id": 2,
+        "children.tenant": 2,
+        "children.name": "child",
+        "children.amount": "42",
+        "children.rootId": 2
+      }
+    ]
+  },
+  {
+    "case": "nql/cte/1/direct/nested/single/all",
+    "sql": "WITH children_cte AS (SELECT children_inner_0.* FROM children AS children_inner_0) SELECT roots.id FROM roots LEFT JOIN children_cte AS children_ref_0 ON roots.id = children_ref_0.\"rootId\"",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "path": "children",
+        "publicKey": "children",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "children_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "children.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "children.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "children.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "children.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "children.rootId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "children.id": 2,
+        "children.tenant": 2,
+        "children.name": "child",
+        "children.amount": "42",
+        "children.rootId": 2
+      }
+    ]
+  },
+  {
+    "case": "orm/cte/1/direct/nested/single/projection",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "_InvalidOperationError",
+      "message": "Invalid include: Include include[0](children) select is not supported by 'cte' strategy."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "external/cte/1/direct/nested/single/projection",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "_InvalidOperationError",
+      "message": "Invalid include: Include include[0](children) select is not supported by 'cte' strategy."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "nql/cte/1/direct/nested/single/projection",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "_InvalidOperationError",
+      "message": "Invalid include: Include include[0](children) select is not supported by 'cte' strategy."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "orm/cte/1/direct/nested/single/ordered-limit",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "_InvalidOperationError",
+      "message": "Invalid include: Include include[0](children) limit is not supported by 'cte' strategy."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "external/cte/1/direct/nested/single/ordered-limit",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "_InvalidOperationError",
+      "message": "Invalid include: Include include[0](children) limit is not supported by 'cte' strategy."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "nql/cte/1/direct/nested/single/ordered-limit",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "_InvalidOperationError",
+      "message": "Invalid include: Include include[0](children) limit is not supported by 'cte' strategy."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "orm/cte/1/direct/nested/single/predicate",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Include where is not supported for strategy cte at include[0](children).where (oorabona/db-semantic-planner#892)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "external/cte/1/direct/nested/single/predicate",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Include where is not supported for strategy cte at include[0](children).where (oorabona/db-semantic-planner#892)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "nql/cte/1/direct/nested/single/predicate",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Include where is not supported for strategy cte at include[0](children).where (oorabona/db-semantic-planner#892)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "orm/cte/1/direct/nested/single/expression",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Include where is not supported for strategy cte at include[0](children).where (oorabona/db-semantic-planner#892)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "external/cte/1/direct/nested/single/expression",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Include where is not supported for strategy cte at include[0](children).where (oorabona/db-semantic-planner#892)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "nql/cte/1/direct/nested/single/expression",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Include where is not supported for strategy cte at include[0](children).where (oorabona/db-semantic-planner#892)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "orm/cte/1/direct/nested/single/outer",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Include where is not supported for strategy cte at include[0](children).where (oorabona/db-semantic-planner#892)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "external/cte/1/direct/nested/single/outer",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Include where is not supported for strategy cte at include[0](children).where (oorabona/db-semantic-planner#892)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "nql/cte/1/direct/nested/single/outer",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Include where is not supported for strategy cte at include[0](children).where (oorabona/db-semantic-planner#892)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "orm/cte/1/direct/nested/composite/all",
+    "sql": "WITH \"compositeChildren_cte\" AS (SELECT children_inner_0.* FROM children AS children_inner_0) SELECT roots.* FROM roots LEFT JOIN \"compositeChildren_cte\" AS \"compositeChildren_ref_0\" ON roots.id = \"compositeChildren_ref_0\".\"rootId\" AND roots.tenant = \"compositeChildren_ref_0\".tenant",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "compositeChildren.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "compositeChildren.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "compositeChildren.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "compositeChildren.rootId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren.id": 2,
+        "compositeChildren.tenant": 2,
+        "compositeChildren.name": "child",
+        "compositeChildren.amount": "42",
+        "compositeChildren.rootId": 2
+      }
+    ]
+  },
+  {
+    "case": "external/cte/1/direct/nested/composite/all",
+    "sql": "WITH \"compositeChildren_cte\" AS (SELECT children_inner_0.* FROM children AS children_inner_0) SELECT roots.* FROM roots LEFT JOIN \"compositeChildren_cte\" AS \"compositeChildren_ref_0\" ON roots.id = \"compositeChildren_ref_0\".\"rootId\" AND roots.tenant = \"compositeChildren_ref_0\".tenant",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "compositeChildren.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "compositeChildren.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "compositeChildren.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "compositeChildren.rootId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren.id": 2,
+        "compositeChildren.tenant": 2,
+        "compositeChildren.name": "child",
+        "compositeChildren.amount": "42",
+        "compositeChildren.rootId": 2
+      }
+    ]
+  },
+  {
+    "case": "nql/cte/1/direct/nested/composite/all",
+    "sql": "WITH \"compositeChildren_cte\" AS (SELECT children_inner_0.* FROM children AS children_inner_0) SELECT roots.id FROM roots LEFT JOIN \"compositeChildren_cte\" AS \"compositeChildren_ref_0\" ON roots.id = \"compositeChildren_ref_0\".\"rootId\" AND roots.tenant = \"compositeChildren_ref_0\".tenant",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "compositeChildren.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "compositeChildren.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "compositeChildren.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "compositeChildren.rootId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren.id": 2,
+        "compositeChildren.tenant": 2,
+        "compositeChildren.name": "child",
+        "compositeChildren.amount": "42",
+        "compositeChildren.rootId": 2
+      }
+    ]
+  },
+  {
+    "case": "orm/cte/1/direct/nested/composite/projection",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "_InvalidOperationError",
+      "message": "Invalid include: Include include[0](compositeChildren) select is not supported by 'cte' strategy."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "external/cte/1/direct/nested/composite/projection",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "_InvalidOperationError",
+      "message": "Invalid include: Include include[0](compositeChildren) select is not supported by 'cte' strategy."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "nql/cte/1/direct/nested/composite/projection",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "_InvalidOperationError",
+      "message": "Invalid include: Include include[0](compositeChildren) select is not supported by 'cte' strategy."
+    },
+    "payloads": [],
+    "rows": []
+  }
+]
