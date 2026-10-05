@@ -463,7 +463,7 @@ export function resolveSelectWhere(
 						break;
 					}
 				const includePath = pathFor(includeSource, [name], 'include');
-				const range = allocator.allocate(
+				const range = allocator.bind(
 					includePath.targetTable,
 					name,
 					`where-include-${scopeIndex++}`,

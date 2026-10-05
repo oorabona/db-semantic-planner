@@ -60,6 +60,17 @@ export class RangeAllocator {
 			this.nameWork++;
 		}
 	}
+	/** Bind caller vocabulary verbatim; only the SQL scope can reject duplicates. */
+	bind(table: string, alias: string, scope = 'query'): ResolvedRange {
+		const names = this.scopedNames.get(scope) ?? new Set<string>();
+		if (names.has(alias))
+			throw new Error(`Query scope already binds qualifier '${alias}'.`);
+		this.scopedNames.set(scope, names);
+		names.add(alias);
+		this.reserveTable(table);
+		return { id: `r${this.nextId++}` as RangeId, table, alias };
+	}
+	/** Allocate generated vocabulary, avoiding bound names and table spellings. */
 	allocate(
 		table: string,
 		preferredAlias: string,

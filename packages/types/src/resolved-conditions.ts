@@ -67,7 +67,6 @@ export type ResolvedExpression =
 			readonly value: ResolvedExpression;
 	  }
 	| { readonly kind: 'literal' | 'parameter'; readonly value: unknown }
-	| { readonly kind: 'raw'; readonly sql: string }
 	| { readonly kind: 'star' };
 
 export type ResolvedProjection =

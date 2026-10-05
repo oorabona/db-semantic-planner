@@ -29,3 +29,14 @@ it('a table can be named beneath an aliased range of the same table', () => {
 	allocator.reserve(outer.alias, outer.table);
 	expect(allocator.allocate('posts', 'posts', 'inner').alias).toBe('posts');
 });
+
+it('bound aliases ignore generated reservations and refuse only scope duplicates', () => {
+	const allocator = new RangeAllocator();
+	allocator.bind('fooBar', 'x');
+	expect(allocator.bind('baz', 'foo_bar').alias).toBe('foo_bar');
+	expect(() => allocator.bind('other', 'foo_bar')).toThrow(
+		"Query scope already binds qualifier 'foo_bar'.",
+	);
+	expect(allocator.bind('other', 'foo_bar', 'inner').alias).toBe('foo_bar');
+	expect(allocator.allocate('other', 'foo_bar').alias).toBe('foo_bar_1');
+});

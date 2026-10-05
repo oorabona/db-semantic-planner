@@ -270,7 +270,11 @@ function comparison(
 	return compileComparison(op(operator), left, rhs(right, ctx, state, operand));
 }
 function from(range: ResolvedRange, ctx: CompilerContext): Node {
-	const local = relationBindingFor(ctx.scope, queryLocal(range.table));
+	const binding = relationBindingFor(ctx.scope, queryLocal(range.table));
+	const local =
+		binding?.kind === 'cte-bind' || binding?.kind === 'batch-values'
+			? binding
+			: undefined;
 	return sqlRangeVar(
 		local?.qualifier ??
 			resolveDeclaredIdentifier(ctx.declaredNames, ctx.dbCasing ?? 'preserve', {
@@ -386,8 +390,6 @@ function compileResolvedExpressionUnchecked(
 			throw new Error(
 				`literal(): unsupported value type "${typeof expr.value}". Only null, boolean, number, and string are allowed. Use param() to bind computed or user-supplied values.`,
 			);
-		case 'raw':
-			return { RawSQL: { sql: expr.sql } } as unknown as Node;
 		case 'star':
 			return { ColumnRef: { fields: [{ A_Star: {} }] } };
 		case 'array':
