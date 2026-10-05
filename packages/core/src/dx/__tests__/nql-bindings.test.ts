@@ -165,7 +165,6 @@ function createM2mBindingTag(executeResult: readonly unknown[] = []) {
 		cardinality: 'many',
 		optionality: 'optional',
 		includeStrategy: 'auto',
-		filterStrategy: 'auto',
 		joinDefault: 'auto',
 	};
 	const tagsPostsRelation: RelationIR = {
@@ -179,7 +178,6 @@ function createM2mBindingTag(executeResult: readonly unknown[] = []) {
 		cardinality: 'many',
 		optionality: 'optional',
 		includeStrategy: 'auto',
-		filterStrategy: 'auto',
 		joinDefault: 'auto',
 	};
 	const relationMap = new Map(db.model.relations);

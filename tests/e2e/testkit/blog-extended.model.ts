@@ -68,7 +68,6 @@ const postsTagsRelation: RelationIR = {
 	cardinality: 'many',
 	optionality: 'optional',
 	includeStrategy: 'auto',
-	filterStrategy: 'auto',
 	joinDefault: 'auto',
 };
 
@@ -83,7 +82,6 @@ const tagsPostsRelation: RelationIR = {
 	cardinality: 'many',
 	optionality: 'optional',
 	includeStrategy: 'auto',
-	filterStrategy: 'auto',
 	joinDefault: 'auto',
 };
 

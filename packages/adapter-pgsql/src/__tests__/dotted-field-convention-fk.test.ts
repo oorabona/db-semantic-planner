@@ -66,7 +66,6 @@ function makeHandBuiltFkModel(): ModelIR {
 					cardinality: 'one-to-many' as const,
 					optionality: 'optional' as const,
 					includeStrategy: 'auto' as const,
-					filterStrategy: 'auto' as const,
 					joinDefault: 'auto' as const,
 					foreignKey: 'user_id',
 				};
@@ -80,7 +79,6 @@ function makeHandBuiltFkModel(): ModelIR {
 					cardinality: 'many-to-one' as const,
 					optionality: 'optional' as const,
 					includeStrategy: 'auto' as const,
-					filterStrategy: 'auto' as const,
 					joinDefault: 'auto' as const,
 					foreignKey: 'author_id',
 				};

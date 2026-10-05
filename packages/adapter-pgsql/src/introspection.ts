@@ -1542,7 +1542,6 @@ function inferRelations(
 				cardinality: 'one',
 				optionality: 'optional',
 				includeStrategy: 'auto',
-				filterStrategy: 'auto',
 				joinDefault: 'auto',
 			});
 		}
@@ -1561,7 +1560,6 @@ function inferRelations(
 				cardinality: 'many',
 				optionality: 'optional',
 				includeStrategy: 'auto',
-				filterStrategy: 'auto',
 				joinDefault: 'auto',
 			});
 		}

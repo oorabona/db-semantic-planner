@@ -17,7 +17,6 @@ function makeRelation(
 		cardinality: 'many',
 		optionality: 'optional',
 		includeStrategy: 'auto',
-		filterStrategy: 'auto',
 		joinDefault: 'auto',
 		...overrides,
 	};

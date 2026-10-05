@@ -691,7 +691,7 @@ describe('ModelIR interface', () => {
 			expect(relation?.cardinality).toBeDefined();
 			expect(relation?.optionality).toBeDefined();
 			expect(relation?.includeStrategy).toBeDefined();
-			expect(relation?.filterStrategy).toBeDefined();
+			expect(relation).not.toHaveProperty('filterStrategy');
 			expect(relation?.joinDefault).toBeDefined();
 		});
 	});

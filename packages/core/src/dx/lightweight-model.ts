@@ -457,7 +457,6 @@ export function defineModel<DB = Record<string, unknown>>(
 			cardinality: def.modelCardinality,
 			optionality,
 			includeStrategy: 'auto',
-			filterStrategy: 'auto',
 			joinDefault: 'auto',
 		};
 

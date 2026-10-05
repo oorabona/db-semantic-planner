@@ -1,9 +1,6 @@
 /**
  * @module compiler-join-filter.test
- * Unit tests for F-005: JOIN compilation for filter-strategy.
- *
- * When the planner emits choice: 'join' for a belongsTo (to-one) relation,
- * the compiler should produce an INNER JOIN instead of EXISTS subquery.
+ * Unit tests for F-005: relation filters compile as EXISTS.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -28,9 +25,9 @@ function compileToSql(plan: SimplifiedPlanReport): {
 // Tests
 // ============================================================================
 
-describe('JOIN filter compilation (F-005)', () => {
-	describe('belongsTo filter with choice=join', () => {
-		it('should compile JOIN instead of EXISTS for choice=join', () => {
+describe('EXISTS filter compilation (F-005)', () => {
+	describe('belongsTo filter with choice=exists', () => {
+		it('should compile EXISTS for a belongsTo filter', () => {
 			const plan: SimplifiedPlanReport = {
 				rootTable: 'posts',
 				decisions: [
@@ -38,7 +35,8 @@ describe('JOIN filter compilation (F-005)', () => {
 					{
 						type: 'where',
 						operator: 'exists',
-						choice: 'join',
+						choice: 'exists',
+						relationType: 'belongsTo',
 						targetTable: 'authors',
 						foreignKey: 'author_id',
 						conditions: [
@@ -56,18 +54,14 @@ describe('JOIN filter compilation (F-005)', () => {
 
 			const result = compileToSql(plan);
 
-			// Should contain JOIN, not EXISTS
-			expect(result.sql).toContain('JOIN');
-			expect(result.sql).not.toContain('EXISTS');
-			// ON condition: target PK = source FK
-			expect(result.sql).toMatch(/authors\.id\s*=\s*posts\.author_id/);
-			// User condition in WHERE
-			expect(result.sql).toMatch(/authors\.name\s*=\s*\$1/);
+			expect(result.sql).toBe(
+				'SELECT * FROM posts WHERE EXISTS (SELECT 1 FROM authors AS authors_exists_0 WHERE posts.author_id = authors_exists_0.id AND authors_exists_0.name = $1)',
+			);
+
 			expect(result.parameters).toEqual(['Alice']);
 		});
 
-		it('should compile JOIN without user conditions', () => {
-			// JOIN alone filters: only rows where FK points to valid target
+		it('should compile EXISTS without user conditions', () => {
 			const plan: SimplifiedPlanReport = {
 				rootTable: 'posts',
 				decisions: [
@@ -75,7 +69,8 @@ describe('JOIN filter compilation (F-005)', () => {
 					{
 						type: 'where',
 						operator: 'exists',
-						choice: 'join',
+						choice: 'exists',
+						relationType: 'belongsTo',
 						targetTable: 'authors',
 						foreignKey: 'author_id',
 					} satisfies PlanDecision,
@@ -84,11 +79,9 @@ describe('JOIN filter compilation (F-005)', () => {
 
 			const result = compileToSql(plan);
 
-			expect(result.sql).toContain('JOIN');
-			expect(result.sql).not.toContain('EXISTS');
-			expect(result.sql).toMatch(/authors\.id\s*=\s*posts\.author_id/);
-			// No WHERE clause needed (JOIN itself filters)
-			expect(result.sql).not.toMatch(/WHERE/);
+			expect(result.sql).toBe(
+				'SELECT * FROM posts WHERE EXISTS (SELECT 1 FROM authors AS authors_exists_0 WHERE posts.author_id = authors_exists_0.id)',
+			);
 		});
 
 		it('should use derived FK when foreignKey not specified', () => {
@@ -99,22 +92,22 @@ describe('JOIN filter compilation (F-005)', () => {
 					{
 						type: 'where',
 						operator: 'exists',
-						choice: 'join',
+						choice: 'exists',
+						relationType: 'belongsTo',
 						targetTable: 'authors',
-						// No foreignKey — compiler derives from target table name
 					} satisfies PlanDecision,
 				],
 			};
 
 			const result = compileToSql(plan);
 
-			expect(result.sql).toContain('JOIN');
-			// Derived FK: singular(targetTable) + 'Id' → authorsId (identity naming)
-			expect(result.sql).toMatch(/authors\.id/);
+			expect(result.sql).toBe(
+				'SELECT * FROM posts WHERE EXISTS (SELECT 1 FROM authors AS authors_exists_0 WHERE posts.author_id = authors_exists_0.id)',
+			);
 		});
 	});
 
-	describe('fallback to EXISTS when choice != join', () => {
+	describe('EXISTS without a strategy override', () => {
 		it('should use EXISTS when no choice specified', () => {
 			const plan: SimplifiedPlanReport = {
 				rootTable: 'authors',
@@ -165,8 +158,8 @@ describe('JOIN filter compilation (F-005)', () => {
 		});
 	});
 
-	describe('multiple JOINs', () => {
-		it('should compile multiple JOINs from different filters', () => {
+	describe('multiple EXISTS predicates', () => {
+		it('should compile multiple EXISTS predicates from different filters', () => {
 			const plan: SimplifiedPlanReport = {
 				rootTable: 'posts',
 				decisions: [
@@ -174,7 +167,8 @@ describe('JOIN filter compilation (F-005)', () => {
 					{
 						type: 'where',
 						operator: 'exists',
-						choice: 'join',
+						choice: 'exists',
+						relationType: 'belongsTo',
 						targetTable: 'authors',
 						foreignKey: 'author_id',
 						conditions: [
@@ -190,7 +184,8 @@ describe('JOIN filter compilation (F-005)', () => {
 					{
 						type: 'where',
 						operator: 'exists',
-						choice: 'join',
+						choice: 'exists',
+						relationType: 'belongsTo',
 						targetTable: 'categories',
 						foreignKey: 'category_id',
 						conditions: [
@@ -208,17 +203,16 @@ describe('JOIN filter compilation (F-005)', () => {
 
 			const result = compileToSql(plan);
 
-			// Both JOINs present
-			expect(result.sql).toMatch(/JOIN\s+authors/);
-			expect(result.sql).toMatch(/JOIN\s+categories/);
-			expect(result.sql).not.toContain('EXISTS');
-			// Both user conditions in WHERE
+			expect(result.sql).toBe(
+				'SELECT * FROM posts WHERE EXISTS (SELECT 1 FROM authors AS authors_exists_0 WHERE posts.author_id = authors_exists_0.id AND authors_exists_0.name = $1) AND EXISTS (SELECT 1 FROM categories AS categories_exists_1 WHERE posts.category_id = categories_exists_1.id AND categories_exists_1.slug = $2)',
+			);
+
 			expect(result.parameters).toEqual(['Alice', 'tech']);
 		});
 	});
 
 	describe('self-referential relation', () => {
-		it('should use alias for self-referential JOIN', () => {
+		it('should use a scoped alias for self-referential EXISTS', () => {
 			const plan: SimplifiedPlanReport = {
 				rootTable: 'categories',
 				decisions: [
@@ -226,7 +220,8 @@ describe('JOIN filter compilation (F-005)', () => {
 					{
 						type: 'where',
 						operator: 'exists',
-						choice: 'join',
+						choice: 'exists',
+						relationType: 'belongsTo',
 						targetTable: 'categories',
 						foreignKey: 'parent_id',
 						relationName: 'parent',
@@ -245,23 +240,24 @@ describe('JOIN filter compilation (F-005)', () => {
 
 			const result = compileToSql(plan);
 
-			expect(result.sql).toContain('JOIN');
-			// Should use alias to avoid ambiguity
-			expect(result.sql).toMatch(/AS\s+parent/i);
+			expect(result.sql).toBe(
+				'SELECT * FROM categories WHERE EXISTS (SELECT 1 FROM categories AS categories_exists_0 WHERE categories.parent_id = categories_exists_0.id AND categories_exists_0.name = $1)',
+			);
 		});
 	});
 
-	describe('mixed JOIN and EXISTS', () => {
-		it('should compile JOIN for choice=join and EXISTS for choice=exists', () => {
+	describe('to-one and to-many EXISTS', () => {
+		it('should compile EXISTS for both to-one and to-many filters', () => {
 			const plan: SimplifiedPlanReport = {
 				rootTable: 'posts',
 				decisions: [
 					{ type: 'select', column: '*' },
-					// belongsTo author → JOIN
+
 					{
 						type: 'where',
 						operator: 'exists',
-						choice: 'join',
+						choice: 'exists',
+						relationType: 'belongsTo',
 						targetTable: 'authors',
 						foreignKey: 'author_id',
 						conditions: [
@@ -274,7 +270,7 @@ describe('JOIN filter compilation (F-005)', () => {
 							},
 						],
 					} satisfies PlanDecision,
-					// hasMany comments → EXISTS
+
 					{
 						type: 'where',
 						operator: 'exists',
@@ -295,11 +291,9 @@ describe('JOIN filter compilation (F-005)', () => {
 
 			const result = compileToSql(plan);
 
-			// JOIN for authors
-			expect(result.sql).toMatch(/JOIN\s+authors/);
-			// EXISTS for comments
-			expect(result.sql).toContain('EXISTS');
-			expect(result.sql).toMatch(/comments/);
+			expect(result.sql).toBe(
+				'SELECT * FROM posts WHERE EXISTS (SELECT 1 FROM authors AS authors_exists_0 WHERE posts.author_id = authors_exists_0.id AND authors_exists_0.active = $1) AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts.id = comments_exists_1.post_id AND comments_exists_1.approved = $2)',
+			);
 		});
 	});
 });

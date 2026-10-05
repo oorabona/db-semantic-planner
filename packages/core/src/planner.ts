@@ -306,7 +306,6 @@ export function plan(
 	};
 
 	const opts: Required<PlanOptions> = {
-		forceFilterStrategy: options.forceFilterStrategy as 'exists' | 'join',
 		forceJoinType: options.forceJoinType as 'left' | 'inner',
 		enableCTEs: options.enableCTEs ?? true,
 		cteThreshold: options.cteThreshold ?? 2,
@@ -1069,12 +1068,6 @@ function processRelationFilter(
 
 		// Determine filter strategy (only for last relation in chain)
 		if (isLastInChain) {
-			const filterStrategy = determineFilterStrategy(
-				relation,
-				opts,
-				mode ?? 'some',
-			);
-
 			const decisionId = generateDecisionId(state, 'filter-strategy');
 			// Detect self-referential relation (source === target)
 			const isSelfRef = relation.source === relation.target;
@@ -1091,25 +1084,10 @@ function processRelationFilter(
 				id: decisionId,
 				type: 'filter-strategy',
 				context,
-				choice: filterStrategy,
-				reasoning: generateFilterReasoning(
-					relation,
-					filterStrategy,
-					mode,
-					isSelfRef,
-				),
-				alternatives: filterStrategy === 'exists' ? ['join'] : ['exists'],
+				choice: 'exists',
+				reasoning: generateFilterReasoning(relation, mode, isSelfRef),
+				alternatives: [],
 			});
-
-			// Check for potential row explosion warning
-			if (filterStrategy === 'join' && relation.cardinality === 'many') {
-				state.warnings.push({
-					code: 'POTENTIAL_ROW_EXPLOSION',
-					message: `Using JOIN on to-many relation "${relation.name}" may cause row multiplication`,
-					suggestion: `Consider using EXISTS strategy for relation "${relation.name}"`,
-					relatedDecision: decisionId,
-				});
-			}
 
 			// Process nested where on the final target
 			if (nestedWhere) {
@@ -1518,31 +1496,6 @@ function disambiguateRelation(
 // ============================================================================
 // Strategy Determination
 // ============================================================================
-
-function determineFilterStrategy(
-	relation: RelationIR,
-	opts: Required<PlanOptions>,
-	_mode: 'some' | 'every' | 'none',
-): 'exists' | 'join' {
-	// Forced strategy takes precedence
-	if (opts.forceFilterStrategy) {
-		return opts.forceFilterStrategy;
-	}
-
-	// Use relation hint if not auto
-	if (relation.filterStrategy !== 'auto') {
-		return relation.filterStrategy;
-	}
-
-	// Auto-determine based on cardinality and mode
-	if (relation.cardinality === 'one') {
-		return 'join';
-	}
-
-	// For cardinality 'many', EXISTS is generally better
-	// (avoids row explosion)
-	return 'exists';
-}
 
 /**
  * Resolved include strategy - the actual strategy to use (never 'auto').
@@ -2047,23 +2000,15 @@ function generateDecisionId(state: PlannerState, type: DecisionType): string {
 
 function generateFilterReasoning(
 	relation: RelationIR,
-	strategy: 'exists' | 'join',
 	mode?: 'some' | 'every' | 'none',
 	isSelfRef?: boolean,
 ): string {
 	const modeText = mode ? ` (mode: ${mode})` : '';
 	const selfRefText = isSelfRef ? ' [self-referential]' : '';
 
-	if (strategy === 'exists') {
-		return (
-			`Relation ${relation.source}.${relation.name} has cardinality "${relation.cardinality}"${modeText}${selfRefText} - ` +
-			`using EXISTS to avoid row explosion`
-		);
-	}
-
 	return (
 		`Relation ${relation.source}.${relation.name} has cardinality "${relation.cardinality}"${modeText}${selfRefText} - ` +
-		`using JOIN for efficient single-row access`
+		`relation predicates compile as EXISTS`
 	);
 }
 

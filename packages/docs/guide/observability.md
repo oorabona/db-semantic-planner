@@ -74,7 +74,7 @@ Common decision types:
 | Type | Description |
 |------|-------------|
 | `include-strategy` | Which SQL strategy was chosen for an `.include()` call |
-| `filter-strategy` | How a WHERE condition was compiled |
+| `filter-strategy` | Relation predicates use `exists`, with no alternatives |
 | `cte-extraction` | Whether a subquery was lifted into a CTE |
 | `join-type` | INNER vs LEFT JOIN for a relation |
 
