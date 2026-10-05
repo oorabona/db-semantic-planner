@@ -385,7 +385,7 @@ All standard filter helpers (`eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like`, `and
 - `packages/core/src/dx/query-builder-types.ts` — `join()` method signatures (overloads 1 and 2)
 - `packages/core/src/dx/query-builder.ts` — immutable `join()` implementation, builds `JoinIntent`
 - `packages/types/src/intent/query-intent.ts` — `JoinIntent` discriminated union (relation / table / batchValues modes)
-- `packages/adapter-pgsql/src/adapter-compiler-select.ts` — `compileJoinIntents()` translates `JoinIntent[]` to SQL JOIN clauses
+- `packages/adapter-pgsql/src/adapter-compiler-select.ts` — `compileJoinIntents()` lowers `SelectExecution.joins` to SQL JOIN clauses
 - `packages/adapter-pgsql/src/__tests__/join-api.test.ts` — SQL compilation tests (exact SQL assertions)
 - `packages/core/src/dx/__tests__/join.test.ts` — unit tests for intent shape, immutability, mode discrimination
 
@@ -399,3 +399,5 @@ All standard filter helpers (`eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like`, `and
 - **Right and full outer joins are not supported** — only `'inner'` and `'left'` are valid values for `type`.
 - **Dotted column notation in ON conditions** — use `'table.column'` (e.g. `'embeddings.id'`) to produce qualified column references in the ON clause. Unqualified names may be ambiguous when both sides of the join expose the same column name.
 - **Multiple joins nest left-to-right** — the SQL FROM clause wraps joins progressively: `((A JOIN B) JOIN C)`. This matches standard PostgreSQL left-associative join behavior and is transparent to the query result.
+
+A report with joins compiles only when planned in the same process.

@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest';
 import type { JoinIntent, QueryIntent } from '../../intent-ast.js';
 import { eq } from '../filters.js';
 import { createOrm } from '../orm.js';
-import { schema } from '../schema.js';
+import { ref, schema } from '../schema.js';
 import { createMockAdapter } from '../test-utils.js';
 
 // ---------------------------------------------------------------------------
@@ -24,10 +24,12 @@ import { createMockAdapter } from '../test-utils.js';
 const testSchema = schema({
 	calls: {
 		id: { type: 'integer', primaryKey: true },
-		callerId: { type: 'integer' },
-		calleeId: { type: 'integer' },
+		callerId: ref('users', { as: 'caller' }),
+		calleeId: ref('users', { as: 'callee' }),
+		callerFileId: ref('users', { as: 'callerFile' }),
 		content: 'string',
 	},
+	users: { id: { type: 'integer', primaryKey: true } },
 	embeddings: {
 		id: { type: 'integer', primaryKey: true },
 		content: 'string',

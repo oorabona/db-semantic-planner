@@ -1,4 +1,4 @@
-import type { IncludeExecution } from '@dbsp/types';
+import type { SelectExecution } from '@dbsp/types';
 import { getResolvedIncludeNode } from '@dbsp/types/internal';
 /**
  * Plan inspector: visual display of PlanReport data.
@@ -36,7 +36,7 @@ interface CteItem {
 }
 
 interface PlanData {
-	execution?: IncludeExecution | undefined;
+	execution?: SelectExecution | undefined;
 	rootTable?: string | undefined;
 	decisions?: readonly PlanDecision[] | undefined;
 	warnings?: readonly PlanWarning[] | undefined;

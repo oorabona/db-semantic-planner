@@ -49,7 +49,8 @@ const rootNames = [
 	'RangeId',
 	'ResolvedRange',
 	'ResolvedIncludeNode',
-	'IncludeExecution',
+	'SelectExecution',
+	'ResolvedJoin',
 	'RangeAllocator',
 ];
 const rootRuntime = [

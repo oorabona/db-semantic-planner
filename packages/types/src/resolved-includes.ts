@@ -89,7 +89,20 @@ export interface ResolvedIncludeNode {
 	};
 	readonly children: readonly ResolvedIncludeNode[];
 }
-export interface IncludeExecution {
+/** An explicit join resolved by the SELECT issuer. */
+export interface ResolvedJoin {
+	readonly intentPath: string;
+	readonly intentIndex: number;
+	readonly kind: 'relation' | 'table' | 'values';
+	readonly type: 'inner' | 'left';
+	readonly range: ResolvedRange;
+	readonly sourceRange: ResolvedRange;
+	readonly path?: ResolvedRelationPath;
+	readonly on?: WhereIntent;
+	readonly visibleRangeIds: readonly RangeId[];
+}
+export interface SelectExecution {
 	readonly rootRange: ResolvedRange;
+	readonly joins: readonly ResolvedJoin[];
 	readonly includes: readonly ResolvedIncludeNode[];
 }

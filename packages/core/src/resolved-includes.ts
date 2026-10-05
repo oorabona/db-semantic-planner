@@ -1,21 +1,24 @@
 import {
-	type IncludeExecution,
 	type IncludeIntent,
 	type ModelIR,
 	type PlanDecision,
 	type QueryIntent,
 	RangeAllocator,
 	type ResolvedIncludeNode,
+	type ResolvedJoin,
 	type ResolvedRange,
+	type SelectExecution,
 	toColumnList,
 } from '@dbsp/types';
 import {
+	belongsToManyJoinIncludeRefusal,
 	getTrustedNqlRelationFilterFields,
 	resolveDeclaredRelationKeys,
 	resolveDeclaredRelationPath,
 	resolveIncludeRelationName,
 } from '@dbsp/types/internal';
 import { singularize } from './conventions.js';
+import { InvalidOperationError } from './dx/errors.js';
 
 /** Called during planning or once after legacy boundary validation. Never by SQL emission. */
 export function resolveReportIncludes(
@@ -26,7 +29,7 @@ export function resolveReportIncludes(
 		defaultPk?: string;
 		deriveFk?: (table: string, pk: string) => string;
 	} = {},
-): IncludeExecution {
+): SelectExecution {
 	const allocator = new RangeAllocator();
 	const rootRange = allocator.allocate(intent.from, intent.from);
 	allocator.reserve(rootRange.alias);
@@ -34,14 +37,62 @@ export function resolveReportIncludes(
 		string,
 		{ target: ResolvedRange; output: ResolvedRange }
 	>();
-	for (const join of intent.joins ?? [])
-		allocator.reserve(
-			join.alias ??
-				join.batchValues?.alias ??
-				join.table ??
-				join.relation ??
-				intent.from,
-		);
+	const occupied = new Set([rootRange.alias]);
+	const joins: ResolvedJoin[] = (intent.joins ?? []).map(
+		(join, intentIndex) => {
+			const alias =
+				join.alias ?? join.relation ?? join.batchValues?.alias ?? join.table!;
+			if (occupied.has(alias))
+				throw new Error(`Query scope already binds qualifier '${alias}'.`);
+			occupied.add(alias);
+			let table = join.table ?? alias;
+			let path: ResolvedJoin['path'];
+			if (join.relation !== undefined) {
+				if (!model)
+					throw new Error(
+						`join('${join.relation}'): relation-mode join requires a model for FK resolution.`,
+					);
+				const relations = model.getRelationsFrom(intent.from);
+				const relation = relations.find((r) => r.name === join.relation);
+				if (!relation)
+					throw new Error(
+						`join('${join.relation}'): relation not found on table '${intent.from}'. Available: ${relations.map((r) => r.name).join(', ')}`,
+					);
+				if (relation.type === 'belongsToMany')
+					throw new InvalidOperationError(
+						'relation',
+						belongsToManyJoinIncludeRefusal(`${intent.from}.${relation.name}`),
+					);
+				const resolved = resolveDeclaredRelationPath(model, intent.from, [
+					join.relation,
+				]);
+				if (!resolved.ok)
+					throw new Error(
+						`join('${join.relation}'): relation not found on table '${intent.from}'. Available: ${relations.map((r) => r.name).join(', ')}`,
+					);
+				path = resolved;
+				table = resolved.targetTable;
+			}
+			const range = allocator.allocate(table, alias);
+			allocator.reserve(range.alias);
+			return {
+				intentPath: `join[${intentIndex}]`,
+				intentIndex,
+				kind:
+					join.relation !== undefined
+						? 'relation'
+						: join.batchValues
+							? 'values'
+							: 'table',
+				type: join.type,
+				range,
+				sourceRange: rootRange,
+				visibleRangeIds: [rootRange.id, range.id],
+				...(path && { path }),
+				...(join.on && { on: join.on }),
+			};
+		},
+	);
 	const generatedAliases = new Map<string, number>();
 	const byPath = new Map(
 		decisions
@@ -274,7 +325,7 @@ export function resolveReportIncludes(
 			};
 			return node;
 		});
-	return { rootRange, includes: visit(intent.include ?? [], rootRange) };
+	return { rootRange, joins, includes: visit(intent.include ?? [], rootRange) };
 }
 /** Include decisions retain observations only; resolved authority belongs to execution. */
 export function observeIncludeDecisions(

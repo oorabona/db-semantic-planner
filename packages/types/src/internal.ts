@@ -570,7 +570,7 @@ export function resolveIncludeRelationName(
 
 /** Resolve observational include decisions, including nested include join decisions. */
 export function getResolvedIncludeNode(
-	execution: import('./resolved-includes.js').IncludeExecution | undefined,
+	execution: import('./resolved-includes.js').SelectExecution | undefined,
 	decision: {
 		readonly type: string;
 		readonly context: { readonly nodeId?: string | undefined };

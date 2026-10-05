@@ -48,6 +48,27 @@ import {
 import type { WhereIntent } from '@dbsp/types';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
+/** ON conditions stay on model lowering until 3a-W. */
+export function isRelationLookupFreeJoinOn(condition: WhereIntent): boolean {
+	if (
+		condition.kind === 'exists' ||
+		condition.kind === 'notExists' ||
+		condition.kind === 'relationFilter'
+	)
+		return false;
+	if (
+		'field' in condition &&
+		typeof condition.field === 'string' &&
+		condition.field.includes('.')
+	)
+		return false;
+	if (condition.kind === 'and' || condition.kind === 'or')
+		return condition.conditions.every(isRelationLookupFreeJoinOn);
+	if (condition.kind === 'not')
+		return isRelationLookupFreeJoinOn(condition.condition);
+	return true;
+}
+
 const columns = {
 	id: { type: 'integer', primaryKey: true },
 	name: { type: 'text' },
@@ -203,7 +224,33 @@ function makePositions(
 		})),
 		{
 			name: 'manual-join-on',
-			run: (c) => orm.select('users').join('posts', { as: 'p', on: c }).dump(),
+			run: (c) => {
+				const report = orm
+					.select('users')
+					.join('posts', { as: 'p', on: c })
+					.plan();
+				const poisoned = new Proxy(model, {
+					get(target, property) {
+						if (property === 'getRelation' || property === 'getRelationsFrom')
+							return () => {
+								throw new Error('join relation lookup after planning');
+							};
+						const member = Reflect.get(target, property);
+						return typeof member === 'function' ? member.bind(target) : member;
+					},
+				});
+				const canonical = adapter.compile(report, { model });
+				const compiled = adapter.compile(report, {
+					model: isRelationLookupFreeJoinOn(c) ? poisoned : model,
+				});
+				if (
+					compiled.sql !== canonical.sql ||
+					JSON.stringify(compiled.parameters) !==
+						JSON.stringify(canonical.parameters)
+				)
+					throw new Error('poisoned join compilation differs');
+				return { sql: compiled.sql, params: compiled.parameters };
+			},
 		},
 		// orm.recursive(name, { base, step }) is the raw-CTE API and cannot express start.where.
 		{

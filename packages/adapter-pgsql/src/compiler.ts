@@ -415,6 +415,7 @@ function mergeDuplicateJoinIncludeDecisions(
  * Simplified PlanReport for the spike
  */
 export interface SimplifiedPlanReport {
+	readonly execution?: import('@dbsp/types').SelectExecution;
 	/** Executable root predicate, compiled after visible alias allocation. */
 	readonly rawWhere?: WhereIntent;
 	readonly rawHaving?: WhereIntent;
@@ -2543,7 +2544,7 @@ export class PlanCompiler {
 		decisions: readonly PlanDecision[],
 		plan: SimplifiedPlanReport,
 	): Map<PlanDecision, IncludeCompilationResult> {
-		this.reserveManualJoinAliases(decisions);
+		this.reserveManualJoinAliases(plan);
 		const includeResults = this.compileJoinIncludeAllocationPass(
 			decisions,
 			plan,
@@ -2565,26 +2566,20 @@ export class PlanCompiler {
 			}
 		};
 
+		for (const join of plan.execution?.joins ?? []) {
+			const alias = join.range.alias;
+			emittedAliases.set(alias, alias);
+			this.registerAliasAuthority(
+				queryLocal(alias),
+				queryLocal(join.range.table),
+			);
+		}
 		// First pass: retain every alias in the namespace actually emitted by FROM.
 		for (const decision of decisions) {
 			if (decision.type === 'includeStrategy') {
 				continue;
 			}
-			if (decision.type === 'join') {
-				const alias = decision.alias ?? decision.targetTable;
-				if (!alias) continue;
-				emittedAliases.set(alias, alias);
-				if (decision.targetTable) {
-					// Manual JOIN aliases are visible to SELECT expressions and ORDER BY
-					// before the JOIN node itself is emitted. Register their target now
-					// so all those references keep the alias spelling verbatim.
-					this.registerAliasAuthority(
-						queryLocal(alias),
-						queryLocal(decision.targetTable),
-					);
-				}
-				continue;
-			}
+
 			if (
 				decision.type === 'where' &&
 				decision.operator === 'exists' &&
@@ -2604,19 +2599,17 @@ export class PlanCompiler {
 			emittedAliases.set(alias, alias);
 		}
 
+		for (const join of plan.execution?.joins ?? []) {
+			const relation = join.path?.logicalSegments.join('.');
+			if (relation) registerRelationPath(relation, join.range.alias);
+		}
 		// Second pass: public relation paths resolve to their emitted alias and
 		// deliberately override a same-spelled emitted-alias key below.
 		for (const decision of decisions) {
 			if (decision.type === 'includeStrategy') {
 				continue;
 			}
-			if (decision.type === 'join') {
-				const alias = decision.alias ?? decision.targetTable;
-				if (alias && decision.relationName) {
-					registerRelationPath(decision.relationName, alias);
-				}
-				continue;
-			}
+
 			if (
 				decision.type === 'where' &&
 				decision.operator === 'exists' &&
@@ -2856,15 +2849,9 @@ export class PlanCompiler {
 		return where;
 	}
 
-	private reserveManualJoinAliases(decisions: readonly PlanDecision[]): void {
-		for (const decision of decisions) {
-			if (decision.type !== 'join') continue;
-
-			const alias = decision.alias ?? decision.targetTable;
-			if (!alias) continue;
-
-			this.usedJoinAliases.add(this.emittedJoinAlias(alias));
-		}
+	private reserveManualJoinAliases(plan: SimplifiedPlanReport): void {
+		for (const join of plan.execution?.joins ?? [])
+			this.usedJoinAliases.add(this.emittedJoinAlias(join.range.alias));
 	}
 
 	/**

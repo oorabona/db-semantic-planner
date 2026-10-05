@@ -268,10 +268,11 @@ export type {
 // Shared utility types
 
 export type {
-	IncludeExecution,
 	RangeId,
 	ResolvedIncludeNode,
+	ResolvedJoin,
 	ResolvedRange,
+	SelectExecution,
 } from './resolved-includes.js';
 export { RangeAllocator } from './resolved-includes.js';
 // ADR-0003 transition planner data contracts

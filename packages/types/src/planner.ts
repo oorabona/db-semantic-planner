@@ -191,8 +191,8 @@ export interface IncludePayloadShape {
 }
 
 export interface PlanReport {
-	/** Normative include execution issued by an in-process planner. */
-	readonly execution?: import('./resolved-includes.js').IncludeExecution;
+	/** Normative SELECT execution (root, explicit joins and includes) issued by an in-process planner. */
+	readonly execution?: import('./resolved-includes.js').SelectExecution;
 	/** Adapter-owned payload descriptors indexed by resolved include identity. */
 	readonly includePayloadsByNodeId?: Readonly<
 		Record<string, IncludePayloadShape>
