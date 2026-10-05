@@ -3100,7 +3100,7 @@ describe('PgAdapter', () => {
 			);
 
 			expect(() => adapter.compile(plan)).toThrow(
-				"cannot enumerate wildcard keys for opaque target 'orders'",
+				'External report with includes requires a model',
 			);
 		});
 
@@ -3150,9 +3150,7 @@ describe('PgAdapter', () => {
 			);
 
 			expect(() => adapter.compile(plan)).toThrow(
-				new Error(
-					"Include payload 'orders' cannot establish read conversions for column 'anything' without a compile model.",
-				),
+				new Error('External report with includes requires a model'),
 			);
 		});
 

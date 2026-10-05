@@ -35,10 +35,13 @@ export function requireIncludePayloads(
 			...new Set(
 				resolved.execution.includes.map((node) => {
 					const payload = resolved.includePayloadsByNodeId![node.nodeId];
-					if (!payload)
-						throw new Error(
+					if (!payload) {
+						const error = new Error(
 							`Include hydration '${node.publicKey}' requires compiled includePayloads; supply the compiled query hydrationPlan.`,
 						);
+						error.name = 'MissingIncludePayloadShapeError';
+						throw error;
+					}
 					return payload;
 				}),
 			),

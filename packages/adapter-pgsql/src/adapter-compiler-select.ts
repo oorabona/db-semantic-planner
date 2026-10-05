@@ -10,7 +10,7 @@ import { lowerResolvedIncludes } from './resolved-include-decisions.js';
  * @internal
  */
 
-import { POSTGRESQL_CAPABILITIES } from '@dbsp/core';
+import { POSTGRESQL_CAPABILITIES, plan as replan } from '@dbsp/core';
 import {
 	countDistinctRelationPathsByName,
 	normalizeRecursiveIncludeOptions,
@@ -37,7 +37,9 @@ import type {
 import { resolveOutputReadHandling, toColumnList } from '@dbsp/types';
 import {
 	belongsToManyJoinIncludeRefusal,
+	brandPlannedReport,
 	getTrustedNqlRelationFilterFields,
+	isPlannedReport,
 	type Mutable,
 	resolveIncludeRelationName,
 } from '@dbsp/types/internal';
@@ -1406,6 +1408,33 @@ export function compileSelectEnvelope<T = unknown>(
 	const schemaName = deps.schemaName;
 
 	const resolvedModelForCompiler = options?.model ?? deps.model;
+	if (
+		!isPlannedReport(plan) &&
+		(plan.intent?.include?.length || plan.execution?.includes.length)
+	) {
+		if (!resolvedModelForCompiler)
+			throw new Error('External report with includes requires a model');
+		if (plan.execution || plan.planningInputs) {
+			const planned = replan(
+				plan.intent,
+				resolvedModelForCompiler,
+				plan.planningInputs,
+			);
+			if (plan.execution) {
+				const difference = firstExecutionDifference(
+					planned.execution,
+					plan.execution,
+					'execution',
+				);
+				if (difference)
+					throw new Error(`External report execution differs at ${difference}`);
+			}
+			plan = {
+				...plan,
+				...(planned.execution && { execution: planned.execution }),
+			};
+		}
+	}
 	const batchValuesSource = plan.intent?.batchValuesSource;
 	const compilerScope =
 		batchValuesSource === undefined
@@ -1574,7 +1603,7 @@ export function compileSelectEnvelope<T = unknown>(
 					(d) => resolvedByOriginal.get(d) ?? d,
 				),
 			};
-			planForCompilation = {
+			planForCompilation = brandPlannedReport({
 				...planForCompilation,
 				execution: resolveReportIncludes(
 					{ ...execIntent, from: execIntent.from ?? plan.rootTable },
@@ -1583,14 +1612,20 @@ export function compileSelectEnvelope<T = unknown>(
 					{ defaultPk: deps.defaultPk, deriveFk: deps.deriveFk },
 				),
 				decisions: observeIncludeDecisions(planForCompilation.decisions),
-			};
+			});
 		}
-		validateExecutionIncludes(
-			planForCompilation.execution!,
-			execIntent,
-			resolvedModelForCompiler,
-		);
 
+		const includeStrategies = new Map<string, string>();
+		const indexIncludeStrategies = (
+			nodes: readonly import('@dbsp/types').ResolvedIncludeNode[],
+		) => {
+			for (const node of nodes) {
+				includeStrategies.set(node.intentPath, node.strategy);
+				indexIncludeStrategies(node.children);
+			}
+		};
+		indexIncludeStrategies(planForCompilation.execution!.includes);
+		assertSupportedIncludeWhere(execIntent.include, includeStrategies);
 		if (execIntent.where) {
 			assertNoRecursiveRootRelations(execIntent.where);
 			assertNoManyToManyRootRelations(
@@ -1733,12 +1768,12 @@ export function compileSelectEnvelope<T = unknown>(
 		);
 		hydrationPlan =
 			includePayloads.length > 0
-				? {
+				? brandPlannedReport({
 						...planForCompilation,
 						intent: plan.intent,
 						includePayloads,
 						includePayloadsByNodeId: payloadsByNodeId(enrichedUnifiedDecisions),
-					}
+					})
 				: undefined;
 
 		const deduplicatedDecisions =
@@ -1873,181 +1908,37 @@ function payloadsByNodeId(
 	visit(decisions);
 	return result;
 }
-function validateExecutionIncludes(
-	execution: import('@dbsp/types').IncludeExecution,
-	intent: QueryIntent,
-	model: ModelIR | undefined,
-): void {
-	const strategies = new Map<string, string>();
-	const inputs = (
-		nodes: readonly import('@dbsp/types').ResolvedIncludeNode[],
-	): IncludeIntent[] =>
-		nodes.map((node) => {
-			strategies.set(node.intentPath, node.strategy);
-			return {
-				relation: node.publicKey,
-				...(node.predicate && { where: node.predicate.condition }),
-				include: inputs(node.children),
-			};
-		});
-	const resolvedInputs = inputs(execution.includes);
-	const byPath = new Map<string, import('@dbsp/types').ResolvedIncludeNode>();
-	const indexNodes = (
-		nodes: readonly import('@dbsp/types').ResolvedIncludeNode[],
-	) => {
-		for (const node of nodes) {
-			byPath.set(node.intentPath, node);
-			indexNodes(node.children);
-		}
-	};
-	indexNodes(execution.includes);
-	const validateAuthored = (
-		includes: readonly IncludeIntent[],
-		parent = '',
-		logicalParent = '',
-	) => {
-		for (const [index, include] of includes.entries()) {
-			const path = `${parent}include[${index}]`;
-			const name = include.via ?? include.relation;
-			const fullPath = logicalParent ? `${logicalParent}.${name}` : name;
-			const node = byPath.get(path);
-			if (!node)
-				throw new Error(
-					`Invalid include: Unknown relation "${name}" from table "${execution.rootRange.table}" at "${fullPath}"`,
-				);
-			validateIncludeInput(include, path, fullPath);
-			const relation = node.path.relations[0];
-			if (relation)
-				validateRecursiveIncludeStrategy(
-					include,
-					relation,
-					path,
-					fullPath,
-					POSTGRESQL_CAPABILITIES,
-					node.strategy,
-					intent,
-				);
-			validateIncludeOptions(
-				include,
-				node.strategy,
-				path,
-				fullPath,
-				!!node.recursion,
-			);
-			if (node.strategy === 'json_agg' || node.strategy === 'lateral') {
-				const order = validateIncludeOrdering(
-					include,
-					model,
-					node.targetRange.table,
-					fullPath,
-					node.ordering.usesFallback ? undefined : node.ordering.fallback,
-				);
-				if (
-					order &&
-					(JSON.stringify(order.columns) !==
-						JSON.stringify(node.ordering.fallback) ||
-						order.fallback !== node.ordering.usesFallback)
-				)
-					throw new Error(
-						`Include ${path}(${fullPath}) resolved ordering does not match its intent`,
-					);
-			}
-
-			validateAuthored(include.include ?? [], `${path}.`, fullPath);
-		}
-	};
-	validateAuthored(intent.include ?? []);
-	assertSupportedIncludeWhere(intent.include, strategies);
-	assertSupportedIncludeWhere(resolvedInputs, strategies);
-
+/** Compare wire-normalized values (undefined is omitted), independent of key order. */
+function firstExecutionDifference(
+	expected: unknown,
+	actual: unknown,
+	path: string,
+): string | undefined {
+	if (Object.is(expected, actual)) return undefined;
 	if (
-		(intent.from && execution.rootRange.table !== intent.from) ||
-		!execution.rootRange.id ||
-		!execution.rootRange.alias
+		expected === null ||
+		actual === null ||
+		typeof expected !== 'object' ||
+		typeof actual !== 'object'
 	)
-		throw new Error('Invalid resolved include root range');
-	const ranges = new Map<string, import('@dbsp/types').ResolvedRange>();
-	const registerRange = (range: import('@dbsp/types').ResolvedRange) => {
-		const previous = ranges.get(range.id);
-		if (
-			!range.id ||
-			!range.table ||
-			!range.alias ||
-			(previous &&
-				(previous.table !== range.table || previous.alias !== range.alias))
-		)
-			throw new Error(`Invalid resolved range '${range.id}'`);
-		ranges.set(range.id, range);
-	};
-	registerRange(execution.rootRange);
-	const ids = new Set<string>();
-	const visit = (
-		nodes: readonly import('@dbsp/types').ResolvedIncludeNode[],
-		source: import('@dbsp/types').ResolvedRange,
-		parentStrategy?: string,
-		parent = '',
-	) => {
-		for (const node of nodes) {
-			if (ids.has(node.nodeId))
-				throw new Error(`Duplicate resolved include node '${node.nodeId}'`);
-			ids.add(node.nodeId);
-			for (const range of [
-				node.sourceRange,
-				node.targetRange,
-				node.outputRange,
-				...(node.cteRange ? [node.cteRange] : []),
-				...(node.recursiveRanges
-					? [node.recursiveRanges.walk, node.recursiveRanges.next]
-					: []),
-			])
-				registerRange(range);
-			if (
-				node.path.hops.some(
-					(hop, index) =>
-						hop.fromTable !== node.hopRanges[index]?.from.table ||
-						hop.toTable !== node.hopRanges[index]?.to.table,
-				) ||
-				(node.predicate &&
-					(node.predicate.currentRange.id !== node.targetRange.id ||
-						node.predicate.outerRange.id !== execution.rootRange.id)) ||
-				!['flat', 'nested'].includes(node.outputMode) ||
-				node.cardinality !==
-					(node.relationType === 'belongsTo' || node.relationType === 'hasOne'
-						? 'one'
-						: 'many')
-			)
-				throw new Error(
-					`Invalid resolved include '${node.nodeId}' binding or cardinality`,
-				);
-			validateResolvedIncludeStrategy(node.strategy, POSTGRESQL_CAPABILITIES);
-			if (
-				node.sourceRange.id !== source.id ||
-				node.sourceRange.table !== source.table ||
-				node.path.targetTable !== node.targetRange.table ||
-				node.path.hops.length !== node.hopRanges.length ||
-				node.path.hops.some(
-					(hop) =>
-						hop.pairs.length === 0 ||
-						hop.pairs.some((pair) => !pair.fromColumn || !pair.toColumn),
-				)
-			)
-				throw new Error(
-					`Invalid resolved include '${node.nodeId}' ranges or correlation`,
-				);
-			const path = `${parent}include[${node.intentPath.match(/include\[(\d+)\]$/)?.[1]}](${node.publicKey})`;
-			if (
-				parentStrategy &&
-				(parentStrategy === 'cte' || node.strategy !== parentStrategy)
-			)
-				throw new Error(
-					`Nested include at ${path} has parent strategy ${parentStrategy} and child strategy ${node.strategy}; mixed strategies and includes under cte are refused (oorabona/db-semantic-planner#894).`,
-				);
-			if (node.predicate && node.strategy !== 'join')
-				throw new Error(
-					`Include where is not supported for strategy ${node.strategy} at ${path}.where (oorabona/db-semantic-planner#892).`,
-				);
-			visit(node.children, node.outputRange, node.strategy, `${path}.`);
-		}
-	};
-	visit(execution.includes, execution.rootRange);
+		return path;
+	if (Array.isArray(expected) !== Array.isArray(actual)) return path;
+	const left = expected as Record<string, unknown>;
+	const right = actual as Record<string, unknown>;
+	for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
+		const child = Array.isArray(expected)
+			? `${path}[${key}]`
+			: `${path}.${key}`;
+		if (left[key] === undefined && right[key] === undefined) continue;
+		if (Object.hasOwn(left, key) !== Object.hasOwn(right, key)) return child;
+		const difference = firstExecutionDifference(left[key], right[key], child);
+		if (difference) return difference;
+	}
+	if (
+		Array.isArray(expected) &&
+		Array.isArray(actual) &&
+		expected.length !== actual.length
+	)
+		return `${path}.length`;
+	return undefined;
 }

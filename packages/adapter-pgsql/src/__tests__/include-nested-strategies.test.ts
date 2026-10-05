@@ -192,7 +192,7 @@ it('#895 preflight accesses include predicates linearly', () => {
 				: d,
 		);
 		// Refuse at the last include, after all preflight lookups but before SQL lowering.
-		const last = includes[count - 1]!;
+		const last = p.intent.include![count - 1]!;
 		Object.defineProperty(last, 'where', { value: or() });
 		const lookups = vi.spyOn(Map.prototype, 'get');
 		try {

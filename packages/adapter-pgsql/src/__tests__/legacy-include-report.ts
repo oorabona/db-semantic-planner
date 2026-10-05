@@ -2,6 +2,7 @@ import type { PlanReport, ResolvedIncludeNode } from '@dbsp/types';
 /** External legacy-report fixtures explicitly relinquish the native execution authority. */
 export function asLegacyReport(report: PlanReport): PlanReport {
 	const { execution, ...legacy } = report;
+	delete legacy.planningInputs;
 	if (!execution) return report;
 	const nodes = (
 		items: readonly ResolvedIncludeNode[],
@@ -12,6 +13,7 @@ export function asLegacyReport(report: PlanReport): PlanReport {
 	);
 	return {
 		...legacy,
+		intent: structuredClone(report.intent),
 		decisions: report.decisions.map((decision) => {
 			const node = decision.context.nodeId && byId.get(decision.context.nodeId);
 			if (!node) return decision;

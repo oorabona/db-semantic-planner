@@ -47,9 +47,9 @@ describe('resolved recursive include edges (#891)', () => {
 	});
 });
 
-// Execution reports are validated, then consumed as authored; observations cannot remint them.
+// External execution must match re-planning; branded reports keep their authority.
 describe('resolved include boundary authority', () => {
-	it('uses a report-carried range alias without re-deriving it', () => {
+	it('refuses an external report-carried range alias', () => {
 		const report = orm.select('nodes').include('parent').plan();
 		const node = report.execution!.includes[0]!;
 		const targetRange = { ...node.targetRange, alias: 'pinned_parent' };
@@ -64,23 +64,11 @@ describe('resolved include boundary authority', () => {
 				},
 			],
 		};
-		const poisoned = new Proxy(model, {
-			get(target, property) {
-				if (property === 'getRelation' || property === 'getRelationsFrom')
-					return () => {
-						throw new Error('unexpected relation lookup');
-					};
-				const value = Reflect.get(target, property);
-				return typeof value === 'function' ? value.bind(target) : value;
-			},
-		});
-		const compiled = createPgCompileOnlyAdapter({ model: poisoned }).compile({
-			...report,
-			execution,
-			decisions: [],
-		});
-		expect(compiled.sql).toContain('FROM nodes AS pinned_parent');
-		expect(compiled.hydrationPlan!.execution).toBe(execution);
+		expect(() =>
+			adapter.compile({ ...report, execution, decisions: [] }),
+		).toThrow(
+			'External report execution differs at execution.includes[0].hopRanges[0].to.alias',
+		);
 	});
 	it('keeps every include observation free of execution keys', () => {
 		const report = orm
@@ -97,7 +85,7 @@ describe('resolved include boundary authority', () => {
 			['intentPath', 'nodeId'],
 		]);
 	});
-	it('refuses a malformed physical correlation without consulting relations', () => {
+	it('refuses a malformed external physical correlation', () => {
 		const report = orm.select('nodes').include('parent').plan();
 		const node = report.execution!.includes[0]!;
 		expect(() =>
@@ -116,7 +104,9 @@ describe('resolved include boundary authority', () => {
 					],
 				},
 			}),
-		).toThrow('ranges or correlation');
+		).toThrow(
+			'External report execution differs at execution.includes[0].path.hops[0].pairs[0]',
+		);
 	});
 	it('reserves explicit names and assigns distinct identities across scopes', () => {
 		const ranges = new RangeAllocator(['parent']);

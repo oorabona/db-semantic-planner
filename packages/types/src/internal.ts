@@ -591,3 +591,44 @@ export function getResolvedIncludeNode(
 	};
 	return find(execution?.includes ?? []);
 }
+
+/** In-process planning authority; intentionally lost by JSON and object spread. */
+const PLANNED_REPORT = Symbol.for('@dbsp/types/plannedReport');
+
+export function isPlannedReport(
+	report: import('./planner.js').PlanReport,
+): boolean {
+	return (
+		Object.hasOwn(report, PLANNED_REPORT) &&
+		Reflect.get(report, PLANNED_REPORT) === true
+	);
+}
+
+function freezePlanningValue(
+	value: unknown,
+	seen = new WeakSet<object>(),
+): void {
+	if (value === null || typeof value !== 'object' || seen.has(value)) return;
+	seen.add(value);
+	// Do not evaluate accessors in opaque parameter values during planning.
+	for (const descriptor of Object.values(
+		Object.getOwnPropertyDescriptors(value),
+	)) {
+		if ('value' in descriptor) freezePlanningValue(descriptor.value, seen);
+	}
+	Object.freeze(value);
+}
+
+export function brandPlannedReport<T extends import('./planner.js').PlanReport>(
+	report: T,
+): T {
+	freezePlanningValue(report.intent);
+	freezePlanningValue(report.executableIntent);
+	freezePlanningValue(report.execution);
+	freezePlanningValue(report.planningInputs);
+	Object.defineProperty(report, PLANNED_REPORT, {
+		value: true,
+		enumerable: false,
+	});
+	return Object.freeze(report);
+}

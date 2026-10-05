@@ -200,7 +200,9 @@ describe('#911 relation resolution precedence', () => {
 					node.strategy,
 				]),
 			).toEqual([[relation, target, 'join']]);
-			const { execution: _execution, ...wire } = report;
+			const wire = { ...report };
+			delete wire.execution;
+			delete wire.planningInputs;
 			const legacy = { ...wire, decisions: [] };
 
 			const adapter = createPgCompileOnlyAdapter({ model: precedenceModel });

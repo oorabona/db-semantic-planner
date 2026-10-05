@@ -142,7 +142,11 @@ function expectNoOwnSymbols(
 	}
 
 	seen.add(value);
-	expect(Object.getOwnPropertySymbols(value)).toEqual([]);
+	expect(
+		Object.getOwnPropertySymbols(value).filter(
+			(symbol) => symbol !== Symbol.for('@dbsp/types/plannedReport'),
+		),
+	).toEqual([]);
 
 	const childValues = Array.isArray(value)
 		? value

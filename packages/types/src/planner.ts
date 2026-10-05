@@ -191,6 +191,12 @@ export interface IncludePayloadShape {
 }
 
 export interface PlanReport {
+	/**
+	 * Normalized planner inputs retained for external re-planning:
+	 * forceFilterStrategy, forceJoinType, enableCTEs, cteThreshold,
+	 * maxIncludeDepth, disambiguate, defaultIncludeStrategy, dialectCapabilities.
+	 */
+	readonly planningInputs?: Readonly<PlanOptions>;
 	/** Normative include execution; absent only on legacy external reports. */
 	readonly execution?: import('./resolved-includes.js').IncludeExecution;
 	/** Adapter-owned payload descriptors indexed by resolved include identity. */

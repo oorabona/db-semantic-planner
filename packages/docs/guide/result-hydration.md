@@ -225,3 +225,5 @@ Every root SELECT label owns its key, including function labels and expanded sta
 Compilation resolves these keys before generating SQL. Exact duplicate source/key requests deduplicate; two different owners of one public key fail with the payload path and key. A wildcard include over a target whose columns cannot be enumerated also fails.
 
 Scalar expression projections retain join include payloads. Expression projections containing a call in `NQL_SELECT_AGGREGATE_FUNCTIONS`, including nested calls, are aggregation. Join includes are refused when aggregation, `groupBy` or `DISTINCT` would drop their data; use `.join()` for relational columns, grouping or ordering.
+
+External reports with includes are re-planned from their intent, model and recorded planning inputs; any supplied `execution` must match the re-planned execution.

@@ -26,6 +26,7 @@ import type {
 import { resolveJsonAggOrderKey, toColumnList } from '@dbsp/types';
 import {
 	belongsToManyJoinIncludeRefusal,
+	brandPlannedReport,
 	dropsJoinIncludeData,
 	resolveDeclaredRelationPath,
 	resolveIncludeRelationName,
@@ -440,6 +441,7 @@ export function plan(
 
 	const report: PlanReport = {
 		rootTable: intent.from,
+		planningInputs: { ...opts, disambiguate: { ...opts.disambiguate } },
 		execution: resolveReportIncludes(intent, state.decisions, model),
 		decisions: Object.freeze(observeIncludeDecisions(state.decisions)),
 		warnings: Object.freeze(state.warnings.slice()),
@@ -454,7 +456,7 @@ export function plan(
 		metadata,
 	};
 
-	return Object.freeze(report);
+	return brandPlannedReport(report);
 }
 
 // ============================================================================

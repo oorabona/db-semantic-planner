@@ -37,6 +37,7 @@ import type {
 } from '@dbsp/types';
 import { resolveJsonAggOrderKey } from '@dbsp/types';
 import {
+	brandPlannedReport,
 	explainUnsupportedNqlBindingIncludeHop,
 	getTrustedNqlRelationFilterFields,
 	NQL_INTERNAL_COMPILER_OPTIONS,
@@ -733,7 +734,11 @@ export function createBindingFinalPlan(
 			),
 		];
 	});
-	return {
+	return brandPlannedReport({
+		planningInputs: {
+			defaultIncludeStrategy: 'json_agg',
+			...(dialectCapabilities && { dialectCapabilities }),
+		},
 		rootTable: intent.from,
 		execution: resolveReportIncludes(intent, decisions, model),
 		decisions: observeIncludeDecisions(decisions),
@@ -745,7 +750,7 @@ export function createBindingFinalPlan(
 			relationsAnalyzed: 0,
 			isAmbiguous: false,
 		},
-	};
+	});
 }
 
 function bindingFinalPlanHasIncludes(planReport: PlanReport): boolean {

@@ -25,6 +25,7 @@ import type {
 	PlanReport,
 	QueryIntent,
 } from '@dbsp/types';
+import { isPlannedReport } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -224,11 +225,11 @@ const record = (
 		});
 		let compiled = createPgCompileOnlyAdapter({
 			model:
-				process.env.POISON_INCLUDE_RELATIONS === '1' && p.execution
+				process.env.POISON_INCLUDE_RELATIONS === '1' && isPlannedReport(p)
 					? poisoned
 					: model,
 		}).compile(p);
-		if (process.env.POISON_INCLUDE_RELATIONS === '1') {
+		if (process.env.POISON_INCLUDE_RELATIONS === '1' && isPlannedReport(p)) {
 			const canonical = p.execution ? p : compiled.hydrationPlan;
 			if (!canonical?.execution)
 				throw new Error('canonical execution is unavailable');

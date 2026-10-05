@@ -252,9 +252,7 @@ describe('#915 / #917 / #927 public include contract', () => {
 		unmodeled.decisions = [];
 		expect(
 			errorOf(() => createPgCompileOnlyAdapter().compile(unmodeled)).message,
-		).toBe(
-			'Include include[0](author) has no resolved include-strategy decision',
-		);
+		).toBe('External report with includes requires a model');
 	});
 
 	it('normalized collisions expose candidates and include path in both planning modes and compilation', () => {

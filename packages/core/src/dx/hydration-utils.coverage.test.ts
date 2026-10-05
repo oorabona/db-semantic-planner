@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	hydrateJsonAggIncludes,
 	planForJsonAggHydration,
+	requireIncludePayloads,
 } from './hydration-utils.js';
 
 const shape: IncludePayloadShape = {
@@ -164,4 +165,19 @@ it('names the nested public key when only its decision requires missing payloads
 	error.name = 'MissingIncludePayloadShapeError';
 	expect(() => hydrateJsonAggIncludes([], planned)).toThrow(error);
 	expect(() => planForJsonAggHydration(planned)).toThrow(error);
+});
+
+it('names the missing indexed payload error', () => {
+	const indexed = {
+		decisions: [],
+		includePayloadsByNodeId: {},
+		execution: { includes: [{ nodeId: 'include[0]', publicKey: 'posts' }] },
+	} as unknown as PlanReport;
+	expect(() => requireIncludePayloads(indexed)).toThrow(
+		expect.objectContaining({
+			name: 'MissingIncludePayloadShapeError',
+			message:
+				"Include hydration 'posts' requires compiled includePayloads; supply the compiled query hydrationPlan.",
+		}),
+	);
 });
