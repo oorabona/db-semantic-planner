@@ -3,13 +3,14 @@
  * @internal Extracted from comparison, in, like, null handlers (PGSQL-008, PGSQL-009).
  */
 
-import { isParamIntent } from '@dbsp/types';
+import { isParamIntent, type ResolvedColumnOperand } from '@dbsp/types';
 import { isFieldRef } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import { nullConstNode } from '../../ast-helpers.js';
 import {
 	declaredRelationBindingFor,
 	type RelationBinding,
+	relationBinding,
 	relationBindingFor,
 } from '../../binding-registry.js';
 import { mapModelIRTypeToPgBase } from '../../compiler-utils.js';
@@ -20,10 +21,15 @@ import {
 } from '../../db-type.js';
 import { normalizeParamIntent, unwrapParamIntent } from '../../param-intent.js';
 import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
+import {
+	requireRelationTargetColumn,
+	resolveRelationTarget,
+} from '../../relation-target-projection.js';
 import { queryLocal, type SqlIdentifier } from '../../sql-identifier.js';
 import type { CompilerContext, CompilerState } from '../types.js';
 import {
 	currentExpressionBinding,
+	expressionColumnIdentifier,
 	expressionColumnRef,
 	expressionQualifiedColumnRef,
 	expressionResolvedColumnRef,
@@ -289,4 +295,47 @@ export function resolveColumnAbstractPgBase(
 	const column = resolveWhereModelColumn(columnName, ctx);
 	if (!column) return undefined;
 	return mapModelIRTypeToPgBase(column.type);
+}
+
+/** The only model/name lookup seam for a resolved WHERE column. */
+export function resolveAddressedColumn(
+	operand: ResolvedColumnOperand,
+	ctx: CompilerContext,
+	correlationRelation?: string,
+) {
+	const range = operand.range;
+	const source = relationBindingFor(ctx.scope, queryLocal(range.table));
+	const binding =
+		relationBindingFor(ctx.scope, queryLocal(range.alias)) ??
+		(source && source.kind !== 'declared-table'
+			? { ...source, qualifier: queryLocal(range.alias) }
+			: relationBinding({
+					kind: 'declared-table',
+					logicalTable: range.table,
+					qualifier: queryLocal(range.alias),
+				}));
+	if (correlationRelation !== undefined)
+		requireRelationTargetColumn(
+			resolveRelationTarget(queryLocal(range.table), ctx),
+			queryLocal(operand.column),
+			'join key',
+			correlationRelation,
+		);
+	const identifier =
+		operand.column === '*'
+			? queryLocal('*')
+			: expressionColumnIdentifier(
+					operand.column,
+					binding,
+					ctx.declaredNames,
+					ctx.dbCasing,
+				);
+	const logicalTable = binding.logicalTable;
+	const column =
+		logicalTable === undefined
+			? undefined
+			: ctx.model
+					?.getTable(logicalTable)
+					?.columns.find((c) => c.name === operand.column);
+	return { binding, identifier, column };
 }

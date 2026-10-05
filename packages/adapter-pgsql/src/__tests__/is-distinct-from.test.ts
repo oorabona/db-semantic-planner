@@ -43,7 +43,6 @@ import { convertWhereCondition } from '../intent-to-decisions.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { deparse } from '../pgsql-deparser.js';
 import { createPgPhysicalModel } from '../physical-model/index.js';
-import { mapComparisonOperator } from '../plan-decision-extractor.js';
 
 const testSchema = schema({
 	t: {
@@ -364,10 +363,6 @@ describe('#462 isDistinctFrom', () => {
 					createWhereDispatcher(compileWhereIntent),
 				),
 			).toThrow(`No WHERE handler registered for operator: ${unknown}`);
-
-			expect(() => mapComparisonOperator(unknown)).toThrow(
-				`No WHERE handler registered for operator: ${unknown}`,
-			);
 		}
 
 		expect(() =>

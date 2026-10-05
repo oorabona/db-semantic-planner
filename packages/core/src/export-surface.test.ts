@@ -60,6 +60,9 @@ const includeValidationExports = [
 ];
 const internalNames = [
 	'resolveReportIncludes',
+	'resolveSelectWhere',
+	'conditionNeedsPlanning',
+	'externalConditionRefusal',
 	'observeIncludeDecisions',
 	...includeValidationExports,
 	...names(before.internal.declarations),
@@ -71,6 +74,9 @@ const movedRuntime = before.root.runtime.filter((name) =>
 );
 const internalRuntime = [
 	'resolveReportIncludes',
+	'resolveSelectWhere',
+	'conditionNeedsPlanning',
+	'externalConditionRefusal',
 	'observeIncludeDecisions',
 	...includeValidationExports,
 	...before.internal.runtime,

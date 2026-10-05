@@ -12,7 +12,7 @@ differ fundamentally in *where the schema knowledge comes from*.
   the safe, type-guided path when the FK is declared in the schema.
 
 - **`rawExists(subquery(...))`** — you build the subquery explicitly, with control
-  over the `SELECT` list, `WHERE` clause, and any inner aggregation. Inner table
+  over the supported `SELECT` list and `WHERE` clause. Unsupported body modifiers are refused at `plan()`. Inner table
   aliases are generated distinctly within PostgreSQL’s 63-byte limit. The wrapper
   does not correlate its target with the parent. Relation predicates inside the
   body still resolve declared keys and model casts. This is the escape hatch for
@@ -39,7 +39,7 @@ Use this table to decide which API to reach for:
 | FK-declared relation + `rawExists` + `outerRef` | `rawExists(subquery('files').select('id').where(gt(..., outerRef(...))))` | Works in query WHERE |
 | No FK (polymorphic), plain filter | `rawExists(subquery('auditLog').select('id').where(eq('entityType', 'login')))` | Works |
 | No FK + `outerRef` correlation inside `rawExists` | `rawExists(subquery('t').select('id').where(eq('col', outerRef(...))))` | Works in query WHERE |
-| No FK + `exists('table', { where })` | `exists('auditLog', { where: ... })` from unrelated table | Silently drops WHERE today |
+| No FK + `exists('table', { where })` | `exists('auditLog', { where: ... })` from unrelated table | Refuses undeclared relation at `plan()` |
 
 ---
 
@@ -159,38 +159,9 @@ const dump = (__rawExistsOrm as any)
 // params: ["login"]
 ```
 
-### Why exists() does NOT work for this case today
+### Undeclared relations refuse during planning
 
-Passing an undeclared relation name to `exists()` silently drops the entire `WHERE`
-clause — you get a plain `SELECT * FROM users` with no filter:
-
-```typescript
-// doctest: skip — illustrative: shows the silent-drop bug for undeclared relations
-import { createOrm, exists, eq, schema } from '@dbsp/core';
-import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
-
-const __existsSilentDb = schema({
-  users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
-  auditLog: { id: { type: 'integer', primaryKey: true }, entityType: 'text', entityId: 'integer' },
-} as const);
-
-const __existsSilentOrm = createOrm({
-  schema: __existsSilentDb,
-  adapter: createPgCompileOnlyAdapter(),
-});
-
-const dump = (__existsSilentOrm as any)
-  .select('users')
-  // auditLog has no ref() to users → planner cannot resolve → WHERE dropped silently
-  .where(exists('auditLog', { where: eq('entityType', 'login') }))
-  .dump();
-
-// dump.sql === 'SELECT users.* FROM users'   ← no WHERE clause at all
-```
-
-This is a known limitation tracked in TODO.md — ideally `exists()` should throw when
-the relation is not declared. Until then, always use `rawExists(subquery(...))` for
-polymorphic or ad-hoc join targets.
+`exists('auditLog', { where: ... })` requires a declared relation from the source table. Without it, `plan()` refuses and suggests `rawExists(subquery(...))`; `.dump()` reports the same refusal before SQL emission. A declared relation also needs declared foreign keys. Use the explicit subquery above for the polymorphic case.
 
 ---
 
@@ -198,23 +169,15 @@ polymorphic or ad-hoc join targets.
 
 ### Correlation scope
 
-Query WHERE subquery bodies support `outerRef()` for scalar comparisons, `inSubquery()` and `rawExists()`. Nested same-table `rawExists()` bodies compile with distinct generated aliases and share parameter numbering. Unqualified `outerRef()` binds to the immediately enclosing query; qualified `outerRef('posts.id')` searches enclosing queries nearest first. An exact emitted qualifier wins; otherwise a logical-table match requires exactly one range of that table in that query. Multiple ranges are refused as ambiguous, naming their aliases; no match in any enclosing query is refused as not visible. A manual `.join()` qualifier repeating an emitted range (root, implicit or explicit alias) is refused; the root logical name is also reserved. Generated subquery aliases are reallocated. Legacy `compilePlan()` lowering retains its correlation refusal, and so does a query WHERE that also contains a dotted relation path such as `eq('caller.name', 'Ada')`, or a join include's `where`: both still compile through the earlier route.
+Query WHERE subquery bodies support `outerRef()` for scalar comparisons, `inSubquery()` and `rawExists()`. Nested same-table `rawExists()` bodies compile with distinct generated aliases and share parameter numbering. Unqualified `outerRef()` binds to the immediately enclosing query; qualified `outerRef('posts.id')` searches enclosing queries nearest first. An exact emitted qualifier wins; otherwise a logical-table match requires exactly one range of that table in that query. Multiple ranges are refused as ambiguous, naming their aliases; no match in any enclosing query is refused as not visible. A manual `.join()` qualifier repeating an emitted range (root, implicit or explicit alias) is refused; the root logical name is also reserved. Generated subquery aliases are reallocated. Root WHERE resolves correlation even alongside dotted relation paths; see [WHERE qualifiers](./joins#where-qualifiers-and-planning). Legacy `compilePlan()` lowering and join include `where` retain their correlation restrictions.
 
-### `exists()` silently drops the WHERE for undeclared relations
+### Relation predicate limits
 
-When the relation name passed to `exists('table', { where })` has no `ref()` declared
-toward the source table, the planner silently drops the entire `WHERE` clause and emits
-a plain SELECT. There is no compile-time error today. Always use `rawExists(subquery())`
-when no FK is declared.
-
-This behavior is locked by the TNR test in
-`packages/adapter-pgsql/src/__tests__/exists-vs-rawexists-comparison.test.ts` so that
-any future change (e.g., making `exists()` throw instead) will fail that test loudly.
+Undeclared relations, missing declared keys, many-to-many traversal and recursive relation predicates refuse at `plan()`. `exists()` can join declared relations through its `include` option; arbitrary subquery joins and HAVING remain unsupported.
 
 ### JOIN-inside-subquery and HAVING-aggregate-inside-subquery
 
-Neither `exists()` nor `rawExists()` supports a join or a HAVING aggregate clause
-inside the subquery today. For those patterns, use raw SQL via the adapter's escape
+`rawExists()` does not support arbitrary joins or HAVING inside its body. For those patterns, use raw SQL via the adapter's escape
 hatch or restructure the query as a lateral join.
 
 ---

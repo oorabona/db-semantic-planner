@@ -260,41 +260,41 @@
 			"position": "dotted-relation",
 			"kind": "expression",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users WHERE length(posts.name) > $1",
-			"params": [2],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE qualifier 'posts' is not visible in this query."
 		},
 		{
 			"position": "dotted-relation",
 			"kind": "expression",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users WHERE length(posts.name) > $1 AND EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)",
-			"params": [2, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE qualifier 'posts' is not visible in this query."
 		},
 		{
 			"position": "dotted-relation",
 			"kind": "expression",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users WHERE length(posts.name) > $1 OR EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $2)",
-			"params": [2, 13],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE qualifier 'posts' is not visible in this query."
 		},
 		{
 			"position": "dotted-relation",
 			"kind": "expression",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users WHERE NOT (length(posts.name) > $1)",
-			"params": [2],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE qualifier 'posts' is not visible in this query."
 		},
 		{
 			"position": "dotted-relation",
 			"kind": "expression",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.\"authorId\" AND posts_exists_0.score = $1) AND (NOT (length(posts.name) > $2) OR EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.\"authorId\" AND posts_exists_1.score = $3))",
-			"params": [13, 2, 17],
-			"error": null
+			"sql": null,
+			"params": null,
+			"error": "WHERE qualifier 'posts' is not visible in this query."
 		},
 		{
 			"position": "dotted-relation",

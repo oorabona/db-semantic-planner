@@ -27,6 +27,7 @@ import {
 	type Decision,
 } from '../handlers/types.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
+import * as resolvedConditions from '../resolved-condition-compiler.js';
 
 const db = schema({
 	users: {
@@ -77,7 +78,7 @@ const shapes = [
 ];
 for (const [index, wrap] of shapes.entries()) {
 	it(`root shape ${index} enters compileCondition with root authorities and leaves dump().plan intact`, () => {
-		const spy = vi.spyOn(conditions, 'compileCondition');
+		const spy = vi.spyOn(resolvedConditions, 'compileResolvedCondition');
 		const predicate = wrap(
 			rangeOverlaps('period', { lower: '2026-01-01', upper: '2026-02-01' }),
 		);
@@ -92,16 +93,14 @@ for (const [index, wrap] of shapes.entries()) {
 			},
 		});
 		expect(spy).toHaveBeenCalledWith(
-			predicate,
+			planned.execution?.where,
 			expect.objectContaining({
-				position: 'where',
-				logicalSourceTable: 'users',
-				emittedAlias: 'users',
+				rootTable: 'users',
+				currentAlias: 'users',
 				model: db.model,
 				defaultPkColumnName: 'custom_pk',
-				visibleAliases: expect.any(Map),
-				paramState: expect.any(Object),
 			}),
+			expect.any(Object),
 		);
 		expect(result.sql).toContain('CAST(');
 		expect(result.sql).toContain('AS daterange)');
@@ -287,7 +286,7 @@ it('validates raw entries and lets declared relation keys win over a decision’
 	);
 });
 it('dotted fields retain legacy lowering and scalar and ANY bodies keep canonical range casts', () => {
-	const spy = vi.spyOn(conditions, 'compileCondition');
+	const spy = vi.spyOn(resolvedConditions, 'compileResolvedCondition');
 	createOrm({
 		schema: db,
 		adapter: createPgCompileOnlyAdapter({ model: db.model }),
@@ -295,7 +294,11 @@ it('dotted fields retain legacy lowering and scalar and ANY bodies keep canonica
 		.select('users')
 		.where(eq('posts.score', 2))
 		.dump();
-	expect(spy).not.toHaveBeenCalled();
+	expect(spy).toHaveBeenCalledWith(
+		expect.objectContaining({ kind: 'relation' }),
+		expect.any(Object),
+		expect.any(Object),
+	);
 	const scalar: WhereIntent = {
 		kind: 'subquery',
 		field: 'score',
@@ -326,15 +329,15 @@ it('dotted fields retain legacy lowering and scalar and ANY bodies keep canonica
 	expect(any.sql).toContain('CAST($1 AS daterange)');
 });
 it('root context sees manual JOIN aliases allocated before predicate compilation', () => {
-	const spy = vi.spyOn(conditions, 'compileCondition');
+	const spy = vi.spyOn(resolvedConditions, 'compileResolvedCondition');
 	const predicate = eq('score', 9);
 	orm
 		.select('users')
 		.join('posts', { as: 'p', on: eq('id', 1) })
 		.where(predicate)
 		.dump();
-	const call = spy.mock.calls.find(([intent]) => intent === predicate);
-	expect(call?.[1].visibleAliases.get('p')).toBe('p');
+	const call = spy.mock.calls.find(([tree]) => tree.kind === 'comparison');
+	expect(call?.[1].scope?.bindings.has('p')).toBe(true);
 });
 it('binds expression-valued scalar subqueries at the root (#891 step 4c decision)', () => {
 	const result = orm

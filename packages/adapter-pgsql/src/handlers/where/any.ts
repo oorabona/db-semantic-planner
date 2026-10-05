@@ -85,41 +85,59 @@ export const anyHandler: WhereHandler = {
 		const columnNode = buildColumnRef(column, ctx);
 		const columnType = resolveColumnPgType(column, ctx);
 
-		// Register the array as a single parameter
-		state.paramIndex++;
-		state.parameters.push(values);
-
-		let typedParam: Node;
-		if (columnType) {
-			typedParam = createTypeCastParamRef(state.paramIndex, columnType, true);
-		} else {
-			// Fallback for a column with no introspected DB type, or an expression LHS.
-			let pgBaseType: string;
-			const abstractBase = resolveColumnAbstractPgBase(column, ctx);
-			if (abstractBase) {
-				// Declared column type (manually defined schemas) — the authoritative
-				// element type for the array cast. Fixes `integer = text` when ids read
-				// back as JS strings on a schema that omits originalDbType.
-				pgBaseType = abstractBase;
-			} else if (decision.dataType) {
-				// mapModelIRTypeToPgBase returns undefined for custom DX-050 dbType — use verbatim
-				pgBaseType =
-					mapModelIRTypeToPgBase(decision.dataType) ?? decision.dataType;
-			} else {
-				// Runtime inspection: find first non-null value
-				const sample = values.find((v) => v !== null && v !== undefined);
-				pgBaseType = sample !== undefined ? inferPgBaseType(sample) : 'text';
-			}
-			typedParam = createTypedArrayParam(state.paramIndex, pgBaseType);
-		}
-
-		return {
-			A_Expr: {
-				kind: 'AEXPR_OP_ANY',
-				name: [{ String: { sval: '=' } }],
-				lexpr: columnNode,
-				rexpr: typedParam,
-			},
-		};
+		return compileAny(
+			columnNode,
+			values,
+			state,
+			columnType,
+			columnType ? undefined : resolveColumnAbstractPgBase(column, ctx),
+			decision.dataType,
+		);
 	},
 };
+
+/** Typed ANY primitive with explicit type authority supplied by its caller. */
+export function compileAny(
+	columnNode: Node,
+	values: unknown[],
+	state: CompilerState,
+	columnType?: string,
+	abstractBase?: string,
+	dataType?: string,
+): Node {
+	// Register the array as a single parameter
+	state.paramIndex++;
+	state.parameters.push(values);
+
+	let typedParam: Node;
+	if (columnType) {
+		typedParam = createTypeCastParamRef(state.paramIndex, columnType, true);
+	} else {
+		// Fallback for a column with no introspected DB type, or an expression LHS.
+		let pgBaseType: string;
+
+		if (abstractBase) {
+			// Declared column type (manually defined schemas) — the authoritative
+			// element type for the array cast. Fixes `integer = text` when ids read
+			// back as JS strings on a schema that omits originalDbType.
+			pgBaseType = abstractBase;
+		} else if (dataType) {
+			// mapModelIRTypeToPgBase returns undefined for custom DX-050 dbType — use verbatim
+			pgBaseType = mapModelIRTypeToPgBase(dataType) ?? dataType;
+		} else {
+			// Runtime inspection: find first non-null value
+			const sample = values.find((v) => v !== null && v !== undefined);
+			pgBaseType = sample !== undefined ? inferPgBaseType(sample) : 'text';
+		}
+		typedParam = createTypedArrayParam(state.paramIndex, pgBaseType);
+	}
+
+	return {
+		A_Expr: {
+			kind: 'AEXPR_OP_ANY',
+			name: [{ String: { sval: '=' } }],
+			lexpr: columnNode,
+			rexpr: typedParam,
+		},
+	};
+}

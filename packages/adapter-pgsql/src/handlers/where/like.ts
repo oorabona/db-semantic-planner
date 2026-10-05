@@ -45,22 +45,26 @@ export const likeHandler: WhereHandler = {
 		if (nullComparison) return nullComparison;
 		const right = buildParamRef(value, state);
 
-		let exprNode: Node;
-
-		if (operator === PATTERN_OPERATORS.ILIKE || operator === 'ilike') {
-			exprNode = ilikeExpr(left, right);
-		} else {
-			exprNode = likeExpr(left, right);
-		}
-
-		if (decision.escape !== undefined) {
-			// Attach escape param as a runtime property on the A_Expr node
-			// so that deparseAExpr can render ESCAPE $N
-			// NOTE: escape property read by deparseAExpr() in pgsql-deparser.ts (AEXPR_LIKE case)
-			const escapeRef = buildParamRef(decision.escape, state);
-			(exprNode as A_ExprWithEscape).A_Expr.escape = escapeRef;
-		}
-
-		return exprNode;
+		return compileLike(
+			left,
+			right,
+			operator === PATTERN_OPERATORS.ILIKE || operator === 'ilike',
+			decision.escape === undefined
+				? undefined
+				: buildParamRef(decision.escape, state),
+		);
 	},
 };
+
+/** Typed AST primitive; callers allocate pattern and escape parameters in order. */
+export function compileLike(
+	left: Node,
+	right: Node,
+	caseInsensitive: boolean,
+	escapeNode?: Node,
+): Node {
+	const node = caseInsensitive ? ilikeExpr(left, right) : likeExpr(left, right);
+	if (escapeNode !== undefined)
+		(node as A_ExprWithEscape).A_Expr.escape = escapeNode;
+	return node;
+}

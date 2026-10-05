@@ -6,6 +6,7 @@ import type {
 } from './intent-ast.js';
 import type { RelationType } from './model-ir.js';
 import type { ResolvedIncludeStrategy } from './planner.js';
+import type { ResolvedCondition } from './resolved-conditions.js';
 
 /** Identity of a query range, independent of table identity. */
 export type RangeId = string & { readonly __rangeId: unique symbol };
@@ -22,12 +23,22 @@ export interface ResolvedRange {
 export class RangeAllocator {
 	private readonly names: Set<string>;
 	private nextId = 0;
+	private nameWork = 0;
+	get namesScanned(): number {
+		return this.nameWork;
+	}
+	hasReserved(alias: string): boolean {
+		this.nameWork++;
+		return this.names.has(alias);
+	}
 	private readonly scopedNames = new Map<string, Set<string>>();
 	constructor(reserved: readonly string[] = []) {
 		this.names = new Set(reserved);
+		this.nameWork += reserved.length;
 	}
 	reserve(alias: string): void {
 		this.names.add(alias);
+		this.nameWork++;
 	}
 	allocate(
 		table: string,
@@ -37,7 +48,7 @@ export class RangeAllocator {
 		const names = this.scopedNames.get(scope) ?? new Set<string>();
 		this.scopedNames.set(scope, names);
 		let alias = preferredAlias;
-		for (let suffix = 1; this.names.has(alias) || names.has(alias); suffix++)
+		for (let suffix = 1; this.hasReserved(alias) || names.has(alias); suffix++)
 			alias = `${preferredAlias}_${suffix}`;
 		names.add(alias);
 		return { id: `r${this.nextId++}` as RangeId, table, alias };
@@ -104,6 +115,7 @@ export interface ResolvedJoin {
 	readonly on?: WhereIntent;
 }
 export interface SelectExecution {
+	readonly where?: ResolvedCondition;
 	readonly rootRange: ResolvedRange;
 	/** Ordered joins: each ON sees the root, every join at a lower index, and itself. */
 	readonly joins: readonly ResolvedJoin[];

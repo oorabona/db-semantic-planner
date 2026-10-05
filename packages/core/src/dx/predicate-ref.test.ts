@@ -52,7 +52,9 @@ describe('predicate-branded expression primitives', () => {
 		(operator) => {
 			const query = orm
 				.select('documents')
-				.where(op(operator, ref('a'), ref('b')))
+				.where(
+					op(operator, ref(operator === '@@@' ? 'documents' : 'a'), ref('b')),
+				)
 				.dump();
 
 			expect(query.sql).toContain(operator);
@@ -65,7 +67,7 @@ describe('predicate-branded expression primitives', () => {
 			.where(op('!=', ref('a'), ref('b')))
 			.dump();
 
-		expect(query.sql).toContain('a != b');
+		expect(query.sql).toContain('documents.a != documents.b');
 		expect(query.params).toEqual([]);
 	});
 
@@ -75,7 +77,7 @@ describe('predicate-branded expression primitives', () => {
 			.where(boolFn('jsonb_exists', ref('doc'), literal('phone')))
 			.dump();
 
-		expect(query.sql).toContain("jsonb_exists(doc, 'phone')");
+		expect(query.sql).toContain("jsonb_exists(documents.doc, 'phone')");
 		expect(query.params).toEqual([]);
 	});
 
@@ -232,7 +234,7 @@ describe('predicate-branded expression primitives', () => {
 		const predicate = unsafeAsPredicate(unary('NOT', ref('a')));
 
 		expect(orm.select('documents').where(predicate).dump().sql).toContain(
-			'NOT a',
+			'NOT documents.a',
 		);
 
 		const typedOrm = createTypedOrm(
@@ -241,7 +243,7 @@ describe('predicate-branded expression primitives', () => {
 		);
 		expect(
 			typedOrm.from(db.tables.documents).where(predicate).dump().sql,
-		).toContain('NOT a');
+		).toContain('NOT documents.a');
 	});
 
 	it('rejects undefined extra binary operands', () => {

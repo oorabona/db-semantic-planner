@@ -641,3 +641,5 @@ export function markPlannedReport<T extends import('./planner.js').PlanReport>(
 	plannedReports.add(issued);
 	return Object.freeze(issued);
 }
+
+export { assertNoUnsupportedSubqueryModifiers } from './subquery-options.js';

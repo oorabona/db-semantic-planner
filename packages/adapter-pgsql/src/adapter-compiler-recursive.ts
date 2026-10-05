@@ -99,7 +99,7 @@ function getRegisteredProjection(
 	return registry.get(name);
 }
 
-function createPlanReportForQuery(
+export function createPlanReportForQuery(
 	query: QueryIntent,
 	model: ModelIR | undefined,
 ): PlanReport {

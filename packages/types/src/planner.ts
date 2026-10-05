@@ -241,6 +241,8 @@ export interface PlanReport {
 // ============================================================================
 
 export interface PlanOptions {
+	/** Emitted root names reserved by the issuing adapter before WHERE range allocation. */
+	whereReservedNames?: readonly string[];
 	/**
 	 * Force a specific join type (overrides auto-detection)
 	 */

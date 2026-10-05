@@ -76,7 +76,7 @@ import { numericLiteralNode } from './numeric-literal.js';
  * OPERATOR_PATTERN. This adapter-side guard covers direct intent construction
  * that bypasses the builder API.
  */
-function assertSafeOperator(
+export function assertSafeOperator(
 	op: string,
 	opts?: { readonly allowWords?: readonly string[] },
 ): void {

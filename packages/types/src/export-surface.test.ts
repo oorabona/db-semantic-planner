@@ -42,6 +42,16 @@ const brandExports = [
 	'brandValue',
 ];
 const rootNames = [
+	'ResolvedCast',
+	'ResolvedColumnOperand',
+	'ResolvedParameter',
+	'ResolvedRhs',
+	'ResolvedExpression',
+	'ResolvedProjection',
+	'ResolvedOrder',
+	'ResolvedSubqueryBody',
+	'ResolvedRelationPredicate',
+	'ResolvedCondition',
 	'AmbiguousIncludeError',
 	...brandExports,
 	...names(before.root.declarations).filter((name) => !excluded.has(name)),
@@ -68,6 +78,7 @@ const joinIncludeExports = [
 const relationPathTypes = ['ResolvedRelationPath'];
 // Readers of include decisions find their resolved include node (#891 step 5).
 const resolvedIncludeExports = [
+	'assertNoUnsupportedSubqueryModifiers',
 	'getResolvedIncludeNode',
 	'markPlannedReport',
 	'isPlannedReport',

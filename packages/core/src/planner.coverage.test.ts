@@ -379,7 +379,7 @@ describe('planner coverage', () => {
 				kind: 'or',
 				conditions: [
 					{ kind: 'exists', relation: 'posts' },
-					{ kind: 'exists', relation: 'comments' },
+					{ kind: 'exists', relation: 'posts.comments' },
 				],
 			},
 		};
@@ -1034,7 +1034,7 @@ describe('planner coverage', () => {
 		expect(report.rootTable).toBe('users');
 	});
 
-	it('should not optimize IN-subquery when select is not fields type', () => {
+	it('should refuse IN-subquery when select is not fields type', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'users',
@@ -1052,11 +1052,12 @@ describe('planner coverage', () => {
 			},
 		};
 
-		const report = plan(intent, testSchema);
-		expect(report.rootTable).toBe('users');
+		expect(() => plan(intent, testSchema)).toThrow(
+			'IN subquery with aggregate SELECT (use a scalar subquery comparison instead) is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+		);
 	});
 
-	it('should not optimize IN-subquery when fields has multiple columns', () => {
+	it('should refuse IN-subquery when fields has multiple columns', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'users',
@@ -1071,8 +1072,9 @@ describe('planner coverage', () => {
 			},
 		};
 
-		const report = plan(intent, testSchema);
-		expect(report.rootTable).toBe('users');
+		expect(() => plan(intent, testSchema)).toThrow(
+			'IN subquery with multi-field projection [authorId, title] (IN subquery must project exactly one named column — use a single field) is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+		);
 	});
 
 	it('should not optimize IN-subquery when no matching relation', () => {
@@ -1624,7 +1626,7 @@ describe('processWhere handles all WhereIntent kinds (exhaustiveness)', () => {
 		expect(() => plan(intent, testSchema)).not.toThrow();
 	});
 
-	it('should not throw for subquery WhereIntent (adapter-only kind)', () => {
+	it('should refuse unsupported subquery WhereIntent (adapter-only kind)', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'users',
@@ -1643,7 +1645,9 @@ describe('processWhere handles all WhereIntent kinds (exhaustiveness)', () => {
 			} as never,
 		};
 
-		expect(() => plan(intent, testSchema)).not.toThrow();
+		expect(() => plan(intent, testSchema)).toThrow(
+			'scalar subquery with expressions SELECT (not supported in scalar subquery) is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+		);
 	});
 
 	it('should not throw for range WhereIntent (adapter-only kind)', () => {

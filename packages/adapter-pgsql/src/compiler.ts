@@ -1,3 +1,4 @@
+import { compileResolvedCondition } from './resolved-condition-compiler.js';
 /**
  * PlanReport Compiler
  *
@@ -414,8 +415,9 @@ function mergeDuplicateJoinIncludeDecisions(
  * Simplified PlanReport for the spike
  */
 export interface SimplifiedPlanReport {
-	/** Executable root predicate, compiled after visible alias allocation. */
+	/** Legacy SELECT-expression / NQL body predicate (3b); issued root WHERE uses resolvedWhere. */
 	readonly rawWhere?: WhereIntent;
+	readonly resolvedWhere?: import('@dbsp/types').ResolvedCondition;
 	readonly rawHaving?: WhereIntent;
 	readonly directConditions?: boolean;
 	readonly enclosingRanges?: HandlerCompilerContext['enclosingRanges'];
@@ -819,7 +821,7 @@ export class PlanCompiler {
 		);
 		// Handle IN/NOT IN subquery: remap to inSubquery/notInSubquery
 		// Subquery can be in `decision.subquery` (direct PlanDecision) or
-		// `decision.value` (from plan-decision-extractor which puts it in value)
+		// `decision.value` (from legacy decision callers which put it in value)
 		const sub =
 			decision.subquery ??
 			(decision.value &&
@@ -919,7 +921,7 @@ export class PlanCompiler {
 		// IN / NOT IN with subquery
 		// Mirror dispatchWhere's dual-source detection: subquery can be in
 		// `pd.subquery` (direct PlanDecision shape) OR `pd.value` (from the
-		// plan-decision-extractor which stores it in `value`).  Only checking
+		// legacy decision callers which store it in `value`).  Only checking
 		// `pd.subquery` would let a value-shaped nested IN bypass the guard and
 		// fall through to the plain inHandler which binds the whole object as a
 		// scalar ANY($n) parameter — producing structurally wrong SQL.
@@ -3127,7 +3129,7 @@ export class PlanCompiler {
 		});
 	}
 
-	private compileRootWhere(
+	private compileLegacyBodyWhere(
 		intent: WhereIntent,
 		plan: SimplifiedPlanReport,
 	): Node | undefined {
@@ -3201,12 +3203,33 @@ export class PlanCompiler {
 		let distinct: boolean | Node[] = false;
 
 		let rootWherePending = plan.rawWhere;
-		for (const decision of decisions) {
-			if (rootWherePending && !decision.type.startsWith('select')) {
-				const root = this.compileRootWhere(rootWherePending, plan);
+		let resolvedWherePending = plan.resolvedWhere;
+		const flushRootWhere = () => {
+			if (resolvedWherePending) {
+				const ctx = this.createHandlerContext(
+					plan,
+					this.tableIdentifier(plan.rootTable),
+				);
+				const root = compileResolvedCondition(
+					resolvedWherePending,
+					{
+						...ctx,
+						currentAlias:
+							plan.batchValuesFromAlias ?? ctx.currentAlias ?? plan.rootTable,
+					},
+					this.state,
+				);
+				where = where ? andExpr(where, root) : root;
+				resolvedWherePending = undefined;
+			}
+			if (rootWherePending) {
+				const root = this.compileLegacyBodyWhere(rootWherePending, plan);
 				if (root) where = where ? andExpr(where, root) : root;
 				rootWherePending = undefined;
 			}
+		};
+		for (const decision of decisions) {
+			if (!decision.type.startsWith('select')) flushRootWhere();
 			switch (decision.type) {
 				case 'select':
 				case 'selectFunction':
@@ -3303,10 +3326,7 @@ export class PlanCompiler {
 			}
 		}
 
-		if (rootWherePending) {
-			const root = this.compileRootWhere(rootWherePending, plan);
-			if (root) where = where ? andExpr(where, root) : root;
-		}
+		flushRootWhere();
 
 		having = plan.rawHaving
 			? this.compilePositionCondition(

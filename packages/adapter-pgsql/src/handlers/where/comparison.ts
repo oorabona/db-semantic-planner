@@ -95,33 +95,7 @@ export const comparisonHandler: WhereHandler = {
 				: resolveColumnPgType(column, ctx);
 		const right = compileValueOrFieldRef(value, ctx, state, columnType);
 
-		switch (resolvedOperator) {
-			case '=':
-				return eqExpr(left, right);
-
-			case '!=':
-				return neExpr(left, right);
-
-			case 'isDistinctFrom':
-				return distinctExpr(left, right);
-
-			case '<':
-				return ltExpr(left, right);
-
-			case '<=':
-				return lteExpr(left, right);
-
-			case '>':
-				return gtExpr(left, right);
-
-			case '>=':
-				return gteExpr(left, right);
-
-			default:
-				throw new Error(
-					`No WHERE handler registered for operator: ${escapeDiagnosticText(String(operator))}`,
-				);
-		}
+		return compileComparison(resolvedOperator, left, right);
 	},
 };
 
@@ -165,4 +139,39 @@ function resolveHavingAggregatePgType(
 		if (normalized === 'interval') return 'interval';
 	}
 	return undefined;
+}
+
+/** Typed AST primitive shared by legacy and resolved comparison callers. */
+export function compileComparison(
+	operator: string,
+	left: Node,
+	right: Node,
+): Node {
+	switch (operator) {
+		case '=':
+			return eqExpr(left, right);
+
+		case '!=':
+			return neExpr(left, right);
+
+		case 'isDistinctFrom':
+			return distinctExpr(left, right);
+
+		case '<':
+			return ltExpr(left, right);
+
+		case '<=':
+			return lteExpr(left, right);
+
+		case '>':
+			return gtExpr(left, right);
+
+		case '>=':
+			return gteExpr(left, right);
+
+		default:
+			throw new Error(
+				`No WHERE handler registered for operator: ${escapeDiagnosticText(String(operator))}`,
+			);
+	}
 }

@@ -288,6 +288,7 @@ export function plan(
 	};
 
 	const opts: Required<PlanOptions> = {
+		whereReservedNames: options.whereReservedNames ?? [],
 		forceJoinType: options.forceJoinType as 'left' | 'inner',
 		enableCTEs: options.enableCTEs ?? true,
 		cteThreshold: options.cteThreshold ?? 2,
@@ -423,7 +424,9 @@ export function plan(
 
 	const report: PlanReport = {
 		rootTable: intent.from,
-		execution: resolveReportIncludes(intent, state.decisions, model),
+		execution: resolveReportIncludes(plannedIntent, state.decisions, model, {
+			whereReservedNames: opts.whereReservedNames,
+		}),
 		decisions: Object.freeze(observeIncludeDecisions(state.decisions)),
 		warnings: Object.freeze(state.warnings.slice()),
 		ctes: Object.freeze(state.ctes.slice()),
@@ -835,9 +838,8 @@ function optimizeInToExists(
 
 		case 'or': {
 			// The adapter now compiles EXISTS inline at its boolean tree position
-			// (enrichExistsDecisionsInPlace replaces stubs in-place rather than hoisting
-			// to top-level AND).  Recursing here is safe: an exists inside an OR
-			// becomes a whereOr stub that is enriched in-place, preserving OR semantics.
+			// through the resolved condition tree, preserving its boolean placement.
+			// Recursing here is safe: an exists inside an OR stays inside that OR.
 			const orWhere = where as WhereOrIntent;
 			const optimized = orWhere.conditions.map((c) =>
 				optimizeInToExists(c, sourceTable, model, negated),

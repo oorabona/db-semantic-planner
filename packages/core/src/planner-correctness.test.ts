@@ -696,7 +696,7 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 		},
 	});
 
-	it('IN with groupBy subquery: report.intent.where stays kind=in (optimization blocked)', () => {
+	it('IN with groupBy subquery: refuses unsupported body at plan()', () => {
 		// Regression gate (filter broadening): EXISTS drops GROUP BY/HAVING constraints,
 		// causing the rewritten query to match more rows than the original IN form.
 		const intent: QueryIntent = {
@@ -720,17 +720,12 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 			},
 		};
 
-		const report = plan(intent, testSchema.model);
-
-		const filterDecision = report.decisions.find(
-			(d) => d.type === 'filter-strategy',
+		expect(() => plan(intent, testSchema.model)).toThrow(
+			'IN subquery with GROUP BY, HAVING is not supported — it would silently change which rows match; restructure the query or use a CTE.',
 		);
-		expect(filterDecision).toBeUndefined();
-		expect(report.intent).toBe(intent);
-		expect(report.intent.where?.kind).toBe('in');
 	});
 
-	it('IN with having-only subquery: report.intent.where stays kind=in', () => {
+	it('IN with having-only subquery: refuses unsupported body at plan()', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'products',
@@ -751,12 +746,12 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 			},
 		};
 
-		const report = plan(intent, testSchema.model);
-		expect(report.intent).toBe(intent);
-		expect(report.intent.where?.kind).toBe('in');
+		expect(() => plan(intent, testSchema.model)).toThrow(
+			'IN subquery with HAVING is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+		);
 	});
 
-	it('IN with offset subquery: report.intent.where stays kind=in', () => {
+	it('IN with offset subquery: refuses unsupported body at plan()', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'products',
@@ -772,12 +767,12 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 			},
 		};
 
-		const report = plan(intent, testSchema.model);
-		expect(report.intent).toBe(intent);
-		expect(report.intent.where?.kind).toBe('in');
+		expect(() => plan(intent, testSchema.model)).toThrow(
+			'IN subquery with OFFSET is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+		);
 	});
 
-	it('IN with distinctOn subquery: report.intent.where stays kind=in', () => {
+	it('IN with distinctOn subquery: refuses unsupported body at plan()', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'products',
@@ -793,12 +788,12 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 			},
 		};
 
-		const report = plan(intent, testSchema.model);
-		expect(report.intent).toBe(intent);
-		expect(report.intent.where?.kind).toBe('in');
+		expect(() => plan(intent, testSchema.model)).toThrow(
+			'IN subquery with DISTINCT ON is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+		);
 	});
 
-	it('IN with aggregate select subquery: report.intent.where stays kind=in', () => {
+	it('IN with aggregate select subquery: refuses unsupported body at plan()', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'products',
@@ -816,9 +811,9 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 			},
 		};
 
-		const report = plan(intent, testSchema.model);
-		expect(report.intent).toBe(intent);
-		expect(report.intent.where?.kind).toBe('in');
+		expect(() => plan(intent, testSchema.model)).toThrow(
+			'IN subquery with aggregate SELECT (use a scalar subquery comparison instead) is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+		);
 	});
 
 	it('IN inside OR: the IN branch is rewritten to exists inside the OR', () => {
@@ -953,7 +948,7 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 		expect(execAndWhere.conditions[1]?.kind).toBe('exists');
 	});
 
-	it('IN with lock subquery: report.intent.where stays kind=in (lock guard)', () => {
+	it('IN with lock subquery: refuses unsupported body at plan()', () => {
 		// Regression gate (FIX 1 — FIND-130): an IN subquery with a row lock (FOR UPDATE)
 		// must NOT be rewritten to EXISTS — the adapter would silently drop the lock clause.
 		// Guard: sq.lock != null blocks the rewrite.
@@ -972,17 +967,12 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 			},
 		};
 
-		const report = plan(intent, testSchema.model);
-
-		const filterDecision = report.decisions.find(
-			(d) => d.type === 'filter-strategy',
+		expect(() => plan(intent, testSchema.model)).toThrow(
+			'IN subquery with lock is not supported — it would silently change which rows match; restructure the query or use a CTE.',
 		);
-		expect(filterDecision).toBeUndefined();
-		expect(report.intent).toBe(intent);
-		expect(report.intent.where?.kind).toBe('in');
 	});
 
-	it('IN with existsWrap subquery: report.intent.where stays kind=in (existsWrap guard)', () => {
+	it('IN with existsWrap subquery: refuses unsupported body at plan()', () => {
 		// Regression gate (FIX 1 — FIND-130): an IN subquery with existsWrap=true
 		// must NOT be rewritten to EXISTS — rewriting would silently drop the existsWrap
 		// semantics. Guard: sq.existsWrap blocks the rewrite.
@@ -1001,14 +991,9 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 			},
 		};
 
-		const report = plan(intent, testSchema.model);
-
-		const filterDecision = report.decisions.find(
-			(d) => d.type === 'filter-strategy',
+		expect(() => plan(intent, testSchema.model)).toThrow(
+			'IN subquery with existsWrap is not supported — it would silently change which rows match; restructure the query or use a CTE.',
 		);
-		expect(filterDecision).toBeUndefined();
-		expect(report.intent).toBe(intent);
-		expect(report.intent.where?.kind).toBe('in');
 	});
 });
 

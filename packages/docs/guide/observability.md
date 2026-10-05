@@ -461,3 +461,7 @@ const hooks = createHookManager()
 
 If a hook returns `undefined`, the previous ctx/results are forwarded unchanged. Hooks cannot be added after `createOrm()` — the manager is frozen internally at that point. Attempting to add hooks to a frozen manager throws:
 `HookManager is frozen — hooks cannot be added after ORM creation.`
+
+## Authored intent and execution authority
+
+A SELECT report keeps `intent` as authored for inspection. The planner resolves its optimized root WHERE into the typed `execution.where` tree, alongside join and include execution metadata; the adapter emits the root predicate from this tree. Serialized or hand-built reports are not process authority. An unissued report with plain root columns and expressions over them can compile through the same resolver at the adapter boundary. A WHERE needing relation paths, dotted references, `outerRef()` or subqueries, or a report carrying `execution.where`, requires a report issued by this loaded planner copy and otherwise refuses with `Conditions with relation paths, outer references or subqueries compile only from a report planned in this process`.

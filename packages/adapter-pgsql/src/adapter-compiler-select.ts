@@ -1,7 +1,3 @@
-import {
-	assertNoManyToManyRootRelations,
-	assertNoRecursiveRootRelations,
-} from './condition-compiler-factory.js';
 import { lowerResolvedIncludes } from './resolved-include-decisions.js';
 /**
  * SELECT compilation: converts PlanReport to CompiledQuery.
@@ -10,7 +6,12 @@ import { lowerResolvedIncludes } from './resolved-include-decisions.js';
  * @internal
  */
 
-import { countDistinctRelationPathsByName } from '@dbsp/core/internal';
+import {
+	conditionNeedsPlanning,
+	countDistinctRelationPathsByName,
+	externalConditionRefusal,
+	resolveSelectWhere,
+} from '@dbsp/core/internal';
 import type {
 	CompiledQuery,
 	CompileOptions,
@@ -22,9 +23,8 @@ import type {
 	PlanReport,
 	QueryIntent,
 	SelectExecution,
-	WhereIntent,
 } from '@dbsp/types';
-import { resolveOutputReadHandling } from '@dbsp/types';
+import { RangeAllocator, resolveOutputReadHandling } from '@dbsp/types';
 import {
 	getTrustedNqlRelationFilterFields,
 	isPlannedReport,
@@ -65,10 +65,6 @@ import {
 	resolveJsonAggColumnReadHandling,
 } from './json-agg-read-handling.js';
 import { createTypeCastParamRef } from './param-ref.js';
-import {
-	convertDottedFieldsToExists,
-	enrichExistsDecisionsInPlace,
-} from './plan-decision-extractor.js';
 import {
 	finalizeEnvelope,
 	fromAstProjection,
@@ -1088,27 +1084,6 @@ function assertSupportedIncludeWhere(
 	}
 }
 
-/** Dotted fields remain on the legacy lowering until step 5. Inspect predicates,
- * not bound values or unmoved expression/subquery bodies. */
-function hasDottedRootField(where: WhereIntent): boolean {
-	if (
-		'field' in where &&
-		typeof where.field === 'string' &&
-		where.field.includes('.')
-	)
-		return true;
-	if (where.kind === 'and' || where.kind === 'or')
-		return where.conditions.some(hasDottedRootField);
-	if (where.kind === 'not') return hasDottedRootField(where.condition);
-	if (
-		where.kind === 'exists' ||
-		where.kind === 'notExists' ||
-		where.kind === 'relationFilter'
-	)
-		return where.where !== undefined && hasDottedRootField(where.where);
-	return false;
-}
-
 /** Joins and includes require authority from the module-private issuing registry. */
 export function assertPlannedReportIncludeAuthority(plan: PlanReport): void {
 	if (
@@ -1147,6 +1122,14 @@ export function compileSelectEnvelope<T = unknown>(
 	const schemaName = deps.schemaName;
 
 	const resolvedModelForCompiler = options?.model ?? deps.model;
+	if (
+		!isPlannedReport(plan) &&
+		(plan.execution?.where ||
+			[plan.intent?.where, plan.executableIntent?.where].some(
+				conditionNeedsPlanning,
+			))
+	)
+		throw new Error(externalConditionRefusal);
 	assertPlannedReportIncludeAuthority(plan);
 	if (
 		[plan.intent, plan.executableIntent].some((intent) => {
@@ -1230,53 +1213,23 @@ export function compileSelectEnvelope<T = unknown>(
 		};
 		indexIncludeStrategies(planForCompilation.execution?.includes ?? []);
 		assertSupportedIncludeWhere(execIntent.include, includeStrategies);
-		if (execIntent.where) {
-			assertNoRecursiveRootRelations(execIntent.where);
-			assertNoManyToManyRootRelations(
+		let resolvedWhere = plan.execution?.where;
+		if (!isPlannedReport(plan) && execIntent.where) {
+			const allocator = new RangeAllocator();
+			const root = allocator.allocate(plan.rootTable, plan.rootTable);
+			allocator.reserve(root.alias);
+			resolvedWhere = resolveSelectWhere(
 				execIntent.where,
-				plan.rootTable,
+				root,
+				[root],
+				allocator,
 				resolvedModelForCompiler,
 			);
 		}
-		// Real usage: convert intent to decisions
-		const rawWhere =
-			execIntent.where &&
-			!hasDottedRootField(execIntent.where) &&
-			(!plan.intent?.where || !hasDottedRootField(plan.intent.where))
-				? execIntent.where
-				: undefined;
-		let decisions = intentToDecisions(execIntent, plan.rootTable, {
-			omitRootWhere: rawWhere !== undefined,
+		const decisions = intentToDecisions(execIntent, plan.rootTable, {
+			omitRootWhere: true,
 			directConditions: true,
 		});
-		const resolvedModel = options?.model ?? deps.model;
-
-		// Convert dotted-field comparisons (e.g., "parent.name") to EXISTS subqueries
-		// NQL compiles relation-path filters as plain comparisons with dotted field names
-		if (resolvedModel) {
-			decisions = convertDottedFieldsToExists(
-				decisions,
-				plan.rootTable,
-				resolvedModel,
-			);
-		}
-
-		// Enrich exists/notExists stub decisions in-place within their boolean tree
-		// position.  The stubs produced by intentToDecisions use the relation name as
-		// targetTable (unresolved); enrichExistsDecisionsInPlace replaces each stub with
-		// the fully-resolved version (real targetTable, foreignKey, conditions, include)
-		// from the planner's filter-strategy decisions — WITHOUT moving them to top level.
-		// This preserves OR/AND/NOT structure, so "x=1 OR exists('posts')" compiles as
-		// "x=1 OR EXISTS(...)" instead of "x=1 AND EXISTS(...)".
-		// planForCompilation has .intent = executableIntent (post-optimization WHERE)
-		// so findExistsIntents finds 'exists' intents rather than the original 'in'.
-		// Side-effect: modifies `decisions` in-place (stub → enriched for each match).
-		if (!rawWhere)
-			enrichExistsDecisionsInPlace(
-				decisions,
-				planForCompilation,
-				options?.model ?? deps.model,
-			);
 
 		const enrichedUnifiedDecisions = planForCompilation.execution
 			? lowerResolvedIncludes(planForCompilation.execution, deps.defaultPk)
@@ -1423,10 +1376,10 @@ export function compileSelectEnvelope<T = unknown>(
 			directConditions: true,
 			...(execIntent.having && { rawHaving: execIntent.having }),
 		};
-		if (rawWhere)
+		if (resolvedWhere)
 			simplifiedPlan = {
 				...simplifiedPlan,
-				rawWhere,
+				resolvedWhere,
 			};
 	} else {
 		// Unit test with mock data: use decisions directly (legacy format).
