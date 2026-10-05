@@ -17,6 +17,7 @@ it('returns ordered declarations and physical key metadata without FK inference'
 			target: 'files',
 			type: 'belongsTo' as const,
 			foreignKey: 'fileId',
+			targetKey: 'id',
 		},
 	];
 	const model = {
@@ -160,3 +161,30 @@ it('refuses conflicting junction aliases and explicit mismatched key vectors', (
 		),
 	).toThrow('mismatched key arity');
 });
+
+it.each(['belongsTo', 'hasOne', 'hasMany', 'belongsToMany'] as const)(
+	'preserves logical %s declarations with absent key vectors without inventing hops',
+	(type) => {
+		const relation = {
+			name: 'related',
+			target: 'targets',
+			type,
+			foreignKey: 'targetId',
+			otherKey: 'otherId',
+			through: 'junction',
+		};
+		expect(
+			resolveDeclaredRelationPath(
+				{ getRelationsFrom: () => [relation] },
+				'sources',
+				['related'],
+			),
+		).toEqual({
+			ok: true,
+			logicalSegments: ['related'],
+			relations: [relation],
+			hops: [],
+			targetTable: 'targets',
+		});
+	},
+);

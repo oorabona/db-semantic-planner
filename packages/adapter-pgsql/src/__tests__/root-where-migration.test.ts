@@ -252,7 +252,7 @@ it('refuses raw EXISTS modifiers before they can be discarded', () => {
 			.dump(),
 	).toThrow(/GROUP BY/);
 });
-it('validates raw entries but trusts already-shaped descendant handler decisions', () => {
+it('validates raw entries and lets declared relation keys win over a decision’s columns', () => {
 	const predicate = {
 		...exists('posts'),
 		targetTable: 'evil',
@@ -283,7 +283,7 @@ it('validates raw entries but trusts already-shaped descendant handler decisions
 		state,
 	);
 	expect(deparseSync(node).replace(/\s+/g, ' ')).toContain(
-		'users.score = posts_exists_0."authorId"',
+		'users.id = posts_exists_0."authorId"',
 	);
 });
 it('dotted fields retain legacy lowering and scalar and ANY bodies keep canonical range casts', () => {

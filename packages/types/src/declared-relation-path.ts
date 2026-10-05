@@ -109,8 +109,8 @@ export function resolveDeclaredRelationPath<
 				})),
 			});
 		};
-		const sourceKey = toColumnList(relation.sourceKey ?? 'id');
-		const targetKey = toColumnList(relation.targetKey ?? 'id');
+		const sourceKey = toColumnList(relation.sourceKey);
+		const targetKey = toColumnList(relation.targetKey);
 		const junctionKey = (
 			canonical: RelationIR['foreignKey'],
 			alias: RelationIR['foreignKey'],

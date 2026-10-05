@@ -811,7 +811,7 @@ export function schemaToModelIR(
 
 	// Phase 4: Build relations from refs and table-level composite FK constraints
 	const relations = buildRelations(
-		definition,
+		tables,
 		refsByTable,
 		tableNames,
 		constraints,
@@ -1701,12 +1701,13 @@ function validateColumnJsReadType(
  * Builds RelationIR objects from collected refs.
  */
 function buildRelations(
-	_definition: SchemaDefinition,
+	tables: readonly TableIR[],
 	refsByTable: Map<string, CollectedRef[]>,
 	tableNames: string[],
 	constraints?: SchemaConstraints,
 ): RelationIR[] {
 	const relations: RelationIR[] = [];
+	const tablesByName = new Map(tables.map((table) => [table.name, table]));
 
 	for (const tableName of tableNames) {
 		const refs = refsByTable.get(tableName) || [];
@@ -1714,6 +1715,21 @@ function buildRelations(
 		for (const ref of refs) {
 			// RelationIR has no schema field; schema-qualified refs are DDL FKs only.
 			if (hasExternalSchema(ref.options.schema)) continue;
+
+			const foreignKey = tablesByName
+				.get(tableName)
+				?.foreignKeys.find(
+					(fk) =>
+						fk.columns.length === 1 &&
+						fk.columns[0] === ref.columnName &&
+						fk.references.table === ref.target,
+				);
+			if (!foreignKey) {
+				throw new Error(
+					`Missing built foreign key for '${tableName}.${ref.columnName}'`,
+				);
+			}
+			const referencedKey = [...foreignKey.references.columns];
 
 			if (ref.options.roles) {
 				// Self-referential - generate 4 relations
@@ -1726,10 +1742,8 @@ function buildRelations(
 					source: tableName,
 					target: tableName,
 					foreignKey: ref.columnName,
-					...(ref.options.roles && {
-						sourceKey: ref.options.references ?? ['id'],
-						targetKey: ref.options.references ?? ['id'],
-					}),
+					sourceKey: referencedKey,
+					targetKey: referencedKey,
 					cardinality: 'one',
 					optionality: ref.options.nullable ? 'optional' : 'required',
 					includeStrategy: 'auto',
@@ -1744,10 +1758,8 @@ function buildRelations(
 					source: tableName,
 					target: tableName,
 					foreignKey: ref.columnName,
-					...(ref.options.roles && {
-						sourceKey: ref.options.references ?? ['id'],
-						targetKey: ref.options.references ?? ['id'],
-					}),
+					sourceKey: referencedKey,
+					targetKey: referencedKey,
 					cardinality: 'many',
 					optionality: 'optional', // Children are always optional
 					includeStrategy: 'auto',
@@ -1763,10 +1775,8 @@ function buildRelations(
 					source: tableName,
 					target: tableName,
 					foreignKey: ref.columnName,
-					...(ref.options.roles && {
-						sourceKey: ref.options.references ?? ['id'],
-						targetKey: ref.options.references ?? ['id'],
-					}),
+					sourceKey: referencedKey,
+					targetKey: referencedKey,
 					cardinality: 'many',
 					optionality: 'optional',
 					includeStrategy: 'auto',
@@ -1787,10 +1797,8 @@ function buildRelations(
 					source: tableName,
 					target: tableName,
 					foreignKey: ref.columnName,
-					...(ref.options.roles && {
-						sourceKey: ref.options.references ?? ['id'],
-						targetKey: ref.options.references ?? ['id'],
-					}),
+					sourceKey: referencedKey,
+					targetKey: referencedKey,
 					cardinality: 'many',
 					optionality: 'optional',
 					includeStrategy: 'auto',
@@ -1813,6 +1821,7 @@ function buildRelations(
 					source: tableName,
 					target: ref.target,
 					foreignKey: ref.columnName,
+					targetKey: referencedKey,
 					cardinality: 'one',
 					optionality: ref.options.nullable ? 'optional' : 'required',
 					includeStrategy: 'auto',
@@ -1830,6 +1839,7 @@ function buildRelations(
 					source: ref.target,
 					target: tableName,
 					foreignKey: ref.columnName,
+					sourceKey: referencedKey,
 					cardinality: inverseCardinality,
 					optionality: 'optional', // Inverse is always optional
 					includeStrategy: 'auto',
