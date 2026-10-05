@@ -23,7 +23,7 @@ import type {
 	QueryIntent,
 	WhereIntent,
 } from '@dbsp/types';
-import { resolveOutputReadHandling, toColumnList } from '@dbsp/types';
+import { resolveOutputReadHandling } from '@dbsp/types';
 import {
 	belongsToManyJoinIncludeRefusal,
 	getTrustedNqlRelationFilterFields,
@@ -33,7 +33,6 @@ import {
 } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
-import { defaultFkDerivation } from './assert-field.js';
 import { funcCall, sqlRangeVar } from './ast-helpers.js';
 import {
 	declaredRelationBindingFor,
@@ -76,6 +75,7 @@ import {
 	type ProjectionEnvelope,
 	supplementOutputDescriptors,
 } from './projection-envelope.js';
+import { resolveRelationKeys } from './relation-keys.js';
 import {
 	assertProjectedJsonContainerCanBeAggregated,
 	resolveRelationTarget,
@@ -327,8 +327,6 @@ function compileJoinIntents(
 	if (joins.length === 0) return [];
 
 	const model = deps.model;
-	const deriveFk = deps.deriveFk ?? defaultFkDerivation;
-	const defaultPk = deps.defaultPk;
 	const results: PlanDecision[] = [];
 	let joinScope = queryScope([
 		...(deps.scope?.bindings.values() ?? []),
@@ -382,24 +380,11 @@ function compileJoinIntents(
 			// Derive FK direction from relation type
 			// - belongsTo: FK is on the source (root) table → sourceColumn=FK, targetColumn=PK
 			// - hasMany/hasOne: FK is on the target table → sourceColumn=PK, targetColumn=FK
-			const isBelongsTo = rel.type === 'belongsTo';
-			const rawFk = toColumnList(rel.foreignKey);
-			const fkColumns =
-				rawFk.length > 0
-					? rawFk
-					: [deriveFk(isBelongsTo ? rootTable : rel.target, defaultPk)];
-			const sourceKey = toColumnList(rel.sourceKey);
-			const targetKey = toColumnList(rel.targetKey);
-			const sourceColumn = isBelongsTo
-				? fkColumns
-				: sourceKey.length > 0
-					? sourceKey
-					: [defaultPk];
-			const targetColumn = isBelongsTo
-				? targetKey.length > 0
-					? targetKey
-					: [defaultPk]
-				: fkColumns;
+			const { sourceColumn, targetColumn } = resolveRelationKeys(
+				rootTable,
+				rel,
+				{ model },
+			);
 			const alias = intent.alias ?? intent.relation;
 
 			joinScope = queryScope([

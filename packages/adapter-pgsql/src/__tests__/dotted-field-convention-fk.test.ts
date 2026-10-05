@@ -1,17 +1,4 @@
-/**
- * Regression tests for the reliable dotted-field EXISTS skip marker.
- *
- * The old code skipped a dotted-field EXISTS decision only when `d.foreignKey`
- * was truthy.  When the model's relation has no explicit foreignKey (convention-
- * derived FK), convertDottedFieldsToExists emits a decision with no foreignKey
- * field — the old check would then re-collect it as an unresolved stub, allowing
- * stub-enrichment to overwrite it with an explicit exists() enrichment for the
- * same relation and silently drop the dotted-field predicate.
- *
- * Fix: collectExistsStubs now uses `d.relationName` (always set by
- * convertDottedFieldsToExists, never by convertExistsLike stubs) as the
- * reliable skip marker — independent of foreignKey presence.
- */
+/** Regression: dotted-field and explicit EXISTS predicates both survive enrichment. */
 
 import { and, createOrm, eq, exists, gt, ref, schema } from '@dbsp/core';
 import type { ModelIR } from '@dbsp/types';
@@ -19,12 +6,11 @@ import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
-// Helpers: build a minimal ModelIR with a relation that has NO foreignKey field.
-// This simulates a convention-FK scenario where the compiler must derive the FK
-// from the table name rather than reading it from the relation.
+// Helpers: build a minimal ModelIR with a relation that has declared foreignKey fields.
+// This simulates a hand-built FK scenario where the compiler reads the declared FK from the relation.
 // ---------------------------------------------------------------------------
 
-function makeConventionFkModel(): ModelIR {
+function makeHandBuiltFkModel(): ModelIR {
 	const base = schema({
 		posts: {
 			id: 'integer',
@@ -35,7 +21,7 @@ function makeConventionFkModel(): ModelIR {
 		},
 		users: { id: 'integer', name: 'text' },
 	}).model;
-	// posts.title, posts.views — no explicit foreignKey on the users→posts relation.
+	// posts.title, posts.views — declared foreignKey on the users→posts relation.
 	// columns is an array so table.columns.find() works in the handler system.
 	const postsTable = {
 		name: 'posts',
@@ -82,7 +68,7 @@ function makeConventionFkModel(): ModelIR {
 					includeStrategy: 'auto' as const,
 					filterStrategy: 'auto' as const,
 					joinDefault: 'auto' as const,
-					// NO foreignKey field — convention-derived by the compiler
+					foreignKey: 'user_id',
 				};
 			}
 			if (qualifiedName === 'posts.author') {
@@ -96,7 +82,7 @@ function makeConventionFkModel(): ModelIR {
 					includeStrategy: 'auto' as const,
 					filterStrategy: 'auto' as const,
 					joinDefault: 'auto' as const,
-					// NO foreignKey field
+					foreignKey: 'author_id',
 				};
 			}
 			return undefined;
@@ -108,14 +94,14 @@ function makeConventionFkModel(): ModelIR {
 }
 
 // ---------------------------------------------------------------------------
-// Defect 1: convention-FK model — dotted-field predicate NOT dropped
+// Defect 1: hand-built FK model — dotted-field predicate NOT dropped
 // ---------------------------------------------------------------------------
 
-describe('dotted-field EXISTS with convention-FK relation', () => {
+describe('dotted-field EXISTS with hand-built FK relation', () => {
 	it('and(eq("posts.title","x"), exists("posts",{where:gt("views",10)})) — both predicates survive', () => {
-		const model = makeConventionFkModel();
+		const model = makeHandBuiltFkModel();
 		const adapter = createPgCompileOnlyAdapter({ model });
-		// Use createOrm with the convention-FK model.
+		// Use createOrm with the hand-built model.
 		const orm = createOrm({ model, adapter } as any);
 
 		const { sql, params } = (orm as any)
@@ -145,8 +131,8 @@ describe('dotted-field EXISTS with convention-FK relation', () => {
 		expect(existsCount, `Expected 2 EXISTS, got: ${normalized}`).toBe(2);
 	});
 
-	it('eq("posts.title","x") alone with convention-FK — compiles without error', () => {
-		const model = makeConventionFkModel();
+	it('eq("posts.title","x") alone with declared FK — compiles without error', () => {
+		const model = makeHandBuiltFkModel();
 		const adapter = createPgCompileOnlyAdapter({ model });
 		const orm = createOrm({ model, adapter } as any);
 

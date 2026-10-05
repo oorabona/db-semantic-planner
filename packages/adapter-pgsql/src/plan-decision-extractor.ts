@@ -8,8 +8,13 @@
  * All functions are stateless pure functions operating on PlanReport data.
  */
 
-import type { ModelIR, PlanReport, WhereIntent } from '@dbsp/types';
-import { type ColumnListInput, toColumnList } from '@dbsp/types';
+import type {
+	ColumnListInput,
+	ModelIR,
+	PlanReport,
+	WhereIntent,
+} from '@dbsp/types';
+import { resolveDeclaredRelationKeys } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import { stringConstNode } from './ast-helpers.js';
 import type { PlanDecision } from './compiler.js';
@@ -72,7 +77,11 @@ export function resolveRelation(
 ): ResolvedRelation | undefined {
 	const rel = model.getRelation(`${sourceTable}.${relationName}`);
 	if (!rel) return undefined;
-	const foreignKeyColumns = toColumnList(rel.foreignKey);
+	const foreignKeyColumns = resolveDeclaredRelationKeys(
+		model,
+		sourceTable,
+		rel,
+	).foreignKey;
 	const foreignKey =
 		foreignKeyColumns.length > 0 ? foreignKeyColumns : undefined;
 	const relationType = rel.type as
@@ -320,7 +329,8 @@ function parentKeyForRelation(
 ): ColumnListInput | undefined {
 	const rel = model.getRelation(`${sourceTable}.${relationName}`);
 	if (!rel) return undefined;
-	return relationType === 'belongsTo' ? rel.targetKey : rel.sourceKey;
+	const keys = resolveDeclaredRelationKeys(model, sourceTable, rel);
+	return relationType === 'belongsTo' ? keys.targetKey : keys.sourceKey;
 }
 
 function convertDottedFieldsToExistsForSource(
@@ -587,7 +597,10 @@ function buildMultiHopExistsChain(
 
 	for (const hop of hops) {
 		const rel = model.getRelation(`${currentSource}.${hop}`);
-		const foreignKeyColumns = rel ? toColumnList(rel.foreignKey) : [];
+		const keys = rel
+			? resolveDeclaredRelationKeys(model, currentSource, rel)
+			: undefined;
+		const foreignKeyColumns = keys?.foreignKey ?? [];
 		const foreignKey =
 			foreignKeyColumns.length > 0 ? foreignKeyColumns : undefined;
 		const relationType =
@@ -597,7 +610,7 @@ function buildMultiHopExistsChain(
 					? (rel.type as 'hasMany' | 'hasOne')
 					: undefined;
 		const parentKey =
-			relationType === 'belongsTo' ? rel?.targetKey : rel?.sourceKey;
+			relationType === 'belongsTo' ? keys?.targetKey : keys?.sourceKey;
 		const target = rel ? rel.target : hop;
 		hopRelations.push({
 			source: currentSource,
@@ -809,7 +822,8 @@ function enrichExistsStubsInConditions(
 							`Use rawExists(subquery(...)) for an EXISTS over an undeclared or uncorrelated subquery.`,
 					);
 				}
-				const foreignKeyColumns = toColumnList(rel.foreignKey);
+				const keys = resolveDeclaredRelationKeys(model, sourceTable, rel);
+				const foreignKeyColumns = keys.foreignKey;
 				const foreignKey =
 					foreignKeyColumns.length > 0 ? foreignKeyColumns : undefined;
 				const relationType =
@@ -819,7 +833,7 @@ function enrichExistsStubsInConditions(
 							? (rel.type as 'hasMany' | 'hasOne')
 							: undefined;
 				const parentKey =
-					relationType === 'belongsTo' ? rel.targetKey : rel.sourceKey;
+					relationType === 'belongsTo' ? keys.targetKey : keys.sourceKey;
 				const targetTable = rel.target;
 
 				let innerConditions: PlanDecision[] | undefined;
@@ -923,7 +937,11 @@ function buildEnrichedExistsDecision(
 					`${sourceTableForRelation}.${context.relation as string}`,
 				)
 			: undefined;
-	const foreignKeyColumns = relIR ? toColumnList(relIR.foreignKey) : [];
+	const keys =
+		model && relIR
+			? resolveDeclaredRelationKeys(model, sourceTableForRelation, relIR)
+			: undefined;
+	const foreignKeyColumns = keys?.foreignKey ?? [];
 	const foreignKey =
 		foreignKeyColumns.length > 0 ? foreignKeyColumns : undefined;
 	// PlanDecision.relationType only supports 'belongsTo' | 'hasMany' | 'hasOne'.
@@ -939,7 +957,7 @@ function buildEnrichedExistsDecision(
 	// For belongsTo: the inner (target) table's PK override (RelationIR.targetKey).
 	// For hasMany/hasOne: the outer (source) table's PK override (RelationIR.sourceKey).
 	const parentKey =
-		relationType === 'belongsTo' ? relIR?.targetKey : relIR?.sourceKey;
+		relationType === 'belongsTo' ? keys?.targetKey : keys?.sourceKey;
 
 	// Determine operator
 	let operator: string = 'exists';

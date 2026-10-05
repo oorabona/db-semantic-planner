@@ -359,7 +359,7 @@ function buildExistsSubquery(
 			if (!model && ctx.position === 'filter') {
 				const keys = resolveRelationKeys(
 					sourceTableForJoin,
-					{ type: 'belongsTo', target: joinTargetTable },
+					{ name: joinRelation, type: 'belongsTo', target: joinTargetTable },
 					ctx,
 				);
 				joinSourceCols = keys.sourceColumn;

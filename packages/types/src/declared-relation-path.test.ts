@@ -188,3 +188,41 @@ it.each(['belongsTo', 'hasOne', 'hasMany', 'belongsToMany'] as const)(
 		});
 	},
 );
+
+it.each(['belongsTo', 'hasOne', 'hasMany'] as const)(
+	'uses the referenced table primary key for hand-built %s relations',
+	(type) => {
+		const relation = {
+			name: 'related',
+			source: 'posts',
+			target: 'users',
+			type,
+			foreignKey: 'author_uuid',
+		};
+		const model = {
+			tables: new Map(),
+			getTable: () => ({ primaryKey: ['tenant', 'uuid'] }),
+			getRelationsFrom: () => [relation],
+		};
+		const composite = { ...relation, foreignKey: ['tenant', 'author_uuid'] };
+		const result = resolveDeclaredRelationPath(
+			{ ...model, getRelationsFrom: () => [composite] },
+			'posts',
+			['related'],
+		);
+		expect(result.ok && result.hops[0]?.pairs).toEqual(
+			type === 'belongsTo'
+				? [
+						{ fromColumn: 'tenant', toColumn: 'tenant' },
+						{ fromColumn: 'author_uuid', toColumn: 'uuid' },
+					]
+				: [
+						{ fromColumn: 'tenant', toColumn: 'tenant' },
+						{ fromColumn: 'uuid', toColumn: 'author_uuid' },
+					],
+		);
+		expect(() =>
+			resolveDeclaredRelationPath(model, 'posts', ['related']),
+		).toThrow("Relation 'posts.related' has mismatched key arity.");
+	},
+);

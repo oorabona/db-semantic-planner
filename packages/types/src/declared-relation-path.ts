@@ -21,6 +21,7 @@ export type DeclaredRelationPathRelation = Pick<RelationIR, 'name' | 'target'> &
 export interface DeclaredRelationPathModel<
 	R extends DeclaredRelationPathRelation,
 > {
+	getTable?(name: string): unknown;
 	getRelation?(qualifiedName: string): R | undefined;
 	getRelationsFrom(sourceTable: string): readonly R[];
 }
@@ -53,6 +54,42 @@ export type DeclaredRelationPathResult<R extends DeclaredRelationPathRelation> =
 			readonly segmentIndex: number;
 			readonly sourceTable: string;
 	  };
+
+/** Resolve physical model keys without adapter conventions or FK-reference inference. */
+export function resolveDeclaredRelationKeys(
+	model: Pick<
+		DeclaredRelationPathModel<DeclaredRelationPathRelation>,
+		'getTable'
+	>,
+	sourceTable: string,
+	relation: DeclaredRelationPathRelation,
+) {
+	const name = `${sourceTable}.${relation.name}`;
+	const foreignKey = toColumnList(
+		relation.foreignKey ?? relation.throughSourceKey,
+	);
+	if (!foreignKey.length)
+		throw new Error(
+			`Relation '${name}' is missing a declared foreign key column.`,
+		);
+	const primaryKey = (table: string) => {
+		const value = model.getTable?.(table);
+		return value && typeof value === 'object' && 'primaryKey' in value
+			? (value.primaryKey as RelationIR['sourceKey'])
+			: undefined;
+	};
+	const sourceKey = toColumnList(relation.sourceKey ?? primaryKey(sourceTable));
+	const targetKey = toColumnList(
+		relation.targetKey ?? primaryKey(relation.target),
+	);
+	const referenced = relation.type === 'belongsTo' ? targetKey : sourceKey;
+	if (
+		relation.type !== 'belongsToMany' &&
+		(!referenced.length || referenced.length !== foreignKey.length)
+	)
+		throw new Error(`Relation '${name}' has mismatched key arity.`);
+	return { foreignKey, sourceKey, targetKey };
+}
 
 /**
  * Resolve declared logical names only; never infer a path from foreign keys.
@@ -109,8 +146,13 @@ export function resolveDeclaredRelationPath<
 				})),
 			});
 		};
-		const sourceKey = toColumnList(relation.sourceKey);
-		const targetKey = toColumnList(relation.targetKey);
+		// Full models expose tables; logical compiler facades may expose only columns.
+		const keys =
+			model.getTable && 'tables' in model
+				? resolveDeclaredRelationKeys(model, currentTable, relation)
+				: undefined;
+		const sourceKey = keys?.sourceKey ?? toColumnList(relation.sourceKey);
+		const targetKey = keys?.targetKey ?? toColumnList(relation.targetKey);
 		const isAncestor =
 			relation.recursive !== null &&
 			typeof relation.recursive === 'object' &&

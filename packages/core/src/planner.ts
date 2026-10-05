@@ -28,6 +28,7 @@ import {
 	belongsToManyJoinIncludeRefusal,
 	dropsJoinIncludeData,
 	markPlannedReport,
+	resolveDeclaredRelationKeys,
 	resolveDeclaredRelationPath,
 	resolveIncludeRelationName,
 } from '@dbsp/types/internal';
@@ -1056,6 +1057,9 @@ function processRelationFilter(
 		if (!relation) {
 			return; // Error already added to warnings or exception thrown
 		}
+
+		// Validate traversal even for plan() callers; compilation resolves physical pairs.
+		resolveDeclaredRelationKeys(model, currentSource, relation);
 
 		// Track relation access for CTE extraction
 		const relPath = `${currentSource}.${relation.name}`;
