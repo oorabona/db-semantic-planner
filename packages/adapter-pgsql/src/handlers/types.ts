@@ -348,6 +348,11 @@ export function expressionColumnRefStar(
  * Mutable state maintained during compilation.
  */
 export interface CompilerState {
+	/** Addressed metadata shared across contexts for this compilation. */
+	addressedColumns?: Map<
+		string,
+		Map<string, import('@dbsp/types').ColumnIR | undefined>
+	>;
 	/** Collected parameters in order */
 	parameters: unknown[];
 	/** Current parameter index (1-based for PostgreSQL) */

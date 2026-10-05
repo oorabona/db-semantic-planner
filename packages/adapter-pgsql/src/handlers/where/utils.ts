@@ -330,12 +330,24 @@ export function resolveAddressedColumn(
 					ctx.declaredNames,
 					ctx.dbCasing,
 				);
-	const logicalTable = binding.logicalTable;
-	const column =
-		logicalTable === undefined
-			? undefined
-			: ctx.model
-					?.getTable(logicalTable)
-					?.columns.find((c) => c.name === operand.column);
-	return { binding, identifier, column };
+	return { binding, identifier };
+}
+
+/** Index metadata once per logical table, independently of identifier resolution. */
+export function resolveAddressedColumnMetadata(
+	logicalTable: string | undefined,
+	columnName: string,
+	ctx: CompilerContext,
+	state: CompilerState,
+): import('@dbsp/types').ColumnIR | undefined {
+	if (logicalTable === undefined || columnName === '*') return undefined;
+	if (!state.addressedColumns) state.addressedColumns = new Map();
+	let columns = state.addressedColumns.get(logicalTable);
+	if (!columns) {
+		columns = new Map(
+			ctx.model?.getTable(logicalTable)?.columns.map((col) => [col.name, col]),
+		);
+		state.addressedColumns.set(logicalTable, columns);
+	}
+	return columns.get(columnName);
 }

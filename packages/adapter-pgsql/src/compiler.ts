@@ -415,7 +415,7 @@ function mergeDuplicateJoinIncludeDecisions(
  * Simplified PlanReport for the spike
  */
 export interface SimplifiedPlanReport {
-	/** Legacy SELECT-expression / NQL body predicate (3b); issued root WHERE uses resolvedWhere. */
+	/** Legacy SELECT-expression / NQL body predicate (HAVING, CASE and FILTER still use it); issued root WHERE uses resolvedWhere. */
 	readonly rawWhere?: WhereIntent;
 	readonly resolvedWhere?: import('@dbsp/types').ResolvedCondition;
 	readonly rawHaving?: WhereIntent;

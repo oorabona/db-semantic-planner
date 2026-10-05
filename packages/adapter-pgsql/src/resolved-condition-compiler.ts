@@ -51,12 +51,21 @@ import { compileRangeParameter } from './handlers/where/range.js';
 import {
 	compileValue,
 	resolveAddressedColumn,
+	resolveAddressedColumnMetadata,
 } from './handlers/where/utils.js';
 import { createParamRef } from './param-ref.js';
 import { queryLocal, resolveDeclaredIdentifier } from './sql-identifier.js';
 import { validateIdentifier } from './validate.js';
 
 const operators: Record<string, string> = {
+	'=': '=',
+	'!=': '!=',
+	'>': '>',
+	'>=': '>=',
+	'<': '<',
+	'<=': '<=',
+	like: 'like',
+	ilike: 'ilike',
 	eq: '=',
 	neq: '!=',
 	ne: '!=',
@@ -67,9 +76,95 @@ const operators: Record<string, string> = {
 	lte: '<=',
 	isDistinctFrom: 'isDistinctFrom',
 };
-function op(operator: string): string {
-	return Object.hasOwn(operators, operator) ? operators[operator]! : operator;
+function assertComparisonOperator(operator: string): void {
+	if (!Object.hasOwn(operators, operator))
+		throw new Error(`Unsupported comparison operator '${operator}'`);
 }
+function op(operator: string): string {
+	assertComparisonOperator(operator);
+	return operators[operator]!;
+}
+function rangeOp(operator: string): string {
+	switch (operator) {
+		case 'between':
+			return 'BETWEEN';
+		case 'contains':
+			return '@>';
+		case 'containedBy':
+			return '<@';
+		case 'overlaps':
+			return '&&';
+		default:
+			throw new Error(`Unsupported range operator '${operator}'`);
+	}
+}
+
+/** Validate the complete resolved subtree before allocating parameters or AST nodes. */
+function validateOperators(input: unknown): void {
+	if (!input || typeof input !== 'object') return;
+	if (Array.isArray(input)) {
+		for (const child of input) validateOperators(child);
+		return;
+	}
+	const node = input as Record<string, unknown>;
+	if (node.kind === 'operator') {
+		const operator = node.operator as string;
+		switch (node.syntax) {
+			case 'arithmetic':
+				if (!['+', '-', '*', '/', '%'].includes(operator))
+					throw new Error(`Unsupported arithmetic operator '${operator}'`);
+				break;
+			case 'comparison':
+				assertComparisonOperator(operator);
+				break;
+			case 'custom':
+				assertSafeOperator(operator);
+				break;
+			case 'unary':
+				assertSafeOperator(operator, { allowWords: ['NOT'] });
+				break;
+			default:
+				throw new Error(`Unsupported operator syntax '${node.syntax}'`);
+		}
+	}
+	if (
+		node.kind === 'comparison' ||
+		(node.kind === 'subquery' && node.use === 'scalar')
+	)
+		assertComparisonOperator(node.operator as string);
+	if (node.kind === 'range') rangeOp(node.operator as string);
+	if (node.kind === 'expression' && node.comparison)
+		assertComparisonOperator(
+			(node.comparison as { operator: string }).operator,
+		);
+	if (node.kind === 'namedArg') validateOperators(node.value);
+	// Parameter values, ranges and relation-path metadata are data, not syntax.
+	for (const key of [
+		'conditions',
+		'condition',
+		'expression',
+		'operands',
+		'args',
+		'filter',
+		'branches',
+		'result',
+		'fallback',
+		'elements',
+		'operand',
+		'body',
+		'where',
+		'select',
+		'projections',
+		'argument',
+		'orderBy',
+		'predicate',
+		'right',
+		'comparison',
+	]) {
+		validateOperators(node[key]);
+	}
+}
+
 function address(
 	operand: ResolvedColumnOperand,
 	ctx: CompilerContext,
@@ -95,11 +190,24 @@ function column(
 	const { binding, identifier } = address(operand, ctx, correlationRelation);
 	return sqlColumnRef(identifier, binding.qualifier);
 }
+function metadata(
+	operand: ResolvedColumnOperand,
+	ctx: CompilerContext,
+	state: CompilerState,
+) {
+	return resolveAddressedColumnMetadata(
+		address(operand, ctx).binding.logicalTable,
+		operand.column,
+		ctx,
+		state,
+	);
+}
 function columnType(
 	operand: ResolvedColumnOperand,
 	ctx: CompilerContext,
+	state: CompilerState,
 ): string | undefined {
-	const col = address(operand, ctx).column;
+	const col = metadata(operand, ctx, state);
 	if (!col?.originalDbType) return undefined;
 	const type = renderColumnDbType(col, ctx.schema).trim();
 	validateDbType(type);
@@ -114,7 +222,7 @@ function parameter(
 ): Node {
 	const type =
 		left && (p.cast === 'column-db-type' || p.cast === 'column-array')
-			? columnType(left, ctx)
+			? columnType(left, ctx, state)
 			: undefined;
 	return compileValue(p.value, state, type, p.bound || force);
 }
@@ -127,7 +235,7 @@ function rhs(
 	if ('range' in value && 'column' in value) return column(value, ctx);
 	if (value.kind === 'parameter' && 'cast' in value)
 		return parameter(value, ctx, state, left);
-	return compileResolvedExpression(value, ctx, state);
+	return compileResolvedExpressionUnchecked(value, ctx, state);
 }
 function comparison(
 	operator: string,
@@ -178,7 +286,7 @@ function projection(
 		case 'column':
 			return [column(p.operand, ctx)];
 		case 'expression':
-			return [compileResolvedExpression(p.expression, ctx, state)];
+			return [compileResolvedExpressionUnchecked(p.expression, ctx, state)];
 		case 'aggregate':
 			if (p.argument === '*' && p.distinct)
 				throw new Error(
@@ -193,7 +301,7 @@ function projection(
 			];
 	}
 }
-export function compileResolvedSubqueryBody(
+function compileResolvedSubqueryBodyUnchecked(
 	body: ResolvedSubqueryBody,
 	ctx: CompilerContext,
 	state: CompilerState,
@@ -208,14 +316,14 @@ export function compileResolvedSubqueryBody(
 		targetList: selected.map((val) => ({ ResTarget: { val } })),
 		fromClause: [from(body.range, ctx)],
 		...(body.where && {
-			whereClause: compileResolvedCondition(body.where, ctx, state),
+			whereClause: compileResolvedConditionUnchecked(body.where, ctx, state),
 		}),
 	};
 	if (body.use !== 'exists') {
 		if (body.orderBy.length)
 			stmt.sortClause = body.orderBy.map((o) =>
 				sortBy(
-					compileResolvedExpression(o.expression, ctx, state),
+					compileResolvedExpressionUnchecked(o.expression, ctx, state),
 					o.direction === 'desc' ? 'DESC' : 'ASC',
 					o.nulls === 'first'
 						? 'FIRST'
@@ -232,13 +340,13 @@ export function compileResolvedSubqueryBody(
 	}
 	return { SelectStmt: stmt };
 }
-export function compileResolvedExpression(
+function compileResolvedExpressionUnchecked(
 	expr: ResolvedExpression,
 	ctx: CompilerContext,
 	state: CompilerState,
 ): Node {
 	const compile = (e: ResolvedExpression) =>
-		compileResolvedExpression(e, ctx, state);
+		compileResolvedExpressionUnchecked(e, ctx, state);
 	switch (expr.kind) {
 		case 'wholeRow':
 			return {
@@ -300,10 +408,21 @@ export function compileResolvedExpression(
 			return {
 				SubLink: {
 					subLinkType: 'EXPR_SUBLINK',
-					subselect: compileResolvedSubqueryBody(expr.body, ctx, state),
+					subselect: compileResolvedSubqueryBodyUnchecked(
+						expr.body,
+						ctx,
+						state,
+					),
 				},
 			};
 		case 'operator': {
+			if (
+				expr.syntax === 'arithmetic' &&
+				!['+', '-', '*', '/', '%'].includes(expr.operator)
+			)
+				throw new Error(`Unsupported arithmetic operator '${expr.operator}'`);
+			const comparisonOperator =
+				expr.syntax === 'comparison' ? op(expr.operator) : undefined;
 			if (expr.syntax === 'custom' || expr.syntax === 'unary')
 				assertSafeOperator(
 					expr.operator,
@@ -311,7 +430,7 @@ export function compileResolvedExpression(
 				);
 			const nodes = expr.operands.map(compile);
 			if (expr.syntax === 'comparison')
-				return compileComparison(op(expr.operator), nodes[0]!, nodes[1]!);
+				return compileComparison(comparisonOperator!, nodes[0]!, nodes[1]!);
 			return {
 				A_Expr: {
 					kind: 'AEXPR_OP',
@@ -335,7 +454,8 @@ export function compileResolvedExpression(
 				),
 			);
 			const filter =
-				expr.filter && compileResolvedCondition(expr.filter, ctx, state);
+				expr.filter &&
+				compileResolvedConditionUnchecked(expr.filter, ctx, state);
 			return funcCall(expr.name.split('.'), args, {
 				distinct: expr.distinct === true,
 				...(orderBy?.length && { orderBy }),
@@ -349,7 +469,7 @@ export function compileResolvedExpression(
 				CaseExpr: {
 					args: expr.branches.map((b) => ({
 						CaseWhen: {
-							expr: compileResolvedCondition(b.condition, ctx, state),
+							expr: compileResolvedConditionUnchecked(b.condition, ctx, state),
 							result: compile(b.result),
 						},
 					})),
@@ -358,13 +478,13 @@ export function compileResolvedExpression(
 			};
 	}
 }
-export function compileResolvedCondition(
+function compileResolvedConditionUnchecked(
 	tree: ResolvedCondition,
 	ctx: CompilerContext,
 	state: CompilerState,
 ): Node {
 	const visit = (n: ResolvedCondition) =>
-		compileResolvedCondition(n, ctx, state);
+		compileResolvedConditionUnchecked(n, ctx, state);
 	const col = (c: ResolvedColumnOperand) => column(c, ctx);
 	switch (tree.kind) {
 		case 'and':
@@ -383,6 +503,7 @@ export function compileResolvedCondition(
 		case 'null':
 			return compileNull(col(tree.left), tree.operator === 'isNull');
 		case 'comparison': {
+			assertComparisonOperator(tree.operator);
 			let left = col(tree.left);
 			if (tree.jsonPath?.length) {
 				assertDialectCapability(
@@ -434,7 +555,7 @@ export function compileResolvedCondition(
 				'supportsArrayType',
 				'ANY array operator is',
 			);
-			const type = columnType(tree.left, ctx);
+			const type = columnType(tree.left, ctx, state);
 			return compileAny(
 				col(tree.left),
 				Array.isArray(tree.values.value) ? tree.values.value : [],
@@ -442,7 +563,7 @@ export function compileResolvedCondition(
 				type,
 				type
 					? undefined
-					: mapModelIRTypeToPgBase(address(tree.left, ctx).column?.type ?? ''),
+					: mapModelIRTypeToPgBase(metadata(tree.left, ctx, state)?.type ?? ''),
 			);
 		}
 		case 'in': {
@@ -452,7 +573,7 @@ export function compileResolvedCondition(
 						subLinkType: 'ANY_SUBLINK',
 						testexpr: col(tree.left),
 						operName: [{ String: { sval: '=' } }],
-						subselect: compileResolvedSubqueryBody(
+						subselect: compileResolvedSubqueryBodyUnchecked(
 							tree.operand.body,
 							ctx,
 							state,
@@ -472,12 +593,13 @@ export function compileResolvedCondition(
 				values,
 				tree.negated,
 				tree.operand.parameter.cast === 'column-array'
-					? columnType(tree.left, ctx)
+					? columnType(tree.left, ctx, state)
 					: undefined,
 				supportsDialectCapability(ctx.dialectCapabilities, 'supportsArrayType'),
 			);
 		}
 		case 'range': {
+			const rangeOperator = rangeOp(tree.operator);
 			if (tree.operator === 'between') {
 				const v = tree.value.value as { lower: unknown; upper: unknown };
 				const lower = compileValue(v.lower, state, undefined, true),
@@ -496,7 +618,7 @@ export function compileResolvedCondition(
 				'supportsRangeTypes',
 				'Range operators are',
 			);
-			const type = address(tree.left, ctx).column?.type;
+			const type = metadata(tree.left, ctx, state)?.type;
 			let castType: string | undefined = type?.endsWith('range')
 				? type
 				: undefined;
@@ -514,12 +636,7 @@ export function compileResolvedCondition(
 			}
 			return compileRangeParameter(
 				col(tree.left),
-				(
-					{ contains: '@>', containedBy: '<@', overlaps: '&&' } as Record<
-						string,
-						string
-					>
-				)[tree.operator] ?? tree.operator,
+				rangeOperator,
 				tree.value.value,
 				state,
 				castType,
@@ -542,7 +659,12 @@ export function compileResolvedCondition(
 				tree.kind === 'jsonExists' ? '?' : tree.reversed ? '<@' : '@>',
 			);
 		case 'expression': {
-			const left = compileResolvedExpression(tree.expression, ctx, state);
+			if (tree.comparison) assertComparisonOperator(tree.comparison.operator);
+			const left = compileResolvedExpressionUnchecked(
+				tree.expression,
+				ctx,
+				state,
+			);
 			return tree.comparison
 				? comparison(
 						tree.comparison.operator,
@@ -554,11 +676,16 @@ export function compileResolvedCondition(
 				: left;
 		}
 		case 'subquery': {
+			if (tree.use !== 'exists') assertComparisonOperator(tree.operator);
 			const node: Node = {
 				SubLink: {
 					subLinkType:
 						tree.use === 'exists' ? 'EXISTS_SUBLINK' : 'EXPR_SUBLINK',
-					subselect: compileResolvedSubqueryBody(tree.body, ctx, state),
+					subselect: compileResolvedSubqueryBodyUnchecked(
+						tree.body,
+						ctx,
+						state,
+					),
 				},
 			};
 			return tree.use === 'exists'
@@ -633,4 +760,29 @@ export function compileResolvedCondition(
 			return tree.quantifier === 'some' ? predicate! : notExpr(predicate!);
 		}
 	}
+}
+
+export function compileResolvedCondition(
+	tree: ResolvedCondition,
+	ctx: CompilerContext,
+	state: CompilerState,
+): Node {
+	validateOperators(tree);
+	return compileResolvedConditionUnchecked(tree, ctx, state);
+}
+export function compileResolvedExpression(
+	expr: ResolvedExpression,
+	ctx: CompilerContext,
+	state: CompilerState,
+): Node {
+	validateOperators(expr);
+	return compileResolvedExpressionUnchecked(expr, ctx, state);
+}
+export function compileResolvedSubqueryBody(
+	body: ResolvedSubqueryBody,
+	ctx: CompilerContext,
+	state: CompilerState,
+): Node {
+	validateOperators(body);
+	return compileResolvedSubqueryBodyUnchecked(body, ctx, state);
 }

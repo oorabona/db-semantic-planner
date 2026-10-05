@@ -88,6 +88,8 @@ export function resolveSelectWhere(
 	initialAliasCount = 0,
 	additionalOuterRanges: readonly ResolvedRange[] = [],
 ): ResolvedCondition | undefined {
+	for (const range of [root, ...visible, ...additionalOuterRanges])
+		allocator.reserve(range.alias);
 	let aliasCount = initialAliasCount;
 	const rawNext = new Map<string, number>();
 	const expressionNext = new Map<string, number>();
@@ -460,6 +462,7 @@ export function resolveSelectWhere(
 					name,
 					`where-include-${scopeIndex++}`,
 				);
+				allocator.reserve(range.alias);
 				includes.push({
 					path: includePath,
 					source: includeSource,

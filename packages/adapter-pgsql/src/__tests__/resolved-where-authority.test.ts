@@ -53,7 +53,7 @@ const poisoned = poison(db.model);
 const refusal =
 	'Conditions with relation paths, outer references or subqueries compile only from a report planned in this process';
 
-describe('resolved root WHERE refusal proofs (#891 W1)', () => {
+describe('resolved root WHERE refusal proofs (#891)', () => {
 	it('1: all eleven matrix positions retain outcomes under post-plan relation poison', () => {
 		const positions = new Set([
 			'select-where',
