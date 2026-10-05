@@ -107,8 +107,9 @@ describe('#915 / #917 / #927 public include contract', () => {
 				external.decisions = external.decisions.map((d) =>
 					d.type === 'include-strategy' ? { ...d, choice: strategy } : d,
 				);
+				expect(expected.message).toMatch(/include/i);
 				expect(errorOf(() => adapter.compile(external)).message).toBe(
-					expected.message,
+					'Includes compile only from a report planned in this process',
 				);
 			}
 			expect(spy).not.toHaveBeenCalled();
@@ -119,7 +120,7 @@ describe('#915 / #917 / #927 public include contract', () => {
 					{ relation: 'author', join: 'left', select: { type: 'all' } },
 				],
 			};
-			expect(adapter.compile(all).sql).toContain(
+			expect(adapter.compile(plan(all.intent, model, caps)).sql).toContain(
 				'author.name AS "author.name"',
 			);
 			for (const strategy of ['json_agg', 'lateral'] as const) {
@@ -146,9 +147,12 @@ describe('#915 / #917 / #927 public include contract', () => {
 					...caps,
 					defaultIncludeStrategy: strategy,
 				});
-				expect(adapter.compile({ ...original, intent }).sql).toBe(
-					adapter.compile(ordered).sql,
+				expect(() => adapter.compile({ ...original, intent })).toThrow(
+					new Error(
+						'Includes compile only from a report planned in this process',
+					),
 				);
+				expect(adapter.compile(ordered).sql).toContain('name DESC');
 			}
 		} finally {
 			spy.mockRestore();
@@ -189,7 +193,7 @@ describe('#915 / #917 / #927 public include contract', () => {
 			const external: Mutable<PlanReport> = { ...base };
 			external.intent = { ...base.intent!, include: [include] };
 			expect(errorOf(() => adapter.compile(external)).message).toBe(
-				'Invalid Include include[0].include[0](post.author) limit: Include include[0].include[0](post.author) limit must be a non-negative safe integer',
+				'Includes compile only from a report planned in this process',
 			);
 		}
 	});
@@ -213,14 +217,14 @@ describe('#915 / #917 / #927 public include contract', () => {
 			};
 			const expected = errorOf(() => plan(external.intent!, model, caps));
 			expect(errorOf(() => adapter.compile(external)).message).toBe(
-				expected.message,
+				'Includes compile only from a report planned in this process',
 			);
 		}
 		const missing = report();
 		missing.decisions = [];
 		missing.intent = { ...missing.intent, include: [{ relation: 'author' }] };
 		expect(errorOf(() => adapter.compile(missing)).message).toBe(
-			'Include include[0](author) has no resolved include-strategy decision',
+			'Includes compile only from a report planned in this process',
 		);
 		missing.intent = {
 			...missing.intent,
@@ -233,15 +237,13 @@ describe('#915 / #917 / #927 public include contract', () => {
 			],
 		};
 		expect(errorOf(() => adapter.compile(missing)).message).toBe(
-			'Include include[0].include[0](author.createdPosts) has no resolved include-strategy decision',
+			'Includes compile only from a report planned in this process',
 		);
 		const unmodeled = report();
 		unmodeled.decisions = [];
 		expect(
 			errorOf(() => createPgCompileOnlyAdapter().compile(unmodeled)).message,
-		).toBe(
-			'Include include[0](author) has no resolved include-strategy decision',
-		);
+		).toBe('Includes compile only from a report planned in this process');
 	});
 
 	it('normalized collisions expose candidates and include path in both planning modes and compilation', () => {
@@ -277,8 +279,9 @@ describe('#915 / #917 / #927 public include contract', () => {
 			...external.intent!,
 			include: [{ relation: 'fooBAr' }],
 		};
-		expect(errorOf(() => adapter.compile(external))).toBeInstanceOf(
-			AmbiguousIncludeError,
+		expect(errorOf(() => adapter.compile(external))).toHaveProperty(
+			'message',
+			'Includes compile only from a report planned in this process',
 		);
 		expect(
 			errorOf(() => orm.select('posts').include('fooBAr').dump()),
@@ -325,7 +328,7 @@ describe('#915 / #917 / #927 public include contract', () => {
 			include: [{ relation: 'author', include: [{ relation: 'nope' }] }],
 		};
 		expect(errorOf(() => adapter.compile(external)).message).toBe(
-			'Invalid include: Unknown relation "nope" from table "users" at "author.nope"',
+			'Includes compile only from a report planned in this process',
 		);
 	});
 
@@ -363,7 +366,11 @@ describe('#915 / #917 / #927 public include contract', () => {
 								via: 'author',
 								strategy: 'flat',
 								include: [
-									{ relation: 'posts', via: 'createdPosts', strategy: 'flat' },
+									{
+										relation: 'posts',
+										via: 'createdPosts',
+										strategy: 'flat',
+									},
 								],
 							},
 						],
@@ -409,7 +416,7 @@ describe('#915 / #917 / #927 public include contract', () => {
 				select: { type: 'expressions', columns: [aggregate.intent] },
 			};
 			expect(errorOf(() => adapter.compile(external)).message).toBe(
-				"Include include[0](author) cannot use 'join' with aggregation, groupBy or DISTINCT because its data would be dropped. Use .join() for relational columns, grouping or ordering.",
+				'Includes compile only from a report planned in this process',
 			);
 		}
 	});

@@ -127,7 +127,9 @@ it('adapter refuses an external to-many join report', () => {
 			d.type === 'include-strategy' ? { ...d, choice: 'join' } : d,
 		),
 	};
-	expect(() => adapter.compile(external, { model })).toThrow(refusal);
+	expect(() => adapter.compile(external, { model })).toThrow(
+		new Error('Includes compile only from a report planned in this process'),
+	);
 });
 it('join include where stays in root WHERE', () => {
 	expect(
@@ -261,7 +263,7 @@ it('adapter refuses an external report that omits relation cardinality', () => {
 		return { ...d, choice: 'join', context };
 	});
 	expect(() => adapter.compile({ ...report, decisions }, { model })).toThrow(
-		'Include include[0](posts) decision does not match its intent',
+		new Error('Includes compile only from a report planned in this process'),
 	);
 });
 it('lateral transport uses a private marker even when selected fields are all null', () => {

@@ -31,8 +31,7 @@ QueryBuilder.all()
             Flat DB rows → nested JS objects
 ```
 
-The planner encodes its decision in `PlanReport.decisions[]` as an
-`include-strategy` entry. The adapter resolves an include payload shape after relation-column injection and carries it in compilation metadata. The hydrator reads that shape to reassemble rows and apply read conversions without renaming keys.
+The planner resolves includes once in `PlanReport.execution.includes`, with query ranges, physical relation hops, strategy, projection, ordering and predicates. The `include-strategy` entries in `PlanReport.decisions[]` are observations: their context holds `intentPath` and `nodeId`, rather than relation keys or targets. The adapter resolves an include payload shape after relation-column injection and carries it in compilation metadata. The compiled report also indexes payload descriptors in `includePayloadsByNodeId`. The hydrator reads that shape to reassemble rows and apply read conversions without renaming keys.
 
 Hydration requires `CompiledQuery.hydrationPlan.includePayloads` (or the compiled plan containing those shapes). Pass the compiled query when calling `ResultHydrator` directly. A planner report alone is insufficient: hydratable include decisions without the compiled shape throw `MissingIncludePayloadShapeError` instead of exposing transport columns.
 
@@ -103,7 +102,7 @@ No deduplication is needed in the hydrator.
 
 ### Explicit JOIN for hasMany
 
-`hasMany` join includes are refused by `plan()` and by the adapter for external reports, whether selected explicitly, by a relation hint, or by a default. Use `.join()` or NQL `| flat` for a flat rowset, or use a `json_agg`/`lateral` include.
+`hasMany` join includes are refused by `plan()`, whether selected explicitly, by a relation hint, or by a default. Use `.join()` or NQL `| flat` for a flat rowset, or use a `json_agg`/`lateral` include.
 
 ## Recursive Include Depth
 
@@ -226,3 +225,5 @@ Every root SELECT label owns its key, including function labels and expanded sta
 Compilation resolves these keys before generating SQL. Exact duplicate source/key requests deduplicate; two different owners of one public key fail with the payload path and key. A wildcard include over a target whose columns cannot be enumerated also fails.
 
 Scalar expression projections retain join include payloads. Expression projections containing a call in `NQL_SELECT_AGGREGATE_FUNCTIONS`, including nested calls, are aggregation. Join includes are refused when aggregation, `groupBy` or `DISTINCT` would drop their data; use `.join()` for relational columns, grouping or ordering.
+
+Includes compile only from a report planned in the same process. The module-private registry recognises reports issued by `plan()` and other in-process issuers, including the CLI. Serialized, spread, hand-built and legacy decision-context reports with includes are refused with `Includes compile only from a report planned in this process`. Reports without includes compile as before.

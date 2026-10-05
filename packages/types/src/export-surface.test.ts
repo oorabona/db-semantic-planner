@@ -46,8 +46,14 @@ const rootNames = [
 	...brandExports,
 	...names(before.root.declarations).filter((name) => !excluded.has(name)),
 	'IncludePayloadShape',
+	'RangeId',
+	'ResolvedRange',
+	'ResolvedIncludeNode',
+	'IncludeExecution',
+	'RangeAllocator',
 ];
 const rootRuntime = [
+	'RangeAllocator',
 	'AmbiguousIncludeError',
 	...brandExports,
 	...before.root.runtime.filter((name) => !excluded.has(name)),
@@ -59,8 +65,15 @@ const joinIncludeExports = [
 ];
 // The resolved relation path contract (#787, #891 step 5).
 const relationPathTypes = ['ResolvedRelationPath'];
+// Readers of include decisions find their resolved include node (#891 step 5).
+const resolvedIncludeExports = [
+	'getResolvedIncludeNode',
+	'markPlannedReport',
+	'isPlannedReport',
+];
 const internalNames = [
 	...joinIncludeExports,
+	...resolvedIncludeExports,
 	...relationPathTypes,
 	...rootNames,
 	...names(before.internal.declarations).filter(
@@ -73,6 +86,7 @@ const movedRuntime = before.root.runtime.filter((name) =>
 );
 const internalRuntime = [
 	...joinIncludeExports,
+	...resolvedIncludeExports,
 	...rootRuntime,
 	...before.internal.runtime.filter(
 		(name) => !before.root.runtime.includes(name),

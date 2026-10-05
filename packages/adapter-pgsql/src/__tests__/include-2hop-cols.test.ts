@@ -1,4 +1,9 @@
-import { ref, schema } from '@dbsp/core';
+import {
+	plan as nativePlan,
+	POSTGRESQL_CAPABILITIES,
+	ref,
+	schema,
+} from '@dbsp/core';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 /**
  * INCLUDE-2HOP-COLS regression tests.
@@ -75,9 +80,8 @@ function buildPlan(overrides?: {
 			: []),
 	];
 
-	return {
-		rootTable: 'calls',
-		intent: {
+	return nativePlan(
+		{
 			type: 'select',
 			from: 'calls',
 			select: {
@@ -97,46 +101,9 @@ function buildPlan(overrides?: {
 				},
 			],
 		},
-		decisions: [
-			{
-				id: 'D1',
-				type: 'include-strategy',
-				choice: 'join',
-				joinType,
-				context: {
-					sourceTable: 'calls',
-					target: 'callees',
-					relation: 'callee',
-					relationType: 'belongsTo',
-					includeAlias: 'callee',
-					intentPath: 'include[0]',
-					foreignKey: 'callee_id',
-				},
-				reasoning: `explicit join:${joinType}`,
-				alternatives: [],
-			},
-			{
-				id: 'D2',
-				type: 'include-strategy',
-				choice: 'join',
-				joinType,
-				context: {
-					sourceTable: 'callees',
-					target: 'files',
-					relation: 'file',
-					relationType: 'belongsTo',
-					includeAlias: 'file',
-					intentPath: 'include[0].include[0]',
-					foreignKey: 'file_id',
-				},
-				reasoning: `explicit join:${joinType}`,
-				alternatives: [],
-			},
-		],
-		warnings: [],
-		rootTableAlias: undefined,
-		schemaName: undefined,
-	} as unknown as PlanReport;
+		compileModel,
+		{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -186,9 +153,8 @@ describe('INCLUDE-2HOP-COLS: 2nd-hop relation columns resolve to correct include
 	});
 
 	it('works with only a 2-hop column and no 1-hop column', () => {
-		const plan: PlanReport = {
-			rootTable: 'calls',
-			intent: {
+		const plan: PlanReport = nativePlan(
+			{
 				type: 'select',
 				from: 'calls',
 				select: {
@@ -211,46 +177,9 @@ describe('INCLUDE-2HOP-COLS: 2nd-hop relation columns resolve to correct include
 					},
 				],
 			},
-			decisions: [
-				{
-					id: 'D1',
-					type: 'include-strategy',
-					choice: 'join',
-					joinType: 'inner',
-					context: {
-						sourceTable: 'calls',
-						target: 'callees',
-						relation: 'callee',
-						relationType: 'belongsTo',
-						includeAlias: 'callee',
-						intentPath: 'include[0]',
-						foreignKey: 'callee_id',
-					},
-					reasoning: 'explicit join:inner',
-					alternatives: [],
-				},
-				{
-					id: 'D2',
-					type: 'include-strategy',
-					choice: 'join',
-					joinType: 'inner',
-					context: {
-						sourceTable: 'callees',
-						target: 'files',
-						relation: 'file',
-						relationType: 'belongsTo',
-						includeAlias: 'file',
-						intentPath: 'include[0].include[0]',
-						foreignKey: 'file_id',
-					},
-					reasoning: 'explicit join:inner',
-					alternatives: [],
-				},
-			],
-			warnings: [],
-			rootTableAlias: undefined,
-			schemaName: undefined,
-		} as unknown as PlanReport;
+			compileModel,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
 
 		expect(() => compile(plan)).not.toThrow();
 		const { sql } = compile(plan);
@@ -259,9 +188,8 @@ describe('INCLUDE-2HOP-COLS: 2nd-hop relation columns resolve to correct include
 	});
 
 	it('1-hop-only relationColumn still works (regression guard)', () => {
-		const plan: PlanReport = {
-			rootTable: 'calls',
-			intent: {
+		const plan: PlanReport = nativePlan(
+			{
 				type: 'select',
 				from: 'calls',
 				select: {
@@ -283,29 +211,9 @@ describe('INCLUDE-2HOP-COLS: 2nd-hop relation columns resolve to correct include
 					},
 				],
 			},
-			decisions: [
-				{
-					id: 'D1',
-					type: 'include-strategy',
-					choice: 'join',
-					joinType: 'inner',
-					context: {
-						sourceTable: 'calls',
-						target: 'callees',
-						relation: 'callee',
-						relationType: 'belongsTo',
-						includeAlias: 'callee',
-						intentPath: 'include[0]',
-						foreignKey: 'callee_id',
-					},
-					reasoning: 'explicit join:inner',
-					alternatives: [],
-				},
-			],
-			warnings: [],
-			rootTableAlias: undefined,
-			schemaName: undefined,
-		} as unknown as PlanReport;
+			compileModel,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
 
 		expect(() => compile(plan)).not.toThrow();
 		const { sql } = compile(plan);

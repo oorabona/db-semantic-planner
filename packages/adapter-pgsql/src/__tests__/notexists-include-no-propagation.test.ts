@@ -60,7 +60,7 @@ describe('decoupled include — sibling exists/notExists never filters the inclu
 		if (!plan) throw new Error('expected a plan for an ORM dump');
 		const includeDecision = plan.decisions.find(
 			(d: any) =>
-				d.type === 'include-strategy' && d.context?.relation === 'posts',
+				d.type === 'include-strategy' && d.context?.intentPath === 'include[0]',
 		) as any;
 
 		// The include decision exists (inclusion is happening)
@@ -95,7 +95,7 @@ describe('decoupled include — sibling exists/notExists never filters the inclu
 		if (!plan) throw new Error('expected a plan for an ORM dump');
 		const includeDecision = plan.decisions.find(
 			(d: any) =>
-				d.type === 'include-strategy' && d.context?.relation === 'posts',
+				d.type === 'include-strategy' && d.context?.intentPath === 'include[0]',
 		) as any;
 		expect(includeDecision?.conditions).toBeUndefined();
 	});

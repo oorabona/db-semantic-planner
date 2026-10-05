@@ -1,3 +1,5 @@
+import type { IncludeExecution } from '@dbsp/types';
+import { getResolvedIncludeNode } from '@dbsp/types/internal';
 /**
  * Plan inspector: visual display of PlanReport data.
  * Renders metadata, decisions, warnings, and CTEs in a structured layout.
@@ -13,7 +15,8 @@ interface PlanDecision {
 	reasoning: string;
 	alternatives: readonly string[];
 	context: {
-		sourceTable: string;
+		sourceTable?: string | undefined;
+		nodeId?: string | undefined;
 		target?: string | undefined;
 		relation?: string | undefined;
 	};
@@ -33,6 +36,7 @@ interface CteItem {
 }
 
 interface PlanData {
+	execution?: IncludeExecution | undefined;
 	rootTable?: string | undefined;
 	decisions?: readonly PlanDecision[] | undefined;
 	warnings?: readonly PlanWarning[] | undefined;
@@ -122,6 +126,7 @@ export function PlanInspector({ plan }: PlanInspectorProps) {
 							reasoning={d.reasoning}
 							alternatives={d.alternatives}
 							context={d.context}
+							includeNode={getResolvedIncludeNode(plan.execution, d)}
 						/>
 					))}
 				</section>

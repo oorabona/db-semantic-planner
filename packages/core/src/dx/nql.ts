@@ -2,6 +2,10 @@ import {
 	validateRecursiveIncludeStrategy,
 	validateRecursiveSetOperation,
 } from '../planner.js';
+import {
+	observeIncludeDecisions,
+	resolveReportIncludes,
+} from '../resolved-includes.js';
 /**
  * @fileoverview NQL template literal integration for type-safe queries (DX-040 Block 8).
  *
@@ -35,6 +39,7 @@ import { resolveJsonAggOrderKey } from '@dbsp/types';
 import {
 	explainUnsupportedNqlBindingIncludeHop,
 	getTrustedNqlRelationFilterFields,
+	markPlannedReport,
 	NQL_INTERNAL_COMPILER_OPTIONS,
 	type NqlBindingIncludeNodeShape,
 	type NqlBindingIncludeRelationShape,
@@ -611,16 +616,23 @@ function createBindingTailIncludeDecisions(
 	return tailPlan.decisions
 		.filter((decision) => decision.type === 'include-strategy')
 		.map((decision, tailIndex) => {
-			const sourceTable = decision.context.sourceTable;
-			const relationName = decision.context.relation;
-			if (!relationName) {
+			const nodes = (
+				items: readonly import('@dbsp/types').ResolvedIncludeNode[],
+			): readonly import('@dbsp/types').ResolvedIncludeNode[] =>
+				items.flatMap((node) => [node, ...nodes(node.children)]);
+			const node = nodes(tailPlan.execution?.includes ?? []).find(
+				(node) => node.nodeId === decision.context.nodeId,
+			);
+			const sourceTable = node?.sourceRange.table;
+			const relationName = node?.relationName;
+			if (!relationName || !sourceTable) {
 				throw bindingFinalIncludeError(
 					bindingName,
 					include.relation,
 					'tail include planning produced a decision without a relation name',
 				);
 			}
-			const relation = findModelRelation(model, sourceTable, relationName);
+			const relation = node?.path.relations[0];
 			if (!relation) {
 				throw bindingFinalIncludeError(
 					bindingName,
@@ -642,9 +654,11 @@ function createBindingTailIncludeDecisions(
 			delete (baseContext as { targetOrderKey?: unknown }).targetOrderKey;
 			delete (baseContext as { orderByFallback?: unknown }).orderByFallback;
 			const parentKey = parentKeyForRelation(relation);
-			const targetTable = model.getTable(relation.target);
-			const targetOrder = targetTable
-				? resolveJsonAggOrderKey(targetTable)
+			const targetOrder = node
+				? {
+						columns: node.ordering.fallback,
+						fallback: node.ordering.usesFallback,
+					}
 				: undefined;
 			return {
 				...decision,
@@ -720,9 +734,10 @@ export function createBindingFinalPlan(
 			),
 		];
 	});
-	return {
+	return markPlannedReport({
 		rootTable: intent.from,
-		decisions,
+		execution: resolveReportIncludes(intent, decisions, model),
+		decisions: observeIncludeDecisions(decisions),
 		warnings: [],
 		ctes: [],
 		intent,
@@ -731,7 +746,7 @@ export function createBindingFinalPlan(
 			relationsAnalyzed: 0,
 			isAmbiguous: false,
 		},
-	};
+	});
 }
 
 function bindingFinalPlanHasIncludes(planReport: PlanReport): boolean {

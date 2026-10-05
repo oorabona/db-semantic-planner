@@ -640,8 +640,8 @@ for (const select of [
 			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
 		);
 		exactError(
-			() => createPgCompileOnlyAdapter().compile({ ...valid, intent }),
-			message,
+			() => createPgCompileOnlyAdapter({ model }).compile({ ...valid, intent }),
+			'Includes compile only from a report planned in this process',
 		);
 	});
 }
@@ -689,8 +689,8 @@ it('revalidates recorded total order against a compile model without a key', () 
 		},
 	});
 	expect(() =>
-		createPgCompileOnlyAdapter().compile(report, { model: noKey }),
+		createPgCompileOnlyAdapter().compile({ ...report }, { model: noKey }),
 	).toThrowError(
-		'Include posts limit requires a primary key or unique ordering for a total order',
+		new Error('Includes compile only from a report planned in this process'),
 	);
 });

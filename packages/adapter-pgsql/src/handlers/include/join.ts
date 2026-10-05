@@ -17,7 +17,6 @@ import type {
 	ResTarget,
 	SelectStmt,
 } from '@pgsql/types';
-import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
 import {
 	sqlColumnRef,
 	sqlColumnRefStar,
@@ -115,19 +114,17 @@ export const joinIncludeHandler: IncludeHandler = {
 
 		// Use relationName as alias for uniqueness
 		// (e.g., "author" and "editor" both from "users")
-		const targetAlias = relation ?? targetTable;
+		const targetAlias =
+			decision.resolvedInclude?.targetRange.alias ?? relation ?? targetTable;
 		const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
 		const sourceColumn = toColumnList(decision.sourceColumn);
 		const columns = decision.columns;
 		if (sourceColumn.length === 0) {
 			throw new Error("Missing required column 'sourceColumn' in JOIN include");
 		}
-		const targetColumn = decision.targetColumn ?? [
-			(ctx.deriveFkColumnName ?? defaultFkDerivation)(
-				ctx.rootTable,
-				ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
-			),
-		];
+		const targetColumn = decision.targetColumn;
+		if (!targetColumn)
+			throw new Error("Missing required column 'targetColumn' in join include");
 		const target = resolveRelationTarget(queryLocal(targetTable), ctx);
 		requireRelationTargetColumns(
 			target,

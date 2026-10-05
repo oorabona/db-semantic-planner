@@ -5,6 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { includeHandlerFixture } from '../../__tests__/include-handler-fixture.js';
 import { identityNaming } from '../../naming-plugin.js';
 import { createCompilerState } from '../types.js';
 import { joinIncludeHandler } from './join.js';
@@ -22,14 +23,17 @@ describe('joinIncludeHandler — coverage', () => {
 	it('compiles LEFT JOIN with explicit sourceColumn and targetColumn', () => {
 		const state = createCompilerState();
 		const result = joinIncludeHandler.compile(
-			{
-				type: 'includeStrategy',
-				strategy: 'join',
-				relation: 'author',
-				targetTable: 'users',
-				sourceColumn: 'author_id',
-				targetColumn: 'id',
-			},
+			includeHandlerFixture(
+				{
+					type: 'includeStrategy',
+					strategy: 'join',
+					relation: 'author',
+					targetTable: 'users',
+					sourceColumn: 'author_id',
+					targetColumn: 'id',
+				},
+				makeCtx(),
+			),
 			makeCtx(),
 			state,
 		);
@@ -40,13 +44,16 @@ describe('joinIncludeHandler — coverage', () => {
 	it('derives targetColumn from FK convention when not specified', () => {
 		const state = createCompilerState();
 		const result = joinIncludeHandler.compile(
-			{
-				type: 'includeStrategy',
-				strategy: 'join',
-				relation: 'author',
-				targetTable: 'users',
-				sourceColumn: 'author_id',
-			},
+			includeHandlerFixture(
+				{
+					type: 'includeStrategy',
+					strategy: 'join',
+					relation: 'author',
+					targetTable: 'users',
+					sourceColumn: 'author_id',
+				},
+				makeCtx(),
+			),
 			makeCtx(),
 			state,
 		);
@@ -56,13 +63,16 @@ describe('joinIncludeHandler — coverage', () => {
 	it('uses relation as targetTable when targetTable not specified', () => {
 		const state = createCompilerState();
 		const result = joinIncludeHandler.compile(
-			{
-				type: 'includeStrategy',
-				strategy: 'join',
-				relation: 'tags',
-				sourceColumn: 'tag_id',
-				targetColumn: 'id',
-			},
+			includeHandlerFixture(
+				{
+					type: 'includeStrategy',
+					strategy: 'join',
+					relation: 'tags',
+					sourceColumn: 'tag_id',
+					targetColumn: 'id',
+				},
+				makeCtx(),
+			),
 			makeCtx(),
 			state,
 		);
@@ -73,11 +83,14 @@ describe('joinIncludeHandler — coverage', () => {
 		const state = createCompilerState();
 		expect(() =>
 			joinIncludeHandler.compile(
-				{
-					type: 'includeStrategy',
-					strategy: 'join',
-					sourceColumn: 'id',
-				},
+				includeHandlerFixture(
+					{
+						type: 'includeStrategy',
+						strategy: 'join',
+						sourceColumn: 'id',
+					},
+					makeCtx(),
+				),
 				makeCtx(),
 				state,
 			),
@@ -87,15 +100,18 @@ describe('joinIncludeHandler — coverage', () => {
 	it('compiles with wildcard columns', () => {
 		const state = createCompilerState();
 		const result = joinIncludeHandler.compile(
-			{
-				type: 'includeStrategy',
-				strategy: 'join',
-				relation: 'author',
-				targetTable: 'users',
-				sourceColumn: 'author_id',
-				targetColumn: 'id',
-				columns: ['*'],
-			},
+			includeHandlerFixture(
+				{
+					type: 'includeStrategy',
+					strategy: 'join',
+					relation: 'author',
+					targetTable: 'users',
+					sourceColumn: 'author_id',
+					targetColumn: 'id',
+					columns: ['*'],
+				},
+				makeCtx(),
+			),
 			makeCtx(),
 			state,
 		);
@@ -107,15 +123,18 @@ describe('joinIncludeHandler — coverage', () => {
 	it('compiles with specific columns', () => {
 		const state = createCompilerState();
 		const result = joinIncludeHandler.compile(
-			{
-				type: 'includeStrategy',
-				strategy: 'join',
-				relation: 'author',
-				targetTable: 'users',
-				sourceColumn: 'author_id',
-				targetColumn: 'id',
-				columns: ['name', 'email'],
-			},
+			includeHandlerFixture(
+				{
+					type: 'includeStrategy',
+					strategy: 'join',
+					relation: 'author',
+					targetTable: 'users',
+					sourceColumn: 'author_id',
+					targetColumn: 'id',
+					columns: ['name', 'email'],
+				},
+				makeCtx(),
+			),
 			makeCtx(),
 			state,
 		);
@@ -126,14 +145,17 @@ describe('joinIncludeHandler — coverage', () => {
 	it('compiles without columns (no targets)', () => {
 		const state = createCompilerState();
 		const result = joinIncludeHandler.compile(
-			{
-				type: 'includeStrategy',
-				strategy: 'join',
-				relation: 'author',
-				targetTable: 'users',
-				sourceColumn: 'author_id',
-				targetColumn: 'id',
-			},
+			includeHandlerFixture(
+				{
+					type: 'includeStrategy',
+					strategy: 'join',
+					relation: 'author',
+					targetTable: 'users',
+					sourceColumn: 'author_id',
+					targetColumn: 'id',
+				},
+				makeCtx(),
+			),
 			makeCtx(),
 			state,
 		);
@@ -143,14 +165,17 @@ describe('joinIncludeHandler — coverage', () => {
 	it('uses currentAlias when available', () => {
 		const state = createCompilerState();
 		const result = joinIncludeHandler.compile(
-			{
-				type: 'includeStrategy',
-				strategy: 'join',
-				relation: 'author',
-				targetTable: 'users',
-				sourceColumn: 'author_id',
-				targetColumn: 'id',
-			},
+			includeHandlerFixture(
+				{
+					type: 'includeStrategy',
+					strategy: 'join',
+					relation: 'author',
+					targetTable: 'users',
+					sourceColumn: 'author_id',
+					targetColumn: 'id',
+				},
+				makeCtx({ currentAlias: 'p' }),
+			),
 			makeCtx({ currentAlias: 'p' }),
 			state,
 		);
@@ -160,14 +185,17 @@ describe('joinIncludeHandler — coverage', () => {
 	it('includes schema in JOIN when ctx.schema is set', () => {
 		const state = createCompilerState();
 		const result = joinIncludeHandler.compile(
-			{
-				type: 'includeStrategy',
-				strategy: 'join',
-				relation: 'author',
-				targetTable: 'users',
-				sourceColumn: 'author_id',
-				targetColumn: 'id',
-			},
+			includeHandlerFixture(
+				{
+					type: 'includeStrategy',
+					strategy: 'join',
+					relation: 'author',
+					targetTable: 'users',
+					sourceColumn: 'author_id',
+					targetColumn: 'id',
+				},
+				makeCtx({ schema: 'tenant_1' }),
+			),
 			makeCtx({ schema: 'tenant_1' }),
 			state,
 		);
@@ -177,13 +205,19 @@ describe('joinIncludeHandler — coverage', () => {
 	it('uses custom deriveFkColumnName from ctx', () => {
 		const state = createCompilerState();
 		const result = joinIncludeHandler.compile(
-			{
-				type: 'includeStrategy',
-				strategy: 'join',
-				relation: 'author',
-				targetTable: 'users',
-				sourceColumn: 'author_id',
-			},
+			includeHandlerFixture(
+				{
+					type: 'includeStrategy',
+					strategy: 'join',
+					relation: 'author',
+					targetTable: 'users',
+					sourceColumn: 'author_id',
+				},
+				makeCtx({
+					defaultPkColumnName: 'uuid',
+					deriveFkColumnName: (table, pk) => `fk_${table}_${pk}`,
+				}),
+			),
 			makeCtx({
 				defaultPkColumnName: 'uuid',
 				deriveFkColumnName: (table, pk) => `fk_${table}_${pk}`,
@@ -196,14 +230,17 @@ describe('joinIncludeHandler — coverage', () => {
 	it('defaults to LEFT JOIN when joinType is not set', () => {
 		const state = createCompilerState();
 		const result = joinIncludeHandler.compile(
-			{
-				type: 'includeStrategy',
-				strategy: 'join',
-				relation: 'author',
-				targetTable: 'users',
-				sourceColumn: 'author_id',
-				targetColumn: 'id',
-			},
+			includeHandlerFixture(
+				{
+					type: 'includeStrategy',
+					strategy: 'join',
+					relation: 'author',
+					targetTable: 'users',
+					sourceColumn: 'author_id',
+					targetColumn: 'id',
+				},
+				makeCtx(),
+			),
 			makeCtx(),
 			state,
 		);
@@ -213,15 +250,18 @@ describe('joinIncludeHandler — coverage', () => {
 	it('produces INNER JOIN when joinType is "inner"', () => {
 		const state = createCompilerState();
 		const result = joinIncludeHandler.compile(
-			{
-				type: 'includeStrategy',
-				strategy: 'join',
-				relation: 'author',
-				targetTable: 'users',
-				sourceColumn: 'author_id',
-				targetColumn: 'id',
-				joinType: 'inner',
-			},
+			includeHandlerFixture(
+				{
+					type: 'includeStrategy',
+					strategy: 'join',
+					relation: 'author',
+					targetTable: 'users',
+					sourceColumn: 'author_id',
+					targetColumn: 'id',
+					joinType: 'inner',
+				},
+				makeCtx(),
+			),
 			makeCtx(),
 			state,
 		);
@@ -232,15 +272,18 @@ describe('joinIncludeHandler — coverage', () => {
 	it('produces LEFT JOIN when joinType is "left"', () => {
 		const state = createCompilerState();
 		const result = joinIncludeHandler.compile(
-			{
-				type: 'includeStrategy',
-				strategy: 'join',
-				relation: 'author',
-				targetTable: 'users',
-				sourceColumn: 'author_id',
-				targetColumn: 'id',
-				joinType: 'left',
-			},
+			includeHandlerFixture(
+				{
+					type: 'includeStrategy',
+					strategy: 'join',
+					relation: 'author',
+					targetTable: 'users',
+					sourceColumn: 'author_id',
+					targetColumn: 'id',
+					joinType: 'left',
+				},
+				makeCtx(),
+			),
 			makeCtx(),
 			state,
 		);
@@ -250,16 +293,19 @@ describe('joinIncludeHandler — coverage', () => {
 	it('produces INNER JOIN with specific columns', () => {
 		const state = createCompilerState();
 		const result = joinIncludeHandler.compile(
-			{
-				type: 'includeStrategy',
-				strategy: 'join',
-				relation: 'file',
-				targetTable: 'files',
-				sourceColumn: 'file_id',
-				targetColumn: 'id',
-				joinType: 'inner',
-				columns: ['path', 'name'],
-			},
+			includeHandlerFixture(
+				{
+					type: 'includeStrategy',
+					strategy: 'join',
+					relation: 'file',
+					targetTable: 'files',
+					sourceColumn: 'file_id',
+					targetColumn: 'id',
+					joinType: 'inner',
+					columns: ['path', 'name'],
+				},
+				makeCtx(),
+			),
 			makeCtx(),
 			state,
 		);
@@ -271,16 +317,19 @@ describe('joinIncludeHandler — coverage', () => {
 	it('uses user-supplied alias from columnAliases for target', () => {
 		const state = createCompilerState();
 		const result = joinIncludeHandler.compile(
-			{
-				type: 'includeStrategy',
-				strategy: 'join',
-				relation: 'file',
-				targetTable: 'files',
-				sourceColumn: 'file_id',
-				targetColumn: 'id',
-				columns: ['path'],
-				columnAliases: { path: 'file_path' },
-			},
+			includeHandlerFixture(
+				{
+					type: 'includeStrategy',
+					strategy: 'join',
+					relation: 'file',
+					targetTable: 'files',
+					sourceColumn: 'file_id',
+					targetColumn: 'id',
+					columns: ['path'],
+					columnAliases: { path: 'file_path' },
+				},
+				makeCtx(),
+			),
 			makeCtx(),
 			state,
 		);
@@ -293,16 +342,19 @@ describe('joinIncludeHandler — coverage', () => {
 	it('falls back to relation.column alias when no columnAliases entry', () => {
 		const state = createCompilerState();
 		const result = joinIncludeHandler.compile(
-			{
-				type: 'includeStrategy',
-				strategy: 'join',
-				relation: 'file',
-				targetTable: 'files',
-				sourceColumn: 'file_id',
-				targetColumn: 'id',
-				columns: ['path'],
-				// No columnAliases — fall back to convention
-			},
+			includeHandlerFixture(
+				{
+					type: 'includeStrategy',
+					strategy: 'join',
+					relation: 'file',
+					targetTable: 'files',
+					sourceColumn: 'file_id',
+					targetColumn: 'id',
+					columns: ['path'],
+					// No columnAliases — fall back to convention
+				},
+				makeCtx(),
+			),
 			makeCtx(),
 			state,
 		);
@@ -314,16 +366,19 @@ describe('joinIncludeHandler — coverage', () => {
 	it('uses user alias for one column, falls back for another', () => {
 		const state = createCompilerState();
 		const result = joinIncludeHandler.compile(
-			{
-				type: 'includeStrategy',
-				strategy: 'join',
-				relation: 'file',
-				targetTable: 'files',
-				sourceColumn: 'file_id',
-				targetColumn: 'id',
-				columns: ['path', 'name'],
-				columnAliases: { path: 'file_path' }, // only 'path' aliased
-			},
+			includeHandlerFixture(
+				{
+					type: 'includeStrategy',
+					strategy: 'join',
+					relation: 'file',
+					targetTable: 'files',
+					sourceColumn: 'file_id',
+					targetColumn: 'id',
+					columns: ['path', 'name'],
+					columnAliases: { path: 'file_path' }, // only 'path' aliased
+				},
+				makeCtx(),
+			),
 			makeCtx(),
 			state,
 		);

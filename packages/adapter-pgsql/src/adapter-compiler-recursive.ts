@@ -1,3 +1,4 @@
+import { markPlannedReport } from '@dbsp/types/internal';
 import {
 	buildSubqueryFromIntent,
 	compileCondition,
@@ -98,7 +99,7 @@ function getRegisteredProjection(
 }
 
 function createPlanReportForQuery(query: QueryIntent): PlanReport {
-	return {
+	return markPlannedReport({
 		rootTable: query.from,
 		decisions: [],
 		warnings: [],
@@ -109,7 +110,7 @@ function createPlanReportForQuery(query: QueryIntent): PlanReport {
 			relationsAnalyzed: 0,
 			isAmbiguous: false,
 		},
-	};
+	});
 }
 
 function createPlanReportForCteQuery(

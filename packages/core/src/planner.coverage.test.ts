@@ -542,7 +542,8 @@ describe('planner coverage', () => {
 		});
 
 		const includeDecision = report.decisions.find(
-			(d) => d.type === 'include-strategy' && d.context?.relation === 'posts',
+			(d) =>
+				d.type === 'include-strategy' && d.context.intentPath === 'include[0]',
 		);
 		// Should use lateral because nested child has limit
 		expect(includeDecision?.choice).toBe('lateral');

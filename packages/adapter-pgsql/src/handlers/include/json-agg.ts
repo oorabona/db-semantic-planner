@@ -46,7 +46,7 @@ import type {
 	ResTargetNode,
 } from '../types.js';
 import { buildKeyCorrelation } from '../where/exists.js';
-import { deriveFkColumns, resolveIncludeOrder } from './shared.js';
+import { resolveIncludeOrder } from './shared.js';
 
 export function chosenRelationColumnAlias(
 	alias: string | undefined,
@@ -215,7 +215,9 @@ function compileJsonAggRecursive(
 	ctx: CompilerContext,
 	_state: CompilerState,
 ): Node {
-	const innerAlias = depth === 0 ? '__t__' : `__t${depth}__`;
+	const innerAlias =
+		decision.resolvedInclude?.targetRange.alias ??
+		(depth === 0 ? '__t__' : `__t${depth}__`);
 
 	const relation = decision.relation ?? decision.relationName;
 	const targetTable = decision.targetTable ?? relation;
@@ -238,26 +240,12 @@ function compileJsonAggRecursive(
 	}
 
 	// Build correlation WHERE based on relation type
-	const { sourceColumn, targetColumn } = deriveFkColumns(
-		decision,
-		parentAlias,
-		ctx.defaultPkColumnName,
-		ctx.deriveFkColumnName,
-	);
-	// Planner include decisions created before the typed boundary can carry an
-	// already-rendered FK spelling. The ModelIR relation remains the declared
-	// address, so use it for the correlation when present.
-	const declaredRelation = ctx.model?.getRelation(
-		`${(decision as { sourceTable?: string }).sourceTable ?? ctx.rootTable}.${relation}`,
-	);
-	const resolvedTargetColumn =
-		declaredRelation?.type === 'belongsTo'
-			? toColumnList(declaredRelation.targetKey).length > 0
-				? declaredRelation.targetKey
-				: targetColumn
-			: toColumnList(declaredRelation?.foreignKey).length > 0
-				? declaredRelation!.foreignKey
-				: targetColumn;
+	const sourceColumn = decision.sourceColumn;
+	const targetColumn = decision.targetColumn;
+	if (sourceColumn === undefined || targetColumn === undefined)
+		throw new Error('JSON_AGG include requires resolved correlation keys');
+
+	const resolvedTargetColumn = targetColumn;
 	const sourceTarget = resolveRelationTarget(queryLocal(targetTable), ctx);
 	// Preserve the container-conversion refusal before validating correlation
 	// keys: its diagnostic is more specific for a projected JSON output.

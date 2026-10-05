@@ -91,7 +91,9 @@ for (const [name, expression] of [
 			.select!;
 		expect(() =>
 			adapter.compile({ ...report, intent: { ...report.intent!, select } }),
-		).toThrow(refusal);
+		).toThrow(
+			new Error('Includes compile only from a report planned in this process'),
+		);
 		expect(
 			orm
 				.select('posts')

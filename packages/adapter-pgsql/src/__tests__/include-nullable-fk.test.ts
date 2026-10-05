@@ -12,7 +12,14 @@
  *   relation: variable_uses.def → variable_defs (belongsTo, FK: variable_def_id)
  */
 
-import { createOrm, eq, plan, ref, schema } from '@dbsp/core';
+import {
+	createOrm,
+	eq,
+	POSTGRESQL_CAPABILITIES,
+	plan,
+	ref,
+	schema,
+} from '@dbsp/core';
 import type { PlanReport } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
@@ -55,9 +62,8 @@ function compileFromPlan(planReport: PlanReport): {
  *   WHERE def.enclosing_symbol_id = $1
  */
 function buildPlanWithNullableFkWhere(symbolId: number): PlanReport {
-	return {
-		rootTable: 'variable_uses',
-		intent: {
+	return plan(
+		{
 			type: 'select',
 			from: 'variable_uses',
 			select: { type: 'fields', fields: ['id'] },
@@ -74,28 +80,9 @@ function buildPlanWithNullableFkWhere(symbolId: number): PlanReport {
 				},
 			],
 		},
-		decisions: [
-			{
-				id: 'D1',
-				type: 'include-strategy',
-				choice: 'join',
-				joinType: 'inner',
-				context: {
-					sourceTable: 'variable_uses',
-					target: 'variable_defs',
-					relation: 'def',
-					relationType: 'belongsTo',
-					intentPath: 'include[0]',
-					foreignKey: 'variable_def_id',
-				},
-				reasoning: 'explicit join:inner',
-				alternatives: [],
-			},
-		],
-		warnings: [],
-		rootTableAlias: undefined,
-		schemaName: undefined,
-	} as unknown as PlanReport;
+		compileModel,
+		{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+	);
 }
 
 // ---------------------------------------------------------------------------

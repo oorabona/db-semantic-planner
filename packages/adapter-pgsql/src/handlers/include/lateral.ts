@@ -12,7 +12,6 @@
 
 import { type ColumnListInput, toColumnList } from '@dbsp/types';
 import type { JoinExpr, Node, SelectStmt } from '@pgsql/types';
-import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
 import {
 	sortBy,
 	sqlColumnRef,
@@ -38,7 +37,7 @@ import type {
 } from '../types.js';
 import { expressionQualifiedColumnRef } from '../types.js';
 import { buildKeyCorrelation } from '../where/exists.js';
-import { deriveFkColumns, resolveIncludeOrder } from './shared.js';
+import { resolveIncludeOrder } from './shared.js';
 
 /**
  * Build column targets for the LATERAL subquery
@@ -160,7 +159,7 @@ function buildLateralJoin(subquery: Node, lateralAlias: string): Node {
 	return { JoinExpr: joinExpr };
 }
 
-// FK direction derivation: use deriveFkColumns from shared.ts
+// Correlation keys are resolved before include emission.
 
 /**
  * Recursively compile a decision and its children into a cascade of LATERAL JOINs.
@@ -181,14 +180,7 @@ function compileLateralCascade(
 				...new Set([
 					...decision.payloadShape.columns.map((c) => c.logicalName),
 					...(decision.children ?? []).flatMap((child) =>
-						toColumnList(
-							deriveFkColumns(
-								child,
-								targetTable ?? '',
-								ctx.defaultPkColumnName,
-								ctx.deriveFkColumnName,
-							).sourceColumn,
-						),
+						toColumnList(child.sourceColumn),
 					),
 				]),
 			]
@@ -216,8 +208,12 @@ function compileLateralCascade(
 
 	// Generate unique aliases
 	const existingAliases = state.aliases.size;
-	const innerAlias = `${targetTable}_inner_${existingAliases}`;
-	const lateralAlias = `${targetTable}_lat_${existingAliases}`;
+	const innerAlias =
+		decision.resolvedInclude?.targetRange.alias ??
+		`${targetTable}_inner_${existingAliases}`;
+	const lateralAlias =
+		decision.resolvedInclude?.outputRange.alias ??
+		`${targetTable}_lat_${existingAliases}`;
 	state.aliases.set(`lateral_${targetTable}_${existingAliases}`, lateralAlias);
 	const aliasColumnAuthorities = bindAliasAuthority(
 		bindAliasAuthority(
@@ -297,13 +293,13 @@ function compileLateralCascade(
 	// Recursively compile children
 	if (decision.children && decision.children.length > 0) {
 		for (const child of decision.children) {
-			const { sourceColumn: childSrc, targetColumn: childTgt } =
-				deriveFkColumns(
-					child,
-					targetTable,
-					ctx.defaultPkColumnName,
-					ctx.deriveFkColumnName,
+			const childSrc = child.sourceColumn;
+			const childTgt = child.targetColumn;
+			if (childSrc === undefined || childTgt === undefined)
+				throw new Error(
+					'LATERAL include requires resolved child correlation keys',
 				);
+
 			const childResult = compileLateralCascade(
 				child,
 				lateralAlias,
@@ -349,12 +345,11 @@ export const lateralIncludeHandler: IncludeHandler = {
 				"Missing required column 'sourceColumn' in lateral include",
 			);
 		}
-		const targetColumn = decision.targetColumn ?? [
-			(ctx.deriveFkColumnName ?? defaultFkDerivation)(
-				ctx.rootTable,
-				ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
-			),
-		];
+		const targetColumn = decision.targetColumn;
+		if (!targetColumn)
+			throw new Error(
+				"Missing required column 'targetColumn' in lateral include",
+			);
 		const outerAlias = ctx.currentAlias ?? ctx.rootTable;
 
 		const { joins, targets } = compileLateralCascade(

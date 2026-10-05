@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	hydrateJsonAggIncludes,
 	planForJsonAggHydration,
+	requireIncludePayloads,
 } from './hydration-utils.js';
 
 const shape: IncludePayloadShape = {
@@ -116,11 +117,14 @@ describe('metadata-owned JSON hydration', () => {
 
 it('utilities refuse hydratable planner reports without compiled shapes', () => {
 	const planned = {
+		execution: {
+			includes: [{ nodeId: 'include:posts', publicKey: 'posts', children: [] }],
+		},
 		decisions: [
 			{
 				type: 'include-strategy',
 				choice: 'json_agg',
-				context: { relation: 'posts' },
+				context: { nodeId: 'include:posts' },
 			},
 		],
 	} as unknown as PlanReport;
@@ -128,4 +132,52 @@ it('utilities refuse hydratable planner reports without compiled shapes', () => 
 		"Include hydration 'posts' requires compiled includePayloads; supply the compiled query hydrationPlan.";
 	expect(() => hydrateJsonAggIncludes([], planned)).toThrow(message);
 	expect(() => planForJsonAggHydration(planned)).toThrow(message);
+});
+
+it('names the nested public key when only its decision requires missing payloads', () => {
+	const planned = {
+		execution: {
+			includes: [
+				{
+					nodeId: 'include:posts',
+					publicKey: 'posts',
+					children: [
+						{
+							nodeId: 'include:posts.comments',
+							publicKey: 'readerComments',
+							children: [],
+						},
+					],
+				},
+			],
+		},
+		decisions: [
+			{
+				type: 'include-strategy',
+				choice: 'json_agg',
+				context: { nodeId: 'include:posts.comments' },
+			},
+		],
+	} as unknown as PlanReport;
+	const error = new Error(
+		"Include hydration 'readerComments' requires compiled includePayloads; supply the compiled query hydrationPlan.",
+	);
+	error.name = 'MissingIncludePayloadShapeError';
+	expect(() => hydrateJsonAggIncludes([], planned)).toThrow(error);
+	expect(() => planForJsonAggHydration(planned)).toThrow(error);
+});
+
+it('names the missing indexed payload error', () => {
+	const indexed = {
+		decisions: [],
+		includePayloadsByNodeId: {},
+		execution: { includes: [{ nodeId: 'include[0]', publicKey: 'posts' }] },
+	} as unknown as PlanReport;
+	expect(() => requireIncludePayloads(indexed)).toThrow(
+		expect.objectContaining({
+			name: 'MissingIncludePayloadShapeError',
+			message:
+				"Include hydration 'posts' requires compiled includePayloads; supply the compiled query hydrationPlan.",
+		}),
+	);
 });

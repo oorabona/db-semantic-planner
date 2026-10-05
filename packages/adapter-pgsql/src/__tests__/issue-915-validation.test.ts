@@ -9,6 +9,7 @@ import { validateIncludeOrdering } from '@dbsp/core/internal';
 import type { PlanReport } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { asExternalReport } from './external-include-report.js';
 
 const model = schema(
 	{
@@ -50,7 +51,9 @@ describe('#915 include validation', () => {
 		for (const strictMode of [true, false]) {
 			const orm = createOrm({ model, adapter, strictMode });
 			expect(() =>
-				orm.select('users').include('posts.author.posts').plan(),
+				asExternalReport(
+					orm.select('users').include('posts.author.posts').plan(),
+				),
 			).toThrowError('Invalid include: Circular include detected: users.posts');
 		}
 	});
@@ -69,10 +72,12 @@ describe('#915 include validation', () => {
 			},
 		});
 		const keylessAdapter = createPgCompileOnlyAdapter({ model: keyless });
-		const original = plan(
-			{ type: 'select', from: 'users', include: [{ relation: 'posts' }] },
-			keyless,
-			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		const original = asExternalReport(
+			plan(
+				{ type: 'select', from: 'users', include: [{ relation: 'posts' }] },
+				keyless,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			),
 		);
 		const external = {
 			...original,
@@ -100,14 +105,16 @@ describe('#915 include validation', () => {
 			),
 		} as PlanReport;
 		expect(() => keylessAdapter.compile(external)).toThrowError(
-			'Include posts limit requires a primary key or unique ordering for a total order',
+			new Error('Includes compile only from a report planned in this process'),
 		);
 	});
 	it('refuses nonexistent recorded key columns even with a primary key', () => {
-		const original = plan(
-			{ type: 'select', from: 'posts', include: [{ relation: 'author' }] },
-			model,
-			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		const original = asExternalReport(
+			plan(
+				{ type: 'select', from: 'posts', include: [{ relation: 'author' }] },
+				model,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			),
 		);
 		const external = {
 			...original,
@@ -125,20 +132,24 @@ describe('#915 include validation', () => {
 			),
 		} as PlanReport;
 		expect(() => adapter.compile(external)).toThrowError(
-			'Include author recorded order key "missing" is not a column of target table "users"',
+			new Error('Includes compile only from a report planned in this process'),
 		);
 	});
 	it('refuses external recursive json_agg decisions', () => {
-		const original = plan(
-			{
-				type: 'select',
-				from: 'categories',
-				include: [{ relation: 'ancestors' }],
-			},
-			model,
-			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		const original = asExternalReport(
+			plan(
+				{
+					type: 'select',
+					from: 'categories',
+					include: [{ relation: 'ancestors' }],
+				},
+				model,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			),
 		);
-		expect(() => adapter.compile(original)).not.toThrow();
+		expect(() => adapter.compile(original)).toThrow(
+			new Error('Includes compile only from a report planned in this process'),
+		);
 		const external = {
 			...original,
 			decisions: original.decisions.map((d) =>
@@ -146,7 +157,7 @@ describe('#915 include validation', () => {
 			),
 		} as PlanReport;
 		expect(() => adapter.compile(external)).toThrowError(
-			"Recursive include at include[0](ancestors) requires strategy 'cte', but decision declares 'json_agg'.",
+			new Error('Includes compile only from a report planned in this process'),
 		);
 	});
 });

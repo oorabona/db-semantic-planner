@@ -262,10 +262,18 @@ export type {
 	RecursivePlanReport,
 	ResolvedIncludeStrategy,
 } from './planner.js';
+
 // Dialect-neutral RelationIR key-field builder
 
 // Shared utility types
 
+export type {
+	IncludeExecution,
+	RangeId,
+	ResolvedIncludeNode,
+	ResolvedRange,
+} from './resolved-includes.js';
+export { RangeAllocator } from './resolved-includes.js';
 // ADR-0003 transition planner data contracts
 export {
 	type AdmittedOutcomeClaim,
@@ -398,7 +406,6 @@ export {
 	type UnprojectableChainReason,
 	type UnprojectableLedgerChain,
 } from './transition/index.js';
-
 export {
 	brandValue,
 	EXPRESSION_BRAND,

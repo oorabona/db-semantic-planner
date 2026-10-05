@@ -566,3 +566,77 @@ export function resolveIncludeRelationName(
 		);
 	return aliases[0] ?? disambiguate?.();
 }
+
+/** Resolve observational include decisions, including nested include join decisions. */
+export function getResolvedIncludeNode(
+	execution: import('./resolved-includes.js').IncludeExecution | undefined,
+	decision: {
+		readonly type: string;
+		readonly context: { readonly nodeId?: string | undefined };
+	},
+): import('./resolved-includes.js').ResolvedIncludeNode | undefined {
+	if (decision.type !== 'include-strategy' && decision.type !== 'join-type')
+		return undefined;
+	const nodeId = decision.context.nodeId;
+	if (!nodeId) return undefined;
+	const find = (
+		nodes: readonly import('./resolved-includes.js').ResolvedIncludeNode[],
+	): import('./resolved-includes.js').ResolvedIncludeNode | undefined => {
+		for (const node of nodes) {
+			if (node.nodeId === nodeId) return node;
+			const child = find(node.children);
+			if (child) return child;
+		}
+		return undefined;
+	};
+	return find(execution?.includes ?? []);
+}
+
+/** Authority belongs only to reports issued by this module instance. */
+const plannedReports = new WeakSet<object>();
+
+export function isPlannedReport(
+	report: import('./planner.js').PlanReport,
+): boolean {
+	return plannedReports.has(report);
+}
+
+/** Copy structural planning data; parameter slots retain opaque caller values. */
+function snapshotPlanningValue<T>(
+	value: T,
+	seen = new WeakMap<object, unknown>(),
+): T {
+	if (value === null || typeof value !== 'object') return value;
+	const prior = seen.get(value);
+	if (prior) return prior as T;
+	const copy = (Array.isArray(value) ? new Array(value.length) : {}) as Record<
+		PropertyKey,
+		unknown
+	>;
+	seen.set(value, copy);
+	for (const key of Reflect.ownKeys(value)) {
+		const descriptor = Object.getOwnPropertyDescriptor(value, key);
+		if (!descriptor || !('value' in descriptor) || key === 'length') continue;
+		Object.defineProperty(copy, key, {
+			enumerable: descriptor.enumerable === true,
+			value:
+				typeof key === 'symbol' || key === 'value' || key === 'values'
+					? descriptor.value
+					: snapshotPlanningValue(descriptor.value, seen),
+		});
+	}
+	return Object.freeze(copy) as T;
+}
+
+export function markPlannedReport<T extends import('./planner.js').PlanReport>(
+	report: T,
+): T {
+	const issued = {
+		...report,
+		...(report.execution && {
+			execution: snapshotPlanningValue(report.execution),
+		}),
+	};
+	plannedReports.add(issued);
+	return Object.freeze(issued);
+}

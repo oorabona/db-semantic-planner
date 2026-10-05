@@ -161,13 +161,20 @@ describe('ResultHydrator', () => {
 		it('refuses includes from planner decisions without compile metadata', () => {
 			const model = createMockModel();
 			const rows = [{ 'author.id': 1, author_json: '[]' }];
-			const report = makePlanReport([
-				{
-					type: 'include-strategy',
-					choice: 'join',
-					context: { relation: 'author' },
+			const report = {
+				...makePlanReport([
+					{
+						type: 'include-strategy',
+						choice: 'join',
+						context: { nodeId: 'include:author' },
+					},
+				]),
+				execution: {
+					includes: [
+						{ nodeId: 'include:author', publicKey: 'author', children: [] },
+					],
 				},
-			]);
+			} as unknown as PlanReport;
 			const hydrator = new ResultHydrator(model, 'posts');
 			expect(() => hydrator.hydrateJoinIncludes(rows, report)).toThrow(
 				"Include hydration 'author' requires compiled includePayloads; supply the compiled query hydrationPlan.",

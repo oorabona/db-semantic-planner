@@ -1,3 +1,7 @@
+import {
+	observeIncludeDecisions,
+	resolveReportIncludes,
+} from './resolved-includes.js';
 /**
  * @module planner
  * Semantic Planner - Decision engine for query planning.
@@ -23,6 +27,7 @@ import { resolveJsonAggOrderKey, toColumnList } from '@dbsp/types';
 import {
 	belongsToManyJoinIncludeRefusal,
 	dropsJoinIncludeData,
+	markPlannedReport,
 	resolveDeclaredRelationPath,
 	resolveIncludeRelationName,
 } from '@dbsp/types/internal';
@@ -436,7 +441,8 @@ export function plan(
 
 	const report: PlanReport = {
 		rootTable: intent.from,
-		decisions: Object.freeze(state.decisions.slice()),
+		execution: resolveReportIncludes(intent, state.decisions, model),
+		decisions: Object.freeze(observeIncludeDecisions(state.decisions)),
 		warnings: Object.freeze(state.warnings.slice()),
 		ctes: Object.freeze(state.ctes.slice()),
 		// intent is ALWAYS the original submitted intent (contract: observable via dump()).
@@ -449,7 +455,7 @@ export function plan(
 		metadata,
 	};
 
-	return Object.freeze(report);
+	return markPlannedReport(report);
 }
 
 // ============================================================================

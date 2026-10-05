@@ -74,76 +74,14 @@
   },
   {
     "case": "external/lateral/1/direct/nested/single/all",
-    "sql": "SELECT roots.*, children_lat_0.id AS \"children.id\", children_lat_0.tenant AS \"children.tenant\", children_lat_0.name AS \"children.name\", children_lat_0.amount AS \"children.amount\", children_lat_0.\"rootId\" AS \"children.rootId\", children_lat_0.__dbsp_presence_children AS __dbsp_presence_children FROM roots LEFT JOIN LATERAL (SELECT children_inner_0.id, children_inner_0.tenant, children_inner_0.name, children_inner_0.amount, children_inner_0.\"rootId\", children_inner_0.id AS __dbsp_presence_children FROM children AS children_inner_0 WHERE children_inner_0.\"rootId\" = roots.id) AS children_lat_0 ON true",
+    "sql": null,
     "params": [],
-    "error": null,
-    "payloads": [
-      {
-        "path": "children",
-        "publicKey": "children",
-        "strategy": "lateral",
-        "outputMode": "nested",
-        "table": "children",
-        "isToOne": true,
-        "outputLabel": "children_json",
-        "columns": [
-          {
-            "logicalName": "id",
-            "physicalName": "id",
-            "publicKey": "id",
-            "outputLabel": "children.id"
-          },
-          {
-            "logicalName": "tenant",
-            "physicalName": "tenant",
-            "publicKey": "tenant",
-            "outputLabel": "children.tenant"
-          },
-          {
-            "logicalName": "name",
-            "physicalName": "name",
-            "publicKey": "name",
-            "outputLabel": "children.name"
-          },
-          {
-            "logicalName": "amount",
-            "physicalName": "amount",
-            "publicKey": "amount",
-            "outputLabel": "children.amount",
-            "readHandling": {
-              "kind": "nestedTransform",
-              "table": "children",
-              "column": "amount",
-              "js": "number",
-              "outputKey": "amount"
-            }
-          },
-          {
-            "logicalName": "rootId",
-            "physicalName": "rootId",
-            "publicKey": "rootId",
-            "outputLabel": "children.rootId"
-          }
-        ],
-        "children": [],
-        "presence": {
-          "outputLabel": "__dbsp_presence_children",
-          "physicalName": "id"
-        }
-      }
-    ],
-    "rows": [
-      {
-        "id": 1,
-        "children": {
-          "id": 2,
-          "tenant": 2,
-          "name": "child",
-          "amount": 42,
-          "rootId": 2
-        }
-      }
-    ]
+    "error": {
+      "class": "Error",
+      "message": "Includes compile only from a report planned in this process"
+    },
+    "payloads": [],
+    "rows": []
   },
   {
     "case": "nql/lateral/1/direct/nested/single/all",
@@ -326,76 +264,14 @@
   },
   {
     "case": "external/lateral/1/direct/nested/single/ordered-limit",
-    "sql": "SELECT roots.*, children_lat_0.id AS \"children.id\", children_lat_0.tenant AS \"children.tenant\", children_lat_0.name AS \"children.name\", children_lat_0.amount AS \"children.amount\", children_lat_0.\"rootId\" AS \"children.rootId\", children_lat_0.__dbsp_presence_children AS __dbsp_presence_children FROM roots LEFT JOIN LATERAL (SELECT children_inner_0.id, children_inner_0.tenant, children_inner_0.name, children_inner_0.amount, children_inner_0.\"rootId\", children_inner_0.id AS __dbsp_presence_children FROM children AS children_inner_0 WHERE children_inner_0.\"rootId\" = roots.id ORDER BY children_inner_0.name DESC NULLS LAST, children_inner_0.id ASC NULLS LAST LIMIT 2) AS children_lat_0 ON true",
+    "sql": null,
     "params": [],
-    "error": null,
-    "payloads": [
-      {
-        "path": "children",
-        "publicKey": "children",
-        "strategy": "lateral",
-        "outputMode": "nested",
-        "table": "children",
-        "isToOne": true,
-        "outputLabel": "children_json",
-        "columns": [
-          {
-            "logicalName": "id",
-            "physicalName": "id",
-            "publicKey": "id",
-            "outputLabel": "children.id"
-          },
-          {
-            "logicalName": "tenant",
-            "physicalName": "tenant",
-            "publicKey": "tenant",
-            "outputLabel": "children.tenant"
-          },
-          {
-            "logicalName": "name",
-            "physicalName": "name",
-            "publicKey": "name",
-            "outputLabel": "children.name"
-          },
-          {
-            "logicalName": "amount",
-            "physicalName": "amount",
-            "publicKey": "amount",
-            "outputLabel": "children.amount",
-            "readHandling": {
-              "kind": "nestedTransform",
-              "table": "children",
-              "column": "amount",
-              "js": "number",
-              "outputKey": "amount"
-            }
-          },
-          {
-            "logicalName": "rootId",
-            "physicalName": "rootId",
-            "publicKey": "rootId",
-            "outputLabel": "children.rootId"
-          }
-        ],
-        "children": [],
-        "presence": {
-          "outputLabel": "__dbsp_presence_children",
-          "physicalName": "id"
-        }
-      }
-    ],
-    "rows": [
-      {
-        "id": 1,
-        "children": {
-          "id": 2,
-          "tenant": 2,
-          "name": "child",
-          "amount": 42,
-          "rootId": 2
-        }
-      }
-    ]
+    "error": {
+      "class": "Error",
+      "message": "Includes compile only from a report planned in this process"
+    },
+    "payloads": [],
+    "rows": []
   },
   {
     "case": "nql/lateral/1/direct/nested/single/ordered-limit",
@@ -487,7 +363,7 @@
     "params": [],
     "error": {
       "class": "Error",
-      "message": "Include where is not supported for strategy lateral at include[0](children).where (oorabona/db-semantic-planner#892)."
+      "message": "Includes compile only from a report planned in this process"
     },
     "payloads": [],
     "rows": []
@@ -520,7 +396,7 @@
     "params": [],
     "error": {
       "class": "Error",
-      "message": "Include where is not supported for strategy lateral at include[0](children).where (oorabona/db-semantic-planner#892)."
+      "message": "Includes compile only from a report planned in this process"
     },
     "payloads": [],
     "rows": []
@@ -553,7 +429,7 @@
     "params": [],
     "error": {
       "class": "Error",
-      "message": "Include where is not supported for strategy lateral at include[0](children).where (oorabona/db-semantic-planner#892)."
+      "message": "Includes compile only from a report planned in this process"
     },
     "payloads": [],
     "rows": []
@@ -644,76 +520,14 @@
   },
   {
     "case": "external/lateral/1/direct/nested/composite/all",
-    "sql": "SELECT roots.*, children_lat_0.id AS \"compositeChildren.id\", children_lat_0.tenant AS \"compositeChildren.tenant\", children_lat_0.name AS \"compositeChildren.name\", children_lat_0.amount AS \"compositeChildren.amount\", children_lat_0.\"rootId\" AS \"compositeChildren.rootId\", children_lat_0.\"__dbsp_presence_compositeChildren\" AS \"__dbsp_presence_compositeChildren\" FROM roots LEFT JOIN LATERAL (SELECT children_inner_0.id, children_inner_0.tenant, children_inner_0.name, children_inner_0.amount, children_inner_0.\"rootId\", children_inner_0.id AS \"__dbsp_presence_compositeChildren\" FROM children AS children_inner_0 WHERE children_inner_0.\"rootId\" = roots.id AND children_inner_0.tenant = roots.tenant) AS children_lat_0 ON true",
+    "sql": null,
     "params": [],
-    "error": null,
-    "payloads": [
-      {
-        "path": "compositeChildren",
-        "publicKey": "compositeChildren",
-        "strategy": "lateral",
-        "outputMode": "nested",
-        "table": "children",
-        "isToOne": true,
-        "outputLabel": "compositeChildren_json",
-        "columns": [
-          {
-            "logicalName": "id",
-            "physicalName": "id",
-            "publicKey": "id",
-            "outputLabel": "compositeChildren.id"
-          },
-          {
-            "logicalName": "tenant",
-            "physicalName": "tenant",
-            "publicKey": "tenant",
-            "outputLabel": "compositeChildren.tenant"
-          },
-          {
-            "logicalName": "name",
-            "physicalName": "name",
-            "publicKey": "name",
-            "outputLabel": "compositeChildren.name"
-          },
-          {
-            "logicalName": "amount",
-            "physicalName": "amount",
-            "publicKey": "amount",
-            "outputLabel": "compositeChildren.amount",
-            "readHandling": {
-              "kind": "nestedTransform",
-              "table": "children",
-              "column": "amount",
-              "js": "number",
-              "outputKey": "amount"
-            }
-          },
-          {
-            "logicalName": "rootId",
-            "physicalName": "rootId",
-            "publicKey": "rootId",
-            "outputLabel": "compositeChildren.rootId"
-          }
-        ],
-        "children": [],
-        "presence": {
-          "outputLabel": "__dbsp_presence_compositeChildren",
-          "physicalName": "id"
-        }
-      }
-    ],
-    "rows": [
-      {
-        "id": 1,
-        "compositeChildren": {
-          "id": 2,
-          "tenant": 2,
-          "name": "child",
-          "amount": 42,
-          "rootId": 2
-        }
-      }
-    ]
+    "error": {
+      "class": "Error",
+      "message": "Includes compile only from a report planned in this process"
+    },
+    "payloads": [],
+    "rows": []
   },
   {
     "case": "nql/lateral/1/direct/nested/composite/all",

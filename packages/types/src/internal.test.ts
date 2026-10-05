@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
 	explainUnsupportedNqlBindingIncludeHop,
 	getTrustedNqlRelationFilterFields,
@@ -335,5 +335,23 @@ describe('include camelCase resolution', () => {
 		expect(resolveIncludeRelationName(model, 'users', 'publics')).toBe(
 			relations[1],
 		);
+	});
+});
+
+describe('planned report registry', () => {
+	it('does not share authority with a second module instance', async () => {
+		const first = await import('./internal.js');
+		const report = first.markPlannedReport({
+			rootTable: 'rows',
+			intent: { type: 'select', from: 'rows' },
+			decisions: [],
+			warnings: [],
+			ctes: [],
+			metadata: { planningTimeMs: 0, relationsAnalyzed: 0, isAmbiguous: false },
+		});
+		vi.resetModules();
+		const second = await import('./internal.js');
+		expect(first.isPlannedReport(report)).toBe(true);
+		expect(second.isPlannedReport(report)).toBe(false);
 	});
 });

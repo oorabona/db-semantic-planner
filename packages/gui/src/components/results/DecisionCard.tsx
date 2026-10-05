@@ -1,3 +1,4 @@
+import type { ResolvedIncludeNode } from '@dbsp/types';
 /**
  * Decision card showing a single planner decision with strategy, reasoning, and alternatives.
  */
@@ -9,8 +10,9 @@ interface DecisionCardProps {
 	choice: string;
 	reasoning: string;
 	alternatives: readonly string[];
+	includeNode?: ResolvedIncludeNode | undefined;
 	context: {
-		sourceTable: string;
+		sourceTable?: string | undefined;
 		target?: string | undefined;
 		relation?: string | undefined;
 	};
@@ -31,6 +33,7 @@ export function DecisionCard({
 	reasoning,
 	alternatives,
 	context,
+	includeNode,
 }: DecisionCardProps) {
 	const [expanded, setExpanded] = useState(false);
 	const colorClass = TYPE_COLORS[type] ?? 'bg-muted text-muted-foreground';
@@ -46,9 +49,20 @@ export function DecisionCard({
 				<div className="min-w-0 flex-1">
 					<p className="text-xs font-medium">{choice}</p>
 					<p className="text-xs text-muted-foreground">
-						{context.sourceTable}
-						{context.target ? ` → ${context.target}` : ''}
-						{context.relation ? ` (${context.relation})` : ''}
+						{includeNode ? includeNode.sourceRange.table : context.sourceTable}
+						{includeNode
+							? ` → ${includeNode.targetRange.table}`
+							: context.target
+								? ` → ${context.target}`
+								: ''}
+						{includeNode
+							? ` (${includeNode.relationName})`
+							: context.relation
+								? ` (${context.relation})`
+								: ''}
+						{includeNode && (
+							<span>{` · ${includeNode.relationType} · ${includeNode.relationPath} · ${includeNode.path.hops.flatMap((hop) => hop.pairs.map((pair) => `${pair.fromColumn} → ${pair.toColumn}`)).join(', ')}`}</span>
+						)}
 					</p>
 					<p className="mt-1 text-xs text-muted-foreground/80">{reasoning}</p>
 				</div>

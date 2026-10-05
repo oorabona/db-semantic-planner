@@ -78,7 +78,8 @@ describe('plan() — frozen arrays via .slice() (FIND-051)', () => {
 
 		// Must contain at least the include-strategy decision
 		const incDecision = report.decisions.find(
-			(d) => d.type === 'include-strategy' && d.context?.relation === 'user',
+			(d) =>
+				d.type === 'include-strategy' && d.context.intentPath === 'include[0]',
 		);
 		expect(incDecision).toBeDefined();
 	});
@@ -267,7 +268,8 @@ describe('plan() — golden regression: semantic output unchanged after perf fix
 
 		// At minimum one include-strategy decision for 'user'
 		const userInclude = report.decisions.find(
-			(d) => d.type === 'include-strategy' && d.context?.relation === 'user',
+			(d) =>
+				d.type === 'include-strategy' && d.context.intentPath === 'include[0]',
 		);
 		expect(userInclude).toBeDefined();
 		expect(typeof userInclude?.choice).toBe('string');

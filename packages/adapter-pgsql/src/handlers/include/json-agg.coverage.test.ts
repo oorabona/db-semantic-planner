@@ -7,6 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { includeHandlerFixture } from '../../__tests__/include-handler-fixture.js';
 import { identityNaming } from '../../naming-plugin.js';
 import type { CompilerContext, Decision } from '../types.js';
 import { createCompilerState } from '../types.js';
@@ -38,7 +39,11 @@ describe('jsonAggIncludeHandler', () => {
 			targetTable: 'posts',
 			relationType: 'hasMany',
 		} as unknown as Decision;
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		expect(result.targets).toHaveLength(1);
 		expect(result.targets[0]).toHaveProperty('ResTarget');
 	});
@@ -54,7 +59,11 @@ describe('jsonAggIncludeHandler', () => {
 			relationType: 'belongsTo',
 			foreignKey: 'user_id',
 		} as unknown as Decision;
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		expect(result.targets).toHaveLength(1);
 	});
 
@@ -69,7 +78,11 @@ describe('jsonAggIncludeHandler', () => {
 			relationType: 'hasMany',
 			foreignKey: 'author_id',
 		} as unknown as Decision;
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		expect(result.targets).toHaveLength(1);
 	});
 
@@ -84,7 +97,11 @@ describe('jsonAggIncludeHandler', () => {
 			relationType: 'hasMany',
 			parentKey: 'user_id',
 		} as unknown as Decision;
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		expect(result.targets).toHaveLength(1);
 	});
 
@@ -104,7 +121,11 @@ describe('jsonAggIncludeHandler', () => {
 			relationType: 'hasMany',
 			limit: 10,
 		} as unknown as Decision;
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		expect(result.targets).toHaveLength(1);
 	});
 
@@ -119,7 +140,13 @@ describe('jsonAggIncludeHandler', () => {
 			relationType: 'hasMany',
 			limit: 'invalid',
 		} as unknown as Decision;
-		expect(() => jsonAggIncludeHandler.compile(decision, ctx, state)).toThrow(
+		expect(() =>
+			jsonAggIncludeHandler.compile(
+				includeHandlerFixture(decision, ctx),
+				ctx,
+				state,
+			),
+		).toThrow(
 			'Include posts limit requires a primary key or unique ordering for a total order',
 		);
 	});
@@ -135,7 +162,11 @@ describe('jsonAggIncludeHandler', () => {
 			relationType: 'hasMany',
 			columns: ['id', 'title', 'created_at'],
 		} as unknown as Decision;
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		expect(result.targets).toHaveLength(1);
 	});
 
@@ -157,7 +188,11 @@ describe('jsonAggIncludeHandler', () => {
 				},
 			},
 		} as unknown as Decision;
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		expect(result.targets).toHaveLength(1);
 	});
 
@@ -178,7 +213,11 @@ describe('jsonAggIncludeHandler', () => {
 				},
 			],
 		} as unknown as Decision;
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		expect(result.targets).toHaveLength(1);
 	});
 
@@ -206,7 +245,11 @@ describe('jsonAggIncludeHandler', () => {
 				},
 			],
 		} as unknown as Decision;
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		expect(result.targets).toHaveLength(1);
 	});
 
@@ -232,7 +275,11 @@ describe('jsonAggIncludeHandler', () => {
 				},
 			],
 		} as unknown as Decision;
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		expect(result.targets).toHaveLength(1);
 	});
 
@@ -253,7 +300,11 @@ describe('jsonAggIncludeHandler', () => {
 				},
 			],
 		} as unknown as Decision;
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		expect(result.targets).toHaveLength(1);
 	});
 
@@ -274,7 +325,11 @@ describe('jsonAggIncludeHandler', () => {
 				},
 			],
 		} as unknown as Decision;
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		expect(result.targets).toHaveLength(1);
 	});
 
@@ -295,7 +350,11 @@ describe('jsonAggIncludeHandler', () => {
 				},
 			],
 		} as unknown as Decision;
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		expect(result.targets).toHaveLength(1);
 	});
 
@@ -310,7 +369,11 @@ describe('jsonAggIncludeHandler', () => {
 			relationType: 'hasMany',
 			children: [],
 		} as unknown as Decision;
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		expect(result.targets).toHaveLength(1);
 	});
 
@@ -324,7 +387,11 @@ describe('jsonAggIncludeHandler', () => {
 			targetTable: 'posts',
 			relationType: 'hasMany',
 		} as unknown as Decision;
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		expect(result.targets).toHaveLength(1);
 	});
 
@@ -337,7 +404,11 @@ describe('jsonAggIncludeHandler', () => {
 			relation: 'posts',
 			relationType: 'hasMany',
 		} as unknown as Decision;
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		expect(result.targets).toHaveLength(1);
 	});
 
@@ -349,9 +420,13 @@ describe('jsonAggIncludeHandler', () => {
 			strategy: 'json_agg',
 			relationType: 'hasMany',
 		} as unknown as Decision;
-		expect(() => jsonAggIncludeHandler.compile(decision, ctx, state)).toThrow(
-			'JSON_AGG include requires targetTable',
-		);
+		expect(() =>
+			jsonAggIncludeHandler.compile(
+				includeHandlerFixture(decision, ctx),
+				ctx,
+				state,
+			),
+		).toThrow('JSON_AGG include requires targetTable');
 	});
 
 	it('throws when relation name is missing', () => {
@@ -363,9 +438,13 @@ describe('jsonAggIncludeHandler', () => {
 			targetTable: 'posts',
 			relationType: 'hasMany',
 		} as unknown as Decision;
-		expect(() => jsonAggIncludeHandler.compile(decision, ctx, state)).toThrow(
-			'JSON_AGG include requires relation name',
-		);
+		expect(() =>
+			jsonAggIncludeHandler.compile(
+				includeHandlerFixture(decision, ctx),
+				ctx,
+				state,
+			),
+		).toThrow('JSON_AGG include requires relation name');
 	});
 
 	it('uses currentAlias when set', () => {
@@ -378,7 +457,11 @@ describe('jsonAggIncludeHandler', () => {
 			targetTable: 'posts',
 			relationType: 'hasMany',
 		} as unknown as Decision;
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		expect(result.targets).toHaveLength(1);
 	});
 
@@ -392,7 +475,11 @@ describe('jsonAggIncludeHandler', () => {
 			targetTable: 'posts',
 			relationType: 'hasMany',
 		} as unknown as Decision;
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		expect(result.targets).toHaveLength(1);
 	});
 
@@ -419,7 +506,11 @@ describe('jsonAggIncludeHandler', () => {
 				},
 			],
 		} as unknown as Decision;
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		expect(result.targets).toHaveLength(1);
 	});
 
@@ -441,7 +532,11 @@ describe('jsonAggIncludeHandler', () => {
 				},
 			],
 		} as unknown as Decision;
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		expect(result.targets).toHaveLength(1);
 	});
 
@@ -472,7 +567,11 @@ describe('jsonAggIncludeHandler', () => {
 				},
 			],
 		} as unknown as Decision;
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		expect(result.targets).toHaveLength(1);
 	});
 });

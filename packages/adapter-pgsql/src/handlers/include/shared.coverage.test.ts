@@ -6,7 +6,10 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { deriveFkColumns, type FkColumnSource } from './shared.js';
+import {
+	deriveConditionKeys as deriveFkColumns,
+	type LegacyConditionKeySource as FkColumnSource,
+} from '../../legacy-condition-keys.js';
 
 // ============================================================================
 // deriveFkColumns for belongsTo relations

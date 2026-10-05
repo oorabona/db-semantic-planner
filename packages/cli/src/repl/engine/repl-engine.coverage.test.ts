@@ -1467,3 +1467,67 @@ describe('isInsideStringLiteral — edge cases', () => {
 		);
 	});
 });
+
+it.each(['hasMany', 'belongsTo'])(
+	'renders resolved %s include rows in the plan view',
+	async (relationType) => {
+		const engine = createEngine();
+		const events = collectEvents(engine);
+		const sourceRange = { id: 'r0', table: 'users', alias: 'users' };
+		const targetRange = { id: 'r1', table: 'posts', alias: 'posts' };
+		const node = {
+			nodeId: 'include[0].include[0]',
+			intentPath: 'include[0].include[0]',
+			publicKey: 'articles',
+			relationName: 'posts',
+			relationPath: 'team.articles',
+			sourceRange,
+			targetRange,
+			relationType,
+			path: {
+				hops: [{ pairs: [{ fromColumn: 'id', toColumn: 'author_id' }] }],
+			},
+			children: [],
+		};
+		mockCompileNqlToSql.mockResolvedValueOnce({
+			sql: 'SELECT 1',
+			params: [],
+			intentType: 'query',
+			intent: { type: 'query', table: 'users' },
+			planReport: {
+				rootTable: 'users',
+				decisions: ['include-strategy', 'join-type'].map((type) => ({
+					id: type,
+					type,
+					choice: 'join',
+					reasoning: 'test',
+					alternatives: [],
+					context: { nodeId: node.nodeId, intentPath: node.nodeId },
+				})),
+				execution: {
+					rootRange: sourceRange,
+					includes: [{ ...node, nodeId: 'include[0]', children: [node] }],
+				},
+				warnings: [],
+				ctes: [],
+				metadata: { planningTimeMs: 0 },
+			},
+		});
+		await engine.submit('users');
+		const result = events.find((e) => e.type === 'query-result');
+		expect(result?.result.error).toBeUndefined();
+		expect(result?.result.plan?.decisions).toEqual(
+			['include-strategy', 'join-type'].map((type) => ({
+				type,
+				context: 'users → posts → include[0].include[0]',
+				choice: 'join',
+				reasoning: 'test',
+				foreignKey: [relationType === 'belongsTo' ? 'id' : 'author_id'],
+				relationType,
+				relationPath: 'team.articles',
+				intentPath: node.nodeId,
+				decisionId: type,
+			})),
+		);
+	},
+);

@@ -12,7 +12,6 @@ import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../assert-field.js';
 import { createDeclaredNameResolver } from '../declared-name-resolver.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { createPgPhysicalModel } from '../physical-model/index.js';
-import { synthesizeMissingJoinDecisions } from '../plan-decision-extractor.js';
 
 const model = schema({
 	variable_defs: {
@@ -102,16 +101,15 @@ describe('#911 fallback includes are planned and validated', () => {
 			include: [{ relation: 'sourceFile', join: 'left' }],
 		});
 		expect(
-			report.decisions
-				.filter((d) => d.type === 'include-strategy')
-				.map((d) => [d.context.relation, d.context.intentPath, d.choice]),
+			[
+				report.execution!.includes[0]!,
+				...report.execution!.includes[0]!.children,
+			].map((node) => [node.relationName, node.intentPath, node.strategy]),
 		).toEqual([
 			['enclosing_symbol', 'include[0]', 'join'],
 			['source_file', 'include[0].include[0]', 'join'],
 		]);
-		expect(synthesizeMissingJoinDecisions(report, new Set(), model)).toEqual(
-			[],
-		);
+
 		const { sql } = compileSelect(report, undefined, {
 			model,
 			declaredNames: createDeclaredNameResolver(
@@ -152,27 +150,28 @@ describe('#911 relation resolution precedence', () => {
 		expect(
 			query
 				.plan()
-				.decisions.filter((d) => d.type === 'include-strategy')
-				.map((d) => [d.context.relation, d.context.target, d.choice]),
+				.execution!.includes.map((node) => [
+					node.relationName,
+					node.targetRange.table,
+					node.strategy,
+				]),
 		).toEqual([['public_link', 'billingProfile', 'json_agg']]);
 		expect(query.dump().sql).toBe(
 			"SELECT accounts.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id) ORDER BY __t__.id ASC NULLS LAST) FROM \"billingProfile\" AS __t__ WHERE __t__.id = accounts.public_id), '[]'::json) AS public_link_json FROM accounts",
 		);
 	});
 
-	for (const [name, relation, target, plannedSql, legacySql] of [
+	for (const [name, relation, target, plannedSql] of [
 		[
 			'billingProfile',
 			'public_link',
 			'billingProfile',
 			'SELECT accounts.*, public_link.id AS "billingProfile.id", public_link.id AS "__dbsp_presence_billingProfile" FROM accounts LEFT JOIN "billingProfile" AS public_link ON accounts.public_id = public_link.id',
-			'SELECT accounts.*, "billingProfile".id AS "billingProfile.id", "billingProfile".id AS "__dbsp_presence_billingProfile" FROM accounts LEFT JOIN "billingProfile" AS "billingProfile" ON accounts.public_id = "billingProfile".id',
 		],
 		[
 			'billing_profile',
 			'billing_profile',
 			'secrets',
-			'SELECT accounts.*, billing_profile.id AS "billing_profile.id", billing_profile.id AS __dbsp_presence_billing_profile FROM accounts LEFT JOIN secrets AS billing_profile ON accounts.secret_id = billing_profile.id',
 			'SELECT accounts.*, billing_profile.id AS "billing_profile.id", billing_profile.id AS __dbsp_presence_billing_profile FROM accounts LEFT JOIN secrets AS billing_profile ON accounts.secret_id = billing_profile.id',
 		],
 		[
@@ -180,10 +179,9 @@ describe('#911 relation resolution precedence', () => {
 			'public_link',
 			'billingProfile',
 			'SELECT accounts.*, public_link.id AS "publicLink.id", public_link.id AS "__dbsp_presence_publicLink" FROM accounts LEFT JOIN "billingProfile" AS public_link ON accounts.public_id = public_link.id',
-			'SELECT accounts.*, "publicLink".id AS "publicLink.id", "publicLink".id AS "__dbsp_presence_publicLink" FROM accounts LEFT JOIN "billingProfile" AS "publicLink" ON accounts.public_id = "publicLink".id',
 		],
 	] as const) {
-		it(`resolves ${name} in planner and legacy synthesis`, () => {
+		it(`resolves ${name} in planner and refuses external synthesis`, () => {
 			const report = plan(
 				{
 					type: 'select',
@@ -193,22 +191,24 @@ describe('#911 relation resolution precedence', () => {
 				precedenceModel,
 			);
 			expect(
-				report.decisions
-					.filter((d) => d.type === 'include-strategy')
-					.map((d) => [d.context.relation, d.context.target, d.choice]),
+				report.execution!.includes.map((node) => [
+					node.relationName,
+					node.targetRange.table,
+					node.strategy,
+				]),
 			).toEqual([[relation, target, 'join']]);
-			const legacy = { ...report, decisions: [] };
-			expect(
-				synthesizeMissingJoinDecisions(legacy, new Set(), precedenceModel).map(
-					(d) => d.targetTable,
-				),
-			).toEqual([target]);
+			const wire = { ...report };
+			delete wire.execution;
+			const legacy = { ...wire, decisions: [] };
+
 			const adapter = createPgCompileOnlyAdapter({ model: precedenceModel });
 			expect(adapter.compile(report, { model: precedenceModel }).sql).toBe(
 				plannedSql,
 			);
-			expect(adapter.compile(legacy, { model: precedenceModel }).sql).toBe(
-				legacySql,
+			expect(() => adapter.compile(legacy, { model: precedenceModel })).toThrow(
+				new Error(
+					'Includes compile only from a report planned in this process',
+				),
 			);
 		});
 	}
@@ -231,7 +231,11 @@ describe('#911 relation resolution precedence', () => {
 			} as unknown as PlanReport;
 			expect(() =>
 				createPgCompileOnlyAdapter({ model }).compile(external, { model }),
-			).toThrow('Include enclosingSymbol select fields must be an array');
+			).toThrow(
+				new Error(
+					'Includes compile only from a report planned in this process',
+				),
+			);
 		});
 	}
 });
@@ -283,8 +287,8 @@ for (const [strategy, expectedSql] of [
 			(d) => d.type === 'include-strategy',
 		);
 		expect(decision?.choice).toBe(strategy);
-		expect(decision?.context.targetOrderKey).toEqual(['rank']);
-		expect(decision?.context.orderByFallback).toBeUndefined();
+		expect(report.execution?.includes[0]?.ordering.fallback).toEqual(['rank']);
+		expect(report.execution?.includes[0]?.ordering.usesFallback).toBe(false);
 		expect(
 			createPgCompileOnlyAdapter({ model: noKey }).compile(report, {
 				model: noKey,

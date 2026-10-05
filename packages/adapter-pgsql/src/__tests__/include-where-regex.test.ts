@@ -1,4 +1,4 @@
-import { ref, schema } from '@dbsp/core';
+import { POSTGRESQL_CAPABILITIES, plan, ref, schema } from '@dbsp/core';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 /**
  * Regression tests: op() expressions in include({ where }) are compiled.
@@ -67,7 +67,7 @@ function makePlanWithRegexIncludeWhere(
 					{
 						kind: 'comparison' as const,
 						field: 'project_id',
-						operator: 'eq',
+						operator: 'eq' as const,
 						value: 1,
 					},
 					makeRegexWhereIntent(regexValue),
@@ -75,9 +75,8 @@ function makePlanWithRegexIncludeWhere(
 			}
 		: makeRegexWhereIntent(regexValue);
 
-	return {
-		rootTable: 'symbols',
-		intent: {
+	return plan(
+		{
 			type: 'select',
 			from: 'symbols',
 			select: { type: 'fields', fields: ['id'] },
@@ -89,27 +88,9 @@ function makePlanWithRegexIncludeWhere(
 				},
 			],
 		},
-		decisions: [
-			{
-				id: 'D1',
-				type: 'include-strategy',
-				choice: 'join',
-				joinType: 'inner',
-				context: {
-					sourceTable: 'symbols',
-					target: 'files',
-					relation: 'file',
-					relationType: 'belongsTo',
-					intentPath: 'include[0]',
-				},
-				reasoning: 'explicit join:inner',
-				alternatives: [],
-			},
-		],
-		warnings: [],
-		rootTableAlias: undefined,
-		schemaName: undefined,
-	} as unknown as PlanReport;
+		compileModel,
+		{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+	);
 }
 
 /**

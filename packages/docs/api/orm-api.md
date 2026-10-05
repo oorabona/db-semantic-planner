@@ -1274,10 +1274,15 @@ const next = await orm.select('users')
 
 ### Observability
 
+Includes compile only from a report planned in the same process. The module-private registry recognises reports issued by `plan()` and other in-process issuers, including the CLI. Serialized, spread, hand-built and legacy decision-context reports with includes are refused with `Includes compile only from a report planned in this process`. Reports without includes compile as before.
+
+`dump().plan` preserves the original intent, decisions, warnings and metadata. `execution` holds resolved includes; include decisions describe the choice without carrying execution authority.
+
 ```typescript
 // Execution plan (no database call)
 const plan = orm.select('users').include('posts').plan();
-console.log(plan.decisions);  // [{ type: 'include-strategy', choice: 'json_agg', ... }]
+console.log(plan.execution?.includes); // Resolved includes and query ranges
+console.log(plan.decisions);  // Strategy observations; context: { intentPath, nodeId }
 console.log(plan.warnings);   // [{ type: 'performance', message: '...' }]
 
 // Full dump: plan + SQL + params

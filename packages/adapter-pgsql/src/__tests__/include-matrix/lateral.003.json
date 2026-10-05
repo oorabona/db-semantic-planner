@@ -16,7 +16,7 @@
     "params": [],
     "error": {
       "class": "Error",
-      "message": "Include where is not supported for strategy lateral at include[0](children).where (oorabona/db-semantic-planner#892)."
+      "message": "Includes compile only from a report planned in this process"
     },
     "payloads": [],
     "rows": []
@@ -49,7 +49,7 @@
     "params": [],
     "error": {
       "class": "Error",
-      "message": "Include where is not supported for strategy lateral at include[0](children).where (oorabona/db-semantic-planner#892)."
+      "message": "Includes compile only from a report planned in this process"
     },
     "payloads": [],
     "rows": []
@@ -140,70 +140,14 @@
   },
   {
     "case": "external/lateral/1/direct/flat/composite/all",
-    "sql": "SELECT roots.*, children_lat_0.id AS \"compositeChildren.id\", children_lat_0.tenant AS \"compositeChildren.tenant\", children_lat_0.name AS \"compositeChildren.name\", children_lat_0.amount AS \"compositeChildren.amount\", children_lat_0.\"rootId\" AS \"compositeChildren.rootId\" FROM roots LEFT JOIN LATERAL (SELECT children_inner_0.id, children_inner_0.tenant, children_inner_0.name, children_inner_0.amount, children_inner_0.\"rootId\" FROM children AS children_inner_0 WHERE children_inner_0.\"rootId\" = roots.id AND children_inner_0.tenant = roots.tenant) AS children_lat_0 ON true",
+    "sql": null,
     "params": [],
-    "error": null,
-    "payloads": [
-      {
-        "path": "compositeChildren",
-        "publicKey": "compositeChildren",
-        "strategy": "lateral",
-        "outputMode": "flat",
-        "table": "children",
-        "isToOne": true,
-        "outputLabel": "compositeChildren_json",
-        "columns": [
-          {
-            "logicalName": "id",
-            "physicalName": "id",
-            "publicKey": "id",
-            "outputLabel": "compositeChildren.id"
-          },
-          {
-            "logicalName": "tenant",
-            "physicalName": "tenant",
-            "publicKey": "tenant",
-            "outputLabel": "compositeChildren.tenant"
-          },
-          {
-            "logicalName": "name",
-            "physicalName": "name",
-            "publicKey": "name",
-            "outputLabel": "compositeChildren.name"
-          },
-          {
-            "logicalName": "amount",
-            "physicalName": "amount",
-            "publicKey": "amount",
-            "outputLabel": "compositeChildren.amount",
-            "readHandling": {
-              "kind": "nestedTransform",
-              "table": "children",
-              "column": "amount",
-              "js": "number",
-              "outputKey": "amount"
-            }
-          },
-          {
-            "logicalName": "rootId",
-            "physicalName": "rootId",
-            "publicKey": "rootId",
-            "outputLabel": "compositeChildren.rootId"
-          }
-        ],
-        "children": []
-      }
-    ],
-    "rows": [
-      {
-        "id": 1,
-        "compositeChildren.id": 2,
-        "compositeChildren.tenant": 2,
-        "compositeChildren.name": "child",
-        "compositeChildren.amount": "42",
-        "compositeChildren.rootId": 2
-      }
-    ]
+    "error": {
+      "class": "Error",
+      "message": "Includes compile only from a report planned in this process"
+    },
+    "payloads": [],
+    "rows": []
   },
   {
     "case": "nql/lateral/1/direct/flat/composite/all",
@@ -380,70 +324,14 @@
   },
   {
     "case": "external/lateral/1/direct/flat/composite/ordered-limit",
-    "sql": "SELECT roots.*, children_lat_0.id AS \"compositeChildren.id\", children_lat_0.tenant AS \"compositeChildren.tenant\", children_lat_0.name AS \"compositeChildren.name\", children_lat_0.amount AS \"compositeChildren.amount\", children_lat_0.\"rootId\" AS \"compositeChildren.rootId\" FROM roots LEFT JOIN LATERAL (SELECT children_inner_0.id, children_inner_0.tenant, children_inner_0.name, children_inner_0.amount, children_inner_0.\"rootId\" FROM children AS children_inner_0 WHERE children_inner_0.\"rootId\" = roots.id AND children_inner_0.tenant = roots.tenant ORDER BY children_inner_0.name DESC NULLS LAST, children_inner_0.id ASC NULLS LAST, children_inner_0.tenant ASC NULLS LAST LIMIT 2) AS children_lat_0 ON true",
+    "sql": null,
     "params": [],
-    "error": null,
-    "payloads": [
-      {
-        "path": "compositeChildren",
-        "publicKey": "compositeChildren",
-        "strategy": "lateral",
-        "outputMode": "flat",
-        "table": "children",
-        "isToOne": true,
-        "outputLabel": "compositeChildren_json",
-        "columns": [
-          {
-            "logicalName": "id",
-            "physicalName": "id",
-            "publicKey": "id",
-            "outputLabel": "compositeChildren.id"
-          },
-          {
-            "logicalName": "tenant",
-            "physicalName": "tenant",
-            "publicKey": "tenant",
-            "outputLabel": "compositeChildren.tenant"
-          },
-          {
-            "logicalName": "name",
-            "physicalName": "name",
-            "publicKey": "name",
-            "outputLabel": "compositeChildren.name"
-          },
-          {
-            "logicalName": "amount",
-            "physicalName": "amount",
-            "publicKey": "amount",
-            "outputLabel": "compositeChildren.amount",
-            "readHandling": {
-              "kind": "nestedTransform",
-              "table": "children",
-              "column": "amount",
-              "js": "number",
-              "outputKey": "amount"
-            }
-          },
-          {
-            "logicalName": "rootId",
-            "physicalName": "rootId",
-            "publicKey": "rootId",
-            "outputLabel": "compositeChildren.rootId"
-          }
-        ],
-        "children": []
-      }
-    ],
-    "rows": [
-      {
-        "id": 1,
-        "compositeChildren.id": 2,
-        "compositeChildren.tenant": 2,
-        "compositeChildren.name": "child",
-        "compositeChildren.amount": "42",
-        "compositeChildren.rootId": 2
-      }
-    ]
+    "error": {
+      "class": "Error",
+      "message": "Includes compile only from a report planned in this process"
+    },
+    "payloads": [],
+    "rows": []
   },
   {
     "case": "nql/lateral/1/direct/flat/composite/ordered-limit",
@@ -529,7 +417,7 @@
     "params": [],
     "error": {
       "class": "Error",
-      "message": "Include where is not supported for strategy lateral at include[0](compositeChildren).where (oorabona/db-semantic-planner#892)."
+      "message": "Includes compile only from a report planned in this process"
     },
     "payloads": [],
     "rows": []
@@ -562,7 +450,7 @@
     "params": [],
     "error": {
       "class": "Error",
-      "message": "Include where is not supported for strategy lateral at include[0](compositeChildren).where (oorabona/db-semantic-planner#892)."
+      "message": "Includes compile only from a report planned in this process"
     },
     "payloads": [],
     "rows": []
@@ -595,7 +483,7 @@
     "params": [],
     "error": {
       "class": "Error",
-      "message": "Include where is not supported for strategy lateral at include[0](compositeChildren).where (oorabona/db-semantic-planner#892)."
+      "message": "Includes compile only from a report planned in this process"
     },
     "payloads": [],
     "rows": []

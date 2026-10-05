@@ -1347,16 +1347,18 @@ active_users | select *, posts.*`;
 		expect(decision).toMatchObject({
 			type: 'include-strategy',
 			choice: 'json_agg',
-			context: {
-				sourceTable: 'active_users',
-				target: 'posts',
-				relation: 'posts',
-				relationType: 'hasMany',
-				foreignKey: ['userId'],
-				parentKey: ['id'],
-				targetOrderKey: ['id'],
-				includeAlias: 'posts',
-			},
+			context: { intentPath: 'include[0]', nodeId: 'include[0]' },
+		});
+		expect(dump.plan.execution!.includes[0]).toMatchObject({
+			strategy: 'json_agg',
+			relationName: 'posts',
+			intentPath: 'include[0]',
+			sourceRange: { table: 'active_users' },
+			targetRange: { table: 'posts' },
+			relationType: 'hasMany',
+			ordering: { fallback: ['id'] },
+			publicKey: 'posts',
+			path: { hops: [{ pairs: [{ fromColumn: 'id', toColumn: 'userId' }] }] },
 		});
 		expect(dump.sql).toMatch(/^WITH "active_users" as \(/);
 		expect(dump.sql).toContain('json_agg(jsonb_build_object(');
@@ -1411,28 +1413,34 @@ active_users | select *, posts.comments.*`;
 		expect(decisions).toHaveLength(2);
 		expect(decisions[0]).toMatchObject({
 			choice: 'json_agg',
-			context: {
-				sourceTable: 'active_users',
-				target: 'posts',
-				relation: 'posts',
-				relationType: 'hasMany',
-				foreignKey: ['userId'],
-				parentKey: ['id'],
-				targetOrderKey: ['id'],
-				intentPath: 'include[0]',
-			},
+			context: { intentPath: 'include[0]', nodeId: 'include[0]' },
+		});
+		expect(dump.plan.execution!.includes[0]).toMatchObject({
+			strategy: 'json_agg',
+			relationName: 'posts',
+			intentPath: 'include[0]',
+			sourceRange: { table: 'active_users' },
+			targetRange: { table: 'posts' },
+			relationType: 'hasMany',
+			ordering: { fallback: ['id'] },
+			path: { hops: [{ pairs: [{ fromColumn: 'id', toColumn: 'userId' }] }] },
 		});
 		expect(decisions[1]).toMatchObject({
 			choice: 'json_agg',
 			context: {
-				sourceTable: 'posts',
-				target: 'comments',
-				relation: 'comments',
-				relationType: 'hasMany',
-				foreignKey: 'postId',
-				targetOrderKey: ['id'],
 				intentPath: 'include[0].include[0]',
+				nodeId: 'include[0].include[0]',
 			},
+		});
+		expect(dump.plan.execution!.includes[0]!.children[0]).toMatchObject({
+			strategy: 'json_agg',
+			relationName: 'comments',
+			intentPath: 'include[0].include[0]',
+			sourceRange: { table: 'posts' },
+			targetRange: { table: 'comments' },
+			relationType: 'hasMany',
+			ordering: { fallback: ['id'] },
+			path: { hops: [{ pairs: [{ fromColumn: 'id', toColumn: 'postId' }] }] },
 		});
 		expect(dump.sql).toContain('json_agg(jsonb_build_object(');
 		expect(dump.sql).toContain('ORDER BY __t__.id ASC NULLS LAST');
@@ -1512,19 +1520,26 @@ active_authors | select *, author_posts.post_comments.*`;
 		expect(decisions).toHaveLength(2);
 		expect(decisions[0]).toMatchObject({
 			choice: 'json_agg',
-			context: {
-				relation: 'author_posts',
-				targetOrderKey: ['id'],
-				intentPath: 'include[0]',
-			},
+			context: { intentPath: 'include[0]', nodeId: 'include[0]' },
+		});
+		expect(dump.plan.execution!.includes[0]).toMatchObject({
+			strategy: 'json_agg',
+			relationName: 'author_posts',
+			intentPath: 'include[0]',
+			ordering: { fallback: ['id'] },
 		});
 		expect(decisions[1]).toMatchObject({
 			choice: 'json_agg',
 			context: {
-				relation: 'post_comments',
-				targetOrderKey: ['id'],
 				intentPath: 'include[0].include[0]',
+				nodeId: 'include[0].include[0]',
 			},
+		});
+		expect(dump.plan.execution!.includes[0]!.children[0]).toMatchObject({
+			strategy: 'json_agg',
+			relationName: 'post_comments',
+			intentPath: 'include[0].include[0]',
+			ordering: { fallback: ['id'] },
 		});
 		expect(dump.sql).toContain('AS author_posts_json');
 		expect(dump.sql).toContain('jsonb_build_object');
@@ -1587,28 +1602,34 @@ active_authors | select *, author_posts.post_comments.*`;
 		expect(decisions).toHaveLength(2);
 		expect(decisions[0]).toMatchObject({
 			choice: 'json_agg',
-			context: {
-				sourceTable: 'active_users',
-				target: 'posts',
-				relation: 'posts',
-				relationType: 'hasMany',
-				foreignKey: ['userId'],
-				parentKey: ['id'],
-				targetOrderKey: ['id'],
-				intentPath: 'include[0]',
-			},
+			context: { intentPath: 'include[0]', nodeId: 'include[0]' },
+		});
+		expect(dump.plan.execution!.includes[0]).toMatchObject({
+			strategy: 'json_agg',
+			relationName: 'posts',
+			intentPath: 'include[0]',
+			sourceRange: { table: 'active_users' },
+			targetRange: { table: 'posts' },
+			relationType: 'hasMany',
+			ordering: { fallback: ['id'] },
+			path: { hops: [{ pairs: [{ fromColumn: 'id', toColumn: 'userId' }] }] },
 		});
 		expect(tailDecision).toMatchObject({
 			choice: 'json_agg',
 			context: {
-				sourceTable: 'posts',
-				target: 'users',
-				relation: 'user',
-				relationType: 'belongsTo',
-				foreignKey: 'userId',
-				targetOrderKey: ['id'],
 				intentPath: 'include[0].include[0]',
+				nodeId: 'include[0].include[0]',
 			},
+		});
+		expect(dump.plan.execution!.includes[0]!.children[0]).toMatchObject({
+			strategy: 'json_agg',
+			relationName: 'user',
+			intentPath: 'include[0].include[0]',
+			sourceRange: { table: 'posts' },
+			targetRange: { table: 'users' },
+			relationType: 'belongsTo',
+			ordering: { fallback: ['id'] },
+			path: { hops: [{ pairs: [{ fromColumn: 'userId', toColumn: 'id' }] }] },
 		});
 		expect(dump.sql.match(/json_agg\(jsonb_build_object/g)).toHaveLength(2);
 		expect(dump.sql).toContain('jsonb_build_object');

@@ -67,7 +67,11 @@ import {
 	rebuildCompiledQuery,
 } from '@dbsp/types/adapter-sdk';
 import type { ConnectionAvailability } from '@dbsp/types/internal';
-import { getNqlBindingRefName, isNqlBindingRef } from '@dbsp/types/internal';
+import {
+	getNqlBindingRefName,
+	isNqlBindingRef,
+	markPlannedReport,
+} from '@dbsp/types/internal';
 import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import {
@@ -85,6 +89,7 @@ import {
 	compileRecursive as compileRecursiveImpl,
 } from './adapter-compiler-recursive.js';
 import {
+	assertPlannedReportIncludeAuthority,
 	compileSelect,
 	compileSelectEnvelope,
 } from './adapter-compiler-select.js';
@@ -2229,7 +2234,7 @@ function compileNqlRuntimeBindingCte(
 }
 
 function createNqlBindingSelectPlan(query: QueryIntent): PlanReport {
-	return {
+	return markPlannedReport({
 		rootTable: query.from,
 		decisions: [],
 		warnings: [],
@@ -2240,7 +2245,7 @@ function createNqlBindingSelectPlan(query: QueryIntent): PlanReport {
 			relationsAnalyzed: 0,
 			isAmbiguous: false,
 		},
-	};
+	});
 }
 
 type NqlBindingProjectionRegistry = ReadonlyMap<string, ProjectionEnvelope>;
@@ -3447,9 +3452,11 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 		if (isCompiledNqlQuery(plan)) {
 			return this.compileNqlBundle<T>(plan, options);
 		}
+		const deps = this.buildCompileDeps(options);
+		assertPlannedReportIncludeAuthority(plan);
 		this.assertDeclaredPlanReferences(plan, options);
 		return guardCompiledQuery(
-			compileSelect<T>(plan, options, this.buildCompileDeps(options)),
+			compileSelect<T>(plan, options, deps),
 			'select plan',
 		);
 	}

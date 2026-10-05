@@ -326,8 +326,7 @@ describe('planner: processInclude via hint', () => {
 		expect(ambiguous).toBeUndefined();
 		const includeDecision = report.decisions.find(
 			(d) =>
-				d.type === 'include-strategy' &&
-				(d.context as Record<string, unknown>)?.relation === 'createdBy',
+				d.type === 'include-strategy' && d.context.intentPath === 'include[0]',
 		);
 		expect(includeDecision).toBeDefined();
 	});
@@ -510,8 +509,7 @@ describe('planner: flat strategy with nested limit', () => {
 		});
 		const includeDecision = report.decisions.find(
 			(d) =>
-				d.type === 'include-strategy' &&
-				(d.context as Record<string, unknown>)?.relation === 'posts',
+				d.type === 'include-strategy' && d.context.intentPath === 'include[0]',
 		);
 		expect(includeDecision?.choice).toBe('lateral');
 	});
@@ -527,8 +525,7 @@ describe('planner: flat strategy with nested limit', () => {
 		});
 		const includeDecision = report.decisions.find(
 			(d) =>
-				d.type === 'include-strategy' &&
-				(d.context as Record<string, unknown>)?.relation === 'posts',
+				d.type === 'include-strategy' && d.context.intentPath === 'include[0]',
 		);
 		expect(includeDecision?.choice).toBe('join');
 	});
@@ -546,8 +543,7 @@ describe('planner: flat strategy with nested limit', () => {
 		});
 		const includeDecision = report.decisions.find(
 			(d) =>
-				d.type === 'include-strategy' &&
-				(d.context as Record<string, unknown>)?.relation === 'posts',
+				d.type === 'include-strategy' && d.context.intentPath === 'include[0]',
 		);
 		expect(includeDecision?.choice).toBe('join');
 	});

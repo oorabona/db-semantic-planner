@@ -127,8 +127,12 @@ export function compileRecursiveInclude(
 	}
 	const resolved = decision.payloadShape!;
 	const jsonAlias = resolved.outputLabel;
-	const walk = allocate(`${relation}_walk`);
-	const innerAlias = allocate('__n');
+	const walk = decision.resolvedInclude?.recursiveRanges
+		? queryLocal(decision.resolvedInclude.recursiveRanges.walk.alias)
+		: allocate(`${relation}_walk`);
+	const innerAlias = decision.resolvedInclude?.recursiveRanges
+		? queryLocal(decision.resolvedInclude.recursiveRanges.next.alias)
+		: allocate('__n');
 	const outer = ctx.currentAlias ?? ctx.rootTable;
 	const col = (alias: string, column: string) =>
 		sqlColumnRef(queryLocal(column), queryLocal(alias));

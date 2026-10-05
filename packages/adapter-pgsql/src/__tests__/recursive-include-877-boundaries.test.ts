@@ -314,10 +314,7 @@ describe('#877 recursive include boundaries', () => {
 			db.model,
 			options,
 		);
-		expect(
-			report.decisions.find((d) => d.context.recursiveInclude)?.context
-				.recursiveInclude,
-		).toEqual({
+		expect(report.execution?.includes[0]?.recursion).toEqual({
 			direction: 'descendants',
 			maxDepth: 100,
 			flat: false,

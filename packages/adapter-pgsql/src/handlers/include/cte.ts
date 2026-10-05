@@ -9,7 +9,6 @@
 
 import { type ColumnListInput, toColumnList } from '@dbsp/types';
 import type { CommonTableExpr, JoinExpr, Node, SelectStmt } from '@pgsql/types';
-import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
 import {
 	sqlColumnRefStar,
 	sqlRangeVar,
@@ -201,12 +200,9 @@ export const cteIncludeHandler: IncludeHandler = {
 		if (sourceColumn.length === 0 || sourceColumn.some((col) => col === '')) {
 			throw new Error("Missing required column 'sourceColumn' in CTE include");
 		}
-		const targetColumn = decision.targetColumn ?? [
-			(ctx.deriveFkColumnName ?? defaultFkDerivation)(
-				ctx.rootTable,
-				ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
-			),
-		];
+		const targetColumn = decision.targetColumn;
+		if (!targetColumn)
+			throw new Error("Missing required column 'targetColumn' in cte include");
 		const columns = decision.columns;
 		const conditions = decision.conditions;
 
@@ -235,9 +231,14 @@ export const cteIncludeHandler: IncludeHandler = {
 
 		// Generate unique names
 		const existingAliases = state.aliases.size;
-		const cteName = `${relation}_cte`;
-		const innerAlias = `${targetTable}_inner_${existingAliases}`;
-		const cteAlias = `${relation}_ref_${existingAliases}`;
+		const cteName =
+			decision.resolvedInclude?.cteRange?.alias ?? `${relation}_cte`;
+		const innerAlias =
+			decision.resolvedInclude?.targetRange.alias ??
+			`${targetTable}_inner_${existingAliases}`;
+		const cteAlias =
+			decision.resolvedInclude?.outputRange.alias ??
+			`${relation}_ref_${existingAliases}`;
 		state.aliases.set(`cte_${targetTable}`, cteName);
 		const aliasColumnAuthorities = bindAliasAuthority(
 			bindAliasAuthority(

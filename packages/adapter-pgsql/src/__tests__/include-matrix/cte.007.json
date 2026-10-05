@@ -16,7 +16,7 @@
     "params": [],
     "error": {
       "class": "Error",
-      "message": "Nested include at include[0](children).include[0](leaves) has parent strategy cte and child strategy cte; mixed strategies and includes under cte are refused (oorabona/db-semantic-planner#894)."
+      "message": "Includes compile only from a report planned in this process"
     },
     "payloads": [],
     "rows": []
@@ -115,7 +115,7 @@
     "params": [],
     "error": {
       "class": "Error",
-      "message": "Include where is not supported for strategy cte at include[0](children).where (oorabona/db-semantic-planner#892)."
+      "message": "Includes compile only from a report planned in this process"
     },
     "payloads": [],
     "rows": []
@@ -148,7 +148,7 @@
     "params": [],
     "error": {
       "class": "Error",
-      "message": "Include where is not supported for strategy cte at include[0](children).where (oorabona/db-semantic-planner#892)."
+      "message": "Includes compile only from a report planned in this process"
     },
     "payloads": [],
     "rows": []
@@ -181,7 +181,7 @@
     "params": [],
     "error": {
       "class": "Error",
-      "message": "Include where is not supported for strategy cte at include[0](children).where (oorabona/db-semantic-planner#892)."
+      "message": "Includes compile only from a report planned in this process"
     },
     "payloads": [],
     "rows": []
@@ -214,7 +214,7 @@
     "params": [],
     "error": {
       "class": "Error",
-      "message": "Nested include at include[0](compositeChildren).include[0](compositeLeaves) has parent strategy cte and child strategy cte; mixed strategies and includes under cte are refused (oorabona/db-semantic-planner#894)."
+      "message": "Includes compile only from a report planned in this process"
     },
     "payloads": [],
     "rows": []

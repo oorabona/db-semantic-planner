@@ -2,6 +2,7 @@ import { createOrm, ref, schema } from '@dbsp/core';
 import type { IncludeStrategy, PlanReport } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { asExternalReport } from './external-include-report.js';
 
 const db = schema({
 	users: { id: { type: 'integer', primaryKey: true } },
@@ -46,14 +47,16 @@ describe('#894 removed include strategy refusal', () => {
 		);
 	});
 	it('refuses an adapter include-strategy decision before SQL lowering', () => {
-		const p = orm.select('users').include('posts').plan();
+		const p = asExternalReport(orm.select('users').include('posts').plan());
 		const stale = {
 			...p,
 			decisions: p.decisions.map((d) =>
 				d.type === 'include-strategy' ? { ...d, choice: removed } : d,
 			),
 		} as PlanReport;
-		expect(() => adapter.compile(stale)).toThrow(resolvedError);
+		expect(() => adapter.compile(stale)).toThrow(
+			new Error('Includes compile only from a report planned in this process'),
+		);
 	});
 	for (const missing of [false, true]) {
 		it(`refuses recursive include with ${missing ? 'no capabilities' : 'no recursive CTE support'}`, () => {
@@ -133,7 +136,9 @@ describe('#900 recursive strategy contract', () => {
 		).toBe('json_agg');
 	});
 	it('refuses auto as an adapter decision and lists only resolved strategies', () => {
-		const p = orm.select('users').include('posts').dump().plan!;
+		const p = asExternalReport(
+			orm.select('users').include('posts').dump().plan!,
+		);
 		const unresolved = {
 			...p,
 			decisions: p.decisions.map((d) =>
@@ -141,7 +146,7 @@ describe('#900 recursive strategy contract', () => {
 			),
 		} as PlanReport;
 		expect(() => adapter.compile(unresolved)).toThrow(
-			"Strategy 'auto' is not supported by postgresql. Supported strategies: 'join', 'json_agg', 'lateral', 'cte'.",
+			new Error('Includes compile only from a report planned in this process'),
 		);
 	});
 });

@@ -1,4 +1,9 @@
-import { ref, schema } from '@dbsp/core';
+import {
+	plan as nativePlan,
+	POSTGRESQL_CAPABILITIES,
+	ref,
+	schema,
+} from '@dbsp/core';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 /**
  * INCLUDE-WHERE-SCOPE regression tests.
@@ -47,9 +52,8 @@ describe('INCLUDE-WHERE-SCOPE: include({ join, where }) filters root rows', () =
 	it('compiles WHERE clause from include with join:inner and simple eq condition', () => {
 		// Reproduces: orm.select('symbols')
 		//   .include('file', { join: 'inner', where: eq('project_id', 42) })
-		const plan: PlanReport = {
-			rootTable: 'symbols',
-			intent: {
+		const plan: PlanReport = nativePlan(
+			{
 				type: 'select',
 				from: 'symbols',
 				select: { type: 'fields', fields: ['id', 'name'] },
@@ -66,41 +70,9 @@ describe('INCLUDE-WHERE-SCOPE: include({ join, where }) filters root rows', () =
 					},
 				],
 			},
-			decisions: [
-				{
-					id: 'D1',
-					type: 'include-strategy',
-					choice: 'join',
-					joinType: 'inner',
-					context: {
-						sourceTable: 'symbols',
-						target: 'files',
-						relation: 'file',
-						relationType: 'belongsTo',
-						intentPath: 'include[0]',
-					},
-					reasoning: 'explicit join:inner',
-					alternatives: [],
-				},
-				{
-					id: 'D2',
-					type: 'join-type',
-					choice: 'inner',
-					context: {
-						sourceTable: 'symbols',
-						target: 'files',
-						relation: 'file',
-						intentPath: 'include[0]',
-					},
-					joinType: 'inner',
-					reasoning: 'explicit join:inner',
-					alternatives: ['left'],
-				},
-			],
-			warnings: [],
-			rootTableAlias: undefined,
-			schemaName: undefined,
-		} as unknown as PlanReport;
+			compileModel,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
 
 		const result = compile(plan);
 		const sql = normalizeSQL(result.sql);
@@ -117,12 +89,11 @@ describe('INCLUDE-WHERE-SCOPE: include({ join, where }) filters root rows', () =
 	});
 
 	it('compiles WHERE clause from include with join:left and eq condition', () => {
-		const plan: PlanReport = {
-			rootTable: 'posts',
-			intent: {
+		const plan: PlanReport = nativePlan(
+			{
 				type: 'select',
 				from: 'posts',
-				select: { all: true },
+				select: { type: 'all' },
 				include: [
 					{
 						relation: 'author',
@@ -136,26 +107,9 @@ describe('INCLUDE-WHERE-SCOPE: include({ join, where }) filters root rows', () =
 					},
 				],
 			},
-			decisions: [
-				{
-					id: 'D1',
-					type: 'include-strategy',
-					choice: 'join',
-					context: {
-						sourceTable: 'posts',
-						target: 'users',
-						relation: 'author',
-						relationType: 'belongsTo',
-					},
-					joinType: 'left',
-					reasoning: 'explicit join:left',
-					alternatives: [],
-				},
-			],
-			warnings: [],
-			rootTableAlias: undefined,
-			schemaName: undefined,
-		} as unknown as PlanReport;
+			compileModel,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
 
 		const result = compile(plan);
 		const sql = normalizeSQL(result.sql);
@@ -167,12 +121,11 @@ describe('INCLUDE-WHERE-SCOPE: include({ join, where }) filters root rows', () =
 	});
 
 	it('produces no WHERE clause when include has no where condition', () => {
-		const plan: PlanReport = {
-			rootTable: 'posts',
-			intent: {
+		const plan: PlanReport = nativePlan(
+			{
 				type: 'select',
 				from: 'posts',
-				select: { all: true },
+				select: { type: 'all' },
 				include: [
 					{
 						relation: 'author',
@@ -181,26 +134,9 @@ describe('INCLUDE-WHERE-SCOPE: include({ join, where }) filters root rows', () =
 					},
 				],
 			},
-			decisions: [
-				{
-					id: 'D1',
-					type: 'include-strategy',
-					choice: 'join',
-					context: {
-						sourceTable: 'posts',
-						target: 'users',
-						relation: 'author',
-						relationType: 'belongsTo',
-					},
-					joinType: 'inner',
-					reasoning: 'explicit join:inner',
-					alternatives: [],
-				},
-			],
-			warnings: [],
-			rootTableAlias: undefined,
-			schemaName: undefined,
-		} as unknown as PlanReport;
+			compileModel,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
 
 		const result = compile(plan);
 		const sql = normalizeSQL(result.sql);
@@ -212,12 +148,11 @@ describe('INCLUDE-WHERE-SCOPE: include({ join, where }) filters root rows', () =
 	});
 
 	it('combines root-level WHERE and include WHERE correctly', () => {
-		const plan: PlanReport = {
-			rootTable: 'symbols',
-			intent: {
+		const plan: PlanReport = nativePlan(
+			{
 				type: 'select',
 				from: 'symbols',
-				select: { all: true },
+				select: { type: 'all' },
 				where: {
 					kind: 'comparison',
 					field: 'type',
@@ -237,26 +172,9 @@ describe('INCLUDE-WHERE-SCOPE: include({ join, where }) filters root rows', () =
 					},
 				],
 			},
-			decisions: [
-				{
-					id: 'D1',
-					type: 'include-strategy',
-					choice: 'join',
-					context: {
-						sourceTable: 'symbols',
-						target: 'files',
-						relation: 'file',
-						relationType: 'belongsTo',
-					},
-					joinType: 'inner',
-					reasoning: 'explicit join:inner',
-					alternatives: [],
-				},
-			],
-			warnings: [],
-			rootTableAlias: undefined,
-			schemaName: undefined,
-		} as unknown as PlanReport;
+			compileModel,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
 
 		const result = compile(plan);
 		const sql = normalizeSQL(result.sql);

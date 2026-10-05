@@ -6,6 +6,7 @@ import {
 	createPgAdapter,
 	createPgCompileOnlyAdapter,
 } from '../pgsql-adapter.js';
+import { asExternalReport } from './external-include-report.js';
 
 const db = schema({
 	categories: {
@@ -193,7 +194,9 @@ describe('#877 recursive option refusals', () => {
 					: d,
 			);
 			expect(() => adapter.compile({ ...plan, intent, decisions })).toThrow(
-				`Recursive include option ${option} is not supported`,
+				new Error(
+					'Includes compile only from a report planned in this process',
+				),
 			);
 		});
 	}
@@ -274,7 +277,9 @@ describe('#877 recursive option refusals', () => {
 				include: [{ ...plan.intent!.include![0]!, [option]: value }],
 			};
 			expect(() => adapter.compile({ ...plan, intent })).toThrow(
-				`Recursive include option ${option} is not supported`,
+				new Error(
+					'Includes compile only from a report planned in this process',
+				),
 			);
 		});
 });
@@ -310,7 +315,7 @@ describe('#877 shared plan/compile refusals', () => {
 		['row locks', { lock: { strength: 'update', waitPolicy: 'block' } }],
 	] as const)
 		it(`refuses root ${JSON.stringify(patch)} in plan and compile`, () => {
-			const report = valid();
+			const report = asExternalReport(valid());
 			const intent = { ...report.intent!, ...patch };
 			expect(() =>
 				plan(intent as QueryIntent, db.model, {
@@ -319,7 +324,11 @@ describe('#877 shared plan/compile refusals', () => {
 			).toThrow(`Recursive include option ${name} is not supported`);
 			expect(() =>
 				adapter.compile({ ...report, intent: intent as QueryIntent }),
-			).toThrow(`Recursive include option ${name} is not supported`);
+			).toThrow(
+				new Error(
+					'Includes compile only from a report planned in this process',
+				),
+			);
 		});
 	for (const [name, patch] of [
 		['where', { where: eq('id', 1) }],
@@ -332,7 +341,7 @@ describe('#877 shared plan/compile refusals', () => {
 		],
 	] as const)
 		it(`refuses include ${name} in plan and compile`, () => {
-			const report = valid();
+			const report = asExternalReport(valid());
 			const include = { ...report.intent!.include![0]!, ...patch };
 			const intent = { ...report.intent!, include: [include] } as QueryIntent;
 			expect(() =>
@@ -341,11 +350,13 @@ describe('#877 shared plan/compile refusals', () => {
 				}),
 			).toThrow(`Recursive include option ${name} is not supported`);
 			expect(() => adapter.compile({ ...report, intent })).toThrow(
-				`Recursive include option ${name} is not supported`,
+				new Error(
+					'Includes compile only from a report planned in this process',
+				),
 			);
 		});
 	it('refuses a recursive include under an ordinary include', () => {
-		const report = valid();
+		const report = asExternalReport(valid());
 		const intent = {
 			...report.intent!,
 			include: [{ relation: 'parent', include: report.intent!.include }],
@@ -357,7 +368,9 @@ describe('#877 shared plan/compile refusals', () => {
 		).toThrow(
 			'Recursive include option include does not support nested recursive includes is not supported',
 		);
-		const outer = orm.select('categories').include('parent').plan();
+		const outer = asExternalReport(
+			orm.select('categories').include('parent').plan(),
+		);
 		expect(() =>
 			adapter.compile({
 				...outer,
@@ -371,7 +384,7 @@ describe('#877 shared plan/compile refusals', () => {
 				],
 			}),
 		).toThrow(
-			'Recursive include option include does not support nested recursive includes is not supported',
+			new Error('Includes compile only from a report planned in this process'),
 		);
 	});
 	it('refuses applicable traversed-node default filters in plan and dump', () => {
@@ -452,14 +465,14 @@ describe('#877 shared plan/compile refusals', () => {
 			getTable: db.model.getTable.bind(db.model),
 			getRelationsFrom: db.model.getRelationsFrom.bind(db.model),
 		} as ModelIR;
-		const report = valid();
+		const report = asExternalReport(valid());
 		expect(() =>
 			plan(report.intent!, model, {
 				dialectCapabilities: adapter.dialectCapabilities,
 			}),
 		).toThrow('Recursive include requires a declared referenced key');
 		expect(() => createPgCompileOnlyAdapter({ model }).compile(report)).toThrow(
-			'Recursive include requires a declared referenced key',
+			new Error('Includes compile only from a report planned in this process'),
 		);
 	});
 	it('refuses composite self references at both boundaries', () => {
@@ -477,14 +490,14 @@ describe('#877 shared plan/compile refusals', () => {
 			getTable: db.model.getTable.bind(db.model),
 			getRelationsFrom: db.model.getRelationsFrom.bind(db.model),
 		} as ModelIR;
-		const report = valid();
+		const report = asExternalReport(valid());
 		expect(() =>
 			plan(report.intent!, model, {
 				dialectCapabilities: adapter.dialectCapabilities,
 			}),
 		).toThrow('Recursive include requires a single parentKey and foreignKey');
 		expect(() => createPgCompileOnlyAdapter({ model }).compile(report)).toThrow(
-			'Recursive include requires a single parentKey and foreignKey',
+			new Error('Includes compile only from a report planned in this process'),
 		);
 	});
 	it('refuses stored requested keys at root and every node, and supports via', () => {
