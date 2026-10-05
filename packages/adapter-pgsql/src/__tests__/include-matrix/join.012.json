@@ -1,0 +1,1900 @@
+[
+  {
+    "key": "orm/join/2/via-alias/flat/single/expression",
+    "sql": "SELECT roots.*, children.id AS \"children.id\", children.tenant AS \"children.tenant\", children.name AS \"children.name\", children.amount AS \"children.amount\", children.\"rootId\" AS \"children.rootId\", children.id AS __dbsp_presence_children, leaves.id AS \"children.leaves.id\", leaves.tenant AS \"children.leaves.tenant\", leaves.name AS \"children.leaves.name\", leaves.amount AS \"children.leaves.amount\", leaves.\"childId\" AS \"children.leaves.childId\", leaves.id AS \"__dbsp_presence_children.leaves\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" JOIN leaves AS leaves ON children.id = leaves.\"childId\" WHERE lower(name) = $1 AND lower(name) = $2",
+    "params": [
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "children",
+        "publicKey": "children",
+        "strategy": "join",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "children_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "children.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "children.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "children.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "children.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "children.rootId"
+          }
+        ],
+        "children": [
+          {
+            "path": "children.leaves",
+            "publicKey": "leaves",
+            "strategy": "join",
+            "outputMode": "nested",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "leaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "children.leaves.id"
+              },
+              {
+                "logicalName": "tenant",
+                "physicalName": "tenant",
+                "publicKey": "tenant",
+                "outputLabel": "children.leaves.tenant"
+              },
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "children.leaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "children.leaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              },
+              {
+                "logicalName": "childId",
+                "physicalName": "childId",
+                "publicKey": "childId",
+                "outputLabel": "children.leaves.childId"
+              }
+            ],
+            "children": [],
+            "presence": {
+              "outputLabel": "__dbsp_presence_children.leaves",
+              "physicalName": "id"
+            }
+          }
+        ],
+        "presence": {
+          "outputLabel": "__dbsp_presence_children",
+          "physicalName": "id"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "children": {
+          "id": 2,
+          "tenant": 2,
+          "name": "child",
+          "amount": 42,
+          "rootId": 2,
+          "leaves": {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "childId": 2
+          }
+        }
+      }
+    ]
+  },
+  {
+    "key": "external/join/2/via-alias/flat/single/expression",
+    "sql": "SELECT roots.*, children.id AS \"children.id\", leaves.id AS \"children.leaves.id\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" JOIN leaves AS leaves ON children.id = leaves.\"childId\" WHERE lower(name) = $1 AND lower(name) = $2",
+    "params": [
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "children",
+        "publicKey": "children",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "children_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "children.id"
+          }
+        ],
+        "children": [
+          {
+            "path": "children.leaves",
+            "publicKey": "leaves",
+            "strategy": "join",
+            "outputMode": "flat",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "leaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "children.leaves.id"
+              }
+            ],
+            "children": []
+          }
+        ]
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "children.id": 2,
+        "children.leaves.id": 2
+      }
+    ]
+  },
+  {
+    "key": "nql/join/2/via-alias/flat/single/expression",
+    "sql": "SELECT roots.id, leaves.id AS \"children.leaves.id\", leaves.tenant AS \"children.leaves.tenant\", leaves.name AS \"children.leaves.name\", leaves.amount AS \"children.leaves.amount\", leaves.\"childId\" AS \"children.leaves.childId\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" JOIN leaves AS leaves ON children.id = leaves.\"childId\" WHERE lower(name) = $1 AND lower(name) = $2",
+    "params": [
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "children",
+        "publicKey": "children",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "children_json",
+        "columns": [],
+        "children": [
+          {
+            "path": "children.leaves",
+            "publicKey": "leaves",
+            "strategy": "join",
+            "outputMode": "flat",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "leaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "children.leaves.id"
+              },
+              {
+                "logicalName": "tenant",
+                "physicalName": "tenant",
+                "publicKey": "tenant",
+                "outputLabel": "children.leaves.tenant"
+              },
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "children.leaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "children.leaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              },
+              {
+                "logicalName": "childId",
+                "physicalName": "childId",
+                "publicKey": "childId",
+                "outputLabel": "children.leaves.childId"
+              }
+            ],
+            "children": []
+          }
+        ]
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "children.leaves.id": 2,
+        "children.leaves.tenant": 2,
+        "children.leaves.name": "child",
+        "children.leaves.amount": "42",
+        "children.leaves.childId": 2
+      }
+    ]
+  },
+  {
+    "key": "orm/join/2/via-alias/flat/single/outer",
+    "sql": "SELECT roots.*, children.id AS \"children.id\", children.tenant AS \"children.tenant\", children.name AS \"children.name\", children.amount AS \"children.amount\", children.\"rootId\" AS \"children.rootId\", children.id AS __dbsp_presence_children, leaves.id AS \"children.leaves.id\", leaves.tenant AS \"children.leaves.tenant\", leaves.name AS \"children.leaves.name\", leaves.amount AS \"children.leaves.amount\", leaves.\"childId\" AS \"children.leaves.childId\", leaves.id AS \"__dbsp_presence_children.leaves\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" JOIN leaves AS leaves ON children.id = leaves.\"childId\" WHERE children.name = $1 AND children.id = roots.id AND leaves.name = $2 AND leaves.id = roots.id",
+    "params": [
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "children",
+        "publicKey": "children",
+        "strategy": "join",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "children_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "children.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "children.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "children.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "children.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "children.rootId"
+          }
+        ],
+        "children": [
+          {
+            "path": "children.leaves",
+            "publicKey": "leaves",
+            "strategy": "join",
+            "outputMode": "nested",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "leaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "children.leaves.id"
+              },
+              {
+                "logicalName": "tenant",
+                "physicalName": "tenant",
+                "publicKey": "tenant",
+                "outputLabel": "children.leaves.tenant"
+              },
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "children.leaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "children.leaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              },
+              {
+                "logicalName": "childId",
+                "physicalName": "childId",
+                "publicKey": "childId",
+                "outputLabel": "children.leaves.childId"
+              }
+            ],
+            "children": [],
+            "presence": {
+              "outputLabel": "__dbsp_presence_children.leaves",
+              "physicalName": "id"
+            }
+          }
+        ],
+        "presence": {
+          "outputLabel": "__dbsp_presence_children",
+          "physicalName": "id"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "children": {
+          "id": 2,
+          "tenant": 2,
+          "name": "child",
+          "amount": 42,
+          "rootId": 2,
+          "leaves": {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "childId": 2
+          }
+        }
+      }
+    ]
+  },
+  {
+    "key": "external/join/2/via-alias/flat/single/outer",
+    "sql": "SELECT roots.*, children.id AS \"children.id\", leaves.id AS \"children.leaves.id\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" JOIN leaves AS leaves ON children.id = leaves.\"childId\" WHERE children.name = $1 AND children.id = roots.id AND leaves.name = $2 AND leaves.id = roots.id",
+    "params": [
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "children",
+        "publicKey": "children",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "children_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "children.id"
+          }
+        ],
+        "children": [
+          {
+            "path": "children.leaves",
+            "publicKey": "leaves",
+            "strategy": "join",
+            "outputMode": "flat",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "leaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "children.leaves.id"
+              }
+            ],
+            "children": []
+          }
+        ]
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "children.id": 2,
+        "children.leaves.id": 2
+      }
+    ]
+  },
+  {
+    "key": "nql/join/2/via-alias/flat/single/outer",
+    "sql": "SELECT roots.id, leaves.id AS \"children.leaves.id\", leaves.tenant AS \"children.leaves.tenant\", leaves.name AS \"children.leaves.name\", leaves.amount AS \"children.leaves.amount\", leaves.\"childId\" AS \"children.leaves.childId\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" JOIN leaves AS leaves ON children.id = leaves.\"childId\" WHERE children.name = $1 AND children.id = roots.id AND leaves.name = $2 AND leaves.id = roots.id",
+    "params": [
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "children",
+        "publicKey": "children",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "children_json",
+        "columns": [],
+        "children": [
+          {
+            "path": "children.leaves",
+            "publicKey": "leaves",
+            "strategy": "join",
+            "outputMode": "flat",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "leaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "children.leaves.id"
+              },
+              {
+                "logicalName": "tenant",
+                "physicalName": "tenant",
+                "publicKey": "tenant",
+                "outputLabel": "children.leaves.tenant"
+              },
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "children.leaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "children.leaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              },
+              {
+                "logicalName": "childId",
+                "physicalName": "childId",
+                "publicKey": "childId",
+                "outputLabel": "children.leaves.childId"
+              }
+            ],
+            "children": []
+          }
+        ]
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "children.leaves.id": 2,
+        "children.leaves.tenant": 2,
+        "children.leaves.name": "child",
+        "children.leaves.amount": "42",
+        "children.leaves.childId": 2
+      }
+    ]
+  },
+  {
+    "key": "orm/join/2/via-alias/flat/composite/all",
+    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".tenant AS \"compositeChildren.compositeLeaves.tenant\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".\"childId\" AS \"compositeChildren.compositeLeaves.childId\", \"compositeLeaves\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves\" FROM roots LEFT JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant LEFT JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "compositeChildren.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "compositeChildren.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "compositeChildren.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "compositeChildren.rootId"
+          }
+        ],
+        "children": [
+          {
+            "path": "compositeChildren.compositeLeaves",
+            "publicKey": "compositeLeaves",
+            "strategy": "join",
+            "outputMode": "nested",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "compositeLeaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "compositeChildren.compositeLeaves.id"
+              },
+              {
+                "logicalName": "tenant",
+                "physicalName": "tenant",
+                "publicKey": "tenant",
+                "outputLabel": "compositeChildren.compositeLeaves.tenant"
+              },
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "compositeChildren.compositeLeaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "compositeChildren.compositeLeaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              },
+              {
+                "logicalName": "childId",
+                "physicalName": "childId",
+                "publicKey": "childId",
+                "outputLabel": "compositeChildren.compositeLeaves.childId"
+              }
+            ],
+            "children": [],
+            "presence": {
+              "outputLabel": "__dbsp_presence_compositeChildren.compositeLeaves",
+              "physicalName": "id"
+            }
+          }
+        ],
+        "presence": {
+          "outputLabel": "__dbsp_presence_compositeChildren",
+          "physicalName": "id"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren": {
+          "id": 2,
+          "tenant": 2,
+          "name": "child",
+          "amount": 42,
+          "rootId": 2,
+          "compositeLeaves": {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "childId": 2
+          }
+        }
+      }
+    ]
+  },
+  {
+    "key": "external/join/2/via-alias/flat/composite/all",
+    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\" FROM roots LEFT JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant LEFT JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          }
+        ],
+        "children": [
+          {
+            "path": "compositeChildren.compositeLeaves",
+            "publicKey": "compositeLeaves",
+            "strategy": "join",
+            "outputMode": "flat",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "compositeLeaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "compositeChildren.compositeLeaves.id"
+              }
+            ],
+            "children": []
+          }
+        ]
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren.id": 2,
+        "compositeChildren.compositeLeaves.id": 2
+      }
+    ]
+  },
+  {
+    "key": "nql/join/2/via-alias/flat/composite/all",
+    "sql": "SELECT roots.id, \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".tenant AS \"compositeChildren.compositeLeaves.tenant\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".\"childId\" AS \"compositeChildren.compositeLeaves.childId\" FROM roots LEFT JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant LEFT JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [],
+        "children": [
+          {
+            "path": "compositeChildren.compositeLeaves",
+            "publicKey": "compositeLeaves",
+            "strategy": "join",
+            "outputMode": "flat",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "compositeLeaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "compositeChildren.compositeLeaves.id"
+              },
+              {
+                "logicalName": "tenant",
+                "physicalName": "tenant",
+                "publicKey": "tenant",
+                "outputLabel": "compositeChildren.compositeLeaves.tenant"
+              },
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "compositeChildren.compositeLeaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "compositeChildren.compositeLeaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              },
+              {
+                "logicalName": "childId",
+                "physicalName": "childId",
+                "publicKey": "childId",
+                "outputLabel": "compositeChildren.compositeLeaves.childId"
+              }
+            ],
+            "children": []
+          }
+        ]
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren.compositeLeaves.id": 2,
+        "compositeChildren.compositeLeaves.tenant": 2,
+        "compositeChildren.compositeLeaves.name": "child",
+        "compositeChildren.compositeLeaves.amount": "42",
+        "compositeChildren.compositeLeaves.childId": 2
+      }
+    ]
+  },
+  {
+    "key": "orm/join/2/via-alias/flat/composite/projection",
+    "sql": "SELECT roots.*, \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves\" FROM roots LEFT JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant LEFT JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "compositeChildren.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "compositeChildren.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          }
+        ],
+        "children": [
+          {
+            "path": "compositeChildren.compositeLeaves",
+            "publicKey": "compositeLeaves",
+            "strategy": "join",
+            "outputMode": "nested",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "compositeLeaves_json",
+            "columns": [
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "compositeChildren.compositeLeaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "compositeChildren.compositeLeaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              }
+            ],
+            "children": [],
+            "presence": {
+              "outputLabel": "__dbsp_presence_compositeChildren.compositeLeaves",
+              "physicalName": "id"
+            }
+          }
+        ],
+        "presence": {
+          "outputLabel": "__dbsp_presence_compositeChildren",
+          "physicalName": "id"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren": {
+          "name": "child",
+          "amount": 42,
+          "compositeLeaves": {
+            "name": "child",
+            "amount": 42
+          }
+        }
+      }
+    ]
+  },
+  {
+    "key": "external/join/2/via-alias/flat/composite/projection",
+    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\" FROM roots LEFT JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant LEFT JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "compositeChildren.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "compositeChildren.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          }
+        ],
+        "children": [
+          {
+            "path": "compositeChildren.compositeLeaves",
+            "publicKey": "compositeLeaves",
+            "strategy": "join",
+            "outputMode": "flat",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "compositeLeaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "compositeChildren.compositeLeaves.id"
+              },
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "compositeChildren.compositeLeaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "compositeChildren.compositeLeaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              }
+            ],
+            "children": []
+          }
+        ]
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren.id": 2,
+        "compositeChildren.name": "child",
+        "compositeChildren.amount": "42",
+        "compositeChildren.compositeLeaves.id": 2,
+        "compositeChildren.compositeLeaves.name": "child",
+        "compositeChildren.compositeLeaves.amount": "42"
+      }
+    ]
+  },
+  {
+    "key": "nql/join/2/via-alias/flat/composite/projection",
+    "sql": "SELECT roots.id, \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\" FROM roots LEFT JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant LEFT JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [],
+        "children": [
+          {
+            "path": "compositeChildren.compositeLeaves",
+            "publicKey": "compositeLeaves",
+            "strategy": "join",
+            "outputMode": "flat",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "compositeLeaves_json",
+            "columns": [
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "compositeChildren.compositeLeaves.name",
+                "outputLabel": "compositeChildren.compositeLeaves.name"
+              }
+            ],
+            "children": []
+          }
+        ]
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren.compositeLeaves.name": "child"
+      }
+    ]
+  },
+  {
+    "key": "orm/join/2/via-alias/flat/composite/ordered-limit",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "_InvalidOperationError",
+      "message": "Invalid include: Include include[0](compositeChildren) limit is not supported by 'join' strategy. Remove the explicit join or use a strategy that limits per parent (json_agg, lateral)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "key": "external/join/2/via-alias/flat/composite/ordered-limit",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "_InvalidOperationError",
+      "message": "Invalid include: Flat output for relation 'compositeChildren' cannot use 'join' selected by defaultIncludeStrategy because the include or a nested include has a per-parent limit. Accepted strategies for flat output: 'join', 'lateral'; per-parent limits require 'lateral' with a dialect that supports lateral joins."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "key": "nql/join/2/via-alias/flat/composite/ordered-limit",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "_InvalidOperationError",
+      "message": "Invalid include: Flat output for relation 'compositeChildren' cannot use 'join' selected by defaultIncludeStrategy because the include or a nested include has a per-parent limit. Accepted strategies for flat output: 'join', 'lateral'; per-parent limits require 'lateral' with a dialect that supports lateral joins."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "key": "orm/join/2/via-alias/flat/composite/predicate",
+    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".tenant AS \"compositeChildren.compositeLeaves.tenant\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".\"childId\" AS \"compositeChildren.compositeLeaves.childId\", \"compositeLeaves\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeLeaves\".name = $2",
+    "params": [
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "compositeChildren.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "compositeChildren.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "compositeChildren.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "compositeChildren.rootId"
+          }
+        ],
+        "children": [
+          {
+            "path": "compositeChildren.compositeLeaves",
+            "publicKey": "compositeLeaves",
+            "strategy": "join",
+            "outputMode": "nested",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "compositeLeaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "compositeChildren.compositeLeaves.id"
+              },
+              {
+                "logicalName": "tenant",
+                "physicalName": "tenant",
+                "publicKey": "tenant",
+                "outputLabel": "compositeChildren.compositeLeaves.tenant"
+              },
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "compositeChildren.compositeLeaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "compositeChildren.compositeLeaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              },
+              {
+                "logicalName": "childId",
+                "physicalName": "childId",
+                "publicKey": "childId",
+                "outputLabel": "compositeChildren.compositeLeaves.childId"
+              }
+            ],
+            "children": [],
+            "presence": {
+              "outputLabel": "__dbsp_presence_compositeChildren.compositeLeaves",
+              "physicalName": "id"
+            }
+          }
+        ],
+        "presence": {
+          "outputLabel": "__dbsp_presence_compositeChildren",
+          "physicalName": "id"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren": {
+          "id": 2,
+          "tenant": 2,
+          "name": "child",
+          "amount": 42,
+          "rootId": 2,
+          "compositeLeaves": {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "childId": 2
+          }
+        }
+      }
+    ]
+  },
+  {
+    "key": "external/join/2/via-alias/flat/composite/predicate",
+    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeLeaves\".name = $2",
+    "params": [
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          }
+        ],
+        "children": [
+          {
+            "path": "compositeChildren.compositeLeaves",
+            "publicKey": "compositeLeaves",
+            "strategy": "join",
+            "outputMode": "flat",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "compositeLeaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "compositeChildren.compositeLeaves.id"
+              }
+            ],
+            "children": []
+          }
+        ]
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren.id": 2,
+        "compositeChildren.compositeLeaves.id": 2
+      }
+    ]
+  },
+  {
+    "key": "nql/join/2/via-alias/flat/composite/predicate",
+    "sql": "SELECT roots.id, \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".tenant AS \"compositeChildren.compositeLeaves.tenant\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".\"childId\" AS \"compositeChildren.compositeLeaves.childId\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeLeaves\".name = $2",
+    "params": [
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [],
+        "children": [
+          {
+            "path": "compositeChildren.compositeLeaves",
+            "publicKey": "compositeLeaves",
+            "strategy": "join",
+            "outputMode": "flat",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "compositeLeaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "compositeChildren.compositeLeaves.id"
+              },
+              {
+                "logicalName": "tenant",
+                "physicalName": "tenant",
+                "publicKey": "tenant",
+                "outputLabel": "compositeChildren.compositeLeaves.tenant"
+              },
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "compositeChildren.compositeLeaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "compositeChildren.compositeLeaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              },
+              {
+                "logicalName": "childId",
+                "physicalName": "childId",
+                "publicKey": "childId",
+                "outputLabel": "compositeChildren.compositeLeaves.childId"
+              }
+            ],
+            "children": []
+          }
+        ]
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren.compositeLeaves.id": 2,
+        "compositeChildren.compositeLeaves.tenant": 2,
+        "compositeChildren.compositeLeaves.name": "child",
+        "compositeChildren.compositeLeaves.amount": "42",
+        "compositeChildren.compositeLeaves.childId": 2
+      }
+    ]
+  },
+  {
+    "key": "orm/join/2/via-alias/flat/composite/expression",
+    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".tenant AS \"compositeChildren.compositeLeaves.tenant\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".\"childId\" AS \"compositeChildren.compositeLeaves.childId\", \"compositeLeaves\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant WHERE lower(name) = $1 AND lower(name) = $2",
+    "params": [
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "compositeChildren.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "compositeChildren.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "compositeChildren.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "compositeChildren.rootId"
+          }
+        ],
+        "children": [
+          {
+            "path": "compositeChildren.compositeLeaves",
+            "publicKey": "compositeLeaves",
+            "strategy": "join",
+            "outputMode": "nested",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "compositeLeaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "compositeChildren.compositeLeaves.id"
+              },
+              {
+                "logicalName": "tenant",
+                "physicalName": "tenant",
+                "publicKey": "tenant",
+                "outputLabel": "compositeChildren.compositeLeaves.tenant"
+              },
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "compositeChildren.compositeLeaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "compositeChildren.compositeLeaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              },
+              {
+                "logicalName": "childId",
+                "physicalName": "childId",
+                "publicKey": "childId",
+                "outputLabel": "compositeChildren.compositeLeaves.childId"
+              }
+            ],
+            "children": [],
+            "presence": {
+              "outputLabel": "__dbsp_presence_compositeChildren.compositeLeaves",
+              "physicalName": "id"
+            }
+          }
+        ],
+        "presence": {
+          "outputLabel": "__dbsp_presence_compositeChildren",
+          "physicalName": "id"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren": {
+          "id": 2,
+          "tenant": 2,
+          "name": "child",
+          "amount": 42,
+          "rootId": 2,
+          "compositeLeaves": {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "childId": 2
+          }
+        }
+      }
+    ]
+  },
+  {
+    "key": "external/join/2/via-alias/flat/composite/expression",
+    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant WHERE lower(name) = $1 AND lower(name) = $2",
+    "params": [
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          }
+        ],
+        "children": [
+          {
+            "path": "compositeChildren.compositeLeaves",
+            "publicKey": "compositeLeaves",
+            "strategy": "join",
+            "outputMode": "flat",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "compositeLeaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "compositeChildren.compositeLeaves.id"
+              }
+            ],
+            "children": []
+          }
+        ]
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren.id": 2,
+        "compositeChildren.compositeLeaves.id": 2
+      }
+    ]
+  },
+  {
+    "key": "nql/join/2/via-alias/flat/composite/expression",
+    "sql": "SELECT roots.id, \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".tenant AS \"compositeChildren.compositeLeaves.tenant\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".\"childId\" AS \"compositeChildren.compositeLeaves.childId\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant WHERE lower(name) = $1 AND lower(name) = $2",
+    "params": [
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [],
+        "children": [
+          {
+            "path": "compositeChildren.compositeLeaves",
+            "publicKey": "compositeLeaves",
+            "strategy": "join",
+            "outputMode": "flat",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "compositeLeaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "compositeChildren.compositeLeaves.id"
+              },
+              {
+                "logicalName": "tenant",
+                "physicalName": "tenant",
+                "publicKey": "tenant",
+                "outputLabel": "compositeChildren.compositeLeaves.tenant"
+              },
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "compositeChildren.compositeLeaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "compositeChildren.compositeLeaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              },
+              {
+                "logicalName": "childId",
+                "physicalName": "childId",
+                "publicKey": "childId",
+                "outputLabel": "compositeChildren.compositeLeaves.childId"
+              }
+            ],
+            "children": []
+          }
+        ]
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren.compositeLeaves.id": 2,
+        "compositeChildren.compositeLeaves.tenant": 2,
+        "compositeChildren.compositeLeaves.name": "child",
+        "compositeChildren.compositeLeaves.amount": "42",
+        "compositeChildren.compositeLeaves.childId": 2
+      }
+    ]
+  },
+  {
+    "key": "orm/join/2/via-alias/flat/composite/outer",
+    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".tenant AS \"compositeChildren.compositeLeaves.tenant\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".\"childId\" AS \"compositeChildren.compositeLeaves.childId\", \"compositeLeaves\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeChildren\".id = roots.id AND \"compositeLeaves\".name = $2 AND \"compositeLeaves\".id = roots.id",
+    "params": [
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "compositeChildren.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "compositeChildren.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "compositeChildren.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "compositeChildren.rootId"
+          }
+        ],
+        "children": [
+          {
+            "path": "compositeChildren.compositeLeaves",
+            "publicKey": "compositeLeaves",
+            "strategy": "join",
+            "outputMode": "nested",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "compositeLeaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "compositeChildren.compositeLeaves.id"
+              },
+              {
+                "logicalName": "tenant",
+                "physicalName": "tenant",
+                "publicKey": "tenant",
+                "outputLabel": "compositeChildren.compositeLeaves.tenant"
+              },
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "compositeChildren.compositeLeaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "compositeChildren.compositeLeaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              },
+              {
+                "logicalName": "childId",
+                "physicalName": "childId",
+                "publicKey": "childId",
+                "outputLabel": "compositeChildren.compositeLeaves.childId"
+              }
+            ],
+            "children": [],
+            "presence": {
+              "outputLabel": "__dbsp_presence_compositeChildren.compositeLeaves",
+              "physicalName": "id"
+            }
+          }
+        ],
+        "presence": {
+          "outputLabel": "__dbsp_presence_compositeChildren",
+          "physicalName": "id"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren": {
+          "id": 2,
+          "tenant": 2,
+          "name": "child",
+          "amount": 42,
+          "rootId": 2,
+          "compositeLeaves": {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "childId": 2
+          }
+        }
+      }
+    ]
+  },
+  {
+    "key": "external/join/2/via-alias/flat/composite/outer",
+    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeChildren\".id = roots.id AND \"compositeLeaves\".name = $2 AND \"compositeLeaves\".id = roots.id",
+    "params": [
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          }
+        ],
+        "children": [
+          {
+            "path": "compositeChildren.compositeLeaves",
+            "publicKey": "compositeLeaves",
+            "strategy": "join",
+            "outputMode": "flat",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "compositeLeaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "compositeChildren.compositeLeaves.id"
+              }
+            ],
+            "children": []
+          }
+        ]
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren.id": 2,
+        "compositeChildren.compositeLeaves.id": 2
+      }
+    ]
+  },
+  {
+    "key": "nql/join/2/via-alias/flat/composite/outer",
+    "sql": "SELECT roots.id, \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".tenant AS \"compositeChildren.compositeLeaves.tenant\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".\"childId\" AS \"compositeChildren.compositeLeaves.childId\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeChildren\".id = roots.id AND \"compositeLeaves\".name = $2 AND \"compositeLeaves\".id = roots.id",
+    "params": [
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [],
+        "children": [
+          {
+            "path": "compositeChildren.compositeLeaves",
+            "publicKey": "compositeLeaves",
+            "strategy": "join",
+            "outputMode": "flat",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "compositeLeaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "compositeChildren.compositeLeaves.id"
+              },
+              {
+                "logicalName": "tenant",
+                "physicalName": "tenant",
+                "publicKey": "tenant",
+                "outputLabel": "compositeChildren.compositeLeaves.tenant"
+              },
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "compositeChildren.compositeLeaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "compositeChildren.compositeLeaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              },
+              {
+                "logicalName": "childId",
+                "physicalName": "childId",
+                "publicKey": "childId",
+                "outputLabel": "compositeChildren.compositeLeaves.childId"
+              }
+            ],
+            "children": []
+          }
+        ]
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren.compositeLeaves.id": 2,
+        "compositeChildren.compositeLeaves.tenant": 2,
+        "compositeChildren.compositeLeaves.name": "child",
+        "compositeChildren.compositeLeaves.amount": "42",
+        "compositeChildren.compositeLeaves.childId": 2
+      }
+    ]
+  }
+]

@@ -1,3 +1,4 @@
+import { includeHandlerFixture } from '../../../__tests__/include-handler-fixture.js';
 /**
  * JSON_AGG handler tests
  *
@@ -115,7 +116,7 @@ describe('json-agg handler', () => {
 		};
 		expect(() =>
 			jsonAggIncludeHandler.compile(
-				buildDecision({ limit: 2, orderBy: [] }),
+				includeHandlerFixture(buildDecision({ limit: 2, orderBy: [] }), ctx),
 				ctx,
 				createCompilerState(),
 			),
@@ -134,12 +135,15 @@ describe('json-agg handler', () => {
 			}),
 		};
 		const result = jsonAggIncludeHandler.compile(
-			buildDecision({
-				limit: 2,
-				includeOrderBy: [
-					{ field: 'created_at', direction: 'desc', nulls: 'first' },
-				],
-			}),
+			includeHandlerFixture(
+				buildDecision({
+					limit: 2,
+					includeOrderBy: [
+						{ field: 'created_at', direction: 'desc', nulls: 'first' },
+					],
+				}),
+				ctx,
+			),
 			ctx,
 			createCompilerState(),
 		);
@@ -165,11 +169,14 @@ describe('json-agg handler', () => {
 			},
 		};
 		const result = jsonAggIncludeHandler.compile(
-			buildDecision({
-				limit: 1,
-				orderBy: [],
-				includeOrderBy: [{ field: 'slug', direction: 'asc' }],
-			}),
+			includeHandlerFixture(
+				buildDecision({
+					limit: 1,
+					orderBy: [],
+					includeOrderBy: [{ field: 'slug', direction: 'asc' }],
+				}),
+				ctx,
+			),
 			ctx,
 			createCompilerState(),
 		);
@@ -214,11 +221,14 @@ describe('json-agg handler', () => {
 		} as CompilerContext;
 
 		const result = jsonAggIncludeHandler.compile(
-			buildDecision({
-				relationType: 'belongsTo',
-				foreignKey: 'author_id',
-				parentKey: 'id',
-			}),
+			includeHandlerFixture(
+				buildDecision({
+					relationType: 'belongsTo',
+					foreignKey: 'author_id',
+					parentKey: 'id',
+				}),
+				ctx,
+			),
 			ctx,
 			createCompilerState(),
 		);
@@ -258,11 +268,14 @@ describe('json-agg handler', () => {
 
 		const sql = targetsToSQL(
 			jsonAggIncludeHandler.compile(
-				buildDecision({
-					relationType: 'belongsTo',
-					foreignKey: 'author_id',
-					parentKey: 'id',
-				}),
+				includeHandlerFixture(
+					buildDecision({
+						relationType: 'belongsTo',
+						foreignKey: 'author_id',
+						parentKey: 'id',
+					}),
+					ctx,
+				),
 				ctx,
 				createCompilerState(),
 			).targets!,
@@ -306,12 +319,15 @@ describe('json-agg handler', () => {
 
 		expect(() =>
 			jsonAggIncludeHandler.compile(
-				buildDecision({
-					columns: ['*'],
-					relationType: 'belongsTo',
-					foreignKey: 'author_id',
-					parentKey: 'id',
-				}),
+				includeHandlerFixture(
+					buildDecision({
+						columns: ['*'],
+						relationType: 'belongsTo',
+						foreignKey: 'author_id',
+						parentKey: 'id',
+					}),
+					ctx,
+				),
 				ctx,
 				createCompilerState(),
 			),
@@ -323,7 +339,11 @@ describe('json-agg handler', () => {
 		const state = createCompilerState();
 		const decision = buildDecision();
 
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 
 		expect(result.targets).toHaveLength(1);
 		const sql = targetsToSQL(result.targets!);
@@ -361,7 +381,11 @@ describe('json-agg handler', () => {
 			],
 		});
 
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		const sql = targetsToSQL(result.targets!);
 
 		// Root level uses __t__
@@ -409,7 +433,11 @@ describe('json-agg handler', () => {
 			],
 		});
 
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		const sql = targetsToSQL(result.targets!);
 
 		expect(sql).toContain('user_roles as __t__');
@@ -432,7 +460,11 @@ describe('json-agg handler', () => {
 			parentKey: 'id',
 		});
 
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		const sql = targetsToSQL(result.targets!);
 
 		// belongsTo: parent.fk = target.pk → __t__.id = posts.author_id
@@ -450,7 +482,11 @@ describe('json-agg handler', () => {
 			parentKey: ['order_id', 'tenant_id'],
 		});
 
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		const sql = targetsToSQL(result.targets!);
 
 		expect(sql).toContain('__t__.order_id = orders.order_id');
@@ -480,7 +516,11 @@ describe('json-agg handler', () => {
 			parentKey: ['order_id', 'tenant_id'],
 		});
 
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		const sql = targetsToSQL(result.targets!);
 
 		expect(sql).toContain(
@@ -509,7 +549,11 @@ describe('json-agg handler', () => {
 			parentKey: 'id',
 		});
 
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		const sql = targetsToSQL(result.targets!);
 
 		expect(sql).toContain(
@@ -530,7 +574,11 @@ describe('json-agg handler', () => {
 			orderByFallback: true,
 		});
 
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		const sql = targetsToSQL(result.targets!);
 
 		expect(sql).toContain(
@@ -566,7 +614,11 @@ describe('json-agg handler', () => {
 			parentKey: 'id',
 		});
 
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		const sql = targetsToSQL(result.targets!);
 
 		expect(sql).toContain(
@@ -591,7 +643,11 @@ describe('json-agg handler', () => {
 			],
 		});
 
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		const sql = targetsToSQL(result.targets!);
 
 		expect(sql).toContain('posts');
@@ -606,7 +662,11 @@ describe('json-agg handler', () => {
 			columns: ['id', 'title', 'created_at'],
 		});
 
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		const sql = targetsToSQL(result.targets!);
 
 		// Should use jsonb_build_object instead of to_jsonb
@@ -628,7 +688,11 @@ describe('json-agg handler', () => {
 			columns: ['*'],
 		});
 
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		const sql = targetsToSQL(result.targets!);
 
 		// Wildcard should fall back to to_jsonb(__t__)
@@ -657,7 +721,11 @@ describe('json-agg handler', () => {
 			],
 		});
 
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		const sql = targetsToSQL(result.targets!);
 
 		// Parent should use jsonb_build_object for column projection
@@ -689,7 +757,11 @@ describe('json-agg handler', () => {
 			],
 		});
 
-		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const result = jsonAggIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		const sql = targetsToSQL(result.targets!);
 
 		// Round-trip through parser

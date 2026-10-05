@@ -29,6 +29,20 @@ export function requireIncludePayloads(
 	resolved: PlanReport,
 	original: PlanReport = resolved,
 ): readonly IncludePayloadShape[] {
+	if (resolved.includePayloadsByNodeId && resolved.execution) {
+		return [
+			...new Set(
+				resolved.execution.includes.map((node) => {
+					const payload = resolved.includePayloadsByNodeId![node.nodeId];
+					if (!payload)
+						throw new Error(
+							`Include hydration '${node.publicKey}' requires compiled includePayloads; supply the compiled query hydrationPlan.`,
+						);
+					return payload;
+				}),
+			),
+		];
+	}
 	if (resolved.includePayloads !== undefined) return resolved.includePayloads;
 	const decision = [...original.decisions, ...resolved.decisions].find(
 		(d) =>
@@ -37,7 +51,7 @@ export function requireIncludePayloads(
 	);
 	if (decision) {
 		const error = new Error(
-			`Include hydration '${decision.context.relation ?? decision.context.includeAlias ?? '?'}' requires compiled includePayloads; supply the compiled query hydrationPlan.`,
+			`Include hydration '${original.execution?.includes.find((node) => node.nodeId === decision.context.nodeId)?.publicKey ?? decision.context.relation ?? decision.context.includeAlias ?? '?'}' requires compiled includePayloads; supply the compiled query hydrationPlan.`,
 		);
 		error.name = 'MissingIncludePayloadShapeError';
 		throw error;

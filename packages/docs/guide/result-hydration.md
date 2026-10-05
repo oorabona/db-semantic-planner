@@ -31,8 +31,7 @@ QueryBuilder.all()
             Flat DB rows → nested JS objects
 ```
 
-The planner encodes its decision in `PlanReport.decisions[]` as an
-`include-strategy` entry. The adapter resolves an include payload shape after relation-column injection and carries it in compilation metadata. The hydrator reads that shape to reassemble rows and apply read conversions without renaming keys.
+The planner resolves includes once in `PlanReport.execution.includes`, with query ranges, physical relation hops, strategy, projection, ordering and predicates. The `include-strategy` entries in `PlanReport.decisions[]` are observations: their context holds `intentPath` and `nodeId`, rather than relation keys or targets. The adapter resolves an include payload shape after relation-column injection and carries it in compilation metadata. The compiled report also indexes payload descriptors in `includePayloadsByNodeId`. The hydrator reads that shape to reassemble rows and apply read conversions without renaming keys.
 
 Hydration requires `CompiledQuery.hydrationPlan.includePayloads` (or the compiled plan containing those shapes). Pass the compiled query when calling `ResultHydrator` directly. A planner report alone is insufficient: hydratable include decisions without the compiled shape throw `MissingIncludePayloadShapeError` instead of exposing transport columns.
 

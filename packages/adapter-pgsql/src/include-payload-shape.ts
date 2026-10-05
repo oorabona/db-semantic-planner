@@ -1,4 +1,3 @@
-import { normalizeRecursiveIncludeOptions } from '@dbsp/core/internal';
 import type {
 	IncludePayloadShape,
 	ModelIR,
@@ -10,7 +9,6 @@ import {
 	belongsToManyJoinIncludeRefusal,
 	dropsJoinIncludeData,
 	type Mutable,
-	resolveIncludeRelationName,
 } from '@dbsp/types/internal';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { truncateIdentifier } from './column-metadata.js';
@@ -99,27 +97,18 @@ export function resolveIncludePayloadShapes(
 		return emitted;
 	};
 	const flatPaths = new Set<string>();
-	const requestedPathsByLeaf = new Map<string, string[]>();
 	const collectFlatPaths = (
-		includes: readonly import('@dbsp/types').IncludeIntent[],
-		parent = '',
-		parentFlat = false,
+		nodes: readonly import('@dbsp/types').ResolvedIncludeNode[],
 	): void => {
-		for (const include of includes) {
-			const path = parent
-				? `${parent}.${include.via ?? include.relation}`
-				: (include.via ?? include.relation);
-			const name = include.via ?? include.relation;
-			const leaf = name.split('.').at(-1) ?? name;
-			const requests = requestedPathsByLeaf.get(leaf) ?? [];
-			requests.push(path);
-			requestedPathsByLeaf.set(leaf, requests);
-			const flat = parentFlat || include.strategy === 'flat';
-			if (flat) flatPaths.add(path);
-			collectFlatPaths(include.include ?? [], path, flat);
+		for (const node of nodes) {
+			const path = node.relationPath;
+
+			if (node.outputMode === 'flat') flatPaths.add(path);
+			collectFlatPaths(node.children);
 		}
 	};
-	collectFlatPaths(plan.intent?.include ?? []);
+	collectFlatPaths(plan.execution?.includes ?? []);
+
 	const all: PlanDecision[] = [];
 	const visit = (items: readonly PlanDecision[]): void => {
 		for (const d of items) {
@@ -132,15 +121,9 @@ export function resolveIncludePayloadShapes(
 		}
 	};
 	visit(decisions);
-	// Recursive includes are root-only: the requested name owns each payload,
-	// while via remains the relation authority. Different public names must not merge.
-	for (const d of all) {
-		if (!d.recursiveInclude) continue;
-		const index = d.intentPath?.match(/^include\[(\d+)\]$/)?.[1];
-		const include =
-			index === undefined ? undefined : plan.intent?.include?.[Number(index)];
-		if (include) (d as Mutable<PlanDecision>).relationPath = include.relation;
-	}
+	for (const d of all)
+		if (d.resolvedInclude?.recursion)
+			(d as Mutable<PlanDecision>).relationPath = d.resolvedInclude.publicKey;
 	// Refuse unsupported nested select forms before resolving any wildcard payload.
 	// Otherwise an opaque parent masks the child strategy's established refusal.
 	for (const d of all) {
@@ -155,17 +138,7 @@ export function resolveIncludePayloadShapes(
 			);
 		}
 	}
-	for (const d of all) {
-		const name = d.relationName ?? d.relation;
-		const candidates = name ? requestedPathsByLeaf.get(name) : undefined;
-		if (
-			!d.intentPath &&
-			name &&
-			(d.relationPath === undefined || d.relationPath === name) &&
-			candidates?.length === 1
-		)
-			(d as Mutable<PlanDecision>).relationPath = candidates[0]!;
-	}
+
 	const byPath = new Map<string, PlanDecision>();
 	for (const d of all) {
 		const path = d.relationPath ?? d.relationName ?? d.relation ?? '';
@@ -259,22 +232,9 @@ export function resolveIncludePayloadShapes(
 			strategy !== 'cte'
 		)
 			throw new Error(`Invalid include payload strategy '${strategy}'.`);
-		const parentPath = path.includes('.')
-			? path.slice(0, path.lastIndexOf('.'))
-			: undefined;
-		const sourceTable =
-			d.sourceTable ??
-			(parentPath ? byPath.get(parentPath)?.targetTable : plan.rootTable);
-		const relation =
-			model && sourceTable
-				? resolveIncludeRelationName(
-						model,
-						sourceTable,
-						d.relationName ?? d.relation ?? path.split('.').at(-1)!,
-					)
-				: undefined;
 		// External reports can carry belongsToMany even though legacy decisions narrow the type.
-		const relationType: string | undefined = relation?.type ?? d.relationType;
+		const relationType: string | undefined =
+			d.resolvedInclude?.relationType ?? d.relationType;
 		if (strategy === 'join' && relationType === 'belongsToMany')
 			throw new Error(
 				belongsToManyJoinIncludeRefusal(`${d.intentPath ?? path}(${path})`),
@@ -415,7 +375,7 @@ export function resolveIncludePayloadShapes(
 			)
 				children.push(shape);
 		}
-		const publicKey = path.split('.').at(-1) ?? path;
+		const publicKey = d.resolvedInclude!.publicKey;
 		let presence: IncludePayloadShape['presence'];
 		if (
 			strategy !== 'json_agg' &&
@@ -451,10 +411,11 @@ export function resolveIncludePayloadShapes(
 			)
 				claimPayloadKey(owners, path, publicKey, `column:${publicKey}`);
 			claimPayloadKey(owners, path, publicKey, `relation:${path}`);
-			const opts = normalizeRecursiveIncludeOptions(
-				d.recursiveInclude,
-				relation,
-			);
+			const opts = d.resolvedInclude?.recursion;
+			if (!opts)
+				throw new Error(
+					`Recursive include '${path}' requires resolved options`,
+				);
 			recursive = {
 				direction: opts.direction!,
 				flat: opts.flat!,

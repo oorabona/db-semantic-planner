@@ -1,0 +1,2282 @@
+[
+  {
+    "key": "orm/recursive/ancestors/false/false",
+    "sql": "SELECT categories.*, COALESCE((WITH RECURSIVE ancestors_walk AS (SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM categories AS __n WHERE __n.id = categories.\"parentId\" AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", ancestors_walk.__depth + 1 AS __depth, ancestors_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM ancestors_walk JOIN categories AS __n ON __n.id = ancestors_walk.\"parentId\" WHERE ancestors_walk.__depth < 3 AND __n.id <> ALL (ancestors_walk.__visited)), ancestors_output AS (SELECT ancestors_walk.id, ancestors_walk.tenant, ancestors_walk.name, ancestors_walk.amount, ancestors_walk.\"parentId\", ancestors_walk.__depth, ancestors_walk.__visited, ancestors_walk.__node_text, ancestors_walk.__parent_text FROM ancestors_walk UNION ALL SELECT categories.id AS id, categories.tenant AS tenant, categories.name AS name, categories.amount AS amount, categories.\"parentId\" AS \"parentId\", 0 AS __depth, array_remove(ARRAY[categories.id], NULL) AS __visited, CAST(categories.id AS text) AS __node_text, CAST(categories.\"parentId\" AS text) AS __parent_text) SELECT json_agg(json_build_object('id', ancestors_walk.id, 'tenant', ancestors_walk.tenant, 'name', ancestors_walk.name, 'amount', CAST(ancestors_walk.amount AS text), 'parentId', ancestors_walk.\"parentId\", '__dbsp_node', ancestors_walk.__node_text, '__dbsp_parent', ancestors_walk.__parent_text, '__dbsp_depth', ancestors_walk.__depth) ORDER BY ancestors_walk.__depth, ancestors_walk.id) FROM ancestors_output AS ancestors_walk), '[]'::json) AS ancestors_json FROM categories",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "recursive": {
+          "direction": "ancestors",
+          "flat": false,
+          "omitSelf": false,
+          "includeDepth": true
+        },
+        "privateFields": [
+          {
+            "role": "node",
+            "jsonKey": "__dbsp_node",
+            "physicalName": "id"
+          },
+          {
+            "role": "parent",
+            "jsonKey": "__dbsp_parent",
+            "physicalName": "parentId"
+          },
+          {
+            "role": "depth",
+            "jsonKey": "__dbsp_depth",
+            "physicalName": ""
+          }
+        ],
+        "path": "ancestors",
+        "publicKey": "ancestors",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "categories",
+        "isToOne": false,
+        "outputLabel": "ancestors_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "ancestors.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "ancestors.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "ancestors.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "ancestors.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "categories",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "parentId",
+            "physicalName": "parentId",
+            "publicKey": "parentId",
+            "outputLabel": "ancestors.parentId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "ancestors": {
+          "id": 2,
+          "tenant": 2,
+          "name": "child",
+          "amount": 42,
+          "parentId": 2,
+          "depth": 1,
+          "ancestors": null
+        }
+      }
+    ]
+  },
+  {
+    "key": "external/recursive/ancestors/false/false",
+    "sql": "SELECT categories.*, COALESCE((WITH RECURSIVE ancestors_walk AS (SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM categories AS __n WHERE __n.id = categories.\"parentId\" AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", ancestors_walk.__depth + 1 AS __depth, ancestors_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM ancestors_walk JOIN categories AS __n ON __n.id = ancestors_walk.\"parentId\" WHERE ancestors_walk.__depth < 3 AND __n.id <> ALL (ancestors_walk.__visited)), ancestors_output AS (SELECT ancestors_walk.id, ancestors_walk.tenant, ancestors_walk.name, ancestors_walk.amount, ancestors_walk.\"parentId\", ancestors_walk.__depth, ancestors_walk.__visited, ancestors_walk.__node_text, ancestors_walk.__parent_text FROM ancestors_walk UNION ALL SELECT categories.id AS id, categories.tenant AS tenant, categories.name AS name, categories.amount AS amount, categories.\"parentId\" AS \"parentId\", 0 AS __depth, array_remove(ARRAY[categories.id], NULL) AS __visited, CAST(categories.id AS text) AS __node_text, CAST(categories.\"parentId\" AS text) AS __parent_text) SELECT json_agg(json_build_object('id', ancestors_walk.id, 'tenant', ancestors_walk.tenant, 'name', ancestors_walk.name, 'amount', CAST(ancestors_walk.amount AS text), 'parentId', ancestors_walk.\"parentId\", '__dbsp_node', ancestors_walk.__node_text, '__dbsp_parent', ancestors_walk.__parent_text, '__dbsp_depth', ancestors_walk.__depth) ORDER BY ancestors_walk.__depth, ancestors_walk.id) FROM ancestors_output AS ancestors_walk), '[]'::json) AS ancestors_json FROM categories",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "recursive": {
+          "direction": "ancestors",
+          "flat": false,
+          "omitSelf": false,
+          "includeDepth": true
+        },
+        "privateFields": [
+          {
+            "role": "node",
+            "jsonKey": "__dbsp_node",
+            "physicalName": "id"
+          },
+          {
+            "role": "parent",
+            "jsonKey": "__dbsp_parent",
+            "physicalName": "parentId"
+          },
+          {
+            "role": "depth",
+            "jsonKey": "__dbsp_depth",
+            "physicalName": ""
+          }
+        ],
+        "path": "ancestors",
+        "publicKey": "ancestors",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "categories",
+        "isToOne": false,
+        "outputLabel": "ancestors_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "ancestors.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "ancestors.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "ancestors.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "ancestors.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "categories",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "parentId",
+            "physicalName": "parentId",
+            "publicKey": "parentId",
+            "outputLabel": "ancestors.parentId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "ancestors": {
+          "id": 2,
+          "tenant": 2,
+          "name": "child",
+          "amount": 42,
+          "parentId": 2,
+          "depth": 1,
+          "ancestors": null
+        }
+      }
+    ]
+  },
+  {
+    "key": "nql/recursive/ancestors/false/false",
+    "sql": "SELECT categories.*, COALESCE((WITH RECURSIVE ancestors_walk AS (SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM categories AS __n WHERE __n.id = categories.\"parentId\" AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", ancestors_walk.__depth + 1 AS __depth, ancestors_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM ancestors_walk JOIN categories AS __n ON __n.id = ancestors_walk.\"parentId\" WHERE ancestors_walk.__depth < 3 AND __n.id <> ALL (ancestors_walk.__visited)), ancestors_output AS (SELECT ancestors_walk.id, ancestors_walk.tenant, ancestors_walk.name, ancestors_walk.amount, ancestors_walk.\"parentId\", ancestors_walk.__depth, ancestors_walk.__visited, ancestors_walk.__node_text, ancestors_walk.__parent_text FROM ancestors_walk UNION ALL SELECT categories.id AS id, categories.tenant AS tenant, categories.name AS name, categories.amount AS amount, categories.\"parentId\" AS \"parentId\", 0 AS __depth, array_remove(ARRAY[categories.id], NULL) AS __visited, CAST(categories.id AS text) AS __node_text, CAST(categories.\"parentId\" AS text) AS __parent_text) SELECT json_agg(json_build_object('id', ancestors_walk.id, 'tenant', ancestors_walk.tenant, 'name', ancestors_walk.name, 'amount', CAST(ancestors_walk.amount AS text), 'parentId', ancestors_walk.\"parentId\", '__dbsp_node', ancestors_walk.__node_text, '__dbsp_parent', ancestors_walk.__parent_text, '__dbsp_depth', ancestors_walk.__depth) ORDER BY ancestors_walk.__depth, ancestors_walk.id) FROM ancestors_output AS ancestors_walk), '[]'::json) AS ancestors_json FROM categories",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "recursive": {
+          "direction": "ancestors",
+          "flat": false,
+          "omitSelf": false,
+          "includeDepth": true
+        },
+        "privateFields": [
+          {
+            "role": "node",
+            "jsonKey": "__dbsp_node",
+            "physicalName": "id"
+          },
+          {
+            "role": "parent",
+            "jsonKey": "__dbsp_parent",
+            "physicalName": "parentId"
+          },
+          {
+            "role": "depth",
+            "jsonKey": "__dbsp_depth",
+            "physicalName": ""
+          }
+        ],
+        "path": "ancestors",
+        "publicKey": "ancestors",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "categories",
+        "isToOne": false,
+        "outputLabel": "ancestors_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "ancestors.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "ancestors.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "ancestors.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "ancestors.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "categories",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "parentId",
+            "physicalName": "parentId",
+            "publicKey": "parentId",
+            "outputLabel": "ancestors.parentId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "ancestors": {
+          "id": 2,
+          "tenant": 2,
+          "name": "child",
+          "amount": 42,
+          "parentId": 2,
+          "depth": 1,
+          "ancestors": null
+        }
+      }
+    ]
+  },
+  {
+    "key": "orm/recursive/ancestors/false/true",
+    "sql": "SELECT categories.*, COALESCE((WITH RECURSIVE ancestors_walk AS (SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM categories AS __n WHERE __n.id = categories.\"parentId\" AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", ancestors_walk.__depth + 1 AS __depth, ancestors_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM ancestors_walk JOIN categories AS __n ON __n.id = ancestors_walk.\"parentId\" WHERE ancestors_walk.__depth < 3 AND __n.id <> ALL (ancestors_walk.__visited)) SELECT json_agg(json_build_object('id', ancestors_walk.id, 'tenant', ancestors_walk.tenant, 'name', ancestors_walk.name, 'amount', CAST(ancestors_walk.amount AS text), 'parentId', ancestors_walk.\"parentId\", '__dbsp_node', ancestors_walk.__node_text, '__dbsp_parent', ancestors_walk.__parent_text, '__dbsp_depth', ancestors_walk.__depth) ORDER BY ancestors_walk.__depth, ancestors_walk.id) FROM ancestors_walk), '[]'::json) AS ancestors_json FROM categories",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "recursive": {
+          "direction": "ancestors",
+          "flat": false,
+          "omitSelf": true,
+          "includeDepth": true
+        },
+        "privateFields": [
+          {
+            "role": "node",
+            "jsonKey": "__dbsp_node",
+            "physicalName": "id"
+          },
+          {
+            "role": "parent",
+            "jsonKey": "__dbsp_parent",
+            "physicalName": "parentId"
+          },
+          {
+            "role": "depth",
+            "jsonKey": "__dbsp_depth",
+            "physicalName": ""
+          }
+        ],
+        "path": "ancestors",
+        "publicKey": "ancestors",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "categories",
+        "isToOne": false,
+        "outputLabel": "ancestors_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "ancestors.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "ancestors.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "ancestors.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "ancestors.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "categories",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "parentId",
+            "physicalName": "parentId",
+            "publicKey": "parentId",
+            "outputLabel": "ancestors.parentId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "ancestors": {
+          "id": 2,
+          "tenant": 2,
+          "name": "child",
+          "amount": 42,
+          "parentId": 2,
+          "depth": 1,
+          "ancestors": null
+        }
+      }
+    ]
+  },
+  {
+    "key": "external/recursive/ancestors/false/true",
+    "sql": "SELECT categories.*, COALESCE((WITH RECURSIVE ancestors_walk AS (SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM categories AS __n WHERE __n.id = categories.\"parentId\" AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", ancestors_walk.__depth + 1 AS __depth, ancestors_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM ancestors_walk JOIN categories AS __n ON __n.id = ancestors_walk.\"parentId\" WHERE ancestors_walk.__depth < 3 AND __n.id <> ALL (ancestors_walk.__visited)) SELECT json_agg(json_build_object('id', ancestors_walk.id, 'tenant', ancestors_walk.tenant, 'name', ancestors_walk.name, 'amount', CAST(ancestors_walk.amount AS text), 'parentId', ancestors_walk.\"parentId\", '__dbsp_node', ancestors_walk.__node_text, '__dbsp_parent', ancestors_walk.__parent_text, '__dbsp_depth', ancestors_walk.__depth) ORDER BY ancestors_walk.__depth, ancestors_walk.id) FROM ancestors_walk), '[]'::json) AS ancestors_json FROM categories",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "recursive": {
+          "direction": "ancestors",
+          "flat": false,
+          "omitSelf": true,
+          "includeDepth": true
+        },
+        "privateFields": [
+          {
+            "role": "node",
+            "jsonKey": "__dbsp_node",
+            "physicalName": "id"
+          },
+          {
+            "role": "parent",
+            "jsonKey": "__dbsp_parent",
+            "physicalName": "parentId"
+          },
+          {
+            "role": "depth",
+            "jsonKey": "__dbsp_depth",
+            "physicalName": ""
+          }
+        ],
+        "path": "ancestors",
+        "publicKey": "ancestors",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "categories",
+        "isToOne": false,
+        "outputLabel": "ancestors_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "ancestors.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "ancestors.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "ancestors.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "ancestors.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "categories",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "parentId",
+            "physicalName": "parentId",
+            "publicKey": "parentId",
+            "outputLabel": "ancestors.parentId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "ancestors": {
+          "id": 2,
+          "tenant": 2,
+          "name": "child",
+          "amount": 42,
+          "parentId": 2,
+          "depth": 1,
+          "ancestors": null
+        }
+      }
+    ]
+  },
+  {
+    "key": "nql/recursive/ancestors/false/true",
+    "sql": "SELECT categories.*, COALESCE((WITH RECURSIVE ancestors_walk AS (SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM categories AS __n WHERE __n.id = categories.\"parentId\" AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", ancestors_walk.__depth + 1 AS __depth, ancestors_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM ancestors_walk JOIN categories AS __n ON __n.id = ancestors_walk.\"parentId\" WHERE ancestors_walk.__depth < 3 AND __n.id <> ALL (ancestors_walk.__visited)) SELECT json_agg(json_build_object('id', ancestors_walk.id, 'tenant', ancestors_walk.tenant, 'name', ancestors_walk.name, 'amount', CAST(ancestors_walk.amount AS text), 'parentId', ancestors_walk.\"parentId\", '__dbsp_node', ancestors_walk.__node_text, '__dbsp_parent', ancestors_walk.__parent_text, '__dbsp_depth', ancestors_walk.__depth) ORDER BY ancestors_walk.__depth, ancestors_walk.id) FROM ancestors_walk), '[]'::json) AS ancestors_json FROM categories",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "recursive": {
+          "direction": "ancestors",
+          "flat": false,
+          "omitSelf": true,
+          "includeDepth": true
+        },
+        "privateFields": [
+          {
+            "role": "node",
+            "jsonKey": "__dbsp_node",
+            "physicalName": "id"
+          },
+          {
+            "role": "parent",
+            "jsonKey": "__dbsp_parent",
+            "physicalName": "parentId"
+          },
+          {
+            "role": "depth",
+            "jsonKey": "__dbsp_depth",
+            "physicalName": ""
+          }
+        ],
+        "path": "ancestors",
+        "publicKey": "ancestors",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "categories",
+        "isToOne": false,
+        "outputLabel": "ancestors_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "ancestors.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "ancestors.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "ancestors.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "ancestors.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "categories",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "parentId",
+            "physicalName": "parentId",
+            "publicKey": "parentId",
+            "outputLabel": "ancestors.parentId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "ancestors": {
+          "id": 2,
+          "tenant": 2,
+          "name": "child",
+          "amount": 42,
+          "parentId": 2,
+          "depth": 1,
+          "ancestors": null
+        }
+      }
+    ]
+  },
+  {
+    "key": "orm/recursive/ancestors/true/false",
+    "sql": "SELECT categories.*, COALESCE((WITH RECURSIVE ancestors_walk AS (SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM categories AS __n WHERE __n.id = categories.\"parentId\" AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", ancestors_walk.__depth + 1 AS __depth, ancestors_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM ancestors_walk JOIN categories AS __n ON __n.id = ancestors_walk.\"parentId\" WHERE ancestors_walk.__depth < 3 AND __n.id <> ALL (ancestors_walk.__visited)), ancestors_output AS (SELECT ancestors_walk.id, ancestors_walk.tenant, ancestors_walk.name, ancestors_walk.amount, ancestors_walk.\"parentId\", ancestors_walk.__depth, ancestors_walk.__visited, ancestors_walk.__node_text, ancestors_walk.__parent_text FROM ancestors_walk UNION ALL SELECT categories.id AS id, categories.tenant AS tenant, categories.name AS name, categories.amount AS amount, categories.\"parentId\" AS \"parentId\", 0 AS __depth, array_remove(ARRAY[categories.id], NULL) AS __visited, CAST(categories.id AS text) AS __node_text, CAST(categories.\"parentId\" AS text) AS __parent_text) SELECT json_agg(json_build_object('id', ancestors_walk.id, 'tenant', ancestors_walk.tenant, 'name', ancestors_walk.name, 'amount', CAST(ancestors_walk.amount AS text), 'parentId', ancestors_walk.\"parentId\", '__dbsp_node', ancestors_walk.__node_text, '__dbsp_parent', ancestors_walk.__parent_text, '__dbsp_depth', ancestors_walk.__depth) ORDER BY ancestors_walk.__depth, ancestors_walk.id) FROM ancestors_output AS ancestors_walk), '[]'::json) AS ancestors_json FROM categories",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "recursive": {
+          "direction": "ancestors",
+          "flat": true,
+          "omitSelf": false,
+          "includeDepth": true
+        },
+        "privateFields": [
+          {
+            "role": "node",
+            "jsonKey": "__dbsp_node",
+            "physicalName": "id"
+          },
+          {
+            "role": "parent",
+            "jsonKey": "__dbsp_parent",
+            "physicalName": "parentId"
+          },
+          {
+            "role": "depth",
+            "jsonKey": "__dbsp_depth",
+            "physicalName": ""
+          }
+        ],
+        "path": "ancestors",
+        "publicKey": "ancestors",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "categories",
+        "isToOne": false,
+        "outputLabel": "ancestors_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "ancestors.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "ancestors.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "ancestors.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "ancestors.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "categories",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "parentId",
+            "physicalName": "parentId",
+            "publicKey": "parentId",
+            "outputLabel": "ancestors.parentId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "ancestors": [
+          {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "parentId": 2,
+            "depth": 1
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "external/recursive/ancestors/true/false",
+    "sql": "SELECT categories.*, COALESCE((WITH RECURSIVE ancestors_walk AS (SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM categories AS __n WHERE __n.id = categories.\"parentId\" AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", ancestors_walk.__depth + 1 AS __depth, ancestors_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM ancestors_walk JOIN categories AS __n ON __n.id = ancestors_walk.\"parentId\" WHERE ancestors_walk.__depth < 3 AND __n.id <> ALL (ancestors_walk.__visited)), ancestors_output AS (SELECT ancestors_walk.id, ancestors_walk.tenant, ancestors_walk.name, ancestors_walk.amount, ancestors_walk.\"parentId\", ancestors_walk.__depth, ancestors_walk.__visited, ancestors_walk.__node_text, ancestors_walk.__parent_text FROM ancestors_walk UNION ALL SELECT categories.id AS id, categories.tenant AS tenant, categories.name AS name, categories.amount AS amount, categories.\"parentId\" AS \"parentId\", 0 AS __depth, array_remove(ARRAY[categories.id], NULL) AS __visited, CAST(categories.id AS text) AS __node_text, CAST(categories.\"parentId\" AS text) AS __parent_text) SELECT json_agg(json_build_object('id', ancestors_walk.id, 'tenant', ancestors_walk.tenant, 'name', ancestors_walk.name, 'amount', CAST(ancestors_walk.amount AS text), 'parentId', ancestors_walk.\"parentId\", '__dbsp_node', ancestors_walk.__node_text, '__dbsp_parent', ancestors_walk.__parent_text, '__dbsp_depth', ancestors_walk.__depth) ORDER BY ancestors_walk.__depth, ancestors_walk.id) FROM ancestors_output AS ancestors_walk), '[]'::json) AS ancestors_json FROM categories",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "recursive": {
+          "direction": "ancestors",
+          "flat": true,
+          "omitSelf": false,
+          "includeDepth": true
+        },
+        "privateFields": [
+          {
+            "role": "node",
+            "jsonKey": "__dbsp_node",
+            "physicalName": "id"
+          },
+          {
+            "role": "parent",
+            "jsonKey": "__dbsp_parent",
+            "physicalName": "parentId"
+          },
+          {
+            "role": "depth",
+            "jsonKey": "__dbsp_depth",
+            "physicalName": ""
+          }
+        ],
+        "path": "ancestors",
+        "publicKey": "ancestors",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "categories",
+        "isToOne": false,
+        "outputLabel": "ancestors_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "ancestors.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "ancestors.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "ancestors.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "ancestors.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "categories",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "parentId",
+            "physicalName": "parentId",
+            "publicKey": "parentId",
+            "outputLabel": "ancestors.parentId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "ancestors": [
+          {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "parentId": 2,
+            "depth": 1
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "nql/recursive/ancestors/true/false",
+    "sql": "SELECT categories.*, COALESCE((WITH RECURSIVE ancestors_walk AS (SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM categories AS __n WHERE __n.id = categories.\"parentId\" AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", ancestors_walk.__depth + 1 AS __depth, ancestors_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM ancestors_walk JOIN categories AS __n ON __n.id = ancestors_walk.\"parentId\" WHERE ancestors_walk.__depth < 3 AND __n.id <> ALL (ancestors_walk.__visited)), ancestors_output AS (SELECT ancestors_walk.id, ancestors_walk.tenant, ancestors_walk.name, ancestors_walk.amount, ancestors_walk.\"parentId\", ancestors_walk.__depth, ancestors_walk.__visited, ancestors_walk.__node_text, ancestors_walk.__parent_text FROM ancestors_walk UNION ALL SELECT categories.id AS id, categories.tenant AS tenant, categories.name AS name, categories.amount AS amount, categories.\"parentId\" AS \"parentId\", 0 AS __depth, array_remove(ARRAY[categories.id], NULL) AS __visited, CAST(categories.id AS text) AS __node_text, CAST(categories.\"parentId\" AS text) AS __parent_text) SELECT json_agg(json_build_object('id', ancestors_walk.id, 'tenant', ancestors_walk.tenant, 'name', ancestors_walk.name, 'amount', CAST(ancestors_walk.amount AS text), 'parentId', ancestors_walk.\"parentId\", '__dbsp_node', ancestors_walk.__node_text, '__dbsp_parent', ancestors_walk.__parent_text, '__dbsp_depth', ancestors_walk.__depth) ORDER BY ancestors_walk.__depth, ancestors_walk.id) FROM ancestors_output AS ancestors_walk), '[]'::json) AS ancestors_json FROM categories",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "recursive": {
+          "direction": "ancestors",
+          "flat": true,
+          "omitSelf": false,
+          "includeDepth": true
+        },
+        "privateFields": [
+          {
+            "role": "node",
+            "jsonKey": "__dbsp_node",
+            "physicalName": "id"
+          },
+          {
+            "role": "parent",
+            "jsonKey": "__dbsp_parent",
+            "physicalName": "parentId"
+          },
+          {
+            "role": "depth",
+            "jsonKey": "__dbsp_depth",
+            "physicalName": ""
+          }
+        ],
+        "path": "ancestors",
+        "publicKey": "ancestors",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "categories",
+        "isToOne": false,
+        "outputLabel": "ancestors_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "ancestors.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "ancestors.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "ancestors.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "ancestors.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "categories",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "parentId",
+            "physicalName": "parentId",
+            "publicKey": "parentId",
+            "outputLabel": "ancestors.parentId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "ancestors": [
+          {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "parentId": 2,
+            "depth": 1
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "orm/recursive/ancestors/true/true",
+    "sql": "SELECT categories.*, COALESCE((WITH RECURSIVE ancestors_walk AS (SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM categories AS __n WHERE __n.id = categories.\"parentId\" AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", ancestors_walk.__depth + 1 AS __depth, ancestors_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM ancestors_walk JOIN categories AS __n ON __n.id = ancestors_walk.\"parentId\" WHERE ancestors_walk.__depth < 3 AND __n.id <> ALL (ancestors_walk.__visited)) SELECT json_agg(json_build_object('id', ancestors_walk.id, 'tenant', ancestors_walk.tenant, 'name', ancestors_walk.name, 'amount', CAST(ancestors_walk.amount AS text), 'parentId', ancestors_walk.\"parentId\", '__dbsp_node', ancestors_walk.__node_text, '__dbsp_parent', ancestors_walk.__parent_text, '__dbsp_depth', ancestors_walk.__depth) ORDER BY ancestors_walk.__depth, ancestors_walk.id) FROM ancestors_walk), '[]'::json) AS ancestors_json FROM categories",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "recursive": {
+          "direction": "ancestors",
+          "flat": true,
+          "omitSelf": true,
+          "includeDepth": true
+        },
+        "privateFields": [
+          {
+            "role": "node",
+            "jsonKey": "__dbsp_node",
+            "physicalName": "id"
+          },
+          {
+            "role": "parent",
+            "jsonKey": "__dbsp_parent",
+            "physicalName": "parentId"
+          },
+          {
+            "role": "depth",
+            "jsonKey": "__dbsp_depth",
+            "physicalName": ""
+          }
+        ],
+        "path": "ancestors",
+        "publicKey": "ancestors",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "categories",
+        "isToOne": false,
+        "outputLabel": "ancestors_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "ancestors.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "ancestors.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "ancestors.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "ancestors.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "categories",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "parentId",
+            "physicalName": "parentId",
+            "publicKey": "parentId",
+            "outputLabel": "ancestors.parentId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "ancestors": [
+          {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "parentId": 2,
+            "depth": 1
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "external/recursive/ancestors/true/true",
+    "sql": "SELECT categories.*, COALESCE((WITH RECURSIVE ancestors_walk AS (SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM categories AS __n WHERE __n.id = categories.\"parentId\" AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", ancestors_walk.__depth + 1 AS __depth, ancestors_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM ancestors_walk JOIN categories AS __n ON __n.id = ancestors_walk.\"parentId\" WHERE ancestors_walk.__depth < 3 AND __n.id <> ALL (ancestors_walk.__visited)) SELECT json_agg(json_build_object('id', ancestors_walk.id, 'tenant', ancestors_walk.tenant, 'name', ancestors_walk.name, 'amount', CAST(ancestors_walk.amount AS text), 'parentId', ancestors_walk.\"parentId\", '__dbsp_node', ancestors_walk.__node_text, '__dbsp_parent', ancestors_walk.__parent_text, '__dbsp_depth', ancestors_walk.__depth) ORDER BY ancestors_walk.__depth, ancestors_walk.id) FROM ancestors_walk), '[]'::json) AS ancestors_json FROM categories",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "recursive": {
+          "direction": "ancestors",
+          "flat": true,
+          "omitSelf": true,
+          "includeDepth": true
+        },
+        "privateFields": [
+          {
+            "role": "node",
+            "jsonKey": "__dbsp_node",
+            "physicalName": "id"
+          },
+          {
+            "role": "parent",
+            "jsonKey": "__dbsp_parent",
+            "physicalName": "parentId"
+          },
+          {
+            "role": "depth",
+            "jsonKey": "__dbsp_depth",
+            "physicalName": ""
+          }
+        ],
+        "path": "ancestors",
+        "publicKey": "ancestors",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "categories",
+        "isToOne": false,
+        "outputLabel": "ancestors_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "ancestors.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "ancestors.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "ancestors.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "ancestors.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "categories",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "parentId",
+            "physicalName": "parentId",
+            "publicKey": "parentId",
+            "outputLabel": "ancestors.parentId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "ancestors": [
+          {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "parentId": 2,
+            "depth": 1
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "nql/recursive/ancestors/true/true",
+    "sql": "SELECT categories.*, COALESCE((WITH RECURSIVE ancestors_walk AS (SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM categories AS __n WHERE __n.id = categories.\"parentId\" AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", ancestors_walk.__depth + 1 AS __depth, ancestors_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM ancestors_walk JOIN categories AS __n ON __n.id = ancestors_walk.\"parentId\" WHERE ancestors_walk.__depth < 3 AND __n.id <> ALL (ancestors_walk.__visited)) SELECT json_agg(json_build_object('id', ancestors_walk.id, 'tenant', ancestors_walk.tenant, 'name', ancestors_walk.name, 'amount', CAST(ancestors_walk.amount AS text), 'parentId', ancestors_walk.\"parentId\", '__dbsp_node', ancestors_walk.__node_text, '__dbsp_parent', ancestors_walk.__parent_text, '__dbsp_depth', ancestors_walk.__depth) ORDER BY ancestors_walk.__depth, ancestors_walk.id) FROM ancestors_walk), '[]'::json) AS ancestors_json FROM categories",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "recursive": {
+          "direction": "ancestors",
+          "flat": true,
+          "omitSelf": true,
+          "includeDepth": true
+        },
+        "privateFields": [
+          {
+            "role": "node",
+            "jsonKey": "__dbsp_node",
+            "physicalName": "id"
+          },
+          {
+            "role": "parent",
+            "jsonKey": "__dbsp_parent",
+            "physicalName": "parentId"
+          },
+          {
+            "role": "depth",
+            "jsonKey": "__dbsp_depth",
+            "physicalName": ""
+          }
+        ],
+        "path": "ancestors",
+        "publicKey": "ancestors",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "categories",
+        "isToOne": false,
+        "outputLabel": "ancestors_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "ancestors.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "ancestors.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "ancestors.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "ancestors.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "categories",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "parentId",
+            "physicalName": "parentId",
+            "publicKey": "parentId",
+            "outputLabel": "ancestors.parentId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "ancestors": [
+          {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "parentId": 2,
+            "depth": 1
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "orm/recursive/descendants/false/false",
+    "sql": "SELECT categories.*, COALESCE((WITH RECURSIVE descendants_walk AS (SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM categories AS __n WHERE __n.\"parentId\" = categories.id AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", descendants_walk.__depth + 1 AS __depth, descendants_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM descendants_walk JOIN categories AS __n ON __n.\"parentId\" = descendants_walk.id WHERE descendants_walk.__depth < 3 AND __n.id <> ALL (descendants_walk.__visited)), descendants_output AS (SELECT descendants_walk.id, descendants_walk.tenant, descendants_walk.name, descendants_walk.amount, descendants_walk.\"parentId\", descendants_walk.__depth, descendants_walk.__visited, descendants_walk.__node_text, descendants_walk.__parent_text FROM descendants_walk UNION ALL SELECT categories.id AS id, categories.tenant AS tenant, categories.name AS name, categories.amount AS amount, categories.\"parentId\" AS \"parentId\", 0 AS __depth, array_remove(ARRAY[categories.id], NULL) AS __visited, CAST(categories.id AS text) AS __node_text, CAST(categories.\"parentId\" AS text) AS __parent_text) SELECT json_agg(json_build_object('id', descendants_walk.id, 'tenant', descendants_walk.tenant, 'name', descendants_walk.name, 'amount', CAST(descendants_walk.amount AS text), 'parentId', descendants_walk.\"parentId\", '__dbsp_node', descendants_walk.__node_text, '__dbsp_parent', descendants_walk.__parent_text, '__dbsp_depth', descendants_walk.__depth) ORDER BY descendants_walk.__depth, descendants_walk.id) FROM descendants_output AS descendants_walk), '[]'::json) AS descendants_json FROM categories",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "recursive": {
+          "direction": "descendants",
+          "flat": false,
+          "omitSelf": false,
+          "includeDepth": true
+        },
+        "privateFields": [
+          {
+            "role": "node",
+            "jsonKey": "__dbsp_node",
+            "physicalName": "id"
+          },
+          {
+            "role": "parent",
+            "jsonKey": "__dbsp_parent",
+            "physicalName": "parentId"
+          },
+          {
+            "role": "depth",
+            "jsonKey": "__dbsp_depth",
+            "physicalName": ""
+          }
+        ],
+        "path": "descendants",
+        "publicKey": "descendants",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "categories",
+        "isToOne": false,
+        "outputLabel": "descendants_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "descendants.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "descendants.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "descendants.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "descendants.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "categories",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "parentId",
+            "physicalName": "parentId",
+            "publicKey": "parentId",
+            "outputLabel": "descendants.parentId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "descendants": [
+          {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "parentId": 2,
+            "depth": 1,
+            "descendants": []
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "external/recursive/descendants/false/false",
+    "sql": "SELECT categories.*, COALESCE((WITH RECURSIVE descendants_walk AS (SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM categories AS __n WHERE __n.\"parentId\" = categories.id AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", descendants_walk.__depth + 1 AS __depth, descendants_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM descendants_walk JOIN categories AS __n ON __n.\"parentId\" = descendants_walk.id WHERE descendants_walk.__depth < 3 AND __n.id <> ALL (descendants_walk.__visited)), descendants_output AS (SELECT descendants_walk.id, descendants_walk.tenant, descendants_walk.name, descendants_walk.amount, descendants_walk.\"parentId\", descendants_walk.__depth, descendants_walk.__visited, descendants_walk.__node_text, descendants_walk.__parent_text FROM descendants_walk UNION ALL SELECT categories.id AS id, categories.tenant AS tenant, categories.name AS name, categories.amount AS amount, categories.\"parentId\" AS \"parentId\", 0 AS __depth, array_remove(ARRAY[categories.id], NULL) AS __visited, CAST(categories.id AS text) AS __node_text, CAST(categories.\"parentId\" AS text) AS __parent_text) SELECT json_agg(json_build_object('id', descendants_walk.id, 'tenant', descendants_walk.tenant, 'name', descendants_walk.name, 'amount', CAST(descendants_walk.amount AS text), 'parentId', descendants_walk.\"parentId\", '__dbsp_node', descendants_walk.__node_text, '__dbsp_parent', descendants_walk.__parent_text, '__dbsp_depth', descendants_walk.__depth) ORDER BY descendants_walk.__depth, descendants_walk.id) FROM descendants_output AS descendants_walk), '[]'::json) AS descendants_json FROM categories",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "recursive": {
+          "direction": "descendants",
+          "flat": false,
+          "omitSelf": false,
+          "includeDepth": true
+        },
+        "privateFields": [
+          {
+            "role": "node",
+            "jsonKey": "__dbsp_node",
+            "physicalName": "id"
+          },
+          {
+            "role": "parent",
+            "jsonKey": "__dbsp_parent",
+            "physicalName": "parentId"
+          },
+          {
+            "role": "depth",
+            "jsonKey": "__dbsp_depth",
+            "physicalName": ""
+          }
+        ],
+        "path": "descendants",
+        "publicKey": "descendants",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "categories",
+        "isToOne": false,
+        "outputLabel": "descendants_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "descendants.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "descendants.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "descendants.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "descendants.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "categories",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "parentId",
+            "physicalName": "parentId",
+            "publicKey": "parentId",
+            "outputLabel": "descendants.parentId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "descendants": [
+          {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "parentId": 2,
+            "depth": 1,
+            "descendants": []
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "nql/recursive/descendants/false/false",
+    "sql": "SELECT categories.*, COALESCE((WITH RECURSIVE descendants_walk AS (SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM categories AS __n WHERE __n.\"parentId\" = categories.id AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", descendants_walk.__depth + 1 AS __depth, descendants_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM descendants_walk JOIN categories AS __n ON __n.\"parentId\" = descendants_walk.id WHERE descendants_walk.__depth < 3 AND __n.id <> ALL (descendants_walk.__visited)), descendants_output AS (SELECT descendants_walk.id, descendants_walk.tenant, descendants_walk.name, descendants_walk.amount, descendants_walk.\"parentId\", descendants_walk.__depth, descendants_walk.__visited, descendants_walk.__node_text, descendants_walk.__parent_text FROM descendants_walk UNION ALL SELECT categories.id AS id, categories.tenant AS tenant, categories.name AS name, categories.amount AS amount, categories.\"parentId\" AS \"parentId\", 0 AS __depth, array_remove(ARRAY[categories.id], NULL) AS __visited, CAST(categories.id AS text) AS __node_text, CAST(categories.\"parentId\" AS text) AS __parent_text) SELECT json_agg(json_build_object('id', descendants_walk.id, 'tenant', descendants_walk.tenant, 'name', descendants_walk.name, 'amount', CAST(descendants_walk.amount AS text), 'parentId', descendants_walk.\"parentId\", '__dbsp_node', descendants_walk.__node_text, '__dbsp_parent', descendants_walk.__parent_text, '__dbsp_depth', descendants_walk.__depth) ORDER BY descendants_walk.__depth, descendants_walk.id) FROM descendants_output AS descendants_walk), '[]'::json) AS descendants_json FROM categories",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "recursive": {
+          "direction": "descendants",
+          "flat": false,
+          "omitSelf": false,
+          "includeDepth": true
+        },
+        "privateFields": [
+          {
+            "role": "node",
+            "jsonKey": "__dbsp_node",
+            "physicalName": "id"
+          },
+          {
+            "role": "parent",
+            "jsonKey": "__dbsp_parent",
+            "physicalName": "parentId"
+          },
+          {
+            "role": "depth",
+            "jsonKey": "__dbsp_depth",
+            "physicalName": ""
+          }
+        ],
+        "path": "descendants",
+        "publicKey": "descendants",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "categories",
+        "isToOne": false,
+        "outputLabel": "descendants_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "descendants.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "descendants.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "descendants.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "descendants.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "categories",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "parentId",
+            "physicalName": "parentId",
+            "publicKey": "parentId",
+            "outputLabel": "descendants.parentId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "descendants": [
+          {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "parentId": 2,
+            "depth": 1,
+            "descendants": []
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "orm/recursive/descendants/false/true",
+    "sql": "SELECT categories.*, COALESCE((WITH RECURSIVE descendants_walk AS (SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM categories AS __n WHERE __n.\"parentId\" = categories.id AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", descendants_walk.__depth + 1 AS __depth, descendants_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM descendants_walk JOIN categories AS __n ON __n.\"parentId\" = descendants_walk.id WHERE descendants_walk.__depth < 3 AND __n.id <> ALL (descendants_walk.__visited)) SELECT json_agg(json_build_object('id', descendants_walk.id, 'tenant', descendants_walk.tenant, 'name', descendants_walk.name, 'amount', CAST(descendants_walk.amount AS text), 'parentId', descendants_walk.\"parentId\", '__dbsp_node', descendants_walk.__node_text, '__dbsp_parent', descendants_walk.__parent_text, '__dbsp_depth', descendants_walk.__depth) ORDER BY descendants_walk.__depth, descendants_walk.id) FROM descendants_walk), '[]'::json) AS descendants_json FROM categories",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "recursive": {
+          "direction": "descendants",
+          "flat": false,
+          "omitSelf": true,
+          "includeDepth": true
+        },
+        "privateFields": [
+          {
+            "role": "node",
+            "jsonKey": "__dbsp_node",
+            "physicalName": "id"
+          },
+          {
+            "role": "parent",
+            "jsonKey": "__dbsp_parent",
+            "physicalName": "parentId"
+          },
+          {
+            "role": "depth",
+            "jsonKey": "__dbsp_depth",
+            "physicalName": ""
+          }
+        ],
+        "path": "descendants",
+        "publicKey": "descendants",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "categories",
+        "isToOne": false,
+        "outputLabel": "descendants_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "descendants.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "descendants.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "descendants.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "descendants.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "categories",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "parentId",
+            "physicalName": "parentId",
+            "publicKey": "parentId",
+            "outputLabel": "descendants.parentId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "descendants": [
+          {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "parentId": 2,
+            "depth": 1,
+            "descendants": []
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "external/recursive/descendants/false/true",
+    "sql": "SELECT categories.*, COALESCE((WITH RECURSIVE descendants_walk AS (SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM categories AS __n WHERE __n.\"parentId\" = categories.id AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", descendants_walk.__depth + 1 AS __depth, descendants_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM descendants_walk JOIN categories AS __n ON __n.\"parentId\" = descendants_walk.id WHERE descendants_walk.__depth < 3 AND __n.id <> ALL (descendants_walk.__visited)) SELECT json_agg(json_build_object('id', descendants_walk.id, 'tenant', descendants_walk.tenant, 'name', descendants_walk.name, 'amount', CAST(descendants_walk.amount AS text), 'parentId', descendants_walk.\"parentId\", '__dbsp_node', descendants_walk.__node_text, '__dbsp_parent', descendants_walk.__parent_text, '__dbsp_depth', descendants_walk.__depth) ORDER BY descendants_walk.__depth, descendants_walk.id) FROM descendants_walk), '[]'::json) AS descendants_json FROM categories",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "recursive": {
+          "direction": "descendants",
+          "flat": false,
+          "omitSelf": true,
+          "includeDepth": true
+        },
+        "privateFields": [
+          {
+            "role": "node",
+            "jsonKey": "__dbsp_node",
+            "physicalName": "id"
+          },
+          {
+            "role": "parent",
+            "jsonKey": "__dbsp_parent",
+            "physicalName": "parentId"
+          },
+          {
+            "role": "depth",
+            "jsonKey": "__dbsp_depth",
+            "physicalName": ""
+          }
+        ],
+        "path": "descendants",
+        "publicKey": "descendants",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "categories",
+        "isToOne": false,
+        "outputLabel": "descendants_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "descendants.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "descendants.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "descendants.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "descendants.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "categories",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "parentId",
+            "physicalName": "parentId",
+            "publicKey": "parentId",
+            "outputLabel": "descendants.parentId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "descendants": [
+          {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "parentId": 2,
+            "depth": 1,
+            "descendants": []
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "nql/recursive/descendants/false/true",
+    "sql": "SELECT categories.*, COALESCE((WITH RECURSIVE descendants_walk AS (SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM categories AS __n WHERE __n.\"parentId\" = categories.id AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", descendants_walk.__depth + 1 AS __depth, descendants_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM descendants_walk JOIN categories AS __n ON __n.\"parentId\" = descendants_walk.id WHERE descendants_walk.__depth < 3 AND __n.id <> ALL (descendants_walk.__visited)) SELECT json_agg(json_build_object('id', descendants_walk.id, 'tenant', descendants_walk.tenant, 'name', descendants_walk.name, 'amount', CAST(descendants_walk.amount AS text), 'parentId', descendants_walk.\"parentId\", '__dbsp_node', descendants_walk.__node_text, '__dbsp_parent', descendants_walk.__parent_text, '__dbsp_depth', descendants_walk.__depth) ORDER BY descendants_walk.__depth, descendants_walk.id) FROM descendants_walk), '[]'::json) AS descendants_json FROM categories",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "recursive": {
+          "direction": "descendants",
+          "flat": false,
+          "omitSelf": true,
+          "includeDepth": true
+        },
+        "privateFields": [
+          {
+            "role": "node",
+            "jsonKey": "__dbsp_node",
+            "physicalName": "id"
+          },
+          {
+            "role": "parent",
+            "jsonKey": "__dbsp_parent",
+            "physicalName": "parentId"
+          },
+          {
+            "role": "depth",
+            "jsonKey": "__dbsp_depth",
+            "physicalName": ""
+          }
+        ],
+        "path": "descendants",
+        "publicKey": "descendants",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "categories",
+        "isToOne": false,
+        "outputLabel": "descendants_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "descendants.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "descendants.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "descendants.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "descendants.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "categories",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "parentId",
+            "physicalName": "parentId",
+            "publicKey": "parentId",
+            "outputLabel": "descendants.parentId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "descendants": [
+          {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "parentId": 2,
+            "depth": 1,
+            "descendants": []
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "orm/recursive/descendants/true/false",
+    "sql": "SELECT categories.*, COALESCE((WITH RECURSIVE descendants_walk AS (SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM categories AS __n WHERE __n.\"parentId\" = categories.id AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", descendants_walk.__depth + 1 AS __depth, descendants_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM descendants_walk JOIN categories AS __n ON __n.\"parentId\" = descendants_walk.id WHERE descendants_walk.__depth < 3 AND __n.id <> ALL (descendants_walk.__visited)), descendants_output AS (SELECT descendants_walk.id, descendants_walk.tenant, descendants_walk.name, descendants_walk.amount, descendants_walk.\"parentId\", descendants_walk.__depth, descendants_walk.__visited, descendants_walk.__node_text, descendants_walk.__parent_text FROM descendants_walk UNION ALL SELECT categories.id AS id, categories.tenant AS tenant, categories.name AS name, categories.amount AS amount, categories.\"parentId\" AS \"parentId\", 0 AS __depth, array_remove(ARRAY[categories.id], NULL) AS __visited, CAST(categories.id AS text) AS __node_text, CAST(categories.\"parentId\" AS text) AS __parent_text) SELECT json_agg(json_build_object('id', descendants_walk.id, 'tenant', descendants_walk.tenant, 'name', descendants_walk.name, 'amount', CAST(descendants_walk.amount AS text), 'parentId', descendants_walk.\"parentId\", '__dbsp_node', descendants_walk.__node_text, '__dbsp_parent', descendants_walk.__parent_text, '__dbsp_depth', descendants_walk.__depth) ORDER BY descendants_walk.__depth, descendants_walk.id) FROM descendants_output AS descendants_walk), '[]'::json) AS descendants_json FROM categories",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "recursive": {
+          "direction": "descendants",
+          "flat": true,
+          "omitSelf": false,
+          "includeDepth": true
+        },
+        "privateFields": [
+          {
+            "role": "node",
+            "jsonKey": "__dbsp_node",
+            "physicalName": "id"
+          },
+          {
+            "role": "parent",
+            "jsonKey": "__dbsp_parent",
+            "physicalName": "parentId"
+          },
+          {
+            "role": "depth",
+            "jsonKey": "__dbsp_depth",
+            "physicalName": ""
+          }
+        ],
+        "path": "descendants",
+        "publicKey": "descendants",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "categories",
+        "isToOne": false,
+        "outputLabel": "descendants_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "descendants.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "descendants.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "descendants.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "descendants.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "categories",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "parentId",
+            "physicalName": "parentId",
+            "publicKey": "parentId",
+            "outputLabel": "descendants.parentId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "descendants": [
+          {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "parentId": 2,
+            "depth": 1
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "external/recursive/descendants/true/false",
+    "sql": "SELECT categories.*, COALESCE((WITH RECURSIVE descendants_walk AS (SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM categories AS __n WHERE __n.\"parentId\" = categories.id AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", descendants_walk.__depth + 1 AS __depth, descendants_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM descendants_walk JOIN categories AS __n ON __n.\"parentId\" = descendants_walk.id WHERE descendants_walk.__depth < 3 AND __n.id <> ALL (descendants_walk.__visited)), descendants_output AS (SELECT descendants_walk.id, descendants_walk.tenant, descendants_walk.name, descendants_walk.amount, descendants_walk.\"parentId\", descendants_walk.__depth, descendants_walk.__visited, descendants_walk.__node_text, descendants_walk.__parent_text FROM descendants_walk UNION ALL SELECT categories.id AS id, categories.tenant AS tenant, categories.name AS name, categories.amount AS amount, categories.\"parentId\" AS \"parentId\", 0 AS __depth, array_remove(ARRAY[categories.id], NULL) AS __visited, CAST(categories.id AS text) AS __node_text, CAST(categories.\"parentId\" AS text) AS __parent_text) SELECT json_agg(json_build_object('id', descendants_walk.id, 'tenant', descendants_walk.tenant, 'name', descendants_walk.name, 'amount', CAST(descendants_walk.amount AS text), 'parentId', descendants_walk.\"parentId\", '__dbsp_node', descendants_walk.__node_text, '__dbsp_parent', descendants_walk.__parent_text, '__dbsp_depth', descendants_walk.__depth) ORDER BY descendants_walk.__depth, descendants_walk.id) FROM descendants_output AS descendants_walk), '[]'::json) AS descendants_json FROM categories",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "recursive": {
+          "direction": "descendants",
+          "flat": true,
+          "omitSelf": false,
+          "includeDepth": true
+        },
+        "privateFields": [
+          {
+            "role": "node",
+            "jsonKey": "__dbsp_node",
+            "physicalName": "id"
+          },
+          {
+            "role": "parent",
+            "jsonKey": "__dbsp_parent",
+            "physicalName": "parentId"
+          },
+          {
+            "role": "depth",
+            "jsonKey": "__dbsp_depth",
+            "physicalName": ""
+          }
+        ],
+        "path": "descendants",
+        "publicKey": "descendants",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "categories",
+        "isToOne": false,
+        "outputLabel": "descendants_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "descendants.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "descendants.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "descendants.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "descendants.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "categories",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "parentId",
+            "physicalName": "parentId",
+            "publicKey": "parentId",
+            "outputLabel": "descendants.parentId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "descendants": [
+          {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "parentId": 2,
+            "depth": 1
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "nql/recursive/descendants/true/false",
+    "sql": "SELECT categories.*, COALESCE((WITH RECURSIVE descendants_walk AS (SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM categories AS __n WHERE __n.\"parentId\" = categories.id AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", descendants_walk.__depth + 1 AS __depth, descendants_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM descendants_walk JOIN categories AS __n ON __n.\"parentId\" = descendants_walk.id WHERE descendants_walk.__depth < 3 AND __n.id <> ALL (descendants_walk.__visited)), descendants_output AS (SELECT descendants_walk.id, descendants_walk.tenant, descendants_walk.name, descendants_walk.amount, descendants_walk.\"parentId\", descendants_walk.__depth, descendants_walk.__visited, descendants_walk.__node_text, descendants_walk.__parent_text FROM descendants_walk UNION ALL SELECT categories.id AS id, categories.tenant AS tenant, categories.name AS name, categories.amount AS amount, categories.\"parentId\" AS \"parentId\", 0 AS __depth, array_remove(ARRAY[categories.id], NULL) AS __visited, CAST(categories.id AS text) AS __node_text, CAST(categories.\"parentId\" AS text) AS __parent_text) SELECT json_agg(json_build_object('id', descendants_walk.id, 'tenant', descendants_walk.tenant, 'name', descendants_walk.name, 'amount', CAST(descendants_walk.amount AS text), 'parentId', descendants_walk.\"parentId\", '__dbsp_node', descendants_walk.__node_text, '__dbsp_parent', descendants_walk.__parent_text, '__dbsp_depth', descendants_walk.__depth) ORDER BY descendants_walk.__depth, descendants_walk.id) FROM descendants_output AS descendants_walk), '[]'::json) AS descendants_json FROM categories",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "recursive": {
+          "direction": "descendants",
+          "flat": true,
+          "omitSelf": false,
+          "includeDepth": true
+        },
+        "privateFields": [
+          {
+            "role": "node",
+            "jsonKey": "__dbsp_node",
+            "physicalName": "id"
+          },
+          {
+            "role": "parent",
+            "jsonKey": "__dbsp_parent",
+            "physicalName": "parentId"
+          },
+          {
+            "role": "depth",
+            "jsonKey": "__dbsp_depth",
+            "physicalName": ""
+          }
+        ],
+        "path": "descendants",
+        "publicKey": "descendants",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "categories",
+        "isToOne": false,
+        "outputLabel": "descendants_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "descendants.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "descendants.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "descendants.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "descendants.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "categories",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "parentId",
+            "physicalName": "parentId",
+            "publicKey": "parentId",
+            "outputLabel": "descendants.parentId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "descendants": [
+          {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "parentId": 2,
+            "depth": 1
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "orm/recursive/descendants/true/true",
+    "sql": "SELECT categories.*, COALESCE((WITH RECURSIVE descendants_walk AS (SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM categories AS __n WHERE __n.\"parentId\" = categories.id AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", descendants_walk.__depth + 1 AS __depth, descendants_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM descendants_walk JOIN categories AS __n ON __n.\"parentId\" = descendants_walk.id WHERE descendants_walk.__depth < 3 AND __n.id <> ALL (descendants_walk.__visited)) SELECT json_agg(json_build_object('id', descendants_walk.id, 'tenant', descendants_walk.tenant, 'name', descendants_walk.name, 'amount', CAST(descendants_walk.amount AS text), 'parentId', descendants_walk.\"parentId\", '__dbsp_node', descendants_walk.__node_text, '__dbsp_parent', descendants_walk.__parent_text, '__dbsp_depth', descendants_walk.__depth) ORDER BY descendants_walk.__depth, descendants_walk.id) FROM descendants_walk), '[]'::json) AS descendants_json FROM categories",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "recursive": {
+          "direction": "descendants",
+          "flat": true,
+          "omitSelf": true,
+          "includeDepth": true
+        },
+        "privateFields": [
+          {
+            "role": "node",
+            "jsonKey": "__dbsp_node",
+            "physicalName": "id"
+          },
+          {
+            "role": "parent",
+            "jsonKey": "__dbsp_parent",
+            "physicalName": "parentId"
+          },
+          {
+            "role": "depth",
+            "jsonKey": "__dbsp_depth",
+            "physicalName": ""
+          }
+        ],
+        "path": "descendants",
+        "publicKey": "descendants",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "categories",
+        "isToOne": false,
+        "outputLabel": "descendants_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "descendants.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "descendants.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "descendants.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "descendants.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "categories",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "parentId",
+            "physicalName": "parentId",
+            "publicKey": "parentId",
+            "outputLabel": "descendants.parentId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "descendants": [
+          {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "parentId": 2,
+            "depth": 1
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "external/recursive/descendants/true/true",
+    "sql": "SELECT categories.*, COALESCE((WITH RECURSIVE descendants_walk AS (SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM categories AS __n WHERE __n.\"parentId\" = categories.id AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", descendants_walk.__depth + 1 AS __depth, descendants_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM descendants_walk JOIN categories AS __n ON __n.\"parentId\" = descendants_walk.id WHERE descendants_walk.__depth < 3 AND __n.id <> ALL (descendants_walk.__visited)) SELECT json_agg(json_build_object('id', descendants_walk.id, 'tenant', descendants_walk.tenant, 'name', descendants_walk.name, 'amount', CAST(descendants_walk.amount AS text), 'parentId', descendants_walk.\"parentId\", '__dbsp_node', descendants_walk.__node_text, '__dbsp_parent', descendants_walk.__parent_text, '__dbsp_depth', descendants_walk.__depth) ORDER BY descendants_walk.__depth, descendants_walk.id) FROM descendants_walk), '[]'::json) AS descendants_json FROM categories",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "recursive": {
+          "direction": "descendants",
+          "flat": true,
+          "omitSelf": true,
+          "includeDepth": true
+        },
+        "privateFields": [
+          {
+            "role": "node",
+            "jsonKey": "__dbsp_node",
+            "physicalName": "id"
+          },
+          {
+            "role": "parent",
+            "jsonKey": "__dbsp_parent",
+            "physicalName": "parentId"
+          },
+          {
+            "role": "depth",
+            "jsonKey": "__dbsp_depth",
+            "physicalName": ""
+          }
+        ],
+        "path": "descendants",
+        "publicKey": "descendants",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "categories",
+        "isToOne": false,
+        "outputLabel": "descendants_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "descendants.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "descendants.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "descendants.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "descendants.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "categories",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "parentId",
+            "physicalName": "parentId",
+            "publicKey": "parentId",
+            "outputLabel": "descendants.parentId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "descendants": [
+          {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "parentId": 2,
+            "depth": 1
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "nql/recursive/descendants/true/true",
+    "sql": "SELECT categories.*, COALESCE((WITH RECURSIVE descendants_walk AS (SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", 1 AS __depth, array_remove(ARRAY[categories.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM categories AS __n WHERE __n.\"parentId\" = categories.id AND __n.id IS DISTINCT FROM categories.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.tenant AS tenant, __n.name AS name, __n.amount AS amount, __n.\"parentId\" AS \"parentId\", descendants_walk.__depth + 1 AS __depth, descendants_walk.__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.\"parentId\" AS text) AS __parent_text FROM descendants_walk JOIN categories AS __n ON __n.\"parentId\" = descendants_walk.id WHERE descendants_walk.__depth < 3 AND __n.id <> ALL (descendants_walk.__visited)) SELECT json_agg(json_build_object('id', descendants_walk.id, 'tenant', descendants_walk.tenant, 'name', descendants_walk.name, 'amount', CAST(descendants_walk.amount AS text), 'parentId', descendants_walk.\"parentId\", '__dbsp_node', descendants_walk.__node_text, '__dbsp_parent', descendants_walk.__parent_text, '__dbsp_depth', descendants_walk.__depth) ORDER BY descendants_walk.__depth, descendants_walk.id) FROM descendants_walk), '[]'::json) AS descendants_json FROM categories",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "recursive": {
+          "direction": "descendants",
+          "flat": true,
+          "omitSelf": true,
+          "includeDepth": true
+        },
+        "privateFields": [
+          {
+            "role": "node",
+            "jsonKey": "__dbsp_node",
+            "physicalName": "id"
+          },
+          {
+            "role": "parent",
+            "jsonKey": "__dbsp_parent",
+            "physicalName": "parentId"
+          },
+          {
+            "role": "depth",
+            "jsonKey": "__dbsp_depth",
+            "physicalName": ""
+          }
+        ],
+        "path": "descendants",
+        "publicKey": "descendants",
+        "strategy": "cte",
+        "outputMode": "nested",
+        "table": "categories",
+        "isToOne": false,
+        "outputLabel": "descendants_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "descendants.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "descendants.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "descendants.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "descendants.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "categories",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "parentId",
+            "physicalName": "parentId",
+            "publicKey": "parentId",
+            "outputLabel": "descendants.parentId"
+          }
+        ],
+        "children": []
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "descendants": [
+          {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "parentId": 2,
+            "depth": 1
+          }
+        ]
+      }
+    ]
+  }
+]

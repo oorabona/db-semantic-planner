@@ -1,4 +1,5 @@
 import { schema } from '@dbsp/core';
+import { includeHandlerFixture } from '../../../__tests__/include-handler-fixture.js';
 /**
  * LATERAL handler tests
  *
@@ -111,7 +112,11 @@ describe('lateral handler', () => {
 		const state = createCompilerState();
 		const decision = buildDecision();
 
-		const result = lateralIncludeHandler.compile(decision, ctx, state);
+		const result = lateralIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 
 		expect(result.lateral).toBeDefined();
 		expect(result.join).toBeDefined();
@@ -128,7 +133,11 @@ describe('lateral handler', () => {
 		const state = createCompilerState();
 		const decision = buildDecision();
 
-		const result = lateralIncludeHandler.compile(decision, ctx, state);
+		const result = lateralIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		const sql = joinToSQL(result.join!, 'users');
 
 		expect(sql).toContain('myschema');
@@ -140,7 +149,11 @@ describe('lateral handler', () => {
 		const state = createCompilerState();
 		const decision = buildDecision();
 
-		const result = lateralIncludeHandler.compile(decision, ctx, state);
+		const result = lateralIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		const sql = joinToSQL(result.join!, 'u0');
 
 		expect(sql).toContain('u0.id');
@@ -150,13 +163,20 @@ describe('lateral handler', () => {
 		const ctx = makeCtx('users');
 		const state = createCompilerState();
 
-		const result1 = lateralIncludeHandler.compile(buildDecision(), ctx, state);
+		const result1 = lateralIncludeHandler.compile(
+			includeHandlerFixture(buildDecision(), ctx),
+			ctx,
+			state,
+		);
 		const result2 = lateralIncludeHandler.compile(
-			buildDecision({
-				relation: 'comments',
-				targetTable: 'comments',
-				targetColumn: 'user_id',
-			}),
+			includeHandlerFixture(
+				buildDecision({
+					relation: 'comments',
+					targetTable: 'comments',
+					targetColumn: 'user_id',
+				}),
+				ctx,
+			),
 			ctx,
 			state,
 		);
@@ -180,7 +200,11 @@ describe('lateral handler', () => {
 			targetColumn: 'id',
 		});
 
-		const result = lateralIncludeHandler.compile(decision, ctx, state);
+		const result = lateralIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		const sql = joinToSQL(result.join!, 'posts');
 
 		expect(sql).toContain('left join lateral');
@@ -196,7 +220,11 @@ describe('lateral handler', () => {
 			columns: ['id', 'title', 'content'],
 		});
 
-		const result = lateralIncludeHandler.compile(decision, ctx, state);
+		const result = lateralIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		const sql = joinToSQL(result.join!, 'users');
 
 		// Should NOT have * — should have specific columns
@@ -217,7 +245,11 @@ describe('lateral handler', () => {
 		const state = createCompilerState();
 		const decision = buildDecision({ limit: 5 });
 
-		const result = lateralIncludeHandler.compile(decision, ctx, state);
+		const result = lateralIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		const sql = joinToSQL(result.join!, 'users');
 
 		expect(sql).toContain('limit 5');
@@ -257,7 +289,11 @@ describe('lateral handler', () => {
 			] as readonly Decision[],
 		});
 
-		const result = lateralIncludeHandler.compile(decision, ctx, state);
+		const result = lateralIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 
 		// Should have additionalJoins for nested children
 		expect(result.additionalJoins).toBeDefined();
@@ -290,9 +326,13 @@ describe('lateral handler', () => {
 			strategy: 'lateral',
 		} as Decision;
 
-		expect(() => lateralIncludeHandler.compile(decision, ctx, state)).toThrow(
-			'LATERAL include requires targetTable',
-		);
+		expect(() =>
+			lateralIncludeHandler.compile(
+				includeHandlerFixture(decision, ctx),
+				ctx,
+				state,
+			),
+		).toThrow('LATERAL include requires targetTable');
 	});
 
 	// F-004: Outer SELECT targets — star expansion
@@ -301,7 +341,11 @@ describe('lateral handler', () => {
 		const state = createCompilerState();
 		const decision = buildDecision();
 
-		const result = lateralIncludeHandler.compile(decision, ctx, state);
+		const result = lateralIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 
 		expect(result.targets).toBeDefined();
 		expect(result.targets!.length).toBe(1);
@@ -329,7 +373,11 @@ describe('lateral handler', () => {
 			columns: ['id', 'title', 'content'],
 		});
 
-		const result = lateralIncludeHandler.compile(decision, ctx, state);
+		const result = lateralIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 
 		expect(result.targets).toBeDefined();
 		expect(result.targets!.length).toBe(3);
@@ -372,7 +420,11 @@ describe('lateral handler', () => {
 			] as readonly Decision[],
 		});
 
-		const result = lateralIncludeHandler.compile(decision, ctx, state);
+		const result = lateralIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 
 		expect(result.targets).toBeDefined();
 		// 2 targets: orders_lat_0.* + items_lat_1.*
@@ -400,7 +452,11 @@ describe('lateral handler', () => {
 		const state = createCompilerState();
 		const decision = buildDecision({});
 
-		const result = lateralIncludeHandler.compile(decision, ctx, state);
+		const result = lateralIncludeHandler.compile(
+			includeHandlerFixture(decision, ctx),
+			ctx,
+			state,
+		);
 		const sql = joinToSQL(result.join!, 'users');
 
 		expect(sql).not.toContain('limit');

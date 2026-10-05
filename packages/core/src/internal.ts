@@ -100,6 +100,10 @@ export {
 	validateResolvedIncludeStrategy,
 } from './planner.js';
 export {
+	observeIncludeDecisions,
+	resolveReportIncludes,
+} from './resolved-includes.js';
+export {
 	type AdmittedDestructiveOutcomeClaim,
 	admitDestructiveOutcomeClaim,
 	attachDestructiveAuthorityPermit,

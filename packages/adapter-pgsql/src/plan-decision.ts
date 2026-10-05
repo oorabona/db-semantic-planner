@@ -8,6 +8,8 @@ export type PlanExpressionOrderBy = readonly {
 }[];
 
 export interface PlanDecision {
+	readonly resolvedInclude?: import('@dbsp/types').ResolvedIncludeNode;
+	readonly includePredicate?: import('@dbsp/types').ResolvedIncludeNode['predicate'];
 	readonly type: string;
 	readonly table?: string;
 	readonly column?: string;

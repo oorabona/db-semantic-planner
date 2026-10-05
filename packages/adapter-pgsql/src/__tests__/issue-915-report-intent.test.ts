@@ -3,6 +3,7 @@ import type { IncludeIntent, PlanReport } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 import * as compiler from '../compiler.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { asLegacyReport } from './legacy-include-report.js';
 
 const model = schema({
 	posts: {
@@ -23,10 +24,12 @@ function report(
 	from = 'posts',
 	defaultIncludeStrategy: 'json_agg' | 'lateral' = 'json_agg',
 ) {
-	return plan({ type: 'select', from, include: [include] }, model, {
-		dialectCapabilities: POSTGRESQL_CAPABILITIES,
-		defaultIncludeStrategy,
-	});
+	return asLegacyReport(
+		plan({ type: 'select', from, include: [include] }, model, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+			defaultIncludeStrategy,
+		}),
+	);
 }
 function edited(
 	original: PlanReport,
@@ -155,20 +158,22 @@ describe('#915 declared keys and path coverage', () => {
 			},
 			c: { id: { type: 'integer', primaryKey: true } },
 		}).model;
-		const original = plan(
-			{
-				type: 'select',
-				from: 'a',
-				include: [
-					{
-						relation: 'same',
-						join: 'left',
-						include: [{ relation: 'same', join: 'left' }],
-					},
-				],
-			},
-			repeated,
-			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		const original = asLegacyReport(
+			plan(
+				{
+					type: 'select',
+					from: 'a',
+					include: [
+						{
+							relation: 'same',
+							join: 'left',
+							include: [{ relation: 'same', join: 'left' }],
+						},
+					],
+				},
+				repeated,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			),
 		);
 		const partial = {
 			...original,

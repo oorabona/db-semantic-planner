@@ -369,8 +369,23 @@ function mergeDuplicateJoinIncludeDecisions(
 			columns?: readonly string[];
 			columnAliases?: Readonly<Record<string, string>>;
 			conditions?: readonly PlanDecision[];
+			includePredicate?: PlanDecision['includePredicate'];
 			children?: readonly PlanDecision[];
 		};
+		if (decision.includePredicate)
+			mutable.includePredicate = existing.includePredicate
+				? {
+						...existing.includePredicate,
+						condition: {
+							kind: 'and',
+							conditions: [
+								existing.includePredicate.condition,
+								decision.includePredicate.condition,
+							],
+						},
+					}
+				: decision.includePredicate;
+
 		const columns = mergeColumnLists(existing.columns, decision.columns);
 		if (columns) mutable.columns = columns;
 		if (decision.columnAliases) {
@@ -1099,6 +1114,7 @@ export class PlanCompiler {
 			? this.joinAliasMap.get(parentRelationPath)?.alias
 			: undefined;
 		const sourceAlias =
+			decision.resolvedInclude?.sourceRange.alias ??
 			parentAlias ??
 			(decision.sourceTable && decision.sourceTable !== plan.rootTable
 				? (this.findAliasForLegacySourceTable(decision.sourceTable) ??
@@ -1119,6 +1135,7 @@ export class PlanCompiler {
 		let finalJoinAlias: string | undefined;
 		if (decision.choice === 'join') {
 			const candidateAlias =
+				decision.resolvedInclude?.targetRange.alias ??
 				handlerDecision.relation ??
 				handlerDecision.targetTable ??
 				handlerDecision.relationName;
@@ -1126,7 +1143,10 @@ export class PlanCompiler {
 				let alias = candidateAlias;
 				let emittedAlias = this.emittedJoinAlias(alias);
 				let counter = 1;
-				while (this.usedJoinAliases.has(emittedAlias)) {
+				while (
+					!decision.resolvedInclude &&
+					this.usedJoinAliases.has(emittedAlias)
+				) {
 					alias = `${candidateAlias}_${counter++}`;
 					emittedAlias = this.emittedJoinAlias(alias);
 				}
@@ -2767,6 +2787,45 @@ export class PlanCompiler {
 		decision: PlanDecision,
 		where: Node | undefined,
 	): Node | undefined {
+		if (decision.includePredicate) {
+			const predicate = decision.includePredicate;
+			const ctx = this.handlerCtx();
+			const condition = compileCondition(predicate.condition, {
+				...ctx,
+				position: 'include-where',
+				logicalSourceTable: predicate.currentRange.table,
+				emittedAlias: predicate.currentRange.alias,
+				outerTable: predicate.outerRange.alias,
+				visibleAliases: new Map(ctx.aliases),
+				paramState: this.state,
+				...(ctx.schema !== undefined && { schemaName: ctx.schema }),
+				compileSubquery: (query, offset, parent) =>
+					buildSubqueryFromIntent(
+						query,
+						offset,
+						this.declaredNames,
+						ctx.schema,
+						'rawExists',
+						ctx.scope,
+						this.dialectCapabilities,
+						this.dbCasing,
+						parent,
+					),
+				compileExpressionSubquery: ctx.compileSubquery,
+			});
+			const projection = this.keylessJoinProjections.get(
+				predicate.currentRange.alias,
+			);
+			if (projection)
+				completeKeylessJoinProjection(
+					projection,
+					predicate.currentRange.alias,
+					[condition],
+					true,
+				);
+			return where ? andExpr(where, condition) : condition;
+		}
+
 		if (
 			decision.choice !== 'join' ||
 			!decision.conditions ||

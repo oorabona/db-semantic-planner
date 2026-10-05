@@ -837,14 +837,14 @@ describe('Semantic Planner', () => {
 				(d) => d.type === 'include-strategy',
 			);
 			expect(includeDecision?.choice).toBe('json_agg');
-			expect(includeDecision?.context.targetOrderKey).toEqual([
+			expect(report.execution?.includes[0]?.ordering.fallback).toEqual([
 				'user_id',
 				'event_time',
 				'message',
 			]);
-			expect(includeDecision?.context.orderByFallback).toBe(true);
+			expect(report.execution?.includes[0]?.ordering.usesFallback).toBe(true);
 			expect(
-				includeDecision?.context.targetOrderKey?.every(
+				report.execution?.includes[0]?.ordering.fallback?.every(
 					(entry) => typeof entry === 'string',
 				),
 			).toBe(true);
@@ -992,13 +992,13 @@ describe('Semantic Planner', () => {
 				(d) => d.type === 'join-type',
 			);
 			const betasDecision = joinDecisions.find(
-				(d) => d.context.relation === 'betas',
+				(d) => d.context.intentPath === 'include[0]',
 			);
 			const gammasDecision = joinDecisions.find(
-				(d) => d.context.relation === 'gammas',
+				(d) => d.context.intentPath === 'include[0].include[0]',
 			);
 			const deltasDecision = joinDecisions.find(
-				(d) => d.context.relation === 'deltas',
+				(d) => d.context.intentPath === 'include[0].include[0].include[0]',
 			);
 
 			expect(betasDecision?.choice).toBe('left');
@@ -1038,13 +1038,13 @@ describe('Semantic Planner', () => {
 				(d) => d.type === 'join-type',
 			);
 			const betasDecision = joinDecisions.find(
-				(d) => d.context.relation === 'betas',
+				(d) => d.context.intentPath === 'include[0]',
 			);
 			const gammasDecision = joinDecisions.find(
-				(d) => d.context.relation === 'gammas',
+				(d) => d.context.intentPath === 'include[0].include[0]',
 			);
 			const deltasDecision = joinDecisions.find(
-				(d) => d.context.relation === 'deltas',
+				(d) => d.context.intentPath === 'include[0].include[0].include[0]',
 			);
 
 			// betas: optional, no filter → LEFT

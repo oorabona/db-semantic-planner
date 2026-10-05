@@ -46,8 +46,14 @@ const rootNames = [
 	...brandExports,
 	...names(before.root.declarations).filter((name) => !excluded.has(name)),
 	'IncludePayloadShape',
+	'RangeId',
+	'ResolvedRange',
+	'ResolvedIncludeNode',
+	'IncludeExecution',
+	'RangeAllocator',
 ];
 const rootRuntime = [
+	'RangeAllocator',
 	'AmbiguousIncludeError',
 	...brandExports,
 	...before.root.runtime.filter((name) => !excluded.has(name)),

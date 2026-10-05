@@ -763,6 +763,14 @@ export class ReplEngine {
 		planInfo: string,
 	): QueryResult {
 		const pr = nqlResult.planReport;
+		const includeTables = (
+			nodes: readonly import('@dbsp/types').ResolvedIncludeNode[],
+		): string[] =>
+			nodes.flatMap((node) => [
+				node.sourceRange.table,
+				node.targetRange.table,
+				...includeTables(node.children),
+			]);
 		return {
 			sql: finalSql,
 			params: nqlResult.params,
@@ -773,15 +781,22 @@ export class ReplEngine {
 					: 'NQL v2',
 				rootTable: pr?.rootTable ?? '',
 				tables: [
-					...new Set(
-						pr?.decisions.map((d) => d.context.sourceTable).filter(Boolean) ??
-							[],
-					),
+					...new Set([
+						...(pr?.decisions
+							.map((d) => d.context.sourceTable)
+							.filter((table): table is string => table !== undefined) ?? []),
+						...(pr?.execution
+							? [
+									pr.execution.rootRange.table,
+									...includeTables(pr.execution.includes),
+								]
+							: []),
+					]),
 				],
 				decisions:
 					pr?.decisions.map((d) => ({
 						type: d.type,
-						context: [d.context.sourceTable, d.context.target]
+						context: [d.context.sourceTable, d.context.target, d.context.nodeId]
 							.filter(Boolean)
 							.join(' → '),
 						choice: d.choice,

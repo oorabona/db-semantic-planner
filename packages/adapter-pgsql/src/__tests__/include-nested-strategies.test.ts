@@ -1,4 +1,9 @@
-import { createOrm, or, plan, ref, schema } from '@dbsp/core';
+import { asLegacyReport } from './legacy-include-report.js';
+
+const plan: typeof nativePlan = (...args) =>
+	asLegacyReport(nativePlan(...args));
+
+import { createOrm, plan as nativePlan, or, ref, schema } from '@dbsp/core';
 import type {
 	IncludeIntent,
 	PlanReport,

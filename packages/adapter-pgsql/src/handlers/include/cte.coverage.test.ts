@@ -14,6 +14,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { includeHandlerFixture } from '../../__tests__/include-handler-fixture.js';
 import { identityNaming } from '../../naming-plugin.js';
 import type { CompilerContext, Decision } from '../types.js';
 import { createCompilerState } from '../types.js';
@@ -47,7 +48,11 @@ describe('cteIncludeHandler - Coverage Tests', () => {
 			const state = createCompilerState();
 			const decision = buildDecision();
 
-			const result = cteIncludeHandler.compile(decision, ctx, state);
+			const result = cteIncludeHandler.compile(
+				includeHandlerFixture(decision, ctx),
+				ctx,
+				state,
+			);
 
 			expect(result.cte).toBeDefined();
 			expect(result.join).toBeDefined();
@@ -63,7 +68,11 @@ describe('cteIncludeHandler - Coverage Tests', () => {
 			state.aliases.set('existing', 'val');
 
 			const decision = buildDecision();
-			const result = cteIncludeHandler.compile(decision, ctx, state);
+			const result = cteIncludeHandler.compile(
+				includeHandlerFixture(decision, ctx),
+				ctx,
+				state,
+			);
 
 			expect(result.cte).toBeDefined();
 			// Alias should include the existing count (1)
@@ -79,7 +88,11 @@ describe('cteIncludeHandler - Coverage Tests', () => {
 				columns: ['title', 'body'],
 			});
 
-			const result = cteIncludeHandler.compile(decision, ctx, state);
+			const result = cteIncludeHandler.compile(
+				includeHandlerFixture(decision, ctx),
+				ctx,
+				state,
+			);
 			expect(result.cte).toBeDefined();
 		});
 
@@ -90,7 +103,11 @@ describe('cteIncludeHandler - Coverage Tests', () => {
 				columns: undefined,
 			});
 
-			const result = cteIncludeHandler.compile(decision, ctx, state);
+			const result = cteIncludeHandler.compile(
+				includeHandlerFixture(decision, ctx),
+				ctx,
+				state,
+			);
 			expect(result.cte).toBeDefined();
 		});
 
@@ -101,7 +118,11 @@ describe('cteIncludeHandler - Coverage Tests', () => {
 				columns: [],
 			});
 
-			const result = cteIncludeHandler.compile(decision, ctx, state);
+			const result = cteIncludeHandler.compile(
+				includeHandlerFixture(decision, ctx),
+				ctx,
+				state,
+			);
 			expect(result.cte).toBeDefined();
 		});
 
@@ -112,7 +133,11 @@ describe('cteIncludeHandler - Coverage Tests', () => {
 				columns: ['*'],
 			});
 
-			const result = cteIncludeHandler.compile(decision, ctx, state);
+			const result = cteIncludeHandler.compile(
+				includeHandlerFixture(decision, ctx),
+				ctx,
+				state,
+			);
 			expect(result.cte).toBeDefined();
 		});
 
@@ -123,7 +148,11 @@ describe('cteIncludeHandler - Coverage Tests', () => {
 				columns: ['*', 'title'],
 			});
 
-			const result = cteIncludeHandler.compile(decision, ctx, state);
+			const result = cteIncludeHandler.compile(
+				includeHandlerFixture(decision, ctx),
+				ctx,
+				state,
+			);
 			expect(result.cte).toBeDefined();
 		});
 	});
@@ -140,7 +169,11 @@ describe('cteIncludeHandler - Coverage Tests', () => {
 				conditions: [],
 			});
 
-			const result = cteIncludeHandler.compile(decision, ctx, state);
+			const result = cteIncludeHandler.compile(
+				includeHandlerFixture(decision, ctx),
+				ctx,
+				state,
+			);
 			expect(result.cte).toBeDefined();
 		});
 	});
@@ -154,7 +187,11 @@ describe('cteIncludeHandler - Coverage Tests', () => {
 			});
 
 			// Should not throw — uses defaultFkDerivation
-			const result = cteIncludeHandler.compile(decision, ctx, state);
+			const result = cteIncludeHandler.compile(
+				includeHandlerFixture(decision, ctx),
+				ctx,
+				state,
+			);
 			expect(result.cte).toBeDefined();
 		});
 
@@ -167,7 +204,11 @@ describe('cteIncludeHandler - Coverage Tests', () => {
 				targetColumn: undefined,
 			});
 
-			const result = cteIncludeHandler.compile(decision, ctx, state);
+			const result = cteIncludeHandler.compile(
+				includeHandlerFixture(decision, ctx),
+				ctx,
+				state,
+			);
 			expect(result.cte).toBeDefined();
 		});
 
@@ -180,7 +221,11 @@ describe('cteIncludeHandler - Coverage Tests', () => {
 				targetColumn: undefined,
 			});
 
-			const result = cteIncludeHandler.compile(decision, ctx, state);
+			const result = cteIncludeHandler.compile(
+				includeHandlerFixture(decision, ctx),
+				ctx,
+				state,
+			);
 			expect(result.cte).toBeDefined();
 		});
 	});
@@ -191,7 +236,11 @@ describe('cteIncludeHandler - Coverage Tests', () => {
 			const state = createCompilerState();
 			const decision = buildDecision();
 
-			const result = cteIncludeHandler.compile(decision, ctx, state);
+			const result = cteIncludeHandler.compile(
+				includeHandlerFixture(decision, ctx),
+				ctx,
+				state,
+			);
 			expect(result.join).toBeDefined();
 		});
 
@@ -200,7 +249,11 @@ describe('cteIncludeHandler - Coverage Tests', () => {
 			const state = createCompilerState();
 			const decision = buildDecision();
 
-			const result = cteIncludeHandler.compile(decision, ctx, state);
+			const result = cteIncludeHandler.compile(
+				includeHandlerFixture(decision, ctx),
+				ctx,
+				state,
+			);
 			expect(result.join).toBeDefined();
 		});
 	});
@@ -211,7 +264,11 @@ describe('cteIncludeHandler - Coverage Tests', () => {
 			const state = createCompilerState();
 			const decision = buildDecision();
 
-			const result = cteIncludeHandler.compile(decision, ctx, state);
+			const result = cteIncludeHandler.compile(
+				includeHandlerFixture(decision, ctx),
+				ctx,
+				state,
+			);
 			expect(result.cte).toBeDefined();
 		});
 	});
@@ -229,7 +286,11 @@ describe('cteIncludeHandler - Coverage Tests', () => {
 			// but the check is: if (!targetTable) throw...
 			// Actually, targetTable defaults to relation: `decision.targetTable ?? relation`
 			// So when targetTable is undefined but relation is 'comments', targetTable = 'comments'
-			const result = cteIncludeHandler.compile(decision, ctx, state);
+			const result = cteIncludeHandler.compile(
+				includeHandlerFixture(decision, ctx),
+				ctx,
+				state,
+			);
 			expect(result.cte).toBeDefined();
 		});
 	});
@@ -240,7 +301,11 @@ describe('cteIncludeHandler - Coverage Tests', () => {
 			const state = createCompilerState();
 			const decision = buildDecision();
 
-			const result = cteIncludeHandler.compile(decision, ctx, state);
+			const result = cteIncludeHandler.compile(
+				includeHandlerFixture(decision, ctx),
+				ctx,
+				state,
+			);
 
 			// Verify result shape
 			expect(result).toHaveProperty('cte');
@@ -255,7 +320,11 @@ describe('cteIncludeHandler - Coverage Tests', () => {
 			const state = createCompilerState();
 			const decision = buildDecision();
 
-			const result = cteIncludeHandler.compile(decision, ctx, state);
+			const result = cteIncludeHandler.compile(
+				includeHandlerFixture(decision, ctx),
+				ctx,
+				state,
+			);
 			expect(result.cte).toHaveProperty('CommonTableExpr');
 		});
 
@@ -264,7 +333,11 @@ describe('cteIncludeHandler - Coverage Tests', () => {
 			const state = createCompilerState();
 			const decision = buildDecision();
 
-			const result = cteIncludeHandler.compile(decision, ctx, state);
+			const result = cteIncludeHandler.compile(
+				includeHandlerFixture(decision, ctx),
+				ctx,
+				state,
+			);
 			expect(result.join).toHaveProperty('JoinExpr');
 			expect(result.join.JoinExpr.jointype).toBe('JOIN_LEFT');
 		});

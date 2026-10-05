@@ -1,0 +1,2865 @@
+[
+  {
+    "key": "orm/join/3/direct/nested/composite/ordered-limit",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "_InvalidOperationError",
+      "message": "Invalid include: Include include[0](compositeChildren) limit is not supported by 'join' strategy. Remove the explicit join or use a strategy that limits per parent (json_agg, lateral)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "key": "external/join/3/direct/nested/composite/ordered-limit",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "_InvalidOperationError",
+      "message": "Invalid include: Include include[0](compositeChildren) limit is not supported by 'join' strategy. Remove the explicit join or use a strategy that limits per parent (json_agg, lateral)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "key": "nql/join/3/direct/nested/composite/ordered-limit",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "_InvalidOperationError",
+      "message": "Invalid include: Include include[0](compositeChildren) limit is not supported by 'join' strategy. Remove the explicit join or use a strategy that limits per parent (json_agg, lateral)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "key": "orm/join/3/direct/nested/composite/predicate",
+    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".tenant AS \"compositeChildren.compositeLeaves.tenant\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".\"childId\" AS \"compositeChildren.compositeLeaves.childId\", \"compositeLeaves\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves\", \"compositeTips\".id AS \"compositeChildren.compositeLeaves.compositeTips.id\", \"compositeTips\".tenant AS \"compositeChildren.compositeLeaves.compositeTips.tenant\", \"compositeTips\".name AS \"compositeChildren.compositeLeaves.compositeTips.name\", \"compositeTips\".amount AS \"compositeChildren.compositeLeaves.compositeTips.amount\", \"compositeTips\".\"leafId\" AS \"compositeChildren.compositeLeaves.compositeTips.leafId\", \"compositeTips\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves.compositeTips\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant JOIN tips AS \"compositeTips\" ON \"compositeLeaves\".id = \"compositeTips\".\"leafId\" AND \"compositeLeaves\".tenant = \"compositeTips\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeLeaves\".name = $2 AND \"compositeTips\".name = $3",
+    "params": [
+      "child",
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "compositeChildren.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "compositeChildren.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "compositeChildren.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "compositeChildren.rootId"
+          }
+        ],
+        "children": [
+          {
+            "path": "compositeChildren.compositeLeaves",
+            "publicKey": "compositeLeaves",
+            "strategy": "join",
+            "outputMode": "nested",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "compositeLeaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "compositeChildren.compositeLeaves.id"
+              },
+              {
+                "logicalName": "tenant",
+                "physicalName": "tenant",
+                "publicKey": "tenant",
+                "outputLabel": "compositeChildren.compositeLeaves.tenant"
+              },
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "compositeChildren.compositeLeaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "compositeChildren.compositeLeaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              },
+              {
+                "logicalName": "childId",
+                "physicalName": "childId",
+                "publicKey": "childId",
+                "outputLabel": "compositeChildren.compositeLeaves.childId"
+              }
+            ],
+            "children": [
+              {
+                "path": "compositeChildren.compositeLeaves.compositeTips",
+                "publicKey": "compositeTips",
+                "strategy": "join",
+                "outputMode": "nested",
+                "table": "tips",
+                "isToOne": true,
+                "outputLabel": "compositeTips_json",
+                "columns": [
+                  {
+                    "logicalName": "id",
+                    "physicalName": "id",
+                    "publicKey": "id",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.id"
+                  },
+                  {
+                    "logicalName": "tenant",
+                    "physicalName": "tenant",
+                    "publicKey": "tenant",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.tenant"
+                  },
+                  {
+                    "logicalName": "name",
+                    "physicalName": "name",
+                    "publicKey": "name",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.name"
+                  },
+                  {
+                    "logicalName": "amount",
+                    "physicalName": "amount",
+                    "publicKey": "amount",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.amount",
+                    "readHandling": {
+                      "kind": "nestedTransform",
+                      "table": "tips",
+                      "column": "amount",
+                      "js": "number",
+                      "outputKey": "amount"
+                    }
+                  },
+                  {
+                    "logicalName": "leafId",
+                    "physicalName": "leafId",
+                    "publicKey": "leafId",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.leafId"
+                  }
+                ],
+                "children": [],
+                "presence": {
+                  "outputLabel": "__dbsp_presence_compositeChildren.compositeLeaves.compositeTips",
+                  "physicalName": "id"
+                }
+              }
+            ],
+            "presence": {
+              "outputLabel": "__dbsp_presence_compositeChildren.compositeLeaves",
+              "physicalName": "id"
+            }
+          }
+        ],
+        "presence": {
+          "outputLabel": "__dbsp_presence_compositeChildren",
+          "physicalName": "id"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren": {
+          "id": 2,
+          "tenant": 2,
+          "name": "child",
+          "amount": 42,
+          "rootId": 2,
+          "compositeLeaves": {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "childId": 2,
+            "compositeTips": {
+              "id": 2,
+              "tenant": 2,
+              "name": "child",
+              "amount": 42,
+              "leafId": 2
+            }
+          }
+        }
+      }
+    ]
+  },
+  {
+    "key": "external/join/3/direct/nested/composite/predicate",
+    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".tenant AS \"compositeChildren.compositeLeaves.tenant\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".\"childId\" AS \"compositeChildren.compositeLeaves.childId\", \"compositeLeaves\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves\", \"compositeTips\".id AS \"compositeChildren.compositeLeaves.compositeTips.id\", \"compositeTips\".tenant AS \"compositeChildren.compositeLeaves.compositeTips.tenant\", \"compositeTips\".name AS \"compositeChildren.compositeLeaves.compositeTips.name\", \"compositeTips\".amount AS \"compositeChildren.compositeLeaves.compositeTips.amount\", \"compositeTips\".\"leafId\" AS \"compositeChildren.compositeLeaves.compositeTips.leafId\", \"compositeTips\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves.compositeTips\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant JOIN tips AS \"compositeTips\" ON \"compositeLeaves\".id = \"compositeTips\".\"leafId\" AND \"compositeLeaves\".tenant = \"compositeTips\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeLeaves\".name = $2 AND \"compositeTips\".name = $3",
+    "params": [
+      "child",
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "compositeChildren.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "compositeChildren.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "compositeChildren.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "compositeChildren.rootId"
+          }
+        ],
+        "children": [
+          {
+            "path": "compositeChildren.compositeLeaves",
+            "publicKey": "compositeLeaves",
+            "strategy": "join",
+            "outputMode": "nested",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "compositeLeaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "compositeChildren.compositeLeaves.id"
+              },
+              {
+                "logicalName": "tenant",
+                "physicalName": "tenant",
+                "publicKey": "tenant",
+                "outputLabel": "compositeChildren.compositeLeaves.tenant"
+              },
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "compositeChildren.compositeLeaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "compositeChildren.compositeLeaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              },
+              {
+                "logicalName": "childId",
+                "physicalName": "childId",
+                "publicKey": "childId",
+                "outputLabel": "compositeChildren.compositeLeaves.childId"
+              }
+            ],
+            "children": [
+              {
+                "path": "compositeChildren.compositeLeaves.compositeTips",
+                "publicKey": "compositeTips",
+                "strategy": "join",
+                "outputMode": "nested",
+                "table": "tips",
+                "isToOne": true,
+                "outputLabel": "compositeTips_json",
+                "columns": [
+                  {
+                    "logicalName": "id",
+                    "physicalName": "id",
+                    "publicKey": "id",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.id"
+                  },
+                  {
+                    "logicalName": "tenant",
+                    "physicalName": "tenant",
+                    "publicKey": "tenant",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.tenant"
+                  },
+                  {
+                    "logicalName": "name",
+                    "physicalName": "name",
+                    "publicKey": "name",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.name"
+                  },
+                  {
+                    "logicalName": "amount",
+                    "physicalName": "amount",
+                    "publicKey": "amount",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.amount",
+                    "readHandling": {
+                      "kind": "nestedTransform",
+                      "table": "tips",
+                      "column": "amount",
+                      "js": "number",
+                      "outputKey": "amount"
+                    }
+                  },
+                  {
+                    "logicalName": "leafId",
+                    "physicalName": "leafId",
+                    "publicKey": "leafId",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.leafId"
+                  }
+                ],
+                "children": [],
+                "presence": {
+                  "outputLabel": "__dbsp_presence_compositeChildren.compositeLeaves.compositeTips",
+                  "physicalName": "id"
+                }
+              }
+            ],
+            "presence": {
+              "outputLabel": "__dbsp_presence_compositeChildren.compositeLeaves",
+              "physicalName": "id"
+            }
+          }
+        ],
+        "presence": {
+          "outputLabel": "__dbsp_presence_compositeChildren",
+          "physicalName": "id"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren": {
+          "id": 2,
+          "tenant": 2,
+          "name": "child",
+          "amount": 42,
+          "rootId": 2,
+          "compositeLeaves": {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "childId": 2,
+            "compositeTips": {
+              "id": 2,
+              "tenant": 2,
+              "name": "child",
+              "amount": 42,
+              "leafId": 2
+            }
+          }
+        }
+      }
+    ]
+  },
+  {
+    "key": "nql/join/3/direct/nested/composite/predicate",
+    "sql": "SELECT roots.id, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".tenant AS \"compositeChildren.compositeLeaves.tenant\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".\"childId\" AS \"compositeChildren.compositeLeaves.childId\", \"compositeLeaves\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves\", \"compositeTips\".id AS \"compositeChildren.compositeLeaves.compositeTips.id\", \"compositeTips\".tenant AS \"compositeChildren.compositeLeaves.compositeTips.tenant\", \"compositeTips\".name AS \"compositeChildren.compositeLeaves.compositeTips.name\", \"compositeTips\".amount AS \"compositeChildren.compositeLeaves.compositeTips.amount\", \"compositeTips\".\"leafId\" AS \"compositeChildren.compositeLeaves.compositeTips.leafId\", \"compositeTips\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves.compositeTips\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant JOIN tips AS \"compositeTips\" ON \"compositeLeaves\".id = \"compositeTips\".\"leafId\" AND \"compositeLeaves\".tenant = \"compositeTips\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeLeaves\".name = $2 AND \"compositeTips\".name = $3",
+    "params": [
+      "child",
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "compositeChildren.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "compositeChildren.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "compositeChildren.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "compositeChildren.rootId"
+          }
+        ],
+        "children": [
+          {
+            "path": "compositeChildren.compositeLeaves",
+            "publicKey": "compositeLeaves",
+            "strategy": "join",
+            "outputMode": "nested",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "compositeLeaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "compositeChildren.compositeLeaves.id"
+              },
+              {
+                "logicalName": "tenant",
+                "physicalName": "tenant",
+                "publicKey": "tenant",
+                "outputLabel": "compositeChildren.compositeLeaves.tenant"
+              },
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "compositeChildren.compositeLeaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "compositeChildren.compositeLeaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              },
+              {
+                "logicalName": "childId",
+                "physicalName": "childId",
+                "publicKey": "childId",
+                "outputLabel": "compositeChildren.compositeLeaves.childId"
+              }
+            ],
+            "children": [
+              {
+                "path": "compositeChildren.compositeLeaves.compositeTips",
+                "publicKey": "compositeTips",
+                "strategy": "join",
+                "outputMode": "nested",
+                "table": "tips",
+                "isToOne": true,
+                "outputLabel": "compositeTips_json",
+                "columns": [
+                  {
+                    "logicalName": "id",
+                    "physicalName": "id",
+                    "publicKey": "id",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.id"
+                  },
+                  {
+                    "logicalName": "tenant",
+                    "physicalName": "tenant",
+                    "publicKey": "tenant",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.tenant"
+                  },
+                  {
+                    "logicalName": "name",
+                    "physicalName": "name",
+                    "publicKey": "name",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.name"
+                  },
+                  {
+                    "logicalName": "amount",
+                    "physicalName": "amount",
+                    "publicKey": "amount",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.amount",
+                    "readHandling": {
+                      "kind": "nestedTransform",
+                      "table": "tips",
+                      "column": "amount",
+                      "js": "number",
+                      "outputKey": "amount"
+                    }
+                  },
+                  {
+                    "logicalName": "leafId",
+                    "physicalName": "leafId",
+                    "publicKey": "leafId",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.leafId"
+                  }
+                ],
+                "children": [],
+                "presence": {
+                  "outputLabel": "__dbsp_presence_compositeChildren.compositeLeaves.compositeTips",
+                  "physicalName": "id"
+                }
+              }
+            ],
+            "presence": {
+              "outputLabel": "__dbsp_presence_compositeChildren.compositeLeaves",
+              "physicalName": "id"
+            }
+          }
+        ],
+        "presence": {
+          "outputLabel": "__dbsp_presence_compositeChildren",
+          "physicalName": "id"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren": {
+          "id": 2,
+          "tenant": 2,
+          "name": "child",
+          "amount": 42,
+          "rootId": 2,
+          "compositeLeaves": {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "childId": 2,
+            "compositeTips": {
+              "id": 2,
+              "tenant": 2,
+              "name": "child",
+              "amount": 42,
+              "leafId": 2
+            }
+          }
+        }
+      }
+    ]
+  },
+  {
+    "key": "orm/join/3/direct/nested/composite/expression",
+    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".tenant AS \"compositeChildren.compositeLeaves.tenant\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".\"childId\" AS \"compositeChildren.compositeLeaves.childId\", \"compositeLeaves\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves\", \"compositeTips\".id AS \"compositeChildren.compositeLeaves.compositeTips.id\", \"compositeTips\".tenant AS \"compositeChildren.compositeLeaves.compositeTips.tenant\", \"compositeTips\".name AS \"compositeChildren.compositeLeaves.compositeTips.name\", \"compositeTips\".amount AS \"compositeChildren.compositeLeaves.compositeTips.amount\", \"compositeTips\".\"leafId\" AS \"compositeChildren.compositeLeaves.compositeTips.leafId\", \"compositeTips\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves.compositeTips\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant JOIN tips AS \"compositeTips\" ON \"compositeLeaves\".id = \"compositeTips\".\"leafId\" AND \"compositeLeaves\".tenant = \"compositeTips\".tenant WHERE lower(name) = $1 AND lower(name) = $2 AND lower(name) = $3",
+    "params": [
+      "child",
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "compositeChildren.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "compositeChildren.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "compositeChildren.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "compositeChildren.rootId"
+          }
+        ],
+        "children": [
+          {
+            "path": "compositeChildren.compositeLeaves",
+            "publicKey": "compositeLeaves",
+            "strategy": "join",
+            "outputMode": "nested",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "compositeLeaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "compositeChildren.compositeLeaves.id"
+              },
+              {
+                "logicalName": "tenant",
+                "physicalName": "tenant",
+                "publicKey": "tenant",
+                "outputLabel": "compositeChildren.compositeLeaves.tenant"
+              },
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "compositeChildren.compositeLeaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "compositeChildren.compositeLeaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              },
+              {
+                "logicalName": "childId",
+                "physicalName": "childId",
+                "publicKey": "childId",
+                "outputLabel": "compositeChildren.compositeLeaves.childId"
+              }
+            ],
+            "children": [
+              {
+                "path": "compositeChildren.compositeLeaves.compositeTips",
+                "publicKey": "compositeTips",
+                "strategy": "join",
+                "outputMode": "nested",
+                "table": "tips",
+                "isToOne": true,
+                "outputLabel": "compositeTips_json",
+                "columns": [
+                  {
+                    "logicalName": "id",
+                    "physicalName": "id",
+                    "publicKey": "id",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.id"
+                  },
+                  {
+                    "logicalName": "tenant",
+                    "physicalName": "tenant",
+                    "publicKey": "tenant",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.tenant"
+                  },
+                  {
+                    "logicalName": "name",
+                    "physicalName": "name",
+                    "publicKey": "name",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.name"
+                  },
+                  {
+                    "logicalName": "amount",
+                    "physicalName": "amount",
+                    "publicKey": "amount",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.amount",
+                    "readHandling": {
+                      "kind": "nestedTransform",
+                      "table": "tips",
+                      "column": "amount",
+                      "js": "number",
+                      "outputKey": "amount"
+                    }
+                  },
+                  {
+                    "logicalName": "leafId",
+                    "physicalName": "leafId",
+                    "publicKey": "leafId",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.leafId"
+                  }
+                ],
+                "children": [],
+                "presence": {
+                  "outputLabel": "__dbsp_presence_compositeChildren.compositeLeaves.compositeTips",
+                  "physicalName": "id"
+                }
+              }
+            ],
+            "presence": {
+              "outputLabel": "__dbsp_presence_compositeChildren.compositeLeaves",
+              "physicalName": "id"
+            }
+          }
+        ],
+        "presence": {
+          "outputLabel": "__dbsp_presence_compositeChildren",
+          "physicalName": "id"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren": {
+          "id": 2,
+          "tenant": 2,
+          "name": "child",
+          "amount": 42,
+          "rootId": 2,
+          "compositeLeaves": {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "childId": 2,
+            "compositeTips": {
+              "id": 2,
+              "tenant": 2,
+              "name": "child",
+              "amount": 42,
+              "leafId": 2
+            }
+          }
+        }
+      }
+    ]
+  },
+  {
+    "key": "external/join/3/direct/nested/composite/expression",
+    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".tenant AS \"compositeChildren.compositeLeaves.tenant\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".\"childId\" AS \"compositeChildren.compositeLeaves.childId\", \"compositeLeaves\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves\", \"compositeTips\".id AS \"compositeChildren.compositeLeaves.compositeTips.id\", \"compositeTips\".tenant AS \"compositeChildren.compositeLeaves.compositeTips.tenant\", \"compositeTips\".name AS \"compositeChildren.compositeLeaves.compositeTips.name\", \"compositeTips\".amount AS \"compositeChildren.compositeLeaves.compositeTips.amount\", \"compositeTips\".\"leafId\" AS \"compositeChildren.compositeLeaves.compositeTips.leafId\", \"compositeTips\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves.compositeTips\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant JOIN tips AS \"compositeTips\" ON \"compositeLeaves\".id = \"compositeTips\".\"leafId\" AND \"compositeLeaves\".tenant = \"compositeTips\".tenant WHERE lower(name) = $1 AND lower(name) = $2 AND lower(name) = $3",
+    "params": [
+      "child",
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "compositeChildren.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "compositeChildren.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "compositeChildren.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "compositeChildren.rootId"
+          }
+        ],
+        "children": [
+          {
+            "path": "compositeChildren.compositeLeaves",
+            "publicKey": "compositeLeaves",
+            "strategy": "join",
+            "outputMode": "nested",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "compositeLeaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "compositeChildren.compositeLeaves.id"
+              },
+              {
+                "logicalName": "tenant",
+                "physicalName": "tenant",
+                "publicKey": "tenant",
+                "outputLabel": "compositeChildren.compositeLeaves.tenant"
+              },
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "compositeChildren.compositeLeaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "compositeChildren.compositeLeaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              },
+              {
+                "logicalName": "childId",
+                "physicalName": "childId",
+                "publicKey": "childId",
+                "outputLabel": "compositeChildren.compositeLeaves.childId"
+              }
+            ],
+            "children": [
+              {
+                "path": "compositeChildren.compositeLeaves.compositeTips",
+                "publicKey": "compositeTips",
+                "strategy": "join",
+                "outputMode": "nested",
+                "table": "tips",
+                "isToOne": true,
+                "outputLabel": "compositeTips_json",
+                "columns": [
+                  {
+                    "logicalName": "id",
+                    "physicalName": "id",
+                    "publicKey": "id",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.id"
+                  },
+                  {
+                    "logicalName": "tenant",
+                    "physicalName": "tenant",
+                    "publicKey": "tenant",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.tenant"
+                  },
+                  {
+                    "logicalName": "name",
+                    "physicalName": "name",
+                    "publicKey": "name",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.name"
+                  },
+                  {
+                    "logicalName": "amount",
+                    "physicalName": "amount",
+                    "publicKey": "amount",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.amount",
+                    "readHandling": {
+                      "kind": "nestedTransform",
+                      "table": "tips",
+                      "column": "amount",
+                      "js": "number",
+                      "outputKey": "amount"
+                    }
+                  },
+                  {
+                    "logicalName": "leafId",
+                    "physicalName": "leafId",
+                    "publicKey": "leafId",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.leafId"
+                  }
+                ],
+                "children": [],
+                "presence": {
+                  "outputLabel": "__dbsp_presence_compositeChildren.compositeLeaves.compositeTips",
+                  "physicalName": "id"
+                }
+              }
+            ],
+            "presence": {
+              "outputLabel": "__dbsp_presence_compositeChildren.compositeLeaves",
+              "physicalName": "id"
+            }
+          }
+        ],
+        "presence": {
+          "outputLabel": "__dbsp_presence_compositeChildren",
+          "physicalName": "id"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren": {
+          "id": 2,
+          "tenant": 2,
+          "name": "child",
+          "amount": 42,
+          "rootId": 2,
+          "compositeLeaves": {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "childId": 2,
+            "compositeTips": {
+              "id": 2,
+              "tenant": 2,
+              "name": "child",
+              "amount": 42,
+              "leafId": 2
+            }
+          }
+        }
+      }
+    ]
+  },
+  {
+    "key": "nql/join/3/direct/nested/composite/expression",
+    "sql": "SELECT roots.id, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".tenant AS \"compositeChildren.compositeLeaves.tenant\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".\"childId\" AS \"compositeChildren.compositeLeaves.childId\", \"compositeLeaves\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves\", \"compositeTips\".id AS \"compositeChildren.compositeLeaves.compositeTips.id\", \"compositeTips\".tenant AS \"compositeChildren.compositeLeaves.compositeTips.tenant\", \"compositeTips\".name AS \"compositeChildren.compositeLeaves.compositeTips.name\", \"compositeTips\".amount AS \"compositeChildren.compositeLeaves.compositeTips.amount\", \"compositeTips\".\"leafId\" AS \"compositeChildren.compositeLeaves.compositeTips.leafId\", \"compositeTips\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves.compositeTips\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant JOIN tips AS \"compositeTips\" ON \"compositeLeaves\".id = \"compositeTips\".\"leafId\" AND \"compositeLeaves\".tenant = \"compositeTips\".tenant WHERE lower(name) = $1 AND lower(name) = $2 AND lower(name) = $3",
+    "params": [
+      "child",
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "compositeChildren.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "compositeChildren.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "compositeChildren.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "compositeChildren.rootId"
+          }
+        ],
+        "children": [
+          {
+            "path": "compositeChildren.compositeLeaves",
+            "publicKey": "compositeLeaves",
+            "strategy": "join",
+            "outputMode": "nested",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "compositeLeaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "compositeChildren.compositeLeaves.id"
+              },
+              {
+                "logicalName": "tenant",
+                "physicalName": "tenant",
+                "publicKey": "tenant",
+                "outputLabel": "compositeChildren.compositeLeaves.tenant"
+              },
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "compositeChildren.compositeLeaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "compositeChildren.compositeLeaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              },
+              {
+                "logicalName": "childId",
+                "physicalName": "childId",
+                "publicKey": "childId",
+                "outputLabel": "compositeChildren.compositeLeaves.childId"
+              }
+            ],
+            "children": [
+              {
+                "path": "compositeChildren.compositeLeaves.compositeTips",
+                "publicKey": "compositeTips",
+                "strategy": "join",
+                "outputMode": "nested",
+                "table": "tips",
+                "isToOne": true,
+                "outputLabel": "compositeTips_json",
+                "columns": [
+                  {
+                    "logicalName": "id",
+                    "physicalName": "id",
+                    "publicKey": "id",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.id"
+                  },
+                  {
+                    "logicalName": "tenant",
+                    "physicalName": "tenant",
+                    "publicKey": "tenant",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.tenant"
+                  },
+                  {
+                    "logicalName": "name",
+                    "physicalName": "name",
+                    "publicKey": "name",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.name"
+                  },
+                  {
+                    "logicalName": "amount",
+                    "physicalName": "amount",
+                    "publicKey": "amount",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.amount",
+                    "readHandling": {
+                      "kind": "nestedTransform",
+                      "table": "tips",
+                      "column": "amount",
+                      "js": "number",
+                      "outputKey": "amount"
+                    }
+                  },
+                  {
+                    "logicalName": "leafId",
+                    "physicalName": "leafId",
+                    "publicKey": "leafId",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.leafId"
+                  }
+                ],
+                "children": [],
+                "presence": {
+                  "outputLabel": "__dbsp_presence_compositeChildren.compositeLeaves.compositeTips",
+                  "physicalName": "id"
+                }
+              }
+            ],
+            "presence": {
+              "outputLabel": "__dbsp_presence_compositeChildren.compositeLeaves",
+              "physicalName": "id"
+            }
+          }
+        ],
+        "presence": {
+          "outputLabel": "__dbsp_presence_compositeChildren",
+          "physicalName": "id"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren": {
+          "id": 2,
+          "tenant": 2,
+          "name": "child",
+          "amount": 42,
+          "rootId": 2,
+          "compositeLeaves": {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "childId": 2,
+            "compositeTips": {
+              "id": 2,
+              "tenant": 2,
+              "name": "child",
+              "amount": 42,
+              "leafId": 2
+            }
+          }
+        }
+      }
+    ]
+  },
+  {
+    "key": "orm/join/3/direct/nested/composite/outer",
+    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".tenant AS \"compositeChildren.compositeLeaves.tenant\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".\"childId\" AS \"compositeChildren.compositeLeaves.childId\", \"compositeLeaves\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves\", \"compositeTips\".id AS \"compositeChildren.compositeLeaves.compositeTips.id\", \"compositeTips\".tenant AS \"compositeChildren.compositeLeaves.compositeTips.tenant\", \"compositeTips\".name AS \"compositeChildren.compositeLeaves.compositeTips.name\", \"compositeTips\".amount AS \"compositeChildren.compositeLeaves.compositeTips.amount\", \"compositeTips\".\"leafId\" AS \"compositeChildren.compositeLeaves.compositeTips.leafId\", \"compositeTips\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves.compositeTips\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant JOIN tips AS \"compositeTips\" ON \"compositeLeaves\".id = \"compositeTips\".\"leafId\" AND \"compositeLeaves\".tenant = \"compositeTips\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeChildren\".id = roots.id AND \"compositeLeaves\".name = $2 AND \"compositeLeaves\".id = roots.id AND \"compositeTips\".name = $3 AND \"compositeTips\".id = roots.id",
+    "params": [
+      "child",
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "compositeChildren.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "compositeChildren.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "compositeChildren.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "compositeChildren.rootId"
+          }
+        ],
+        "children": [
+          {
+            "path": "compositeChildren.compositeLeaves",
+            "publicKey": "compositeLeaves",
+            "strategy": "join",
+            "outputMode": "nested",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "compositeLeaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "compositeChildren.compositeLeaves.id"
+              },
+              {
+                "logicalName": "tenant",
+                "physicalName": "tenant",
+                "publicKey": "tenant",
+                "outputLabel": "compositeChildren.compositeLeaves.tenant"
+              },
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "compositeChildren.compositeLeaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "compositeChildren.compositeLeaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              },
+              {
+                "logicalName": "childId",
+                "physicalName": "childId",
+                "publicKey": "childId",
+                "outputLabel": "compositeChildren.compositeLeaves.childId"
+              }
+            ],
+            "children": [
+              {
+                "path": "compositeChildren.compositeLeaves.compositeTips",
+                "publicKey": "compositeTips",
+                "strategy": "join",
+                "outputMode": "nested",
+                "table": "tips",
+                "isToOne": true,
+                "outputLabel": "compositeTips_json",
+                "columns": [
+                  {
+                    "logicalName": "id",
+                    "physicalName": "id",
+                    "publicKey": "id",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.id"
+                  },
+                  {
+                    "logicalName": "tenant",
+                    "physicalName": "tenant",
+                    "publicKey": "tenant",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.tenant"
+                  },
+                  {
+                    "logicalName": "name",
+                    "physicalName": "name",
+                    "publicKey": "name",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.name"
+                  },
+                  {
+                    "logicalName": "amount",
+                    "physicalName": "amount",
+                    "publicKey": "amount",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.amount",
+                    "readHandling": {
+                      "kind": "nestedTransform",
+                      "table": "tips",
+                      "column": "amount",
+                      "js": "number",
+                      "outputKey": "amount"
+                    }
+                  },
+                  {
+                    "logicalName": "leafId",
+                    "physicalName": "leafId",
+                    "publicKey": "leafId",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.leafId"
+                  }
+                ],
+                "children": [],
+                "presence": {
+                  "outputLabel": "__dbsp_presence_compositeChildren.compositeLeaves.compositeTips",
+                  "physicalName": "id"
+                }
+              }
+            ],
+            "presence": {
+              "outputLabel": "__dbsp_presence_compositeChildren.compositeLeaves",
+              "physicalName": "id"
+            }
+          }
+        ],
+        "presence": {
+          "outputLabel": "__dbsp_presence_compositeChildren",
+          "physicalName": "id"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren": {
+          "id": 2,
+          "tenant": 2,
+          "name": "child",
+          "amount": 42,
+          "rootId": 2,
+          "compositeLeaves": {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "childId": 2,
+            "compositeTips": {
+              "id": 2,
+              "tenant": 2,
+              "name": "child",
+              "amount": 42,
+              "leafId": 2
+            }
+          }
+        }
+      }
+    ]
+  },
+  {
+    "key": "external/join/3/direct/nested/composite/outer",
+    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".tenant AS \"compositeChildren.compositeLeaves.tenant\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".\"childId\" AS \"compositeChildren.compositeLeaves.childId\", \"compositeLeaves\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves\", \"compositeTips\".id AS \"compositeChildren.compositeLeaves.compositeTips.id\", \"compositeTips\".tenant AS \"compositeChildren.compositeLeaves.compositeTips.tenant\", \"compositeTips\".name AS \"compositeChildren.compositeLeaves.compositeTips.name\", \"compositeTips\".amount AS \"compositeChildren.compositeLeaves.compositeTips.amount\", \"compositeTips\".\"leafId\" AS \"compositeChildren.compositeLeaves.compositeTips.leafId\", \"compositeTips\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves.compositeTips\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant JOIN tips AS \"compositeTips\" ON \"compositeLeaves\".id = \"compositeTips\".\"leafId\" AND \"compositeLeaves\".tenant = \"compositeTips\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeChildren\".id = roots.id AND \"compositeLeaves\".name = $2 AND \"compositeLeaves\".id = roots.id AND \"compositeTips\".name = $3 AND \"compositeTips\".id = roots.id",
+    "params": [
+      "child",
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "compositeChildren.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "compositeChildren.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "compositeChildren.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "compositeChildren.rootId"
+          }
+        ],
+        "children": [
+          {
+            "path": "compositeChildren.compositeLeaves",
+            "publicKey": "compositeLeaves",
+            "strategy": "join",
+            "outputMode": "nested",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "compositeLeaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "compositeChildren.compositeLeaves.id"
+              },
+              {
+                "logicalName": "tenant",
+                "physicalName": "tenant",
+                "publicKey": "tenant",
+                "outputLabel": "compositeChildren.compositeLeaves.tenant"
+              },
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "compositeChildren.compositeLeaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "compositeChildren.compositeLeaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              },
+              {
+                "logicalName": "childId",
+                "physicalName": "childId",
+                "publicKey": "childId",
+                "outputLabel": "compositeChildren.compositeLeaves.childId"
+              }
+            ],
+            "children": [
+              {
+                "path": "compositeChildren.compositeLeaves.compositeTips",
+                "publicKey": "compositeTips",
+                "strategy": "join",
+                "outputMode": "nested",
+                "table": "tips",
+                "isToOne": true,
+                "outputLabel": "compositeTips_json",
+                "columns": [
+                  {
+                    "logicalName": "id",
+                    "physicalName": "id",
+                    "publicKey": "id",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.id"
+                  },
+                  {
+                    "logicalName": "tenant",
+                    "physicalName": "tenant",
+                    "publicKey": "tenant",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.tenant"
+                  },
+                  {
+                    "logicalName": "name",
+                    "physicalName": "name",
+                    "publicKey": "name",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.name"
+                  },
+                  {
+                    "logicalName": "amount",
+                    "physicalName": "amount",
+                    "publicKey": "amount",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.amount",
+                    "readHandling": {
+                      "kind": "nestedTransform",
+                      "table": "tips",
+                      "column": "amount",
+                      "js": "number",
+                      "outputKey": "amount"
+                    }
+                  },
+                  {
+                    "logicalName": "leafId",
+                    "physicalName": "leafId",
+                    "publicKey": "leafId",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.leafId"
+                  }
+                ],
+                "children": [],
+                "presence": {
+                  "outputLabel": "__dbsp_presence_compositeChildren.compositeLeaves.compositeTips",
+                  "physicalName": "id"
+                }
+              }
+            ],
+            "presence": {
+              "outputLabel": "__dbsp_presence_compositeChildren.compositeLeaves",
+              "physicalName": "id"
+            }
+          }
+        ],
+        "presence": {
+          "outputLabel": "__dbsp_presence_compositeChildren",
+          "physicalName": "id"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren": {
+          "id": 2,
+          "tenant": 2,
+          "name": "child",
+          "amount": 42,
+          "rootId": 2,
+          "compositeLeaves": {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "childId": 2,
+            "compositeTips": {
+              "id": 2,
+              "tenant": 2,
+              "name": "child",
+              "amount": 42,
+              "leafId": 2
+            }
+          }
+        }
+      }
+    ]
+  },
+  {
+    "key": "nql/join/3/direct/nested/composite/outer",
+    "sql": "SELECT roots.id, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".tenant AS \"compositeChildren.compositeLeaves.tenant\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\", \"compositeLeaves\".\"childId\" AS \"compositeChildren.compositeLeaves.childId\", \"compositeLeaves\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves\", \"compositeTips\".id AS \"compositeChildren.compositeLeaves.compositeTips.id\", \"compositeTips\".tenant AS \"compositeChildren.compositeLeaves.compositeTips.tenant\", \"compositeTips\".name AS \"compositeChildren.compositeLeaves.compositeTips.name\", \"compositeTips\".amount AS \"compositeChildren.compositeLeaves.compositeTips.amount\", \"compositeTips\".\"leafId\" AS \"compositeChildren.compositeLeaves.compositeTips.leafId\", \"compositeTips\".id AS \"__dbsp_presence_compositeChildren.compositeLeaves.compositeTips\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant JOIN tips AS \"compositeTips\" ON \"compositeLeaves\".id = \"compositeTips\".\"leafId\" AND \"compositeLeaves\".tenant = \"compositeTips\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeChildren\".id = roots.id AND \"compositeLeaves\".name = $2 AND \"compositeLeaves\".id = roots.id AND \"compositeTips\".name = $3 AND \"compositeTips\".id = roots.id",
+    "params": [
+      "child",
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "compositeChildren",
+        "publicKey": "compositeChildren",
+        "strategy": "join",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "compositeChildren_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "compositeChildren.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "compositeChildren.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "compositeChildren.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "compositeChildren.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "compositeChildren.rootId"
+          }
+        ],
+        "children": [
+          {
+            "path": "compositeChildren.compositeLeaves",
+            "publicKey": "compositeLeaves",
+            "strategy": "join",
+            "outputMode": "nested",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "compositeLeaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "compositeChildren.compositeLeaves.id"
+              },
+              {
+                "logicalName": "tenant",
+                "physicalName": "tenant",
+                "publicKey": "tenant",
+                "outputLabel": "compositeChildren.compositeLeaves.tenant"
+              },
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "compositeChildren.compositeLeaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "compositeChildren.compositeLeaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              },
+              {
+                "logicalName": "childId",
+                "physicalName": "childId",
+                "publicKey": "childId",
+                "outputLabel": "compositeChildren.compositeLeaves.childId"
+              }
+            ],
+            "children": [
+              {
+                "path": "compositeChildren.compositeLeaves.compositeTips",
+                "publicKey": "compositeTips",
+                "strategy": "join",
+                "outputMode": "nested",
+                "table": "tips",
+                "isToOne": true,
+                "outputLabel": "compositeTips_json",
+                "columns": [
+                  {
+                    "logicalName": "id",
+                    "physicalName": "id",
+                    "publicKey": "id",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.id"
+                  },
+                  {
+                    "logicalName": "tenant",
+                    "physicalName": "tenant",
+                    "publicKey": "tenant",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.tenant"
+                  },
+                  {
+                    "logicalName": "name",
+                    "physicalName": "name",
+                    "publicKey": "name",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.name"
+                  },
+                  {
+                    "logicalName": "amount",
+                    "physicalName": "amount",
+                    "publicKey": "amount",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.amount",
+                    "readHandling": {
+                      "kind": "nestedTransform",
+                      "table": "tips",
+                      "column": "amount",
+                      "js": "number",
+                      "outputKey": "amount"
+                    }
+                  },
+                  {
+                    "logicalName": "leafId",
+                    "physicalName": "leafId",
+                    "publicKey": "leafId",
+                    "outputLabel": "compositeChildren.compositeLeaves.compositeTips.leafId"
+                  }
+                ],
+                "children": [],
+                "presence": {
+                  "outputLabel": "__dbsp_presence_compositeChildren.compositeLeaves.compositeTips",
+                  "physicalName": "id"
+                }
+              }
+            ],
+            "presence": {
+              "outputLabel": "__dbsp_presence_compositeChildren.compositeLeaves",
+              "physicalName": "id"
+            }
+          }
+        ],
+        "presence": {
+          "outputLabel": "__dbsp_presence_compositeChildren",
+          "physicalName": "id"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "compositeChildren": {
+          "id": 2,
+          "tenant": 2,
+          "name": "child",
+          "amount": 42,
+          "rootId": 2,
+          "compositeLeaves": {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "childId": 2,
+            "compositeTips": {
+              "id": 2,
+              "tenant": 2,
+              "name": "child",
+              "amount": 42,
+              "leafId": 2
+            }
+          }
+        }
+      }
+    ]
+  },
+  {
+    "key": "orm/join/3/direct/flat/single/all",
+    "sql": "SELECT roots.*, children.id AS \"children.id\", children.tenant AS \"children.tenant\", children.name AS \"children.name\", children.amount AS \"children.amount\", children.\"rootId\" AS \"children.rootId\", children.id AS __dbsp_presence_children, leaves.id AS \"children.leaves.id\", leaves.tenant AS \"children.leaves.tenant\", leaves.name AS \"children.leaves.name\", leaves.amount AS \"children.leaves.amount\", leaves.\"childId\" AS \"children.leaves.childId\", leaves.id AS \"__dbsp_presence_children.leaves\", tips.id AS \"children.leaves.tips.id\", tips.tenant AS \"children.leaves.tips.tenant\", tips.name AS \"children.leaves.tips.name\", tips.amount AS \"children.leaves.tips.amount\", tips.\"leafId\" AS \"children.leaves.tips.leafId\", tips.id AS \"__dbsp_presence_children.leaves.tips\" FROM roots LEFT JOIN children AS children ON roots.id = children.\"rootId\" LEFT JOIN leaves AS leaves ON children.id = leaves.\"childId\" LEFT JOIN tips AS tips ON leaves.id = tips.\"leafId\"",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "path": "children",
+        "publicKey": "children",
+        "strategy": "join",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "children_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "children.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "children.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "children.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "children.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "children.rootId"
+          }
+        ],
+        "children": [
+          {
+            "path": "children.leaves",
+            "publicKey": "leaves",
+            "strategy": "join",
+            "outputMode": "nested",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "leaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "children.leaves.id"
+              },
+              {
+                "logicalName": "tenant",
+                "physicalName": "tenant",
+                "publicKey": "tenant",
+                "outputLabel": "children.leaves.tenant"
+              },
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "children.leaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "children.leaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              },
+              {
+                "logicalName": "childId",
+                "physicalName": "childId",
+                "publicKey": "childId",
+                "outputLabel": "children.leaves.childId"
+              }
+            ],
+            "children": [
+              {
+                "path": "children.leaves.tips",
+                "publicKey": "tips",
+                "strategy": "join",
+                "outputMode": "nested",
+                "table": "tips",
+                "isToOne": true,
+                "outputLabel": "tips_json",
+                "columns": [
+                  {
+                    "logicalName": "id",
+                    "physicalName": "id",
+                    "publicKey": "id",
+                    "outputLabel": "children.leaves.tips.id"
+                  },
+                  {
+                    "logicalName": "tenant",
+                    "physicalName": "tenant",
+                    "publicKey": "tenant",
+                    "outputLabel": "children.leaves.tips.tenant"
+                  },
+                  {
+                    "logicalName": "name",
+                    "physicalName": "name",
+                    "publicKey": "name",
+                    "outputLabel": "children.leaves.tips.name"
+                  },
+                  {
+                    "logicalName": "amount",
+                    "physicalName": "amount",
+                    "publicKey": "amount",
+                    "outputLabel": "children.leaves.tips.amount",
+                    "readHandling": {
+                      "kind": "nestedTransform",
+                      "table": "tips",
+                      "column": "amount",
+                      "js": "number",
+                      "outputKey": "amount"
+                    }
+                  },
+                  {
+                    "logicalName": "leafId",
+                    "physicalName": "leafId",
+                    "publicKey": "leafId",
+                    "outputLabel": "children.leaves.tips.leafId"
+                  }
+                ],
+                "children": [],
+                "presence": {
+                  "outputLabel": "__dbsp_presence_children.leaves.tips",
+                  "physicalName": "id"
+                }
+              }
+            ],
+            "presence": {
+              "outputLabel": "__dbsp_presence_children.leaves",
+              "physicalName": "id"
+            }
+          }
+        ],
+        "presence": {
+          "outputLabel": "__dbsp_presence_children",
+          "physicalName": "id"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "children": {
+          "id": 2,
+          "tenant": 2,
+          "name": "child",
+          "amount": 42,
+          "rootId": 2,
+          "leaves": {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "childId": 2,
+            "tips": {
+              "id": 2,
+              "tenant": 2,
+              "name": "child",
+              "amount": 42,
+              "leafId": 2
+            }
+          }
+        }
+      }
+    ]
+  },
+  {
+    "key": "external/join/3/direct/flat/single/all",
+    "sql": "SELECT roots.*, children.id AS \"children.id\", leaves.id AS \"children.leaves.id\", tips.id AS \"children.leaves.tips.id\" FROM roots LEFT JOIN children AS children ON roots.id = children.\"rootId\" LEFT JOIN leaves AS leaves ON children.id = leaves.\"childId\" LEFT JOIN tips AS tips ON leaves.id = tips.\"leafId\"",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "path": "children",
+        "publicKey": "children",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "children_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "children.id"
+          }
+        ],
+        "children": [
+          {
+            "path": "children.leaves",
+            "publicKey": "leaves",
+            "strategy": "join",
+            "outputMode": "flat",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "leaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "children.leaves.id"
+              }
+            ],
+            "children": [
+              {
+                "path": "children.leaves.tips",
+                "publicKey": "tips",
+                "strategy": "join",
+                "outputMode": "flat",
+                "table": "tips",
+                "isToOne": true,
+                "outputLabel": "tips_json",
+                "columns": [
+                  {
+                    "logicalName": "id",
+                    "physicalName": "id",
+                    "publicKey": "id",
+                    "outputLabel": "children.leaves.tips.id"
+                  }
+                ],
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "children.id": 2,
+        "children.leaves.id": 2,
+        "children.leaves.tips.id": 2
+      }
+    ]
+  },
+  {
+    "key": "nql/join/3/direct/flat/single/all",
+    "sql": "SELECT roots.id, tips.id AS \"children.leaves.tips.id\", tips.tenant AS \"children.leaves.tips.tenant\", tips.name AS \"children.leaves.tips.name\", tips.amount AS \"children.leaves.tips.amount\", tips.\"leafId\" AS \"children.leaves.tips.leafId\" FROM roots LEFT JOIN children AS children ON roots.id = children.\"rootId\" LEFT JOIN leaves AS leaves ON children.id = leaves.\"childId\" LEFT JOIN tips AS tips ON leaves.id = tips.\"leafId\"",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "path": "children",
+        "publicKey": "children",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "children_json",
+        "columns": [],
+        "children": [
+          {
+            "path": "children.leaves",
+            "publicKey": "leaves",
+            "strategy": "join",
+            "outputMode": "flat",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "leaves_json",
+            "columns": [],
+            "children": [
+              {
+                "path": "children.leaves.tips",
+                "publicKey": "tips",
+                "strategy": "join",
+                "outputMode": "flat",
+                "table": "tips",
+                "isToOne": true,
+                "outputLabel": "tips_json",
+                "columns": [
+                  {
+                    "logicalName": "id",
+                    "physicalName": "id",
+                    "publicKey": "id",
+                    "outputLabel": "children.leaves.tips.id"
+                  },
+                  {
+                    "logicalName": "tenant",
+                    "physicalName": "tenant",
+                    "publicKey": "tenant",
+                    "outputLabel": "children.leaves.tips.tenant"
+                  },
+                  {
+                    "logicalName": "name",
+                    "physicalName": "name",
+                    "publicKey": "name",
+                    "outputLabel": "children.leaves.tips.name"
+                  },
+                  {
+                    "logicalName": "amount",
+                    "physicalName": "amount",
+                    "publicKey": "amount",
+                    "outputLabel": "children.leaves.tips.amount",
+                    "readHandling": {
+                      "kind": "nestedTransform",
+                      "table": "tips",
+                      "column": "amount",
+                      "js": "number",
+                      "outputKey": "amount"
+                    }
+                  },
+                  {
+                    "logicalName": "leafId",
+                    "physicalName": "leafId",
+                    "publicKey": "leafId",
+                    "outputLabel": "children.leaves.tips.leafId"
+                  }
+                ],
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "children.leaves.tips.id": 2,
+        "children.leaves.tips.tenant": 2,
+        "children.leaves.tips.name": "child",
+        "children.leaves.tips.amount": "42",
+        "children.leaves.tips.leafId": 2
+      }
+    ]
+  },
+  {
+    "key": "orm/join/3/direct/flat/single/projection",
+    "sql": "SELECT roots.*, children.name AS \"children.name\", children.amount AS \"children.amount\", children.id AS __dbsp_presence_children, leaves.name AS \"children.leaves.name\", leaves.amount AS \"children.leaves.amount\", leaves.id AS \"__dbsp_presence_children.leaves\", tips.name AS \"children.leaves.tips.name\", tips.amount AS \"children.leaves.tips.amount\", tips.id AS \"__dbsp_presence_children.leaves.tips\" FROM roots LEFT JOIN children AS children ON roots.id = children.\"rootId\" LEFT JOIN leaves AS leaves ON children.id = leaves.\"childId\" LEFT JOIN tips AS tips ON leaves.id = tips.\"leafId\"",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "path": "children",
+        "publicKey": "children",
+        "strategy": "join",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "children_json",
+        "columns": [
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "children.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "children.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          }
+        ],
+        "children": [
+          {
+            "path": "children.leaves",
+            "publicKey": "leaves",
+            "strategy": "join",
+            "outputMode": "nested",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "leaves_json",
+            "columns": [
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "children.leaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "children.leaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              }
+            ],
+            "children": [
+              {
+                "path": "children.leaves.tips",
+                "publicKey": "tips",
+                "strategy": "join",
+                "outputMode": "nested",
+                "table": "tips",
+                "isToOne": true,
+                "outputLabel": "tips_json",
+                "columns": [
+                  {
+                    "logicalName": "name",
+                    "physicalName": "name",
+                    "publicKey": "name",
+                    "outputLabel": "children.leaves.tips.name"
+                  },
+                  {
+                    "logicalName": "amount",
+                    "physicalName": "amount",
+                    "publicKey": "amount",
+                    "outputLabel": "children.leaves.tips.amount",
+                    "readHandling": {
+                      "kind": "nestedTransform",
+                      "table": "tips",
+                      "column": "amount",
+                      "js": "number",
+                      "outputKey": "amount"
+                    }
+                  }
+                ],
+                "children": [],
+                "presence": {
+                  "outputLabel": "__dbsp_presence_children.leaves.tips",
+                  "physicalName": "id"
+                }
+              }
+            ],
+            "presence": {
+              "outputLabel": "__dbsp_presence_children.leaves",
+              "physicalName": "id"
+            }
+          }
+        ],
+        "presence": {
+          "outputLabel": "__dbsp_presence_children",
+          "physicalName": "id"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "children": {
+          "name": "child",
+          "amount": 42,
+          "leaves": {
+            "name": "child",
+            "amount": 42,
+            "tips": {
+              "name": "child",
+              "amount": 42
+            }
+          }
+        }
+      }
+    ]
+  },
+  {
+    "key": "external/join/3/direct/flat/single/projection",
+    "sql": "SELECT roots.*, children.id AS \"children.id\", children.name AS \"children.name\", children.amount AS \"children.amount\", leaves.id AS \"children.leaves.id\", leaves.name AS \"children.leaves.name\", leaves.amount AS \"children.leaves.amount\", tips.id AS \"children.leaves.tips.id\", tips.name AS \"children.leaves.tips.name\", tips.amount AS \"children.leaves.tips.amount\" FROM roots LEFT JOIN children AS children ON roots.id = children.\"rootId\" LEFT JOIN leaves AS leaves ON children.id = leaves.\"childId\" LEFT JOIN tips AS tips ON leaves.id = tips.\"leafId\"",
+    "params": [],
+    "error": null,
+    "payloads": [
+      {
+        "path": "children",
+        "publicKey": "children",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "children_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "children.id"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "children.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "children.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          }
+        ],
+        "children": [
+          {
+            "path": "children.leaves",
+            "publicKey": "leaves",
+            "strategy": "join",
+            "outputMode": "flat",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "leaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "children.leaves.id"
+              },
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "children.leaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "children.leaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              }
+            ],
+            "children": [
+              {
+                "path": "children.leaves.tips",
+                "publicKey": "tips",
+                "strategy": "join",
+                "outputMode": "flat",
+                "table": "tips",
+                "isToOne": true,
+                "outputLabel": "tips_json",
+                "columns": [
+                  {
+                    "logicalName": "id",
+                    "physicalName": "id",
+                    "publicKey": "id",
+                    "outputLabel": "children.leaves.tips.id"
+                  },
+                  {
+                    "logicalName": "name",
+                    "physicalName": "name",
+                    "publicKey": "name",
+                    "outputLabel": "children.leaves.tips.name"
+                  },
+                  {
+                    "logicalName": "amount",
+                    "physicalName": "amount",
+                    "publicKey": "amount",
+                    "outputLabel": "children.leaves.tips.amount",
+                    "readHandling": {
+                      "kind": "nestedTransform",
+                      "table": "tips",
+                      "column": "amount",
+                      "js": "number",
+                      "outputKey": "amount"
+                    }
+                  }
+                ],
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "children.id": 2,
+        "children.name": "child",
+        "children.amount": "42",
+        "children.leaves.id": 2,
+        "children.leaves.name": "child",
+        "children.leaves.amount": "42",
+        "children.leaves.tips.id": 2,
+        "children.leaves.tips.name": "child",
+        "children.leaves.tips.amount": "42"
+      }
+    ]
+  },
+  {
+    "key": "nql/join/3/direct/flat/single/projection",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "NQL compilation failed: Column 'leaves' does not exist on table 'roots'. Available columns: id, tenant, name, amount"
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "key": "orm/join/3/direct/flat/single/ordered-limit",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "_InvalidOperationError",
+      "message": "Invalid include: Include include[0](children) limit is not supported by 'join' strategy. Remove the explicit join or use a strategy that limits per parent (json_agg, lateral)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "key": "external/join/3/direct/flat/single/ordered-limit",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "_InvalidOperationError",
+      "message": "Invalid include: Flat output for relation 'children' cannot use 'join' selected by defaultIncludeStrategy because the include or a nested include has a per-parent limit. Accepted strategies for flat output: 'join', 'lateral'; per-parent limits require 'lateral' with a dialect that supports lateral joins."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "key": "nql/join/3/direct/flat/single/ordered-limit",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "_InvalidOperationError",
+      "message": "Invalid include: Flat output for relation 'children' cannot use 'join' selected by defaultIncludeStrategy because the include or a nested include has a per-parent limit. Accepted strategies for flat output: 'join', 'lateral'; per-parent limits require 'lateral' with a dialect that supports lateral joins."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "key": "orm/join/3/direct/flat/single/predicate",
+    "sql": "SELECT roots.*, children.id AS \"children.id\", children.tenant AS \"children.tenant\", children.name AS \"children.name\", children.amount AS \"children.amount\", children.\"rootId\" AS \"children.rootId\", children.id AS __dbsp_presence_children, leaves.id AS \"children.leaves.id\", leaves.tenant AS \"children.leaves.tenant\", leaves.name AS \"children.leaves.name\", leaves.amount AS \"children.leaves.amount\", leaves.\"childId\" AS \"children.leaves.childId\", leaves.id AS \"__dbsp_presence_children.leaves\", tips.id AS \"children.leaves.tips.id\", tips.tenant AS \"children.leaves.tips.tenant\", tips.name AS \"children.leaves.tips.name\", tips.amount AS \"children.leaves.tips.amount\", tips.\"leafId\" AS \"children.leaves.tips.leafId\", tips.id AS \"__dbsp_presence_children.leaves.tips\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" JOIN leaves AS leaves ON children.id = leaves.\"childId\" JOIN tips AS tips ON leaves.id = tips.\"leafId\" WHERE children.name = $1 AND leaves.name = $2 AND tips.name = $3",
+    "params": [
+      "child",
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "children",
+        "publicKey": "children",
+        "strategy": "join",
+        "outputMode": "nested",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "children_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "children.id"
+          },
+          {
+            "logicalName": "tenant",
+            "physicalName": "tenant",
+            "publicKey": "tenant",
+            "outputLabel": "children.tenant"
+          },
+          {
+            "logicalName": "name",
+            "physicalName": "name",
+            "publicKey": "name",
+            "outputLabel": "children.name"
+          },
+          {
+            "logicalName": "amount",
+            "physicalName": "amount",
+            "publicKey": "amount",
+            "outputLabel": "children.amount",
+            "readHandling": {
+              "kind": "nestedTransform",
+              "table": "children",
+              "column": "amount",
+              "js": "number",
+              "outputKey": "amount"
+            }
+          },
+          {
+            "logicalName": "rootId",
+            "physicalName": "rootId",
+            "publicKey": "rootId",
+            "outputLabel": "children.rootId"
+          }
+        ],
+        "children": [
+          {
+            "path": "children.leaves",
+            "publicKey": "leaves",
+            "strategy": "join",
+            "outputMode": "nested",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "leaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "children.leaves.id"
+              },
+              {
+                "logicalName": "tenant",
+                "physicalName": "tenant",
+                "publicKey": "tenant",
+                "outputLabel": "children.leaves.tenant"
+              },
+              {
+                "logicalName": "name",
+                "physicalName": "name",
+                "publicKey": "name",
+                "outputLabel": "children.leaves.name"
+              },
+              {
+                "logicalName": "amount",
+                "physicalName": "amount",
+                "publicKey": "amount",
+                "outputLabel": "children.leaves.amount",
+                "readHandling": {
+                  "kind": "nestedTransform",
+                  "table": "leaves",
+                  "column": "amount",
+                  "js": "number",
+                  "outputKey": "amount"
+                }
+              },
+              {
+                "logicalName": "childId",
+                "physicalName": "childId",
+                "publicKey": "childId",
+                "outputLabel": "children.leaves.childId"
+              }
+            ],
+            "children": [
+              {
+                "path": "children.leaves.tips",
+                "publicKey": "tips",
+                "strategy": "join",
+                "outputMode": "nested",
+                "table": "tips",
+                "isToOne": true,
+                "outputLabel": "tips_json",
+                "columns": [
+                  {
+                    "logicalName": "id",
+                    "physicalName": "id",
+                    "publicKey": "id",
+                    "outputLabel": "children.leaves.tips.id"
+                  },
+                  {
+                    "logicalName": "tenant",
+                    "physicalName": "tenant",
+                    "publicKey": "tenant",
+                    "outputLabel": "children.leaves.tips.tenant"
+                  },
+                  {
+                    "logicalName": "name",
+                    "physicalName": "name",
+                    "publicKey": "name",
+                    "outputLabel": "children.leaves.tips.name"
+                  },
+                  {
+                    "logicalName": "amount",
+                    "physicalName": "amount",
+                    "publicKey": "amount",
+                    "outputLabel": "children.leaves.tips.amount",
+                    "readHandling": {
+                      "kind": "nestedTransform",
+                      "table": "tips",
+                      "column": "amount",
+                      "js": "number",
+                      "outputKey": "amount"
+                    }
+                  },
+                  {
+                    "logicalName": "leafId",
+                    "physicalName": "leafId",
+                    "publicKey": "leafId",
+                    "outputLabel": "children.leaves.tips.leafId"
+                  }
+                ],
+                "children": [],
+                "presence": {
+                  "outputLabel": "__dbsp_presence_children.leaves.tips",
+                  "physicalName": "id"
+                }
+              }
+            ],
+            "presence": {
+              "outputLabel": "__dbsp_presence_children.leaves",
+              "physicalName": "id"
+            }
+          }
+        ],
+        "presence": {
+          "outputLabel": "__dbsp_presence_children",
+          "physicalName": "id"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "children": {
+          "id": 2,
+          "tenant": 2,
+          "name": "child",
+          "amount": 42,
+          "rootId": 2,
+          "leaves": {
+            "id": 2,
+            "tenant": 2,
+            "name": "child",
+            "amount": 42,
+            "childId": 2,
+            "tips": {
+              "id": 2,
+              "tenant": 2,
+              "name": "child",
+              "amount": 42,
+              "leafId": 2
+            }
+          }
+        }
+      }
+    ]
+  },
+  {
+    "key": "external/join/3/direct/flat/single/predicate",
+    "sql": "SELECT roots.*, children.id AS \"children.id\", leaves.id AS \"children.leaves.id\", tips.id AS \"children.leaves.tips.id\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" JOIN leaves AS leaves ON children.id = leaves.\"childId\" JOIN tips AS tips ON leaves.id = tips.\"leafId\" WHERE children.name = $1 AND leaves.name = $2 AND tips.name = $3",
+    "params": [
+      "child",
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "children",
+        "publicKey": "children",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "children_json",
+        "columns": [
+          {
+            "logicalName": "id",
+            "physicalName": "id",
+            "publicKey": "id",
+            "outputLabel": "children.id"
+          }
+        ],
+        "children": [
+          {
+            "path": "children.leaves",
+            "publicKey": "leaves",
+            "strategy": "join",
+            "outputMode": "flat",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "leaves_json",
+            "columns": [
+              {
+                "logicalName": "id",
+                "physicalName": "id",
+                "publicKey": "id",
+                "outputLabel": "children.leaves.id"
+              }
+            ],
+            "children": [
+              {
+                "path": "children.leaves.tips",
+                "publicKey": "tips",
+                "strategy": "join",
+                "outputMode": "flat",
+                "table": "tips",
+                "isToOne": true,
+                "outputLabel": "tips_json",
+                "columns": [
+                  {
+                    "logicalName": "id",
+                    "physicalName": "id",
+                    "publicKey": "id",
+                    "outputLabel": "children.leaves.tips.id"
+                  }
+                ],
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "children.id": 2,
+        "children.leaves.id": 2,
+        "children.leaves.tips.id": 2
+      }
+    ]
+  },
+  {
+    "key": "nql/join/3/direct/flat/single/predicate",
+    "sql": "SELECT roots.id, tips.id AS \"children.leaves.tips.id\", tips.tenant AS \"children.leaves.tips.tenant\", tips.name AS \"children.leaves.tips.name\", tips.amount AS \"children.leaves.tips.amount\", tips.\"leafId\" AS \"children.leaves.tips.leafId\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" JOIN leaves AS leaves ON children.id = leaves.\"childId\" JOIN tips AS tips ON leaves.id = tips.\"leafId\" WHERE children.name = $1 AND leaves.name = $2 AND tips.name = $3",
+    "params": [
+      "child",
+      "child",
+      "child"
+    ],
+    "error": null,
+    "payloads": [
+      {
+        "path": "children",
+        "publicKey": "children",
+        "strategy": "join",
+        "outputMode": "flat",
+        "table": "children",
+        "isToOne": true,
+        "outputLabel": "children_json",
+        "columns": [],
+        "children": [
+          {
+            "path": "children.leaves",
+            "publicKey": "leaves",
+            "strategy": "join",
+            "outputMode": "flat",
+            "table": "leaves",
+            "isToOne": true,
+            "outputLabel": "leaves_json",
+            "columns": [],
+            "children": [
+              {
+                "path": "children.leaves.tips",
+                "publicKey": "tips",
+                "strategy": "join",
+                "outputMode": "flat",
+                "table": "tips",
+                "isToOne": true,
+                "outputLabel": "tips_json",
+                "columns": [
+                  {
+                    "logicalName": "id",
+                    "physicalName": "id",
+                    "publicKey": "id",
+                    "outputLabel": "children.leaves.tips.id"
+                  },
+                  {
+                    "logicalName": "tenant",
+                    "physicalName": "tenant",
+                    "publicKey": "tenant",
+                    "outputLabel": "children.leaves.tips.tenant"
+                  },
+                  {
+                    "logicalName": "name",
+                    "physicalName": "name",
+                    "publicKey": "name",
+                    "outputLabel": "children.leaves.tips.name"
+                  },
+                  {
+                    "logicalName": "amount",
+                    "physicalName": "amount",
+                    "publicKey": "amount",
+                    "outputLabel": "children.leaves.tips.amount",
+                    "readHandling": {
+                      "kind": "nestedTransform",
+                      "table": "tips",
+                      "column": "amount",
+                      "js": "number",
+                      "outputKey": "amount"
+                    }
+                  },
+                  {
+                    "logicalName": "leafId",
+                    "physicalName": "leafId",
+                    "publicKey": "leafId",
+                    "outputLabel": "children.leaves.tips.leafId"
+                  }
+                ],
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "children.leaves.tips.id": 2,
+        "children.leaves.tips.tenant": 2,
+        "children.leaves.tips.name": "child",
+        "children.leaves.tips.amount": "42",
+        "children.leaves.tips.leafId": 2
+      }
+    ]
+  }
+]

@@ -16,7 +16,7 @@ export type DeclaredRelationPathRelation = Pick<RelationIR, 'name' | 'target'> &
 			| 'throughSourceKey'
 			| 'throughTargetKey'
 		>
-	>;
+	> & { readonly recursive?: unknown };
 
 export interface DeclaredRelationPathModel<
 	R extends DeclaredRelationPathRelation,
@@ -111,6 +111,11 @@ export function resolveDeclaredRelationPath<
 		};
 		const sourceKey = toColumnList(relation.sourceKey);
 		const targetKey = toColumnList(relation.targetKey);
+		const isAncestor =
+			relation.recursive !== null &&
+			typeof relation.recursive === 'object' &&
+			'direction' in relation.recursive &&
+			relation.recursive.direction === 'up';
 		const junctionKey = (
 			canonical: RelationIR['foreignKey'],
 			alias: RelationIR['foreignKey'],
@@ -147,13 +152,16 @@ export function resolveDeclaredRelationPath<
 				targetKey,
 				relation.targetKey !== undefined,
 			);
-		} else if (relation.type === 'belongsTo') {
+		} else if (relation.type === 'belongsTo' || isAncestor) {
 			hop(
 				currentTable,
 				relation.target,
 				toColumnList(relation.foreignKey),
-				targetKey,
-				relation.targetKey !== undefined && relation.foreignKey !== undefined,
+				isAncestor ? sourceKey : targetKey,
+				(isAncestor
+					? relation.sourceKey !== undefined
+					: relation.targetKey !== undefined) &&
+					relation.foreignKey !== undefined,
 			);
 		} else if (relation.type === 'hasOne' || relation.type === 'hasMany') {
 			hop(

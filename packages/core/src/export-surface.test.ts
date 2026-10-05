@@ -59,6 +59,8 @@ const includeValidationExports = [
 	'validateRecursiveSetOperation',
 ];
 const internalNames = [
+	'resolveReportIncludes',
+	'observeIncludeDecisions',
 	...includeValidationExports,
 	...names(before.internal.declarations),
 	...names(moved),
@@ -68,6 +70,8 @@ const movedRuntime = before.root.runtime.filter((name) =>
 	names(moved).includes(name),
 );
 const internalRuntime = [
+	'resolveReportIncludes',
+	'observeIncludeDecisions',
 	...includeValidationExports,
 	...before.internal.runtime,
 	...movedRuntime,

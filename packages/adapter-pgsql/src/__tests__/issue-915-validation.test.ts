@@ -9,6 +9,7 @@ import { validateIncludeOrdering } from '@dbsp/core/internal';
 import type { PlanReport } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { asLegacyReport } from './legacy-include-report.js';
 
 const model = schema(
 	{
@@ -50,7 +51,9 @@ describe('#915 include validation', () => {
 		for (const strictMode of [true, false]) {
 			const orm = createOrm({ model, adapter, strictMode });
 			expect(() =>
-				orm.select('users').include('posts.author.posts').plan(),
+				asLegacyReport(
+					orm.select('users').include('posts.author.posts').plan(),
+				),
 			).toThrowError('Invalid include: Circular include detected: users.posts');
 		}
 	});
@@ -69,10 +72,12 @@ describe('#915 include validation', () => {
 			},
 		});
 		const keylessAdapter = createPgCompileOnlyAdapter({ model: keyless });
-		const original = plan(
-			{ type: 'select', from: 'users', include: [{ relation: 'posts' }] },
-			keyless,
-			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		const original = asLegacyReport(
+			plan(
+				{ type: 'select', from: 'users', include: [{ relation: 'posts' }] },
+				keyless,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			),
 		);
 		const external = {
 			...original,
@@ -104,10 +109,12 @@ describe('#915 include validation', () => {
 		);
 	});
 	it('refuses nonexistent recorded key columns even with a primary key', () => {
-		const original = plan(
-			{ type: 'select', from: 'posts', include: [{ relation: 'author' }] },
-			model,
-			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		const original = asLegacyReport(
+			plan(
+				{ type: 'select', from: 'posts', include: [{ relation: 'author' }] },
+				model,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			),
 		);
 		const external = {
 			...original,
@@ -129,14 +136,16 @@ describe('#915 include validation', () => {
 		);
 	});
 	it('refuses external recursive json_agg decisions', () => {
-		const original = plan(
-			{
-				type: 'select',
-				from: 'categories',
-				include: [{ relation: 'ancestors' }],
-			},
-			model,
-			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		const original = asLegacyReport(
+			plan(
+				{
+					type: 'select',
+					from: 'categories',
+					include: [{ relation: 'ancestors' }],
+				},
+				model,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			),
 		);
 		expect(() => adapter.compile(original)).not.toThrow();
 		const external = {

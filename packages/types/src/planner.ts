@@ -18,7 +18,7 @@ import type { NestedOutputReadHandling } from './output-provenance.js';
 /**
  * Aggregate ORDER BY key for deterministic json_agg include arrays.
  * Core keeps this dialect-neutral: entries are column names only. When
- * `PlanDecision.context.orderByFallback` is true, adapters decide how to
+ * `ResolvedIncludeNode.ordering.usesFallback` is true, adapters decide how to
  * realize the PK-less deterministic fallback for their dialect.
  */
 export type JsonAggOrderByEntry = string;
@@ -49,7 +49,7 @@ export interface PlanDecision {
 	/** Context: what triggered this decision */
 	readonly context: {
 		/** Source table in the decision */
-		readonly sourceTable: string;
+		readonly sourceTable?: string;
 		/** Target table or relation name */
 		readonly target?: string;
 		/** Relation name if applicable */
@@ -79,6 +79,7 @@ export interface PlanDecision {
 		/** Whether the relation is self-referential (source === target) */
 		readonly recursiveInclude?: import('./intent/include-intent.js').IncludeRecursiveOptions;
 		readonly isSelfRef?: boolean;
+		readonly nodeId?: string;
 	};
 
 	/** The choice made */
@@ -190,6 +191,12 @@ export interface IncludePayloadShape {
 }
 
 export interface PlanReport {
+	/** Normative include execution; absent only on legacy external reports. */
+	readonly execution?: import('./resolved-includes.js').IncludeExecution;
+	/** Adapter-owned payload descriptors indexed by resolved include identity. */
+	readonly includePayloadsByNodeId?: Readonly<
+		Record<string, IncludePayloadShape>
+	>;
 	/** Required at hydration time for json_agg, join and lateral include decisions. */
 	readonly includePayloads?: readonly IncludePayloadShape[];
 	/** Root table for the query */

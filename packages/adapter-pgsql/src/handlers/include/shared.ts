@@ -4,57 +4,8 @@
  * Extracted from lateral.ts and json-agg.ts to eliminate FK direction duplication.
  */
 
-import {
-	type ColumnListInput,
-	resolveJsonAggOrderKey,
-	toColumnList,
-} from '@dbsp/types';
-import {
-	DEFAULT_PK_COLUMN,
-	defaultFkDerivation,
-	type FkColumnDerivation,
-} from '../../assert-field.js';
+import { resolveJsonAggOrderKey, toColumnList } from '@dbsp/types';
 import type { CompilerContext, Decision } from '../types.js';
-
-/** Minimal shape required by deriveFkColumns — works with both Decision and PlanDecision. */
-export interface FkColumnSource {
-	readonly relationType?: 'belongsTo' | 'hasMany' | 'hasOne';
-	readonly foreignKey?: ColumnListInput;
-	readonly parentKey?: ColumnListInput;
-	readonly targetTable?: string;
-}
-
-/**
- * Derive the source (parent-side) and target (child-side) column names
- * based on the relation type and FK configuration.
- *
- * For belongsTo: the FK is on the parent side (e.g., user_roles.role_id → roles.id)
- *   → sourceColumn = foreignKey (role_id), targetColumn = parentKey (id)
- * For hasMany/hasOne: the FK is on the child side (e.g., roles.id ← role_permissions.role_id)
- *   → sourceColumn = parentKey (id), targetColumn = foreignKey (role_id)
- */
-export function deriveFkColumns(
-	decision: FkColumnSource,
-	parentTable: string,
-	defaultPk: string = DEFAULT_PK_COLUMN,
-	deriveFk: FkColumnDerivation = defaultFkDerivation,
-): { sourceColumn: ColumnListInput; targetColumn: ColumnListInput } {
-	if (decision.relationType === 'belongsTo') {
-		return {
-			sourceColumn:
-				decision.foreignKey ??
-				(decision.targetTable
-					? deriveFk(decision.targetTable, defaultPk)
-					: defaultPk),
-			targetColumn: decision.parentKey ?? defaultPk,
-		};
-	}
-	// hasMany or hasOne
-	return {
-		sourceColumn: decision.parentKey ?? defaultPk,
-		targetColumn: decision.foreignKey ?? deriveFk(parentTable, defaultPk),
-	};
-}
 
 /** Resolve a field-only total order once for every ordered include strategy. */
 export function resolveIncludeOrder(
@@ -69,6 +20,29 @@ export function resolveIncludeOrder(
 	}[];
 	fallback: boolean;
 } {
+	if (decision.resolvedInclude) {
+		const ordering = decision.resolvedInclude.ordering;
+		const entries: {
+			field: string;
+			direction: 'ASC' | 'DESC';
+			nulls: 'FIRST' | 'LAST' | 'DEFAULT';
+		}[] = (ordering.authored ?? []).map((entry) => ({
+			field: entry.field,
+			direction: entry.direction === 'desc' ? 'DESC' : 'ASC',
+			nulls:
+				entry.nulls === undefined
+					? 'DEFAULT'
+					: entry.nulls === 'first'
+						? 'FIRST'
+						: 'LAST',
+		}));
+		const used = new Set(entries.map((entry) => entry.field));
+		for (const field of ordering.fallback)
+			if (!used.has(field))
+				entries.push({ field, direction: 'ASC', nulls: 'LAST' });
+		return { entries, fallback: ordering.usesFallback };
+	}
+
 	const path = decision.relationPath ?? decision.relation ?? 'include';
 	const table = ctx.model?.getTable(targetTable);
 	if (decision.includeOrderBy === undefined && decision.limit === undefined) {

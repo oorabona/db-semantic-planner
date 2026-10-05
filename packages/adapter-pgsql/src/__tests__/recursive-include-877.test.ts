@@ -6,6 +6,7 @@ import {
 	createPgAdapter,
 	createPgCompileOnlyAdapter,
 } from '../pgsql-adapter.js';
+import { asLegacyReport } from './legacy-include-report.js';
 
 const db = schema({
 	categories: {
@@ -310,7 +311,7 @@ describe('#877 shared plan/compile refusals', () => {
 		['row locks', { lock: { strength: 'update', waitPolicy: 'block' } }],
 	] as const)
 		it(`refuses root ${JSON.stringify(patch)} in plan and compile`, () => {
-			const report = valid();
+			const report = asLegacyReport(valid());
 			const intent = { ...report.intent!, ...patch };
 			expect(() =>
 				plan(intent as QueryIntent, db.model, {
@@ -332,7 +333,7 @@ describe('#877 shared plan/compile refusals', () => {
 		],
 	] as const)
 		it(`refuses include ${name} in plan and compile`, () => {
-			const report = valid();
+			const report = asLegacyReport(valid());
 			const include = { ...report.intent!.include![0]!, ...patch };
 			const intent = { ...report.intent!, include: [include] } as QueryIntent;
 			expect(() =>
@@ -345,7 +346,7 @@ describe('#877 shared plan/compile refusals', () => {
 			);
 		});
 	it('refuses a recursive include under an ordinary include', () => {
-		const report = valid();
+		const report = asLegacyReport(valid());
 		const intent = {
 			...report.intent!,
 			include: [{ relation: 'parent', include: report.intent!.include }],
@@ -357,7 +358,9 @@ describe('#877 shared plan/compile refusals', () => {
 		).toThrow(
 			'Recursive include option include does not support nested recursive includes is not supported',
 		);
-		const outer = orm.select('categories').include('parent').plan();
+		const outer = asLegacyReport(
+			orm.select('categories').include('parent').plan(),
+		);
 		expect(() =>
 			adapter.compile({
 				...outer,
@@ -452,7 +455,7 @@ describe('#877 shared plan/compile refusals', () => {
 			getTable: db.model.getTable.bind(db.model),
 			getRelationsFrom: db.model.getRelationsFrom.bind(db.model),
 		} as ModelIR;
-		const report = valid();
+		const report = asLegacyReport(valid());
 		expect(() =>
 			plan(report.intent!, model, {
 				dialectCapabilities: adapter.dialectCapabilities,
@@ -477,7 +480,7 @@ describe('#877 shared plan/compile refusals', () => {
 			getTable: db.model.getTable.bind(db.model),
 			getRelationsFrom: db.model.getRelationsFrom.bind(db.model),
 		} as ModelIR;
-		const report = valid();
+		const report = asLegacyReport(valid());
 		expect(() =>
 			plan(report.intent!, model, {
 				dialectCapabilities: adapter.dialectCapabilities,

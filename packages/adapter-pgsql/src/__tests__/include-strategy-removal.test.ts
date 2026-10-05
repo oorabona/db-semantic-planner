@@ -2,6 +2,7 @@ import { createOrm, ref, schema } from '@dbsp/core';
 import type { IncludeStrategy, PlanReport } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { asLegacyReport } from './legacy-include-report.js';
 
 const db = schema({
 	users: { id: { type: 'integer', primaryKey: true } },
@@ -46,7 +47,7 @@ describe('#894 removed include strategy refusal', () => {
 		);
 	});
 	it('refuses an adapter include-strategy decision before SQL lowering', () => {
-		const p = orm.select('users').include('posts').plan();
+		const p = asLegacyReport(orm.select('users').include('posts').plan());
 		const stale = {
 			...p,
 			decisions: p.decisions.map((d) =>
@@ -133,7 +134,7 @@ describe('#900 recursive strategy contract', () => {
 		).toBe('json_agg');
 	});
 	it('refuses auto as an adapter decision and lists only resolved strategies', () => {
-		const p = orm.select('users').include('posts').dump().plan!;
+		const p = asLegacyReport(orm.select('users').include('posts').dump().plan!);
 		const unresolved = {
 			...p,
 			decisions: p.decisions.map((d) =>

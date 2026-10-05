@@ -17,6 +17,7 @@ import { describe, expect, it, vi } from 'vitest';
 import * as compiler from '../compiler.js';
 import { joinIncludeHandler } from '../handlers/include/join.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { asLegacyReport } from './legacy-include-report.js';
 
 const model = schema({
 	users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
@@ -46,14 +47,16 @@ function errorOf(run: () => unknown): Error {
 }
 function report(): Mutable<PlanReport> {
 	return {
-		...plan(
-			{
-				type: 'select',
-				from: 'posts',
-				include: [{ relation: 'author', join: 'left' }],
-			},
-			model,
-			caps,
+		...asLegacyReport(
+			plan(
+				{
+					type: 'select',
+					from: 'posts',
+					include: [{ relation: 'author', join: 'left' }],
+				},
+				model,
+				caps,
+			),
 		),
 	};
 }
@@ -97,10 +100,12 @@ describe('#915 / #917 / #927 public include contract', () => {
 			for (const { strategy, options } of cases) {
 				const include: IncludeIntent = { relation: 'author', ...options };
 				const expected = errorOf(() =>
-					plan({ type: 'select', from: 'posts', include: [include] }, model, {
-						...caps,
-						defaultIncludeStrategy: strategy,
-					}),
+					asLegacyReport(
+						plan({ type: 'select', from: 'posts', include: [include] }, model, {
+							...caps,
+							defaultIncludeStrategy: strategy,
+						}),
+					),
 				);
 				const external = report();
 				external.intent = { ...external.intent!, include: [include] };
@@ -123,14 +128,16 @@ describe('#915 / #917 / #927 public include contract', () => {
 				'author.name AS "author.name"',
 			);
 			for (const strategy of ['json_agg', 'lateral'] as const) {
-				const original = plan(
-					{
-						type: 'select',
-						from: 'posts',
-						include: [{ relation: 'author', limit: 1 }],
-					},
-					model,
-					{ ...caps, defaultIncludeStrategy: strategy },
+				const original = asLegacyReport(
+					plan(
+						{
+							type: 'select',
+							from: 'posts',
+							include: [{ relation: 'author', limit: 1 }],
+						},
+						model,
+						{ ...caps, defaultIncludeStrategy: strategy },
+					),
 				);
 				const intent: QueryIntent = {
 					...original.intent,
@@ -142,10 +149,12 @@ describe('#915 / #917 / #927 public include contract', () => {
 						},
 					],
 				};
-				const ordered = plan(intent, model, {
-					...caps,
-					defaultIncludeStrategy: strategy,
-				});
+				const ordered = asLegacyReport(
+					plan(intent, model, {
+						...caps,
+						defaultIncludeStrategy: strategy,
+					}),
+				);
 				expect(adapter.compile({ ...original, intent }).sql).toBe(
 					adapter.compile(ordered).sql,
 				);
@@ -164,20 +173,22 @@ describe('#915 / #917 / #927 public include contract', () => {
 			Number.MAX_SAFE_INTEGER + 1,
 			'1',
 		]) {
-			const base = plan(
-				{
-					type: 'select',
-					from: 'comments',
-					include: [
-						{
-							relation: 'post',
-							join: 'left',
-							include: [{ relation: 'author', join: 'left' }],
-						},
-					],
-				},
-				model,
-				caps,
+			const base = asLegacyReport(
+				plan(
+					{
+						type: 'select',
+						from: 'comments',
+						include: [
+							{
+								relation: 'post',
+								join: 'left',
+								include: [{ relation: 'author', join: 'left' }],
+							},
+						],
+					},
+					model,
+					caps,
+				),
 			);
 			const include = {
 				relation: 'post',
@@ -211,7 +222,9 @@ describe('#915 / #917 / #927 public include contract', () => {
 				...external.intent!,
 				include: [{ relation: 'author', join: 'left', select }],
 			};
-			const expected = errorOf(() => plan(external.intent!, model, caps));
+			const expected = errorOf(() =>
+				asLegacyReport(plan(external.intent!, model, caps)),
+			);
 			expect(errorOf(() => adapter.compile(external)).message).toBe(
 				expected.message,
 			);
@@ -247,10 +260,12 @@ describe('#915 / #917 / #927 public include contract', () => {
 	it('normalized collisions expose candidates and include path in both planning modes and compilation', () => {
 		for (const strict of [true, false]) {
 			const error = errorOf(() =>
-				createOrm({ model, adapter, strictMode: strict })
-					.select('comments')
-					.include('post.fooBAr')
-					.plan(),
+				asLegacyReport(
+					createOrm({ model, adapter, strictMode: strict })
+						.select('comments')
+						.include('post.fooBAr')
+						.plan(),
+				),
 			);
 			expect(error).toBeInstanceOf(AmbiguousIncludeError);
 			expect(error).toMatchObject({
@@ -261,14 +276,16 @@ describe('#915 / #917 / #927 public include contract', () => {
 				'Ambiguous include relation "fooBAr" from table "posts" at "post.fooBAr". Use the exact relation name or "via" to specify one of: foo_b_ar, foo_bAr',
 			);
 		}
-		const chosen = plan(
-			{
-				type: 'select',
-				from: 'posts',
-				include: [{ relation: 'users', join: 'left' }],
-			},
-			model,
-			{ ...caps, disambiguate: { 'posts.users': 'author' } },
+		const chosen = asLegacyReport(
+			plan(
+				{
+					type: 'select',
+					from: 'posts',
+					include: [{ relation: 'users', join: 'left' }],
+				},
+				model,
+				{ ...caps, disambiguate: { 'posts.users': 'author' } },
+			),
 		);
 		expect(adapter.compile(chosen).sql).toContain('LEFT JOIN users AS author');
 
@@ -289,10 +306,12 @@ describe('#915 / #917 / #927 public include contract', () => {
 		for (const strict of [true, false]) {
 			expect(
 				errorOf(() =>
-					createOrm({ model, adapter, strictMode: strict })
-						.select('posts')
-						.include('nope', { join: 'left' })
-						.plan(),
+					asLegacyReport(
+						createOrm({ model, adapter, strictMode: strict })
+							.select('posts')
+							.include('nope', { join: 'left' })
+							.plan(),
+					),
 				).message,
 			).toBe(
 				'Invalid include: Unknown relation "nope" from table "posts" at "nope"',
@@ -300,13 +319,15 @@ describe('#915 / #917 / #927 public include contract', () => {
 		}
 		expect(
 			errorOf(() =>
-				plan(
-					{
-						type: 'select',
-						from: 'posts',
-						include: [{ relation: 'nope', join: 'left' }],
-					},
-					model,
+				asLegacyReport(
+					plan(
+						{
+							type: 'select',
+							from: 'posts',
+							include: [{ relation: 'nope', join: 'left' }],
+						},
+						model,
+					),
 				),
 			).message,
 		).toBe(
@@ -330,48 +351,56 @@ describe('#915 / #917 / #927 public include contract', () => {
 	});
 
 	it('flat via paths compile at the root and in nested includes', () => {
-		const top = plan(
-			{
-				type: 'select',
-				from: 'users',
-				include: [
-					{
-						relation: 'posts',
-						via: 'createdPosts',
-						strategy: 'flat',
-						select: { type: 'fields', fields: ['title'] },
-					},
-				],
-			},
-			model,
-			caps,
+		const top = asLegacyReport(
+			plan(
+				{
+					type: 'select',
+					from: 'users',
+					include: [
+						{
+							relation: 'posts',
+							via: 'createdPosts',
+							strategy: 'flat',
+							select: { type: 'fields', fields: ['title'] },
+						},
+					],
+				},
+				model,
+				caps,
+			),
 		);
 		expect(adapter.compile(top).sql).toBe(
 			'SELECT users.*, "createdPosts".id AS "createdPosts.id", "createdPosts".title AS "createdPosts.title" FROM users LEFT JOIN posts AS "createdPosts" ON users.id = "createdPosts"."authorId"',
 		);
-		const nested = plan(
-			{
-				type: 'select',
-				from: 'comments',
-				include: [
-					{
-						relation: 'post',
-						strategy: 'flat',
-						include: [
-							{
-								relation: 'users',
-								via: 'author',
-								strategy: 'flat',
-								include: [
-									{ relation: 'posts', via: 'createdPosts', strategy: 'flat' },
-								],
-							},
-						],
-					},
-				],
-			},
-			model,
-			caps,
+		const nested = asLegacyReport(
+			plan(
+				{
+					type: 'select',
+					from: 'comments',
+					include: [
+						{
+							relation: 'post',
+							strategy: 'flat',
+							include: [
+								{
+									relation: 'users',
+									via: 'author',
+									strategy: 'flat',
+									include: [
+										{
+											relation: 'posts',
+											via: 'createdPosts',
+											strategy: 'flat',
+										},
+									],
+								},
+							],
+						},
+					],
+				},
+				model,
+				caps,
+			),
 		);
 		expect(adapter.compile(nested).sql).toContain(
 			'LEFT JOIN posts AS "createdPosts" ON author.id = "createdPosts"."authorId"',

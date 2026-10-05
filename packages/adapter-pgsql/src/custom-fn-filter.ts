@@ -8,12 +8,12 @@ import {
 } from './assert-field.js';
 import type { ConditionCompilerCtx } from './condition-context.js';
 import { createSubqueryBuilder } from './condition-subquery.js';
-import { deriveFkColumns } from './handlers/include/shared.js';
 import type {
 	CompilerContext as HandlerCompilerContext,
 	CompilerState as HandlerCompilerState,
 	Decision as HandlerDecision,
 } from './handlers/types.js';
+import { deriveConditionKeys } from './legacy-condition-keys.js';
 import type { PlanDecision, PlanExpressionOrderBy } from './plan-decision.js';
 
 function isJsonAggOrderBy(
@@ -62,15 +62,14 @@ export function mapToHandlerDecision(
 			column: o.field,
 			direction: (o.direction?.toUpperCase() ?? 'ASC') as 'ASC' | 'DESC',
 		}));
-	const derivedFkColumns = deriveFkColumns(
-		pd,
-		pd.sourceTable ?? rootTable,
-		defaultPk,
-		deriveFk,
-	);
+	const derivedFkColumns = pd.resolvedInclude
+		? { sourceColumn: pd.sourceColumn!, targetColumn: pd.targetColumn! }
+		: deriveConditionKeys(pd, pd.sourceTable ?? rootTable, defaultPk, deriveFk);
 	const subqueryOperator = pd.subqueryOperator;
 	return {
 		type: pd.type,
+		resolvedInclude: pd.resolvedInclude,
+		includePredicate: pd.includePredicate,
 		table: pd.table,
 		column: pd.column ?? pd.field,
 		alias: pd.alias,

@@ -1275,10 +1275,13 @@ const next = await orm.select('users')
 
 ### Observability
 
+`dump().plan` preserves the original intent, decisions, warnings and metadata. `execution` holds resolved includes; include decisions describe the choice without carrying execution authority.
+
 ```typescript
 // Execution plan (no database call)
 const plan = orm.select('users').include('posts').plan();
-console.log(plan.decisions);  // [{ type: 'include-strategy', choice: 'json_agg', ... }]
+console.log(plan.execution?.includes); // Resolved includes and query ranges
+console.log(plan.decisions);  // Strategy observations; context: { intentPath, nodeId }
 console.log(plan.warnings);   // [{ type: 'performance', message: '...' }]
 
 // Full dump: plan + SQL + params

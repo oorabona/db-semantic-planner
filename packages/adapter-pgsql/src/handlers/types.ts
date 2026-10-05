@@ -381,6 +381,8 @@ export function createCompilerState(): CompilerState {
  * Base decision interface matching core's PlanDecision structure.
  */
 export interface Decision {
+	readonly resolvedInclude?: import('@dbsp/types').ResolvedIncludeNode;
+	readonly includePredicate?: import('@dbsp/types').ResolvedIncludeNode['predicate'];
 	readonly type: string;
 	readonly table?: string;
 	readonly column?: string;

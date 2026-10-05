@@ -2,6 +2,7 @@ import {
 	assertNoManyToManyRootRelations,
 	assertNoRecursiveRootRelations,
 } from './condition-compiler-factory.js';
+import { lowerResolvedIncludes } from './resolved-include-decisions.js';
 /**
  * SELECT compilation: converts PlanReport to CompiledQuery.
  * Extracted from PgAdapter.compile().
@@ -13,6 +14,8 @@ import { POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 import {
 	countDistinctRelationPathsByName,
 	normalizeRecursiveIncludeOptions,
+	observeIncludeDecisions,
+	resolveReportIncludes,
 	validateIncludeInput,
 	validateIncludeOptions,
 	validateIncludeOrdering,
@@ -76,8 +79,6 @@ import { createTypeCastParamRef } from './param-ref.js';
 import {
 	convertDottedFieldsToExists,
 	enrichExistsDecisionsInPlace,
-	extractAllIncludeDecisions,
-	synthesizeMissingJoinDecisions,
 } from './plan-decision-extractor.js';
 import {
 	finalizeEnvelope,
@@ -659,52 +660,13 @@ type RelationColumnEntry = {
  */
 function buildRelationColumnsMap(
 	decisions: PlanDecision[],
-	includedRelations: Set<string>,
 ): Map<string, RelationColumnEntry[]> {
 	const map = new Map<string, RelationColumnEntry[]>();
-
-	for (const d of decisions) {
-		if (!(d.type === 'selectRelationColumn' && d.relation && d.column))
-			continue;
-
-		const col = d.column as string;
-		const alias = d.alias as string | undefined;
-		const fullRelation = d.relation as string;
-		if (!includedRelations.has(fullRelation)) continue;
-
-		// Use full path as map key so 'callee.file' is stored separately
-		// from 'callee' — avoids injecting 2-hop columns into 1-hop includes.
-		const mapKey = fullRelation;
-
-		const existing = map.get(mapKey);
-		if (existing) {
-			if (
-				!existing.some(
-					(e) =>
-						e.col === col &&
-						e.alias === alias &&
-						e.defaultLabel === (d.defaultRelationColumnLabel || undefined) &&
-						e.nqlLabel === (d.relationColumnLabelOrigin === 'nql' || undefined),
-				)
-			)
-				existing.push({
-					col,
-					...(alias !== undefined && { alias }),
-					...(d.defaultRelationColumnLabel && { defaultLabel: true }),
-					...(d.relationColumnLabelOrigin === 'nql' && { nqlLabel: true }),
-				});
-		} else {
-			map.set(mapKey, [
-				{
-					col,
-					...(alias !== undefined && { alias }),
-					...(d.defaultRelationColumnLabel && { defaultLabel: true }),
-					...(d.relationColumnLabelOrigin === 'nql' && { nqlLabel: true }),
-				},
-			]);
-		}
+	for (const decision of includeDecisions(decisions)) {
+		const requests = decision.resolvedInclude?.projectionRequests;
+		const path = decision.relationPath ?? decision.relationName;
+		if (requests?.length && path) map.set(path, [...requests]);
 	}
-
 	return map;
 }
 
@@ -1502,8 +1464,8 @@ export function compileSelectEnvelope<T = unknown>(
 	}
 	let hydrationPlan: PlanReport | undefined;
 	// planForCompilation: a view of the plan where .intent is the executable intent.
-	// Passed to extractor helpers (extractExistsDecisions, synthesizeMissingJoinDecisions,
-	// extractAllIncludeDecisions) so they read the correct WHERE for SQL generation.
+	// Condition extraction still consumes executable WHERE until PR 3.
+	// Includes consume execution nodes, independently of this intent view.
 	// buildSimplifiedPlanReport also uses it for batchValuesSource / existsWrap / lock.
 	let planForCompilation: PlanReport =
 		plan.executableIntent !== undefined
@@ -1512,103 +1474,123 @@ export function compileSelectEnvelope<T = unknown>(
 	let simplifiedPlan: SimplifiedPlanReport;
 
 	if (execIntent) {
-		const strategies = new Map<string, string>();
-		const includeAssignments: Record<string, IncludeAssignment | undefined> =
-			Object.create(null);
-		// Older externally constructed plans may omit intentPath. Index their
-		// aliases once; refuse assignments that cannot identify a unique include.
-		const legacyStrategies = new Map<string, IncludeAssignment>();
-		for (const decision of planForCompilation.decisions) {
-			if (decision.type !== 'include-strategy') continue;
-			const strategy = validateResolvedIncludeStrategy(
-				decision.choice,
-				deps.dialectCapabilities,
-			);
-			if (decision.context.intentPath) {
-				if (includeAssignments[decision.context.intentPath])
-					throw new Error(
-						`Include ${decision.context.intentPath} has duplicate include-strategy decisions`,
-					);
-				strategies.set(decision.context.intentPath, strategy);
-				includeAssignments[decision.context.intentPath] = {
-					strategy,
-					decision,
-				};
-			} else {
-				for (const alias of new Set([
-					decision.context.relation,
-					decision.context.includeAlias,
-				])) {
-					if (!alias) continue;
-					if (legacyStrategies.has(alias)) {
+		if (!planForCompilation.execution) {
+			const strategies = new Map<string, string>();
+			const includeAssignments: Record<string, IncludeAssignment | undefined> =
+				Object.create(null);
+			// Older externally constructed plans may omit intentPath. Index their
+			// aliases once; refuse assignments that cannot identify a unique include.
+			const legacyStrategies = new Map<string, IncludeAssignment>();
+			for (const decision of planForCompilation.decisions) {
+				if (decision.type !== 'include-strategy') continue;
+				const strategy = validateResolvedIncludeStrategy(
+					decision.choice,
+					deps.dialectCapabilities,
+				);
+				if (decision.context.intentPath) {
+					if (includeAssignments[decision.context.intentPath])
 						throw new Error(
-							`Ambiguous include relation '${alias}': context.intentPath is required for unique strategy assignment (#894).`,
+							`Include ${decision.context.intentPath} has duplicate include-strategy decisions`,
 						);
-					}
-					legacyStrategies.set(alias, { strategy, decision });
-				}
-			}
-		}
-		if (legacyStrategies.size > 0) {
-			const assignedDecisions = new Set<object>();
-			const indexLegacy = (
-				includes: readonly IncludeIntent[] | undefined,
-				parent = '',
-			): void => {
-				for (const [index, include] of (includes ?? []).entries()) {
-					const path = `${parent}include[${index}]`;
-					const legacy = legacyStrategies.get(include.via ?? include.relation);
-					if (legacy) {
-						if (assignedDecisions.has(legacy.decision)) {
+					strategies.set(decision.context.intentPath, strategy);
+					includeAssignments[decision.context.intentPath] = {
+						strategy,
+						decision,
+					};
+				} else {
+					for (const alias of new Set([
+						decision.context.relation,
+						decision.context.includeAlias,
+					])) {
+						if (!alias) continue;
+						if (legacyStrategies.has(alias)) {
 							throw new Error(
-								`Ambiguous include relation '${include.relation}': context.intentPath is required for unique strategy assignment (#894).`,
+								`Ambiguous include relation '${alias}': context.intentPath is required for unique strategy assignment (#894).`,
 							);
 						}
-						assignedDecisions.add(legacy.decision);
-						if (!strategies.has(path)) {
-							strategies.set(path, legacy.strategy);
-							includeAssignments[path] = legacy;
-						}
+						legacyStrategies.set(alias, { strategy, decision });
 					}
-					indexLegacy(include.include, `${path}.`);
 				}
+			}
+			if (legacyStrategies.size > 0) {
+				const assignedDecisions = new Set<object>();
+				const indexLegacy = (
+					includes: readonly IncludeIntent[] | undefined,
+					parent = '',
+				): void => {
+					for (const [index, include] of (includes ?? []).entries()) {
+						const path = `${parent}include[${index}]`;
+						const legacy = legacyStrategies.get(
+							include.via ?? include.relation,
+						);
+						if (legacy) {
+							if (assignedDecisions.has(legacy.decision)) {
+								throw new Error(
+									`Ambiguous include relation '${include.relation}': context.intentPath is required for unique strategy assignment (#894).`,
+								);
+							}
+							assignedDecisions.add(legacy.decision);
+							if (!strategies.has(path)) {
+								strategies.set(path, legacy.strategy);
+								includeAssignments[path] = legacy;
+							}
+						}
+						indexLegacy(include.include, `${path}.`);
+					}
+				};
+				indexLegacy(execIntent.include);
+			}
+			const assignedLegacyDecisions = new Set(
+				Object.values(includeAssignments).map((a) => a?.decision),
+			);
+			for (const legacy of new Set(legacyStrategies.values()))
+				if (!assignedLegacyDecisions.has(legacy.decision))
+					throw new Error(
+						`Include ${legacy.decision.context.relation} has no matching intent include`,
+					);
+			validateReportIncludes(
+				execIntent.include,
+				resolvedModelForCompiler,
+				plan.rootTable,
+				includeAssignments,
+				compilerOptions,
+				execIntent,
+			);
+			assertSupportedIncludeWhere(execIntent.include, strategies);
+			const resolvedByOriginal = new Map<
+				PlanReport['decisions'][number],
+				PlanReport['decisions'][number]
+			>();
+			for (const assignment of Object.values(includeAssignments)) {
+				if (assignment?.context)
+					resolvedByOriginal.set(assignment.decision, {
+						...assignment.decision,
+						context: assignment.context,
+					});
+			}
+			planForCompilation = {
+				...planForCompilation,
+				decisions: planForCompilation.decisions.map(
+					(d) => resolvedByOriginal.get(d) ?? d,
+				),
 			};
-			indexLegacy(execIntent.include);
+			planForCompilation = {
+				...planForCompilation,
+				execution: resolveReportIncludes(
+					{ ...execIntent, from: execIntent.from ?? plan.rootTable },
+					planForCompilation.decisions,
+					resolvedModelForCompiler,
+					{ defaultPk: deps.defaultPk, deriveFk: deps.deriveFk },
+				),
+				decisions: observeIncludeDecisions(planForCompilation.decisions),
+			};
 		}
-		const assignedLegacyDecisions = new Set(
-			Object.values(includeAssignments).map((a) => a?.decision),
-		);
-		for (const legacy of new Set(legacyStrategies.values()))
-			if (!assignedLegacyDecisions.has(legacy.decision))
-				throw new Error(
-					`Include ${legacy.decision.context.relation} has no matching intent include`,
-				);
-		validateReportIncludes(
-			execIntent.include,
-			resolvedModelForCompiler,
-			plan.rootTable,
-			includeAssignments,
-			compilerOptions,
+		validateExecutionIncludes(
+			planForCompilation.execution!,
 			execIntent,
+			resolvedModelForCompiler,
 		);
-		assertSupportedIncludeWhere(execIntent.include, strategies);
-		const resolvedByOriginal = new Map<
-			PlanReport['decisions'][number],
-			PlanReport['decisions'][number]
-		>();
-		for (const assignment of Object.values(includeAssignments)) {
-			if (assignment?.context)
-				resolvedByOriginal.set(assignment.decision, {
-					...assignment.decision,
-					context: assignment.context,
-				});
-		}
-		planForCompilation = {
-			...planForCompilation,
-			decisions: planForCompilation.decisions.map(
-				(d) => resolvedByOriginal.get(d) ?? d,
-			),
-		};
+
 		if (execIntent.where) {
 			assertNoRecursiveRootRelations(execIntent.where);
 			assertNoManyToManyRootRelations(
@@ -1657,42 +1639,10 @@ export function compileSelectEnvelope<T = unknown>(
 				options?.model ?? deps.model,
 			);
 
-		// Phase 3: Extract ALL include decisions (json_agg, join, lateral, cte)
-		const unifiedIncludeDecisions = extractAllIncludeDecisions(
-			planForCompilation,
+		const enrichedUnifiedDecisions = lowerResolvedIncludes(
+			planForCompilation.execution!,
 			deps.defaultPk,
-			deps.deriveFk,
 		);
-
-		// Synthesis recovers joins from legacy or externally incomplete reports.
-		const coveredByPlanner = new Set(
-			unifiedIncludeDecisions
-				.filter((d) => d.type === 'includeStrategy')
-				.map((d) => d.intentPath as string)
-				.filter(Boolean),
-		);
-		const synthesizedModel = options?.model ?? deps.model;
-		const synthesizedJoins = synthesizedModel
-			? synthesizeMissingJoinDecisions(
-					planForCompilation,
-					coveredByPlanner,
-					synthesizedModel,
-					deps.defaultPk,
-					deps.deriveFk,
-				)
-			: [];
-		const allUnifiedIncludeDecisions =
-			synthesizedJoins.length > 0
-				? [...synthesizedJoins, ...unifiedIncludeDecisions]
-				: unifiedIncludeDecisions;
-
-		// Include decisions are independent of any sibling exists() filter.
-		// The exists() only filters which root rows are selected; the include
-		// subquery correlates on the FK only and returns ALL related rows.
-		// Spread to mutable array — downstream helpers mutate in-place.
-		const enrichedUnifiedDecisions: PlanDecision[] = [
-			...allUnifiedIncludeDecisions,
-		];
 
 		applyJoinHydrationPrefixes(enrichedUnifiedDecisions);
 
@@ -1709,8 +1659,7 @@ export function compileSelectEnvelope<T = unknown>(
 			// Collect specific columns from selectRelationColumn decisions and inject
 			// them into matching includeStrategy decisions, then validate against schema.
 			const relationColumnsMap = buildRelationColumnsMap(
-				decisions,
-				includedRelations,
+				enrichedUnifiedDecisions,
 			);
 			injectAndValidateRelationColumns(
 				enrichedUnifiedDecisions,
@@ -1783,7 +1732,14 @@ export function compileSelectEnvelope<T = unknown>(
 			},
 		);
 		hydrationPlan =
-			includePayloads.length > 0 ? { ...plan, includePayloads } : undefined;
+			includePayloads.length > 0
+				? {
+						...planForCompilation,
+						intent: plan.intent,
+						includePayloads,
+						includePayloadsByNodeId: payloadsByNodeId(enrichedUnifiedDecisions),
+					}
+				: undefined;
 
 		const deduplicatedDecisions =
 			includedRelations.size > 0
@@ -1900,4 +1856,198 @@ export function compileSelect<T = unknown>(
 	deps: AdapterCompilerDeps,
 ): CompiledQuery<T> {
 	return finalizeEnvelope(compileSelectEnvelope(plan, options, deps));
+}
+
+function payloadsByNodeId(
+	decisions: readonly PlanDecision[],
+): Readonly<Record<string, import('@dbsp/types').IncludePayloadShape>> {
+	const result: Record<string, import('@dbsp/types').IncludePayloadShape> =
+		Object.create(null);
+	const visit = (items: readonly PlanDecision[]) => {
+		for (const decision of items) {
+			if (decision.resolvedInclude && decision.payloadShape)
+				result[decision.resolvedInclude.nodeId] = decision.payloadShape;
+			visit(decision.children ?? []);
+		}
+	};
+	visit(decisions);
+	return result;
+}
+function validateExecutionIncludes(
+	execution: import('@dbsp/types').IncludeExecution,
+	intent: QueryIntent,
+	model: ModelIR | undefined,
+): void {
+	const strategies = new Map<string, string>();
+	const inputs = (
+		nodes: readonly import('@dbsp/types').ResolvedIncludeNode[],
+	): IncludeIntent[] =>
+		nodes.map((node) => {
+			strategies.set(node.intentPath, node.strategy);
+			return {
+				relation: node.publicKey,
+				...(node.predicate && { where: node.predicate.condition }),
+				include: inputs(node.children),
+			};
+		});
+	const resolvedInputs = inputs(execution.includes);
+	const byPath = new Map<string, import('@dbsp/types').ResolvedIncludeNode>();
+	const indexNodes = (
+		nodes: readonly import('@dbsp/types').ResolvedIncludeNode[],
+	) => {
+		for (const node of nodes) {
+			byPath.set(node.intentPath, node);
+			indexNodes(node.children);
+		}
+	};
+	indexNodes(execution.includes);
+	const validateAuthored = (
+		includes: readonly IncludeIntent[],
+		parent = '',
+		logicalParent = '',
+	) => {
+		for (const [index, include] of includes.entries()) {
+			const path = `${parent}include[${index}]`;
+			const name = include.via ?? include.relation;
+			const fullPath = logicalParent ? `${logicalParent}.${name}` : name;
+			const node = byPath.get(path);
+			if (!node)
+				throw new Error(
+					`Invalid include: Unknown relation "${name}" from table "${execution.rootRange.table}" at "${fullPath}"`,
+				);
+			validateIncludeInput(include, path, fullPath);
+			const relation = node.path.relations[0];
+			if (relation)
+				validateRecursiveIncludeStrategy(
+					include,
+					relation,
+					path,
+					fullPath,
+					POSTGRESQL_CAPABILITIES,
+					node.strategy,
+					intent,
+				);
+			validateIncludeOptions(
+				include,
+				node.strategy,
+				path,
+				fullPath,
+				!!node.recursion,
+			);
+			if (node.strategy === 'json_agg' || node.strategy === 'lateral') {
+				const order = validateIncludeOrdering(
+					include,
+					model,
+					node.targetRange.table,
+					fullPath,
+					node.ordering.usesFallback ? undefined : node.ordering.fallback,
+				);
+				if (
+					order &&
+					(JSON.stringify(order.columns) !==
+						JSON.stringify(node.ordering.fallback) ||
+						order.fallback !== node.ordering.usesFallback)
+				)
+					throw new Error(
+						`Include ${path}(${fullPath}) resolved ordering does not match its intent`,
+					);
+			}
+
+			validateAuthored(include.include ?? [], `${path}.`, fullPath);
+		}
+	};
+	validateAuthored(intent.include ?? []);
+	assertSupportedIncludeWhere(intent.include, strategies);
+	assertSupportedIncludeWhere(resolvedInputs, strategies);
+
+	if (
+		(intent.from && execution.rootRange.table !== intent.from) ||
+		!execution.rootRange.id ||
+		!execution.rootRange.alias
+	)
+		throw new Error('Invalid resolved include root range');
+	const ranges = new Map<string, import('@dbsp/types').ResolvedRange>();
+	const registerRange = (range: import('@dbsp/types').ResolvedRange) => {
+		const previous = ranges.get(range.id);
+		if (
+			!range.id ||
+			!range.table ||
+			!range.alias ||
+			(previous &&
+				(previous.table !== range.table || previous.alias !== range.alias))
+		)
+			throw new Error(`Invalid resolved range '${range.id}'`);
+		ranges.set(range.id, range);
+	};
+	registerRange(execution.rootRange);
+	const ids = new Set<string>();
+	const visit = (
+		nodes: readonly import('@dbsp/types').ResolvedIncludeNode[],
+		source: import('@dbsp/types').ResolvedRange,
+		parentStrategy?: string,
+		parent = '',
+	) => {
+		for (const node of nodes) {
+			if (ids.has(node.nodeId))
+				throw new Error(`Duplicate resolved include node '${node.nodeId}'`);
+			ids.add(node.nodeId);
+			for (const range of [
+				node.sourceRange,
+				node.targetRange,
+				node.outputRange,
+				...(node.cteRange ? [node.cteRange] : []),
+				...(node.recursiveRanges
+					? [node.recursiveRanges.walk, node.recursiveRanges.next]
+					: []),
+			])
+				registerRange(range);
+			if (
+				node.path.hops.some(
+					(hop, index) =>
+						hop.fromTable !== node.hopRanges[index]?.from.table ||
+						hop.toTable !== node.hopRanges[index]?.to.table,
+				) ||
+				(node.predicate &&
+					(node.predicate.currentRange.id !== node.targetRange.id ||
+						node.predicate.outerRange.id !== execution.rootRange.id)) ||
+				!['flat', 'nested'].includes(node.outputMode) ||
+				node.cardinality !==
+					(node.relationType === 'belongsTo' || node.relationType === 'hasOne'
+						? 'one'
+						: 'many')
+			)
+				throw new Error(
+					`Invalid resolved include '${node.nodeId}' binding or cardinality`,
+				);
+			validateResolvedIncludeStrategy(node.strategy, POSTGRESQL_CAPABILITIES);
+			if (
+				node.sourceRange.id !== source.id ||
+				node.sourceRange.table !== source.table ||
+				node.path.targetTable !== node.targetRange.table ||
+				node.path.hops.length !== node.hopRanges.length ||
+				node.path.hops.some(
+					(hop) =>
+						hop.pairs.length === 0 ||
+						hop.pairs.some((pair) => !pair.fromColumn || !pair.toColumn),
+				)
+			)
+				throw new Error(
+					`Invalid resolved include '${node.nodeId}' ranges or correlation`,
+				);
+			const path = `${parent}include[${node.intentPath.match(/include\[(\d+)\]$/)?.[1]}](${node.publicKey})`;
+			if (
+				parentStrategy &&
+				(parentStrategy === 'cte' || node.strategy !== parentStrategy)
+			)
+				throw new Error(
+					`Nested include at ${path} has parent strategy ${parentStrategy} and child strategy ${node.strategy}; mixed strategies and includes under cte are refused (oorabona/db-semantic-planner#894).`,
+				);
+			if (node.predicate && node.strategy !== 'join')
+				throw new Error(
+					`Include where is not supported for strategy ${node.strategy} at ${path}.where (oorabona/db-semantic-planner#892).`,
+				);
+			visit(node.children, node.outputRange, node.strategy, `${path}.`);
+		}
+	};
+	visit(execution.includes, execution.rootRange);
 }
