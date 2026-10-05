@@ -341,11 +341,7 @@ describe('include camelCase resolution', () => {
 describe('planned report registry', () => {
 	it('does not share authority with a second module instance', async () => {
 		const first = await import('./internal.js');
-		const disambiguate: Record<string, string> = JSON.parse(
-			'{"__proto__":"author"}',
-		);
 		const report = first.markPlannedReport({
-			planningInputs: { disambiguate },
 			rootTable: 'rows',
 			intent: { type: 'select', from: 'rows' },
 			decisions: [],
@@ -353,12 +349,6 @@ describe('planned report registry', () => {
 			ctes: [],
 			metadata: { planningTimeMs: 0, relationsAnalyzed: 0, isAmbiguous: false },
 		});
-		expect(Object.hasOwn(report.planningInputs.disambiguate, '__proto__')).toBe(
-			true,
-		);
-		expect(report.planningInputs.disambiguate).toEqual(disambiguate);
-		expect(Object.isFrozen(report.planningInputs.disambiguate)).toBe(true);
-		expect(Object.isFrozen(disambiguate)).toBe(false);
 		vi.resetModules();
 		const second = await import('./internal.js');
 		expect(first.isPlannedReport(report)).toBe(true);

@@ -636,9 +636,6 @@ export function markPlannedReport<T extends import('./planner.js').PlanReport>(
 		...(report.execution && {
 			execution: snapshotPlanningValue(report.execution),
 		}),
-		...(report.planningInputs && {
-			planningInputs: snapshotPlanningValue(report.planningInputs),
-		}),
 	};
 	plannedReports.add(issued);
 	return Object.freeze(issued);

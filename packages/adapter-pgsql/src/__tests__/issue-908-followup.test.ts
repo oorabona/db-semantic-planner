@@ -70,7 +70,7 @@ it('join includes refuse payload-dropping shapes at plan and external compile', 
 				{ ...report, intent: { ...report.intent!, ...shape } },
 				{ model },
 			),
-		).toThrow(shapeRefusal);
+		).toThrow('Includes compile only from a report planned in this process');
 	}
 });
 it('belongsToMany refuses every planned join include source', () => {

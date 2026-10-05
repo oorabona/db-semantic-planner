@@ -1,4 +1,5 @@
 // @ts-nocheck — coverage test: runtime assertions on AST nodes
+import { plan as nativePlan, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 /**
  * Coverage tests for pgsql-adapter.ts.
  *
@@ -1789,25 +1790,10 @@ describe('PgAdapter - Coverage Tests', () => {
 			// selectRelationColumn decisions. plan.decisions contains planner output
 			// (include-strategy) consumed by extractAllIncludeDecisions.
 			const adapter = createPgCompileOnlyAdapter({ model });
-			const plan = {
-				rootTable: 'posts',
-				// Planner decisions: include-strategy produces includeStrategy decisions
-				decisions: [
-					{
-						type: 'include-strategy',
-						choice: 'json_agg',
-						context: {
-							relation: 'author',
-							target: 'users',
-							relationType: 'belongsTo',
-							sourceTable: 'posts',
-						},
-					},
-				],
-				// Intent triggers intentToDecisions to produce selectRelationColumn
-				intent: {
-					type: 'query',
-					table: 'posts',
+			const plan = nativePlan(
+				{
+					type: 'select',
+					from: 'posts',
 					include: [{ relation: 'author' }],
 					select: {
 						type: 'expressions',
@@ -1826,7 +1812,9 @@ describe('PgAdapter - Coverage Tests', () => {
 						],
 					},
 				},
-			} as any;
+				adapter.model,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			expect(() => adapter.compile(plan, { model })).toThrow('Unknown column');
 		});
@@ -1881,26 +1869,14 @@ describe('PgAdapter - Coverage Tests', () => {
 	describe('compile — intent path with relationColumnsMap', () => {
 		it('deduplicates selectRelationColumn when covered by include', () => {
 			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
-			const plan = {
-				rootTable: 'posts',
-				decisions: [
-					{
-						type: 'include-strategy',
-						choice: 'json_agg',
-						context: {
-							relation: 'author',
-							target: 'users',
-							relationType: 'belongsTo',
-							sourceTable: 'posts',
-						},
-					},
-				],
-				intent: {
-					type: 'query',
-					table: 'posts',
+			const plan = nativePlan(
+				{
+					type: 'select',
+					from: 'posts',
 					select: {
-						fields: [
-							'id',
+						type: 'expressions',
+						columns: [
+							{ kind: 'column', column: 'id' },
 							{ kind: 'relationColumn', relation: 'author', column: 'name' },
 							{
 								kind: 'relationColumn',
@@ -1911,7 +1887,9 @@ describe('PgAdapter - Coverage Tests', () => {
 					},
 					include: [{ relation: 'author' }],
 				},
-			} as any;
+				adapter.model,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const result = adapter.compile(plan);
 			expect(result.sql).toContain('SELECT');
@@ -1940,32 +1918,22 @@ describe('PgAdapter - Coverage Tests', () => {
 
 		it('handles wildcard column in selectRelationColumn dedup', () => {
 			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
-			const plan = {
-				rootTable: 'posts',
-				decisions: [
-					{
-						type: 'include-strategy',
-						choice: 'json_agg',
-						context: {
-							relation: 'author',
-							target: 'users',
-							relationType: 'belongsTo',
-							sourceTable: 'posts',
-						},
-					},
-				],
-				intent: {
-					type: 'query',
-					table: 'posts',
+			const plan = nativePlan(
+				{
+					type: 'select',
+					from: 'posts',
 					select: {
-						fields: [
-							'id',
+						type: 'expressions',
+						columns: [
+							{ kind: 'column', column: 'id' },
 							{ kind: 'relationColumn', relation: 'author', column: '*' },
 						],
 					},
 					include: [{ relation: 'author' }],
 				},
-			} as any;
+				adapter.model,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const result = adapter.compile(plan);
 			expect(result.sql).toContain('SELECT');
@@ -2301,9 +2269,8 @@ describe('synthetic binding includes', () => {
 		});
 		const adapter = createPgCompileOnlyAdapter({ model });
 
-		const plan: PlanReport = {
-			rootTable: 'active_authors',
-			intent: {
+		const plan: PlanReport = nativePlan(
+			{
 				type: 'select',
 				from: 'active_authors',
 				select: {
@@ -2320,34 +2287,9 @@ describe('synthetic binding includes', () => {
 				},
 				include: [{ relation: 'author_posts' }],
 			},
-			decisions: [
-				{
-					id: 'binding-include-0',
-					type: 'include-strategy',
-					choice: 'json_agg',
-					context: {
-						sourceTable: 'active_authors',
-						target: 'posts',
-						relation: 'author_posts',
-						relationType: 'hasMany',
-						foreignKey: 'author_id',
-						parentKey: 'author_key',
-						targetOrderKey: ['id'],
-						includeAlias: 'authorPosts',
-						intentPath: 'include[0]',
-					},
-					reasoning: 'synthetic binding include',
-					alternatives: [],
-				},
-			],
-			warnings: [],
-			ctes: [],
-			metadata: {
-				planningTimeMs: 0,
-				relationsAnalyzed: 0,
-				isAmbiguous: false,
-			},
-		} as PlanReport;
+			adapter.model,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
 
 		const result = adapter.compile(plan);
 
@@ -2373,9 +2315,8 @@ describe('synthetic binding includes', () => {
 				},
 			}),
 		});
-		const plan: PlanReport = {
-			rootTable: 'projected_authors',
-			intent: {
+		const plan: PlanReport = nativePlan(
+			{
 				type: 'select',
 				from: 'projected_authors',
 				select: {
@@ -2397,52 +2338,9 @@ describe('synthetic binding includes', () => {
 					},
 				],
 			},
-			decisions: [
-				{
-					id: 'binding-include-0',
-					type: 'include-strategy',
-					choice: 'json_agg',
-					context: {
-						sourceTable: 'projected_authors',
-						target: 'posts',
-						relation: 'author_posts',
-						relationType: 'hasMany',
-						foreignKey: 'author_id',
-						parentKey: 'id',
-						targetOrderKey: ['id'],
-						includeAlias: 'author_posts',
-						intentPath: 'include[0]',
-					},
-					reasoning: 'synthetic binding include',
-					alternatives: [],
-				},
-				{
-					id: 'binding-include-0-tail-0',
-					type: 'include-strategy',
-					choice: 'json_agg',
-					context: {
-						sourceTable: 'posts',
-						target: 'comments',
-						relation: 'comments',
-						relationType: 'hasMany',
-						foreignKey: 'post_id',
-						parentKey: 'id',
-						targetOrderKey: ['id'],
-						includeAlias: 'comments',
-						intentPath: 'include[0].include[0]',
-					},
-					reasoning: 'synthetic binding tail include',
-					alternatives: [],
-				},
-			],
-			warnings: [],
-			ctes: [],
-			metadata: {
-				planningTimeMs: 0,
-				relationsAnalyzed: 0,
-				isAmbiguous: false,
-			},
-		} as PlanReport;
+			adapter.model,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
 
 		const result = adapter.compile(plan);
 
@@ -2515,8 +2413,6 @@ describe('synthetic binding includes', () => {
 					supportsJsonAgg: false,
 				},
 			}),
-		).toThrow(
-			"Strategy 'json_agg' is not supported by postgresql. Supported strategies: 'join', 'lateral', 'cte'.",
-		);
+		).toThrow('Includes compile only from a report planned in this process');
 	});
 });

@@ -161,19 +161,17 @@ describe('#911 relation resolution precedence', () => {
 		);
 	});
 
-	for (const [name, relation, target, plannedSql, legacySql] of [
+	for (const [name, relation, target, plannedSql] of [
 		[
 			'billingProfile',
 			'public_link',
 			'billingProfile',
 			'SELECT accounts.*, public_link.id AS "billingProfile.id", public_link.id AS "__dbsp_presence_billingProfile" FROM accounts LEFT JOIN "billingProfile" AS public_link ON accounts.public_id = public_link.id',
-			'SELECT accounts.*, "billingProfile".id AS "billingProfile.id", "billingProfile".id AS "__dbsp_presence_billingProfile" FROM accounts LEFT JOIN "billingProfile" AS "billingProfile" ON accounts.public_id = "billingProfile".id',
 		],
 		[
 			'billing_profile',
 			'billing_profile',
 			'secrets',
-			'SELECT accounts.*, billing_profile.id AS "billing_profile.id", billing_profile.id AS __dbsp_presence_billing_profile FROM accounts LEFT JOIN secrets AS billing_profile ON accounts.secret_id = billing_profile.id',
 			'SELECT accounts.*, billing_profile.id AS "billing_profile.id", billing_profile.id AS __dbsp_presence_billing_profile FROM accounts LEFT JOIN secrets AS billing_profile ON accounts.secret_id = billing_profile.id',
 		],
 		[
@@ -181,10 +179,9 @@ describe('#911 relation resolution precedence', () => {
 			'public_link',
 			'billingProfile',
 			'SELECT accounts.*, public_link.id AS "publicLink.id", public_link.id AS "__dbsp_presence_publicLink" FROM accounts LEFT JOIN "billingProfile" AS public_link ON accounts.public_id = public_link.id',
-			'SELECT accounts.*, "publicLink".id AS "publicLink.id", "publicLink".id AS "__dbsp_presence_publicLink" FROM accounts LEFT JOIN "billingProfile" AS "publicLink" ON accounts.public_id = "publicLink".id',
 		],
 	] as const) {
-		it(`resolves ${name} in planner and legacy synthesis`, () => {
+		it(`resolves ${name} in planner and refuses external synthesis`, () => {
 			const report = plan(
 				{
 					type: 'select',
@@ -202,15 +199,16 @@ describe('#911 relation resolution precedence', () => {
 			).toEqual([[relation, target, 'join']]);
 			const wire = { ...report };
 			delete wire.execution;
-			delete wire.planningInputs;
 			const legacy = { ...wire, decisions: [] };
 
 			const adapter = createPgCompileOnlyAdapter({ model: precedenceModel });
 			expect(adapter.compile(report, { model: precedenceModel }).sql).toBe(
 				plannedSql,
 			);
-			expect(adapter.compile(legacy, { model: precedenceModel }).sql).toBe(
-				legacySql,
+			expect(() => adapter.compile(legacy, { model: precedenceModel })).toThrow(
+				new Error(
+					'Includes compile only from a report planned in this process',
+				),
 			);
 		});
 	}
@@ -233,7 +231,11 @@ describe('#911 relation resolution precedence', () => {
 			} as unknown as PlanReport;
 			expect(() =>
 				createPgCompileOnlyAdapter({ model }).compile(external, { model }),
-			).toThrow('Include enclosingSymbol select fields must be an array');
+			).toThrow(
+				new Error(
+					'Includes compile only from a report planned in this process',
+				),
+			);
 		});
 	}
 });

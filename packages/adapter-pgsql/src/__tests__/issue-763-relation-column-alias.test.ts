@@ -440,7 +440,7 @@ describe('issue 763: relation qualifiers require an emitted SQL alias', () => {
 				{ model: e2eBlogSchema.model },
 			),
 		).toThrow(
-			'Invalid include: Unknown relation "tags" from table "posts" at "tags"',
+			new Error('Includes compile only from a report planned in this process'),
 		);
 	});
 });

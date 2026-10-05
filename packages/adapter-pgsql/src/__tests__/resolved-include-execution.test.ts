@@ -40,14 +40,14 @@ describe('resolved recursive include edges (#891)', () => {
 		});
 	it('indexes compiled payload authority by nodeId and hydrates without decisions', () => {
 		const report = orm.select('nodes').include('parent').plan();
-		const compiled = adapter.compile({ ...report, decisions: [] });
+		const compiled = adapter.compile(report);
 		expect(
 			compiled.hydrationPlan?.includePayloadsByNodeId?.['include[0]'],
 		).toEqual(compiled.hydrationPlan?.includePayloads?.[0]);
 	});
 });
 
-// External execution must match re-planning; branded reports keep their authority.
+// External include reports are refused; issued reports keep their authority.
 describe('resolved include boundary authority', () => {
 	it('refuses an external report-carried range alias', () => {
 		const report = orm.select('nodes').include('parent').plan();
@@ -67,7 +67,7 @@ describe('resolved include boundary authority', () => {
 		expect(() =>
 			adapter.compile({ ...report, execution, decisions: [] }),
 		).toThrow(
-			'External report execution differs at execution.includes[0].hopRanges[0].to.alias',
+			new Error('Includes compile only from a report planned in this process'),
 		);
 	});
 	it('keeps every include observation free of execution keys', () => {
@@ -105,7 +105,7 @@ describe('resolved include boundary authority', () => {
 				},
 			}),
 		).toThrow(
-			'External report execution differs at execution.includes[0].path.hops[0].pairs[0]',
+			new Error('Includes compile only from a report planned in this process'),
 		);
 	});
 	it('reserves explicit names and assigns distinct identities across scopes', () => {

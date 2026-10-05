@@ -735,11 +735,6 @@ export function createBindingFinalPlan(
 		];
 	});
 	return markPlannedReport({
-		bindingFinal: true,
-		planningInputs: {
-			defaultIncludeStrategy: 'json_agg',
-			...(dialectCapabilities && { dialectCapabilities }),
-		},
 		rootTable: intent.from,
 		execution: resolveReportIncludes(intent, decisions, model),
 		decisions: observeIncludeDecisions(decisions),

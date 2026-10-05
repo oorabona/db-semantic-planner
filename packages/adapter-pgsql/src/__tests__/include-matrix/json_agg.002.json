@@ -70,72 +70,14 @@
   },
   {
     "case": "external/json_agg/1/direct/nested/composite/ordered-limit",
-    "sql": "SELECT roots.*, COALESCE((SELECT json_agg(__lim.__row ORDER BY __lim.__key0 DESC NULLS LAST, __lim.__key1 ASC NULLS LAST, __lim.__key2 ASC NULLS LAST) FROM (SELECT jsonb_build_object('id', __t__.id, 'tenant', __t__.tenant, 'name', __t__.name, 'amount', CAST(__t__.amount AS text), 'rootId', __t__.\"rootId\") AS __row, __t__.name AS __key0, __t__.id AS __key1, __t__.tenant AS __key2 FROM children AS __t__ WHERE __t__.\"rootId\" = roots.id AND __t__.tenant = roots.tenant ORDER BY __t__.name DESC NULLS LAST, __t__.id ASC NULLS LAST, __t__.tenant ASC NULLS LAST LIMIT 2) AS __lim), '[]'::json) AS \"compositeChildren_json\" FROM roots",
+    "sql": null,
     "params": [],
-    "error": null,
-    "payloads": [
-      {
-        "path": "compositeChildren",
-        "publicKey": "compositeChildren",
-        "strategy": "json_agg",
-        "outputMode": "nested",
-        "table": "children",
-        "isToOne": true,
-        "outputLabel": "compositeChildren_json",
-        "columns": [
-          {
-            "logicalName": "id",
-            "physicalName": "id",
-            "publicKey": "id",
-            "outputLabel": "id"
-          },
-          {
-            "logicalName": "tenant",
-            "physicalName": "tenant",
-            "publicKey": "tenant",
-            "outputLabel": "tenant"
-          },
-          {
-            "logicalName": "name",
-            "physicalName": "name",
-            "publicKey": "name",
-            "outputLabel": "name"
-          },
-          {
-            "logicalName": "amount",
-            "physicalName": "amount",
-            "publicKey": "amount",
-            "outputLabel": "amount",
-            "readHandling": {
-              "kind": "nestedTransform",
-              "table": "children",
-              "column": "amount",
-              "js": "number",
-              "outputKey": "amount"
-            }
-          },
-          {
-            "logicalName": "rootId",
-            "physicalName": "rootId",
-            "publicKey": "rootId",
-            "outputLabel": "rootId"
-          }
-        ],
-        "children": []
-      }
-    ],
-    "rows": [
-      {
-        "id": 1,
-        "compositeChildren": {
-          "id": 2,
-          "tenant": 2,
-          "name": "child",
-          "amount": 42,
-          "rootId": 2
-        }
-      }
-    ]
+    "error": {
+      "class": "Error",
+      "message": "Includes compile only from a report planned in this process"
+    },
+    "payloads": [],
+    "rows": []
   },
   {
     "case": "nql/json_agg/1/direct/nested/composite/ordered-limit",
@@ -223,7 +165,7 @@
     "params": [],
     "error": {
       "class": "Error",
-      "message": "Include where is not supported for strategy json_agg at include[0](compositeChildren).where (oorabona/db-semantic-planner#892)."
+      "message": "Includes compile only from a report planned in this process"
     },
     "payloads": [],
     "rows": []
@@ -256,7 +198,7 @@
     "params": [],
     "error": {
       "class": "Error",
-      "message": "Include where is not supported for strategy json_agg at include[0](compositeChildren).where (oorabona/db-semantic-planner#892)."
+      "message": "Includes compile only from a report planned in this process"
     },
     "payloads": [],
     "rows": []
@@ -289,7 +231,7 @@
     "params": [],
     "error": {
       "class": "Error",
-      "message": "Include where is not supported for strategy json_agg at include[0](compositeChildren).where (oorabona/db-semantic-planner#892)."
+      "message": "Includes compile only from a report planned in this process"
     },
     "payloads": [],
     "rows": []
@@ -376,35 +318,14 @@
   },
   {
     "case": "external/json_agg/1/direct/flat/single/all",
-    "sql": "SELECT roots.*, children.id AS \"children.id\" FROM roots LEFT JOIN children AS children ON roots.id = children.\"rootId\"",
+    "sql": null,
     "params": [],
-    "error": null,
-    "payloads": [
-      {
-        "path": "children",
-        "publicKey": "children",
-        "strategy": "join",
-        "outputMode": "flat",
-        "table": "children",
-        "isToOne": true,
-        "outputLabel": "children_json",
-        "columns": [
-          {
-            "logicalName": "id",
-            "physicalName": "id",
-            "publicKey": "id",
-            "outputLabel": "children.id"
-          }
-        ],
-        "children": []
-      }
-    ],
-    "rows": [
-      {
-        "id": 1,
-        "children.id": 2
-      }
-    ]
+    "error": {
+      "class": "Error",
+      "message": "Includes compile only from a report planned in this process"
+    },
+    "payloads": [],
+    "rows": []
   },
   {
     "case": "nql/json_agg/1/direct/flat/single/all",
@@ -523,56 +444,14 @@
   },
   {
     "case": "external/json_agg/1/direct/flat/single/projection",
-    "sql": "SELECT roots.*, children.id AS \"children.id\", children.name AS \"children.name\", children.amount AS \"children.amount\" FROM roots LEFT JOIN children AS children ON roots.id = children.\"rootId\"",
+    "sql": null,
     "params": [],
-    "error": null,
-    "payloads": [
-      {
-        "path": "children",
-        "publicKey": "children",
-        "strategy": "join",
-        "outputMode": "flat",
-        "table": "children",
-        "isToOne": true,
-        "outputLabel": "children_json",
-        "columns": [
-          {
-            "logicalName": "id",
-            "physicalName": "id",
-            "publicKey": "id",
-            "outputLabel": "children.id"
-          },
-          {
-            "logicalName": "name",
-            "physicalName": "name",
-            "publicKey": "name",
-            "outputLabel": "children.name"
-          },
-          {
-            "logicalName": "amount",
-            "physicalName": "amount",
-            "publicKey": "amount",
-            "outputLabel": "children.amount",
-            "readHandling": {
-              "kind": "nestedTransform",
-              "table": "children",
-              "column": "amount",
-              "js": "number",
-              "outputKey": "amount"
-            }
-          }
-        ],
-        "children": []
-      }
-    ],
-    "rows": [
-      {
-        "id": 1,
-        "children.id": 2,
-        "children.name": "child",
-        "children.amount": "42"
-      }
-    ]
+    "error": {
+      "class": "Error",
+      "message": "Includes compile only from a report planned in this process"
+    },
+    "payloads": [],
+    "rows": []
   },
   {
     "case": "nql/json_agg/1/direct/flat/single/projection",
@@ -669,70 +548,14 @@
   },
   {
     "case": "external/json_agg/1/direct/flat/single/ordered-limit",
-    "sql": "SELECT roots.*, children_lat_0.id AS \"children.id\", children_lat_0.tenant AS \"children.tenant\", children_lat_0.name AS \"children.name\", children_lat_0.amount AS \"children.amount\", children_lat_0.\"rootId\" AS \"children.rootId\" FROM roots LEFT JOIN LATERAL (SELECT children_inner_0.id, children_inner_0.tenant, children_inner_0.name, children_inner_0.amount, children_inner_0.\"rootId\" FROM children AS children_inner_0 WHERE children_inner_0.\"rootId\" = roots.id ORDER BY children_inner_0.name DESC NULLS LAST, children_inner_0.id ASC NULLS LAST LIMIT 2) AS children_lat_0 ON true",
+    "sql": null,
     "params": [],
-    "error": null,
-    "payloads": [
-      {
-        "path": "children",
-        "publicKey": "children",
-        "strategy": "lateral",
-        "outputMode": "flat",
-        "table": "children",
-        "isToOne": true,
-        "outputLabel": "children_json",
-        "columns": [
-          {
-            "logicalName": "id",
-            "physicalName": "id",
-            "publicKey": "id",
-            "outputLabel": "children.id"
-          },
-          {
-            "logicalName": "tenant",
-            "physicalName": "tenant",
-            "publicKey": "tenant",
-            "outputLabel": "children.tenant"
-          },
-          {
-            "logicalName": "name",
-            "physicalName": "name",
-            "publicKey": "name",
-            "outputLabel": "children.name"
-          },
-          {
-            "logicalName": "amount",
-            "physicalName": "amount",
-            "publicKey": "amount",
-            "outputLabel": "children.amount",
-            "readHandling": {
-              "kind": "nestedTransform",
-              "table": "children",
-              "column": "amount",
-              "js": "number",
-              "outputKey": "amount"
-            }
-          },
-          {
-            "logicalName": "rootId",
-            "physicalName": "rootId",
-            "publicKey": "rootId",
-            "outputLabel": "children.rootId"
-          }
-        ],
-        "children": []
-      }
-    ],
-    "rows": [
-      {
-        "id": 1,
-        "children.id": 2,
-        "children.tenant": 2,
-        "children.name": "child",
-        "children.amount": "42",
-        "children.rootId": 2
-      }
-    ]
+    "error": {
+      "class": "Error",
+      "message": "Includes compile only from a report planned in this process"
+    },
+    "payloads": [],
+    "rows": []
   },
   {
     "case": "nql/json_agg/1/direct/flat/single/ordered-limit",
@@ -814,37 +637,14 @@
   },
   {
     "case": "external/json_agg/1/direct/flat/single/predicate",
-    "sql": "SELECT roots.*, children.id AS \"children.id\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" WHERE children.name = $1",
-    "params": [
-      "child"
-    ],
-    "error": null,
-    "payloads": [
-      {
-        "path": "children",
-        "publicKey": "children",
-        "strategy": "join",
-        "outputMode": "flat",
-        "table": "children",
-        "isToOne": true,
-        "outputLabel": "children_json",
-        "columns": [
-          {
-            "logicalName": "id",
-            "physicalName": "id",
-            "publicKey": "id",
-            "outputLabel": "children.id"
-          }
-        ],
-        "children": []
-      }
-    ],
-    "rows": [
-      {
-        "id": 1,
-        "children.id": 2
-      }
-    ]
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Includes compile only from a report planned in this process"
+    },
+    "payloads": [],
+    "rows": []
   },
   {
     "case": "nql/json_agg/1/direct/flat/single/predicate",

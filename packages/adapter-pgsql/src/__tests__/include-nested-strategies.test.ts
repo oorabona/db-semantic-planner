@@ -1,15 +1,8 @@
-import { asLegacyReport } from './legacy-include-report.js';
-
-const plan: typeof nativePlan = (...args) =>
-	asLegacyReport(nativePlan(...args));
+const plan = nativePlan;
 
 import { createOrm, plan as nativePlan, or, ref, schema } from '@dbsp/core';
-import type {
-	IncludeIntent,
-	PlanReport,
-	ResolvedIncludeStrategy,
-} from '@dbsp/types';
-import { describe, expect, it, vi } from 'vitest';
+import type { PlanReport, ResolvedIncludeStrategy } from '@dbsp/types';
+import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const db = schema({
@@ -47,14 +40,14 @@ function nestedPlan(
 	parent: ResolvedIncludeStrategy,
 	child: ResolvedIncludeStrategy,
 ) {
-	const p = plan(
-		{
-			type: 'select',
-			from: 'users',
-			include: [{ relation: 'posts', include: [{ relation: 'comments' }] }],
-		},
-		db.model,
-	);
+	const intent = {
+		type: 'select' as const,
+		from: 'users',
+		include: [{ relation: 'posts', include: [{ relation: 'comments' }] }],
+	};
+	if (parent === child && parent !== 'cte')
+		return plan(intent, db.model, { defaultIncludeStrategy: parent });
+	const p = plan(intent, db.model);
 	return {
 		...p,
 		decisions: p.decisions.map((d) =>
@@ -71,11 +64,11 @@ describe('#894 nested strategy refusal', () => {
 	for (const parent of strategies)
 		for (const child of strategies) {
 			if (parent === child && parent !== 'cte') continue;
-			it(`refuses planned ${parent}→${child} before returning SQL`, () =>
-				refuses(
-					() => adapter.compile(nestedPlan(parent, child)),
-					parent,
-					child,
+			it(`refuses external ${parent}→${child} before returning SQL`, () =>
+				expect(() => adapter.compile(nestedPlan(parent, child))).toThrow(
+					new Error(
+						'Includes compile only from a report planned in this process',
+					),
 				));
 		}
 	for (const [parent, child] of [
@@ -169,49 +162,34 @@ describe('#894 supported SQL', () => {
 		expect(result.params).toEqual([]);
 	});
 });
-it('#895 preflight accesses include predicates linearly', () => {
-	const accesses = (count: number) => {
-		let reads = 0;
-		const includes: IncludeIntent[] = Array.from({ length: count }, () => ({
-			relation: 'posts',
-		}));
-		const p = plan(
-			{ type: 'select', from: 'users', include: includes },
+it.each([10, 20])(
+	'#895 external refusal does not read %s decision choices',
+	(count) => {
+		const issued = plan(
+			{
+				type: 'select',
+				from: 'users',
+				include: Array.from({ length: count }, () => ({ relation: 'posts' })),
+			},
 			db.model,
-			{ defaultIncludeStrategy: 'json_agg' },
 		);
-		const decisions = p.decisions.map((d) =>
-			d.type === 'include-strategy'
-				? {
-						...d,
-						get choice() {
-							reads++;
-							return d.choice;
-						},
-					}
-				: d,
+		let reads = 0;
+		const external = {
+			...issued,
+			decisions: issued.decisions.map((decision) => ({
+				...decision,
+				get choice() {
+					reads++;
+					return decision.choice;
+				},
+			})),
+		};
+		expect(() => adapter.compile(external)).toThrow(
+			new Error('Includes compile only from a report planned in this process'),
 		);
-		// Refuse at the last include, after all preflight lookups but before SQL lowering.
-		const last = p.intent.include![count - 1]!;
-		Object.defineProperty(last, 'where', { value: or() });
-		const lookups = vi.spyOn(Map.prototype, 'get');
-		try {
-			expect(() => adapter.compile({ ...p, decisions })).toThrow(
-				/strategy json_agg.*#892/,
-			);
-			expect(
-				lookups.mock.calls.filter(
-					([key]) => typeof key === 'string' && /^include\[\d+\]$/.test(key),
-				),
-			).toHaveLength(count);
-		} finally {
-			lookups.mockRestore();
-		}
-		return reads;
-	};
-	expect(accesses(10)).toBe(10);
-	expect(accesses(20)).toBe(20);
-});
+		expect(reads).toBe(0);
+	},
+);
 
 describe('#894 pathless include assignments', () => {
 	const pathless = (p: PlanReport): PlanReport => ({
@@ -262,9 +240,7 @@ describe('#894 pathless include assignments', () => {
 			createPgCompileOnlyAdapter({ model: repeated.model }).compile(
 				pathless(p),
 			),
-		).toThrow(
-			"Ambiguous include relation 'children': context.intentPath is required for unique strategy assignment (#894).",
-		);
+		).toThrow('Includes compile only from a report planned in this process');
 	});
 	it('refuses sibling same-name includes sharing one pathless decision', () => {
 		const p = pathless(nestedPlan('join', 'join'));
@@ -280,9 +256,7 @@ describe('#894 pathless include assignments', () => {
 				},
 				decisions: [decision!],
 			}),
-		).toThrow(
-			"Ambiguous include relation 'posts': context.intentPath is required for unique strategy assignment (#894).",
-		);
+		).toThrow('Includes compile only from a report planned in this process');
 	});
 	it('refuses reusing one decision through its relation and alias', () => {
 		const p = pathless(nestedPlan('join', 'join'));
@@ -298,13 +272,11 @@ describe('#894 pathless include assignments', () => {
 					},
 				],
 			}),
-		).toThrow(
-			"Ambiguous include relation 'comments': context.intentPath is required for unique strategy assignment (#894).",
-		);
+		).toThrow('Includes compile only from a report planned in this process');
 	});
-	it('preserves full SQL for unique pathless assignments', () => {
-		expect(adapter.compile(pathless(nestedPlan('join', 'join'))).sql).toBe(
-			sameSql.join,
+	it('refuses unique pathless external assignments', () => {
+		expect(() => adapter.compile(pathless(nestedPlan('join', 'join')))).toThrow(
+			new Error('Includes compile only from a report planned in this process'),
 		);
 	});
 });

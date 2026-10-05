@@ -441,7 +441,6 @@ export function plan(
 
 	const report: PlanReport = {
 		rootTable: intent.from,
-		planningInputs: { ...opts, disambiguate: { ...opts.disambiguate } },
 		execution: resolveReportIncludes(intent, state.decisions, model),
 		decisions: Object.freeze(observeIncludeDecisions(state.decisions)),
 		warnings: Object.freeze(state.warnings.slice()),

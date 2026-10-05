@@ -17,7 +17,6 @@ import {
 import type { ExpressionIntent } from '@dbsp/types';
 import { expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
-import { asLegacyReport } from './legacy-include-report.js';
 
 const model = schema({
 	users: {
@@ -55,7 +54,7 @@ it('field selection returns exactly the requested fields', () => {
 	expect(query.dump().sql).toBe(
 		'SELECT posts.*, author.name AS "author.name", author.email AS "author.email", author.id AS __dbsp_presence_author FROM posts LEFT JOIN users AS author ON posts."authorId" = author.id',
 	);
-	const report = asLegacyReport(query.plan());
+	const report = query.plan();
 	const compiled = adapter.compile(report, { model });
 	const rows = [
 		{
@@ -107,30 +106,30 @@ const refusal =
 	"Include include[0](posts) cannot use 'join' for a to-many relation. Use .join(), NQL | flat, or a json_agg/lateral include.";
 for (const join of ['left', 'inner'] as const)
 	it(`to-many ${join} is refused at plan()`, () => {
-		expect(() =>
-			asLegacyReport(orm.select('users').include('posts', { join }).plan()),
-		).toThrow(`Invalid include: ${refusal}`);
+		expect(() => orm.select('users').include('posts', { join }).plan()).toThrow(
+			`Invalid include: ${refusal}`,
+		);
 	});
 it('to-many join default is refused at plan()', () => {
 	expect(() =>
-		asLegacyReport(
-			orm
-				.select('users')
-				.withPlanOptions({ defaultIncludeStrategy: 'join' })
-				.include('posts')
-				.plan(),
-		),
+		orm
+			.select('users')
+			.withPlanOptions({ defaultIncludeStrategy: 'join' })
+			.include('posts')
+			.plan(),
 	).toThrow(`Invalid include: ${refusal}`);
 });
 it('adapter refuses an external to-many join report', () => {
-	const report = asLegacyReport(orm.select('users').include('posts').plan());
+	const report = orm.select('users').include('posts').plan();
 	const external = {
 		...report,
 		decisions: report.decisions.map((d) =>
 			d.type === 'include-strategy' ? { ...d, choice: 'join' } : d,
 		),
 	};
-	expect(() => adapter.compile(external, { model })).toThrow(refusal);
+	expect(() => adapter.compile(external, { model })).toThrow(
+		new Error('Includes compile only from a report planned in this process'),
+	);
 });
 it('join include where stays in root WHERE', () => {
 	expect(
@@ -158,9 +157,9 @@ it('a relation join hint refuses a to-many include', () => {
 		model: hintModel,
 		adapter: createPgCompileOnlyAdapter({ model: hintModel }),
 	});
-	expect(() =>
-		asLegacyReport(hintOrm.select('users').include('posts').plan()),
-	).toThrow(`Invalid include: ${refusal}`);
+	expect(() => hintOrm.select('users').include('posts').plan()).toThrow(
+		`Invalid include: ${refusal}`,
+	);
 });
 it('presence labels cannot collide with root or payload keys', () => {
 	const collisionModel = schema({
@@ -183,7 +182,7 @@ it('presence labels cannot collide with root or payload keys', () => {
 	})
 		.select('posts')
 		.include('author', { join: 'left' });
-	const report = asLegacyReport(builder.plan());
+	const report = builder.plan();
 	const compiled = collisionAdapter.compile(report);
 	const shape = compiled.hydrationPlan!.includePayloads![0]!;
 	expect(shape.presence).toEqual({
@@ -239,7 +238,7 @@ it('keyless target keeps outer filter columns and exact private payload', () => 
 			where: eq('email', 'a@example.test'),
 		});
 	expect(builder.dump().params).toEqual(['a@example.test']);
-	const report = asLegacyReport(builder.plan());
+	const report = builder.plan();
 	const compiled = keylessAdapter.compile(report);
 	expect(compiled.sql).toBe(
 		'SELECT posts.*, author.name AS "author.name", author.__dbsp_presence_author AS __dbsp_presence_author FROM posts LEFT JOIN (SELECT author.id, author.name, author.email, 1 AS __dbsp_presence_author FROM users AS author) AS author ON posts."authorCode" = author.id WHERE author.email = $1',
@@ -256,7 +255,7 @@ it('keyless target keeps outer filter columns and exact private payload', () => 
 	expect(rows).toEqual([{ author: { name: null } }, { author: null }]);
 });
 it('adapter refuses an external report that omits relation cardinality', () => {
-	const report = asLegacyReport(orm.select('users').include('posts').plan());
+	const report = orm.select('users').include('posts').plan();
 	const decisions = report.decisions.map((d) => {
 		if (d.type !== 'include-strategy') return d;
 		const context = { ...d.context };
@@ -264,7 +263,7 @@ it('adapter refuses an external report that omits relation cardinality', () => {
 		return { ...d, choice: 'join', context };
 	});
 	expect(() => adapter.compile({ ...report, decisions }, { model })).toThrow(
-		'Include include[0](posts) decision does not match its intent',
+		new Error('Includes compile only from a report planned in this process'),
 	);
 });
 it('lateral transport uses a private marker even when selected fields are all null', () => {
@@ -276,7 +275,7 @@ it('lateral transport uses a private marker even when selected fields are all nu
 			relationColumn('author', 'name', 'name'),
 			relationColumn('author', 'email', 'email'),
 		]);
-	const report = asLegacyReport(builder.plan());
+	const report = builder.plan();
 	const compiled = adapter.compile(report);
 	expect(compiled.sql).toBe(
 		'SELECT users_lat_0.name AS "author.name", users_lat_0.email AS "author.email", users_lat_0.__dbsp_presence_author AS __dbsp_presence_author FROM posts LEFT JOIN LATERAL (SELECT users_inner_0.name, users_inner_0.email, users_inner_0.id AS __dbsp_presence_author FROM users AS users_inner_0 WHERE users_inner_0.id = posts."authorId") AS users_lat_0 ON true',
@@ -300,7 +299,7 @@ it('an explicit empty field selection returns an empty object or null using only
 		join: 'left',
 		select: { type: 'fields', fields: [] },
 	});
-	const report = asLegacyReport(builder.plan());
+	const report = builder.plan();
 	const compiled = adapter.compile(report);
 	expect(compiled.sql).toBe(
 		'SELECT posts.*, author.id AS __dbsp_presence_author FROM posts LEFT JOIN users AS author ON posts."authorId" = author.id',
@@ -325,20 +324,21 @@ it('alternatives exclude every refused join data strategy', () => {
 	];
 	for (const query of queries) {
 		expect(
-			asLegacyReport(query.include('author').plan()).decisions.find(
-				(d) => d.type === 'include-strategy',
-			)?.alternatives,
+			query
+				.include('author')
+				.plan()
+				.decisions.find((d) => d.type === 'include-strategy')?.alternatives,
 		).toEqual(['cte', 'lateral']);
-		expect(() =>
-			asLegacyReport(query.include('author', { join: 'left' }).plan()),
-		).toThrow(
+		expect(() => query.include('author', { join: 'left' }).plan()).toThrow(
 			"Invalid include: Include include[0](author) cannot use 'join' with aggregation, groupBy or DISTINCT because its data would be dropped. Use .join() for relational columns, grouping or ordering.",
 		);
 	}
 	expect(
-		asLegacyReport(orm.select('users').include('posts').plan()).decisions.find(
-			(d) => d.type === 'include-strategy',
-		)?.alternatives,
+		orm
+			.select('users')
+			.include('posts')
+			.plan()
+			.decisions.find((d) => d.type === 'include-strategy')?.alternatives,
 	).toEqual(['cte', 'lateral']);
 });
 it('presence collision checks use physical snake case root outputs', () => {
@@ -466,13 +466,11 @@ const nestedAggregates: readonly ExpressionIntent[] = [
 it('908f: structural wrappers still refuse outer aggregates', () => {
 	for (const intent of nestedAggregates) {
 		expect(() =>
-			asLegacyReport(
-				orm
-					.select('posts')
-					.columns([new ExpressionRef(intent)])
-					.include('author', { join: 'left' })
-					.plan(),
-			),
+			orm
+				.select('posts')
+				.columns([new ExpressionRef(intent)])
+				.include('author', { join: 'left' })
+				.plan(),
 		).toThrow(
 			"Invalid include: Include include[0](author) cannot use 'join' with aggregation, groupBy or DISTINCT because its data would be dropped. Use .join() for relational columns, grouping or ordering.",
 		);

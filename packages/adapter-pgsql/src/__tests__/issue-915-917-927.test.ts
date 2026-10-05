@@ -17,7 +17,6 @@ import { describe, expect, it, vi } from 'vitest';
 import * as compiler from '../compiler.js';
 import { joinIncludeHandler } from '../handlers/include/join.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
-import { asLegacyReport } from './legacy-include-report.js';
 
 const model = schema({
 	users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
@@ -47,16 +46,14 @@ function errorOf(run: () => unknown): Error {
 }
 function report(): Mutable<PlanReport> {
 	return {
-		...asLegacyReport(
-			plan(
-				{
-					type: 'select',
-					from: 'posts',
-					include: [{ relation: 'author', join: 'left' }],
-				},
-				model,
-				caps,
-			),
+		...plan(
+			{
+				type: 'select',
+				from: 'posts',
+				include: [{ relation: 'author', join: 'left' }],
+			},
+			model,
+			caps,
 		),
 	};
 }
@@ -100,20 +97,19 @@ describe('#915 / #917 / #927 public include contract', () => {
 			for (const { strategy, options } of cases) {
 				const include: IncludeIntent = { relation: 'author', ...options };
 				const expected = errorOf(() =>
-					asLegacyReport(
-						plan({ type: 'select', from: 'posts', include: [include] }, model, {
-							...caps,
-							defaultIncludeStrategy: strategy,
-						}),
-					),
+					plan({ type: 'select', from: 'posts', include: [include] }, model, {
+						...caps,
+						defaultIncludeStrategy: strategy,
+					}),
 				);
 				const external = report();
 				external.intent = { ...external.intent!, include: [include] };
 				external.decisions = external.decisions.map((d) =>
 					d.type === 'include-strategy' ? { ...d, choice: strategy } : d,
 				);
+				expect(expected.message).toMatch(/include/i);
 				expect(errorOf(() => adapter.compile(external)).message).toBe(
-					expected.message,
+					'Includes compile only from a report planned in this process',
 				);
 			}
 			expect(spy).not.toHaveBeenCalled();
@@ -124,20 +120,18 @@ describe('#915 / #917 / #927 public include contract', () => {
 					{ relation: 'author', join: 'left', select: { type: 'all' } },
 				],
 			};
-			expect(adapter.compile(all).sql).toContain(
+			expect(adapter.compile(plan(all.intent, model, caps)).sql).toContain(
 				'author.name AS "author.name"',
 			);
 			for (const strategy of ['json_agg', 'lateral'] as const) {
-				const original = asLegacyReport(
-					plan(
-						{
-							type: 'select',
-							from: 'posts',
-							include: [{ relation: 'author', limit: 1 }],
-						},
-						model,
-						{ ...caps, defaultIncludeStrategy: strategy },
-					),
+				const original = plan(
+					{
+						type: 'select',
+						from: 'posts',
+						include: [{ relation: 'author', limit: 1 }],
+					},
+					model,
+					{ ...caps, defaultIncludeStrategy: strategy },
 				);
 				const intent: QueryIntent = {
 					...original.intent,
@@ -149,15 +143,16 @@ describe('#915 / #917 / #927 public include contract', () => {
 						},
 					],
 				};
-				const ordered = asLegacyReport(
-					plan(intent, model, {
-						...caps,
-						defaultIncludeStrategy: strategy,
-					}),
+				const ordered = plan(intent, model, {
+					...caps,
+					defaultIncludeStrategy: strategy,
+				});
+				expect(() => adapter.compile({ ...original, intent })).toThrow(
+					new Error(
+						'Includes compile only from a report planned in this process',
+					),
 				);
-				expect(adapter.compile({ ...original, intent }).sql).toBe(
-					adapter.compile(ordered).sql,
-				);
+				expect(adapter.compile(ordered).sql).toContain('name DESC');
 			}
 		} finally {
 			spy.mockRestore();
@@ -173,22 +168,20 @@ describe('#915 / #917 / #927 public include contract', () => {
 			Number.MAX_SAFE_INTEGER + 1,
 			'1',
 		]) {
-			const base = asLegacyReport(
-				plan(
-					{
-						type: 'select',
-						from: 'comments',
-						include: [
-							{
-								relation: 'post',
-								join: 'left',
-								include: [{ relation: 'author', join: 'left' }],
-							},
-						],
-					},
-					model,
-					caps,
-				),
+			const base = plan(
+				{
+					type: 'select',
+					from: 'comments',
+					include: [
+						{
+							relation: 'post',
+							join: 'left',
+							include: [{ relation: 'author', join: 'left' }],
+						},
+					],
+				},
+				model,
+				caps,
 			);
 			const include = {
 				relation: 'post',
@@ -200,7 +193,7 @@ describe('#915 / #917 / #927 public include contract', () => {
 			const external: Mutable<PlanReport> = { ...base };
 			external.intent = { ...base.intent!, include: [include] };
 			expect(errorOf(() => adapter.compile(external)).message).toBe(
-				'Invalid Include include[0].include[0](post.author) limit: Include include[0].include[0](post.author) limit must be a non-negative safe integer',
+				'Includes compile only from a report planned in this process',
 			);
 		}
 	});
@@ -222,18 +215,16 @@ describe('#915 / #917 / #927 public include contract', () => {
 				...external.intent!,
 				include: [{ relation: 'author', join: 'left', select }],
 			};
-			const expected = errorOf(() =>
-				asLegacyReport(plan(external.intent!, model, caps)),
-			);
+			const expected = errorOf(() => plan(external.intent!, model, caps));
 			expect(errorOf(() => adapter.compile(external)).message).toBe(
-				expected.message,
+				'Includes compile only from a report planned in this process',
 			);
 		}
 		const missing = report();
 		missing.decisions = [];
 		missing.intent = { ...missing.intent, include: [{ relation: 'author' }] };
 		expect(errorOf(() => adapter.compile(missing)).message).toBe(
-			'Include include[0](author) has no resolved include-strategy decision',
+			'Includes compile only from a report planned in this process',
 		);
 		missing.intent = {
 			...missing.intent,
@@ -246,24 +237,22 @@ describe('#915 / #917 / #927 public include contract', () => {
 			],
 		};
 		expect(errorOf(() => adapter.compile(missing)).message).toBe(
-			'Include include[0].include[0](author.createdPosts) has no resolved include-strategy decision',
+			'Includes compile only from a report planned in this process',
 		);
 		const unmodeled = report();
 		unmodeled.decisions = [];
 		expect(
 			errorOf(() => createPgCompileOnlyAdapter().compile(unmodeled)).message,
-		).toBe('External report with includes requires a model');
+		).toBe('Includes compile only from a report planned in this process');
 	});
 
 	it('normalized collisions expose candidates and include path in both planning modes and compilation', () => {
 		for (const strict of [true, false]) {
 			const error = errorOf(() =>
-				asLegacyReport(
-					createOrm({ model, adapter, strictMode: strict })
-						.select('comments')
-						.include('post.fooBAr')
-						.plan(),
-				),
+				createOrm({ model, adapter, strictMode: strict })
+					.select('comments')
+					.include('post.fooBAr')
+					.plan(),
 			);
 			expect(error).toBeInstanceOf(AmbiguousIncludeError);
 			expect(error).toMatchObject({
@@ -274,16 +263,14 @@ describe('#915 / #917 / #927 public include contract', () => {
 				'Ambiguous include relation "fooBAr" from table "posts" at "post.fooBAr". Use the exact relation name or "via" to specify one of: foo_b_ar, foo_bAr',
 			);
 		}
-		const chosen = asLegacyReport(
-			plan(
-				{
-					type: 'select',
-					from: 'posts',
-					include: [{ relation: 'users', join: 'left' }],
-				},
-				model,
-				{ ...caps, disambiguate: { 'posts.users': 'author' } },
-			),
+		const chosen = plan(
+			{
+				type: 'select',
+				from: 'posts',
+				include: [{ relation: 'users', join: 'left' }],
+			},
+			model,
+			{ ...caps, disambiguate: { 'posts.users': 'author' } },
 		);
 		expect(adapter.compile(chosen).sql).toContain('LEFT JOIN users AS author');
 
@@ -292,8 +279,9 @@ describe('#915 / #917 / #927 public include contract', () => {
 			...external.intent!,
 			include: [{ relation: 'fooBAr' }],
 		};
-		expect(errorOf(() => adapter.compile(external))).toBeInstanceOf(
-			AmbiguousIncludeError,
+		expect(errorOf(() => adapter.compile(external))).toHaveProperty(
+			'message',
+			'Includes compile only from a report planned in this process',
 		);
 		expect(
 			errorOf(() => orm.select('posts').include('fooBAr').dump()),
@@ -304,12 +292,10 @@ describe('#915 / #917 / #927 public include contract', () => {
 		for (const strict of [true, false]) {
 			expect(
 				errorOf(() =>
-					asLegacyReport(
-						createOrm({ model, adapter, strictMode: strict })
-							.select('posts')
-							.include('nope', { join: 'left' })
-							.plan(),
-					),
+					createOrm({ model, adapter, strictMode: strict })
+						.select('posts')
+						.include('nope', { join: 'left' })
+						.plan(),
 				).message,
 			).toBe(
 				'Invalid include: Unknown relation "nope" from table "posts" at "nope"',
@@ -317,15 +303,13 @@ describe('#915 / #917 / #927 public include contract', () => {
 		}
 		expect(
 			errorOf(() =>
-				asLegacyReport(
-					plan(
-						{
-							type: 'select',
-							from: 'posts',
-							include: [{ relation: 'nope', join: 'left' }],
-						},
-						model,
-					),
+				plan(
+					{
+						type: 'select',
+						from: 'posts',
+						include: [{ relation: 'nope', join: 'left' }],
+					},
+					model,
 				),
 			).message,
 		).toBe(
@@ -344,61 +328,57 @@ describe('#915 / #917 / #927 public include contract', () => {
 			include: [{ relation: 'author', include: [{ relation: 'nope' }] }],
 		};
 		expect(errorOf(() => adapter.compile(external)).message).toBe(
-			'Invalid include: Unknown relation "nope" from table "users" at "author.nope"',
+			'Includes compile only from a report planned in this process',
 		);
 	});
 
 	it('flat via paths compile at the root and in nested includes', () => {
-		const top = asLegacyReport(
-			plan(
-				{
-					type: 'select',
-					from: 'users',
-					include: [
-						{
-							relation: 'posts',
-							via: 'createdPosts',
-							strategy: 'flat',
-							select: { type: 'fields', fields: ['title'] },
-						},
-					],
-				},
-				model,
-				caps,
-			),
+		const top = plan(
+			{
+				type: 'select',
+				from: 'users',
+				include: [
+					{
+						relation: 'posts',
+						via: 'createdPosts',
+						strategy: 'flat',
+						select: { type: 'fields', fields: ['title'] },
+					},
+				],
+			},
+			model,
+			caps,
 		);
 		expect(adapter.compile(top).sql).toBe(
 			'SELECT users.*, "createdPosts".id AS "createdPosts.id", "createdPosts".title AS "createdPosts.title" FROM users LEFT JOIN posts AS "createdPosts" ON users.id = "createdPosts"."authorId"',
 		);
-		const nested = asLegacyReport(
-			plan(
-				{
-					type: 'select',
-					from: 'comments',
-					include: [
-						{
-							relation: 'post',
-							strategy: 'flat',
-							include: [
-								{
-									relation: 'users',
-									via: 'author',
-									strategy: 'flat',
-									include: [
-										{
-											relation: 'posts',
-											via: 'createdPosts',
-											strategy: 'flat',
-										},
-									],
-								},
-							],
-						},
-					],
-				},
-				model,
-				caps,
-			),
+		const nested = plan(
+			{
+				type: 'select',
+				from: 'comments',
+				include: [
+					{
+						relation: 'post',
+						strategy: 'flat',
+						include: [
+							{
+								relation: 'users',
+								via: 'author',
+								strategy: 'flat',
+								include: [
+									{
+										relation: 'posts',
+										via: 'createdPosts',
+										strategy: 'flat',
+									},
+								],
+							},
+						],
+					},
+				],
+			},
+			model,
+			caps,
 		);
 		expect(adapter.compile(nested).sql).toContain(
 			'LEFT JOIN posts AS "createdPosts" ON author.id = "createdPosts"."authorId"',
@@ -436,7 +416,7 @@ describe('#915 / #917 / #927 public include contract', () => {
 				select: { type: 'expressions', columns: [aggregate.intent] },
 			};
 			expect(errorOf(() => adapter.compile(external)).message).toBe(
-				"Include include[0](author) cannot use 'join' with aggregation, groupBy or DISTINCT because its data would be dropped. Use .join() for relational columns, grouping or ordering.",
+				'Includes compile only from a report planned in this process',
 			);
 		}
 	});

@@ -109,78 +109,14 @@
   },
   {
     "case": "external/join/1/direct/nested/composite/predicate",
-    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE \"compositeChildren\".name = $1",
-    "params": [
-      "child"
-    ],
-    "error": null,
-    "payloads": [
-      {
-        "path": "compositeChildren",
-        "publicKey": "compositeChildren",
-        "strategy": "join",
-        "outputMode": "nested",
-        "table": "children",
-        "isToOne": true,
-        "outputLabel": "compositeChildren_json",
-        "columns": [
-          {
-            "logicalName": "id",
-            "physicalName": "id",
-            "publicKey": "id",
-            "outputLabel": "compositeChildren.id"
-          },
-          {
-            "logicalName": "tenant",
-            "physicalName": "tenant",
-            "publicKey": "tenant",
-            "outputLabel": "compositeChildren.tenant"
-          },
-          {
-            "logicalName": "name",
-            "physicalName": "name",
-            "publicKey": "name",
-            "outputLabel": "compositeChildren.name"
-          },
-          {
-            "logicalName": "amount",
-            "physicalName": "amount",
-            "publicKey": "amount",
-            "outputLabel": "compositeChildren.amount",
-            "readHandling": {
-              "kind": "nestedTransform",
-              "table": "children",
-              "column": "amount",
-              "js": "number",
-              "outputKey": "amount"
-            }
-          },
-          {
-            "logicalName": "rootId",
-            "physicalName": "rootId",
-            "publicKey": "rootId",
-            "outputLabel": "compositeChildren.rootId"
-          }
-        ],
-        "children": [],
-        "presence": {
-          "outputLabel": "__dbsp_presence_compositeChildren",
-          "physicalName": "id"
-        }
-      }
-    ],
-    "rows": [
-      {
-        "id": 1,
-        "compositeChildren": {
-          "id": 2,
-          "tenant": 2,
-          "name": "child",
-          "amount": 42,
-          "rootId": 2
-        }
-      }
-    ]
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Includes compile only from a report planned in this process"
+    },
+    "payloads": [],
+    "rows": []
   },
   {
     "case": "nql/join/1/direct/nested/composite/predicate",
@@ -334,78 +270,14 @@
   },
   {
     "case": "external/join/1/direct/nested/composite/expression",
-    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE lower(name) = $1",
-    "params": [
-      "child"
-    ],
-    "error": null,
-    "payloads": [
-      {
-        "path": "compositeChildren",
-        "publicKey": "compositeChildren",
-        "strategy": "join",
-        "outputMode": "nested",
-        "table": "children",
-        "isToOne": true,
-        "outputLabel": "compositeChildren_json",
-        "columns": [
-          {
-            "logicalName": "id",
-            "physicalName": "id",
-            "publicKey": "id",
-            "outputLabel": "compositeChildren.id"
-          },
-          {
-            "logicalName": "tenant",
-            "physicalName": "tenant",
-            "publicKey": "tenant",
-            "outputLabel": "compositeChildren.tenant"
-          },
-          {
-            "logicalName": "name",
-            "physicalName": "name",
-            "publicKey": "name",
-            "outputLabel": "compositeChildren.name"
-          },
-          {
-            "logicalName": "amount",
-            "physicalName": "amount",
-            "publicKey": "amount",
-            "outputLabel": "compositeChildren.amount",
-            "readHandling": {
-              "kind": "nestedTransform",
-              "table": "children",
-              "column": "amount",
-              "js": "number",
-              "outputKey": "amount"
-            }
-          },
-          {
-            "logicalName": "rootId",
-            "physicalName": "rootId",
-            "publicKey": "rootId",
-            "outputLabel": "compositeChildren.rootId"
-          }
-        ],
-        "children": [],
-        "presence": {
-          "outputLabel": "__dbsp_presence_compositeChildren",
-          "physicalName": "id"
-        }
-      }
-    ],
-    "rows": [
-      {
-        "id": 1,
-        "compositeChildren": {
-          "id": 2,
-          "tenant": 2,
-          "name": "child",
-          "amount": 42,
-          "rootId": 2
-        }
-      }
-    ]
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Includes compile only from a report planned in this process"
+    },
+    "payloads": [],
+    "rows": []
   },
   {
     "case": "nql/join/1/direct/nested/composite/expression",
@@ -559,78 +431,14 @@
   },
   {
     "case": "external/join/1/direct/nested/composite/outer",
-    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".tenant AS \"compositeChildren.tenant\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeChildren\".\"rootId\" AS \"compositeChildren.rootId\", \"compositeChildren\".id AS \"__dbsp_presence_compositeChildren\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeChildren\".id = roots.id",
-    "params": [
-      "child"
-    ],
-    "error": null,
-    "payloads": [
-      {
-        "path": "compositeChildren",
-        "publicKey": "compositeChildren",
-        "strategy": "join",
-        "outputMode": "nested",
-        "table": "children",
-        "isToOne": true,
-        "outputLabel": "compositeChildren_json",
-        "columns": [
-          {
-            "logicalName": "id",
-            "physicalName": "id",
-            "publicKey": "id",
-            "outputLabel": "compositeChildren.id"
-          },
-          {
-            "logicalName": "tenant",
-            "physicalName": "tenant",
-            "publicKey": "tenant",
-            "outputLabel": "compositeChildren.tenant"
-          },
-          {
-            "logicalName": "name",
-            "physicalName": "name",
-            "publicKey": "name",
-            "outputLabel": "compositeChildren.name"
-          },
-          {
-            "logicalName": "amount",
-            "physicalName": "amount",
-            "publicKey": "amount",
-            "outputLabel": "compositeChildren.amount",
-            "readHandling": {
-              "kind": "nestedTransform",
-              "table": "children",
-              "column": "amount",
-              "js": "number",
-              "outputKey": "amount"
-            }
-          },
-          {
-            "logicalName": "rootId",
-            "physicalName": "rootId",
-            "publicKey": "rootId",
-            "outputLabel": "compositeChildren.rootId"
-          }
-        ],
-        "children": [],
-        "presence": {
-          "outputLabel": "__dbsp_presence_compositeChildren",
-          "physicalName": "id"
-        }
-      }
-    ],
-    "rows": [
-      {
-        "id": 1,
-        "compositeChildren": {
-          "id": 2,
-          "tenant": 2,
-          "name": "child",
-          "amount": 42,
-          "rootId": 2
-        }
-      }
-    ]
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Includes compile only from a report planned in this process"
+    },
+    "payloads": [],
+    "rows": []
   },
   {
     "case": "nql/join/1/direct/nested/composite/outer",
@@ -782,35 +590,14 @@
   },
   {
     "case": "external/join/1/direct/flat/single/all",
-    "sql": "SELECT roots.*, children.id AS \"children.id\" FROM roots LEFT JOIN children AS children ON roots.id = children.\"rootId\"",
+    "sql": null,
     "params": [],
-    "error": null,
-    "payloads": [
-      {
-        "path": "children",
-        "publicKey": "children",
-        "strategy": "join",
-        "outputMode": "flat",
-        "table": "children",
-        "isToOne": true,
-        "outputLabel": "children_json",
-        "columns": [
-          {
-            "logicalName": "id",
-            "physicalName": "id",
-            "publicKey": "id",
-            "outputLabel": "children.id"
-          }
-        ],
-        "children": []
-      }
-    ],
-    "rows": [
-      {
-        "id": 1,
-        "children.id": 2
-      }
-    ]
+    "error": {
+      "class": "Error",
+      "message": "Includes compile only from a report planned in this process"
+    },
+    "payloads": [],
+    "rows": []
   },
   {
     "case": "nql/join/1/direct/flat/single/all",
@@ -933,56 +720,14 @@
   },
   {
     "case": "external/join/1/direct/flat/single/projection",
-    "sql": "SELECT roots.*, children.id AS \"children.id\", children.name AS \"children.name\", children.amount AS \"children.amount\" FROM roots LEFT JOIN children AS children ON roots.id = children.\"rootId\"",
+    "sql": null,
     "params": [],
-    "error": null,
-    "payloads": [
-      {
-        "path": "children",
-        "publicKey": "children",
-        "strategy": "join",
-        "outputMode": "flat",
-        "table": "children",
-        "isToOne": true,
-        "outputLabel": "children_json",
-        "columns": [
-          {
-            "logicalName": "id",
-            "physicalName": "id",
-            "publicKey": "id",
-            "outputLabel": "children.id"
-          },
-          {
-            "logicalName": "name",
-            "physicalName": "name",
-            "publicKey": "name",
-            "outputLabel": "children.name"
-          },
-          {
-            "logicalName": "amount",
-            "physicalName": "amount",
-            "publicKey": "amount",
-            "outputLabel": "children.amount",
-            "readHandling": {
-              "kind": "nestedTransform",
-              "table": "children",
-              "column": "amount",
-              "js": "number",
-              "outputKey": "amount"
-            }
-          }
-        ],
-        "children": []
-      }
-    ],
-    "rows": [
-      {
-        "id": 1,
-        "children.id": 2,
-        "children.name": "child",
-        "children.amount": "42"
-      }
-    ]
+    "error": {
+      "class": "Error",
+      "message": "Includes compile only from a report planned in this process"
+    },
+    "payloads": [],
+    "rows": []
   },
   {
     "case": "nql/join/1/direct/flat/single/projection",
@@ -1118,37 +863,14 @@
   },
   {
     "case": "external/join/1/direct/flat/single/predicate",
-    "sql": "SELECT roots.*, children.id AS \"children.id\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" WHERE children.name = $1",
-    "params": [
-      "child"
-    ],
-    "error": null,
-    "payloads": [
-      {
-        "path": "children",
-        "publicKey": "children",
-        "strategy": "join",
-        "outputMode": "flat",
-        "table": "children",
-        "isToOne": true,
-        "outputLabel": "children_json",
-        "columns": [
-          {
-            "logicalName": "id",
-            "physicalName": "id",
-            "publicKey": "id",
-            "outputLabel": "children.id"
-          }
-        ],
-        "children": []
-      }
-    ],
-    "rows": [
-      {
-        "id": 1,
-        "children.id": 2
-      }
-    ]
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Includes compile only from a report planned in this process"
+    },
+    "payloads": [],
+    "rows": []
   },
   {
     "case": "nql/join/1/direct/flat/single/predicate",

@@ -150,16 +150,14 @@ type Entry = {
 	rows: unknown[];
 };
 const entries: Entry[] = [];
-const legacyInputs: Record<string, PlanReport> = rewrite
-	? {}
-	: Object.assign(
-			{},
-			...readdirSync(inputsDirectory)
-				.sort()
-				.map((name) =>
-					JSON.parse(readFileSync(new URL(name, inputsDirectory), 'utf8')),
-				),
-		);
+const legacyInputs: Record<string, PlanReport> = Object.assign(
+	{},
+	...readdirSync(inputsDirectory)
+		.sort()
+		.map((name) =>
+			JSON.parse(readFileSync(new URL(name, inputsDirectory), 'utf8')),
+		),
+);
 /** Preserve insertion order within each strategy and bound serialized bytes. */
 function inputShards(inputs: Record<string, PlanReport>) {
 	const prefixes = [...strategies, 'recursive'];
@@ -205,10 +203,10 @@ const record = (
 	let error: Entry['error'] = null;
 	try {
 		const p =
-			key.startsWith('external/') && !rewrite && legacyInputs[key]
+			key.startsWith('external/') && legacyInputs[key]
 				? legacyInputs[key]!
 				: report();
-		if (rewrite && key.startsWith('external/'))
+		if (rewrite && key.startsWith('external/') && !legacyInputs[key])
 			legacyInputs[key] = {
 				...p,
 				metadata: { ...p.metadata, planningTimeMs: 0 },

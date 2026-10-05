@@ -83,8 +83,7 @@ function makeCountWithJoinPlan(
 // ---------------------------------------------------------------------------
 
 describe('aggregate join includes refuse payload loss', () => {
-	const refusal =
-		"Include include[0](file) cannot use 'join' with aggregation, groupBy or DISTINCT because its data would be dropped. Use .join() for relational columns, grouping or ordering.";
+	const refusal = 'Includes compile only from a report planned in this process';
 	for (const joinType of ['left', 'inner'] as const) {
 		for (const withWhere of [false, true]) {
 			it(`refuses external ${joinType} include, where=${withWhere}`, () => {

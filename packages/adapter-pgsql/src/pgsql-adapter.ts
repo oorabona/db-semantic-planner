@@ -89,7 +89,7 @@ import {
 	compileRecursive as compileRecursiveImpl,
 } from './adapter-compiler-recursive.js';
 import {
-	assertPlannedReportBindingAuthority,
+	assertPlannedReportIncludeAuthority,
 	compileSelect,
 	compileSelectEnvelope,
 } from './adapter-compiler-select.js';
@@ -2235,7 +2235,6 @@ function compileNqlRuntimeBindingCte(
 
 function createNqlBindingSelectPlan(query: QueryIntent): PlanReport {
 	return markPlannedReport({
-		bindingFinal: true,
 		rootTable: query.from,
 		decisions: [],
 		warnings: [],
@@ -3454,7 +3453,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 			return this.compileNqlBundle<T>(plan, options);
 		}
 		const deps = this.buildCompileDeps(options);
-		assertPlannedReportBindingAuthority(plan, deps);
+		assertPlannedReportIncludeAuthority(plan);
 		this.assertDeclaredPlanReferences(plan, options);
 		return guardCompiledQuery(
 			compileSelect<T>(plan, options, deps),

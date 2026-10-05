@@ -102,7 +102,7 @@ No deduplication is needed in the hydrator.
 
 ### Explicit JOIN for hasMany
 
-`hasMany` join includes are refused by `plan()` and by the adapter for external reports, whether selected explicitly, by a relation hint, or by a default. Use `.join()` or NQL `| flat` for a flat rowset, or use a `json_agg`/`lateral` include.
+`hasMany` join includes are refused by `plan()`, whether selected explicitly, by a relation hint, or by a default. Use `.join()` or NQL `| flat` for a flat rowset, or use a `json_agg`/`lateral` include.
 
 ## Recursive Include Depth
 
@@ -226,4 +226,4 @@ Compilation resolves these keys before generating SQL. Exact duplicate source/ke
 
 Scalar expression projections retain join include payloads. Expression projections containing a call in `NQL_SELECT_AGGREGATE_FUNCTIONS`, including nested calls, are aggregation. Join includes are refused when aggregation, `groupBy` or `DISTINCT` would drop their data; use `.join()` for relational columns, grouping or ordering.
 
-External reports are re-planned from intent, model and recorded planning inputs. Supplied execution must match the re-planned execution; decisions are observations. Decision matching applies to legacy reports without execution or planning inputs. Binding-final reports compile only in the process that planned them; JSON, spread and reports from a second package instance lose that authority and are refused.
+Includes compile only from a report planned in the same process. The module-private registry recognises reports issued by `plan()` and other in-process issuers, including the CLI. Serialized, spread, hand-built and legacy decision-context reports with includes are refused with `Includes compile only from a report planned in this process`. Reports without includes compile as before.

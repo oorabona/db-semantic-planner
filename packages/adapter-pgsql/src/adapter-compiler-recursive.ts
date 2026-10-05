@@ -98,12 +98,8 @@ function getRegisteredProjection(
 	return registry.get(name);
 }
 
-function createPlanReportForQuery(
-	query: QueryIntent,
-	bindingFinal = false,
-): PlanReport {
+function createPlanReportForQuery(query: QueryIntent): PlanReport {
 	return markPlannedReport({
-		...(bindingFinal && { bindingFinal: true as const }),
 		rootTable: query.from,
 		decisions: [],
 		warnings: [],
@@ -123,7 +119,7 @@ function createPlanReportForCteQuery(
 	hasRegisteredSource = false,
 ): PlanReport {
 	if (hasRegisteredSource || hasBindingName(deps.bindingNames, query.from)) {
-		return createPlanReportForQuery(query, true);
+		return createPlanReportForQuery(query);
 	}
 	if (
 		deps.model === undefined ||

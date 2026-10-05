@@ -1,3 +1,4 @@
+import { plan as nativePlan, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 /**
  * PgAdapter Unit Tests
  *
@@ -3002,39 +3003,31 @@ describe('PgAdapter', () => {
 		function buildPlanWithRelationColumns(
 			rootTable: string,
 			selectExprs: unknown[],
-			includeDecisions: unknown[],
+			includes: readonly { relation: string; join?: 'left' }[],
 		): PlanReport {
-			return {
-				rootTable,
-				intent: {
-					type: 'query',
-					table: rootTable,
-					include: includeDecisions.map((d: any) => ({
-						relation: d.context.relation,
-					})),
+			return nativePlan(
+				{
+					type: 'select',
+					from: rootTable,
 					select: {
 						type: 'expressions',
-						columns: selectExprs,
+						columns: selectExprs as Extract<
+							NonNullable<import('@dbsp/types').QueryIntent['select']>,
+							{ type: 'expressions' }
+						>['columns'],
 					},
+					include: includes,
 				},
-				decisions: includeDecisions.map((d: any) => ({
-					...d,
-					context: { ...d.context, sourceTable: rootTable },
-				})),
-			} as unknown as PlanReport;
+				propagationModel,
+				{
+					defaultIncludeStrategy: 'lateral',
+					dialectCapabilities: POSTGRESQL_CAPABILITIES,
+				},
+			);
 		}
 
-		function lateralInclude(relation: string, targetTable: string): unknown {
-			return {
-				type: 'include-strategy',
-				choice: 'lateral',
-				context: {
-					relation,
-					target: targetTable,
-					relationType: 'hasMany',
-					sourceTable: undefined,
-				},
-			};
+		function lateralInclude(relation: string) {
+			return { relation };
 		}
 
 		it('propagates specific columns from selectRelationColumn to lateral include', () => {
@@ -3049,7 +3042,7 @@ describe('PgAdapter', () => {
 						column: 'name',
 					},
 				],
-				[lateralInclude('orders', 'orders')],
+				[lateralInclude('orders')],
 			);
 
 			const compiled = adapter.compile(plan);
@@ -3075,7 +3068,7 @@ describe('PgAdapter', () => {
 						column: 'total',
 					},
 				],
-				[lateralInclude('orders', 'orders')],
+				[lateralInclude('orders')],
 			);
 
 			const compiled = adapter.compile(plan);
@@ -3096,11 +3089,11 @@ describe('PgAdapter', () => {
 						column: '*',
 					},
 				],
-				[lateralInclude('orders', 'orders')],
+				[lateralInclude('orders')],
 			);
 
 			expect(() => adapter.compile(plan)).toThrow(
-				'External report with includes requires a model',
+				"Include payload 'orders' cannot enumerate wildcard keys for opaque target 'orders'.",
 			);
 		});
 
@@ -3126,7 +3119,7 @@ describe('PgAdapter', () => {
 						column: 'nonexistent',
 					},
 				],
-				[lateralInclude('orders', 'orders')],
+				[lateralInclude('orders')],
 			);
 
 			expect(() => adapter.compile(plan, { model } as any)).toThrow(
@@ -3146,11 +3139,13 @@ describe('PgAdapter', () => {
 						column: 'anything',
 					},
 				],
-				[lateralInclude('orders', 'orders')],
+				[lateralInclude('orders')],
 			);
 
 			expect(() => adapter.compile(plan)).toThrow(
-				new Error('External report with includes requires a model'),
+				new Error(
+					"Include payload 'orders' cannot establish read conversions for column 'anything' without a compile model.",
+				),
 			);
 		});
 
@@ -3175,7 +3170,7 @@ describe('PgAdapter', () => {
 						column: 'anything',
 					},
 				],
-				[lateralInclude('orders', 'orders')],
+				[lateralInclude('orders')],
 			);
 
 			// The complete fixture still exercises relation-column propagation.
@@ -3189,17 +3184,8 @@ describe('PgAdapter', () => {
 		// Before the fix, the alias was dropped and "file.path" (pg notation)
 		// was used instead, making the result column unreachable.
 
-		function joinInclude(relation: string, targetTable: string): unknown {
-			return {
-				type: 'include-strategy',
-				choice: 'join',
-				context: {
-					relation,
-					target: targetTable,
-					relationType: 'belongsTo',
-					sourceTable: undefined,
-				},
-			};
+		function joinInclude(relation: string) {
+			return { relation, join: 'left' as const };
 		}
 
 		it('propagates user-supplied alias for join include (RELATION-COL-RESULT)', () => {
@@ -3216,7 +3202,7 @@ describe('PgAdapter', () => {
 						as: 'file_path',
 					},
 				],
-				[joinInclude('file', 'files')],
+				[joinInclude('file')],
 			);
 
 			const compiled = adapter.compile(plan);
@@ -3240,7 +3226,7 @@ describe('PgAdapter', () => {
 						// No `as` — fall back to "file.path" convention
 					},
 				],
-				[joinInclude('file', 'files')],
+				[joinInclude('file')],
 			);
 
 			const compiled = adapter.compile(plan);

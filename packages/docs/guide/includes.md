@@ -17,7 +17,7 @@ const usersWithPosts = await orm.select('users').include('posts').dump();
 
 The relation name maps to the `inverse` or `as` name defined in your schema's `ref()` declaration.
 
-Unknown relations are refused with the include path in both strict and lenient planning. Normalized-name collisions are always refused with an exported `AmbiguousIncludeError` carrying `candidates` and `includePath`; use the exact declared name or `via` to identify the relation. Compilation applies the same include option rules to external reports.
+Unknown relations are refused with the include path in both strict and lenient planning. Normalized-name collisions are always refused with an exported `AmbiguousIncludeError` carrying `candidates` and `includePath`; use the exact declared name or `via` to identify the relation. Includes compile only from a report planned in the same process.
 
 ---
 
@@ -206,8 +206,7 @@ properties independently in chunks of at most 50 key/value pairs joined with
 selections are root relation columns, so `users | select id, posts.title | flat`
 and `users | select id, posts.title | limit posts 5` retain their behaviour.
 
-Every resolved include, including camelCase names for snake_case relations, is
-validated during planning and before adapter handler dispatch, including external reports. Legacy external reports without execution or planning inputs must have include decisions matching their intent; contradictory, duplicate, or unmatched decisions are refused by include path. Reports with execution or planning inputs are re-planned from intent, model and recorded planning inputs, and any supplied execution is compared with the re-planned execution; decisions are observations. Binding-final reports compile only in the process that planned them; external copies are refused. Legacy decisions without a path must identify a unique include; nested coverage never suppresses a missing root join. Supplied foreign and parent keys must match the declared relation, and omitted keys are filled from that relation. Ordering options are validated in the same pass before handler dispatch. Include `select` forms are checked against the resolved strategy:
+Includes compile only from a report planned in the same process. The module-private registry recognises reports issued by `plan()` and other in-process issuers, including the CLI. Serialized, spread, hand-built and legacy decision-context reports with includes are refused with `Includes compile only from a report planned in this process`. Reports without includes compile as before. Include options are validated during planning. Include `select` forms are checked against the resolved strategy:
 `json_agg` accepts fields or all columns, `lateral` accepts only all columns, `join` accepts all columns or plain fields for to-one relations,
 and ordinary non-recursive `cte` refuses explicit selection. Mixed wildcard lists such as `['*', 'id']`
 are refused for every strategy; `['*']` is the all-columns form. Both `json_agg`

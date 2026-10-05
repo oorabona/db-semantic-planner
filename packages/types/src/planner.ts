@@ -191,13 +191,7 @@ export interface IncludePayloadShape {
 }
 
 export interface PlanReport {
-	/**
-	 * Normalized planner inputs retained for external re-planning:
-	 * forceFilterStrategy, forceJoinType, enableCTEs, cteThreshold,
-	 * maxIncludeDepth, disambiguate, defaultIncludeStrategy, dialectCapabilities.
-	 */
-	readonly planningInputs?: Readonly<PlanOptions>;
-	/** Normative include execution; absent only on legacy external reports. */
+	/** Normative include execution issued by an in-process planner. */
 	readonly execution?: import('./resolved-includes.js').IncludeExecution;
 	/** Adapter-owned payload descriptors indexed by resolved include identity. */
 	readonly includePayloadsByNodeId?: Readonly<
@@ -205,8 +199,6 @@ export interface PlanReport {
 	>;
 	/** Required at hydration time for json_agg, join and lateral include decisions. */
 	readonly includePayloads?: readonly IncludePayloadShape[];
-	/** Binding-final reports require the issuing process, even without includes. */
-	readonly bindingFinal?: true;
 	/** Root table for the query */
 	readonly rootTable: string;
 

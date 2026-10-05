@@ -12,58 +12,14 @@
   },
   {
     "case": "external/json_agg/2/direct/flat/single/expression",
-    "sql": "SELECT roots.*, children.id AS \"children.id\", leaves.id AS \"children.leaves.id\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" JOIN leaves AS leaves ON children.id = leaves.\"childId\" WHERE lower(name) = $1 AND lower(name) = $2",
-    "params": [
-      "child",
-      "child"
-    ],
-    "error": null,
-    "payloads": [
-      {
-        "path": "children",
-        "publicKey": "children",
-        "strategy": "join",
-        "outputMode": "flat",
-        "table": "children",
-        "isToOne": true,
-        "outputLabel": "children_json",
-        "columns": [
-          {
-            "logicalName": "id",
-            "physicalName": "id",
-            "publicKey": "id",
-            "outputLabel": "children.id"
-          }
-        ],
-        "children": [
-          {
-            "path": "children.leaves",
-            "publicKey": "leaves",
-            "strategy": "join",
-            "outputMode": "flat",
-            "table": "leaves",
-            "isToOne": true,
-            "outputLabel": "leaves_json",
-            "columns": [
-              {
-                "logicalName": "id",
-                "physicalName": "id",
-                "publicKey": "id",
-                "outputLabel": "children.leaves.id"
-              }
-            ],
-            "children": []
-          }
-        ]
-      }
-    ],
-    "rows": [
-      {
-        "id": 1,
-        "children.id": 2,
-        "children.leaves.id": 2
-      }
-    ]
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Includes compile only from a report planned in this process"
+    },
+    "payloads": [],
+    "rows": []
   },
   {
     "case": "nql/json_agg/2/direct/flat/single/expression",
@@ -160,58 +116,14 @@
   },
   {
     "case": "external/json_agg/2/direct/flat/single/outer",
-    "sql": "SELECT roots.*, children.id AS \"children.id\", leaves.id AS \"children.leaves.id\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" JOIN leaves AS leaves ON children.id = leaves.\"childId\" WHERE children.name = $1 AND children.id = roots.id AND leaves.name = $2 AND leaves.id = roots.id",
-    "params": [
-      "child",
-      "child"
-    ],
-    "error": null,
-    "payloads": [
-      {
-        "path": "children",
-        "publicKey": "children",
-        "strategy": "join",
-        "outputMode": "flat",
-        "table": "children",
-        "isToOne": true,
-        "outputLabel": "children_json",
-        "columns": [
-          {
-            "logicalName": "id",
-            "physicalName": "id",
-            "publicKey": "id",
-            "outputLabel": "children.id"
-          }
-        ],
-        "children": [
-          {
-            "path": "children.leaves",
-            "publicKey": "leaves",
-            "strategy": "join",
-            "outputMode": "flat",
-            "table": "leaves",
-            "isToOne": true,
-            "outputLabel": "leaves_json",
-            "columns": [
-              {
-                "logicalName": "id",
-                "physicalName": "id",
-                "publicKey": "id",
-                "outputLabel": "children.leaves.id"
-              }
-            ],
-            "children": []
-          }
-        ]
-      }
-    ],
-    "rows": [
-      {
-        "id": 1,
-        "children.id": 2,
-        "children.leaves.id": 2
-      }
-    ]
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Includes compile only from a report planned in this process"
+    },
+    "payloads": [],
+    "rows": []
   },
   {
     "case": "nql/json_agg/2/direct/flat/single/outer",
@@ -423,55 +335,14 @@
   },
   {
     "case": "external/json_agg/2/direct/flat/composite/all",
-    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\" FROM roots LEFT JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant LEFT JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant",
+    "sql": null,
     "params": [],
-    "error": null,
-    "payloads": [
-      {
-        "path": "compositeChildren",
-        "publicKey": "compositeChildren",
-        "strategy": "join",
-        "outputMode": "flat",
-        "table": "children",
-        "isToOne": true,
-        "outputLabel": "compositeChildren_json",
-        "columns": [
-          {
-            "logicalName": "id",
-            "physicalName": "id",
-            "publicKey": "id",
-            "outputLabel": "compositeChildren.id"
-          }
-        ],
-        "children": [
-          {
-            "path": "compositeChildren.compositeLeaves",
-            "publicKey": "compositeLeaves",
-            "strategy": "join",
-            "outputMode": "flat",
-            "table": "leaves",
-            "isToOne": true,
-            "outputLabel": "compositeLeaves_json",
-            "columns": [
-              {
-                "logicalName": "id",
-                "physicalName": "id",
-                "publicKey": "id",
-                "outputLabel": "compositeChildren.compositeLeaves.id"
-              }
-            ],
-            "children": []
-          }
-        ]
-      }
-    ],
-    "rows": [
-      {
-        "id": 1,
-        "compositeChildren.id": 2,
-        "compositeChildren.compositeLeaves.id": 2
-      }
-    ]
+    "error": {
+      "class": "Error",
+      "message": "Includes compile only from a report planned in this process"
+    },
+    "payloads": [],
+    "rows": []
   },
   {
     "case": "nql/json_agg/2/direct/flat/composite/all",
@@ -638,97 +509,14 @@
   },
   {
     "case": "external/json_agg/2/direct/flat/composite/projection",
-    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeChildren\".name AS \"compositeChildren.name\", \"compositeChildren\".amount AS \"compositeChildren.amount\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\", \"compositeLeaves\".name AS \"compositeChildren.compositeLeaves.name\", \"compositeLeaves\".amount AS \"compositeChildren.compositeLeaves.amount\" FROM roots LEFT JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant LEFT JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant",
+    "sql": null,
     "params": [],
-    "error": null,
-    "payloads": [
-      {
-        "path": "compositeChildren",
-        "publicKey": "compositeChildren",
-        "strategy": "join",
-        "outputMode": "flat",
-        "table": "children",
-        "isToOne": true,
-        "outputLabel": "compositeChildren_json",
-        "columns": [
-          {
-            "logicalName": "id",
-            "physicalName": "id",
-            "publicKey": "id",
-            "outputLabel": "compositeChildren.id"
-          },
-          {
-            "logicalName": "name",
-            "physicalName": "name",
-            "publicKey": "name",
-            "outputLabel": "compositeChildren.name"
-          },
-          {
-            "logicalName": "amount",
-            "physicalName": "amount",
-            "publicKey": "amount",
-            "outputLabel": "compositeChildren.amount",
-            "readHandling": {
-              "kind": "nestedTransform",
-              "table": "children",
-              "column": "amount",
-              "js": "number",
-              "outputKey": "amount"
-            }
-          }
-        ],
-        "children": [
-          {
-            "path": "compositeChildren.compositeLeaves",
-            "publicKey": "compositeLeaves",
-            "strategy": "join",
-            "outputMode": "flat",
-            "table": "leaves",
-            "isToOne": true,
-            "outputLabel": "compositeLeaves_json",
-            "columns": [
-              {
-                "logicalName": "id",
-                "physicalName": "id",
-                "publicKey": "id",
-                "outputLabel": "compositeChildren.compositeLeaves.id"
-              },
-              {
-                "logicalName": "name",
-                "physicalName": "name",
-                "publicKey": "name",
-                "outputLabel": "compositeChildren.compositeLeaves.name"
-              },
-              {
-                "logicalName": "amount",
-                "physicalName": "amount",
-                "publicKey": "amount",
-                "outputLabel": "compositeChildren.compositeLeaves.amount",
-                "readHandling": {
-                  "kind": "nestedTransform",
-                  "table": "leaves",
-                  "column": "amount",
-                  "js": "number",
-                  "outputKey": "amount"
-                }
-              }
-            ],
-            "children": []
-          }
-        ]
-      }
-    ],
-    "rows": [
-      {
-        "id": 1,
-        "compositeChildren.id": 2,
-        "compositeChildren.name": "child",
-        "compositeChildren.amount": "42",
-        "compositeChildren.compositeLeaves.id": 2,
-        "compositeChildren.compositeLeaves.name": "child",
-        "compositeChildren.compositeLeaves.amount": "42"
-      }
-    ]
+    "error": {
+      "class": "Error",
+      "message": "Includes compile only from a report planned in this process"
+    },
+    "payloads": [],
+    "rows": []
   },
   {
     "case": "nql/json_agg/2/direct/flat/composite/projection",
@@ -902,125 +690,14 @@
   },
   {
     "case": "external/json_agg/2/direct/flat/composite/ordered-limit",
-    "sql": "SELECT roots.*, children_lat_0.id AS \"compositeChildren.id\", children_lat_0.tenant AS \"compositeChildren.tenant\", children_lat_0.name AS \"compositeChildren.name\", children_lat_0.amount AS \"compositeChildren.amount\", children_lat_0.\"rootId\" AS \"compositeChildren.rootId\", leaves_lat_1.id AS \"compositeChildren.compositeLeaves.id\", leaves_lat_1.tenant AS \"compositeChildren.compositeLeaves.tenant\", leaves_lat_1.name AS \"compositeChildren.compositeLeaves.name\", leaves_lat_1.amount AS \"compositeChildren.compositeLeaves.amount\", leaves_lat_1.\"childId\" AS \"compositeChildren.compositeLeaves.childId\" FROM roots LEFT JOIN LATERAL (SELECT children_inner_0.id, children_inner_0.tenant, children_inner_0.name, children_inner_0.amount, children_inner_0.\"rootId\" FROM children AS children_inner_0 WHERE children_inner_0.\"rootId\" = roots.id AND children_inner_0.tenant = roots.tenant ORDER BY children_inner_0.name DESC NULLS LAST, children_inner_0.id ASC NULLS LAST, children_inner_0.tenant ASC NULLS LAST LIMIT 2) AS children_lat_0 ON true LEFT JOIN LATERAL (SELECT leaves_inner_1.id, leaves_inner_1.tenant, leaves_inner_1.name, leaves_inner_1.amount, leaves_inner_1.\"childId\" FROM leaves AS leaves_inner_1 WHERE leaves_inner_1.\"childId\" = children_lat_0.id AND leaves_inner_1.tenant = children_lat_0.tenant ORDER BY leaves_inner_1.name DESC NULLS LAST, leaves_inner_1.id ASC NULLS LAST, leaves_inner_1.tenant ASC NULLS LAST LIMIT 2) AS leaves_lat_1 ON true",
+    "sql": null,
     "params": [],
-    "error": null,
-    "payloads": [
-      {
-        "path": "compositeChildren",
-        "publicKey": "compositeChildren",
-        "strategy": "lateral",
-        "outputMode": "flat",
-        "table": "children",
-        "isToOne": true,
-        "outputLabel": "compositeChildren_json",
-        "columns": [
-          {
-            "logicalName": "id",
-            "physicalName": "id",
-            "publicKey": "id",
-            "outputLabel": "compositeChildren.id"
-          },
-          {
-            "logicalName": "tenant",
-            "physicalName": "tenant",
-            "publicKey": "tenant",
-            "outputLabel": "compositeChildren.tenant"
-          },
-          {
-            "logicalName": "name",
-            "physicalName": "name",
-            "publicKey": "name",
-            "outputLabel": "compositeChildren.name"
-          },
-          {
-            "logicalName": "amount",
-            "physicalName": "amount",
-            "publicKey": "amount",
-            "outputLabel": "compositeChildren.amount",
-            "readHandling": {
-              "kind": "nestedTransform",
-              "table": "children",
-              "column": "amount",
-              "js": "number",
-              "outputKey": "amount"
-            }
-          },
-          {
-            "logicalName": "rootId",
-            "physicalName": "rootId",
-            "publicKey": "rootId",
-            "outputLabel": "compositeChildren.rootId"
-          }
-        ],
-        "children": [
-          {
-            "path": "compositeChildren.compositeLeaves",
-            "publicKey": "compositeLeaves",
-            "strategy": "lateral",
-            "outputMode": "flat",
-            "table": "leaves",
-            "isToOne": true,
-            "outputLabel": "compositeLeaves_json",
-            "columns": [
-              {
-                "logicalName": "id",
-                "physicalName": "id",
-                "publicKey": "id",
-                "outputLabel": "compositeChildren.compositeLeaves.id"
-              },
-              {
-                "logicalName": "tenant",
-                "physicalName": "tenant",
-                "publicKey": "tenant",
-                "outputLabel": "compositeChildren.compositeLeaves.tenant"
-              },
-              {
-                "logicalName": "name",
-                "physicalName": "name",
-                "publicKey": "name",
-                "outputLabel": "compositeChildren.compositeLeaves.name"
-              },
-              {
-                "logicalName": "amount",
-                "physicalName": "amount",
-                "publicKey": "amount",
-                "outputLabel": "compositeChildren.compositeLeaves.amount",
-                "readHandling": {
-                  "kind": "nestedTransform",
-                  "table": "leaves",
-                  "column": "amount",
-                  "js": "number",
-                  "outputKey": "amount"
-                }
-              },
-              {
-                "logicalName": "childId",
-                "physicalName": "childId",
-                "publicKey": "childId",
-                "outputLabel": "compositeChildren.compositeLeaves.childId"
-              }
-            ],
-            "children": []
-          }
-        ]
-      }
-    ],
-    "rows": [
-      {
-        "id": 1,
-        "compositeChildren.id": 2,
-        "compositeChildren.tenant": 2,
-        "compositeChildren.name": "child",
-        "compositeChildren.amount": "42",
-        "compositeChildren.rootId": 2,
-        "compositeChildren.compositeLeaves.id": 2,
-        "compositeChildren.compositeLeaves.tenant": 2,
-        "compositeChildren.compositeLeaves.name": "child",
-        "compositeChildren.compositeLeaves.amount": "42",
-        "compositeChildren.compositeLeaves.childId": 2
-      }
-    ]
+    "error": {
+      "class": "Error",
+      "message": "Includes compile only from a report planned in this process"
+    },
+    "payloads": [],
+    "rows": []
   },
   {
     "case": "nql/json_agg/2/direct/flat/composite/ordered-limit",
@@ -1157,58 +834,14 @@
   },
   {
     "case": "external/json_agg/2/direct/flat/composite/predicate",
-    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeLeaves\".name = $2",
-    "params": [
-      "child",
-      "child"
-    ],
-    "error": null,
-    "payloads": [
-      {
-        "path": "compositeChildren",
-        "publicKey": "compositeChildren",
-        "strategy": "join",
-        "outputMode": "flat",
-        "table": "children",
-        "isToOne": true,
-        "outputLabel": "compositeChildren_json",
-        "columns": [
-          {
-            "logicalName": "id",
-            "physicalName": "id",
-            "publicKey": "id",
-            "outputLabel": "compositeChildren.id"
-          }
-        ],
-        "children": [
-          {
-            "path": "compositeChildren.compositeLeaves",
-            "publicKey": "compositeLeaves",
-            "strategy": "join",
-            "outputMode": "flat",
-            "table": "leaves",
-            "isToOne": true,
-            "outputLabel": "compositeLeaves_json",
-            "columns": [
-              {
-                "logicalName": "id",
-                "physicalName": "id",
-                "publicKey": "id",
-                "outputLabel": "compositeChildren.compositeLeaves.id"
-              }
-            ],
-            "children": []
-          }
-        ]
-      }
-    ],
-    "rows": [
-      {
-        "id": 1,
-        "compositeChildren.id": 2,
-        "compositeChildren.compositeLeaves.id": 2
-      }
-    ]
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Includes compile only from a report planned in this process"
+    },
+    "payloads": [],
+    "rows": []
   },
   {
     "case": "nql/json_agg/2/direct/flat/composite/predicate",
@@ -1305,58 +938,14 @@
   },
   {
     "case": "external/json_agg/2/direct/flat/composite/expression",
-    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant WHERE lower(name) = $1 AND lower(name) = $2",
-    "params": [
-      "child",
-      "child"
-    ],
-    "error": null,
-    "payloads": [
-      {
-        "path": "compositeChildren",
-        "publicKey": "compositeChildren",
-        "strategy": "join",
-        "outputMode": "flat",
-        "table": "children",
-        "isToOne": true,
-        "outputLabel": "compositeChildren_json",
-        "columns": [
-          {
-            "logicalName": "id",
-            "physicalName": "id",
-            "publicKey": "id",
-            "outputLabel": "compositeChildren.id"
-          }
-        ],
-        "children": [
-          {
-            "path": "compositeChildren.compositeLeaves",
-            "publicKey": "compositeLeaves",
-            "strategy": "join",
-            "outputMode": "flat",
-            "table": "leaves",
-            "isToOne": true,
-            "outputLabel": "compositeLeaves_json",
-            "columns": [
-              {
-                "logicalName": "id",
-                "physicalName": "id",
-                "publicKey": "id",
-                "outputLabel": "compositeChildren.compositeLeaves.id"
-              }
-            ],
-            "children": []
-          }
-        ]
-      }
-    ],
-    "rows": [
-      {
-        "id": 1,
-        "compositeChildren.id": 2,
-        "compositeChildren.compositeLeaves.id": 2
-      }
-    ]
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Includes compile only from a report planned in this process"
+    },
+    "payloads": [],
+    "rows": []
   },
   {
     "case": "nql/json_agg/2/direct/flat/composite/expression",
@@ -1453,58 +1042,14 @@
   },
   {
     "case": "external/json_agg/2/direct/flat/composite/outer",
-    "sql": "SELECT roots.*, \"compositeChildren\".id AS \"compositeChildren.id\", \"compositeLeaves\".id AS \"compositeChildren.compositeLeaves.id\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeChildren\".id = roots.id AND \"compositeLeaves\".name = $2 AND \"compositeLeaves\".id = roots.id",
-    "params": [
-      "child",
-      "child"
-    ],
-    "error": null,
-    "payloads": [
-      {
-        "path": "compositeChildren",
-        "publicKey": "compositeChildren",
-        "strategy": "join",
-        "outputMode": "flat",
-        "table": "children",
-        "isToOne": true,
-        "outputLabel": "compositeChildren_json",
-        "columns": [
-          {
-            "logicalName": "id",
-            "physicalName": "id",
-            "publicKey": "id",
-            "outputLabel": "compositeChildren.id"
-          }
-        ],
-        "children": [
-          {
-            "path": "compositeChildren.compositeLeaves",
-            "publicKey": "compositeLeaves",
-            "strategy": "join",
-            "outputMode": "flat",
-            "table": "leaves",
-            "isToOne": true,
-            "outputLabel": "compositeLeaves_json",
-            "columns": [
-              {
-                "logicalName": "id",
-                "physicalName": "id",
-                "publicKey": "id",
-                "outputLabel": "compositeChildren.compositeLeaves.id"
-              }
-            ],
-            "children": []
-          }
-        ]
-      }
-    ],
-    "rows": [
-      {
-        "id": 1,
-        "compositeChildren.id": 2,
-        "compositeChildren.compositeLeaves.id": 2
-      }
-    ]
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Includes compile only from a report planned in this process"
+    },
+    "payloads": [],
+    "rows": []
   },
   {
     "case": "nql/json_agg/2/direct/flat/composite/outer",

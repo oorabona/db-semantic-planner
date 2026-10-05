@@ -1,3 +1,4 @@
+import { plan as nativePlan, POSTGRESQL_CAPABILITIES, ref } from '@dbsp/core';
 /**
  * Issue 15 regression: include('enclosingSymbol', { join: 'left' }) on a query from
  * variable_defs did not emit the LEFT JOIN in SQL because the planner's
@@ -11,71 +12,24 @@
 import { schema } from '@dbsp/core';
 import type { ModelIR, PlanReport } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import type { AdapterCompilerDeps } from '../adapter-compiler-deps.js';
-import { compileSelect } from '../adapter-compiler-select.js';
-import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../assert-field.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Mock model: variable_defs with enclosing_symbol (FK: enclosing_symbol_id -> symbols)
 // ---------------------------------------------------------------------------
 
-const mockModel = {
-	getRelation: () => undefined,
-	getRelationsFrom: (table: string) => {
-		if (table === 'variable_defs') {
-			return [
-				{
-					name: 'enclosing_symbol',
-					type: 'belongsTo',
-					target: 'symbols',
-					foreignKey: 'enclosing_symbol_id',
-					cardinality: 'one',
-					optionality: 'optional',
-					includeStrategy: 'join',
-					filterStrategy: 'exists',
-					joinDefault: 'left',
-				},
-				{
-					name: 'file',
-					type: 'belongsTo',
-					target: 'files',
-					foreignKey: 'file_id',
-					cardinality: 'one',
-					optionality: 'required',
-					includeStrategy: 'join',
-					filterStrategy: 'exists',
-					joinDefault: 'inner',
-				},
-			];
-		}
-		return [];
+const mockModel = schema({
+	variable_defs: {
+		id: { type: 'integer', primaryKey: true },
+		enclosing_symbol_id: ref('symbols', { as: 'enclosing_symbol' }),
+		file_id: ref('files', { as: 'file' }),
 	},
-	getRelationsTo: () => [],
-	getTable: (name: string) =>
-		schema({
-			variable_defs: {
-				id: { type: 'integer', primaryKey: true },
-				enclosing_symbol_id: 'integer',
-				file_id: 'integer',
-			},
-			symbols: { id: { type: 'integer', primaryKey: true }, name: 'text' },
-			files: { id: { type: 'integer', primaryKey: true }, path: 'text' },
-		}).model.getTable(name),
-	relations: [],
-} as unknown as ModelIR;
+	symbols: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+	files: { id: { type: 'integer', primaryKey: true }, path: 'text' },
+}).model;
 
-const deps: AdapterCompilerDeps = {
-	schemaName: undefined,
-	defaultPk: DEFAULT_PK_COLUMN,
-	deriveFk: defaultFkDerivation,
-	model: mockModel,
-};
-
-function compile(plan: PlanReport): {
-	sql: string;
-	parameters: readonly unknown[];
-} {
-	return compileSelect(plan, undefined, deps);
+function compile(report: PlanReport) {
+	return createPgCompileOnlyAdapter({ model: mockModel }).compile(report);
 }
 
 /** Build a minimal plan for the Issue 16 scenario:
@@ -84,12 +38,10 @@ function compile(plan: PlanReport): {
  */
 function buildExplicitColumnsPlan(overrides?: {
 	joinType?: 'inner' | 'left';
-	hasPlannerDecision?: boolean;
 }): PlanReport {
-	const { joinType = 'left', hasPlannerDecision = false } = overrides ?? {};
-	return {
-		rootTable: 'variable_defs',
-		intent: {
+	const { joinType = 'left' } = overrides ?? {};
+	return nativePlan(
+		{
 			type: 'select',
 			from: 'variable_defs',
 			select: {
@@ -111,32 +63,9 @@ function buildExplicitColumnsPlan(overrides?: {
 				},
 			],
 		},
-		// Optionally include a planner-emitted decision (snake_case relation name)
-		decisions: hasPlannerDecision
-			? [
-					{
-						id: 'D1',
-						type: 'include-strategy',
-						choice: 'join',
-						joinType,
-						context: {
-							sourceTable: 'variable_defs',
-							target: 'symbols',
-							relation: 'enclosing_symbol',
-							relationType: 'belongsTo',
-							includeAlias: 'enclosingSymbol',
-							intentPath: 'include[0]',
-							foreignKey: 'enclosing_symbol_id',
-						},
-						reasoning: `explicit join:${joinType}`,
-						alternatives: [],
-					},
-				]
-			: [],
-		warnings: [],
-		ctes: [],
-		metadata: { planningTimeMs: 0, relationsAnalyzed: 0, isAmbiguous: false },
-	} as unknown as PlanReport;
+		mockModel,
+		{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -148,12 +77,11 @@ describe('Issue 15: include camelCase alias — synthesizeMissingJoinDecisions',
 		// Reproduces the astix checkUnusedVariables query pattern:
 		//   orm.from(variable_defs)
 		//     .include('enclosingSymbol', { join: 'left' })
-		const plan: PlanReport = {
-			rootTable: 'variable_defs',
-			intent: {
+		const plan: PlanReport = nativePlan(
+			{
 				type: 'select',
 				from: 'variable_defs',
-				select: { type: 'fields', fields: ['id', 'name'] },
+				select: { type: 'fields', fields: ['id'] },
 				include: [
 					{
 						relation: 'enclosingSymbol',
@@ -161,12 +89,9 @@ describe('Issue 15: include camelCase alias — synthesizeMissingJoinDecisions',
 					},
 				],
 			},
-			// No include-strategy decision: planner could not resolve 'enclosingSymbol'
-			decisions: [],
-			warnings: [],
-			ctes: [],
-			metadata: { planningTimeMs: 0, relationsAnalyzed: 0, isAmbiguous: false },
-		};
+			mockModel,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
 
 		const { sql } = compile(plan);
 
@@ -176,12 +101,11 @@ describe('Issue 15: include camelCase alias — synthesizeMissingJoinDecisions',
 	});
 
 	it('emits INNER JOIN for include(file, join:inner) resolved via direct name match', () => {
-		const plan: PlanReport = {
-			rootTable: 'variable_defs',
-			intent: {
+		const plan: PlanReport = nativePlan(
+			{
 				type: 'select',
 				from: 'variable_defs',
-				select: { type: 'fields', fields: ['id', 'name'] },
+				select: { type: 'fields', fields: ['id'] },
 				include: [
 					{
 						relation: 'file',
@@ -189,11 +113,9 @@ describe('Issue 15: include camelCase alias — synthesizeMissingJoinDecisions',
 					},
 				],
 			},
-			decisions: [],
-			warnings: [],
-			ctes: [],
-			metadata: { planningTimeMs: 0, relationsAnalyzed: 0, isAmbiguous: false },
-		};
+			mockModel,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
 
 		const { sql } = compile(plan);
 
@@ -202,12 +124,11 @@ describe('Issue 15: include camelCase alias — synthesizeMissingJoinDecisions',
 	});
 
 	it('refuses missing strategy decisions instead of dropping the include', () => {
-		const plan: PlanReport = {
-			rootTable: 'variable_defs',
-			intent: {
+		const plan: PlanReport = nativePlan(
+			{
 				type: 'select',
 				from: 'variable_defs',
-				select: { type: 'fields', fields: ['id', 'name'] },
+				select: { type: 'fields', fields: ['id'] },
 				include: [
 					{
 						relation: 'enclosingSymbol',
@@ -215,14 +136,12 @@ describe('Issue 15: include camelCase alias — synthesizeMissingJoinDecisions',
 					},
 				],
 			},
-			decisions: [],
-			warnings: [],
-			ctes: [],
-			metadata: { planningTimeMs: 0, relationsAnalyzed: 0, isAmbiguous: false },
-		};
+			mockModel,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
 
-		expect(() => compile(plan)).toThrow(
-			'Include include[0](enclosingSymbol) has no resolved include-strategy decision',
+		expect(() => compile({ ...plan, decisions: [] })).toThrow(
+			new Error('Includes compile only from a report planned in this process'),
 		);
 	});
 });
@@ -263,9 +182,7 @@ describe('Issue 16: include with explicit .columns() — hydration suppression',
 	});
 
 	it('does not emit hydration columns when planner emitted a snake_case relation decision', () => {
-		const { sql } = compile(
-			buildExplicitColumnsPlan({ hasPlannerDecision: true }),
-		);
+		const { sql } = compile(buildExplicitColumnsPlan());
 		// Still JOINs
 		expect(sql).toMatch(/JOIN/i);
 		// The compiled shape uses the projected public keys for relation hydration.
@@ -275,19 +192,16 @@ describe('Issue 16: include with explicit .columns() — hydration suppression',
 
 	it('regression: include WITHOUT explicit columns still hydrates full relation (select:fields)', () => {
 		// Control: this existing behaviour must not regress
-		const plan: PlanReport = {
-			rootTable: 'variable_defs',
-			intent: {
+		const plan: PlanReport = nativePlan(
+			{
 				type: 'select',
 				from: 'variable_defs',
-				select: { type: 'fields', fields: ['id', 'name'] },
+				select: { type: 'fields', fields: ['id'] },
 				include: [{ relation: 'enclosingSymbol', join: 'left' as const }],
 			},
-			decisions: [],
-			warnings: [],
-			ctes: [],
-			metadata: { planningTimeMs: 0, relationsAnalyzed: 0, isAmbiguous: false },
-		};
+			mockModel,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
 		const { sql } = compile(plan);
 		// The normal case should still emit the JOIN
 		expect(sql).toMatch(/LEFT JOIN/i);
@@ -323,13 +237,13 @@ describe('legacy synthesis camelCase collisions', () => {
 		};
 		let error: unknown;
 		try {
-			compileSelect(report, undefined, { ...deps, model: collisionModel });
+			createPgCompileOnlyAdapter({ model: collisionModel }).compile(report);
 		} catch (caught) {
 			error = caught;
 		}
 		expect(error).toBeInstanceOf(Error);
 		expect((error as Error).message).toBe(
-			'Ambiguous include relation "fooBAr" from table "variable_defs" at "fooBAr". Use the exact relation name or "via" to specify one of: foo_b_ar, foo_bAr',
+			'Includes compile only from a report planned in this process',
 		);
 	});
 });

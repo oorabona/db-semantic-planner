@@ -1,4 +1,9 @@
-import { ref, schema } from '@dbsp/core';
+import {
+	plan as nativePlan,
+	POSTGRESQL_CAPABILITIES,
+	ref,
+	schema,
+} from '@dbsp/core';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 /**
  * INCLUDE-WHERE-SCOPE-2HOP regression test.
@@ -27,9 +32,8 @@ function compile(plan: PlanReport): {
 
 describe('INCLUDE-WHERE-SCOPE-2HOP: 2-hop include WHERE compiled', () => {
 	it('where on 2nd-hop include is applied to root query', () => {
-		const plan: PlanReport = {
-			rootTable: 'calls',
-			intent: {
+		const plan: PlanReport = nativePlan(
+			{
 				type: 'select',
 				from: 'calls',
 				select: { type: 'fields', fields: ['id'] },
@@ -52,42 +56,9 @@ describe('INCLUDE-WHERE-SCOPE-2HOP: 2-hop include WHERE compiled', () => {
 					},
 				],
 			},
-			decisions: [
-				{
-					id: 'D1',
-					type: 'include-strategy',
-					choice: 'join',
-					joinType: 'inner',
-					context: {
-						sourceTable: 'calls',
-						target: 'callees',
-						relation: 'callee',
-						relationType: 'belongsTo',
-						intentPath: 'include[0]',
-					},
-					reasoning: 'explicit join:inner',
-					alternatives: [],
-				},
-				{
-					id: 'D2',
-					type: 'include-strategy',
-					choice: 'join',
-					joinType: 'inner',
-					context: {
-						sourceTable: 'callees',
-						target: 'files',
-						relation: 'file',
-						relationType: 'belongsTo',
-						intentPath: 'include[0].include[0]',
-					},
-					reasoning: 'explicit join:inner',
-					alternatives: [],
-				},
-			],
-			warnings: [],
-			rootTableAlias: undefined,
-			schemaName: undefined,
-		} as unknown as PlanReport;
+			compileModel,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
 
 		const result = compile(plan);
 		const sql = normalizeSQL(result.sql);
@@ -98,9 +69,8 @@ describe('INCLUDE-WHERE-SCOPE-2HOP: 2-hop include WHERE compiled', () => {
 	});
 
 	it('1-hop include WHERE still works (regression guard)', () => {
-		const plan: PlanReport = {
-			rootTable: 'symbols',
-			intent: {
+		const plan: PlanReport = nativePlan(
+			{
 				type: 'select',
 				from: 'symbols',
 				select: { type: 'fields', fields: ['id'] },
@@ -117,27 +87,9 @@ describe('INCLUDE-WHERE-SCOPE-2HOP: 2-hop include WHERE compiled', () => {
 					},
 				],
 			},
-			decisions: [
-				{
-					id: 'D1',
-					type: 'include-strategy',
-					choice: 'join',
-					joinType: 'inner',
-					context: {
-						sourceTable: 'symbols',
-						target: 'files',
-						relation: 'file',
-						relationType: 'belongsTo',
-						intentPath: 'include[0]',
-					},
-					reasoning: 'explicit join:inner',
-					alternatives: [],
-				},
-			],
-			warnings: [],
-			rootTableAlias: undefined,
-			schemaName: undefined,
-		} as unknown as PlanReport;
+			compileModel,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
 
 		const result = compile(plan);
 		const sql = normalizeSQL(result.sql);
@@ -147,9 +99,8 @@ describe('INCLUDE-WHERE-SCOPE-2HOP: 2-hop include WHERE compiled', () => {
 	});
 
 	it('2-hop include without where produces no WHERE', () => {
-		const plan: PlanReport = {
-			rootTable: 'calls',
-			intent: {
+		const plan: PlanReport = nativePlan(
+			{
 				type: 'select',
 				from: 'calls',
 				select: { type: 'fields', fields: ['id'] },
@@ -161,42 +112,9 @@ describe('INCLUDE-WHERE-SCOPE-2HOP: 2-hop include WHERE compiled', () => {
 					},
 				],
 			},
-			decisions: [
-				{
-					id: 'D1',
-					type: 'include-strategy',
-					choice: 'join',
-					joinType: 'inner',
-					context: {
-						sourceTable: 'calls',
-						target: 'callees',
-						relation: 'callee',
-						relationType: 'belongsTo',
-						intentPath: 'include[0]',
-					},
-					reasoning: 'explicit join:inner',
-					alternatives: [],
-				},
-				{
-					id: 'D2',
-					type: 'include-strategy',
-					choice: 'join',
-					joinType: 'inner',
-					context: {
-						sourceTable: 'callees',
-						target: 'files',
-						relation: 'file',
-						relationType: 'belongsTo',
-						intentPath: 'include[0].include[0]',
-					},
-					reasoning: 'explicit join:inner',
-					alternatives: [],
-				},
-			],
-			warnings: [],
-			rootTableAlias: undefined,
-			schemaName: undefined,
-		} as unknown as PlanReport;
+			compileModel,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
 
 		const result = compile(plan);
 		const sql = normalizeSQL(result.sql);
