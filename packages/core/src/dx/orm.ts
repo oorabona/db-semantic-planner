@@ -258,7 +258,9 @@ export function createOrm<T extends SchemaDefinition>(
 		// Full schema object provided
 		model = schemaObj.model;
 		schemaDefinition = schemaObj.definition;
-		defaultFilters = schemaObj.defaultFilters;
+		defaultFilters = schemaObj.defaultFilters
+			? Object.assign(Object.create(null), schemaObj.defaultFilters)
+			: undefined;
 
 		// ARCH-006: Validate casing consistency
 		if (

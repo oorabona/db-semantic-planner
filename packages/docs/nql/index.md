@@ -1318,7 +1318,7 @@ recent_users | select username, createdAt
 
 The `employees` table has a self-referencing `managerId` column. The schema defines
 pseudo-columns for traversal: `manager` (parent), `managementChain` (ancestors),
-`allReports` (descendants).
+`allReports` (descendants). Recursive pseudo-columns return an omitted-self flat list with `depth` under the requested name (`managementChain` or `allReports`), without changing the number of root rows.
 
 ### Single-Level Traversal
 
@@ -1369,7 +1369,7 @@ employees | select name, manager.name, manager.manager.name
 
 ### Recursive Ancestors (CTE)
 
-The `managementChain` pseudo-column walks all the way up to the root. NQL compiles this to a `WITH RECURSIVE` CTE — no manual recursion needed.
+`managementChain` walks from the immediate manager toward the root. The correlated scalar aggregate tracks non-null referenced keys, stops before a node repeats (a cycle returns each node once, without an error) and stops at the relation's `maxDepth` (10 here).
 
 ```nql
 employees | select name, managementChain.*
@@ -1378,18 +1378,37 @@ employees | select name, managementChain.*
 <details><summary>SQL</summary>
 
 ```sql
-WITH "managementChain_cte" AS (SELECT employees_inner_0.* FROM hierarchy.employees AS employees_inner_0) SELECT employees.name FROM hierarchy.employees LEFT JOIN "managementChain_cte" AS "managementChain_ref_0" ON employees.id = "managementChain_ref_0".manager_id
+SELECT employees.name, COALESCE((WITH RECURSIVE "managementChain_walk" AS (SELECT __n.id AS id, __n.name AS name, __n.email AS email, __n.title AS title, __n.department_id AS department_id, __n.manager_id AS manager_id, __n.hire_date AS hire_date, __n.salary AS salary, 1 AS __depth, array_remove(ARRAY[employees.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.manager_id AS text) AS __parent_text FROM hierarchy.employees AS __n WHERE __n.id = employees.manager_id AND __n.id IS DISTINCT FROM employees.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.name AS name, __n.email AS email, __n.title AS title, __n.department_id AS department_id, __n.manager_id AS manager_id, __n.hire_date AS hire_date, __n.salary AS salary, "managementChain_walk".__depth + 1 AS __depth, "managementChain_walk".__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.manager_id AS text) AS __parent_text FROM "managementChain_walk" JOIN hierarchy.employees AS __n ON __n.id = "managementChain_walk".manager_id WHERE "managementChain_walk".__depth < 10 AND __n.id <> ALL ("managementChain_walk".__visited)) SELECT json_agg(json_build_object('id', "managementChain_walk".id, 'name', "managementChain_walk".name, 'email', "managementChain_walk".email, 'title', "managementChain_walk".title, 'departmentId', "managementChain_walk".department_id, 'managerId', "managementChain_walk".manager_id, 'hireDate', "managementChain_walk".hire_date, 'salary', "managementChain_walk".salary, '__dbsp_node', "managementChain_walk".__node_text, '__dbsp_parent', "managementChain_walk".__parent_text, '__dbsp_depth', "managementChain_walk".__depth) ORDER BY "managementChain_walk".__depth, "managementChain_walk".id) FROM "managementChain_walk"), '[]'::json) AS "managementChain_json" FROM hierarchy.employees
 ```
 </details>
 
 ### Recursive Descendants (CTE)
 
-The inverse of `managementChain`: `allReports` walks *down* the tree, collecting all direct and indirect reports via a recursive CTE.
+`allReports` walks down the tree. Each employee keeps one root row; leaves receive `allReports: []`. An index on the self-referencing foreign key is required for efficient recursive steps.
 
 ```nql
 employees | select name, allReports.*
+```
+
+<details><summary>SQL</summary>
+
+```sql
+SELECT employees.name, COALESCE((WITH RECURSIVE "allReports_walk" AS (SELECT __n.id AS id, __n.name AS name, __n.email AS email, __n.title AS title, __n.department_id AS department_id, __n.manager_id AS manager_id, __n.hire_date AS hire_date, __n.salary AS salary, 1 AS __depth, array_remove(ARRAY[employees.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.manager_id AS text) AS __parent_text FROM hierarchy.employees AS __n WHERE __n.manager_id = employees.id AND __n.id IS DISTINCT FROM employees.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.name AS name, __n.email AS email, __n.title AS title, __n.department_id AS department_id, __n.manager_id AS manager_id, __n.hire_date AS hire_date, __n.salary AS salary, "allReports_walk".__depth + 1 AS __depth, "allReports_walk".__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.manager_id AS text) AS __parent_text FROM "allReports_walk" JOIN hierarchy.employees AS __n ON __n.manager_id = "allReports_walk".id WHERE "allReports_walk".__depth < 10 AND __n.id <> ALL ("allReports_walk".__visited)) SELECT json_agg(json_build_object('id', "allReports_walk".id, 'name', "allReports_walk".name, 'email', "allReports_walk".email, 'title', "allReports_walk".title, 'departmentId', "allReports_walk".department_id, 'managerId', "allReports_walk".manager_id, 'hireDate', "allReports_walk".hire_date, 'salary', "allReports_walk".salary, '__dbsp_node', "allReports_walk".__node_text, '__dbsp_parent', "allReports_walk".__parent_text, '__dbsp_depth', "allReports_walk".__depth) ORDER BY "allReports_walk".__depth, "allReports_walk".id) FROM "allReports_walk"), '[]'::json) AS "allReports_json" FROM hierarchy.employees
+```
+</details>
+
+Selected pseudo-column fields use the same payload resolver and private traversal keys:
+
+```nql
 employees | select name, allReports.name
 ```
+
+<details><summary>SQL</summary>
+
+```sql
+SELECT employees.name, COALESCE((WITH RECURSIVE "allReports_walk" AS (SELECT __n.name AS name, __n.id AS id, __n.manager_id AS manager_id, 1 AS __depth, array_remove(ARRAY[employees.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.manager_id AS text) AS __parent_text FROM hierarchy.employees AS __n WHERE __n.manager_id = employees.id AND __n.id IS DISTINCT FROM employees.id AND __n.id IS NOT NULL UNION ALL SELECT __n.name AS name, __n.id AS id, __n.manager_id AS manager_id, "allReports_walk".__depth + 1 AS __depth, "allReports_walk".__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.manager_id AS text) AS __parent_text FROM "allReports_walk" JOIN hierarchy.employees AS __n ON __n.manager_id = "allReports_walk".id WHERE "allReports_walk".__depth < 10 AND __n.id <> ALL ("allReports_walk".__visited)) SELECT json_agg(json_build_object('name', "allReports_walk".name, '__dbsp_node', "allReports_walk".__node_text, '__dbsp_parent', "allReports_walk".__parent_text, '__dbsp_depth', "allReports_walk".__depth) ORDER BY "allReports_walk".__depth, "allReports_walk".id) FROM "allReports_walk"), '[]'::json) AS "allReports_json" FROM hierarchy.employees
+```
+</details>
 
 ---
 
@@ -2234,7 +2253,7 @@ The multi-row example compiles to `INSERT INTO table (a, b) VALUES ($1, DEFAULT)
 | json_agg | `select *, rel.*` (default) | Correlated subquery with `json_agg` |
 | flat | `\| flat` | `join` (JOIN), or `lateral` (LEFT JOIN LATERAL) with a per-relation limit |
 | LATERAL | `\| limit rel N` | LEFT JOIN LATERAL with LIMIT |
-| CTE | Recursive pseudo-columns | WITH RECURSIVE |
+| CTE | Recursive pseudo-columns | Correlated scalar WITH RECURSIVE JSON aggregate; one root row |
 
 ### Hierarchy Pseudo-Columns
 
@@ -2244,8 +2263,8 @@ Requires a self-referencing FK with roles defined in the schema:
 |---------------|-------------|
 | `manager` | Direct parent (single level) |
 | `manager.manager` | Skip-level (2 levels up) |
-| `managementChain` | All ancestors (recursive CTE) |
-| `allReports` | All descendants (recursive CTE) |
+| `managementChain` | Omitted-self flat ancestors with depth, under managementChain |
+| `allReports` | Omitted-self flat descendants with depth, under allReports |
 
 ## Include payload keys
 

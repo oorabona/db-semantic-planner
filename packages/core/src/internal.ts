@@ -89,12 +89,14 @@ export type {
 } from './model-ir.js';
 export { inspectMutationRows } from './mutation-rows.js';
 export {
+	normalizeRecursiveIncludeOptions,
 	type RecursivePlanReport,
 	validateIncludeInput,
 	validateIncludeOptions,
 	validateIncludeOrdering,
 	validateIncludeStrategy,
 	validateRecursiveIncludeStrategy,
+	validateRecursiveSetOperation,
 	validateResolvedIncludeStrategy,
 } from './planner.js';
 export {

@@ -41,16 +41,16 @@ function makeMockModel(relations: readonly RelationIR[]): ModelIR {
 
 describe('extractRecursiveField', () => {
 	it('returns empty array for null input', () => {
-		expect(extractRecursiveField(null, 'ancestors')).toEqual([]);
+		expect(extractRecursiveField(null, 'manager')).toEqual([]);
 	});
 
 	it('returns empty array for undefined input', () => {
-		expect(extractRecursiveField(undefined, 'descendants')).toEqual([]);
+		expect(extractRecursiveField(undefined, 'children')).toEqual([]);
 	});
 
 	it('returns the field value when present', () => {
-		const row = { id: 1, ancestors: [{ id: 2 }, { id: 3 }] };
-		expect(extractRecursiveField(row, 'ancestors')).toEqual([
+		const row = { id: 1, manager: [{ id: 2 }, { id: 3 }] };
+		expect(extractRecursiveField(row, 'manager')).toEqual([
 			{ id: 2 },
 			{ id: 3 },
 		]);
@@ -58,19 +58,19 @@ describe('extractRecursiveField', () => {
 
 	it('returns empty array when field is absent (nullish coalescing)', () => {
 		const row = { id: 1, name: 'root' };
-		expect(extractRecursiveField(row, 'descendants')).toEqual([]);
+		expect(extractRecursiveField(row, 'children')).toEqual([]);
 	});
 
 	it('returns empty array when field value is null', () => {
-		const row = { id: 1, ancestors: null };
+		const row = { id: 1, manager: null };
 		expect(
-			extractRecursiveField(row as Record<string, unknown>, 'ancestors'),
+			extractRecursiveField(row as Record<string, unknown>, 'manager'),
 		).toEqual([]);
 	});
 
 	it('returns empty array when field value is undefined', () => {
-		const row = { id: 1, ancestors: undefined };
-		expect(extractRecursiveField(row, 'ancestors')).toEqual([]);
+		const row = { id: 1, manager: undefined };
+		expect(extractRecursiveField(row, 'manager')).toEqual([]);
 	});
 });
 

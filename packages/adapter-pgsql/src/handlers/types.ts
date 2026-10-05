@@ -430,6 +430,7 @@ export interface Decision {
 		| readonly JsonAggOrderByEntry[];
 	readonly frame?: string;
 	// Recursive specific
+	readonly recursiveInclude?: import('@dbsp/types').IncludeRecursiveOptions;
 	readonly maxDepth?: number;
 	readonly pathColumn?: string;
 	readonly cycleDetection?: boolean;

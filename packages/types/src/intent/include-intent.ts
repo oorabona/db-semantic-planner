@@ -25,6 +25,9 @@ import type { WhereIntent } from './where-intent.js';
  * `RecursiveIncludeOptions` in dx/types.ts.
  */
 export interface IncludeRecursiveOptions {
+	readonly direction?: 'ancestors' | 'descendants';
+	readonly flat?: boolean;
+	readonly omitSelf?: boolean;
 	/**
 	 * Maximum recursion depth (default: 100).
 	 * Safety limit to prevent infinite recursion.
@@ -37,21 +40,18 @@ export interface IncludeRecursiveOptions {
 	 */
 	readonly track?: {
 		/**
-		 * Include depth counter (starts at 0 for root nodes).
-		 * Set to true for default column name 'depth', or object for custom alias.
+		 * `true` exposes the depth counter as `depth` (0 for the root itself).
+		 * An object with a custom alias is refused by `plan()`.
 		 */
 		readonly depth?: boolean | { readonly as?: string };
 		/**
-		 * Include path array for cycle detection/debugging.
-		 * Set to true for default column name 'path', or object for custom alias.
+		 * Refused by `plan()`: a recursive include does not expose its path.
 		 */
 		readonly path?: boolean | { readonly as?: string };
 	};
 
 	/**
-	 * Foreign key column for recursion.
-	 * If not specified, will be inferred from relation definition.
-	 * @example 'parentId' for self-referential category tree
+	 * Refused by `plan()`: the walk always uses the relation's declared keys.
 	 */
 	readonly foreignKey?: string;
 }

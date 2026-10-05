@@ -11,7 +11,15 @@
  */
 
 import type { CommonTableExpr, Node, SelectStmt } from '@pgsql/types';
-import { andExpr, binaryExpr, eqExpr, integerNode } from '../ast-helpers.js';
+import {
+	andExpr,
+	binaryExpr,
+	eqExpr,
+	funcCall,
+	integerNode,
+	nullConstNode,
+	sqlColumnRef,
+} from '../ast-helpers.js';
 import type { CompilerContext } from '../handlers/types.js';
 import { queryLocal, type SqlIdentifier } from '../sql-identifier.js';
 import {
@@ -60,6 +68,14 @@ export interface RecursiveCteConfig {
 	trackPath?: boolean;
 	/** Whether to use PG14+ CYCLE clause (vs __visited array) */
 	usePg14Cycle?: boolean;
+	/** Resolved outer key expressions for a correlated include walk. */
+	correlation?: { readonly seed: Node; readonly rootId: Node };
+	/** Internal names allocated by correlated includes; standalone SQL stays unchanged. */
+	internalNames?: {
+		node: SqlIdentifier;
+		depth: SqlIdentifier;
+		visited: SqlIdentifier;
+	};
 	/** Compiler context */
 	ctx: CompilerContext;
 
@@ -135,7 +151,9 @@ export function buildRecursiveCte(config: RecursiveCteConfig): {
 	const dbTable = table;
 	const dbPk = pkColumn;
 	const dbFk = fkColumn;
-	const innerAlias = queryLocal('__n');
+	const innerAlias = config.internalNames?.node ?? queryLocal('__n');
+	const depthName = config.internalNames?.depth ?? queryLocal('__depth');
+	const visitedName = config.internalNames?.visited ?? queryLocal('__visited');
 
 	// Ancestor joins read the parent key from the preceding CTE row.
 	const traversalColumns = isAncestors
@@ -145,14 +163,55 @@ export function buildRecursiveCte(config: RecursiveCteConfig): {
 	// Build anchor target list
 	const anchorTargets: Node[] = buildTargetList(traversalColumns, innerAlias, {
 		isAnchor: true,
+		depthName,
+		visitedName,
 		trackPath,
 		pkColumn: dbPk,
 		usePg14Cycle,
 	});
 
+	// Correlated includes retain the root in their visited ids, but seed only neighbours.
+	if (config.correlation) {
+		const visited = anchorTargets.find(
+			(target) =>
+				'ResTarget' in target && target.ResTarget?.name === visitedName,
+		);
+		if (visited && 'ResTarget' in visited)
+			visited.ResTarget!.val = funcCall('array_remove', [
+				{
+					A_ArrayExpr: {
+						elements: [
+							config.correlation.rootId,
+							sqlColumnRef(dbPk, innerAlias),
+						],
+					},
+				},
+				nullConstNode(),
+			]);
+	}
 	// Build anchor WHERE clause
-	const structuralAnchorWhere =
-		config.anchor.mode === 'correlated'
+	const structuralAnchorWhere = config.correlation
+		? andExpr(
+				eqExpr(
+					sqlColumnRef(isAncestors ? dbPk : dbFk, innerAlias),
+					config.correlation.seed,
+				),
+				{
+					A_Expr: {
+						kind: 'AEXPR_DISTINCT',
+						name: [{ String: { sval: '=' } }],
+						lexpr: sqlColumnRef(dbPk, innerAlias),
+						rexpr: config.correlation.rootId,
+					},
+				},
+				{
+					NullTest: {
+						arg: sqlColumnRef(dbPk, innerAlias),
+						nulltesttype: 'IS_NOT_NULL',
+					},
+				},
+			)
+		: config.anchor.mode === 'correlated'
 			? buildAnchorWhere(
 					innerAlias,
 					config.anchor.outerAlias,
@@ -189,6 +248,8 @@ export function buildRecursiveCte(config: RecursiveCteConfig): {
 		innerAlias,
 		{
 			isAnchor: false,
+			depthName,
+			visitedName,
 			trackPath,
 			pkColumn: dbPk,
 			cteAlias,
@@ -203,6 +264,8 @@ export function buildRecursiveCte(config: RecursiveCteConfig): {
 		dbPk,
 		maxDepth,
 		usePg14Cycle,
+		depthName,
+		visitedName,
 	);
 
 	// Build recursive JOIN condition
@@ -266,6 +329,8 @@ function buildTargetList(
 	alias: SqlIdentifier,
 	options: {
 		isAnchor: boolean;
+		depthName?: SqlIdentifier;
+		visitedName?: SqlIdentifier;
 		trackPath: boolean;
 		pkColumn: SqlIdentifier;
 		cteAlias?: SqlIdentifier;
@@ -294,7 +359,7 @@ function buildTargetList(
 		targets.push({
 			ResTarget: {
 				val: integerNode(1),
-				name: '__depth',
+				name: options.depthName ?? '__depth',
 			},
 		});
 	} else if (options.cteAlias) {
@@ -306,27 +371,39 @@ function buildTargetList(
 						ColumnRef: {
 							fields: [
 								{ String: { sval: options.cteAlias } },
-								{ String: { sval: '__depth' } },
+								{ String: { sval: options.depthName ?? '__depth' } },
 							],
 						},
 					},
 					integerNode(1),
 				),
-				name: '__depth',
+				name: options.depthName ?? '__depth',
 			},
 		});
 	}
 
 	// Add __visited for cycle detection (skipped when using PG14 CYCLE clause)
 	if (!options.usePg14Cycle) {
-		targets.push(
-			buildCycleDetection(
-				alias,
-				options.pkColumn,
-				options.isAnchor,
-				options.cteAlias,
-			),
+		const visited = buildCycleDetection(
+			alias,
+			options.pkColumn,
+			options.isAnchor,
+			options.cteAlias,
 		);
+		if (options.visitedName && 'ResTarget' in visited) {
+			visited.ResTarget!.name = options.visitedName;
+			if (
+				!options.isAnchor &&
+				visited.ResTarget?.val &&
+				'A_Expr' in visited.ResTarget.val
+			) {
+				visited.ResTarget.val.A_Expr!.lexpr = sqlColumnRef(
+					options.visitedName,
+					options.cteAlias!,
+				);
+			}
+		}
+		targets.push(visited);
 	}
 
 	// Add __path if tracking
@@ -407,6 +484,8 @@ function buildRecursiveWhere(
 	pkColumn: SqlIdentifier,
 	maxDepth: number,
 	usePg14Cycle: boolean,
+	depthName: SqlIdentifier = queryLocal('__depth'),
+	visitedName: SqlIdentifier = queryLocal('__visited'),
 ): Node {
 	const conditions: Node[] = [
 		// __depth < maxDepth
@@ -416,7 +495,7 @@ function buildRecursiveWhere(
 				ColumnRef: {
 					fields: [
 						{ String: { sval: cteAlias } },
-						{ String: { sval: '__depth' } },
+						{ String: { sval: depthName } },
 					],
 				},
 			},
@@ -442,7 +521,7 @@ function buildRecursiveWhere(
 					ColumnRef: {
 						fields: [
 							{ String: { sval: cteAlias } },
-							{ String: { sval: '__visited' } },
+							{ String: { sval: visitedName } },
 						],
 					},
 				},

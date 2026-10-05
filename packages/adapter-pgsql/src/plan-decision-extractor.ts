@@ -1771,7 +1771,7 @@ function toIncludeDecision(
 		? includeIntent.orderBy
 		: context.includeOrderBy;
 	const columns =
-		choice === 'json_agg'
+		choice === 'json_agg' || context.recursiveInclude
 			? includeSelectedColumns(
 					includeIntent?.select,
 					deriveRelationPathFromIntentPath(
@@ -1787,6 +1787,9 @@ function toIncludeDecision(
 	return {
 		type: 'includeStrategy',
 		choice,
+		...(context.recursiveInclude && {
+			recursiveInclude: context.recursiveInclude,
+		}),
 		...(columns !== undefined && { columns }),
 		...(columns?.length === 0 && { emptyProjection: true }),
 		...(includeIntent?.select && {

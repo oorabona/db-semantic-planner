@@ -83,7 +83,7 @@ Include `select` support by strategy:
 |----------|------------------------|
 | `json_agg` | `fields` (including an empty list) and `all`; other forms, including `expressions` and `aggregate`, are refused |
 | `join` | To-one only: omitted `select`, `all`, or explicit fields; fields `['*']` are refused |
-| `cte` | Omitted `select` only; any explicit `select` is refused |
+| `cte` | Recursive includes support fields/all; ordinary CTE includes refuse explicit `select` |
 | `lateral` | All columns only: omitted select, `all`, or fields `['*']` |
 
 A to-one join include with omitted `select` or `select: { type: 'all' }` returns every target column, enumerated with `"relation.column"` transport labels and declared public keys. Explicit field selection returns exactly those fields, with no unrequested primary key. A private presence marker distinguishes an existing row of null values from a missing row; hydration removes it. `hasMany` join includes are refused at planning and compilation, including join hints and defaults. Use `.join()`, NQL `| flat`, or a `json_agg`/`lateral` include instead.
@@ -95,7 +95,7 @@ Every `belongsToMany` include strategy is refused, including explicit strategies
 The provisional refusal applies when planning includes (any strategy, NQL relation columns and `| flat`), relation `.join()` and relation predicates. Other traversal routes are not supported until the junction lowering lands.
 
 To-one join includes accept omitted `select`, `select: { type: 'all' }`, or `select: { type: 'fields', fields: [...] }` with plain column names and no `'*'`.
-CTE includes refuse any explicit `select` with the include path because they add no related targets to the outer `SELECT`.
+Ordinary non-recursive CTE includes refuse any explicit `select` with the include path because they add no related targets to the outer `SELECT`.
 
 ### Include Options Reference
 
@@ -110,6 +110,8 @@ CTE includes refuse any explicit `select` with the include path because they add
 | `recursive` | `boolean` | Enable recursive CTE traversal (trees/hierarchies) |
 | `direction` | `'ancestors' \| 'descendants'` | Traversal direction — required when `recursive: true` |
 | `flat` | `boolean` | Return a flat array with a depth field instead of a tree |
+| `omitSelf` | `boolean` | Exclude the source node (default: false) |
+| `includeDepth` | `boolean` | Expose depth (default: false; always true for flat output) |
 | `maxDepth` | `number` | Maximum recursion depth (default: 100) |
 
 ---
@@ -137,7 +139,25 @@ const descendants = await orm.select('categories')
   .dump();
 ```
 
-The `flat: true` option returns all nodes as a flat array with a `depth` field rather than a nested tree structure.
+Recursive includes compile to one correlated `WITH RECURSIVE` JSON aggregate per parent. The walk uses the relation's declared referenced key, not an assumed `id`; missing or composite referenced keys are refused. Nullable traversal keys never match or enter the visited array. Each step tracks visited IDs to terminate cycles and stops at `maxDepth`. Aggregation orders by depth, node key and primary key, and falls back to `[]`. No root JOIN multiplies rows.
+
+The correlated include walk runs one recursive step per level per parent row. An index on the self-referencing foreign key is required for efficient recursive steps.
+
+Use `.all()` to obtain hydrated results; `.dump()` shows SQL and parameters. By default, `omitSelf: false` includes the source as depth 0. Nested descendants attach an array under the requested relation at every node (leaves have `children: []`); nested ancestors attach a single object, ending in `parent: null`. Set `omitSelf: true` to start at the immediate children or parent, depth 1.
+
+For a chain `1 → 2 → 3`, querying node 1 with `include('children', { recursive: true, direction: 'descendants', omitSelf: true })` yields:
+
+```json
+[{ "id": 1, "parentId": null, "children": [
+  { "id": 2, "parentId": 1, "children": [
+    { "id": 3, "parentId": 2, "children": [] }
+  ] }
+] }]
+```
+
+`flat: true` returns an ordered array with `depth` and keeps the requested include name as the property. `includeDepth: true` also exposes depth in nested output. Selecting fields preserves that projection; hydration uses internal key columns to nest the list and removes unselected keys afterwards.
+
+Recursive includes support `via`, field/all `select`, `direction`, `flat`, `omitSelf`, `includeDepth` and positive integer `maxDepth`. They refuse `where`, `join`, nested `include`, and expression projections with messages naming the option. At the intent layer, `foreignKey`, `track.path`, custom `track.depth.as`, `limit` and `orderBy` are also refused. Ordinary non-recursive CTE includes retain their existing strategy.
 
 For schema setup with self-referential `ref()` and `roles`, see [Getting Started](./getting-started).
 
@@ -189,7 +209,7 @@ and `users | select id, posts.title | limit posts 5` retain their behaviour.
 Every resolved include, including camelCase names for snake_case relations, is
 validated during planning and before adapter handler dispatch, including external reports. An external report’s include decisions must match its intent; contradictory, duplicate, or unmatched decisions are refused by include path. Legacy decisions without a path must identify a unique include; nested coverage never suppresses a missing root join. Supplied foreign and parent keys must match the declared relation, and omitted keys are filled from that relation. Ordering options are validated in the same pass before handler dispatch. Include `select` forms are checked against the resolved strategy:
 `json_agg` accepts fields or all columns, `lateral` accepts only all columns, `join` accepts all columns or plain fields for to-one relations,
-and `cte` refuses explicit selection. Mixed wildcard lists such as `['*', 'id']`
+and ordinary non-recursive `cte` refuses explicit selection. Mixed wildcard lists such as `['*', 'id']`
 are refused for every strategy; `['*']` is the all-columns form. Both `json_agg`
 and `lateral` limit rows per parent. Refusals identify the full nested include path.
 
@@ -207,4 +227,10 @@ Compilation resolves these keys before generating SQL. Exact duplicate source/ke
 
 Scalar expression projections retain join include payloads. Expression projections containing a call in `NQL_SELECT_AGGREGATE_FUNCTIONS`, including nested calls, are aggregation. Join includes are refused when aggregation, `groupBy` or `DISTINCT` would drop their data; use `.join()` for relational columns, grouping or ordering.
 
-Circular include paths are refused during planning, in both strict and lenient modes.
+A repeated non-self-referential relation edge is refused in strict and lenient planning. Finite self-referential paths such as `parent.parent` plan; unbounded traversal uses a recursive include.
+
+Recursive includes cannot be nested under any include or contain nested includes. Grouped or aggregated roots, plain DISTINCT, set operations and row locks are refused by name. Traversed-node `defaultFilters` are not yet supported (#906); applicable filters are refused rather than silently omitted. PostgreSQL 10 is supported: cycle protection uses a visited-key array, without a CYCLE clause. The maximum depth defaults to 100 or the recursive relation metadata.
+
+A stored column with the requested include name conflicts at the root or at any node (`conflicting public key`). Use another public name with `via`, for example `.include('tree', { via: 'children', recursive: true, direction: 'descendants' })`.
+
+Recursive include options default to `flat: false`, `omitSelf: false`, and `includeDepth: false`. NQL hierarchy pseudo-columns explicitly request flat output with self omitted. Planning refuses `maxDepth` outside 1–2147483647, an empty `select` fields list, recursion on a non-self-reference, and `direction` contradicting the relation's recursive metadata or cardinality.

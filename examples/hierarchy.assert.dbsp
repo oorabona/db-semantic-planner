@@ -93,45 +93,63 @@ db.output:
 
 # ─────────────────────────────────────────
 # Query 9: employees | select name, managementChain.*
-# Recursive CTE (ancestors) — all columns, LEFT JOIN
+# Recursive scalar CTE aggregate — one root row per employee
 # ─────────────────────────────────────────
 --- query: 9
 success: true
-sql.equals: WITH "managementChain_cte" AS (SELECT employees_inner_0.* FROM hierarchy.employees AS employees_inner_0) SELECT employees.name FROM hierarchy.employees LEFT JOIN "managementChain_cte" AS "managementChain_ref_0" ON employees.id = "managementChain_ref_0".manager_id
+sql.equals: SELECT employees.name, COALESCE((WITH RECURSIVE "managementChain_walk" AS (SELECT __n.id AS id, __n.name AS name, __n.email AS email, __n.title AS title, __n.department_id AS department_id, __n.manager_id AS manager_id, __n.hire_date AS hire_date, __n.salary AS salary, 1 AS __depth, array_remove(ARRAY[employees.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.manager_id AS text) AS __parent_text FROM hierarchy.employees AS __n WHERE __n.id = employees.manager_id AND __n.id IS DISTINCT FROM employees.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.name AS name, __n.email AS email, __n.title AS title, __n.department_id AS department_id, __n.manager_id AS manager_id, __n.hire_date AS hire_date, __n.salary AS salary, "managementChain_walk".__depth + 1 AS __depth, "managementChain_walk".__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.manager_id AS text) AS __parent_text FROM "managementChain_walk" JOIN hierarchy.employees AS __n ON __n.id = "managementChain_walk".manager_id WHERE "managementChain_walk".__depth < 10 AND __n.id <> ALL ("managementChain_walk".__visited)) SELECT json_agg(json_build_object('id', "managementChain_walk".id, 'name', "managementChain_walk".name, 'email', "managementChain_walk".email, 'title', "managementChain_walk".title, 'departmentId', "managementChain_walk".department_id, 'managerId', "managementChain_walk".manager_id, 'hireDate', "managementChain_walk".hire_date, 'salary', "managementChain_walk".salary, '__dbsp_node', "managementChain_walk".__node_text, '__dbsp_parent', "managementChain_walk".__parent_text, '__dbsp_depth', "managementChain_walk".__depth) ORDER BY "managementChain_walk".__depth, "managementChain_walk".id) FROM "managementChain_walk"), '[]'::json) AS "managementChain_json" FROM hierarchy.employees
 params.equals: []
 db.output:
-| name |
-| --- |
-| Alice |
-| Alice |
-| Bob |
-| Carol |
-| Dave |
-| Dave |
-| Eve |
-| Heidi |
-| Frank |
-| Grace |
+| name | managementChain_json |
+| --- | --- |
+| Alice | [] |
+| Bob | [{"id":1,"name":"Alice","email":"alice@example.com","title":"CEO","departmentId":1,"managerId":null,"hireDate":"2020-01-15","salary":250000,"__dbsp_node":"1","__dbsp_parent":null,"__dbsp_depth":1}] |
+| Carol | [{"id":1,"name":"Alice","email":"alice@example.com","title":"CEO","departmentId":1,"managerId":null,"hireDate":"2020-01-15","salary":250000,"__dbsp_node":"1","__dbsp_parent":null,"__dbsp_depth":1}] |
+| Dave | [{"id":2,"name":"Bob","email":"bob@example.com","title":"VP Engineering","departmentId":1,"managerId":1,"hireDate":"2020-03-01","salary":200000,"__dbsp_node":"2","__dbsp_parent":"1","__dbsp_depth":1},{"id":1,"name":"Alice","email":"alice@example.com","title":"CEO","departmentId":1,"managerId":null,"hireDate":"2020-01-15","salary":250000,"__dbsp_node":"1","__dbsp_parent":null,"__dbsp_depth":2}] |
+| Eve | [{"id":3,"name":"Carol","email":"carol@example.com","title":"VP Product","departmentId":2,"managerId":1,"hireDate":"2020-06-15","salary":190000,"__dbsp_node":"3","__dbsp_parent":"1","__dbsp_depth":1},{"id":1,"name":"Alice","email":"alice@example.com","title":"CEO","departmentId":1,"managerId":null,"hireDate":"2020-01-15","salary":250000,"__dbsp_node":"1","__dbsp_parent":null,"__dbsp_depth":2}] |
+| Frank | [{"id":4,"name":"Dave","email":"dave@example.com","title":"Engineering Director","departmentId":1,"managerId":2,"hireDate":"2021-01-10","salary":170000,"__dbsp_node":"4","__dbsp_parent":"2","__dbsp_depth":1},{"id":2,"name":"Bob","email":"bob@example.com","title":"VP Engineering","departmentId":1,"managerId":1,"hireDate":"2020-03-01","salary":200000,"__dbsp_node":"2","__dbsp_parent":"1","__dbsp_depth":2},{"id":1,"name":"Alice","email":"alice@example.com","title":"CEO","departmentId":1,"managerId":null,"hireDate":"2020-01-15","salary":250000,"__dbsp_node":"1","__dbsp_parent":null,"__dbsp_depth":3}] |
+| Grace | [{"id":4,"name":"Dave","email":"dave@example.com","title":"Engineering Director","departmentId":1,"managerId":2,"hireDate":"2021-01-10","salary":170000,"__dbsp_node":"4","__dbsp_parent":"2","__dbsp_depth":1},{"id":2,"name":"Bob","email":"bob@example.com","title":"VP Engineering","departmentId":1,"managerId":1,"hireDate":"2020-03-01","salary":200000,"__dbsp_node":"2","__dbsp_parent":"1","__dbsp_depth":2},{"id":1,"name":"Alice","email":"alice@example.com","title":"CEO","departmentId":1,"managerId":null,"hireDate":"2020-01-15","salary":250000,"__dbsp_node":"1","__dbsp_parent":null,"__dbsp_depth":3}] |
+| Heidi | [{"id":5,"name":"Eve","email":"eve@example.com","title":"Product Director","departmentId":2,"managerId":3,"hireDate":"2021-04-20","salary":160000,"__dbsp_node":"5","__dbsp_parent":"3","__dbsp_depth":1},{"id":3,"name":"Carol","email":"carol@example.com","title":"VP Product","departmentId":2,"managerId":1,"hireDate":"2020-06-15","salary":190000,"__dbsp_node":"3","__dbsp_parent":"1","__dbsp_depth":2},{"id":1,"name":"Alice","email":"alice@example.com","title":"CEO","departmentId":1,"managerId":null,"hireDate":"2020-01-15","salary":250000,"__dbsp_node":"1","__dbsp_parent":null,"__dbsp_depth":3}] |
 
 # ─────────────────────────────────────────
 # Query 10: employees | select name, managementChain.name
 # Recursive CTE (ancestors) — optimized: only PK+FK+name
-# NOTE: dbSuccess=false due to column name conflict
 # ─────────────────────────────────────────
 --- query: 10
 success: true
-sql.equals: WITH "managementChain_cte" AS (SELECT employees_inner_0.name AS name FROM hierarchy.employees AS employees_inner_0) SELECT employees.name FROM hierarchy.employees LEFT JOIN "managementChain_cte" AS "managementChain_ref_0" ON employees.id = "managementChain_ref_0".manager_id
+sql.equals: SELECT employees.name, COALESCE((WITH RECURSIVE "managementChain_walk" AS (SELECT __n.name AS name, __n.id AS id, __n.manager_id AS manager_id, 1 AS __depth, array_remove(ARRAY[employees.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.manager_id AS text) AS __parent_text FROM hierarchy.employees AS __n WHERE __n.id = employees.manager_id AND __n.id IS DISTINCT FROM employees.id AND __n.id IS NOT NULL UNION ALL SELECT __n.name AS name, __n.id AS id, __n.manager_id AS manager_id, "managementChain_walk".__depth + 1 AS __depth, "managementChain_walk".__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.manager_id AS text) AS __parent_text FROM "managementChain_walk" JOIN hierarchy.employees AS __n ON __n.id = "managementChain_walk".manager_id WHERE "managementChain_walk".__depth < 10 AND __n.id <> ALL ("managementChain_walk".__visited)) SELECT json_agg(json_build_object('name', "managementChain_walk".name, '__dbsp_node', "managementChain_walk".__node_text, '__dbsp_parent', "managementChain_walk".__parent_text, '__dbsp_depth', "managementChain_walk".__depth) ORDER BY "managementChain_walk".__depth, "managementChain_walk".id) FROM "managementChain_walk"), '[]'::json) AS "managementChain_json" FROM hierarchy.employees
 params.equals: []
+db.output:
+| name | managementChain_json |
+| --- | --- |
+| Alice | [] |
+| Bob | [{"name":"Alice","__dbsp_node":"1","__dbsp_parent":null,"__dbsp_depth":1}] |
+| Carol | [{"name":"Alice","__dbsp_node":"1","__dbsp_parent":null,"__dbsp_depth":1}] |
+| Dave | [{"name":"Bob","__dbsp_node":"2","__dbsp_parent":"1","__dbsp_depth":1},{"name":"Alice","__dbsp_node":"1","__dbsp_parent":null,"__dbsp_depth":2}] |
+| Eve | [{"name":"Carol","__dbsp_node":"3","__dbsp_parent":"1","__dbsp_depth":1},{"name":"Alice","__dbsp_node":"1","__dbsp_parent":null,"__dbsp_depth":2}] |
+| Frank | [{"name":"Dave","__dbsp_node":"4","__dbsp_parent":"2","__dbsp_depth":1},{"name":"Bob","__dbsp_node":"2","__dbsp_parent":"1","__dbsp_depth":2},{"name":"Alice","__dbsp_node":"1","__dbsp_parent":null,"__dbsp_depth":3}] |
+| Grace | [{"name":"Dave","__dbsp_node":"4","__dbsp_parent":"2","__dbsp_depth":1},{"name":"Bob","__dbsp_node":"2","__dbsp_parent":"1","__dbsp_depth":2},{"name":"Alice","__dbsp_node":"1","__dbsp_parent":null,"__dbsp_depth":3}] |
+| Heidi | [{"name":"Eve","__dbsp_node":"5","__dbsp_parent":"3","__dbsp_depth":1},{"name":"Carol","__dbsp_node":"3","__dbsp_parent":"1","__dbsp_depth":2},{"name":"Alice","__dbsp_node":"1","__dbsp_parent":null,"__dbsp_depth":3}] |
 
 # ─────────────────────────────────────────
 # Query 11: employees | select name, managementChain.name, managementChain.title
 # Recursive CTE (ancestors) — optimized: PK+FK+name+title
-# NOTE: dbSuccess=false due to column name conflict
 # ─────────────────────────────────────────
 --- query: 11
 success: true
-sql.equals: WITH "managementChain_cte" AS (SELECT employees_inner_0.name AS name, employees_inner_0.title AS title FROM hierarchy.employees AS employees_inner_0) SELECT employees.name FROM hierarchy.employees LEFT JOIN "managementChain_cte" AS "managementChain_ref_0" ON employees.id = "managementChain_ref_0".manager_id
+sql.equals: SELECT employees.name, COALESCE((WITH RECURSIVE "managementChain_walk" AS (SELECT __n.name AS name, __n.title AS title, __n.id AS id, __n.manager_id AS manager_id, 1 AS __depth, array_remove(ARRAY[employees.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.manager_id AS text) AS __parent_text FROM hierarchy.employees AS __n WHERE __n.id = employees.manager_id AND __n.id IS DISTINCT FROM employees.id AND __n.id IS NOT NULL UNION ALL SELECT __n.name AS name, __n.title AS title, __n.id AS id, __n.manager_id AS manager_id, "managementChain_walk".__depth + 1 AS __depth, "managementChain_walk".__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.manager_id AS text) AS __parent_text FROM "managementChain_walk" JOIN hierarchy.employees AS __n ON __n.id = "managementChain_walk".manager_id WHERE "managementChain_walk".__depth < 10 AND __n.id <> ALL ("managementChain_walk".__visited)) SELECT json_agg(json_build_object('name', "managementChain_walk".name, 'title', "managementChain_walk".title, '__dbsp_node', "managementChain_walk".__node_text, '__dbsp_parent', "managementChain_walk".__parent_text, '__dbsp_depth', "managementChain_walk".__depth) ORDER BY "managementChain_walk".__depth, "managementChain_walk".id) FROM "managementChain_walk"), '[]'::json) AS "managementChain_json" FROM hierarchy.employees
 params.equals: []
+db.output:
+| name | managementChain_json |
+| --- | --- |
+| Alice | [] |
+| Bob | [{"name":"Alice","title":"CEO","__dbsp_node":"1","__dbsp_parent":null,"__dbsp_depth":1}] |
+| Carol | [{"name":"Alice","title":"CEO","__dbsp_node":"1","__dbsp_parent":null,"__dbsp_depth":1}] |
+| Dave | [{"name":"Bob","title":"VP Engineering","__dbsp_node":"2","__dbsp_parent":"1","__dbsp_depth":1},{"name":"Alice","title":"CEO","__dbsp_node":"1","__dbsp_parent":null,"__dbsp_depth":2}] |
+| Eve | [{"name":"Carol","title":"VP Product","__dbsp_node":"3","__dbsp_parent":"1","__dbsp_depth":1},{"name":"Alice","title":"CEO","__dbsp_node":"1","__dbsp_parent":null,"__dbsp_depth":2}] |
+| Frank | [{"name":"Dave","title":"Engineering Director","__dbsp_node":"4","__dbsp_parent":"2","__dbsp_depth":1},{"name":"Bob","title":"VP Engineering","__dbsp_node":"2","__dbsp_parent":"1","__dbsp_depth":2},{"name":"Alice","title":"CEO","__dbsp_node":"1","__dbsp_parent":null,"__dbsp_depth":3}] |
+| Grace | [{"name":"Dave","title":"Engineering Director","__dbsp_node":"4","__dbsp_parent":"2","__dbsp_depth":1},{"name":"Bob","title":"VP Engineering","__dbsp_node":"2","__dbsp_parent":"1","__dbsp_depth":2},{"name":"Alice","title":"CEO","__dbsp_node":"1","__dbsp_parent":null,"__dbsp_depth":3}] |
+| Heidi | [{"name":"Eve","title":"Product Director","__dbsp_node":"5","__dbsp_parent":"3","__dbsp_depth":1},{"name":"Carol","title":"VP Product","__dbsp_node":"3","__dbsp_parent":"1","__dbsp_depth":2},{"name":"Alice","title":"CEO","__dbsp_node":"1","__dbsp_parent":null,"__dbsp_depth":3}] |
 
 # ─────────────────────────────────────────
 # Query 12: employees | select name, allReports.*
@@ -139,28 +157,36 @@ params.equals: []
 # ─────────────────────────────────────────
 --- query: 12
 success: true
-sql.equals: WITH "allReports_cte" AS (SELECT employees_inner_0.* FROM hierarchy.employees AS employees_inner_0) SELECT employees.name FROM hierarchy.employees LEFT JOIN "allReports_cte" AS "allReports_ref_0" ON employees.id = "allReports_ref_0".manager_id
+sql.equals: SELECT employees.name, COALESCE((WITH RECURSIVE "allReports_walk" AS (SELECT __n.id AS id, __n.name AS name, __n.email AS email, __n.title AS title, __n.department_id AS department_id, __n.manager_id AS manager_id, __n.hire_date AS hire_date, __n.salary AS salary, 1 AS __depth, array_remove(ARRAY[employees.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.manager_id AS text) AS __parent_text FROM hierarchy.employees AS __n WHERE __n.manager_id = employees.id AND __n.id IS DISTINCT FROM employees.id AND __n.id IS NOT NULL UNION ALL SELECT __n.id AS id, __n.name AS name, __n.email AS email, __n.title AS title, __n.department_id AS department_id, __n.manager_id AS manager_id, __n.hire_date AS hire_date, __n.salary AS salary, "allReports_walk".__depth + 1 AS __depth, "allReports_walk".__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.manager_id AS text) AS __parent_text FROM "allReports_walk" JOIN hierarchy.employees AS __n ON __n.manager_id = "allReports_walk".id WHERE "allReports_walk".__depth < 10 AND __n.id <> ALL ("allReports_walk".__visited)) SELECT json_agg(json_build_object('id', "allReports_walk".id, 'name', "allReports_walk".name, 'email', "allReports_walk".email, 'title', "allReports_walk".title, 'departmentId', "allReports_walk".department_id, 'managerId', "allReports_walk".manager_id, 'hireDate', "allReports_walk".hire_date, 'salary', "allReports_walk".salary, '__dbsp_node', "allReports_walk".__node_text, '__dbsp_parent', "allReports_walk".__parent_text, '__dbsp_depth', "allReports_walk".__depth) ORDER BY "allReports_walk".__depth, "allReports_walk".id) FROM "allReports_walk"), '[]'::json) AS "allReports_json" FROM hierarchy.employees
 params.equals: []
 db.output:
-| name |
-| --- |
-| Alice |
-| Alice |
-| Bob |
-| Carol |
-| Dave |
-| Dave |
-| Eve |
-| Heidi |
-| Frank |
-| Grace |
+| name | allReports_json |
+| --- | --- |
+| Alice | [{"id":2,"name":"Bob","email":"bob@example.com","title":"VP Engineering","departmentId":1,"managerId":1,"hireDate":"2020-03-01","salary":200000,"__dbsp_node":"2","__dbsp_parent":"1","__dbsp_depth":1},{"id":3,"name":"Carol","email":"carol@example.com","title":"VP Product","departmentId":2,"managerId":1,"hireDate":"2020-06-15","salary":190000,"__dbsp_node":"3","__dbsp_parent":"1","__dbsp_depth":1},{"id":4,"name":"Dave","email":"dave@example.com","title":"Engineering Director","departmentId":1,"managerId":2,"hireDate":"2021-01-10","salary":170000,"__dbsp_node":"4","__dbsp_parent":"2","__dbsp_depth":2},{"id":5,"name":"Eve","email":"eve@example.com","title":"Product Director","departmentId":2,"managerId":3,"hireDate":"2021-04-20","salary":160000,"__dbsp_node":"5","__dbsp_parent":"3","__dbsp_depth":2},{"id":6,"name":"Frank","email":"frank@example.com","title":"Senior Engineer","departmentId":1,"managerId":4,"hireDate":"2022-02-01","salary":140000,"__dbsp_node":"6","__dbsp_parent":"4","__dbsp_depth":3},{"id":7,"name":"Grace","email":"grace@example.com","title":"Engineer","departmentId":1,"managerId":4,"hireDate":"2022-08-15","salary":120000,"__dbsp_node":"7","__dbsp_parent":"4","__dbsp_depth":3},{"id":8,"name":"Heidi","email":"heidi@example.com","title":"Designer","departmentId":3,"managerId":5,"hireDate":"2023-01-10","salary":110000,"__dbsp_node":"8","__dbsp_parent":"5","__dbsp_depth":3}] |
+| Bob | [{"id":4,"name":"Dave","email":"dave@example.com","title":"Engineering Director","departmentId":1,"managerId":2,"hireDate":"2021-01-10","salary":170000,"__dbsp_node":"4","__dbsp_parent":"2","__dbsp_depth":1},{"id":6,"name":"Frank","email":"frank@example.com","title":"Senior Engineer","departmentId":1,"managerId":4,"hireDate":"2022-02-01","salary":140000,"__dbsp_node":"6","__dbsp_parent":"4","__dbsp_depth":2},{"id":7,"name":"Grace","email":"grace@example.com","title":"Engineer","departmentId":1,"managerId":4,"hireDate":"2022-08-15","salary":120000,"__dbsp_node":"7","__dbsp_parent":"4","__dbsp_depth":2}] |
+| Carol | [{"id":5,"name":"Eve","email":"eve@example.com","title":"Product Director","departmentId":2,"managerId":3,"hireDate":"2021-04-20","salary":160000,"__dbsp_node":"5","__dbsp_parent":"3","__dbsp_depth":1},{"id":8,"name":"Heidi","email":"heidi@example.com","title":"Designer","departmentId":3,"managerId":5,"hireDate":"2023-01-10","salary":110000,"__dbsp_node":"8","__dbsp_parent":"5","__dbsp_depth":2}] |
+| Dave | [{"id":6,"name":"Frank","email":"frank@example.com","title":"Senior Engineer","departmentId":1,"managerId":4,"hireDate":"2022-02-01","salary":140000,"__dbsp_node":"6","__dbsp_parent":"4","__dbsp_depth":1},{"id":7,"name":"Grace","email":"grace@example.com","title":"Engineer","departmentId":1,"managerId":4,"hireDate":"2022-08-15","salary":120000,"__dbsp_node":"7","__dbsp_parent":"4","__dbsp_depth":1}] |
+| Eve | [{"id":8,"name":"Heidi","email":"heidi@example.com","title":"Designer","departmentId":3,"managerId":5,"hireDate":"2023-01-10","salary":110000,"__dbsp_node":"8","__dbsp_parent":"5","__dbsp_depth":1}] |
+| Frank | [] |
+| Grace | [] |
+| Heidi | [] |
 
 # ─────────────────────────────────────────
 # Query 13: employees | select name, allReports.name
 # Recursive CTE (descendants) — optimized: only PK+FK+name
-# NOTE: dbSuccess=false due to column name conflict
 # ─────────────────────────────────────────
 --- query: 13
 success: true
-sql.equals: WITH "allReports_cte" AS (SELECT employees_inner_0.name AS name FROM hierarchy.employees AS employees_inner_0) SELECT employees.name FROM hierarchy.employees LEFT JOIN "allReports_cte" AS "allReports_ref_0" ON employees.id = "allReports_ref_0".manager_id
+sql.equals: SELECT employees.name, COALESCE((WITH RECURSIVE "allReports_walk" AS (SELECT __n.name AS name, __n.id AS id, __n.manager_id AS manager_id, 1 AS __depth, array_remove(ARRAY[employees.id, __n.id], NULL) AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.manager_id AS text) AS __parent_text FROM hierarchy.employees AS __n WHERE __n.manager_id = employees.id AND __n.id IS DISTINCT FROM employees.id AND __n.id IS NOT NULL UNION ALL SELECT __n.name AS name, __n.id AS id, __n.manager_id AS manager_id, "allReports_walk".__depth + 1 AS __depth, "allReports_walk".__visited || __n.id AS __visited, CAST(__n.id AS text) AS __node_text, CAST(__n.manager_id AS text) AS __parent_text FROM "allReports_walk" JOIN hierarchy.employees AS __n ON __n.manager_id = "allReports_walk".id WHERE "allReports_walk".__depth < 10 AND __n.id <> ALL ("allReports_walk".__visited)) SELECT json_agg(json_build_object('name', "allReports_walk".name, '__dbsp_node', "allReports_walk".__node_text, '__dbsp_parent', "allReports_walk".__parent_text, '__dbsp_depth', "allReports_walk".__depth) ORDER BY "allReports_walk".__depth, "allReports_walk".id) FROM "allReports_walk"), '[]'::json) AS "allReports_json" FROM hierarchy.employees
 params.equals: []
+db.output:
+| name | allReports_json |
+| --- | --- |
+| Alice | [{"name":"Bob","__dbsp_node":"2","__dbsp_parent":"1","__dbsp_depth":1},{"name":"Carol","__dbsp_node":"3","__dbsp_parent":"1","__dbsp_depth":1},{"name":"Dave","__dbsp_node":"4","__dbsp_parent":"2","__dbsp_depth":2},{"name":"Eve","__dbsp_node":"5","__dbsp_parent":"3","__dbsp_depth":2},{"name":"Frank","__dbsp_node":"6","__dbsp_parent":"4","__dbsp_depth":3},{"name":"Grace","__dbsp_node":"7","__dbsp_parent":"4","__dbsp_depth":3},{"name":"Heidi","__dbsp_node":"8","__dbsp_parent":"5","__dbsp_depth":3}] |
+| Bob | [{"name":"Dave","__dbsp_node":"4","__dbsp_parent":"2","__dbsp_depth":1},{"name":"Frank","__dbsp_node":"6","__dbsp_parent":"4","__dbsp_depth":2},{"name":"Grace","__dbsp_node":"7","__dbsp_parent":"4","__dbsp_depth":2}] |
+| Carol | [{"name":"Eve","__dbsp_node":"5","__dbsp_parent":"3","__dbsp_depth":1},{"name":"Heidi","__dbsp_node":"8","__dbsp_parent":"5","__dbsp_depth":2}] |
+| Dave | [{"name":"Frank","__dbsp_node":"6","__dbsp_parent":"4","__dbsp_depth":1},{"name":"Grace","__dbsp_node":"7","__dbsp_parent":"4","__dbsp_depth":1}] |
+| Eve | [{"name":"Heidi","__dbsp_node":"8","__dbsp_parent":"5","__dbsp_depth":1}] |
+| Frank | [] |
+| Grace | [] |
+| Heidi | [] |

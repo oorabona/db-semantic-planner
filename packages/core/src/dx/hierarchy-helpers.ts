@@ -8,14 +8,14 @@ import type { ModelIR } from '../model-ir.js';
 /**
  * Extract a named field from a recursive query result.
  *
- * Recursive includes (`ancestors` / `descendants`) add a dynamic property to each row.
+ * Recursive includes retain the requested include name in every mode.
  * This helper safely extracts that property without `as any` casts.
  *
  * @internal
  */
 export function extractRecursiveField<T>(
 	result: T | null | undefined,
-	field: 'ancestors' | 'descendants',
+	field: string,
 ): T[] {
 	if (result == null) return [];
 	const row = result as Record<string, unknown>;

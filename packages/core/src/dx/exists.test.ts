@@ -438,22 +438,18 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 			expect(dump.params).toEqual([true, 'flagged']);
 		});
 
-		it('keeps a recursive-flagged self-referential include under exists — its CTE + LEFT JOIN survive existsWrap (a to-many join multiplies root rows, so pruning it would change offset/groupBy/having results)', () => {
+		it('keeps recursive capability validation under exists; the scalar target vanishes without changing root rows', () => {
 			const adapter = createPgCompileOnlyAdapter();
 			const orm = createOrm({ adapter, schema: categorySchema });
 
-			// existsWrap only swaps the target list for `1`; the WITH cte + LEFT
-			// JOIN survive untouched — the exists FROM clause is identical to the
-			// non-exists query's. Pruning it (as three prior designs attempted)
-			// would drop a FROM join that multiplies root rows, silently changing
-			// what offset/groupBy/having observe.
+			// The recursive scalar payload is a target; existsWrap replaces it with 1.
 			const dump = orm
 				.select('categories')
 				.include('children', { recursive: true, direction: 'descendants' })
 				.existsDump();
 
 			expect(dump.sql).toBe(
-				'SELECT EXISTS (WITH children_cte AS (SELECT categories_inner_0.* FROM categories AS categories_inner_0) SELECT 1 FROM categories LEFT JOIN children_cte AS children_ref_0 ON categories.id = children_ref_0."parentId" LIMIT 1) AS "exists"',
+				'SELECT EXISTS (SELECT 1 FROM categories LIMIT 1) AS "exists"',
 			);
 			expect(dump.params).toEqual([]);
 		});
@@ -483,12 +479,11 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 			).toThrow(/supportsRecursiveCTE/);
 		});
 
-		it('keeps a relation-level recursive include (ancestors / descendants) under exists — its CTE + LEFT JOIN survive even with no `recursive` flag on the entry', () => {
+		it('keeps relation-level recursive validation under exists while omitting scalar payload targets', () => {
 			// schema()'s self-referential FK sugar generates 'ancestors' and
 			// 'descendants' RELATIONS with recursive metadata (schema.ts), so
 			// `.include('ancestors')` resolves to a CTE strategy even though the
-			// include entry has no `recursive` field. Its `WITH ... LEFT JOIN`
-			// is a FROM join that rides along under existsWrap.
+			// include entry has no recursive flag. Its scalar target vanishes under existsWrap.
 			const adapter = createPgCompileOnlyAdapter();
 			const orm = createOrm({ adapter, schema: categorySchema });
 
@@ -497,7 +492,7 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 				.include('ancestors')
 				.existsDump();
 			expect(ancestorsDump.sql).toBe(
-				'SELECT EXISTS (WITH ancestors_cte AS (SELECT categories_inner_0.* FROM categories AS categories_inner_0) SELECT 1 FROM categories LEFT JOIN ancestors_cte AS ancestors_ref_0 ON categories.id = ancestors_ref_0."parentId" LIMIT 1) AS "exists"',
+				'SELECT EXISTS (SELECT 1 FROM categories LIMIT 1) AS "exists"',
 			);
 
 			const descendantsDump = orm
@@ -505,38 +500,25 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 				.include('descendants')
 				.existsDump();
 			expect(descendantsDump.sql).toBe(
-				'SELECT EXISTS (WITH descendants_cte AS (SELECT categories_inner_0.* FROM categories AS categories_inner_0) SELECT 1 FROM categories LEFT JOIN descendants_cte AS descendants_ref_0 ON categories.id = descendants_ref_0."parentId" LIMIT 1) AS "exists"',
+				'SELECT EXISTS (SELECT 1 FROM categories LIMIT 1) AS "exists"',
 			);
 		});
 
-		it('keeps an include whose `recursive` flag the planner ignores (non-self relation) — its JOIN + where still filter', () => {
-			// `include.recursive` only matters when the referenced relation is
-			// self-referential; otherwise the planner warns and falls through to
-			// the normal strategy. Dot-notation is the reachable path here: the DX
-			// `.include()` eagerly THROWS for a plain non-self relation name with
-			// `recursive: true` (validateRecursiveInclude), but that validation
-			// only checks the exact qualified relation name and silently no-ops
-			// for a dotted path — so the `recursive` flag still reaches the
-			// (non-self) leaf relation's intent, and its explicit join:'inner' +
-			// where is a real FROM filter that rides along under existsWrap.
+		it('refuses recursive non-self relations in existsDump as in plan', () => {
 			const adapter = createPgCompileOnlyAdapter();
 			const orm = createOrm({ adapter, schema: nestedSchema });
-
-			const dump = orm
-				.select('users')
-				.include('posts.comments', {
-					recursive: true,
-					direction: 'descendants',
-					join: 'inner',
-					where: eq('body', 'flagged'),
-				} as never)
-				.where(eq('active', true))
-				.existsDump();
-
-			expect(dump.sql).toBe(
-				'SELECT EXISTS (SELECT 1 FROM users JOIN posts AS author_posts ON users.id = author_posts.author JOIN comments AS post_comments ON author_posts.id = post_comments.post WHERE users.active = $1 AND post_comments.body = $2 LIMIT 1) AS "exists"',
-			);
-			expect(dump.params).toEqual([true, 'flagged']);
+			expect(() =>
+				orm
+					.select('users')
+					.include('posts.comments', {
+						recursive: true,
+						direction: 'descendants',
+						join: 'inner',
+						where: eq('body', 'flagged'),
+					} as never)
+					.where(eq('active', true))
+					.existsDump(),
+			).toThrow('self-referential relation');
 		});
 
 		it('refuses recursive self-referential includes with explicit join (#894)', () => {
