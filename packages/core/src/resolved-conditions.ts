@@ -434,16 +434,13 @@ export function resolveSelectWhere(
 		const vacuous =
 			mode === 'every' &&
 			(!nested || (nested.kind === 'and' && nested.conditions.length === 0));
+		const subqueryScope = `where-relation-${scopeIndex++}`;
 		let from = source;
 		const hopRanges = path.hops.map((hop) => {
 			let alias = generated(hop.toTable, `_exists_${aliasCount++}`);
 			while (allocator.hasReserved(alias))
 				alias = generated(hop.toTable, `_exists_${aliasCount++}`);
-			const to = allocator.allocate(
-				hop.toTable,
-				alias,
-				`where-relation-${scopeIndex++}`,
-			);
+			const to = allocator.allocate(hop.toTable, alias, subqueryScope);
 			allocator.reserve(to.alias);
 			const result = { from, to };
 			from = to;
@@ -463,10 +460,10 @@ export function resolveSelectWhere(
 						break;
 					}
 				const includePath = pathFor(includeSource, [name], 'include');
-				const range = allocator.bind(
+				const range = allocator.allocate(
 					includePath.targetTable,
 					name,
-					`where-include-${scopeIndex++}`,
+					subqueryScope,
 				);
 				allocator.reserve(range.alias);
 				includes.push({

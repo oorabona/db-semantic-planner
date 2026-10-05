@@ -16,7 +16,8 @@ const db = schema({
 	a: { id: { type: 'integer', primaryKey: true } },
 	other: {
 		id: { type: 'integer', primaryKey: true },
-		aId: ref('a', { inverse: 'others' }),
+		aId: ref('a', { as: 'a', inverse: 'others' }),
+		otherAliasId: ref('a', { as: 'other_exists_0' }),
 		fooBarId: ref('fooBar', { as: 'fooBar' }),
 		fooBarAgainId: ref('fooBar', { as: 'foo_bar' }),
 	},
@@ -99,18 +100,18 @@ it('relation predicate include FROM ignores an outer join alias matching its log
 			.where(exists('others', { include: { fooBar: { join: 'inner' } } }))
 			.dump().sql,
 	).toBe(
-		'SELECT a.* FROM a JOIN baz AS "fooBar" ON a.id = $1 WHERE EXISTS (SELECT 1 FROM other AS other_exists_1 JOIN foo_bar AS "fooBar" ON other_exists_1.foo_bar_id = "fooBar".id WHERE a.id = other_exists_1.a_id)',
+		'SELECT a.* FROM a JOIN baz AS "fooBar" ON a.id = $1 WHERE EXISTS (SELECT 1 FROM other AS other_exists_1 JOIN foo_bar AS "fooBar_1" ON other_exists_1.foo_bar_id = "fooBar_1".id WHERE a.id = other_exists_1.a_id)',
 	);
 });
 
-it('WHERE relation include alias retains its written casing spelling', () => {
+it('WHERE relation include key allocates a generated alias avoiding table spellings', () => {
 	const result = orm
 		.select('a')
 		.join('fooBar', { as: 'x', on: eq('a.id', 1) })
 		.where(exists('others', { include: { foo_bar: { join: 'inner' } } }))
 		.dump();
 	expect(result.sql).toBe(
-		'SELECT a.* FROM a JOIN foo_bar AS x ON a.id = $1 WHERE EXISTS (SELECT 1 FROM other AS other_exists_1 JOIN foo_bar AS foo_bar ON other_exists_1.foo_bar_again_id = foo_bar.id WHERE a.id = other_exists_1.a_id)',
+		'SELECT a.* FROM a JOIN foo_bar AS x ON a.id = $1 WHERE EXISTS (SELECT 1 FROM other AS other_exists_1 JOIN foo_bar AS foo_bar_1 ON other_exists_1.foo_bar_again_id = foo_bar_1.id WHERE a.id = other_exists_1.a_id)',
 	);
 });
 it('physical subquery FROM retains the configured schema under an outer alias', () => {
@@ -122,5 +123,30 @@ it('physical subquery FROM retains the configured schema under an outer alias', 
 		.dump();
 	expect(result.sql).toBe(
 		'SELECT a.* FROM tenant.a JOIN tenant.other AS "fooBar" ON a.id = $1 WHERE EXISTS (SELECT "fooBar_sq".id FROM tenant.foo_bar AS "fooBar_sq")',
+	);
+});
+
+it('relation predicate include avoids shadowing the correlated root', () => {
+	expect(
+		orm
+			.select('a')
+			.where(exists('others', { include: { a: { join: 'inner' } } }))
+			.dump().sql,
+	).toBe(
+		'SELECT a.* FROM a WHERE EXISTS (SELECT 1 FROM other AS other_exists_0 JOIN a AS a_1 ON other_exists_0.a_id = a_1.id WHERE a.id = other_exists_0.a_id)',
+	);
+});
+it('relation predicate include avoids duplicating a relation hop alias', () => {
+	expect(
+		orm
+			.select('a')
+			.where(
+				exists('others', {
+					include: { other_exists_0: { join: 'inner' } },
+				}),
+			)
+			.dump().sql,
+	).toBe(
+		'SELECT a.* FROM a WHERE EXISTS (SELECT 1 FROM other AS other_exists_0 JOIN a AS other_exists_0_1 ON other_exists_0.other_alias_id = other_exists_0_1.id WHERE a.id = other_exists_0.a_id)',
 	);
 });
