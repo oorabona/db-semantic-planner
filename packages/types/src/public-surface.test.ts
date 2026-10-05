@@ -6,6 +6,13 @@ import { describe, expect, it } from 'vitest';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 describe('@dbsp/types public surface', () => {
+	it('does not export the removed FilterStrategy type', async () => {
+		for (const file of ['index.ts', 'model-ir.ts']) {
+			expect(await readFile(resolve(__dirname, file), 'utf8')).not.toMatch(
+				/\bFilterStrategy\b/,
+			);
+		}
+	});
 	it('does not export the removed ScalarSubqueryIntent alias', async () => {
 		const files = ['index.ts', 'intent-ast.ts', 'intent/where-intent.ts'];
 

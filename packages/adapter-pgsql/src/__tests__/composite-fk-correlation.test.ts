@@ -51,7 +51,6 @@ const relations = new Map([
 			cardinality: 'many',
 			optionality: 'optional',
 			includeStrategy: 'auto',
-			filterStrategy: 'auto',
 			joinDefault: 'auto',
 		},
 	],

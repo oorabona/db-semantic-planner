@@ -34,7 +34,6 @@ const relation: RelationIR = {
 	cardinality: 'many',
 	optionality: 'optional',
 	includeStrategy: 'auto',
-	filterStrategy: 'auto',
 	joinDefault: 'auto',
 };
 const relations = new Map([

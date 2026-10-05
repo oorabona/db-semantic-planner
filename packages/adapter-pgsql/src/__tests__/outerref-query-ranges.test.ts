@@ -339,7 +339,7 @@ it('a relation predicate retains its own root range for a nested qualified body'
 	expect({ sql: result.sql, params: result.params }).toMatchInlineSnapshot(`
 		{
 		  "params": [],
-		  "sql": "SELECT calls.* FROM calls JOIN symbols AS caller ON caller.id = calls."callerId" WHERE EXISTS (SELECT comments_sq.id FROM comments AS comments_sq WHERE comments_sq."postId" = caller.id)",
+		  "sql": "SELECT calls.* FROM calls WHERE EXISTS (SELECT 1 FROM symbols AS symbols_exists_0 WHERE calls."callerId" = symbols_exists_0.id AND EXISTS (SELECT comments_sq.id FROM comments AS comments_sq WHERE comments_sq."postId" = symbols_exists_0.id))",
 		}
 	`);
 });

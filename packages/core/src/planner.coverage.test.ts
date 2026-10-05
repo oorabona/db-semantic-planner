@@ -119,7 +119,7 @@ describe('planner coverage', () => {
 		expect(rawSqlWarning).toBeDefined();
 	});
 
-	it('should warn on row explosion with join strategy on hasMany', () => {
+	it('should avoid row explosion with EXISTS on hasMany', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'users',
@@ -135,12 +135,12 @@ describe('planner coverage', () => {
 			},
 		};
 
-		const report = plan(intent, testSchema, { forceFilterStrategy: 'join' });
+		const report = plan(intent, testSchema);
 
 		const explosionWarning = report.warnings.find(
 			(w) => w.code === 'POTENTIAL_ROW_EXPLOSION',
 		);
-		expect(explosionWarning).toBeDefined();
+		expect(explosionWarning).toBeUndefined();
 	});
 
 	it('should skip CTE extraction when enableCTEs is false', () => {
@@ -585,7 +585,7 @@ describe('planner coverage', () => {
 		expect(report.intent.existsWrap).toBe(true);
 	});
 
-	it('should handle forceFilterStrategy option', () => {
+	it('should record EXISTS without alternatives', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'users',
@@ -595,14 +595,13 @@ describe('planner coverage', () => {
 			},
 		};
 
-		const report = plan(intent, testSchema, {
-			forceFilterStrategy: 'exists',
-		});
+		const report = plan(intent, testSchema);
 
 		const filterDecision = report.decisions.find(
 			(d) => d.type === 'filter-strategy',
 		);
 		expect(filterDecision?.choice).toBe('exists');
+		expect(filterDecision?.alternatives).toEqual([]);
 	});
 
 	it('should handle forceJoinType option', () => {
@@ -1147,13 +1146,7 @@ describe('planner coverage', () => {
 		expect(report.rootTable).toBe('users');
 	});
 
-	// ==================================================================
-	// NEW: determineFilterStrategy with relation.filterStrategy != auto
-	// ==================================================================
-
-	it('should use relation filterStrategy hint when not auto', () => {
-		// This is difficult to trigger through high-level API since
-		// schema-generated relations all use 'auto'. But forceFilterStrategy covers it.
+	it('should always choose EXISTS for relation filters', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'users',
@@ -1163,12 +1156,9 @@ describe('planner coverage', () => {
 			},
 		};
 
-		// Force 'join' strategy
-		const report = plan(intent, testSchema, {
-			forceFilterStrategy: 'join',
-		});
+		const report = plan(intent, testSchema);
 		const decision = report.decisions.find((d) => d.type === 'filter-strategy');
-		expect(decision?.choice).toBe('join');
+		expect(decision?.choice).toBe('exists');
 	});
 
 	// ==================================================================

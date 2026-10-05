@@ -242,11 +242,6 @@ export interface PlanReport {
 
 export interface PlanOptions {
 	/**
-	 * Force a specific filter strategy (overrides auto-detection)
-	 */
-	forceFilterStrategy?: 'exists' | 'join';
-
-	/**
 	 * Force a specific join type (overrides auto-detection)
 	 */
 	forceJoinType?: 'left' | 'inner';

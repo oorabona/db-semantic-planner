@@ -33,7 +33,6 @@ function buildModel(
 		cardinality: 'many-to-one' as const,
 		optionality: 'optional' as const,
 		includeStrategy: 'auto' as const,
-		filterStrategy: 'auto' as const,
 		joinDefault: 'auto' as const,
 		...(foreignKey !== undefined && { foreignKey }),
 	};

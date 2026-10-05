@@ -12,7 +12,7 @@
  * - GROUP BY and HAVING
  * - Parameterized limit/offset
  * - Include strategies (json_agg, lateral, cte)
- * - JOIN filter strategy
+ * - EXISTS relation filters
  * - Set operations branches
  * - IN/NOT IN subquery handling
  * - Nested conditions (whereAnd, whereOr, whereNot)
@@ -2132,8 +2132,8 @@ describe('PlanCompiler - Coverage Tests', () => {
 		});
 	});
 
-	describe('JOIN filter strategy (exists + join choice)', () => {
-		it('compiles where exists with join strategy', () => {
+	describe('EXISTS filter predicates', () => {
+		it('compiles where exists with EXISTS strategy', () => {
 			const plan: SimplifiedPlanReport = {
 				rootTable: 'posts',
 				decisions: [
@@ -2141,7 +2141,8 @@ describe('PlanCompiler - Coverage Tests', () => {
 					{
 						type: 'where',
 						operator: 'exists',
-						choice: 'join',
+						choice: 'exists',
+						relationType: 'belongsTo',
 						targetTable: 'authors',
 					},
 				],
@@ -2149,11 +2150,11 @@ describe('PlanCompiler - Coverage Tests', () => {
 			const compiler = new PlanCompiler();
 			const result = compiler.compile(plan);
 			const sql = normalizeSQL(result.sql);
-			expect(sql).toContain('join');
+			expect(sql).toContain('exists');
 			expect(sql).toContain('authors');
 		});
 
-		it('compiles where exists with join strategy + conditions', () => {
+		it('compiles where exists with EXISTS strategy + conditions', () => {
 			const plan: SimplifiedPlanReport = {
 				rootTable: 'posts',
 				decisions: [
@@ -2161,7 +2162,8 @@ describe('PlanCompiler - Coverage Tests', () => {
 					{
 						type: 'where',
 						operator: 'exists',
-						choice: 'join',
+						choice: 'exists',
+						relationType: 'belongsTo',
 						targetTable: 'authors',
 						conditions: [
 							{
@@ -2177,11 +2179,11 @@ describe('PlanCompiler - Coverage Tests', () => {
 			const compiler = new PlanCompiler();
 			const result = compiler.compile(plan);
 			const sql = normalizeSQL(result.sql);
-			expect(sql).toContain('join');
+			expect(sql).toContain('exists');
 			expect(sql).toContain('where');
 		});
 
-		it('compiles where exists with join strategy + multiple conditions', () => {
+		it('compiles where exists with EXISTS strategy + multiple conditions', () => {
 			const plan: SimplifiedPlanReport = {
 				rootTable: 'posts',
 				decisions: [
@@ -2189,7 +2191,8 @@ describe('PlanCompiler - Coverage Tests', () => {
 					{
 						type: 'where',
 						operator: 'exists',
-						choice: 'join',
+						choice: 'exists',
+						relationType: 'belongsTo',
 						targetTable: 'authors',
 						conditions: [
 							{
@@ -2211,7 +2214,7 @@ describe('PlanCompiler - Coverage Tests', () => {
 			const compiler = new PlanCompiler();
 			const result = compiler.compile(plan);
 			const sql = normalizeSQL(result.sql);
-			expect(sql).toContain('join');
+			expect(sql).toContain('exists');
 			expect(sql).toContain('and');
 		});
 	});
@@ -2941,8 +2944,8 @@ describe('PlanCompiler - Coverage Tests', () => {
 		});
 	});
 
-	describe('registerJoinFilter — branches', () => {
-		it('uses relation-based alias for self-referential join filter', () => {
+	describe('relation EXISTS — branches', () => {
+		it('uses relation-based alias for self-referential EXISTS filter', () => {
 			const plan: SimplifiedPlanReport = {
 				rootTable: 'categories',
 				decisions: [
@@ -2950,7 +2953,8 @@ describe('PlanCompiler - Coverage Tests', () => {
 					{
 						type: 'where',
 						operator: 'exists',
-						choice: 'join',
+						choice: 'exists',
+						relationType: 'belongsTo',
 						targetTable: 'categories',
 						relationName: 'parent',
 						conditions: [
@@ -2967,8 +2971,8 @@ describe('PlanCompiler - Coverage Tests', () => {
 			const compiler = new PlanCompiler();
 			const result = compiler.compile(plan);
 			const sql = normalizeSQL(result.sql);
-			expect(sql).toContain('join');
-			expect(sql).toContain('parent');
+			expect(sql).toContain('exists');
+			expect(sql).toContain('categories_exists_0');
 		});
 
 		it('uses foreignKey from decision when provided', () => {
@@ -2979,7 +2983,8 @@ describe('PlanCompiler - Coverage Tests', () => {
 					{
 						type: 'where',
 						operator: 'exists',
-						choice: 'join',
+						choice: 'exists',
+						relationType: 'belongsTo',
 						targetTable: 'users',
 						foreignKey: 'author_id',
 					} as any,
@@ -2988,7 +2993,7 @@ describe('PlanCompiler - Coverage Tests', () => {
 			const compiler = new PlanCompiler();
 			const result = compiler.compile(plan);
 			const sql = normalizeSQL(result.sql);
-			expect(sql).toContain('join');
+			expect(sql).toContain('exists');
 			expect(sql).toContain('author_id');
 		});
 	});

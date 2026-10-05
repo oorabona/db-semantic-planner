@@ -114,7 +114,6 @@ import {
 	isAmbiguousRelationAlias,
 	resolveVisibleRelationAlias,
 } from './relation-alias.js';
-import { resolveRelationKeys } from './relation-keys.js';
 import {
 	type AliasColumnAuthority,
 	bindAliasAuthority,
@@ -421,7 +420,6 @@ export interface SimplifiedPlanReport {
 	readonly directConditions?: boolean;
 	readonly enclosingRanges?: HandlerCompilerContext['enclosingRanges'];
 	readonly rootAlias?: string;
-	readonly rootWhereJoinRelations?: ReadonlySet<string>;
 	readonly rootTable: string;
 	readonly decisions: readonly PlanDecision[];
 	readonly schema?: string;
@@ -771,16 +769,6 @@ export class PlanCompiler {
 			relation,
 			column,
 			this.visibleSqlQualifiers,
-		);
-	}
-
-	private filterJoinAlias(decision: PlanDecision): string {
-		const targetTable = decision.targetTable!;
-		return (
-			decision.relationName ??
-			(targetTable === this.currentRootTable
-				? `${targetTable}_join`
-				: targetTable)
 		);
 	}
 
@@ -2583,20 +2571,6 @@ export class PlanCompiler {
 						queryLocal(decision.targetTable),
 					);
 				}
-				continue;
-			}
-			if (
-				decision.type === 'where' &&
-				decision.operator === 'exists' &&
-				decision.choice === 'join' &&
-				decision.targetTable
-			) {
-				const alias = this.filterJoinAlias(decision);
-				emittedAliases.set(alias, alias);
-				this.registerAliasAuthority(
-					queryLocal(alias),
-					queryLocal(decision.targetTable),
-				);
 			}
 		}
 
@@ -2614,18 +2588,6 @@ export class PlanCompiler {
 				const alias = decision.alias ?? decision.targetTable;
 				if (alias && decision.relationName) {
 					registerRelationPath(decision.relationName, alias);
-				}
-				continue;
-			}
-			if (
-				decision.type === 'where' &&
-				decision.operator === 'exists' &&
-				decision.choice === 'join' &&
-				decision.targetTable
-			) {
-				const relation = decision.relationName ?? decision.relation;
-				if (relation) {
-					registerRelationPath(relation, this.filterJoinAlias(decision));
 				}
 			}
 		}
@@ -2656,27 +2618,6 @@ export class PlanCompiler {
 	): Node | undefined {
 		switch (decision.type) {
 			case 'where': {
-				// JOIN filter: register INNER JOIN instead of EXISTS subquery
-				if (
-					decision.operator === 'exists' &&
-					decision.choice === 'join' &&
-					decision.targetTable
-				) {
-					this.registerJoinFilter(decision);
-					// Add user conditions (on joined table) to WHERE
-					if (decision.conditions && decision.conditions.length > 0) {
-						const joinTarget = this.filterJoinAlias(decision);
-						const condNodes = decision.conditions.map((c) =>
-							this.dispatchWhere(c as PlanDecision, {
-								currentAlias: joinTarget,
-							}),
-						);
-						const combined =
-							condNodes.length === 1 ? condNodes[0]! : andExpr(...condNodes);
-						return currentWhere ? andExpr(currentWhere, combined) : combined;
-					}
-					return currentWhere;
-				}
 				const whereExpr = this.dispatchWhere(decision);
 				return currentWhere ? andExpr(currentWhere, whereExpr) : whereExpr;
 			}
@@ -3190,39 +3131,6 @@ export class PlanCompiler {
 		intent: WhereIntent,
 		plan: SimplifiedPlanReport,
 	): Node | undefined {
-		const provenJoins = new Set<string>();
-		// Schedule only structural JOINs chosen by the planner. The predicate itself
-		// remains raw and enters compileCondition below.
-		for (const path of plan.rootWhereJoinRelations ?? []) {
-			const prefix = `${plan.rootTable}.`;
-			if (!path.startsWith(prefix)) continue;
-			const relationName = path.slice(prefix.length);
-			if (this.visibleSqlQualifiers.has(relationName)) continue;
-			const relation = this.model?.getRelation(path);
-			if (relation?.type !== 'belongsTo') continue;
-			const keys = resolveRelationKeys(plan.rootTable, relation, {
-				model: this.model!,
-				defaultPkColumnName: this.defaultPk,
-				deriveFkColumnName: this.deriveFk,
-			});
-			provenJoins.add(path);
-			this.registerJoinFilter({
-				type: 'join',
-				targetTable: relation.target,
-				relationName,
-				foreignKey: keys.sourceColumn,
-				parentKey: keys.targetColumn,
-			});
-			this.visibleSqlQualifiers = new Map([
-				...this.visibleSqlQualifiers,
-				[relationName, relationName],
-			]);
-			this.emittedRangeQualifiers = new Set([
-				...this.emittedRangeQualifiers,
-				relationName,
-			]);
-			this.state.aliases = new Map(this.visibleSqlQualifiers);
-		}
 		const handlerCtx = this.createHandlerContext(
 			plan,
 			this.tableIdentifier(plan.rootTable),
@@ -3232,9 +3140,6 @@ export class PlanCompiler {
 			position: plan.enclosingRanges ? 'subquery' : 'where',
 			...(handlerCtx.outerAlias && { outerTable: handlerCtx.outerAlias }),
 			compileExpressionSubquery: handlerCtx.compileSubquery,
-			...(plan.rootWhereJoinRelations !== undefined && {
-				rootWhereJoinRelations: provenJoins,
-			}),
 			logicalSourceTable: plan.rootTable,
 			emittedAlias:
 				plan.batchValuesFromAlias ?? handlerCtx.currentAlias ?? plan.rootTable,
@@ -3254,22 +3159,6 @@ export class PlanCompiler {
 					parent,
 				),
 		});
-		// A positive planned JOIN without an inner predicate already supplies the
-		// complete filter. Keep the existing SELECT shape without WHERE true.
-		if (
-			(intent.kind === 'exists' ||
-				(intent.kind === 'relationFilter' && intent.mode === 'some')) &&
-			intent.where === undefined &&
-			(!('include' in intent) ||
-				!intent.include ||
-				Object.keys(intent.include).length === 0) &&
-			[...provenJoins].some(
-				(path) =>
-					path.startsWith(`${plan.rootTable}.`) &&
-					this.visibleSqlQualifiers.has(path.slice(plan.rootTable.length + 1)),
-			)
-		)
-			return undefined;
 		return condition;
 	}
 
@@ -3788,64 +3677,6 @@ export class PlanCompiler {
 	// --------------------------------------------------------------------------
 	// Helpers (condition compilation via handler dispatcher)
 	// --------------------------------------------------------------------------
-
-	/**
-	 * Register an INNER JOIN for a belongsTo filter-strategy decision.
-	 * The JOIN replaces the EXISTS subquery when the planner chooses 'join'.
-	 * The ON condition correlates FK → PK (belongsTo: source.FK = target.PK).
-	 */
-	private registerJoinFilter(decision: PlanDecision): void {
-		const targetTable = decision.targetTable!;
-		const sourceTable = this.currentRootTable;
-
-		// For belongsTo: FK is on source table, references target PK
-		// e.g., posts.author_id → authors.id
-		// Use relation-based alias for self-referential tables
-		const targetAlias = this.filterJoinAlias(decision);
-		// A selected relation may already have emitted the same FK join during
-		// alias allocation. Reuse that range variable so WHERE references and
-		// projected relation columns share one query-local qualifier.
-		const alreadyJoined = [...this.joinAliasMap.values()].some(
-			(entry) =>
-				entry.alias === targetAlias &&
-				entry.targetTable === targetTable &&
-				entry.relationName === decision.relationName,
-		);
-		if (alreadyJoined) return;
-		const alias = targetAlias === targetTable ? undefined : targetAlias;
-		const fkColumn = decision.foreignKey ?? [
-			this.deriveFk(targetTable, this.defaultPk),
-		];
-		const targetKey = decision.parentKey ?? [this.defaultPk];
-		const target = resolveRelationTarget(
-			queryLocal(targetTable),
-			this.createHandlerContext({ rootTable: sourceTable, decisions: [] }),
-		);
-		requireRelationTargetColumns(
-			target,
-			toColumnList(targetKey).map(queryLocal),
-			'join key',
-			decision.relationName,
-		);
-		this.registerAliasAuthority(queryLocal(targetAlias), target);
-		const onCondition = buildKeyCorrelation(
-			targetAlias,
-			targetKey,
-			sourceTable,
-			fkColumn,
-			this.createHandlerContext({
-				rootTable: sourceTable,
-				decisions: [],
-			}),
-		);
-
-		this.pendingJoins.push({
-			type: 'JOIN',
-			table: targetTable,
-			...(alias && { alias }),
-			on: onCondition,
-		});
-	}
 
 	private compileJoin(
 		decision: PlanDecision,

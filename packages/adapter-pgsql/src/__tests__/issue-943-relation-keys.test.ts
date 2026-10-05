@@ -23,7 +23,6 @@ function ormFor(
 		cardinality: 'one',
 		optionality: 'optional',
 		includeStrategy: 'auto',
-		filterStrategy: 'auto',
 		joinDefault: 'auto',
 		...(foreignKey === undefined ? {} : { foreignKey }),
 	};
@@ -133,7 +132,6 @@ it('#943 recursive planning uses the declared primary key fallback', () => {
 					cardinality: 'many',
 					optionality: 'optional',
 					includeStrategy: 'auto',
-					filterStrategy: 'auto',
 					joinDefault: 'auto',
 					foreignKey: 'parent_uuid',
 				},
@@ -168,6 +166,6 @@ it('#943 EXISTS includes use the referenced model primary key', () => {
 			.where(exists('author', { include: { manager: { join: 'inner' } } }))
 			.dump().sql,
 	).toBe(
-		'SELECT posts.* FROM posts JOIN users AS author ON author.uuid = posts.author_uuid WHERE EXISTS (SELECT 1 FROM users AS users_exists_1 JOIN users AS manager ON users_exists_1.manager_uuid = manager.uuid WHERE posts.author_uuid = users_exists_1.uuid)',
+		'SELECT posts.* FROM posts WHERE EXISTS (SELECT 1 FROM users AS users_exists_0 JOIN users AS manager ON users_exists_0.manager_uuid = manager.uuid WHERE posts.author_uuid = users_exists_0.uuid)',
 	);
 });

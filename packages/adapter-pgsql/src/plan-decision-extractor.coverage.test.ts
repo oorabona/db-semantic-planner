@@ -673,20 +673,21 @@ describe('plan-decision-extractor - coverage', () => {
 			expect(result).toEqual([]);
 		});
 
-		it('propagates join choice to decision', () => {
+		it('lowers the fixed EXISTS choice to a predicate', () => {
 			const plan = {
 				rootTable: 'users',
 				intent: { where: { kind: 'exists', relation: 'posts' } },
 				decisions: [
 					{
 						type: 'filter-strategy',
-						choice: 'join',
+						choice: 'exists',
 						context: { target: 'posts', relation: 'posts' },
 					},
 				],
 			};
 			const result = extractExistsDecisions(plan);
-			expect(result[0].choice).toBe('join');
+			expect(result[0].operator).toBe('exists');
+			expect(result[0].choice).toBeUndefined();
 		});
 
 		it('returns empty if no filter-strategy decisions', () => {

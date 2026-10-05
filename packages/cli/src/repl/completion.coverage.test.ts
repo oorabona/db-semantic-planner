@@ -61,7 +61,6 @@ function createMockSchema(
 				rel.type === 'hasMany' || rel.type === 'belongsToMany' ? 'many' : 'one',
 			optionality: 'optional',
 			includeStrategy: 'auto',
-			filterStrategy: 'auto',
 			joinDefault: 'auto',
 		});
 	}

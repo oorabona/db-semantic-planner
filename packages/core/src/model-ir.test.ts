@@ -169,7 +169,6 @@ describe('ModelIR', () => {
 					foreignKey: 'postId',
 					otherKey: 'tagId',
 					cardinality: 'many',
-					filterStrategy: 'auto',
 					joinDefault: 'auto',
 				});
 				return s;
@@ -187,7 +186,7 @@ describe('ModelIR', () => {
 
 	describe('relation hints', () => {
 		// Note: The new schema() + ref() API doesn't support setting strategies
-		// at schema definition time. Strategies (filterStrategy, includeStrategy)
+		// at schema definition time. Include strategies
 		// are determined by the planner or specified at query time.
 		// These tests verify the default 'auto' behavior.
 
@@ -205,7 +204,7 @@ describe('ModelIR', () => {
 			}).model;
 
 			const relation = testModel.getRelation('users.posts');
-			expect(relation?.filterStrategy).toBe('auto');
+			expect(relation).not.toHaveProperty('filterStrategy');
 			expect(relation?.includeStrategy).toBe('auto');
 			expect(relation?.joinDefault).toBe('auto');
 		});
@@ -419,7 +418,7 @@ describe('ModelIR', () => {
 			it('should have images relation with cardinality many', () => {
 				const relation = q1Schema.getRelation('products.images');
 				expect(relation?.cardinality).toBe('many');
-				expect(relation?.filterStrategy).toBe('auto'); // Will default to EXISTS
+				expect(relation).not.toHaveProperty('filterStrategy');
 			});
 		});
 
@@ -540,7 +539,6 @@ describe('CLI-NQL: Relation Kind Helpers', () => {
 		cardinality: 'many',
 		optionality: 'optional',
 		includeStrategy: 'auto',
-		filterStrategy: 'auto',
 		joinDefault: 'auto',
 		...overrides,
 	});

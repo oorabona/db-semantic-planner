@@ -841,7 +841,6 @@ describe('planner: determineJoinType — relation.joinDefault hint (L1392)', () 
 		cardinality: 'one',
 		optionality: 'optional',
 		includeStrategy: 'auto',
-		filterStrategy: 'auto',
 		joinDefault: 'inner', // non-auto hint → L1392 branch
 	};
 	const modelWithJoinHint = new ModelIRImpl(

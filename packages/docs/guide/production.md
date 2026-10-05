@@ -479,7 +479,6 @@ const users = await orm.select('users')
     "duration_ms": 45
   },
   "plan": {
-    "filterStrategy": "where",
     "includeStrategy": "lateral"
   }
 }

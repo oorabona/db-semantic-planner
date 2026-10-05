@@ -187,10 +187,10 @@ describe('Semantic Planner', () => {
 			expect(filterDecision?.choice).toBe('exists');
 			expect(filterDecision?.context.relation).toBe('images');
 			expect(filterDecision?.reasoning).toContain('cardinality "many"');
-			expect(filterDecision?.alternatives).toContain('join');
+			expect(filterDecision?.alternatives).toEqual([]);
 		});
 
-		it('should choose JOIN strategy for belongsTo filter', () => {
+		it('should choose EXISTS strategy for belongsTo filter', () => {
 			const intent: QueryIntent = {
 				type: 'select',
 				from: 'productImages',
@@ -206,7 +206,7 @@ describe('Semantic Planner', () => {
 				(d) => d.type === 'filter-strategy',
 			);
 			expect(filterDecision).toBeDefined();
-			expect(filterDecision?.choice).toBe('join');
+			expect(filterDecision?.choice).toBe('exists');
 			expect(filterDecision?.reasoning).toContain('cardinality "one"');
 		});
 
@@ -228,7 +228,7 @@ describe('Semantic Planner', () => {
 			expect(rowExplosionWarning).toBeUndefined();
 		});
 
-		it('should warn about row explosion when forcing JOIN on to-many', () => {
+		it('should use EXISTS without row explosion on to-many', () => {
 			const intent: QueryIntent = {
 				type: 'select',
 				from: 'products',
@@ -238,18 +238,17 @@ describe('Semantic Planner', () => {
 				},
 			};
 
-			const report = plan(intent, q1Schema, { forceFilterStrategy: 'join' });
+			const report = plan(intent, q1Schema);
 
 			const filterDecision = report.decisions.find(
 				(d) => d.type === 'filter-strategy',
 			);
-			expect(filterDecision?.choice).toBe('join');
+			expect(filterDecision?.choice).toBe('exists');
 
 			const rowExplosionWarning = report.warnings.find(
 				(w) => w.code === 'POTENTIAL_ROW_EXPLOSION',
 			);
-			expect(rowExplosionWarning).toBeDefined();
-			expect(rowExplosionWarning?.message).toContain('images');
+			expect(rowExplosionWarning).toBeUndefined();
 		});
 
 		it('should handle relationFilter with mode some', () => {
@@ -804,7 +803,6 @@ describe('Semantic Planner', () => {
 				cardinality: 'many',
 				optionality: 'optional',
 				includeStrategy: 'auto',
-				filterStrategy: 'auto',
 				joinDefault: 'auto',
 			};
 			const tables = new Map([

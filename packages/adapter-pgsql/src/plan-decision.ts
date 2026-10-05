@@ -55,7 +55,7 @@ export interface PlanDecision {
 	// Nested json_agg children (for deep relation traversal)
 	readonly children?: readonly PlanDecision[];
 	readonly intentPath?: string;
-	// Filter/include strategy choice from planner ('join' | 'exists' | 'json_agg')
+	// Include strategy choice from planner; relation predicates always use EXISTS.
 	readonly choice?: string;
 	// IN (subquery) reference
 	readonly subquery?: {

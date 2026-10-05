@@ -669,27 +669,6 @@ export function createConditionCompiler(
 			// (DEFECT 1 FIX: before this fix, single-hop always fell back to convention,
 			//  so e.g. posts.author_id was correlated as posts.user_id — wrong.)
 			const relation = hops[0] ?? (rf.relation as string);
-			if (
-				ctx.directRootWhere &&
-				rf.mode === 'some' &&
-				innermostWhere &&
-				ctx.rootWhereJoinRelations?.has(`${ctx.rootTable}.${relation}`)
-			) {
-				const target =
-					preResolved?.targetTable ??
-					(ctx.model
-						? resolveConditionRelation(ctx.model, ctx.rootTable, relation)
-								?.target
-						: undefined);
-				const alias = ctx.aliases?.get(relation);
-				if (target && alias)
-					return ctx.compileCondition(innermostWhere, {
-						...ctx,
-						rootTable: target,
-						currentAlias: alias,
-						outerTable: ctx.currentAlias ?? ctx.rootTable,
-					});
-			}
 			if (preResolved) {
 				return ctx.compileCondition(
 					internalRelationIntent({
@@ -1147,24 +1126,6 @@ export function createConditionCompiler(
 				throw new Error(
 					`${intent.kind}('${intent.relation}'): supplied relation target or keys differ from the model.`,
 				);
-			const joinRelation = resolved?.name ?? intent.relation;
-			const joinedAlias = ctx.aliases?.get(joinRelation);
-			if (
-				ctx.directRootWhere &&
-				intent.kind === 'exists' &&
-				(!intent.include || Object.keys(intent.include).length === 0) &&
-				joinedAlias &&
-				ctx.rootWhereJoinRelations?.has(`${ctx.rootTable}.${joinRelation}`)
-			) {
-				return intent.where
-					? ctx.compileCondition(intent.where, {
-							...ctx,
-							rootTable: hints?.targetTable ?? targetTable,
-							currentAlias: joinedAlias,
-							outerTable: ctx.currentAlias ?? ctx.rootTable,
-						})
-					: booleanConstNode(true);
-			}
 			return dispatcher(
 				{
 					type: 'exists',

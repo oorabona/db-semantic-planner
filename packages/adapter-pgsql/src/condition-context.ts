@@ -16,7 +16,6 @@ import type {
 } from './relation-target-projection.js';
 export type WhereCompilerCtx = {
 	/** Root relation filters already planned as positive JOINs, keyed by source.relation. */
-	readonly rootWhereJoinRelations?: ReadonlySet<string>;
 	/** Internal migration provenance; legacy where callers retain their lowering. */
 	readonly directRootWhere?: boolean;
 	readonly resolveHavingOperand?: (
