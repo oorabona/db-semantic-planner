@@ -271,7 +271,15 @@ for (const position of ['raw', 'scalar', 'in'] as const) {
 		const prior = db.model
 			.getRelationsFrom('posts')
 			.find((r) => r.name === 'comments')!;
-		relations.set('posts.comments', { ...prior, type: 'belongsToMany' });
+		relations.set('posts.comments', {
+			...prior,
+			type: 'belongsToMany',
+			through: 'post_comments',
+			foreignKey: 'postId',
+			otherKey: 'commentId',
+			sourceKey: 'id',
+			targetKey: 'id',
+		});
 		const model: ModelIR = {
 			...db.model,
 			getTable: (name) => db.model.getTable(name),

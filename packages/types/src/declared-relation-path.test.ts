@@ -226,3 +226,66 @@ it.each(['belongsTo', 'hasOne', 'hasMany'] as const)(
 		).toThrow("Relation 'posts.related' has mismatched key arity.");
 	},
 );
+
+it.each(['belongsTo', 'hasOne', 'hasMany'] as const)(
+	'#943 refuses junction-only foreign keys on %s',
+	(type) => {
+		const relation = {
+			name: 'related',
+			target: 'targets',
+			type,
+			throughSourceKey: 'fake',
+		};
+		const model = {
+			tables: new Map(),
+			getTable: () => ({ primaryKey: 'uuid' }),
+			getRelationsFrom: () => [relation],
+		};
+		expect(() =>
+			resolveDeclaredRelationPath(model, 'sources', ['related']),
+		).toThrow(
+			"Relation 'sources.related' is missing a declared foreign key column.",
+		);
+	},
+);
+it.each([
+	{ sourceKey: 'uuid', foreignKey: 'post_uuid' },
+	{ targetKey: 'uuid', otherKey: 'tag_uuid' },
+	{ sourceKey: 'uuid', targetKey: 'uuid', foreignKey: 'post_uuid' },
+])('#943 refuses partial junction hops %j', (keys) => {
+	const relation = {
+		name: 'tags',
+		target: 'tags',
+		type: 'belongsToMany' as const,
+		through: 'post_tags',
+		...keys,
+	};
+	expect(() =>
+		resolveDeclaredRelationPath(
+			{ getRelationsFrom: () => [relation] },
+			'posts',
+			['tags'],
+		),
+	).toThrow("Relation 'posts.tags' has mismatched key arity.");
+});
+
+it.each([
+	{ foreignKey: 'post_uuid' },
+	{ foreignKey: 'post_uuid', otherKey: ['tenant', 'tag_uuid'] },
+])('#943 refuses incomplete model-backed junction hops %j', (junction) => {
+	const relation = {
+		name: 'tags',
+		target: 'tags',
+		type: 'belongsToMany' as const,
+		through: 'post_tags',
+		...junction,
+	};
+	const model = {
+		tables: new Map(),
+		getTable: () => ({ primaryKey: 'uuid' }),
+		getRelationsFrom: () => [relation],
+	};
+	expect(() => resolveDeclaredRelationPath(model, 'posts', ['tags'])).toThrow(
+		"Relation 'posts.tags' has mismatched key arity.",
+	);
+});

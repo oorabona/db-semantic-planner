@@ -66,7 +66,10 @@ export function resolveDeclaredRelationKeys(
 ) {
 	const name = `${sourceTable}.${relation.name}`;
 	const foreignKey = toColumnList(
-		relation.foreignKey ?? relation.throughSourceKey,
+		relation.foreignKey ??
+			(relation.type === 'belongsToMany'
+				? relation.throughSourceKey
+				: undefined),
 	);
 	if (!foreignKey.length)
 		throw new Error(
@@ -176,6 +179,25 @@ export function resolveDeclaredRelationPath<
 			return columns;
 		};
 		if (relation.type === 'belongsToMany') {
+			const junctionSource = junctionKey(
+				relation.foreignKey,
+				relation.throughSourceKey,
+			);
+			const junctionTarget = junctionKey(
+				relation.otherKey,
+				relation.throughTargetKey,
+			);
+			if (
+				(keys || sourceKey.length || targetKey.length) &&
+				(!relation.through ||
+					!sourceKey.length ||
+					!targetKey.length ||
+					sourceKey.length !== junctionSource.length ||
+					targetKey.length !== junctionTarget.length)
+			)
+				throw new Error(
+					`Relation '${currentTable}.${segment}' has mismatched key arity.`,
+				);
 			if (!relation.through) {
 				currentTable = relation.target;
 				continue;
@@ -184,13 +206,13 @@ export function resolveDeclaredRelationPath<
 				currentTable,
 				relation.through,
 				sourceKey,
-				junctionKey(relation.foreignKey, relation.throughSourceKey),
+				junctionSource,
 				relation.sourceKey !== undefined,
 			);
 			hop(
 				relation.through,
 				relation.target,
-				junctionKey(relation.otherKey, relation.throughTargetKey),
+				junctionTarget,
 				targetKey,
 				relation.targetKey !== undefined,
 			);

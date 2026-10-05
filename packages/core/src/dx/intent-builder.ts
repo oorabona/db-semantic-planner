@@ -225,6 +225,11 @@ export function validateRecursiveInclude(
 			'include[0]',
 			relationName,
 			POSTGRESQL_CAPABILITIES,
+			undefined,
+			undefined,
+			false,
+			false,
+			model,
 		);
 	} catch (error) {
 		throw new InvalidOperationError(
