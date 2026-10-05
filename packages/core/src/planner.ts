@@ -2008,7 +2008,7 @@ function generateFilterReasoning(
 
 	return (
 		`Relation ${relation.source}.${relation.name} has cardinality "${relation.cardinality}"${modeText}${selfRefText} - ` +
-		`using EXISTS to avoid row explosion`
+		`relation predicates compile as EXISTS`
 	);
 }
 
