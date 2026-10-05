@@ -1,0 +1,266 @@
+[
+  {
+    "case": "orm/cte/2/direct/nested/single/all",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Nested include at include[0](children).include[0](leaves) has parent strategy cte and child strategy cte; mixed strategies and includes under cte are refused (oorabona/db-semantic-planner#894)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "external/cte/2/direct/nested/single/all",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Nested include at include[0](children).include[0](leaves) has parent strategy cte and child strategy cte; mixed strategies and includes under cte are refused (oorabona/db-semantic-planner#894)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "nql/cte/2/direct/nested/single/all",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Nested include at include[0](children).include[0](leaves) has parent strategy cte and child strategy cte; mixed strategies and includes under cte are refused (oorabona/db-semantic-planner#894)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "orm/cte/2/direct/nested/single/projection",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "_InvalidOperationError",
+      "message": "Invalid include: Include include[0](children) select is not supported by 'cte' strategy."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "external/cte/2/direct/nested/single/projection",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "_InvalidOperationError",
+      "message": "Invalid include: Include include[0](children) select is not supported by 'cte' strategy."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "nql/cte/2/direct/nested/single/projection",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "NQL compilation failed: Column 'leaves' does not exist on table 'roots'. Available columns: id, tenant, name, amount"
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "orm/cte/2/direct/nested/single/ordered-limit",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "_InvalidOperationError",
+      "message": "Invalid include: Include include[0](children) limit is not supported by 'cte' strategy."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "external/cte/2/direct/nested/single/ordered-limit",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "_InvalidOperationError",
+      "message": "Invalid include: Include include[0](children) limit is not supported by 'cte' strategy."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "nql/cte/2/direct/nested/single/ordered-limit",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "_InvalidOperationError",
+      "message": "Invalid include: Include include[0](children) limit is not supported by 'cte' strategy."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "orm/cte/2/direct/nested/single/predicate",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Include where is not supported for strategy cte at include[0](children).where (oorabona/db-semantic-planner#892)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "external/cte/2/direct/nested/single/predicate",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Include where is not supported for strategy cte at include[0](children).where (oorabona/db-semantic-planner#892)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "nql/cte/2/direct/nested/single/predicate",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Include where is not supported for strategy cte at include[0](children).where (oorabona/db-semantic-planner#892)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "orm/cte/2/direct/nested/single/expression",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Include where is not supported for strategy cte at include[0](children).where (oorabona/db-semantic-planner#892)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "external/cte/2/direct/nested/single/expression",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Include where is not supported for strategy cte at include[0](children).where (oorabona/db-semantic-planner#892)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "nql/cte/2/direct/nested/single/expression",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Include where is not supported for strategy cte at include[0](children).where (oorabona/db-semantic-planner#892)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "orm/cte/2/direct/nested/single/outer",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Include where is not supported for strategy cte at include[0](children).where (oorabona/db-semantic-planner#892)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "external/cte/2/direct/nested/single/outer",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Include where is not supported for strategy cte at include[0](children).where (oorabona/db-semantic-planner#892)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "nql/cte/2/direct/nested/single/outer",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Include where is not supported for strategy cte at include[0](children).where (oorabona/db-semantic-planner#892)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "orm/cte/2/direct/nested/composite/all",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Nested include at include[0](compositeChildren).include[0](compositeLeaves) has parent strategy cte and child strategy cte; mixed strategies and includes under cte are refused (oorabona/db-semantic-planner#894)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "external/cte/2/direct/nested/composite/all",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Nested include at include[0](compositeChildren).include[0](compositeLeaves) has parent strategy cte and child strategy cte; mixed strategies and includes under cte are refused (oorabona/db-semantic-planner#894)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "nql/cte/2/direct/nested/composite/all",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "Error",
+      "message": "Nested include at include[0](compositeChildren).include[0](compositeLeaves) has parent strategy cte and child strategy cte; mixed strategies and includes under cte are refused (oorabona/db-semantic-planner#894)."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "orm/cte/2/direct/nested/composite/projection",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "_InvalidOperationError",
+      "message": "Invalid include: Include include[0](compositeChildren) select is not supported by 'cte' strategy."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "external/cte/2/direct/nested/composite/projection",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "_InvalidOperationError",
+      "message": "Invalid include: Include include[0](compositeChildren) select is not supported by 'cte' strategy."
+    },
+    "payloads": [],
+    "rows": []
+  },
+  {
+    "case": "nql/cte/2/direct/nested/composite/projection",
+    "sql": null,
+    "params": [],
+    "error": {
+      "class": "_InvalidOperationError",
+      "message": "Invalid include: Include include[0](compositeChildren) select is not supported by 'cte' strategy."
+    },
+    "payloads": [],
+    "rows": []
+  }
+]

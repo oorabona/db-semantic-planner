@@ -1,0 +1,570 @@
+{
+  "external/recursive/ancestors/false/false": {
+    "rootTable": "categories",
+    "decisions": [
+      {
+        "id": "includestrategy-001",
+        "type": "include-strategy",
+        "context": {
+          "sourceTable": "categories",
+          "target": "categories",
+          "relation": "ancestors",
+          "relationType": "hasMany",
+          "includeAlias": "ancestors",
+          "intentPath": "include[0]",
+          "recursiveInclude": {
+            "direction": "ancestors",
+            "maxDepth": 3,
+            "flat": false,
+            "omitSelf": false,
+            "track": {
+              "depth": true
+            }
+          },
+          "foreignKey": "parentId",
+          "parentKey": [
+            "id"
+          ],
+          "targetOrderKey": [
+            "id"
+          ]
+        },
+        "choice": "cte",
+        "reasoning": "Recursive include on self-referential relation \"ancestors\" → forced CTE strategy",
+        "alternatives": []
+      }
+    ],
+    "warnings": [],
+    "ctes": [
+      {
+        "name": "cte_categories_ancestors",
+        "purpose": "Recursive include for self-referential \"ancestors\"",
+        "referencedBy": [
+          "include[0]"
+        ],
+        "sourceIntent": "categories.ancestors",
+        "recursive": true
+      }
+    ],
+    "intent": {
+      "type": "select",
+      "from": "categories",
+      "include": [
+        {
+          "relation": "ancestors",
+          "recursive": {
+            "direction": "ancestors",
+            "maxDepth": 3,
+            "flat": false,
+            "omitSelf": false,
+            "track": {
+              "depth": true
+            }
+          }
+        }
+      ]
+    },
+    "metadata": {
+      "planningTimeMs": 0,
+      "relationsAnalyzed": 1,
+      "isAmbiguous": false
+    }
+  },
+  "external/recursive/ancestors/false/true": {
+    "rootTable": "categories",
+    "decisions": [
+      {
+        "id": "includestrategy-001",
+        "type": "include-strategy",
+        "context": {
+          "sourceTable": "categories",
+          "target": "categories",
+          "relation": "ancestors",
+          "relationType": "hasMany",
+          "includeAlias": "ancestors",
+          "intentPath": "include[0]",
+          "recursiveInclude": {
+            "direction": "ancestors",
+            "maxDepth": 3,
+            "flat": false,
+            "omitSelf": true,
+            "track": {
+              "depth": true
+            }
+          },
+          "foreignKey": "parentId",
+          "parentKey": [
+            "id"
+          ],
+          "targetOrderKey": [
+            "id"
+          ]
+        },
+        "choice": "cte",
+        "reasoning": "Recursive include on self-referential relation \"ancestors\" → forced CTE strategy",
+        "alternatives": []
+      }
+    ],
+    "warnings": [],
+    "ctes": [
+      {
+        "name": "cte_categories_ancestors",
+        "purpose": "Recursive include for self-referential \"ancestors\"",
+        "referencedBy": [
+          "include[0]"
+        ],
+        "sourceIntent": "categories.ancestors",
+        "recursive": true
+      }
+    ],
+    "intent": {
+      "type": "select",
+      "from": "categories",
+      "include": [
+        {
+          "relation": "ancestors",
+          "recursive": {
+            "direction": "ancestors",
+            "maxDepth": 3,
+            "flat": false,
+            "omitSelf": true,
+            "track": {
+              "depth": true
+            }
+          }
+        }
+      ]
+    },
+    "metadata": {
+      "planningTimeMs": 0,
+      "relationsAnalyzed": 1,
+      "isAmbiguous": false
+    }
+  },
+  "external/recursive/ancestors/true/false": {
+    "rootTable": "categories",
+    "decisions": [
+      {
+        "id": "includestrategy-001",
+        "type": "include-strategy",
+        "context": {
+          "sourceTable": "categories",
+          "target": "categories",
+          "relation": "ancestors",
+          "relationType": "hasMany",
+          "includeAlias": "ancestors",
+          "intentPath": "include[0]",
+          "recursiveInclude": {
+            "direction": "ancestors",
+            "maxDepth": 3,
+            "flat": true,
+            "omitSelf": false,
+            "track": {
+              "depth": true
+            }
+          },
+          "foreignKey": "parentId",
+          "parentKey": [
+            "id"
+          ],
+          "targetOrderKey": [
+            "id"
+          ]
+        },
+        "choice": "cte",
+        "reasoning": "Recursive include on self-referential relation \"ancestors\" → forced CTE strategy",
+        "alternatives": []
+      }
+    ],
+    "warnings": [],
+    "ctes": [
+      {
+        "name": "cte_categories_ancestors",
+        "purpose": "Recursive include for self-referential \"ancestors\"",
+        "referencedBy": [
+          "include[0]"
+        ],
+        "sourceIntent": "categories.ancestors",
+        "recursive": true
+      }
+    ],
+    "intent": {
+      "type": "select",
+      "from": "categories",
+      "include": [
+        {
+          "relation": "ancestors",
+          "recursive": {
+            "direction": "ancestors",
+            "maxDepth": 3,
+            "flat": true,
+            "omitSelf": false,
+            "track": {
+              "depth": true
+            }
+          }
+        }
+      ]
+    },
+    "metadata": {
+      "planningTimeMs": 0,
+      "relationsAnalyzed": 1,
+      "isAmbiguous": false
+    }
+  },
+  "external/recursive/ancestors/true/true": {
+    "rootTable": "categories",
+    "decisions": [
+      {
+        "id": "includestrategy-001",
+        "type": "include-strategy",
+        "context": {
+          "sourceTable": "categories",
+          "target": "categories",
+          "relation": "ancestors",
+          "relationType": "hasMany",
+          "includeAlias": "ancestors",
+          "intentPath": "include[0]",
+          "recursiveInclude": {
+            "direction": "ancestors",
+            "maxDepth": 3,
+            "flat": true,
+            "omitSelf": true,
+            "track": {
+              "depth": true
+            }
+          },
+          "foreignKey": "parentId",
+          "parentKey": [
+            "id"
+          ],
+          "targetOrderKey": [
+            "id"
+          ]
+        },
+        "choice": "cte",
+        "reasoning": "Recursive include on self-referential relation \"ancestors\" → forced CTE strategy",
+        "alternatives": []
+      }
+    ],
+    "warnings": [],
+    "ctes": [
+      {
+        "name": "cte_categories_ancestors",
+        "purpose": "Recursive include for self-referential \"ancestors\"",
+        "referencedBy": [
+          "include[0]"
+        ],
+        "sourceIntent": "categories.ancestors",
+        "recursive": true
+      }
+    ],
+    "intent": {
+      "type": "select",
+      "from": "categories",
+      "include": [
+        {
+          "relation": "ancestors",
+          "recursive": {
+            "direction": "ancestors",
+            "maxDepth": 3,
+            "flat": true,
+            "omitSelf": true,
+            "track": {
+              "depth": true
+            }
+          }
+        }
+      ]
+    },
+    "metadata": {
+      "planningTimeMs": 0,
+      "relationsAnalyzed": 1,
+      "isAmbiguous": false
+    }
+  },
+  "external/recursive/descendants/false/false": {
+    "rootTable": "categories",
+    "decisions": [
+      {
+        "id": "includestrategy-001",
+        "type": "include-strategy",
+        "context": {
+          "sourceTable": "categories",
+          "target": "categories",
+          "relation": "descendants",
+          "relationType": "hasMany",
+          "includeAlias": "descendants",
+          "intentPath": "include[0]",
+          "recursiveInclude": {
+            "direction": "descendants",
+            "maxDepth": 3,
+            "flat": false,
+            "omitSelf": false,
+            "track": {
+              "depth": true
+            }
+          },
+          "foreignKey": "parentId",
+          "parentKey": [
+            "id"
+          ],
+          "targetOrderKey": [
+            "id"
+          ]
+        },
+        "choice": "cte",
+        "reasoning": "Recursive include on self-referential relation \"descendants\" → forced CTE strategy",
+        "alternatives": []
+      }
+    ],
+    "warnings": [],
+    "ctes": [
+      {
+        "name": "cte_categories_descendants",
+        "purpose": "Recursive include for self-referential \"descendants\"",
+        "referencedBy": [
+          "include[0]"
+        ],
+        "sourceIntent": "categories.descendants",
+        "recursive": true
+      }
+    ],
+    "intent": {
+      "type": "select",
+      "from": "categories",
+      "include": [
+        {
+          "relation": "descendants",
+          "recursive": {
+            "direction": "descendants",
+            "maxDepth": 3,
+            "flat": false,
+            "omitSelf": false,
+            "track": {
+              "depth": true
+            }
+          }
+        }
+      ]
+    },
+    "metadata": {
+      "planningTimeMs": 0,
+      "relationsAnalyzed": 1,
+      "isAmbiguous": false
+    }
+  },
+  "external/recursive/descendants/false/true": {
+    "rootTable": "categories",
+    "decisions": [
+      {
+        "id": "includestrategy-001",
+        "type": "include-strategy",
+        "context": {
+          "sourceTable": "categories",
+          "target": "categories",
+          "relation": "descendants",
+          "relationType": "hasMany",
+          "includeAlias": "descendants",
+          "intentPath": "include[0]",
+          "recursiveInclude": {
+            "direction": "descendants",
+            "maxDepth": 3,
+            "flat": false,
+            "omitSelf": true,
+            "track": {
+              "depth": true
+            }
+          },
+          "foreignKey": "parentId",
+          "parentKey": [
+            "id"
+          ],
+          "targetOrderKey": [
+            "id"
+          ]
+        },
+        "choice": "cte",
+        "reasoning": "Recursive include on self-referential relation \"descendants\" → forced CTE strategy",
+        "alternatives": []
+      }
+    ],
+    "warnings": [],
+    "ctes": [
+      {
+        "name": "cte_categories_descendants",
+        "purpose": "Recursive include for self-referential \"descendants\"",
+        "referencedBy": [
+          "include[0]"
+        ],
+        "sourceIntent": "categories.descendants",
+        "recursive": true
+      }
+    ],
+    "intent": {
+      "type": "select",
+      "from": "categories",
+      "include": [
+        {
+          "relation": "descendants",
+          "recursive": {
+            "direction": "descendants",
+            "maxDepth": 3,
+            "flat": false,
+            "omitSelf": true,
+            "track": {
+              "depth": true
+            }
+          }
+        }
+      ]
+    },
+    "metadata": {
+      "planningTimeMs": 0,
+      "relationsAnalyzed": 1,
+      "isAmbiguous": false
+    }
+  },
+  "external/recursive/descendants/true/false": {
+    "rootTable": "categories",
+    "decisions": [
+      {
+        "id": "includestrategy-001",
+        "type": "include-strategy",
+        "context": {
+          "sourceTable": "categories",
+          "target": "categories",
+          "relation": "descendants",
+          "relationType": "hasMany",
+          "includeAlias": "descendants",
+          "intentPath": "include[0]",
+          "recursiveInclude": {
+            "direction": "descendants",
+            "maxDepth": 3,
+            "flat": true,
+            "omitSelf": false,
+            "track": {
+              "depth": true
+            }
+          },
+          "foreignKey": "parentId",
+          "parentKey": [
+            "id"
+          ],
+          "targetOrderKey": [
+            "id"
+          ]
+        },
+        "choice": "cte",
+        "reasoning": "Recursive include on self-referential relation \"descendants\" → forced CTE strategy",
+        "alternatives": []
+      }
+    ],
+    "warnings": [],
+    "ctes": [
+      {
+        "name": "cte_categories_descendants",
+        "purpose": "Recursive include for self-referential \"descendants\"",
+        "referencedBy": [
+          "include[0]"
+        ],
+        "sourceIntent": "categories.descendants",
+        "recursive": true
+      }
+    ],
+    "intent": {
+      "type": "select",
+      "from": "categories",
+      "include": [
+        {
+          "relation": "descendants",
+          "recursive": {
+            "direction": "descendants",
+            "maxDepth": 3,
+            "flat": true,
+            "omitSelf": false,
+            "track": {
+              "depth": true
+            }
+          }
+        }
+      ]
+    },
+    "metadata": {
+      "planningTimeMs": 0,
+      "relationsAnalyzed": 1,
+      "isAmbiguous": false
+    }
+  },
+  "external/recursive/descendants/true/true": {
+    "rootTable": "categories",
+    "decisions": [
+      {
+        "id": "includestrategy-001",
+        "type": "include-strategy",
+        "context": {
+          "sourceTable": "categories",
+          "target": "categories",
+          "relation": "descendants",
+          "relationType": "hasMany",
+          "includeAlias": "descendants",
+          "intentPath": "include[0]",
+          "recursiveInclude": {
+            "direction": "descendants",
+            "maxDepth": 3,
+            "flat": true,
+            "omitSelf": true,
+            "track": {
+              "depth": true
+            }
+          },
+          "foreignKey": "parentId",
+          "parentKey": [
+            "id"
+          ],
+          "targetOrderKey": [
+            "id"
+          ]
+        },
+        "choice": "cte",
+        "reasoning": "Recursive include on self-referential relation \"descendants\" → forced CTE strategy",
+        "alternatives": []
+      }
+    ],
+    "warnings": [],
+    "ctes": [
+      {
+        "name": "cte_categories_descendants",
+        "purpose": "Recursive include for self-referential \"descendants\"",
+        "referencedBy": [
+          "include[0]"
+        ],
+        "sourceIntent": "categories.descendants",
+        "recursive": true
+      }
+    ],
+    "intent": {
+      "type": "select",
+      "from": "categories",
+      "include": [
+        {
+          "relation": "descendants",
+          "recursive": {
+            "direction": "descendants",
+            "maxDepth": 3,
+            "flat": true,
+            "omitSelf": true,
+            "track": {
+              "depth": true
+            }
+          }
+        }
+      ]
+    },
+    "metadata": {
+      "planningTimeMs": 0,
+      "relationsAnalyzed": 1,
+      "isAmbiguous": false
+    }
+  }
+}
