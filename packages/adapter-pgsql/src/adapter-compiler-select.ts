@@ -321,14 +321,13 @@ function compileJoinIntents(
 ): PlanDecision[] {
 	if (execution.joins.length === 0) return [];
 	const rootTable = execution.rootRange.table;
+	const rootBinding = sourceBinding(rootTable, deps);
 
 	const model = deps.model;
 	const results: PlanDecision[] = [];
 	const initialScope = queryScope([
 		...(deps.scope?.bindings.values() ?? []),
-		...(!hasSourceBinding(rootTable, deps)
-			? [sourceBinding(rootTable, deps)]
-			: []),
+		...(!hasSourceBinding(rootTable, deps) ? [rootBinding] : []),
 	]);
 
 	// One local scope grows in execution order; each ON sees itself and prior joins.
@@ -371,7 +370,7 @@ function compileJoinIntents(
 		const resolved = join;
 		const alias = resolved.range.alias;
 
-		if (alias === sourceBinding(rootTable, deps).qualifier)
+		if (alias === rootBinding.qualifier)
 			throw new Error(`Query scope already binds qualifier '${alias}'.`);
 		if (resolved.kind === 'relation') {
 			const pairs = resolved.path!.hops[0]!.pairs;
