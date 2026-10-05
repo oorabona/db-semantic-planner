@@ -2,6 +2,7 @@ import {
 	batchValues,
 	createOrm,
 	eq,
+	exprRef,
 	manyToMany,
 	outerRef,
 	ref,
@@ -167,5 +168,49 @@ describe('resolved joins authority', () => {
 			expect(actual.parameters).toEqual(canonical.parameters);
 			expect(actual.sql).toContain(`${join.range.alias}.id`);
 		}
+	});
+});
+
+describe('left-to-right ON visibility', () => {
+	const db = schema({
+		a: { id: 'integer' },
+		b: { id: 'integer', aId: 'integer' },
+		c: { bId: 'integer' },
+	});
+	const orm = createOrm({
+		schema: db,
+		adapter: createPgCompileOnlyAdapter({ model: db.model }),
+	});
+	it('table ON sees a preceding table alias', () => {
+		const report = orm
+			.select('a')
+			.join('b', { as: 'b1', on: eq('a.id', exprRef('b1.aId')) })
+			.join('c', { as: 'c1', on: eq('b1.id', exprRef('c1.bId')) })
+			.plan();
+		expect(report.execution!.joins[1]!.visibleRangeIds).toEqual([
+			report.execution!.rootRange.id,
+			...report.execution!.joins.map((join) => join.range.id),
+		]);
+		expect(
+			orm
+				.select('a')
+				.join('b', { as: 'b1', on: eq('a.id', exprRef('b1.aId')) })
+				.join('c', { as: 'c1', on: eq('b1.id', exprRef('c1.bId')) })
+				.dump().sql,
+		).toBe(
+			'SELECT a.* FROM a JOIN b AS b1 ON a.id = b1."aId" JOIN c AS c1 ON b1.id = c1."bId"',
+		);
+	});
+	it('values ON sees a preceding table alias', () => {
+		const values = batchValues([[1, 2]], ['bId'], ['integer'], { alias: 'v' });
+		expect(
+			orm
+				.select('a')
+				.join('b', { as: 'b1', on: eq('a.id', exprRef('b1.aId')) })
+				.join(values, { on: eq('b1.id', exprRef('v.bId')) })
+				.dump().sql,
+		).toBe(
+			'SELECT a.* FROM a JOIN b AS b1 ON a.id = b1."aId" JOIN unnest(CAST($1 AS integer[])) AS v("bId") ON b1.id = v."bId"',
+		);
 	});
 });

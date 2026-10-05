@@ -415,7 +415,6 @@ function mergeDuplicateJoinIncludeDecisions(
  * Simplified PlanReport for the spike
  */
 export interface SimplifiedPlanReport {
-	readonly execution?: import('@dbsp/types').SelectExecution;
 	/** Executable root predicate, compiled after visible alias allocation. */
 	readonly rawWhere?: WhereIntent;
 	readonly rawHaving?: WhereIntent;
@@ -2566,13 +2565,16 @@ export class PlanCompiler {
 			}
 		};
 
-		for (const join of plan.execution?.joins ?? []) {
-			const alias = join.range.alias;
+		for (const join of decisions) {
+			if (join.type !== 'join') continue;
+			const alias = join.alias ?? join.targetTable;
+			if (!alias) continue;
 			emittedAliases.set(alias, alias);
-			this.registerAliasAuthority(
-				queryLocal(alias),
-				queryLocal(join.range.table),
-			);
+			if (join.targetTable)
+				this.registerAliasAuthority(
+					queryLocal(alias),
+					queryLocal(join.targetTable),
+				);
 		}
 		// First pass: retain every alias in the namespace actually emitted by FROM.
 		for (const decision of decisions) {
@@ -2599,9 +2601,11 @@ export class PlanCompiler {
 			emittedAliases.set(alias, alias);
 		}
 
-		for (const join of plan.execution?.joins ?? []) {
-			const relation = join.path?.logicalSegments.join('.');
-			if (relation) registerRelationPath(relation, join.range.alias);
+		for (const join of decisions) {
+			if (join.type !== 'join') continue;
+			const alias = join.alias ?? join.targetTable;
+			if (join.relationName && alias)
+				registerRelationPath(join.relationName, alias);
 		}
 		// Second pass: public relation paths resolve to their emitted alias and
 		// deliberately override a same-spelled emitted-alias key below.
@@ -2850,8 +2854,11 @@ export class PlanCompiler {
 	}
 
 	private reserveManualJoinAliases(plan: SimplifiedPlanReport): void {
-		for (const join of plan.execution?.joins ?? [])
-			this.usedJoinAliases.add(this.emittedJoinAlias(join.range.alias));
+		for (const join of plan.decisions) {
+			if (join.type !== 'join') continue;
+			const alias = join.alias ?? join.targetTable;
+			if (alias) this.usedJoinAliases.add(this.emittedJoinAlias(alias));
+		}
 	}
 
 	/**

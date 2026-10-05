@@ -335,19 +335,66 @@ function compileJoinIntents(
 			: []),
 	]);
 
+	const ranges = new Map([
+		[execution.rootRange.id, execution.rootRange],
+		...execution.joins.map((join) => [join.range.id, join.range] as const),
+	]);
+	const bindings = new Map<
+		typeof execution.rootRange.id,
+		ReturnType<typeof relationBinding>
+	>();
+	for (const join of execution.joins) {
+		const range = join.range;
+		if (join.kind === 'values') {
+			const bv = joins[join.intentIndex]?.batchValues;
+			if (!bv) throw new Error(`Join ${join.intentPath} has no values payload`);
+			bindings.set(
+				range.id,
+				batchValuesBinding(range.alias, [
+					...bv.columns,
+					...(bv.ordinality ? ['ord'] : []),
+				]),
+			);
+		} else {
+			const source = relationBindingFor(deps.scope, queryLocal(range.table));
+			bindings.set(
+				range.id,
+				relationBinding({
+					qualifier: queryLocal(range.alias),
+					...(source && source.kind !== 'declared-table'
+						? {
+								kind: 'join-alias' as const,
+								...(source.outputs && { outputs: source.outputs }),
+							}
+						: {
+								kind: 'declared-table' as const,
+								logicalTable: source?.logicalTable ?? range.table,
+							}),
+				}),
+			);
+		}
+	}
 	for (const resolved of execution.joins) {
 		const visibleRanges = resolved.visibleRangeIds.map((id) => {
-			const range = [
-				execution.rootRange,
-				...execution.joins.map((join) => join.range),
-			].find((range) => range.id === id);
+			const range = ranges.get(id);
 			if (!range)
 				throw new Error(
 					`Join ${resolved.intentPath} has an unknown visible range`,
 				);
 			return range;
 		});
-		let joinScope = rootScope;
+		const visibleBindings = visibleRanges
+			.filter((range) => range.id !== execution.rootRange.id)
+			.map((range) => bindings.get(range.id)!);
+		const visibleQualifiers = new Set(
+			visibleBindings.map((binding) => identifierText(binding.qualifier)),
+		);
+		const joinScope = queryScope([
+			...Array.from(rootScope.bindings.values()).filter(
+				(binding) => !visibleQualifiers.has(identifierText(binding.qualifier)),
+			),
+			...visibleBindings,
+		]);
 		const alias = resolved.range.alias;
 
 		if (alias === sourceBinding(rootTable, deps).qualifier)
@@ -386,15 +433,6 @@ function compileJoinIntents(
 			const bvOnParamState = createCompilerState();
 			bvOnParamState.paramIndex = bvParams.length;
 
-			joinScope = queryScope([
-				...Array.from(joinScope.bindings.values()).filter(
-					(binding) => identifierText(binding.qualifier) !== alias,
-				),
-				batchValuesBinding(alias, [
-					...bv.columns,
-					...(bv.ordinality ? ['ord'] : []),
-				]),
-			]);
 			const bvCtx: WhereCompilerCtx = {
 				rootTable,
 				aliases: new Map<string, string>(),
@@ -461,36 +499,6 @@ function compileJoinIntents(
 				// rangeVar() emits the same spelling rather than a physical table name.
 				tableAliasMap.set(tableAlias, tableAlias);
 			}
-			const joinedSource = relationBindingFor(
-				deps.scope,
-				queryLocal(resolved.range.table),
-			);
-			const joinedBinding =
-				joinedSource?.kind === 'declared-table'
-					? relationBinding({
-							qualifier: queryLocal(tableAlias),
-							kind: 'declared-table',
-							logicalTable: joinedSource.logicalTable ?? resolved.range.table,
-						})
-					: joinedSource !== undefined
-						? relationBinding({
-								qualifier: queryLocal(tableAlias),
-								kind: 'join-alias',
-								...(joinedSource.outputs !== undefined && {
-									outputs: joinedSource.outputs,
-								}),
-							})
-						: relationBinding({
-								qualifier: queryLocal(tableAlias),
-								kind: 'declared-table',
-								logicalTable: resolved.range.table,
-							});
-			joinScope = queryScope([
-				...Array.from(joinScope.bindings.values()).filter(
-					(binding) => identifierText(binding.qualifier) !== tableAlias,
-				),
-				joinedBinding,
-			]);
 			const ctx: WhereCompilerCtx = {
 				rootTable,
 				aliases: tableAliasMap,
@@ -520,6 +528,10 @@ function compileJoinIntents(
 
 			// Store rarg + onNode separately — the 'join' case in compiler.ts wraps
 			// from[0] as larg so multiple .join() calls chain correctly.
+			const joinedSource = relationBindingFor(
+				deps.scope,
+				queryLocal(resolved.range.table),
+			);
 			const joinedRangeVar = sqlRangeVar(
 				joinedSource?.qualifier ??
 					resolveDeclaredIdentifier(
@@ -1034,7 +1046,6 @@ function buildSimplifiedPlanReport(
 
 	return {
 		rootTable: plan.rootTable,
-		...(plan.execution && { execution: plan.execution }),
 		decisions: allDecisions,
 		...(schemaName ? { schema: schemaName } : {}),
 		...(plan.intent?.existsWrap ? { existsWrap: true } : {}),
