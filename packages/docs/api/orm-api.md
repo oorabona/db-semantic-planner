@@ -304,9 +304,8 @@ Traversal of a declared many-to-many relation is refused when planning one of th
 query's includes (any strategy, including NQL relation columns and `| flat`) or a
 relation `.join()`; the message contains
 `Relation 'posts.tags': many-to-many traversal is not supported yet (#787).`
-Relation predicates keep their #787 refusal. Other traversal routes, such as an
-include inside `exists(..., { include })`, are not refused yet and fail at
-compilation until the junction lowering lands.
+Relation predicates and their includes (`exists(..., { include })`) are refused
+with a message ending in `many-to-many traversal is not supported yet (#787).`
 
 ### Schema Options (`dbCasing`)
 

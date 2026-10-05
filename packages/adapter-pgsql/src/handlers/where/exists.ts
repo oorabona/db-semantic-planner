@@ -318,6 +318,11 @@ function buildExistsSubquery(
 					);
 				}
 				if (rel) {
+					if (rel.type === 'belongsToMany') {
+						throw new Error(
+							`${(ctx.position ?? 'where').toUpperCase()} include('${joinRelation}'): many-to-many traversal is not supported yet (#787).`,
+						);
+					}
 					joinTargetTable = rel.target;
 					if (ctx.position === 'filter') {
 						const keys = resolveRelationKeys(sourceTableForJoin, rel, ctx);
