@@ -42,7 +42,6 @@ it('emits exact forward and inverse declarations', () => {
 		cardinality: 'many',
 		optionality: 'optional',
 		includeStrategy: 'auto',
-		filterStrategy: 'auto',
 		joinDefault: 'auto',
 	};
 	expect(model.getRelation('posts.tags')).toEqual({

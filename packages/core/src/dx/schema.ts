@@ -1747,7 +1747,6 @@ function buildRelations(
 					cardinality: 'one',
 					optionality: ref.options.nullable ? 'optional' : 'required',
 					includeStrategy: 'auto',
-					filterStrategy: 'auto',
 					joinDefault: 'auto',
 				});
 
@@ -1763,7 +1762,6 @@ function buildRelations(
 					cardinality: 'many',
 					optionality: 'optional', // Children are always optional
 					includeStrategy: 'auto',
-					filterStrategy: 'auto',
 					joinDefault: 'auto',
 				});
 
@@ -1780,7 +1778,6 @@ function buildRelations(
 					cardinality: 'many',
 					optionality: 'optional',
 					includeStrategy: 'auto',
-					filterStrategy: 'auto',
 					joinDefault: 'auto',
 					recursive: {
 						direction: 'up',
@@ -1802,7 +1799,6 @@ function buildRelations(
 					cardinality: 'many',
 					optionality: 'optional',
 					includeStrategy: 'auto',
-					filterStrategy: 'auto',
 					joinDefault: 'auto',
 					recursive: {
 						direction: 'down',
@@ -1825,7 +1821,6 @@ function buildRelations(
 					cardinality: 'one',
 					optionality: ref.options.nullable ? 'optional' : 'required',
 					includeStrategy: 'auto',
-					filterStrategy: 'auto',
 					joinDefault: 'auto',
 				});
 
@@ -1843,7 +1838,6 @@ function buildRelations(
 					cardinality: inverseCardinality,
 					optionality: 'optional', // Inverse is always optional
 					includeStrategy: 'auto',
-					filterStrategy: 'auto',
 					joinDefault: 'auto',
 				});
 			}
@@ -1926,7 +1920,6 @@ function addCompositeConstraintRelations(
 				cardinality: 'one',
 				optionality: fkRef.options.nullable ? 'optional' : 'required',
 				includeStrategy: 'auto',
-				filterStrategy: 'auto',
 				joinDefault: 'auto',
 			});
 
@@ -1940,7 +1933,6 @@ function addCompositeConstraintRelations(
 				cardinality: inverseCardinality,
 				optionality: 'optional',
 				includeStrategy: 'auto',
-				filterStrategy: 'auto',
 				joinDefault: 'auto',
 			});
 		}
@@ -2340,7 +2332,6 @@ function buildManyToManyRelations(
 					cardinality: 'many',
 					optionality: 'optional',
 					includeStrategy: 'auto',
-					filterStrategy: 'auto',
 					joinDefault: 'auto',
 				});
 			};

@@ -274,8 +274,8 @@ describe('LEFT JOIN include compilation (F-006)', () => {
 		});
 	});
 
-	describe('mixed JOIN filter + LEFT JOIN include', () => {
-		it('should compile INNER JOIN for filter and LEFT JOIN for include', () => {
+	describe('mixed EXISTS filter + LEFT JOIN include', () => {
+		it('should compile EXISTS for filter and LEFT JOIN for include', () => {
 			const plan: SimplifiedPlanReport = {
 				rootTable: 'posts',
 				decisions: [
@@ -291,11 +291,12 @@ describe('LEFT JOIN include compilation (F-006)', () => {
 						parentKey: 'id',
 						columns: ['id', 'name'],
 					} satisfies PlanDecision,
-					// INNER JOIN filter for category
+					// EXISTS filter for category
 					{
 						type: 'where',
 						operator: 'exists',
-						choice: 'join',
+						choice: 'exists',
+						relationType: 'belongsTo',
 						targetTable: 'categories',
 						foreignKey: 'category_id',
 						conditions: [
@@ -316,8 +317,8 @@ describe('LEFT JOIN include compilation (F-006)', () => {
 			// LEFT JOIN for include
 			expect(result.sql).toMatch(/LEFT JOIN\s+authors/i);
 			expect(result.sql).toContain('"author.id"');
-			// INNER JOIN for filter
-			expect(result.sql).toMatch(/JOIN\s+categories/);
+			// EXISTS for filter
+			expect(result.sql).toMatch(/EXISTS \(SELECT 1 FROM categories/);
 			expect(result.parameters).toEqual(['tech']);
 		});
 	});

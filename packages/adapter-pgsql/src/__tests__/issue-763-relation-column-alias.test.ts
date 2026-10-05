@@ -377,29 +377,31 @@ describe('issue 763: relation qualifiers require an emitted SQL alias', () => {
 			);
 		}
 	});
-	it('preallocates a filter join before its relation column is projected', () => {
-		const result = compilePlan({
-			rootTable: 'posts',
-			decisions: [
-				{
-					type: 'selectRelationColumn',
-					relation: 'author',
-					column: 'name',
-					alias: 'authorName',
-				},
-				{
-					type: 'where',
-					operator: 'exists',
-					choice: 'join',
-					relationName: 'author',
-					targetTable: 'users',
-					foreignKey: 'author_id',
-					parentKey: 'id',
-				},
-			],
-		});
-
-		expect(result.sql).toContain('author.name AS "authorName"');
+	it('refuses to project a relation column from a predicate without a join', () => {
+		expect(() =>
+			compilePlan({
+				rootTable: 'posts',
+				decisions: [
+					{
+						type: 'selectRelationColumn',
+						relation: 'author',
+						column: 'name',
+						alias: 'authorName',
+					},
+					{
+						type: 'where',
+						operator: 'exists',
+						choice: 'exists',
+						relationName: 'author',
+						targetTable: 'users',
+						foreignKey: 'author_id',
+						parentKey: 'id',
+					},
+				],
+			}),
+		).toThrow(
+			'relation column "author"."name" has no emitted alias in this query',
+		);
 	});
 
 	it('refuses caller-supplied qualifiers that have no emitted alias', () => {

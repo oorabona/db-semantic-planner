@@ -215,8 +215,8 @@ describe('Q1: Products with approved FR main image', () => {
 	// ============================================================================
 
 	describe('Filter strategy contract (CORE-001)', () => {
-		describe('belongsTo → JOIN strategy (default)', () => {
-			it('should use JOIN strategy for belongsTo filter (products.category)', async () => {
+		describe('belongsTo → EXISTS strategy', () => {
+			it('should use EXISTS strategy for belongsTo filter (products.category)', async () => {
 				const adapter = await getTestAdapter();
 				const orm = createOrm({ model: pimdamModel, adapter });
 
@@ -230,22 +230,18 @@ describe('Q1: Products with approved FR main image', () => {
 					)
 					.dump();
 
-				// Verify JOIN strategy is chosen for belongsTo
+				// Verify EXISTS is recorded for belongsTo
 				const filterDecision = dump.plan!.decisions.find(
 					(d) => d.type === 'filter-strategy',
 				);
 				expect(filterDecision).toBeDefined();
-				expect(filterDecision?.choice).toBe('join');
+				expect(filterDecision?.choice).toBe('exists');
 
-				// Verify SQL uses JOIN not EXISTS
-				// Note: pgsql-adapter compiles filter-strategy decisions as EXISTS even when
-				// planner chooses 'join' — JOIN compilation is a future enhancement (TODO_ADAPTER_PGSQL.md)
-				// The planner decision above is the authoritative contract test.
-				// expect(dump.sql.toLowerCase()).toContain('join');
-				// expect(dump.sql.toLowerCase()).not.toContain('exists');
+				expect(filterDecision?.alternatives).toEqual([]);
+				expect(dump.sql).toContain('WHERE EXISTS');
 			});
 
-			it('should return correct results with JOIN filter on category', async () => {
+			it('should return correct results with EXISTS filter on category', async () => {
 				const adapter = await getTestAdapter();
 				const orm = createOrm({ model: pimdamModel, adapter });
 

@@ -88,7 +88,7 @@ it('belongsToMany refuses every planned join include source', () => {
 		foreignKey: 'postId',
 		otherKey: 'tagId',
 		cardinality: 'many' as const,
-		filterStrategy: 'auto' as const,
+
 		joinDefault: 'auto' as const,
 		includeStrategy: 'auto',
 		optionality: 'optional',

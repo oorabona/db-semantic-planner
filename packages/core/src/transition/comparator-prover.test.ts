@@ -219,7 +219,6 @@ function relation(name = 'posts'): RelationIR {
 		cardinality: 'many',
 		optionality: 'optional',
 		includeStrategy: 'auto',
-		filterStrategy: 'auto',
 		joinDefault: 'auto',
 	};
 }

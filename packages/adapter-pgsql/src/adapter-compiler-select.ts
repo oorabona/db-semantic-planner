@@ -1428,28 +1428,6 @@ export function compileSelectEnvelope<T = unknown>(
 			simplifiedPlan = {
 				...simplifiedPlan,
 				rawWhere,
-				rootWhereJoinRelations: new Set(
-					planForCompilation.decisions
-						.filter(
-							(decision) =>
-								decision.type === 'filter-strategy' &&
-								decision.choice === 'join' &&
-								(rawWhere.kind === 'exists' ||
-									(rawWhere.kind === 'relationFilter' &&
-										rawWhere.mode === 'some')) &&
-								(decision.context.sourceTable ?? plan.rootTable) ===
-									plan.rootTable &&
-								(decision.context.relation === rawWhere.relation ||
-									decision.context.target === rawWhere.relation ||
-									(Array.isArray(rawWhere.relation) &&
-										rawWhere.relation.length === 1 &&
-										decision.context.relation === rawWhere.relation[0])),
-						)
-						.map(
-							(decision) =>
-								`${decision.context.sourceTable ?? plan.rootTable}.${decision.context.relation}`,
-						),
-				),
 			};
 	} else {
 		// Unit test with mock data: use decisions directly (legacy format).

@@ -151,9 +151,6 @@ export type Optionality = 'required' | 'optional';
  */
 export type IncludeStrategy = 'join' | 'cte' | 'lateral' | 'json_agg' | 'auto';
 
-/** Strategy for filtering by relation */
-export type FilterStrategy = 'exists' | 'join' | 'auto';
-
 /** Default join type when joining */
 export type JoinDefault = 'left' | 'inner' | 'auto';
 
@@ -581,15 +578,6 @@ export interface RelationIR {
 	 * @default 'auto'
 	 */
 	readonly includeStrategy: IncludeStrategy;
-
-	/**
-	 * How to filter by this relation.
-	 * - 'exists': Use EXISTS subquery (no row multiplication)
-	 * - 'join': Use JOIN (may cause row explosion on to-many)
-	 * - 'auto': Planner decides (defaults to EXISTS for to-many)
-	 * @default 'auto'
-	 */
-	readonly filterStrategy: FilterStrategy;
 
 	/**
 	 * Default join type when joining.

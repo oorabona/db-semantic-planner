@@ -358,16 +358,16 @@ it('refuses a root relation without model authority', () => {
 		/cannot resolve relation 'posts'.*no model/,
 	);
 });
-it('only a positive root relation leaf reuses its planned JOIN', () => {
+it('positive root relation leaves use EXISTS like boolean predicates', () => {
 	const positive = orm
 		.select('posts')
 		.where(exists('author', { where: eq('score', 3) }))
 		.dump();
-	expect(positive.sql).toContain('JOIN users AS author');
-	expect(positive.sql).toContain('WHERE author.score = $1');
-	expect(positive.sql).not.toContain('EXISTS');
-	expect(orm.select('posts').where(exists('author')).dump().sql).not.toContain(
-		'WHERE',
+	expect(positive.sql).toBe(
+		'SELECT posts.* FROM posts WHERE EXISTS (SELECT 1 FROM users AS users_exists_0 WHERE posts."authorId" = users_exists_0.id AND users_exists_0.score = $1)',
+	);
+	expect(orm.select('posts').where(exists('author')).dump().sql).toContain(
+		'WHERE EXISTS',
 	);
 	for (const predicate of [
 		notExists('author'),
@@ -384,7 +384,7 @@ const reuseOrm = createOrm({
 	schema: db,
 	adapter: createPgCompileOnlyAdapter({ model: db.model }),
 });
-it('4a item 1 preserves the outer row during relationFilter join reuse', () => {
+it('4a item 1 preserves the outer row during relationFilter EXISTS', () => {
 	const result = reuseOrm
 		.select('posts')
 		.where({
@@ -395,7 +395,7 @@ it('4a item 1 preserves the outer row during relationFilter join reuse', () => {
 		})
 		.dump();
 	expect(result.sql).toBe(
-		'SELECT posts.* FROM posts JOIN users AS author ON author.id = posts."authorId" WHERE author.id = posts.id',
+		'SELECT posts.* FROM posts WHERE EXISTS (SELECT 1 FROM users AS users_exists_0 WHERE posts."authorId" = users_exists_0.id AND users_exists_0.id = posts.id)',
 	);
 	expect(result.params).toEqual([]);
 });

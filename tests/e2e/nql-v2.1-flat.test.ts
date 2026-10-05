@@ -295,9 +295,9 @@ describe('E2E: NQL v2.1 Strategy Behavior', () => {
 			// Execute
 			const rows = await adapter.execute(compiled);
 
-			// Then: Should use JOIN for belongsTo (single row, no explosion risk)
+			// Then: Relation predicates always use EXISTS
 			const decision = getFilterStrategyDecision(planReport, 'author');
-			expect(decision?.choice).toBe('join');
+			expect(decision?.choice).toBe('exists');
 
 			// And: Should return only Alice's posts (3 posts)
 			expect(rows).toHaveLength(3);

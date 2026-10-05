@@ -6,6 +6,8 @@ title: Manual Joins
 
 The `.join()` method adds a flat SQL JOIN to a query without triggering the nested-object hydration that `include()` performs. Use it when you need to filter the root table by a condition on a related table, perform a self-join, or join a table that has no declared foreign-key relation in your schema.
 
+A relation predicate filters with `EXISTS` or `NOT EXISTS`. Use `.join()` to order, group or select by a related table’s columns.
+
 ## When
 
 When you need a flat, non-hydrating SQL JOIN on the root query — cross-table filtering,

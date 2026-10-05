@@ -437,13 +437,11 @@ export function extractExistsDecisions(
 	plan: PlanReport,
 	model?: ModelIR,
 ): PlanDecision[] {
-	// Find filter-strategy decisions with choice: 'exists', 'notExists', or 'join'
+	// Find filter-strategy decisions with choice: 'exists' or 'notExists'
 	const filterDecisions = plan.decisions.filter(
 		(d) =>
 			d.type === 'filter-strategy' &&
-			(d.choice === 'exists' ||
-				d.choice === 'notExists' ||
-				d.choice === 'join'),
+			(d.choice === 'exists' || d.choice === 'notExists'),
 	);
 
 	if (filterDecisions.length === 0) {
@@ -542,8 +540,6 @@ export function extractExistsDecisions(
 			targetTable: context.target,
 			...(foreignKey && { foreignKey }),
 			...(conditions && { conditions }),
-			// Propagate planner's filter strategy choice to compiler
-			...(d.choice === 'join' && { choice: 'join' }),
 			// Pass relation name for alias (self-referential tables)
 			...(context.relation && { relationName: context.relation }),
 			// Pass include declarations (JOIN inside the EXISTS subquery)
@@ -997,7 +993,6 @@ function buildEnrichedExistsDecision(
 		// parentKey provides the explicit PK override for non-default PK columns.
 		...(parentKey ? { parentKey } : {}),
 		...(conditions ? { conditions } : {}),
-		...(d.choice === 'join' ? { choice: 'join' } : {}),
 		...(relationName ? { relationName } : {}),
 		...(includeDecisions ? { include: includeDecisions } : {}),
 	};
@@ -1250,13 +1245,11 @@ export function enrichExistsDecisionsInPlace(
 		);
 	}
 
-	// Find filter-strategy decisions with choice: 'exists', 'notExists', or 'join'
+	// Find filter-strategy decisions with choice: 'exists' or 'notExists'
 	const filterDecisions = plan.decisions.filter(
 		(d) =>
 			d.type === 'filter-strategy' &&
-			(d.choice === 'exists' ||
-				d.choice === 'notExists' ||
-				d.choice === 'join'),
+			(d.choice === 'exists' || d.choice === 'notExists'),
 	);
 
 	// For each filter-strategy decision, find the matching stub (by relation name)
