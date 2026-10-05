@@ -1,7 +1,10 @@
 import {
 	batchValues,
 	createOrm,
+	eq,
+	exprRef,
 	type PlanReport,
+	plan,
 	ref,
 	schema,
 } from '@dbsp/core';
@@ -205,29 +208,44 @@ describe('bigint js column metadata provenance', () => {
 	});
 
 	it('uses output aliases to distinguish same-name joined ids', () => {
-		const compiled = compile({
-			rootTable: 'events',
-			decisions: [
-				{ type: 'select', table: 'users', column: 'id', alias: 'userId' },
-				{ type: 'select', table: 'metrics', column: 'id', alias: 'metricId' },
+		const compiled = compile(
+			plan(
 				{
-					type: 'join',
-					targetTable: 'users',
-					alias: 'users',
-					sourceColumn: ['userId'],
-					targetColumn: ['id'],
-					joinType: 'left',
+					type: 'select',
+					from: 'events',
+					select: {
+						type: 'expressions',
+						columns: [
+							{
+								kind: 'relationColumn',
+								relation: 'users',
+								column: 'id',
+								as: 'userId',
+							},
+							{
+								kind: 'relationColumn',
+								relation: 'metrics',
+								column: 'id',
+								as: 'metricId',
+							},
+						],
+					},
+					joins: [
+						{
+							table: 'users',
+							type: 'left',
+							on: eq('events.userId', exprRef('users.id')),
+						},
+						{
+							table: 'metrics',
+							type: 'left',
+							on: eq('events.id', exprRef('metrics.eventId')),
+						},
+					],
 				},
-				{
-					type: 'join',
-					targetTable: 'metrics',
-					alias: 'metrics',
-					sourceColumn: ['id'],
-					targetColumn: ['eventId'],
-					joinType: 'left',
-				},
-			],
-		} as unknown as PlanReport);
+				testSchema.model,
+			),
+		);
 
 		expect(compiled.columnMetadata?.has('userId')).toBe(false);
 		expect(compiled.columnMetadata?.get('metricId')).toEqual({

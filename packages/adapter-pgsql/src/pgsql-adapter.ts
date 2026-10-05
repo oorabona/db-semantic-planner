@@ -1,4 +1,7 @@
-import { validateRecursiveSetOperation } from '@dbsp/core/internal';
+import {
+	resolveReportIncludes,
+	validateRecursiveSetOperation,
+} from '@dbsp/core/internal';
 import { compileWhereIntent } from './condition-compiler.js';
 import { createWhereDispatcher } from './handlers/index.js';
 import { assertRelationalOutput } from './relational-output.js';
@@ -2233,13 +2236,17 @@ function compileNqlRuntimeBindingCte(
 	};
 }
 
-function createNqlBindingSelectPlan(query: QueryIntent): PlanReport {
+function createNqlBindingSelectPlan(
+	query: QueryIntent,
+	model: ModelIR | undefined,
+): PlanReport {
 	return markPlannedReport({
 		rootTable: query.from,
 		decisions: [],
 		warnings: [],
 		ctes: [],
 		intent: query,
+		execution: resolveReportIncludes(query, [], model),
 		metadata: {
 			planningTimeMs: 0,
 			relationsAnalyzed: 0,
@@ -3139,7 +3146,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 			const queryFromBinding = hasBindingName(bindingNames, bundle.query.from);
 			const planReport = queryFromBinding
 				? (bundle.plan ??
-					createNqlBindingSelectPlan(bundle.query as QueryIntent))
+					createNqlBindingSelectPlan(bundle.query as QueryIntent, deps.model))
 				: planFn(bundle.query, this.requireNqlCompileModel(options), {
 						dialectCapabilities:
 							options?.dialectCapabilities ?? this.dialectCapabilities,
@@ -3799,7 +3806,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 			);
 			const queryFromBinding = hasBindingName(bindingNames, query.from);
 			const planReport = queryFromBinding
-				? createNqlBindingSelectPlan(query)
+				? createNqlBindingSelectPlan(query, model)
 				: planFn(query, model, {
 						dialectCapabilities:
 							options?.dialectCapabilities ?? this.dialectCapabilities,

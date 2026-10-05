@@ -33,9 +33,11 @@ export type BatchValuesJoinPayload = {
 /**
  * Join intent — represents a SQL JOIN clause on the root query.
  *
- * Two discrimination modes (based on `on` presence):
+ * Planning resolves each join to a range in SelectExecution; SQL emission uses that authority.
+ * Three modes discriminated by `relation`, `table`, or `batchValues`; ON is absent only in relation mode:
  * - **Relation mode** (`relation` set, no `on`): FK auto-resolved, like `include` but flat (no hydration).
  * - **Table mode** (`table` set, `on` required): Explicit table name + ON condition. Required for self-joins.
+ * - **Values mode** (`batchValues` set, `on` required): payload retained in the intent.
  *
  * @example
  * ```typescript

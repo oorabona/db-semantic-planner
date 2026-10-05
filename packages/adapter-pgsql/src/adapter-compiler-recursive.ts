@@ -1,3 +1,4 @@
+import { resolveReportIncludes } from '@dbsp/core/internal';
 import { markPlannedReport } from '@dbsp/types/internal';
 import {
 	buildSubqueryFromIntent,
@@ -98,13 +99,17 @@ function getRegisteredProjection(
 	return registry.get(name);
 }
 
-function createPlanReportForQuery(query: QueryIntent): PlanReport {
+function createPlanReportForQuery(
+	query: QueryIntent,
+	model: ModelIR | undefined,
+): PlanReport {
 	return markPlannedReport({
 		rootTable: query.from,
 		decisions: [],
 		warnings: [],
 		ctes: [],
 		intent: query,
+		execution: resolveReportIncludes(query, [], model),
 		metadata: {
 			planningTimeMs: 0,
 			relationsAnalyzed: 0,
@@ -119,13 +124,13 @@ function createPlanReportForCteQuery(
 	hasRegisteredSource = false,
 ): PlanReport {
 	if (hasRegisteredSource || hasBindingName(deps.bindingNames, query.from)) {
-		return createPlanReportForQuery(query);
+		return createPlanReportForQuery(query, deps.model);
 	}
 	if (
 		deps.model === undefined ||
 		deps.model.getTable(query.from) === undefined
 	) {
-		return createPlanReportForQuery(query);
+		return createPlanReportForQuery(query, deps.model);
 	}
 	return planFn(query, deps.model, {
 		...(deps.dialectCapabilities !== undefined && {

@@ -21,11 +21,11 @@ import type {
 	OutputValueShape,
 	PlanReport,
 	QueryIntent,
+	SelectExecution,
 	WhereIntent,
 } from '@dbsp/types';
 import { resolveOutputReadHandling } from '@dbsp/types';
 import {
-	belongsToManyJoinIncludeRefusal,
 	getTrustedNqlRelationFilterFields,
 	isPlannedReport,
 	type Mutable,
@@ -75,16 +75,11 @@ import {
 	type ProjectionEnvelope,
 	supplementOutputDescriptors,
 } from './projection-envelope.js';
-import { resolveRelationKeys } from './relation-keys.js';
 import {
 	assertProjectedJsonContainerCanBeAggregated,
 	resolveRelationTarget,
 } from './relation-target-projection.js';
-import {
-	identifierText,
-	queryLocal,
-	resolveDeclaredIdentifier,
-} from './sql-identifier.js';
+import { queryLocal, resolveDeclaredIdentifier } from './sql-identifier.js';
 import { stableJson } from './transition/stable-json.js';
 
 /** Exact source/key duplicates have one SQL projection, including at the root. */
@@ -320,100 +315,83 @@ function buildBatchValuesRangeFn(
 
 function compileJoinIntents(
 	joins: readonly JoinIntent[],
-	rootTable: string,
+	execution: SelectExecution,
 	schemaName: string | undefined,
 	deps: AdapterCompilerDeps,
 ): PlanDecision[] {
-	if (joins.length === 0) return [];
+	if (execution.joins.length === 0) return [];
+	const rootTable = execution.rootRange.table;
+	const rootBinding = sourceBinding(rootTable, deps);
 
 	const model = deps.model;
 	const results: PlanDecision[] = [];
-	let joinScope = queryScope([
+	const initialScope = queryScope([
 		...(deps.scope?.bindings.values() ?? []),
-		...(!hasSourceBinding(rootTable, deps)
-			? [sourceBinding(rootTable, deps)]
-			: []),
+		...(!hasSourceBinding(rootTable, deps) ? [rootBinding] : []),
 	]);
 
-	// Reserve both public and emitted root names before binding manual joins.
-	const occupiedQualifiers = new Set<string>([
-		rootTable,
-		sourceBinding(rootTable, deps).qualifier,
+	// One local scope grows in execution order; each ON sees itself and prior joins.
+	const joinBindings = new Map(initialScope.bindings);
+	const joinScope = { bindings: joinBindings };
+	const tableAliasMap = new Map([
+		[execution.rootRange.alias, execution.rootRange.alias],
 	]);
-	for (const intent of joins) {
-		const qualifier =
-			intent.alias ??
-			intent.relation ??
-			intent.batchValues?.alias ??
-			intent.table;
-		if (qualifier !== undefined && occupiedQualifiers.has(qualifier)) {
-			throw new Error(`Query scope already binds qualifier '${qualifier}'.`);
-		}
-		if (qualifier !== undefined) occupiedQualifiers.add(qualifier);
-		if (intent.relation !== undefined) {
-			// ── Relation mode: resolve FK from model ──────────────────────────
-			// If no model available, we can't resolve the FK — skip with warning.
-			if (!model) {
-				throw new Error(
-					`join('${intent.relation}'): relation-mode join requires a model for FK resolution.`,
-				);
-			}
-
-			const relationsFromRoot = model.getRelationsFrom(rootTable);
-			// Match only by relation name for FK resolution.
-			// The alias is only used for the output JOIN alias — using it for FK lookup
-			// would allow `.join('callee', { as: 'caller' })` to resolve against the
-			// wrong relation when 'caller' happens to be another relation name.
-			const rel = relationsFromRoot.find((r) => r.name === intent.relation);
-
-			if (!rel) {
-				throw new Error(
-					`join('${intent.relation}'): relation not found on table '${rootTable}'. ` +
-						`Available: ${relationsFromRoot.map((r) => r.name).join(', ')}`,
-				);
-			}
-
-			if (rel.type === 'belongsToMany')
-				throw new Error(
-					belongsToManyJoinIncludeRefusal(`${rootTable}.${rel.name}`),
-				);
-			// Derive FK direction from relation type
-			// - belongsTo: FK is on the source (root) table → sourceColumn=FK, targetColumn=PK
-			// - hasMany/hasOne: FK is on the target table → sourceColumn=PK, targetColumn=FK
-			const { sourceColumn, targetColumn } = resolveRelationKeys(
-				rootTable,
-				rel,
-				{ model },
+	for (const join of execution.joins) {
+		const range = join.range;
+		tableAliasMap.set(range.alias, range.alias);
+		if (join.kind === 'values') {
+			const bv = joins[join.intentIndex]?.batchValues;
+			if (!bv) throw new Error(`Join ${join.intentPath} has no values payload`);
+			joinBindings.set(
+				range.alias,
+				batchValuesBinding(range.alias, [
+					...bv.columns,
+					...(bv.ordinality ? ['ord'] : []),
+				]),
 			);
-			const alias = intent.alias ?? intent.relation;
-
-			joinScope = queryScope([
-				...Array.from(joinScope.bindings.values()).filter(
-					(binding) => identifierText(binding.qualifier) !== alias,
-				),
+		} else {
+			const source = relationBindingFor(deps.scope, queryLocal(range.table));
+			joinBindings.set(
+				range.alias,
 				relationBinding({
-					qualifier: queryLocal(alias),
-					kind: 'declared-table',
-					logicalTable: rel.target,
+					qualifier: queryLocal(range.alias),
+					...(source && source.kind !== 'declared-table'
+						? {
+								kind: 'join-alias' as const,
+								...(source.outputs && { outputs: source.outputs }),
+							}
+						: {
+								kind: 'declared-table' as const,
+								logicalTable: source?.logicalTable ?? range.table,
+							}),
 				}),
-			]);
+			);
+		}
+		const resolved = join;
+		const alias = resolved.range.alias;
 
+		if (alias === rootBinding.qualifier)
+			throw new Error(`Query scope already binds qualifier '${alias}'.`);
+		if (resolved.kind === 'relation') {
+			const pairs = resolved.path!.hops[0]!.pairs;
 			results.push({
 				type: 'join',
-				targetTable: rel.target,
+				targetTable: resolved.range.table,
 				alias,
-				relationName: intent.relation,
-				sourceColumn,
-				targetColumn,
-				joinType: intent.type,
+				relationName: resolved.path!.logicalSegments.join('.'),
+				sourceColumn: pairs.map((p) => p.fromColumn),
+				targetColumn: pairs.map((p) => p.toColumn),
+				joinType: resolved.type,
 			});
-		} else if (intent.batchValues !== undefined) {
+		} else if (resolved.kind === 'values') {
 			// ── BatchValues mode: unnest($N::type[], ...) AS alias(col1, col2) ──
 			// Compiles a batch-values join: the rarg is a RangeFunction wrapping
 			// unnest() instead of a plain RangeVar.
 			// Params are $1, $2, ... (1-indexed); compiler.ts splices them first.
-			const bv = intent.batchValues;
-			const alias = intent.alias ?? bv.alias;
+			const bv = joins[resolved.intentIndex]?.batchValues;
+			if (!bv)
+				throw new Error(`Join ${resolved.intentPath} has no values payload`);
+			const alias = resolved.range.alias;
 
 			const { rangeFunction, params: bvParams } = buildBatchValuesRangeFn(
 				bv,
@@ -428,15 +406,6 @@ function compileJoinIntents(
 			const bvOnParamState = createCompilerState();
 			bvOnParamState.paramIndex = bvParams.length;
 
-			joinScope = queryScope([
-				...Array.from(joinScope.bindings.values()).filter(
-					(binding) => identifierText(binding.qualifier) !== alias,
-				),
-				batchValuesBinding(alias, [
-					...bv.columns,
-					...(bv.ordinality ? ['ord'] : []),
-				]),
-			]);
 			const bvCtx: WhereCompilerCtx = {
 				rootTable,
 				aliases: new Map<string, string>(),
@@ -462,7 +431,7 @@ function compileJoinIntents(
 				},
 			};
 
-			const onNode: Node = compileWhereIntent(intent.on, bvCtx);
+			const onNode: Node = compileWhereIntent(resolved.on!, bvCtx);
 
 			// Combine bv unnest params + any ON condition params into batchValuesParams.
 			// compiler.ts splices all of these BEFORE other query params so that $1/$2/...
@@ -476,7 +445,7 @@ function compileJoinIntents(
 				type: 'join',
 				targetTable: alias,
 				alias,
-				joinType: intent.type,
+				joinType: resolved.type,
 				joinRarg: rangeFunction,
 				joinOnNode: onNode,
 				// batchValuesParams are spliced into this.state.parameters BEFORE
@@ -490,48 +459,9 @@ function compileJoinIntents(
 			// join so compiler.ts can merge them into the query's live param sequence.
 			const paramState = createCompilerState();
 
-			const tableAlias = intent.alias ?? intent.table;
+			const tableAlias = resolved.range.alias;
 
-			// Pre-populate aliases so ref("rootTable.col") and similar expressions
-			// resolve the correct table qualifier when the alias differs from the
-			// base table name.
-			const tableAliasMap = new Map<string, string>();
-			tableAliasMap.set(rootTable, rootTable);
-			if (tableAlias !== rootTable) {
-				// A manual join alias is query-local. Preserve it in ON references;
-				// rangeVar() emits the same spelling rather than a physical table name.
-				tableAliasMap.set(tableAlias, tableAlias);
-			}
-			const joinedSource = relationBindingFor(
-				deps.scope,
-				queryLocal(intent.table),
-			);
-			const joinedBinding =
-				joinedSource?.kind === 'declared-table'
-					? relationBinding({
-							qualifier: queryLocal(tableAlias),
-							kind: 'declared-table',
-							logicalTable: joinedSource.logicalTable ?? intent.table,
-						})
-					: joinedSource !== undefined
-						? relationBinding({
-								qualifier: queryLocal(tableAlias),
-								kind: 'join-alias',
-								...(joinedSource.outputs !== undefined && {
-									outputs: joinedSource.outputs,
-								}),
-							})
-						: relationBinding({
-								qualifier: queryLocal(tableAlias),
-								kind: 'declared-table',
-								logicalTable: intent.table,
-							});
-			joinScope = queryScope([
-				...Array.from(joinScope.bindings.values()).filter(
-					(binding) => identifierText(binding.qualifier) !== tableAlias,
-				),
-				joinedBinding,
-			]);
+			// The incremental alias map preserves query-local qualifiers in ON references.
 			const ctx: WhereCompilerCtx = {
 				rootTable,
 				aliases: tableAliasMap,
@@ -557,16 +487,20 @@ function compileJoinIntents(
 				},
 			};
 
-			const onNode: Node = compileWhereIntent(intent.on, ctx);
+			const onNode: Node = compileWhereIntent(resolved.on!, ctx);
 
 			// Store rarg + onNode separately — the 'join' case in compiler.ts wraps
 			// from[0] as larg so multiple .join() calls chain correctly.
+			const joinedSource = relationBindingFor(
+				deps.scope,
+				queryLocal(resolved.range.table),
+			);
 			const joinedRangeVar = sqlRangeVar(
 				joinedSource?.qualifier ??
 					resolveDeclaredIdentifier(
 						deps.declaredNames,
 						deps.dbCasing ?? 'preserve',
-						{ kind: 'table', table: intent.table },
+						{ kind: 'table', table: resolved.range.table },
 					),
 				queryLocal(tableAlias),
 				joinedSource?.kind === 'cte-bind' ||
@@ -579,9 +513,9 @@ function compileJoinIntents(
 
 			const joinDecision: PrecompiledJoinDecision = {
 				type: 'join',
-				targetTable: intent.table,
+				targetTable: resolved.range.table,
 				alias: tableAlias,
-				joinType: intent.type,
+				joinType: resolved.type,
 				joinRarg: joinedRangeVar,
 				joinOnNode: onNode,
 				joinOnParams: paramState.parameters,
@@ -1175,8 +1109,18 @@ function hasDottedRootField(where: WhereIntent): boolean {
 	return false;
 }
 
-/** Includes require authority from the module-private issuing registry. */
+/** Joins and includes require authority from the module-private issuing registry. */
 export function assertPlannedReportIncludeAuthority(plan: PlanReport): void {
+	if (
+		!isPlannedReport(plan) &&
+		(plan.intent?.joins?.length ||
+			plan.executableIntent?.joins?.length ||
+			plan.execution?.joins?.length ||
+			plan.decisions.some(
+				(decision: { readonly type: string }) => decision.type === 'join',
+			))
+	)
+		throw new Error('Joins compile only from a report planned in this process');
 	if (
 		!isPlannedReport(plan) &&
 		(plan.intent?.include?.length ||
@@ -1204,6 +1148,18 @@ export function compileSelectEnvelope<T = unknown>(
 
 	const resolvedModelForCompiler = options?.model ?? deps.model;
 	assertPlannedReportIncludeAuthority(plan);
+	if (
+		[plan.intent, plan.executableIntent].some((intent) => {
+			const count = intent?.joins?.length ?? 0;
+			return count > 0 && plan.execution?.joins?.length !== count;
+		})
+	) {
+		const error = new Error(
+			'Planned joins require matching resolved execution joins',
+		);
+		error.name = 'InvalidResolvedJoinsError';
+		throw error;
+	}
 	const batchValuesSource = plan.intent?.batchValuesSource;
 	const compilerScope =
 		batchValuesSource === undefined
@@ -1350,12 +1306,17 @@ export function compileSelectEnvelope<T = unknown>(
 			);
 		}
 
-		// Compile explicit JoinIntent[] from execIntent.joins into 'join' decisions.
+		// Lower resolved joins; the intent is read only for values payloads.
 		// These are non-hydrating SQL JOINs (flat result, no relation columns added).
 		// joins are not affected by the IN→EXISTS WHERE optimization; execIntent and
 		// plan.intent carry the same joins value.
-		const joinIntentDecisions = execIntent.joins?.length
-			? compileJoinIntents(execIntent.joins, plan.rootTable, schemaName, deps)
+		const joinIntentDecisions = plan.execution?.joins?.length
+			? compileJoinIntents(
+					execIntent.joins ?? [],
+					plan.execution!,
+					schemaName,
+					deps,
+				)
 			: [];
 
 		const includePayloads = resolveIncludePayloadShapes(

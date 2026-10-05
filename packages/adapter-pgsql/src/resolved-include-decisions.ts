@@ -1,9 +1,9 @@
-import type { IncludeExecution, ResolvedIncludeNode } from '@dbsp/types';
+import type { ResolvedIncludeNode, SelectExecution } from '@dbsp/types';
 import type { PlanDecision } from './plan-decision.js';
 
 /** Physical lowering reads only execution nodes. No intent, decision context or model. */
 export function lowerResolvedIncludes(
-	execution: IncludeExecution,
+	execution: SelectExecution,
 	defaultPk: string,
 ): PlanDecision[] {
 	const lower = (node: ResolvedIncludeNode): PlanDecision => {

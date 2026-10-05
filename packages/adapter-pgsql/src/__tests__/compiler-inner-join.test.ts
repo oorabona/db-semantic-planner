@@ -233,3 +233,55 @@ describe('INNER JOIN include compilation', () => {
 		});
 	});
 });
+
+describe('compilePlan join decision authority', () => {
+	it('reserves manual aliases beside join includes', () => {
+		const result = compilePlan({
+			rootTable: 'symbols',
+			decisions: [
+				{ type: 'select', column: '*', table: 'symbols' },
+				{
+					type: 'join',
+					targetTable: 'definitions',
+					alias: 'file',
+					sourceColumn: 'id',
+					targetColumn: 'id',
+				},
+				{
+					type: 'includeStrategy',
+					choice: 'join',
+					joinType: 'inner',
+					relationName: 'file',
+					targetTable: 'files',
+					relationType: 'belongsTo',
+					foreignKey: 'file_id',
+					parentKey: 'id',
+					columns: ['id', 'path'],
+				},
+			],
+		});
+		expect(result.sql).toBe(
+			'SELECT symbols.*, file_1.id AS "file_1.id", file_1.path AS "file_1.path" FROM symbols JOIN definitions AS file ON symbols.id = file.id JOIN files AS file_1 ON symbols.file_id = file_1.id',
+		);
+	});
+	it('resolves relation paths from manual join decisions', () => {
+		const result = compilePlan({
+			rootTable: 'calls',
+			decisions: [
+				{ type: 'select', column: '*', table: 'calls' },
+				{ type: 'where', column: 'caller.name', operator: '=', value: 'Alice' },
+				{
+					type: 'join',
+					targetTable: 'users',
+					relationName: 'caller',
+					alias: 'c',
+					sourceColumn: 'caller_id',
+					targetColumn: 'id',
+				},
+			],
+		});
+		expect(result.sql).toBe(
+			'SELECT calls.* FROM calls JOIN users AS c ON calls.caller_id = c.id WHERE c.name = $1',
+		);
+	});
+});
