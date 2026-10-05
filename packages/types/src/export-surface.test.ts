@@ -65,8 +65,11 @@ const joinIncludeExports = [
 ];
 // The resolved relation path contract (#787, #891 step 5).
 const relationPathTypes = ['ResolvedRelationPath'];
+// Readers of include decisions find their resolved include node (#891 step 5).
+const resolvedIncludeExports = ['getResolvedIncludeNode'];
 const internalNames = [
 	...joinIncludeExports,
+	...resolvedIncludeExports,
 	...relationPathTypes,
 	...rootNames,
 	...names(before.internal.declarations).filter(
@@ -79,6 +82,7 @@ const movedRuntime = before.root.runtime.filter((name) =>
 );
 const internalRuntime = [
 	...joinIncludeExports,
+	...resolvedIncludeExports,
 	...rootRuntime,
 	...before.internal.runtime.filter(
 		(name) => !before.root.runtime.includes(name),
