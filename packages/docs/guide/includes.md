@@ -88,11 +88,11 @@ Include `select` support by strategy:
 
 A to-one join include with omitted `select` or `select: { type: 'all' }` returns every target column, enumerated with `"relation.column"` transport labels and declared public keys. Explicit field selection returns exactly those fields, with no unrequested primary key. A private presence marker distinguishes an existing row of null values from a missing row; hydration removes it. `hasMany` join includes are refused at planning and compilation, including join hints and defaults. Use `.join()`, NQL `| flat`, or a `json_agg`/`lateral` include instead.
 
-Every `belongsToMany` include strategy is refused, including explicit strategies, hints and defaults. For a `tags` include, the exact message is:
+A `belongsToMany` include of the query is refused in every strategy, including explicit strategies, hints and defaults. For a `tags` include, `plan()` throws:
 
-> `Relation 'posts.tags': many-to-many traversal is not supported yet (#787).`
+> `Invalid include: Relation 'posts.tags': many-to-many traversal is not supported yet (#787).`
 
-The provisional refusal applies when planning includes (any strategy, NQL relation columns and `| flat`), relation `.join()` and relation predicates. Other traversal routes are not supported until the junction lowering lands.
+The provisional refusal applies when planning the query's includes (any strategy, NQL relation columns and `| flat`), relation `.join()` and relation predicates. Other traversal routes, such as an include inside `exists(..., { include })`, are not refused yet and fail at compilation until the junction lowering lands.
 
 To-one join includes accept omitted `select`, `select: { type: 'all' }`, or `select: { type: 'fields', fields: [...] }` with plain column names and no `'*'`.
 Ordinary non-recursive CTE includes refuse any explicit `select` with the include path because they add no related targets to the outer `SELECT`.

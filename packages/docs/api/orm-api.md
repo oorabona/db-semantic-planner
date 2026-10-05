@@ -300,11 +300,13 @@ primary key, unique constraint or B-tree unique index covered by the two foreign
 inferred junction primary key satisfies this requirement. Names must not collide
 with columns or existing relations.
 
-Traversal of a declared many-to-many relation is refused when planning an include
-(any strategy, including NQL relation columns and `| flat`) or a relation `.join()`:
+Traversal of a declared many-to-many relation is refused when planning one of the
+query's includes (any strategy, including NQL relation columns and `| flat`) or a
+relation `.join()`; the message contains
 `Relation 'posts.tags': many-to-many traversal is not supported yet (#787).`
-Relation predicates retain their existing #787 refusal. Other traversal routes are
-not supported until the junction lowering lands.
+Relation predicates keep their #787 refusal. Other traversal routes, such as an
+include inside `exists(..., { include })`, are not refused yet and fail at
+compilation until the junction lowering lands.
 
 ### Schema Options (`dbCasing`)
 

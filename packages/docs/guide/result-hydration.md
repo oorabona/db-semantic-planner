@@ -70,9 +70,9 @@ payloads become arrays. Read conversions use public payload keys.
 Hydration is atomic per row: if a read conversion fails, that row retains its
 original keys and values.
 
-Every `belongsToMany` include strategy is refused, including explicit strategies, hints and defaults. For a `tags` include, the exact message is:
+A `belongsToMany` include of the query is refused in every strategy, including explicit strategies, hints and defaults. For a `tags` include, `plan()` throws:
 
-> `Relation 'posts.tags': many-to-many traversal is not supported yet (#787).`
+> `Invalid include: Relation 'posts.tags': many-to-many traversal is not supported yet (#787).`
 
 ## Row Explosion Risk
 
