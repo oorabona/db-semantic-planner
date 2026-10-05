@@ -8,7 +8,7 @@ import {
 	ref,
 	schema,
 } from '@dbsp/core';
-import type { ModelIR } from '@dbsp/types';
+import type { ModelIR, PlanReport } from '@dbsp/types';
 import { markPlannedReport } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -101,10 +101,39 @@ describe('resolved joins authority', () => {
 		for (const copy of [{ ...plain }, JSON.parse(JSON.stringify(plain))])
 			expect(adapter.compile(copy).sql).toBe(adapter.compile(plain).sql);
 	});
+	it('join-free reports without execution joins compile, including copies', () => {
+		const plain = orm.select('calls').plan();
+		const execution = { rootRange: plain.execution!.rootRange, includes: [] };
+		const issued = markPlannedReport({
+			...plain,
+			execution,
+		} as unknown as PlanReport);
+		for (const report of [
+			issued,
+			{ ...issued },
+			JSON.parse(JSON.stringify(issued)),
+		])
+			expect(adapter.compile(report).sql).toBe(adapter.compile(plain).sql);
+	});
+	it('unissued reports with only join decisions refuse', () => {
+		const plain = orm.select('calls').plan();
+		const report = {
+			...plain,
+			decisions: [{ type: 'join' }],
+		} as unknown as PlanReport;
+		expect(() => adapter.compile(report)).toThrow(
+			'Joins compile only from a report planned in this process',
+		);
+	});
+
 	it('issued reports refuse absent or mismatched resolved joins', () => {
 		const report = orm.select('calls').join('caller').plan();
 		for (const execution of [
 			undefined,
+			{
+				rootRange: report.execution!.rootRange,
+				includes: [],
+			} as unknown as NonNullable<PlanReport['execution']>,
 			{ ...report.execution!, joins: [] },
 			{
 				...report.execution!,
@@ -158,10 +187,6 @@ describe('resolved joins authority', () => {
 				.plan(),
 		]) {
 			const join = report.execution!.joins[0]!;
-			expect(join.visibleRangeIds).toEqual([
-				report.execution!.rootRange.id,
-				join.range.id,
-			]);
 			const canonical = adapter.compile(report);
 			const actual = adapter.compile(report, { model: poison(db.model) });
 			expect(actual.sql).toBe(canonical.sql);
@@ -182,15 +207,16 @@ describe('left-to-right ON visibility', () => {
 		adapter: createPgCompileOnlyAdapter({ model: db.model }),
 	});
 	it('table ON sees a preceding table alias', () => {
-		const report = orm
-			.select('a')
-			.join('b', { as: 'b1', on: eq('a.id', exprRef('b1.aId')) })
-			.join('c', { as: 'c1', on: eq('b1.id', exprRef('c1.bId')) })
-			.plan();
-		expect(report.execution!.joins[1]!.visibleRangeIds).toEqual([
-			report.execution!.rootRange.id,
-			...report.execution!.joins.map((join) => join.range.id),
-		]);
+		expect(
+			orm
+				.select('a')
+				.join('b', { as: 'b1', on: eq('a.id', exprRef('b1.aId')) })
+				.join('c', { as: 'c1', on: eq('b1.id', exprRef('c1.bId')) })
+				.join('b', { as: 'b2', on: eq('c1.bId', exprRef('b2.id')) })
+				.dump().sql,
+		).toBe(
+			'SELECT a.* FROM a JOIN b AS b1 ON a.id = b1."aId" JOIN c AS c1 ON b1.id = c1."bId" JOIN b AS b2 ON c1."bId" = b2.id',
+		);
 		expect(
 			orm
 				.select('a')

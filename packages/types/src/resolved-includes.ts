@@ -89,7 +89,10 @@ export interface ResolvedIncludeNode {
 	};
 	readonly children: readonly ResolvedIncludeNode[];
 }
-/** An explicit join resolved by the SELECT issuer. */
+/**
+ * An explicit join resolved by the SELECT issuer.
+ * Its ON sees the root, every join at a lower index in SelectExecution.joins, and itself.
+ */
 export interface ResolvedJoin {
 	readonly intentPath: string;
 	readonly intentIndex: number;
@@ -99,10 +102,10 @@ export interface ResolvedJoin {
 	readonly sourceRange: ResolvedRange;
 	readonly path?: ResolvedRelationPath;
 	readonly on?: WhereIntent;
-	readonly visibleRangeIds: readonly RangeId[];
 }
 export interface SelectExecution {
 	readonly rootRange: ResolvedRange;
+	/** Ordered joins: each ON sees the root, every join at a lower index, and itself. */
 	readonly joins: readonly ResolvedJoin[];
 	readonly includes: readonly ResolvedIncludeNode[];
 }

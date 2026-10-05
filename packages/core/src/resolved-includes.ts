@@ -38,7 +38,6 @@ export function resolveReportIncludes(
 		{ target: ResolvedRange; output: ResolvedRange }
 	>();
 	const occupied = new Set([rootRange.alias]);
-	const visibleRangeIds = [rootRange.id];
 	const joins: ResolvedJoin[] = (intent.joins ?? []).map(
 		(join, intentIndex) => {
 			const alias =
@@ -76,7 +75,6 @@ export function resolveReportIncludes(
 			}
 			const range = allocator.allocate(table, alias);
 			allocator.reserve(range.alias);
-			visibleRangeIds.push(range.id);
 			return {
 				intentPath: `join[${intentIndex}]`,
 				intentIndex,
@@ -89,7 +87,6 @@ export function resolveReportIncludes(
 				type: join.type,
 				range,
 				sourceRange: rootRange,
-				visibleRangeIds: [...visibleRangeIds],
 				...(path && { path }),
 				...(join.on && { on: join.on }),
 			};

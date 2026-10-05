@@ -79,11 +79,7 @@ import {
 	assertProjectedJsonContainerCanBeAggregated,
 	resolveRelationTarget,
 } from './relation-target-projection.js';
-import {
-	identifierText,
-	queryLocal,
-	resolveDeclaredIdentifier,
-} from './sql-identifier.js';
+import { queryLocal, resolveDeclaredIdentifier } from './sql-identifier.js';
 import { stableJson } from './transition/stable-json.js';
 
 /** Exact source/key duplicates have one SQL projection, including at the root. */
@@ -328,28 +324,27 @@ function compileJoinIntents(
 
 	const model = deps.model;
 	const results: PlanDecision[] = [];
-	const rootScope = queryScope([
+	const initialScope = queryScope([
 		...(deps.scope?.bindings.values() ?? []),
 		...(!hasSourceBinding(rootTable, deps)
 			? [sourceBinding(rootTable, deps)]
 			: []),
 	]);
 
-	const ranges = new Map([
-		[execution.rootRange.id, execution.rootRange],
-		...execution.joins.map((join) => [join.range.id, join.range] as const),
+	// One local scope grows in execution order; each ON sees itself and prior joins.
+	const joinBindings = new Map(initialScope.bindings);
+	const joinScope = { bindings: joinBindings };
+	const tableAliasMap = new Map([
+		[execution.rootRange.alias, execution.rootRange.alias],
 	]);
-	const bindings = new Map<
-		typeof execution.rootRange.id,
-		ReturnType<typeof relationBinding>
-	>();
 	for (const join of execution.joins) {
 		const range = join.range;
+		tableAliasMap.set(range.alias, range.alias);
 		if (join.kind === 'values') {
 			const bv = joins[join.intentIndex]?.batchValues;
 			if (!bv) throw new Error(`Join ${join.intentPath} has no values payload`);
-			bindings.set(
-				range.id,
+			joinBindings.set(
+				range.alias,
 				batchValuesBinding(range.alias, [
 					...bv.columns,
 					...(bv.ordinality ? ['ord'] : []),
@@ -357,8 +352,8 @@ function compileJoinIntents(
 			);
 		} else {
 			const source = relationBindingFor(deps.scope, queryLocal(range.table));
-			bindings.set(
-				range.id,
+			joinBindings.set(
+				range.alias,
 				relationBinding({
 					qualifier: queryLocal(range.alias),
 					...(source && source.kind !== 'declared-table'
@@ -373,28 +368,7 @@ function compileJoinIntents(
 				}),
 			);
 		}
-	}
-	for (const resolved of execution.joins) {
-		const visibleRanges = resolved.visibleRangeIds.map((id) => {
-			const range = ranges.get(id);
-			if (!range)
-				throw new Error(
-					`Join ${resolved.intentPath} has an unknown visible range`,
-				);
-			return range;
-		});
-		const visibleBindings = visibleRanges
-			.filter((range) => range.id !== execution.rootRange.id)
-			.map((range) => bindings.get(range.id)!);
-		const visibleQualifiers = new Set(
-			visibleBindings.map((binding) => identifierText(binding.qualifier)),
-		);
-		const joinScope = queryScope([
-			...Array.from(rootScope.bindings.values()).filter(
-				(binding) => !visibleQualifiers.has(identifierText(binding.qualifier)),
-			),
-			...visibleBindings,
-		]);
+		const resolved = join;
 		const alias = resolved.range.alias;
 
 		if (alias === sourceBinding(rootTable, deps).qualifier)
@@ -488,17 +462,7 @@ function compileJoinIntents(
 
 			const tableAlias = resolved.range.alias;
 
-			// Pre-populate aliases so ref("rootTable.col") and similar expressions
-			// resolve the correct table qualifier when the alias differs from the
-			// base table name.
-			const tableAliasMap = new Map<string, string>();
-			for (const range of visibleRanges)
-				tableAliasMap.set(range.alias, range.alias);
-			if (tableAlias !== rootTable) {
-				// A manual join alias is query-local. Preserve it in ON references;
-				// rangeVar() emits the same spelling rather than a physical table name.
-				tableAliasMap.set(tableAlias, tableAlias);
-			}
+			// The incremental alias map preserves query-local qualifiers in ON references.
 			const ctx: WhereCompilerCtx = {
 				rootTable,
 				aliases: tableAliasMap,
@@ -1152,7 +1116,10 @@ export function assertPlannedReportIncludeAuthority(plan: PlanReport): void {
 		!isPlannedReport(plan) &&
 		(plan.intent?.joins?.length ||
 			plan.executableIntent?.joins?.length ||
-			plan.execution?.joins.length)
+			plan.execution?.joins?.length ||
+			plan.decisions.some(
+				(decision: { readonly type: string }) => decision.type === 'join',
+			))
 	)
 		throw new Error('Joins compile only from a report planned in this process');
 	if (
@@ -1344,7 +1311,7 @@ export function compileSelectEnvelope<T = unknown>(
 		// These are non-hydrating SQL JOINs (flat result, no relation columns added).
 		// joins are not affected by the IN→EXISTS WHERE optimization; execIntent and
 		// plan.intent carry the same joins value.
-		const joinIntentDecisions = plan.execution?.joins.length
+		const joinIntentDecisions = plan.execution?.joins?.length
 			? compileJoinIntents(
 					execIntent.joins ?? [],
 					plan.execution!,
