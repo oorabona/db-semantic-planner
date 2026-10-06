@@ -115,6 +115,23 @@ export function isWhereIntent(value: unknown): value is WhereIntent {
 	);
 }
 
+/** Normalize object filters and intents using the table's declared columns. */
+export function normalizeWhereInput(
+	input: WhereIntent | WhereFilter,
+	columns: readonly string[],
+): WhereIntent {
+	const prototype = Object.getPrototypeOf(input);
+	const declared = new Set(columns);
+	if (
+		(prototype === Object.prototype || prototype === null) &&
+		Object.keys(input).every((key) => declared.has(key))
+	)
+		return objectToWhereIntent(input as WhereFilter);
+	return isWhereIntent(input)
+		? input
+		: objectToWhereIntent(input as WhereFilter);
+}
+
 /**
  * Check if a value is an operator object (has $-prefixed keys).
  */

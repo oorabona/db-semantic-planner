@@ -67,11 +67,7 @@ import {
 } from './intent-builder.js';
 import { validateLimit } from './limit-validation.js';
 import { emitWarning } from './logger.js';
-import {
-	isWhereIntent,
-	objectToWhereIntent,
-	type WhereFilter,
-} from './object-filter.js';
+import { normalizeWhereInput, type WhereFilter } from './object-filter.js';
 import * as paginationImpl from './pagination-impl.js';
 import type { QueryBuilderContext } from './query-builder-context.js';
 import type { DumpMetaInput } from './query-builder-types.js';
@@ -600,9 +596,12 @@ export class QueryBuilderImpl<TResult = unknown>
 			);
 		}
 		// Convert object filter to WhereIntent if needed
-		const intent = isWhereIntent(condition)
-			? condition
-			: objectToWhereIntent(condition as WhereFilter<Record<string, unknown>>);
+		const intent = normalizeWhereInput(
+			condition,
+			this.ctx.model
+				.getTable(this.from)
+				?.columns.map((column) => column.name) ?? [],
+		);
 		builder.whereIntents.push(intent);
 		return builder;
 	}

@@ -339,7 +339,7 @@ schema(definition, constraints?, options?, extras?)
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `defaultFilters` | `Record<string, WhereIntent>` | — | Filters applied automatically to all queries per table. Override with `.withoutDefaultFilters()` on the query builder. |
+| `defaultFilters` | `Record<string, WhereIntent \| WhereFilter>` | — | Accepts a condition or an object filter on the table’s own columns. Filters applied automatically to all queries per table. Override with `.withoutDefaultFilters()` on the query builder. |
 | `defaultPkColumnName` | `string \| null` | `'id'` | Column name treated as the implicit primary key for short-form columns. Set to `null` to disable the convention; pass a custom string for project-specific naming schemes. Empty or whitespace-only strings are rejected eagerly at `schema()` time. |
 
 #### Example: implicit-PK convention

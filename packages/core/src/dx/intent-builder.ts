@@ -26,11 +26,7 @@ import { validateRecursiveIncludeStrategy } from '../planner.js';
 import { InvalidOperationError } from './errors.js';
 import { and } from './filters.js';
 import { applyHintToIncludeRecursive } from './include-hints.js';
-import {
-	isWhereIntent,
-	objectToWhereIntent,
-	type WhereFilter,
-} from './object-filter.js';
+import { normalizeWhereInput, type WhereFilter } from './object-filter.js';
 import {
 	type AggregateOptions,
 	type ColumnSpec,
@@ -386,9 +382,12 @@ export class IntentBuilder<TResult = unknown> {
 	 */
 	addWhere(condition: WhereIntent | WhereFilter<TResult>): void {
 		// Convert object filter to WhereIntent if needed
-		const intent = isWhereIntent(condition)
-			? condition
-			: objectToWhereIntent(condition as WhereFilter<Record<string, unknown>>);
+		const intent = normalizeWhereInput(
+			condition,
+			this.model
+				.getTable(this.state.from)
+				?.columns.map((column) => column.name) ?? [],
+		);
 		this.state.whereIntents.push(intent);
 	}
 

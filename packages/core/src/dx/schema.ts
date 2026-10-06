@@ -1,4 +1,4 @@
-import { brandValue, REF_BRAND } from '@dbsp/types';
+import { brandValue, RangeAllocator, REF_BRAND } from '@dbsp/types';
 /**
  * ARCH-005: Unified Schema API
  *
@@ -16,7 +16,12 @@ import { brandValue, REF_BRAND } from '@dbsp/types';
  * ```
  */
 
-import type { WhereIntent } from '@dbsp/types';
+import type {
+	ResolvedColumnOperand,
+	ResolvedCondition,
+	ResolvedRhs,
+	WhereIntent,
+} from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
 import type { DbCasing } from '../adapter.js';
 import { ModelIRImpl } from '../model-impl.js';
@@ -36,11 +41,8 @@ import type {
 	TableReaddressDeclaration,
 } from '../model-ir.js';
 import { createPseudoColumnMetadata } from '../model-ir.js';
-import {
-	isWhereIntent,
-	objectToWhereIntent,
-	type WhereFilter,
-} from './object-filter.js';
+import { resolveConditionContext } from '../resolved-conditions.js';
+import { normalizeWhereInput, type WhereFilter } from './object-filter.js';
 import type { InferTables } from './schema-tables-types.js';
 import { createTablesProxy } from './table-ref-factory.js';
 
@@ -673,74 +675,83 @@ export function isRef(
 function validateDefaultFilter(
 	intent: WhereIntent,
 	table: string,
-	columns: Set<string>,
+	model: ModelIR,
 ): void {
+	const allocator = new RangeAllocator();
+	const range = allocator.bind(table, table);
 	const refuse = (part: string): never => {
-		throw new SchemaValidationError(
-			`Default filter for table '${table}': ${part}`,
-		);
+		throw new Error(part);
 	};
-	const column = (field: string): void => {
-		if (typeof field !== 'string' || field.includes('.') || !columns.has(field))
-			refuse(`invalid column '${String(field)}'`);
-	};
-	// Inspect operands too: subqueries and outer references can hide in comparison values.
-	const operand = (value: unknown): void => {
-		if (!value || typeof value !== 'object') return;
-		if (Array.isArray(value)) {
-			value.forEach(operand);
-			return;
-		}
-		const record = value as Record<string, unknown>;
+	const column = (operand: ResolvedColumnOperand): void => {
+		if (operand.kind !== 'column' || operand.range !== range)
+			refuse('forbidden column range or outer reference');
 		if (
-			record.kind === 'subquery' ||
-			record._type === 'subquery' ||
-			record.outer === true ||
-			record.kind === 'fieldRef'
+			!model
+				.getTable(table)
+				?.columns.some((column) => column.name === operand.column)
 		)
-			refuse(`forbidden operand '${String(record.kind)}'`);
-		if (record.kind === 'ref') column(record.column as string);
-		Object.values(record).forEach(operand);
+			refuse(`invalid column '${operand.column}'`);
 	};
-	if (!intent || typeof intent !== 'object') refuse('missing condition kind');
-	switch (intent.kind) {
-		case 'and':
-		case 'or':
-			if (!Array.isArray(intent.conditions))
-				refuse(`invalid '${intent.kind}' conditions`);
-			for (const child of intent.conditions)
-				validateDefaultFilter(child, table, columns);
-			return;
-		case 'not':
-			validateDefaultFilter(intent.condition, table, columns);
-			return;
-		case 'comparison':
-		case 'like':
-		case 'in':
-		case 'any':
-		case 'null':
-		case 'range':
-		case 'jsonContains':
-		case 'jsonExists':
-			column(intent.field);
-			if ('subquery' in intent) refuse("forbidden subquery in 'in'");
-			operand(intent);
-			return;
-		case 'exists':
-		case 'notExists':
-		case 'rawExists':
-		case 'rawNotExists':
-		case 'relationFilter':
-		case 'subquery':
-		case 'expression':
-			refuse(`forbidden condition kind '${intent.kind}'`);
-			return;
-		default: {
-			const exhaustive: never = intent;
-			refuse(
-				`unknown condition kind '${String((exhaustive as WhereIntent).kind)}'`,
-			);
+	const rhs = (operand: ResolvedRhs): void => {
+		switch (operand.kind) {
+			case 'parameter':
+				return;
+			case 'column':
+			case 'outerRef':
+				column(operand);
+				return;
+			case 'ref':
+				column(operand.operand);
+				return;
+			default:
+				refuse(`forbidden operand '${operand.kind}'`);
 		}
+	};
+	const visit = (node: ResolvedCondition): void => {
+		switch (node.kind) {
+			case 'and':
+			case 'or':
+				node.conditions.forEach(visit);
+				return;
+			case 'not':
+				visit(node.condition);
+				return;
+			case 'comparison':
+				column(node.left);
+				rhs(node.right);
+				return;
+			case 'in':
+				column(node.left);
+				if (node.operand.kind !== 'values')
+					refuse("forbidden subquery in 'in'");
+				return;
+			case 'like':
+			case 'any':
+			case 'null':
+			case 'range':
+			case 'jsonContains':
+			case 'jsonExists':
+				column(node.left);
+				return;
+			default:
+				refuse(`forbidden condition kind '${node.kind}'`);
+		}
+	};
+	try {
+		const resolved = resolveConditionContext(
+			intent,
+			range,
+			[range],
+			[],
+			allocator,
+			model,
+		);
+		if (resolved) visit(resolved);
+		else refuse('missing condition kind');
+	} catch (error) {
+		throw new SchemaValidationError(
+			`Default filter for table '${table}': ${error instanceof Error ? error.message : String(error)}`,
+		);
 	}
 }
 
@@ -799,21 +810,16 @@ export function schema<const T extends SchemaDefinition>(
 			try {
 				if (!input || typeof input !== 'object' || Array.isArray(input))
 					throw new Error('expected condition intent or object filter');
-				intent = isWhereIntent(input)
-					? input
-					: objectToWhereIntent(input as WhereFilter);
+				intent = normalizeWhereInput(
+					input,
+					model.getTable(tableName)?.columns.map((column) => column.name) ?? [],
+				);
 			} catch (error) {
 				throw new SchemaValidationError(
 					`Default filter for table '${tableName}': ${error instanceof Error ? error.message : String(error)}`,
 				);
 			}
-			validateDefaultFilter(
-				intent,
-				tableName,
-				new Set(
-					model.getTable(tableName)?.columns.map((column) => column.name),
-				),
-			);
+			validateDefaultFilter(intent, tableName, model);
 			defaultFilters[tableName] = intent;
 		}
 	}
