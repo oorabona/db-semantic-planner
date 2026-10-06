@@ -1,4 +1,14 @@
-import { batchValues, createOrm, eq, exprRef, fn, schema } from '@dbsp/core';
+import {
+	batchValues,
+	createOrm,
+	eq,
+	exprRef,
+	fn,
+	inSubquery,
+	outerRef,
+	schema,
+	subquery,
+} from '@dbsp/core';
 import type { CompileOptions, PlanReport } from '@dbsp/types';
 import { createPhysicalNameInventory } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
@@ -108,4 +118,59 @@ describe('join ON operand visibility', () => {
 			'SELECT "otherThings".* FROM "otherThings" JOIN users AS u ON "otherThings".id = u.id JOIN users AS users ON u.id = "otherThings".id',
 		);
 	});
+});
+
+describe('join ON qualified outer reference visibility', () => {
+	const orm = createOrm({
+		schema: db,
+		adapter: createPgCompileOnlyAdapter({ model: db.model }),
+	});
+	for (const values of [false, true]) {
+		const source = batchValues([[1]], ['id'], ['integer'], { alias: 'u' });
+		for (const nested of [false, true]) {
+			for (const field of [false, true]) {
+				const on = (qualifier: string) => {
+					const ref = field
+						? {
+								kind: 'fieldRef' as const,
+								column: `${qualifier}.id`,
+								scope: 'outer' as const,
+							}
+						: outerRef(`${qualifier}.id`);
+					return nested
+						? inSubquery(
+								'u.id',
+								subquery('users').select('id').where(eq('id', ref)),
+							)
+						: eq('id', ref);
+				};
+				const query = (qualifier: string) => {
+					const root = orm.select('otherThings');
+					const options = { as: 'u', on: on(qualifier) };
+					return (
+						values ? root.join(source, options) : root.join('users', options)
+					).join('users', { on: eq('u.id', exprRef('users.id')) });
+				};
+				const shape = `${values ? 'values' : 'table'} ON ${nested ? 'subquery' : 'operand'} ${field ? 'outer fieldRef' : 'outerRef'}`;
+				it(`refuses a later qualifier in a ${shape}`, () => {
+					expect(() => query('users').plan()).toThrow(
+						"WHERE qualifier 'users' is not visible in this query.",
+					);
+				});
+				for (const qualifier of nested ? ['u', 'otherThings'] : ['u']) {
+					it(`compiles the visible ${qualifier} qualifier in a ${shape}`, () => {
+						const join = values
+							? 'unnest(CAST($1 AS integer[])) AS u(id)'
+							: 'users AS u';
+						const predicate = nested
+							? `u.id = ANY (SELECT users_subq_0.id FROM users AS users_subq_0 WHERE users_subq_0.id = ${qualifier === 'otherThings' ? '"otherThings"' : qualifier}.id)`
+							: '"otherThings".id = u.id';
+						expect(query(qualifier).dump().sql).toBe(
+							`SELECT "otherThings".* FROM "otherThings" JOIN ${join} ON ${predicate} JOIN users AS users ON u.id = users.id`,
+						);
+					});
+				}
+			}
+		}
+	}
 });

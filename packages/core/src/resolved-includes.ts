@@ -44,6 +44,13 @@ export function resolveReportIncludes(
 		{ target: ResolvedRange; output: ResolvedRange }
 	>();
 	const visibleJoinRanges: ResolvedRange[] = [rootRange];
+	const firstJoinByQualifier = new Map<string, number>();
+	(intent.joins ?? []).forEach((join, index) => {
+		const qualifier =
+			join.alias ?? join.relation ?? join.batchValues?.alias ?? join.table!;
+		if (!firstJoinByQualifier.has(qualifier))
+			firstJoinByQualifier.set(qualifier, index);
+	});
 	const joins: ResolvedJoin[] = (intent.joins ?? []).map(
 		(join, intentIndex) => {
 			const alias =
@@ -92,15 +99,8 @@ export function resolveReportIncludes(
 					subqueryRefusal: join.batchValues
 						? 'Subquery in BatchValues JOIN ON condition is not supported.'
 						: 'Subquery in JOIN ON condition is not supported.',
-					unavailableQualifiers: (intent.joins ?? [])
-						.slice(intentIndex + 1)
-						.map(
-							(later) =>
-								later.alias ??
-								later.relation ??
-								later.batchValues?.alias ??
-								later.table!,
-						),
+					firstJoinByQualifier,
+					intentIndex,
 				},
 			);
 			return {

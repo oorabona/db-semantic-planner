@@ -82,7 +82,8 @@ export function resolveConditionContext(
 	additionalOuterRanges: readonly ResolvedRange[] = [],
 	joinOn?: {
 		readonly subqueryRefusal: string;
-		readonly unavailableQualifiers: readonly string[];
+		readonly firstJoinByQualifier: ReadonlyMap<string, number>;
+		readonly intentIndex: number;
 	},
 ): ResolvedCondition | undefined {
 	const subqueryRefusal = joinOn?.subqueryRefusal;
@@ -109,13 +110,40 @@ export function resolveConditionContext(
 		ranges: readonly ResolvedRange[],
 	): void => {
 		if (
-			ranges === visible &&
-			joinOn?.unavailableQualifiers.includes(qualifier) &&
-			!ranges.some((range) => range.alias === qualifier)
+			(ranges === visible ||
+				ranges === rootScope ||
+				enclosing.includes(ranges)) &&
+			joinOn !== undefined &&
+			(joinOn.firstJoinByQualifier.get(qualifier) ?? -1) > joinOn.intentIndex &&
+			!visible.some((range) => range.alias === qualifier)
 		)
 			throw new Error(
 				`WHERE qualifier '${qualifier}' is not visible in this query.`,
 			);
+	};
+	const matchQualifier = (
+		qualifier: string,
+		scope: readonly ResolvedRange[],
+		outer: boolean,
+	): ResolvedRange | undefined => {
+		assertQualifierVisible(qualifier, scope);
+		const candidates = scope.filter((r) => r.table === qualifier);
+		const exact =
+			writtenQualifiers.get(scope)?.get(qualifier) ??
+			scope.find(
+				(r) =>
+					r.alias === qualifier &&
+					(r !== scope[0] || r.alias !== r.table || candidates.length < 2),
+			);
+		if (exact) return exact;
+		if (candidates.length > 1)
+			throw new Error(
+				`${outer ? 'outerRef' : 'WHERE'} qualifier '${qualifier}' is ambiguous between ${candidates
+					.map((r) => `'${r.alias}'`)
+					.sort()
+					.join(', ')}${outer ? ' in an enclosing query' : ''}.`,
+			);
+		return candidates[0];
 	};
 	const column = (
 		name: string,
@@ -134,26 +162,7 @@ export function resolveConditionContext(
 				const qualifier = parts.shift()!;
 				let found: ResolvedRange | undefined;
 				for (const scope of enclosing) {
-					const candidates = scope.filter((r) => r.table === qualifier);
-					// A self-join makes the logical root name ambiguous even though its default alias matches.
-					found =
-						writtenQualifiers.get(scope)?.get(qualifier) ??
-						scope.find(
-							(r) =>
-								r.alias === qualifier &&
-								(r !== scope[0] ||
-									r.alias !== r.table ||
-									candidates.length < 2),
-						);
-					if (found) break;
-					if (candidates.length > 1)
-						throw new Error(
-							`outerRef qualifier '${qualifier}' is ambiguous between ${candidates
-								.map((r) => `'${r.alias}'`)
-								.sort()
-								.join(', ')} in an enclosing query.`,
-						);
-					found = candidates[0];
+					found = matchQualifier(qualifier, scope, true);
 					if (found) break;
 				}
 				if (!found)
@@ -164,24 +173,8 @@ export function resolveConditionContext(
 			}
 		} else if (parts.length > 1) {
 			const qualifier = parts.shift()!;
-			assertQualifierVisible(qualifier, ranges);
-			const candidates = ranges.filter((r) => r.table === qualifier);
-			const exact =
-				writtenQualifiers.get(ranges)?.get(qualifier) ??
-				ranges.find(
-					(r) =>
-						r.alias === qualifier &&
-						(r !== ranges[0] || r.alias !== r.table || candidates.length < 2),
-				);
-			if (exact) range = exact;
-			else if (candidates.length > 1)
-				throw new Error(
-					`WHERE qualifier '${qualifier}' is ambiguous between ${candidates
-						.map((r) => `'${r.alias}'`)
-						.sort()
-						.join(', ')}.`,
-				);
-			else if (candidates[0]) range = candidates[0];
+			const found = matchQualifier(qualifier, ranges, false);
+			if (found) range = found;
 			else
 				throw new Error(
 					`WHERE qualifier '${qualifier}' is not visible in this query.`,
@@ -784,19 +777,9 @@ export function resolveConditionContext(
 		) {
 			const parts = node.field.split('.');
 			const qualifier = parts[0]!;
-			assertQualifierVisible(qualifier, ranges);
-			const candidates = ranges.filter((r) => r.table === qualifier);
-			const exact =
-				writtenQualifiers.get(ranges)?.get(qualifier) ??
-				ranges.find(
-					(r) =>
-						r.alias === qualifier &&
-						(r !== ranges[0] || r.alias !== r.table || candidates.length < 2),
-				);
-			if (!exact && candidates.length > 1)
-				column(node.field, current, ranges, enclosing);
-			const source = exact ?? candidates[0] ?? current;
-			if (exact || candidates.length) parts.shift();
+			const found = matchQualifier(qualifier, ranges, false);
+			const source = found ?? current;
+			if (found) parts.shift();
 			if (parts.length > 1) {
 				const field = parts.pop()!;
 				return relation(
