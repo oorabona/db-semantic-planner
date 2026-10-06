@@ -20,18 +20,33 @@ const definition = {
 	posts: { id: 'integer', title: 'string', deletedAt: 'timestamp' },
 } as const;
 
-it('normalizes object default filters before compiling a select', () => {
-	const db = schema(definition, undefined, {
-		defaultFilters: { posts: { deletedAt: null } },
+it('refuses object default filters with a table name and condition helper hint', () => {
+	expect(() =>
+		schema(definition, undefined, {
+			defaultFilters: { posts: { deletedAt: null } as unknown as WhereIntent },
+		}),
+	).toThrowError(
+		/^Default filter for table 'posts': expected a condition intent built with condition helpers, for example isNull\('deletedAt'\)$/,
+	);
+});
+
+it('keeps helper conditions on tables declaring intent-shaped column names', () => {
+	const db = schema({
+		events: {
+			id: 'integer',
+			kind: 'string',
+			field: 'string',
+			operator: 'string',
+			value: 'string',
+		},
 	});
-	expect(db.defaultFilters?.posts).toEqual(isNull('deletedAt'));
 	const orm = createOrm({
 		schema: db,
 		adapter: createPgCompileOnlyAdapter({ model: db.model }),
 	});
-	expect(orm.select('posts').dump().sql).toBe(
-		'SELECT posts.* FROM posts WHERE posts."deletedAt" IS NULL',
-	);
+	const dump = orm.select('events').where(eq('id', 7)).dump();
+	expect(dump.sql).toBe('SELECT events.* FROM events WHERE events.id = $1');
+	expect(dump.params).toEqual([7]);
 });
 
 it('accepts nested conditions on declared columns', () => {
@@ -43,7 +58,10 @@ it('accepts nested conditions on declared columns', () => {
 });
 
 it.each([
-	[{ field: 'deletedAt', op: 'isNull' }, "invalid column 'field'"],
+	[
+		{ field: 'deletedAt', op: 'isNull' },
+		"expected a condition intent built with condition helpers, for example isNull('deletedAt')",
+	],
 	[
 		exists('authored'),
 		"exists('authored'): no relation 'authored' is declared on table 'posts'. Use rawExists(subquery(...)) for an EXISTS over an undeclared or uncorrelated subquery.",
@@ -126,52 +144,5 @@ it.each([{ outer: true }, { kind: 'subquery' }])(
 		const dump = orm.select('posts').dump();
 		expect(dump.sql).toBe('SELECT posts.* FROM posts WHERE posts.payload = $1');
 		expect(dump.params).toEqual([payload]);
-	},
-);
-
-it.each(['audit', 'null'])(
-	'treats the declared kind column as an object filter with value %s',
-	(value) => {
-		const definition = { events: { id: 'integer', kind: 'string' } } as const;
-		const db = schema(definition, undefined, {
-			defaultFilters: { events: { kind: value } },
-		});
-		const orm = createOrm({
-			schema: db,
-			adapter: createPgCompileOnlyAdapter({ model: db.model }),
-		});
-		const dumps = [
-			orm.select('events').dump(),
-			orm
-				.select('events')
-				.withoutDefaultFilters()
-				.where({ kind: value })
-				.dump(),
-			orm
-				.select('events')
-				.withoutDefaultFilters()
-				.where(eq('kind', value))
-				.dump(),
-		];
-		for (const dump of dumps) {
-			expect(dump.sql).toBe(
-				'SELECT events.* FROM events WHERE events.kind = $1',
-			);
-			expect(dump.params).toEqual([value]);
-		}
-	},
-);
-
-it.each(['audit', 'null'])(
-	'normalizes an explicit object filter on the kind column with value %s',
-	(value) => {
-		const db = schema({ events: { id: 'integer', kind: 'string' } });
-		const orm = createOrm({
-			schema: db,
-			adapter: createPgCompileOnlyAdapter({ model: db.model }),
-		});
-		const dump = orm.select('events').where({ kind: value }).dump();
-		expect(dump.sql).toBe('SELECT events.* FROM events WHERE events.kind = $1');
-		expect(dump.params).toEqual([value]);
 	},
 );

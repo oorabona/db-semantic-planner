@@ -414,13 +414,15 @@ const hooks = createHookManager()
 const orm = createOrm({ schema: db, adapter: createPgAdapter(pool), hooks });
 ```
 
-> **Note:** `schema()` accepts a `defaultFilters` option as its third argument for table-level default WHERE clauses. Use condition helpers or an object filter as in `.where()`; each filter may test only columns of its own table:
+> **Note:** `schema()` accepts a `defaultFilters` option as its third argument for table-level default WHERE clauses. Each default filter is a condition on its table’s own columns, built with condition helpers. It currently applies to the root of a query-builder SELECT, after `beforeQuery` hooks; included rows, joins, relation predicates, NQL and mutations are not filtered yet:
 >
 > ```typescript
+> import { isNull, schema } from '@dbsp/core';
+>
 > const db = schema(
 >   { posts: { id: 'integer', title: 'string', deletedAt: 'timestamp' } } as const,
 >   undefined,
->   { defaultFilters: { posts: { deletedAt: null } } },
+>   { defaultFilters: { posts: isNull('deletedAt') } },
 > );
 > ```
 

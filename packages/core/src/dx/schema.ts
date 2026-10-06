@@ -42,7 +42,7 @@ import type {
 } from '../model-ir.js';
 import { createPseudoColumnMetadata } from '../model-ir.js';
 import { resolveConditionContext } from '../resolved-conditions.js';
-import { normalizeWhereInput, type WhereFilter } from './object-filter.js';
+import { isWhereIntent } from './object-filter.js';
 import type { InferTables } from './schema-tables-types.js';
 import { createTablesProxy } from './table-ref-factory.js';
 
@@ -314,10 +314,12 @@ export interface SchemaOptions {
 	/** Explicit many-to-many declarations indexed by source table and relation name. */
 	relations?: Record<string, Record<string, ManyToManyDefinition>>;
 	/**
-	 * Default filters applied automatically to all queries per table.
+	 * Default filters are conditions on each table's own columns, built with condition helpers.
+	 * Applied to the root of a query-builder SELECT after beforeQuery hooks.
+	 * Included rows, joins, relation predicates, NQL and mutations are not filtered yet.
 	 * Override with `.withoutDefaultFilters()` on the query builder.
 	 */
-	defaultFilters?: Record<string, WhereIntent | WhereFilter>;
+	defaultFilters?: Record<string, WhereIntent>;
 	/**
 	 * Column name treated as the implicit primary key for short-form column
 	 * declarations. When set (default `'id'`), `inferPrimaryKey` resolves the
@@ -409,8 +411,10 @@ export interface Schema<T extends SchemaDefinition> {
 	 */
 	readonly introspectedAt?: Date;
 	/**
-	 * Default filters per table (e.g., soft delete filtering).
-	 * Applied automatically to all queries unless `.withoutDefaultFilters()` is called.
+	 * Default filters are conditions on each table's own columns, built with condition helpers.
+	 * Applied to the root of a query-builder SELECT after beforeQuery hooks.
+	 * Included rows, joins, relation predicates, NQL and mutations are not filtered yet.
+	 * Override with `.withoutDefaultFilters()` on the query builder.
 	 */
 	readonly defaultFilters?: DefaultFilters;
 }
@@ -793,7 +797,7 @@ export function schema<const T extends SchemaDefinition>(
 	const defaultFilters = options?.defaultFilters
 		? (Object.assign(Object.create(null), options.defaultFilters) as Record<
 				string,
-				WhereIntent | WhereFilter
+				WhereIntent
 			>)
 		: undefined;
 	if (defaultFilters) {
@@ -805,22 +809,13 @@ export function schema<const T extends SchemaDefinition>(
 						`Available: ${[...tableNameSet].join(', ')}`,
 				);
 			}
-			const input = defaultFilters[tableName];
-			let intent: WhereIntent;
-			try {
-				if (!input || typeof input !== 'object' || Array.isArray(input))
-					throw new Error('expected condition intent or object filter');
-				intent = normalizeWhereInput(
-					input,
-					model.getTable(tableName)?.columns.map((column) => column.name) ?? [],
-				);
-			} catch (error) {
+			const intent = defaultFilters[tableName];
+			if (!isWhereIntent(intent)) {
 				throw new SchemaValidationError(
-					`Default filter for table '${tableName}': ${error instanceof Error ? error.message : String(error)}`,
+					`Default filter for table '${tableName}': expected a condition intent built with condition helpers, for example isNull('deletedAt')`,
 				);
 			}
 			validateDefaultFilter(intent, tableName, model);
-			defaultFilters[tableName] = intent;
 		}
 	}
 

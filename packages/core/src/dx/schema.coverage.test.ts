@@ -7,6 +7,7 @@ import { REF_BRAND } from '@dbsp/types';
  */
 
 import { describe, expect, it } from 'vitest';
+import { isNull } from './filters.js';
 import { isRef, ref, SchemaValidationError, schema } from './schema.js';
 
 describe('schema coverage', () => {
@@ -447,7 +448,7 @@ describe('schema coverage', () => {
 				undefined,
 				{
 					defaultFilters: {
-						users: { deletedAt: null },
+						users: isNull('deletedAt'),
 					},
 				},
 			);
@@ -465,7 +466,7 @@ describe('schema coverage', () => {
 					undefined,
 					{
 						defaultFilters: {
-							products: { deletedAt: null }, // Non-existent
+							products: isNull('deletedAt'), // Non-existent
 						},
 					},
 				),
@@ -481,8 +482,8 @@ describe('schema coverage', () => {
 				undefined,
 				{
 					defaultFilters: {
-						users: { deletedAt: null },
-						posts: { deletedAt: null },
+						users: isNull('deletedAt'),
+						posts: isNull('deletedAt'),
 					},
 				},
 			);
