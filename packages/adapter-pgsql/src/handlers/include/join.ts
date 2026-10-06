@@ -1,3 +1,5 @@
+import { andExpr } from '../../ast-helpers.js';
+import { compileResolvedCondition } from '../../resolved-condition-compiler.js';
 /**
  * JOIN Include Strategy Handler
  *
@@ -103,7 +105,7 @@ export const joinIncludeHandler: IncludeHandler = {
 	compile(
 		decision: Decision,
 		ctx: CompilerContext,
-		_state: CompilerState,
+		state: CompilerState,
 	): IncludeResult {
 		const relation = decision.relation;
 		const targetTable = decision.targetTable ?? relation;
@@ -171,6 +173,13 @@ export const joinIncludeHandler: IncludeHandler = {
 			scopedCtx,
 			decision.joinType ?? 'left',
 		);
+
+		const defaultFilter = decision.resolvedInclude?.defaultFilter;
+		if (defaultFilter)
+			join.JoinExpr.quals = andExpr(
+				join.JoinExpr.quals!,
+				compileResolvedCondition(defaultFilter, scopedCtx, state),
+			);
 
 		// Build column targets with output aliases for hydration.
 		// Prefer user-supplied alias from columnAliases; fall back to

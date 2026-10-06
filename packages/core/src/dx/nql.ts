@@ -6,6 +6,7 @@ import {
 	observeIncludeDecisions,
 	resolveReportIncludes,
 } from '../resolved-includes.js';
+import { assertUnsupportedNqlDefaultFilters } from './default-filter-refusals.js';
 /**
  * @fileoverview NQL template literal integration for type-safe queries (DX-040 Block 8).
  *
@@ -697,6 +698,7 @@ export function createBindingFinalPlan(
 	bundle: CompiledNqlQuery,
 	model: ModelIR,
 	dialectCapabilities?: DialectCapabilities,
+	defaultFilters?: import('./schema.js').DefaultFilters,
 ): PlanReport {
 	assertBindingFinalQueryCanUseSyntheticPlan(intent, bundle);
 	const provenIncludes = getProvenBindingIncludes(intent, bundle);
@@ -736,7 +738,10 @@ export function createBindingFinalPlan(
 	});
 	return markPlannedReport({
 		rootTable: intent.from,
-		execution: resolveReportIncludes(intent, decisions, model),
+		execution: resolveReportIncludes(intent, decisions, model, {
+			...(defaultFilters && { defaultFilters }),
+			skipRootDefaultFilter: true,
+		}),
 		decisions: observeIncludeDecisions(decisions),
 		warnings: [],
 		ctes: [],
@@ -818,14 +823,14 @@ export function compileNqlRead<T = unknown>(
 				bundle,
 				model,
 				adapter?.dialectCapabilities,
+				options?.defaultFilters,
 			)
-		: executePlan(
-				bundle.query,
-				model,
-				adapter
-					? { dialectCapabilities: adapter.dialectCapabilities }
-					: undefined,
-			);
+		: executePlan(bundle.query, model, {
+				...(options?.defaultFilters && {
+					defaultFilters: options?.defaultFilters,
+				}),
+				...(adapter && { dialectCapabilities: adapter.dialectCapabilities }),
+			});
 	const finalStep = createNqlProgramSteps({
 		kind: 'query',
 		bundle,
@@ -1578,6 +1583,12 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		if (!bundle) {
 			throw new Error('NQL compilation failed: no query AST produced');
 		}
+		assertUnsupportedNqlDefaultFilters(
+			bundle,
+			this.model,
+			this.defaultFilters,
+			'NQL',
+		);
 		if (bundle.query) {
 			const inspect = (
 				includes: QueryIntent['include'],
@@ -1663,13 +1674,12 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		if (compiled.kind === 'unplannedRead') {
 			throw new Error(UNPLANNED_NQL_READ_PLAN_ERROR);
 		}
-		return executePlan(
-			compiled.intent,
-			this.model,
-			this.adapter
-				? { dialectCapabilities: this.adapter.dialectCapabilities }
-				: undefined,
-		);
+		return executePlan(compiled.intent, this.model, {
+			...(this.defaultFilters && { defaultFilters: this.defaultFilters }),
+			...(this.adapter && {
+				dialectCapabilities: this.adapter.dialectCapabilities,
+			}),
+		});
 	}
 
 	plan(): PlanReport {
@@ -1688,6 +1698,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 					compiled.bundle,
 					this.model,
 					this.adapter?.dialectCapabilities,
+					this.defaultFilters,
 				)
 			: this.planInternal();
 	}
@@ -1802,6 +1813,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 
 	private mutationCompileOptions(extraOptions?: DumpMetaInput): CompileOptions {
 		return {
+			...(this.defaultFilters && { defaultFilters: this.defaultFilters }),
 			model: this.model,
 			...(this._schemaName !== undefined && { schemaName: this._schemaName }),
 			...extraOptions,
@@ -1810,6 +1822,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 
 	private nqlBundleCompileOptions(): CompileOptions {
 		return {
+			...(this.defaultFilters && { defaultFilters: this.defaultFilters }),
 			model: this.model,
 			...(this._schemaName !== undefined && { schemaName: this._schemaName }),
 		};
@@ -1995,6 +2008,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 									sourceBundle,
 									this.model,
 									txAdapter.dialectCapabilities,
+									this.defaultFilters,
 								)
 							: undefined;
 					const statementBundle = createNqlStatementBundle(
@@ -2094,6 +2108,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 								sourceBundle,
 								this.model,
 								adapter.dialectCapabilities,
+								this.defaultFilters,
 							)
 						: undefined;
 				const statementBundle = createNqlStatementBundle(
@@ -2140,6 +2155,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 						compiledIntent.bundle,
 						this.model,
 						this.adapter?.dialectCapabilities,
+						this.defaultFilters,
 					)
 				: this.planInternal();
 			const dumpMeta: DumpMeta = {
@@ -2265,6 +2281,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 				compiledIntent.bundle,
 				this.model,
 				adapter.dialectCapabilities,
+				this.defaultFilters,
 			);
 			const compiled = adapter.compile<T>(
 				this.createFinalNqlStatementBundle(

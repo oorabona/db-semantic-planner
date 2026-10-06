@@ -92,6 +92,8 @@ export interface RecursiveCteConfig {
 	// Anchor filter on the node table for either traversal
 	/** Anchor WHERE clause node (pre-built AST) */
 	anchorWhere?: Node;
+	/** Predicate on the node scan in the recursive step. */
+	stepWhere?: Node;
 }
 
 // ============================================================================
@@ -283,7 +285,9 @@ export function buildRecursiveCte(config: RecursiveCteConfig): {
 	const recursiveSelect: SelectStmt = {
 		targetList: recursiveTargets,
 		fromClause: [recursiveJoin],
-		whereClause: recursiveWhere,
+		whereClause: config.stepWhere
+			? andExpr(recursiveWhere, config.stepWhere)
+			: recursiveWhere,
 	};
 
 	// Build UNION ALL
@@ -821,7 +825,9 @@ function buildEdgeTableRecursiveCte(config: RecursiveCteConfig): {
 	const recursiveSelect: SelectStmt = {
 		targetList: recursiveTargets,
 		fromClause: [fullRecursiveJoin],
-		whereClause: recursiveWhere,
+		whereClause: config.stepWhere
+			? andExpr(recursiveWhere, config.stepWhere)
+			: recursiveWhere,
 	};
 
 	// ── UNION ALL ───────────────────────────────────────────────────────────

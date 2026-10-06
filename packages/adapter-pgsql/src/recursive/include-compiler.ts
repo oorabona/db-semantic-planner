@@ -1,3 +1,4 @@
+import { compileResolvedCondition } from '../resolved-condition-compiler.js';
 /** A recursive include is a correlated scalar aggregate, never a root JOIN. */
 
 import { toColumnList } from '@dbsp/types';
@@ -138,6 +139,20 @@ export function compileRecursiveInclude(
 		sqlColumnRef(queryLocal(column), queryLocal(alias));
 	const { cte } = buildRecursiveCte({
 		cteAlias: walk,
+		...(decision.resolvedInclude?.recursiveRanges?.anchorDefaultFilter && {
+			anchorWhere: compileResolvedCondition(
+				decision.resolvedInclude.recursiveRanges.anchorDefaultFilter,
+				ctx,
+				state,
+			),
+		}),
+		...(decision.resolvedInclude?.recursiveRanges?.stepDefaultFilter && {
+			stepWhere: compileResolvedCondition(
+				decision.resolvedInclude.recursiveRanges.stepDefaultFilter,
+				ctx,
+				state,
+			),
+		}),
 		internalNames: { node: innerAlias, depth: depthName, visited: visitedName },
 		table: resolveDeclaredIdentifier(
 			ctx.declaredNames,

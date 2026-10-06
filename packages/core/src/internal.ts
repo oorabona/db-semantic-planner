@@ -99,6 +99,7 @@ export {
 	validateRecursiveSetOperation,
 	validateResolvedIncludeStrategy,
 } from './planner.js';
+export { getRelationalReadPlan } from './relational-read-plans.js';
 export { resolveSelectWhere } from './resolved-conditions.js';
 export {
 	observeIncludeDecisions,

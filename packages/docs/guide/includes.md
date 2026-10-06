@@ -228,7 +228,7 @@ Scalar expression projections retain join include payloads. Expression projectio
 
 A repeated non-self-referential relation edge is refused in strict and lenient planning. Finite self-referential paths such as `parent.parent` plan; unbounded traversal uses a recursive include.
 
-Recursive includes cannot be nested under any include or contain nested includes. Grouped or aggregated roots, plain DISTINCT, set operations and row locks are refused by name. Traversed-node `defaultFilters` are not yet supported (#906); applicable filters are refused rather than silently omitted. PostgreSQL 10 is supported: cycle protection uses a visited-key array, without a CYCLE clause. The maximum depth defaults to 100 or the recursive relation metadata.
+Recursive includes cannot be nested under any include or contain nested includes. Grouped or aggregated roots, plain DISTINCT, set operations and row locks are refused by name. Traversed-node `defaultFilters` apply in the anchor and recursive step: filtered nodes and their subtrees are excluded. Junction-table filters remain refused until #787. PostgreSQL 10 is supported: cycle protection uses a visited-key array, without a CYCLE clause. The maximum depth defaults to 100 or the recursive relation metadata.
 
 A stored column with the requested include name conflicts at the root or at any node (`conflicting public key`). Use another public name with `via`, for example `.include('tree', { via: 'children', recursive: true, direction: 'descendants' })`.
 

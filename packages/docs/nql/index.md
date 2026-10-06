@@ -71,6 +71,12 @@ The result tables below summarize executed results. Their column headers are the
 columns appear under their database names (`parent_id`) and written aliases as written (`userCount`). Queries run
 through the ORM return model columns under their logical keys (`parentId`).
 
+### ORM default filters
+
+`orm.nql` applies schema `defaultFilters` to physical table reads, including roots, relation includes and predicates, joins, subqueries, read bindings, CTE bodies and set-operation leaves. Use `orm.withoutDefaultFilters().nql` to opt out. Mutation targets remain unfiltered.
+
+Applicable filters on pseudo-column projections, binding relation-column projections and relation reads from projected CTEs are refused with the table name and query path. Many-to-many junction filters remain unsupported until #787.
+
 ### Pipe Syntax
 
 NQL uses pipes (`|`) to chain operators, left to right:

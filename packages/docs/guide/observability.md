@@ -414,7 +414,7 @@ const hooks = createHookManager()
 const orm = createOrm({ schema: db, adapter: createPgAdapter(pool), hooks });
 ```
 
-> **Note:** `schema()` accepts a `defaultFilters` option as its third argument for table-level default WHERE clauses. Each default filter is a condition or expression on its table’s own columns. Self-qualified columns are allowed; a relation path reaching another table is refused. It currently applies to the root of a query-builder SELECT, after `beforeQuery` hooks; included rows, joins, relation predicates, NQL and mutations are not filtered yet:
+> **Note:** `schema()` accepts `defaultFilters` as its third argument. A default filter is a helper-built condition over its table’s own range. Self-qualified columns are allowed; anything reaching another range, including a self-relation, is refused. Aggregates and context-only expression leaves are refused. Filters apply to every table scan of a read. Opt out with a builder’s `withoutDefaultFilters()` or `orm.withoutDefaultFilters()`. Mutations and raw SQL are unfiltered. Many-to-many junction tables (#787), NQL pseudo-column projections, binding relation-column projections and relation reads from projected CTEs refuse applicable filters by table and query path. Recursive walks filter both the anchor and recursive step, excluding filtered nodes and their subtrees. Set-operation leaves and fluent CTE bodies retain their builder’s filter policy. NQL binding bodies, CTE bodies and set-operation leaves apply the same filters:
 >
 > ```typescript
 > import { isNull, schema } from '@dbsp/core';

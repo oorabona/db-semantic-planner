@@ -27,7 +27,7 @@ import {
 } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
-import { funcCall, sqlRangeVar } from './ast-helpers.js';
+import { andExpr, funcCall, sqlRangeVar } from './ast-helpers.js';
 import {
 	declaredRelationBindingFor,
 	queryScope,
@@ -376,7 +376,7 @@ function compileJoinIntents(
 
 		if (alias === rootBinding.qualifier)
 			throw new Error(`Query scope already binds qualifier '${alias}'.`);
-		if (resolved.kind === 'relation') {
+		if (resolved.kind === 'relation' && !resolved.defaultFilter) {
 			const pairs = resolved.path!.hops[0]!.pairs;
 			results.push({
 				type: 'join',
@@ -443,11 +443,45 @@ function compileJoinIntents(
 
 			const tableAlias = resolved.range.alias;
 
-			const onNode = compileResolvedCondition(
-				resolved.on!,
-				onContext,
-				paramState,
-			);
+			const conditions: Node[] = [];
+			if (resolved.path) {
+				for (const pair of resolved.path.hops[0]!.pairs) {
+					conditions.push(
+						compileResolvedCondition(
+							{
+								kind: 'comparison',
+								left: {
+									kind: 'column',
+									range: resolved.sourceRange,
+									column: pair.fromColumn,
+								},
+								operator: 'eq',
+								right: {
+									kind: 'column',
+									range: resolved.range,
+									column: pair.toColumn,
+								},
+							},
+							onContext,
+							paramState,
+						),
+					);
+				}
+			}
+			if (resolved.on)
+				conditions.push(
+					compileResolvedCondition(resolved.on, onContext, paramState),
+				);
+			if (resolved.defaultFilter)
+				conditions.push(
+					compileResolvedCondition(
+						resolved.defaultFilter,
+						onContext,
+						paramState,
+					),
+				);
+			const onNode =
+				conditions.length === 1 ? conditions[0]! : andExpr(...conditions);
 
 			// Store rarg + onNode separately — the 'join' case in compiler.ts wraps
 			// from[0] as larg so multiple .join() calls chain correctly.
@@ -1049,6 +1083,16 @@ export function compileSelectEnvelope<T = unknown>(
 		}),
 	};
 
+	const expressionConditions = plan.execution?.expressionConditions?.map(
+		(entry) => ({
+			intent: planningNodeAtPath(
+				plan.executableIntent ?? plan.intent,
+				entry.intentPath,
+			) as import('@dbsp/types').WhereIntent,
+			condition: entry.condition,
+		}),
+	);
+
 	// Convert PlanReport (core) → SimplifiedPlanReport (pgsql compiler)
 	// The core's plan.decisions contain observability data, not SQL instructions.
 	// The actual query structure is in plan.intent (QueryIntent).
@@ -1149,6 +1193,13 @@ export function compileSelectEnvelope<T = unknown>(
 				const projection = compilePlan(
 					{
 						rootTable: plan.rootTable,
+						...(expressionConditions && { expressionConditions }),
+						...(plan.execution?.expressionSubqueries && {
+							expressionSubqueries: bindExpressionSubqueries(
+								plan.executableIntent ?? plan.intent ?? execIntent,
+								plan.execution.expressionSubqueries,
+							),
+						}),
 						decisions: [
 							...intentToDecisions(
 								{
@@ -1223,6 +1274,13 @@ export function compileSelectEnvelope<T = unknown>(
 		simplifiedPlan = {
 			...simplifiedPlan,
 			directConditions: true,
+			...(expressionConditions && { expressionConditions }),
+			...(plan.execution?.expressionSubqueries && {
+				expressionSubqueries: bindExpressionSubqueries(
+					plan.executableIntent ?? plan.intent ?? execIntent,
+					plan.execution.expressionSubqueries,
+				),
+			}),
 			...(execIntent.having && { rawHaving: execIntent.having }),
 		};
 		if (resolvedWhere)
@@ -1295,4 +1353,31 @@ function payloadsByNodeId(
 	};
 	visit(decisions);
 	return result;
+}
+
+/** Rebind frozen resolved bodies to authored expression objects by their planning path. */
+function bindExpressionSubqueries(
+	intent: QueryIntent,
+	entries: NonNullable<SelectExecution['expressionSubqueries']>,
+): NonNullable<SimplifiedPlanReport['expressionSubqueries']> {
+	return entries.map((entry) => {
+		const node = planningNodeAtPath(intent, entry.intentPath);
+		const query = (node as { query: QueryIntent }).query;
+		if (!query)
+			throw new Error(`Missing expression subquery at ${entry.intentPath}`);
+		return {
+			expression: node as import('@dbsp/types').ExpressionIntent,
+			body: entry.body,
+		};
+	});
+}
+
+function planningNodeAtPath(intent: unknown, path: string): unknown {
+	let node = intent;
+	for (const key of path.replaceAll('[', '.').replaceAll(']', '').split('.')) {
+		if (!node || typeof node !== 'object')
+			throw new Error(`Missing planned expression at ${path}`);
+		node = (node as Record<string, unknown>)[key];
+	}
+	return node;
 }

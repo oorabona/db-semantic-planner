@@ -389,7 +389,7 @@ describe('#877 shared plan/compile refusals', () => {
 			),
 		);
 	});
-	it('refuses applicable traversed-node default filters in plan and dump', () => {
+	it('applies traversed-node default filters in plan and dump', () => {
 		const filtered = schema(
 			{
 				categories: {
@@ -409,12 +409,13 @@ describe('#877 shared plan/compile refusals', () => {
 		})
 			.select('categories')
 			.include('children', { recursive: true, direction: 'descendants' });
-		expect(() => query.plan()).toThrow(
-			'Recursive include with applicable defaultFilters on traversed nodes is not yet supported (#906).',
-		);
-		expect(() => query.dump()).toThrow(
-			'Recursive include with applicable defaultFilters on traversed nodes is not yet supported (#906).',
-		);
+		expect(
+			query.plan().execution?.includes[0]?.recursiveRanges?.anchorDefaultFilter,
+		).toBeDefined();
+		expect(
+			query.plan().execution?.includes[0]?.recursiveRanges?.stepDefaultFilter,
+		).toBeDefined();
+		expect(query.dump().params).toEqual([1, 1, 1]);
 	});
 	it('refuses set operations by name in NQL plan and adapter compile', () => {
 		const query = orm.nql`categories | select managementChain.* | union (categories | select managementChain.*)`;

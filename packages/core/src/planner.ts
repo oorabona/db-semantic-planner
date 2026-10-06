@@ -1,3 +1,6 @@
+import { RangeAllocator } from '@dbsp/types';
+import { assertUnplannedDefaultFilters } from './dx/default-filter-refusals.js';
+import { resolveScanDefaultFilter } from './resolved-conditions.js';
 import {
 	observeIncludeDecisions,
 	resolveReportIncludes,
@@ -289,6 +292,7 @@ export function plan(
 
 	const opts: Required<PlanOptions> = {
 		whereReservedNames: options.whereReservedNames ?? [],
+		defaultFilters: options.defaultFilters ?? Object.create(null),
 		forceJoinType: options.forceJoinType as 'left' | 'inner',
 		enableCTEs: options.enableCTEs ?? true,
 		cteThreshold: options.cteThreshold ?? 2,
@@ -426,6 +430,7 @@ export function plan(
 		rootTable: intent.from,
 		execution: resolveReportIncludes(plannedIntent, state.decisions, model, {
 			whereReservedNames: opts.whereReservedNames,
+			defaultFilters: opts.defaultFilters,
 		}),
 		decisions: Object.freeze(observeIncludeDecisions(state.decisions)),
 		warnings: Object.freeze(state.warnings.slice()),
@@ -475,6 +480,57 @@ export function planRecursive(
 		);
 	}
 
+	// The walk node scans are planned below. Other scans in anchor/emit
+	// expressions still use the legacy compiler and must keep refusing.
+	assertUnplannedDefaultFilters(
+		{
+			type: 'select',
+			from: startFrom,
+			where: intent.start.where,
+			select: intent.start.select,
+			nodeIdExpr: intent.start.nodeIdExpr,
+		},
+		model,
+		options.defaultFilters,
+		'recursive.start',
+		true,
+	);
+	assertUnplannedDefaultFilters(
+		{
+			type: 'select',
+			from: startFrom,
+			where: intent.emit?.where,
+			joins: intent.emit?.joinWith,
+		},
+		model,
+		options.defaultFilters,
+		'recursive.emit',
+		true,
+	);
+	const allocator = new RangeAllocator();
+	if (
+		intent.traversal.kind === 'edge-table' &&
+		options.defaultFilters?.[intent.traversal.edgeTable]
+	)
+		throw new Error(
+			`Default filter for table '${intent.traversal.edgeTable}' is not supported at recursive.traversal.edgeTable.`,
+		);
+	if (intent.traversal.kind === 'custom' && options.defaultFilters?.[startFrom])
+		throw new Error(
+			`Default filter for table '${startFrom}' is not supported at recursive.traversal.custom.`,
+		);
+	const anchorRange = allocator.allocate(startFrom, '__n', 'anchor');
+	const stepRange = allocator.allocate(startFrom, '__n', 'step');
+	const anchorFilter = resolveScanDefaultFilter(
+		options.defaultFilters,
+		anchorRange,
+		model,
+	);
+	const stepFilter = resolveScanDefaultFilter(
+		options.defaultFilters,
+		stepRange,
+		model,
+	);
 	const startTime = performance.now();
 
 	// Step 1: Validate shape compatibility
@@ -579,6 +635,12 @@ export function planRecursive(
 
 	// PERF (FIND-051): use .slice() instead of spread — avoids iterable-protocol overhead.
 	const report: RecursivePlanReport = {
+		...((anchorFilter || stepFilter) && {
+			recursiveFilters: {
+				...(anchorFilter && { anchor: anchorFilter }),
+				...(stepFilter && { step: stepFilter }),
+			},
+		}),
 		rootTable: startFrom,
 		decisions: Object.freeze(state.decisions.slice()),
 		warnings: Object.freeze(state.warnings.slice()),

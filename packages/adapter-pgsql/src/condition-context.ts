@@ -40,6 +40,10 @@ export type WhereCompilerCtx = {
 	readonly dbCasing?: DbCasing;
 	readonly defaultPkColumnName?: string;
 	readonly deriveFkColumnName?: FkColumnDerivation;
+	readonly resolvedConditions?: ReadonlyMap<
+		import('@dbsp/types').WhereIntent,
+		import('@dbsp/types').ResolvedCondition
+	>;
 	readonly compileExpressionSubquery?: CompilerContext['compileSubquery'];
 	/** Lexically visible relation bindings. */
 	readonly scope?: QueryScope;

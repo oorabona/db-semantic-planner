@@ -86,6 +86,7 @@ export interface SetOperationBuilder<TResult = unknown> {
 /** Minimal interface to extract a QueryIntent from a builder. @internal */
 export interface QueryIntentSource {
 	buildIntent(): QueryIntent;
+	buildRelationalReadIntent?(path: string): QueryIntent;
 }
 
 // ============================================================================
@@ -142,7 +143,7 @@ export class SetOperationBuilderImpl<TResult = unknown>
 		all: boolean,
 		other: QueryBuilder<TResult>,
 	): SetOperationBuilder<TResult> {
-		const rightIntent = (other as unknown as QueryIntentSource).buildIntent();
+		const rightIntent = readIntent(other as unknown as QueryIntentSource);
 		const newIntent: SetOperationIntent = {
 			kind: 'setOperation',
 			op,
@@ -161,7 +162,7 @@ export class SetOperationBuilderImpl<TResult = unknown>
 	dump(): Dump {
 		const adapter = this.requireAdapter();
 		const compiled = adapter.compileSetOperation(this.intent, this.model);
-		// Set operations bypass the semantic planner — no PlanReport is produced.
+		// Each builder leaf retains its plan; the set envelope has no combined PlanReport.
 		// compiledAt is always included so observability hooks that read
 		// dump.meta?.compiledAt receive a consistent shape regardless of query type.
 		const meta: DumpMeta = {
@@ -219,7 +220,13 @@ export function buildSetOperationIntent(
 		kind: 'setOperation',
 		op,
 		all,
-		left: left.buildIntent(),
-		right: right.buildIntent(),
+		left: readIntent(left),
+		right: readIntent(right),
 	};
+}
+
+function readIntent(source: QueryIntentSource): QueryIntent {
+	return (
+		source.buildRelationalReadIntent?.('set operation') ?? source.buildIntent()
+	);
 }

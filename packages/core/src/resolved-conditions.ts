@@ -81,6 +81,8 @@ export function resolveConditionContext(
 	initialAliasCount = 0,
 	additionalOuterRanges: readonly ResolvedRange[] = [],
 	mode?: {
+		readonly defaultFilters?: Readonly<Record<string, WhereIntent>> | undefined;
+		readonly rootDefaultFilter?: ResolvedCondition | undefined;
 		readonly subqueryRefusal?: string;
 		readonly firstJoinByQualifier?: ReadonlyMap<string, number>;
 		readonly intentIndex?: number;
@@ -111,7 +113,7 @@ export function resolveConditionContext(
 	if (mode?.include)
 		writtenQualifiers.set(visible, new Map([[root.table, root]]));
 	// ON preserves the authored root qualifier even for a self-join.
-	if (mode && !mode.include)
+	if (mode?.subqueryRefusal && !mode.include)
 		writtenQualifiers.set(visible, new Map([[root.alias, root]]));
 	const activeNames = new Set(visible.map((r) => r.alias));
 	let scopeIndex = 0;
@@ -390,11 +392,17 @@ export function resolveConditionContext(
 		}));
 		activeNames.delete(range.alias);
 		if (isExpressionBody) expressionNext.set(query.from, expressionPrior);
+		const defaultFilter = resolveScanDefaultFilter(
+			mode?.defaultFilters,
+			range,
+			model,
+		);
 		const result: ResolvedSubqueryBody =
 			use === 'exists'
 				? {
 						use: 'exists',
 						range,
+						...(defaultFilter && { defaultFilter }),
 						...(select && { select: projection }),
 						...(where && { where }),
 					}
@@ -402,6 +410,7 @@ export function resolveConditionContext(
 					? {
 							use: 'in',
 							range,
+							...(defaultFilter && { defaultFilter }),
 							select:
 								projection.kind === 'column'
 									? projection.operand
@@ -418,6 +427,7 @@ export function resolveConditionContext(
 					: {
 							use: 'scalar',
 							range,
+							...(defaultFilter && { defaultFilter }),
 							select: projection,
 							orderBy,
 							...(where && { where }),
@@ -476,14 +486,14 @@ export function resolveConditionContext(
 							],
 				}
 			: pathFor(source, segments, node.kind);
-		const mode =
+		const quantifier =
 			node.kind === 'notExists'
 				? 'none'
 				: node.kind === 'relationFilter'
 					? node.mode
 					: 'some';
 		const vacuous =
-			mode === 'every' &&
+			quantifier === 'every' &&
 			(!nested || (nested.kind === 'and' && nested.conditions.length === 0));
 		const subqueryScope = `where-relation-${scopeIndex++}`;
 		let from = source;
@@ -493,7 +503,12 @@ export function resolveConditionContext(
 				alias = generated(hop.toTable, `_exists_${aliasCount++}`);
 			const to = allocator.allocate(hop.toTable, alias, subqueryScope);
 			allocator.reserve(to.alias);
-			const result = { from, to };
+			const defaultFilter = resolveScanDefaultFilter(
+				mode?.defaultFilters,
+				to,
+				model,
+			);
+			const result = { from, to, ...(defaultFilter && { defaultFilter }) };
 			from = to;
 			return result;
 		});
@@ -524,6 +539,14 @@ export function resolveConditionContext(
 					source: includeSource,
 					range,
 					type: options.join ?? 'inner',
+					...(() => {
+						const defaultFilter = resolveScanDefaultFilter(
+							mode?.defaultFilters,
+							range,
+							model,
+						);
+						return defaultFilter ? { defaultFilter } : {};
+					})(),
 				});
 			}
 		}
@@ -532,7 +555,7 @@ export function resolveConditionContext(
 		return {
 			kind: 'relation',
 			path,
-			quantifier: mode,
+			quantifier,
 			source,
 			hops: hopRanges,
 			target,
@@ -717,6 +740,7 @@ export function resolveConditionContext(
 			case 'aggregate':
 				return {
 					kind: 'call',
+					aggregate: true,
 					name: input.function.toLowerCase(),
 					args: [
 						input.field === '*' ? { kind: 'star' } : ref(input.field),
@@ -788,6 +812,12 @@ export function resolveConditionContext(
 		enclosing: readonly (readonly ResolvedRange[])[],
 		fieldOverride?: string,
 	): ResolvedCondition => {
+		if (
+			current === root &&
+			node === mode?.defaultFilters?.[root.table] &&
+			mode.rootDefaultFilter
+		)
+			return mode.rootDefaultFilter;
 		if (node.kind === 'and' || node.kind === 'or')
 			return {
 				kind: node.kind,
@@ -977,5 +1007,169 @@ export function resolveConditionContext(
 	};
 	const resolved = where ? visit(where, root, visible, enclosing) : undefined;
 	if (mode?.aliasState) mode.aliasState.count = aliasCount;
+	return resolved;
+}
+
+/** Shared schema/planning validation of a filter over exactly one physical range. */
+export function assertScanDefaultFilter(
+	condition: ResolvedCondition,
+	range: ResolvedRange,
+	model: ModelIR | undefined,
+): void {
+	const table = range.table;
+	const refuse = (part: string): never => {
+		throw new Error(part);
+	};
+	const column = (operand: ResolvedColumnOperand): void => {
+		if (operand.kind !== 'column' || operand.range !== range)
+			refuse('forbidden column range or outer reference');
+		if (
+			model &&
+			!model
+				.getTable(table)
+				?.columns.some((column) => column.name === operand.column)
+		)
+			refuse(`invalid column '${operand.column}'`);
+	};
+	const expression = (
+		node: ResolvedExpression,
+		functionArgument = false,
+	): void => {
+		switch (node.kind) {
+			case 'ref':
+				column(node.operand);
+				return;
+			case 'wholeRow':
+				if (node.range !== range) refuse('forbidden whole-row range');
+				return;
+			case 'call':
+				node.args.forEach((argument) => {
+					expression(argument, true);
+				});
+				if (node.filter) visit(node.filter);
+				node.orderBy?.forEach((order) => {
+					expression(order.expression);
+				});
+				if (
+					node.aggregate ||
+					node.filter ||
+					node.orderBy ||
+					node.distinct !== undefined
+				)
+					refuse('forbidden aggregate call');
+				return;
+			case 'operator':
+				node.operands.forEach((operand) => {
+					expression(operand);
+				});
+				return;
+			case 'cast':
+				expression(node.expression);
+				return;
+			case 'case':
+				node.branches.forEach((branch) => {
+					visit(branch.condition);
+					expression(branch.result);
+				});
+				if (node.fallback) expression(node.fallback);
+				return;
+			case 'array':
+				node.elements.forEach((element) => {
+					expression(element);
+				});
+				return;
+			case 'namedArg':
+				if (!functionArgument)
+					refuse("forbidden operand 'namedArg' outside a function argument");
+				expression(node.value);
+				return;
+			case 'literal':
+			case 'parameter':
+				return;
+			case 'star':
+				if (!functionArgument)
+					refuse("forbidden operand 'star' outside a function argument");
+				return;
+			case 'subquery':
+				refuse("forbidden operand 'subquery'");
+				return;
+			default: {
+				const exhaustive: never = node;
+				refuse(`unsupported expression '${String(exhaustive)}'`);
+			}
+		}
+	};
+	const rhs = (operand: ResolvedRhs): void => {
+		switch (operand.kind) {
+			case 'column':
+			case 'outerRef':
+				column(operand);
+				return;
+			default:
+				expression(operand);
+		}
+	};
+	const visit = (node: ResolvedCondition): void => {
+		switch (node.kind) {
+			case 'and':
+			case 'or':
+				node.conditions.forEach(visit);
+				return;
+			case 'not':
+				visit(node.condition);
+				return;
+			case 'expression':
+				expression(node.expression);
+				if (node.comparison) rhs(node.comparison.right);
+				return;
+			case 'comparison':
+				column(node.left);
+				rhs(node.right);
+				return;
+			case 'in':
+				column(node.left);
+				if (node.operand.kind !== 'values')
+					refuse("forbidden subquery in 'in'");
+				return;
+			case 'like':
+			case 'any':
+			case 'null':
+			case 'range':
+			case 'jsonContains':
+			case 'jsonExists':
+				column(node.left);
+				return;
+			default:
+				refuse(`forbidden condition kind '${node.kind}'`);
+		}
+	};
+	visit(condition);
+}
+
+/** Resolve one physical scan's filter in isolation and reject additional ranges. */
+export function resolveScanDefaultFilter(
+	filters: Readonly<Record<string, WhereIntent>> | undefined,
+	range: ResolvedRange,
+	model: ModelIR | undefined,
+): ResolvedCondition | undefined {
+	const filter = filters?.[range.table];
+	if (!filter) return undefined;
+	const refusal = `Default filter for table '${range.table}' must reference only its own scan.`;
+	let resolved: ResolvedCondition | undefined;
+	try {
+		resolved = resolveConditionContext(
+			filter,
+			range,
+			[range],
+			[],
+			new RangeAllocator(),
+			model,
+		);
+		if (resolved) assertScanDefaultFilter(resolved, range, model);
+	} catch (error) {
+		throw new Error(
+			`${refusal} ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
 	return resolved;
 }

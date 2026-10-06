@@ -1,5 +1,9 @@
-import { resolveReportIncludes } from '@dbsp/core/internal';
+import {
+	getRelationalReadPlan,
+	resolveReportIncludes,
+} from '@dbsp/core/internal';
 import { markPlannedReport } from '@dbsp/types/internal';
+import { andExpr } from './ast-helpers.js';
 import {
 	buildSubqueryFromIntent,
 	compileCondition,
@@ -7,6 +11,7 @@ import {
 } from './condition-compiler.js';
 import { createWhereDispatcher } from './handlers/index.js';
 import { assertRelationalOutput } from './relational-output.js';
+import { compileResolvedCondition } from './resolved-condition-compiler.js';
 /**
  * Recursive CTE and unnest-CTE compilation.
  * Extracted from PgAdapter.compileRecursive(), compileCteQuery(),
@@ -102,6 +107,7 @@ function getRegisteredProjection(
 export function createPlanReportForQuery(
 	query: QueryIntent,
 	model: ModelIR | undefined,
+	defaultFilters?: CompileOptions['defaultFilters'],
 ): PlanReport {
 	return markPlannedReport({
 		rootTable: query.from,
@@ -109,7 +115,10 @@ export function createPlanReportForQuery(
 		warnings: [],
 		ctes: [],
 		intent: query,
-		execution: resolveReportIncludes(query, [], model),
+		execution: resolveReportIncludes(query, [], model, {
+			...(defaultFilters && { defaultFilters }),
+			skipRootDefaultFilter: true,
+		}),
 		metadata: {
 			planningTimeMs: 0,
 			relationsAnalyzed: 0,
@@ -123,16 +132,21 @@ function createPlanReportForCteQuery(
 	deps: AdapterCompilerDeps,
 	hasRegisteredSource = false,
 ): PlanReport {
-	if (hasRegisteredSource || hasBindingName(deps.bindingNames, query.from)) {
-		return createPlanReportForQuery(query, deps.model);
+	const queryLocalSource =
+		hasRegisteredSource || hasBindingName(deps.bindingNames, query.from);
+	const issued = getRelationalReadPlan(query, queryLocalSource);
+	if (issued) return issued;
+	if (queryLocalSource) {
+		return createPlanReportForQuery(query, deps.model, deps.defaultFilters);
 	}
 	if (
 		deps.model === undefined ||
 		deps.model.getTable(query.from) === undefined
 	) {
-		return createPlanReportForQuery(query, deps.model);
+		return createPlanReportForQuery(query, deps.model, deps.defaultFilters);
 	}
 	return planFn(query, deps.model, {
+		...(deps.defaultFilters && { defaultFilters: deps.defaultFilters }),
 		...(deps.dialectCapabilities !== undefined && {
 			dialectCapabilities: deps.dialectCapabilities,
 		}),
@@ -627,6 +641,22 @@ export function compileRecursive<T = unknown>(
 	}
 
 	// Build the recursive CTE
+	if (report.recursiveFilters?.anchor) {
+		const predicate = compileResolvedCondition(
+			report.recursiveFilters.anchor,
+			config.ctx,
+			state,
+		);
+		config.anchorWhere = config.anchorWhere
+			? andExpr(config.anchorWhere, predicate)
+			: predicate;
+	}
+	if (report.recursiveFilters?.step)
+		config.stepWhere = compileResolvedCondition(
+			report.recursiveFilters.step,
+			config.ctx,
+			state,
+		);
 	const { cte, extraCtes } = buildRecursiveCte(config);
 
 	// Build final target list (include __depth and __path when tracked)

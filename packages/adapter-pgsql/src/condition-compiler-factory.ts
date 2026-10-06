@@ -1,4 +1,5 @@
 import { EXPRESSION_BRAND, REF_BRAND } from '@dbsp/types';
+import { compileResolvedCondition } from './resolved-condition-compiler.js';
 /**
  * Unified WHERE compiler: compiles WhereIntent directly to PostgreSQL AST nodes.
  *
@@ -325,6 +326,9 @@ export function createConditionCompiler(
 			defaultPkColumnName: ctx.defaultPkColumnName,
 			deriveFkColumnName: ctx.deriveFkColumnName,
 			compileSubquery: ctx.compileExpressionSubquery,
+			...(ctx.resolvedConditions && {
+				resolvedConditions: ctx.resolvedConditions,
+			}),
 			...(ctx.schemaName !== undefined && { schema: ctx.schemaName }),
 			...(ctx.dialectCapabilities !== undefined && {
 				dialectCapabilities: ctx.dialectCapabilities,
@@ -1028,6 +1032,9 @@ export function createConditionCompiler(
 		dispatcher: WhereDispatcher,
 		handlerCtx: CompilerContext,
 	): Node {
+		const resolved = ctx.resolvedConditions?.get(intent);
+		if (resolved)
+			return compileResolvedCondition(resolved, handlerCtx, ctx.paramState);
 		if (
 			(((ctx.position === 'where' || ctx.position === 'subquery') &&
 				ctx.directRootWhere) ||

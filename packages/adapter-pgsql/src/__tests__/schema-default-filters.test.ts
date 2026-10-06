@@ -12,7 +12,6 @@ import {
 	fn,
 	inSubquery,
 	isNull,
-	literal,
 	namedArg,
 	not,
 	op,
@@ -229,8 +228,6 @@ it.each([
 
 it.each([
 	op('+', exprRef('id'), param(1)).eq(7),
-	fn('count', star()).filter(eq('id', 7)).eq(1),
-	fn('array_agg', exprRef('id'), aggOrderBy('posts.id')).eq(array(literal(7))),
 	exprRef('id').eq(cast(exprRef('posts.id'), 'integer')),
 	eq('id', cast(exprRef('posts.id'), 'integer')),
 ])('accepts own-range expression kind and RHS %j', (filter) => {
@@ -253,4 +250,71 @@ it('refuses relation paths to another table', () => {
 	).toThrowError(
 		"Default filter for table 'posts': forbidden condition kind 'relation'",
 	);
+});
+
+// #961: schema validation must refuse expressions invalid in a scan WHERE.
+it.each([
+	[fn('count', star()).filter(eq('id', 7)).eq(1), 'forbidden aggregate call'],
+	[
+		fn('array_agg', exprRef('id'), aggOrderBy('posts.id')).eq(1),
+		'forbidden aggregate call',
+	],
+	[
+		new ExpressionRef({
+			kind: 'customFn',
+			name: 'array_agg',
+			args: [exprRef('id').intent],
+			distinct: true,
+		}).eq(1),
+		'forbidden aggregate call',
+	],
+	[
+		new ExpressionRef({ kind: 'aggregate', function: 'count', field: '*' }).eq(
+			1,
+		),
+		'forbidden aggregate call',
+	],
+	[star().eq(1), "forbidden operand 'star' outside a function argument"],
+	[
+		namedArg('value', exprRef('id')).eq(1),
+		"forbidden operand 'namedArg' outside a function argument",
+	],
+])('refuses #961 default filter %j at schema()', (filter, reason) => {
+	expect(() =>
+		schema(definition, undefined, { defaultFilters: { posts: filter } }),
+	).toThrowError(`Default filter for table 'posts': ${reason}`);
+});
+
+it('refuses a self-relation as another range at schema()', () => {
+	expect(() =>
+		schema(
+			{
+				posts: {
+					...definition.posts,
+					parentId: ref('posts', {
+						nullable: true,
+						roles: { parent: 'parent', children: 'children' },
+					}),
+				},
+			},
+			undefined,
+			{ defaultFilters: { posts: isNull('parent.id') } },
+		),
+	).toThrowError(
+		"Default filter for table 'posts': forbidden condition kind 'relation'",
+	);
+});
+
+it('accepts a scalar function over its own column with exact SQL', () => {
+	const db = schema(definition, undefined, {
+		defaultFilters: { posts: fn('abs', exprRef('id')).eq(7) },
+	});
+	const orm = createOrm({
+		schema: db,
+		adapter: createPgCompileOnlyAdapter({ model: db.model }),
+	});
+	expect(orm.select('posts').dump()).toMatchObject({
+		sql: 'SELECT posts.* FROM posts WHERE abs(posts.id) = $1',
+		params: [7],
+	});
 });

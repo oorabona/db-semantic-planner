@@ -118,10 +118,15 @@ export interface CompilerContext {
 	 * @param paramOffset - Current outer paramIndex; inner $N are renumbered by this offset
 	 * @returns The compiled SelectStmt AST node and the inner parameters
 	 */
+	readonly resolvedConditions?: ReadonlyMap<
+		import('@dbsp/types').WhereIntent,
+		import('@dbsp/types').ResolvedCondition
+	>;
 	readonly compileSubquery?: (
 		query: import('@dbsp/types').QueryIntent,
 		paramOffset: number,
 		parent?: CompilerContext,
+		expression?: import('@dbsp/types').ExpressionIntent,
 	) => { ast: Node; parameters: readonly unknown[] };
 	/**
 	 * Optional recursive compiler for NQL-origin SELECT expression values nested

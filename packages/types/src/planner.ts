@@ -241,6 +241,10 @@ export interface PlanReport {
 // ============================================================================
 
 export interface PlanOptions {
+	/** Per-table read predicates supplied by the issuing ORM. */
+	defaultFilters?: Readonly<
+		Record<string, import('./intent-ast.js').WhereIntent>
+	>;
 	/** Emitted root names reserved by the issuing adapter before WHERE range allocation. */
 	whereReservedNames?: readonly string[];
 	/**
@@ -300,6 +304,10 @@ export interface PlanOptions {
 export interface RecursivePlanReport
 	extends Omit<PlanReport, 'intent' | 'metadata'> {
 	readonly intent: RecursiveIntent;
+	readonly recursiveFilters?: {
+		readonly anchor?: import('./resolved-conditions.js').ResolvedCondition;
+		readonly step?: import('./resolved-conditions.js').ResolvedCondition;
+	};
 	readonly metadata: PlanReport['metadata'] & {
 		readonly isRecursive: true;
 		readonly traversalKind: 'adjacency' | 'edge-table' | 'custom';
@@ -309,6 +317,7 @@ export interface RecursivePlanReport
 }
 
 export interface RecursivePlanOptions {
+	readonly defaultFilters?: PlanOptions['defaultFilters'];
 	/** Force bidirectional edge handling strategy */
 	readonly forceBidirectionalStrategy?: 'union' | 'union-all';
 }

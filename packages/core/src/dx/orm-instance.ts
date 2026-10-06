@@ -571,6 +571,24 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 	);
 
 	return {
+		withoutDefaultFilters(): OrmInstanceInternal<DB> {
+			return createOrmInstance(
+				model,
+				strictMode,
+				relationHints,
+				adapter,
+				schemaName,
+				dialectCapabilities,
+				schemaDefinition,
+				globalPlanOptions,
+				undefined,
+				hookStore,
+				onHookError,
+				inTransaction,
+				tablesProxy,
+				onObserverError,
+			);
+		},
 		strictMode,
 		// Reflect the REAL transaction state of the backing adapter so callers can
 		// enforce a top-level precondition. This is authoritative even when the ORM

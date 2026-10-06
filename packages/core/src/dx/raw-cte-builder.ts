@@ -227,10 +227,10 @@ export function createRawCteBuilder<TResult = unknown>(
 ): RawCteQueryBuilder<TResult> {
 	const baseIntent = (
 		options.base as unknown as QueryBuilderImpl<unknown>
-	).buildIntent();
+	).buildRelationalReadIntent('raw CTE');
 	const stepIntent = (
 		options.step as unknown as QueryBuilderImpl<unknown>
-	).buildIntent();
+	).buildRelationalReadIntent('raw CTE');
 
 	const rawCteIntent: RawCteIntent = {
 		kind: 'rawCte',

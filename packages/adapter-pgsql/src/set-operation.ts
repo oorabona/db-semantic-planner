@@ -1,3 +1,4 @@
+import { getRelationalReadPlan } from '@dbsp/core/internal';
 /**
  * Set operation compiler (UNION / INTERSECT / EXCEPT)
  *
@@ -158,9 +159,11 @@ export function createLeafCompileFn(
 	options?: CompileOptions,
 ): LeafCompileFn {
 	return (query: QueryIntent) => {
-		const planReport = planFn(query, model, {
-			dialectCapabilities: adapter.dialectCapabilities,
-		});
+		const planReport =
+			getRelationalReadPlan(query) ??
+			planFn(query, model, {
+				dialectCapabilities: adapter.dialectCapabilities,
+			});
 		return fromCompiledQuery(
 			adapter.compile(planReport, { ...options, model }),
 		);

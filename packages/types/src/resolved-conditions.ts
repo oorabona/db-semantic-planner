@@ -40,6 +40,8 @@ export type ResolvedExpression =
 	  }
 	| {
 			readonly kind: 'call';
+			/** Preserve explicit aggregate intent after lowering to a call. */
+			readonly aggregate?: true;
 			readonly name: string;
 			readonly args: readonly ResolvedExpression[];
 			readonly distinct?: boolean;
@@ -97,11 +99,13 @@ export type ResolvedSubqueryBody =
 			readonly use: 'exists';
 			readonly select?: ResolvedProjection;
 			readonly range: ResolvedRange;
+			readonly defaultFilter?: ResolvedCondition;
 			readonly where?: ResolvedCondition;
 	  }
 	| {
 			readonly use: 'in';
 			readonly range: ResolvedRange;
+			readonly defaultFilter?: ResolvedCondition;
 			readonly select: ResolvedColumnOperand;
 			readonly where?: ResolvedCondition;
 			readonly orderBy: readonly ResolvedOrder[];
@@ -110,6 +114,7 @@ export type ResolvedSubqueryBody =
 	| {
 			readonly use: 'scalar';
 			readonly range: ResolvedRange;
+			readonly defaultFilter?: ResolvedCondition;
 			readonly select: ResolvedProjection;
 			readonly where?: ResolvedCondition;
 			readonly orderBy: readonly ResolvedOrder[];
@@ -121,13 +126,18 @@ export interface ResolvedRelationPredicate {
 	readonly quantifier: 'some' | 'every' | 'none';
 	readonly path: ResolvedRelationPath;
 	readonly source: ResolvedRange;
-	readonly hops: readonly { from: ResolvedRange; to: ResolvedRange }[];
+	readonly hops: readonly {
+		from: ResolvedRange;
+		to: ResolvedRange;
+		defaultFilter?: ResolvedCondition;
+	}[];
 	readonly target: ResolvedRange;
 	readonly joins: readonly {
 		path: ResolvedRelationPath;
 		source: ResolvedRange;
 		range: ResolvedRange;
 		type: 'inner' | 'left';
+		defaultFilter?: ResolvedCondition;
 	}[];
 	readonly predicate?: ResolvedCondition;
 	readonly vacuous: boolean;

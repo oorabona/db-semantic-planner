@@ -62,7 +62,12 @@ export class ResultHydrator<TResult = unknown> {
 	private readonly from: string;
 	private readonly schemaName: string | undefined;
 
-	constructor(model: ModelIR, from: string, schemaName?: string) {
+	constructor(
+		model: ModelIR,
+		from: string,
+		schemaName?: string,
+		private readonly planOptions: import('@dbsp/types').RecursivePlanOptions = {},
+	) {
 		this.model = model;
 		this.from = from;
 		this.schemaName = schemaName;
@@ -194,7 +199,7 @@ export class ResultHydrator<TResult = unknown> {
 		);
 
 		// Plan and compile the recursive query
-		const report = planRecursive(recursiveIntent, this.model);
+		const report = planRecursive(recursiveIntent, this.model, this.planOptions);
 
 		// Build compile options with exactOptionalPropertyTypes compliance
 		const compileOptions: { schemaName?: string } = {};

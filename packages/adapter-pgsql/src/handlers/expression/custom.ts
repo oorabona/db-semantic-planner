@@ -338,6 +338,7 @@ export function compileExpressionIntent(
 				sq.query,
 				state.paramIndex,
 				ctx,
+				intent,
 			);
 			// Append inner parameters to outer state (shared array, appended in order)
 			for (const p of innerParams) {

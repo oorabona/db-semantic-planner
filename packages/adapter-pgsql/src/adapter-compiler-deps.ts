@@ -17,6 +17,7 @@ import type { RelationTargetProjectionRegistry } from './relation-target-project
  * Passed by reference — constructed once in PgAdapter constructor.
  */
 export interface AdapterCompilerDeps {
+	readonly defaultFilters?: import('@dbsp/types').PlanOptions['defaultFilters'];
 	readonly dbCasing?: DbCasing;
 	readonly schemaName: string | undefined;
 	readonly model: ModelIR | undefined;
