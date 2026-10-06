@@ -12,7 +12,7 @@ differ fundamentally in *where the schema knowledge comes from*.
   the safe, type-guided path when the FK is declared in the schema.
 
 - **`rawExists(subquery(...))`** — you build the subquery explicitly, with control
-  over the supported `SELECT` list and `WHERE` clause. Unsupported body modifiers are refused at `plan()`. Inner table
+  over the supported `SELECT` list and `WHERE` clause. Unsupported body modifiers are refused at `plan()` on the root SELECT WHERE route. Mutations and the other direct routes refuse them at compilation. Inner table
   aliases are generated distinctly within PostgreSQL’s 63-byte limit. The wrapper
   does not correlate its target with the parent. Relation predicates inside the
   body still resolve declared keys and model casts. This is the escape hatch for

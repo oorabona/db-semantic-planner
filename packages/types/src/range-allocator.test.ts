@@ -40,3 +40,16 @@ it('bound aliases ignore generated reservations and refuse only scope duplicates
 	expect(allocator.bind('other', 'foo_bar', 'inner').alias).toBe('foo_bar');
 	expect(allocator.allocate('other', 'foo_bar').alias).toBe('foo_bar_1');
 });
+
+it('generated aliases fit UTF-8 bytes and check complete truncated suffix collisions', () => {
+	const allocator = new RangeAllocator();
+	const base = 'é'.repeat(32);
+	expect(allocator.allocate('a', base).alias).toBe('é'.repeat(31));
+	expect(allocator.allocate('b', base).alias).toBe(`${'é'.repeat(30)}_1`);
+	expect(allocator.allocate('c', base).alias).toBe(`${'é'.repeat(30)}_2`);
+	for (let suffix = 3; suffix <= 10; suffix++) {
+		const alias = allocator.allocate('d', base).alias;
+		expect(alias).toBe(`${'é'.repeat(30)}_${suffix}`);
+		expect(new TextEncoder().encode(alias).length).toBeLessThanOrEqual(63);
+	}
+});
