@@ -104,6 +104,19 @@ export function resolveConditionContext(
 	if (joinOn) writtenQualifiers.set(visible, new Map([[root.alias, root]]));
 	const activeNames = new Set(visible.map((r) => r.alias));
 	let scopeIndex = 0;
+	const assertQualifierVisible = (
+		qualifier: string,
+		ranges: readonly ResolvedRange[],
+	): void => {
+		if (
+			ranges === visible &&
+			joinOn?.unavailableQualifiers.includes(qualifier) &&
+			!ranges.some((range) => range.alias === qualifier)
+		)
+			throw new Error(
+				`WHERE qualifier '${qualifier}' is not visible in this query.`,
+			);
+	};
 	const column = (
 		name: string,
 		current: ResolvedRange,
@@ -151,6 +164,7 @@ export function resolveConditionContext(
 			}
 		} else if (parts.length > 1) {
 			const qualifier = parts.shift()!;
+			assertQualifierVisible(qualifier, ranges);
 			const candidates = ranges.filter((r) => r.table === qualifier);
 			const exact =
 				writtenQualifiers.get(ranges)?.get(qualifier) ??
@@ -770,13 +784,7 @@ export function resolveConditionContext(
 		) {
 			const parts = node.field.split('.');
 			const qualifier = parts[0]!;
-			if (
-				ranges === visible &&
-				joinOn?.unavailableQualifiers.includes(qualifier)
-			)
-				throw new Error(
-					`WHERE qualifier '${qualifier}' is not visible in this query.`,
-				);
+			assertQualifierVisible(qualifier, ranges);
 			const candidates = ranges.filter((r) => r.table === qualifier);
 			const exact =
 				writtenQualifiers.get(ranges)?.get(qualifier) ??

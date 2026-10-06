@@ -356,6 +356,7 @@ function compileJoinIntents(
 		}
 		const onContext: CompilerContext = {
 			rootTable,
+			currentAlias: rootBinding.qualifier,
 			scope: joinScope,
 			...(schemaName !== undefined && { schema: schemaName }),
 			dbCasing: deps.dbCasing ?? 'preserve',
