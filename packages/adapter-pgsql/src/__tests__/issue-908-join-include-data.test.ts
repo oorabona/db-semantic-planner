@@ -128,7 +128,9 @@ it('adapter refuses an external to-many join report', () => {
 		),
 	};
 	expect(() => adapter.compile(external, { model })).toThrow(
-		new Error('Includes compile only from a report planned in this process'),
+		new Error(
+			'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+		),
 	);
 });
 it('join include where stays in root WHERE', () => {
@@ -263,7 +265,9 @@ it('adapter refuses an external report that omits relation cardinality', () => {
 		return { ...d, choice: 'join', context };
 	});
 	expect(() => adapter.compile({ ...report, decisions }, { model })).toThrow(
-		new Error('Includes compile only from a report planned in this process'),
+		new Error(
+			'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+		),
 	);
 });
 it('lateral transport uses a private marker even when selected fields are all null', () => {

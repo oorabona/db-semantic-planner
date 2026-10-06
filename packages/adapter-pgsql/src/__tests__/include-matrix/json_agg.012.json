@@ -16,7 +16,7 @@
     "params": [],
     "error": {
       "class": "Error",
-      "message": "Includes compile only from a report planned in this process"
+      "message": "Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation"
     },
     "payloads": [],
     "rows": []
@@ -120,7 +120,7 @@
     "params": [],
     "error": {
       "class": "Error",
-      "message": "Includes compile only from a report planned in this process"
+      "message": "Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation"
     },
     "payloads": [],
     "rows": []
@@ -339,7 +339,7 @@
     "params": [],
     "error": {
       "class": "Error",
-      "message": "Includes compile only from a report planned in this process"
+      "message": "Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation"
     },
     "payloads": [],
     "rows": []
@@ -513,7 +513,7 @@
     "params": [],
     "error": {
       "class": "Error",
-      "message": "Includes compile only from a report planned in this process"
+      "message": "Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation"
     },
     "payloads": [],
     "rows": []
@@ -694,7 +694,7 @@
     "params": [],
     "error": {
       "class": "Error",
-      "message": "Includes compile only from a report planned in this process"
+      "message": "Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation"
     },
     "payloads": [],
     "rows": []
@@ -838,7 +838,7 @@
     "params": [],
     "error": {
       "class": "Error",
-      "message": "Includes compile only from a report planned in this process"
+      "message": "Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation"
     },
     "payloads": [],
     "rows": []
@@ -942,7 +942,7 @@
     "params": [],
     "error": {
       "class": "Error",
-      "message": "Includes compile only from a report planned in this process"
+      "message": "Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation"
     },
     "payloads": [],
     "rows": []
@@ -1046,7 +1046,7 @@
     "params": [],
     "error": {
       "class": "Error",
-      "message": "Includes compile only from a report planned in this process"
+      "message": "Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation"
     },
     "payloads": [],
     "rows": []

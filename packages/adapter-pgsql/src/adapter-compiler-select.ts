@@ -6,12 +6,7 @@ import { lowerResolvedIncludes } from './resolved-include-decisions.js';
  * @internal
  */
 
-import {
-	conditionNeedsPlanning,
-	countDistinctRelationPathsByName,
-	externalConditionRefusal,
-	resolveSelectWhere,
-} from '@dbsp/core/internal';
+import { countDistinctRelationPathsByName } from '@dbsp/core/internal';
 import type {
 	CompiledQuery,
 	CompileOptions,
@@ -24,7 +19,7 @@ import type {
 	QueryIntent,
 	SelectExecution,
 } from '@dbsp/types';
-import { RangeAllocator, resolveOutputReadHandling } from '@dbsp/types';
+import { resolveOutputReadHandling } from '@dbsp/types';
 import {
 	getTrustedNqlRelationFilterFields,
 	isPlannedReport,
@@ -43,7 +38,6 @@ import {
 import {
 	aggregateProjectionIdentity,
 	compiledProjectionLabels,
-	expressionProjectionIdentity,
 	rootProjectionLabels,
 } from './column-metadata.js';
 import { compileWhereIntent, type WhereCompilerCtx } from './compile-where.js';
@@ -137,7 +131,7 @@ function deduplicateRootProjection(
 							])
 						: expr.kind === 'aggregate'
 							? aggregateProjectionIdentity(expr)
-							: expressionProjectionIdentity(expr);
+							: stableJson(expr);
 				if (seen.has(identity)) return false;
 				seen.add(identity);
 				return true;
@@ -1085,27 +1079,11 @@ function assertSupportedIncludeWhere(
 	}
 }
 
-/** Joins and includes require authority from the module-private issuing registry. */
-export function assertPlannedReportIncludeAuthority(plan: PlanReport): void {
-	if (
-		!isPlannedReport(plan) &&
-		(plan.intent?.joins?.length ||
-			plan.executableIntent?.joins?.length ||
-			plan.execution?.joins?.length ||
-			plan.decisions.some(
-				(decision: { readonly type: string }) => decision.type === 'join',
-			))
-	)
-		throw new Error('Joins compile only from a report planned in this process');
-	if (
-		!isPlannedReport(plan) &&
-		(plan.intent?.include?.length ||
-			plan.executableIntent?.include?.length ||
-			plan.execution?.includes.length ||
-			plan.decisions.some((decision) => decision.type === 'include-strategy'))
-	) {
+/** Public SELECT compilation requires process-local planner authority. */
+export function assertPlannedReportAuthority(plan: PlanReport): void {
+	if (!isPlannedReport(plan)) {
 		throw new Error(
-			'Includes compile only from a report planned in this process',
+			'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 		);
 	}
 }
@@ -1123,17 +1101,6 @@ export function compileSelectEnvelope<T = unknown>(
 	const schemaName = deps.schemaName;
 
 	const resolvedModelForCompiler = options?.model ?? deps.model;
-	if (
-		!isPlannedReport(plan) &&
-		(plan.execution?.where ||
-			[plan.intent, plan.executableIntent].some((intent) =>
-				[intent?.where, intent?.having, intent?.select, intent?.orderBy].some(
-					conditionNeedsPlanning,
-				),
-			))
-	)
-		throw new Error(externalConditionRefusal);
-	assertPlannedReportIncludeAuthority(plan);
 	if (
 		[plan.intent, plan.executableIntent].some((intent) => {
 			const count = intent?.joins?.length ?? 0;
@@ -1216,19 +1183,7 @@ export function compileSelectEnvelope<T = unknown>(
 		};
 		indexIncludeStrategies(planForCompilation.execution?.includes ?? []);
 		assertSupportedIncludeWhere(execIntent.include, includeStrategies);
-		let resolvedWhere = plan.execution?.where;
-		if (!isPlannedReport(plan) && execIntent.where) {
-			const allocator = new RangeAllocator();
-			const root = allocator.allocate(plan.rootTable, plan.rootTable);
-			allocator.reserve(root.alias);
-			resolvedWhere = resolveSelectWhere(
-				execIntent.where,
-				root,
-				[root],
-				allocator,
-				resolvedModelForCompiler,
-			);
-		}
+		const resolvedWhere = plan.execution?.where;
 		const decisions = intentToDecisions(execIntent, plan.rootTable, {
 			omitRootWhere: true,
 			directConditions: true,

@@ -37,57 +37,6 @@ function isRef(value: unknown): value is { target: string } {
 	return value !== null && typeof value === 'object' && REF_BRAND in value;
 }
 
-export const externalConditionRefusal =
-	'Conditions with relation paths, outer references or subqueries compile only from a report planned in this process';
-
-/** External reports may use only columns and expressions in their root range. */
-export function conditionNeedsPlanning(value: unknown): boolean {
-	const visited = new WeakSet<object>();
-	return walk(value);
-
-	function walk(value: unknown): boolean {
-		if (!value || typeof value !== 'object' || isParamIntent(value))
-			return false;
-		if (visited.has(value)) return false;
-		visited.add(value);
-		const node = value as Record<string, unknown>;
-		if (
-			[
-				'exists',
-				'notExists',
-				'relationFilter',
-				'rawExists',
-				'rawNotExists',
-				'subquery',
-			].includes(String(node.kind)) ||
-			node.outer === true ||
-			(node.kind === 'fieldRef' && node.scope === 'outer')
-		)
-			return true;
-		if (
-			['field', 'column', 'target'].some(
-				(key) =>
-					typeof node[key] === 'string' && (node[key] as string).includes('.'),
-			)
-		)
-			return true;
-		if (node.subquery || node.query) return true;
-		return Object.entries(node).some(([key, child]) =>
-			!['value', 'values', 'pattern', 'defaultValue'].includes(key)
-				? walk(child)
-				: key === 'value' &&
-					child !== null &&
-					typeof child === 'object' &&
-					(EXPRESSION_BRAND in child ||
-						REF_BRAND in child ||
-						['ref', 'fieldRef'].includes(
-							String((child as Record<string, unknown>).kind),
-						)) &&
-					walk(child),
-		);
-	}
-}
-
 /** One traversal, with one shared allocator and no reconstruction of ancestor name sets. */
 export function resolveSelectWhere(
 	where: WhereIntent | undefined,

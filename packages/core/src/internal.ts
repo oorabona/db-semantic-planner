@@ -99,11 +99,7 @@ export {
 	validateRecursiveSetOperation,
 	validateResolvedIncludeStrategy,
 } from './planner.js';
-export {
-	conditionNeedsPlanning,
-	externalConditionRefusal,
-	resolveSelectWhere,
-} from './resolved-conditions.js';
+export { resolveSelectWhere } from './resolved-conditions.js';
 export {
 	observeIncludeDecisions,
 	resolveReportIncludes,

@@ -100,19 +100,15 @@ function makePlanWithRegexIncludeWhere(
  * convertWhereCondition handles the expression kind.
  */
 function makePlanWithTopLevelRegexWhere(regexValue = '^src/'): PlanReport {
-	return {
-		rootTable: 'files',
-		intent: {
+	return plan(
+		{
 			type: 'select',
 			from: 'files',
 			select: { type: 'fields', fields: ['id', 'path'] },
 			where: makeRegexWhereIntent(regexValue),
 		},
-		decisions: [],
-		warnings: [],
-		rootTableAlias: undefined,
-		schemaName: undefined,
-	} as unknown as PlanReport;
+		compileModel,
+	);
 }
 
 // ---------------------------------------------------------------------------

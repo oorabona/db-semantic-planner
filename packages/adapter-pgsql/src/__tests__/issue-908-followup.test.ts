@@ -70,7 +70,9 @@ it('join includes refuse payload-dropping shapes at plan and external compile', 
 				{ ...report, intent: { ...report.intent!, ...shape } },
 				{ model },
 			),
-		).toThrow('Includes compile only from a report planned in this process');
+		).toThrow(
+			'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+		);
 	}
 });
 it('belongsToMany refuses every planned join include source', () => {

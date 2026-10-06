@@ -13,28 +13,6 @@ import {
 } from './declared-name-resolver.js';
 import { stableJson } from './transition/stable-json.js';
 
-const cyclicProjectionIds = new WeakMap<object, number>();
-let nextCyclicProjectionId = 0;
-
-/** Cyclic bound payloads have object identity, never structural equality. */
-export function expressionProjectionIdentity(expression: object): string {
-	try {
-		return `structural:${stableJson(expression)}`;
-	} catch (error) {
-		if (
-			!(error instanceof TypeError) ||
-			error.message !== 'stableJson cannot serialize cyclic structures'
-		)
-			throw error;
-		let id = cyclicProjectionIds.get(expression);
-		if (id === undefined) {
-			id = nextCyclicProjectionId++;
-			cyclicProjectionIds.set(expression, id);
-		}
-		return `cyclic:${id}`;
-	}
-}
-
 type ProjectionSource = {
 	readonly table: string;
 	readonly column: ColumnIR;
@@ -521,7 +499,7 @@ export function rootProjectionLabels(
 								identity:
 									expr.kind === 'aggregate'
 										? `aggregate:${aggregateProjectionIdentity(expr)}`
-										: `expression:${expressionProjectionIdentity(expr)}`,
+										: `expression:${stableJson(expr)}`,
 								description: `${expr.kind}:${truncateIdentifier(key, 63)}`,
 							},
 			},

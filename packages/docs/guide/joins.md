@@ -402,7 +402,7 @@ All standard filter helpers (`eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like`, `and
 - **Dotted column notation in ON conditions** — use `'table.column'` (e.g. `'embeddings.id'`) to produce qualified column references in the ON clause. Unqualified names may be ambiguous when both sides of the join expose the same column name.
 - **Multiple joins nest left-to-right** — the SQL FROM clause wraps joins progressively: `((A JOIN B) JOIN C)`. This matches standard PostgreSQL left-associative join behavior and is transparent to the query result.
 
-A report passed to `adapter.compile()` whose intent, execution, or decisions declare joins must have been planned by the same loaded copy of dbsp (`plan()`, the ORM, or NQL). Copies and hand-built reports are refused. `compilePlan` from `@dbsp/adapter-pgsql/internal` compiles the decisions it is given.
+Compilation follows [Authored intent and execution authority](./observability.md#authored-intent-and-execution-authority).
 
 ## WHERE qualifiers and planning
 

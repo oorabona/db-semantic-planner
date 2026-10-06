@@ -339,19 +339,19 @@ describe('include camelCase resolution', () => {
 });
 
 describe('planned report registry', () => {
-	it('does not share authority with a second module instance', async () => {
+	it('rejects unissued reports in both module instances', async () => {
 		const first = await import('./internal.js');
-		const report = first.markPlannedReport({
+		const report: import('./planner.js').PlanReport = {
 			rootTable: 'rows',
 			intent: { type: 'select', from: 'rows' },
 			decisions: [],
 			warnings: [],
 			ctes: [],
 			metadata: { planningTimeMs: 0, relationsAnalyzed: 0, isAmbiguous: false },
-		});
+		};
 		vi.resetModules();
 		const second = await import('./internal.js');
-		expect(first.isPlannedReport(report)).toBe(true);
+		expect(first.isPlannedReport(report)).toBe(false);
 		expect(second.isPlannedReport(report)).toBe(false);
 	});
 });

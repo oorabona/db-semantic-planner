@@ -51,7 +51,7 @@ function poison(model: ModelIR): ModelIR {
 }
 const poisoned = poison(db.model);
 const refusal =
-	'Conditions with relation paths, outer references or subqueries compile only from a report planned in this process';
+	'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation';
 
 describe('resolved root WHERE refusal proofs (#891)', () => {
 	it('1: all eleven matrix positions retain outcomes under post-plan relation poison', () => {
@@ -269,7 +269,7 @@ describe('resolved root WHERE refusal proofs (#891)', () => {
 			expect(allocator.namesScanned).toBeLessThanOrEqual(8 * depth + 4);
 		}
 	});
-	it('6: external plain columns compile; metadata-bearing variants refuse', () => {
+	it('6: external plain columns and metadata-bearing variants refuse', () => {
 		const plain: PlanReport = {
 			rootTable: 'users',
 			decisions: [],
@@ -278,9 +278,15 @@ describe('resolved root WHERE refusal proofs (#891)', () => {
 			intent: { type: 'select', from: 'users', where: eq('id', 7) },
 			metadata: { planningTimeMs: 0, relationsAnalyzed: 0, isAmbiguous: false },
 		};
-		expect(adapter.compile(plain).sql).toBe(
+		expect(() => adapter.compile(plain)).toThrow(refusal);
+		const planned = orm.select('users').where(eq('id', 7)).plan();
+		expect(adapter.compile(planned).sql).toBe(
 			'SELECT users.* FROM users WHERE users.id = $1',
 		);
+		expect(() => adapter.compile(JSON.parse(JSON.stringify(planned)))).toThrow(
+			refusal,
+		);
+		expect(() => adapter.compile({ ...planned })).toThrow(refusal);
 		for (const where of [
 			exists('calls'),
 			eq('calls.id', 7),

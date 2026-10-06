@@ -67,7 +67,7 @@ describe('#894 nested strategy refusal', () => {
 			it(`refuses external ${parent}→${child} before returning SQL`, () =>
 				expect(() => adapter.compile(nestedPlan(parent, child))).toThrow(
 					new Error(
-						'Includes compile only from a report planned in this process',
+						'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 					),
 				));
 		}
@@ -185,7 +185,9 @@ it.each([10, 20])(
 			})),
 		};
 		expect(() => adapter.compile(external)).toThrow(
-			new Error('Includes compile only from a report planned in this process'),
+			new Error(
+				'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			),
 		);
 		expect(reads).toBe(0);
 	},
@@ -240,7 +242,9 @@ describe('#894 pathless include assignments', () => {
 			createPgCompileOnlyAdapter({ model: repeated.model }).compile(
 				pathless(p),
 			),
-		).toThrow('Includes compile only from a report planned in this process');
+		).toThrow(
+			'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+		);
 	});
 	it('refuses sibling same-name includes sharing one pathless decision', () => {
 		const p = pathless(nestedPlan('join', 'join'));
@@ -256,7 +260,9 @@ describe('#894 pathless include assignments', () => {
 				},
 				decisions: [decision!],
 			}),
-		).toThrow('Includes compile only from a report planned in this process');
+		).toThrow(
+			'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+		);
 	});
 	it('refuses reusing one decision through its relation and alias', () => {
 		const p = pathless(nestedPlan('join', 'join'));
@@ -272,11 +278,15 @@ describe('#894 pathless include assignments', () => {
 					},
 				],
 			}),
-		).toThrow('Includes compile only from a report planned in this process');
+		).toThrow(
+			'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+		);
 	});
 	it('refuses unique pathless external assignments', () => {
 		expect(() => adapter.compile(pathless(nestedPlan('join', 'join')))).toThrow(
-			new Error('Includes compile only from a report planned in this process'),
+			new Error(
+				'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			),
 		);
 	});
 });

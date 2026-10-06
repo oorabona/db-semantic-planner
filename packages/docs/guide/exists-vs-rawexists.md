@@ -188,3 +188,5 @@ hatch or restructure the query as a lateral join.
 - [Expression Primitives](./expression-primitives.md) — `outerRef()`, `op()`, `ref()`, `cast()`
 - [Joins](./joins.md) — manual JOIN API as an alternative to EXISTS for filter-with-data patterns
 - [ORM API Reference](/api/orm-api) — `subquery()` builder full reference
+
+Compilation follows [Authored intent and execution authority](./observability.md#authored-intent-and-execution-authority).

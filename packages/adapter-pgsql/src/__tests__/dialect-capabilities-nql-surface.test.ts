@@ -3,14 +3,14 @@ import {
 	compilePlan,
 	type SimplifiedPlanReport,
 } from '@dbsp/adapter-pgsql/internal';
-import { POSTGRESQL_CAPABILITIES } from '@dbsp/core';
+import { POSTGRESQL_CAPABILITIES, plan as planQuery, schema } from '@dbsp/core';
 import {
 	DUCKDB_CAPABILITIES,
 	MSSQL_CAPABILITIES,
 	MYSQL_CAPABILITIES,
 	SQLITE_CAPABILITIES,
 } from '@dbsp/core/internal';
-import type { DialectCapabilities, PlanReport } from '@dbsp/types';
+import type { DialectCapabilities } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -248,7 +248,19 @@ describe('NQL text surface dialect capability gates', () => {
 
 	it('threads adapter compile options into handler capability gates', () => {
 		const adapter = createPgCompileOnlyAdapter();
-		const plan = jsonPlan as unknown as PlanReport;
+		const plan = planQuery(
+			{
+				type: 'select',
+				from: 'audit_log',
+				where: {
+					kind: 'jsonContains',
+					field: 'details',
+					reversed: false,
+					value: { ip: '10.0.0.1' },
+				},
+			},
+			schema({ audit_log: { details: 'jsonb' } }).model,
+		);
 
 		expect(() =>
 			adapter.compile(plan, {

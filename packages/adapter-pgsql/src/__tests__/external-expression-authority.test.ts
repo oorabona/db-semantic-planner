@@ -12,7 +12,7 @@ const model = schema({
 }).model;
 const adapter = createPgCompileOnlyAdapter({ model });
 const refusal =
-	'Conditions with relation paths, outer references or subqueries compile only from a report planned in this process';
+	'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation';
 function external(): { -readonly [K in keyof PlanReport]: PlanReport[K] } {
 	return JSON.parse(
 		JSON.stringify(plan({ type: 'select', from: 'users' }, model)),
@@ -53,13 +53,13 @@ describe('external expression authority', () => {
 				refusal,
 			);
 		});
-		it(`compiles plain ${slot} ORDER BY`, () => {
+		it(`plans plain ${slot} ORDER BY`, () => {
 			const report = external();
 			report[slot] = {
 				...report.intent!,
 				orderBy: [{ field: 'id', direction: 'asc' }],
 			};
-			expect(adapter.compile(report).sql).toBe(
+			expect(adapter.compile(plan(report[slot]!, model)).sql).toBe(
 				'SELECT users.* FROM users ORDER BY users.id ASC',
 			);
 		});
@@ -94,7 +94,14 @@ describe('external expression authority', () => {
 					],
 				},
 			};
-			const compiled = adapter.compile(report);
+			const issued = plan(report.intent!, model);
+			if (shape === 'cyclic') {
+				expect(() => adapter.compile(issued)).toThrow(
+					'stableJson cannot serialize cyclic structures',
+				);
+				return;
+			}
+			const compiled = adapter.compile(issued);
 			expect(compiled.sql).toBe(
 				'SELECT lag(users.id, $1, $2) OVER (ORDER BY users.id ASC) AS previous FROM users',
 			);
@@ -102,7 +109,7 @@ describe('external expression authority', () => {
 			expect(compiled.parameters[1]).toBe(payload);
 		},
 	);
-	it('handles cyclic non-payload projection metadata without overflowing', () => {
+	it('preserves main refusal of cyclic non-payload projection metadata', () => {
 		const expression = {
 			kind: 'ref' as const,
 			column: 'id',
@@ -114,6 +121,8 @@ describe('external expression authority', () => {
 			...report.intent!,
 			select: { type: 'expressions', columns: [expression] },
 		};
-		expect(adapter.compile(report).sql).toBe('SELECT id FROM users');
+		expect(() => adapter.compile(plan(report.intent!, model))).toThrow(
+			'stableJson cannot serialize cyclic structures',
+		);
 	});
 });

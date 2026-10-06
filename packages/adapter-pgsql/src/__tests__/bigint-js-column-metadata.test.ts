@@ -1,4 +1,8 @@
 import {
+	compilePlan,
+	type SimplifiedPlanReport,
+} from '@dbsp/adapter-pgsql/internal';
+import {
 	batchValues,
 	createOrm,
 	eq,
@@ -57,6 +61,40 @@ function compile(plan: PlanReport) {
 	return adapter.compile(plan, { model: testSchema.model });
 }
 
+function compileDecisions(
+	report: SimplifiedPlanReport,
+	model = testSchema.model,
+) {
+	const compiled = compilePlan(report, {
+		model,
+		declaredNames: resolverFor(model),
+	});
+	const projections = buildCompiledColumnProjections(
+		compiled.ast,
+		report.rootTable,
+		model,
+		resolverFor(model),
+	);
+	return {
+		...compiled,
+		columnMetadata: new Map(
+			[...(projections ?? [])].flatMap(([key, source]) =>
+				source.kind === 'modelColumn' && source.js
+					? [
+							[
+								key,
+								{ table: source.table, column: source.column, js: source.js },
+							] as const,
+						]
+					: [],
+			),
+		),
+		outputKeyMap: new Map(
+			[...(projections ?? [])].map(([key, source]) => [key, source.logicalKey]),
+		),
+	};
+}
+
 function compileNqlToPg(nql: string) {
 	const result = compileNql(nql, testSchema.model);
 	if (!result.success || !result.ast) {
@@ -111,10 +149,10 @@ function recursiveEventsReport(
 
 describe('bigint js column metadata provenance', () => {
 	it('expands SELECT * from model columns', () => {
-		const compiled = compile({
+		const compiled = compileDecisions({
 			rootTable: 'events',
 			decisions: [{ type: 'select', column: '*' }],
-		} as unknown as PlanReport);
+		} as unknown as SimplifiedPlanReport);
 
 		expect(compiled.columnMetadata?.get('sequence')).toEqual({
 			table: 'events',
@@ -135,7 +173,7 @@ describe('bigint js column metadata provenance', () => {
 	});
 
 	it('tracks explicit and aliased plain columns only', () => {
-		const compiled = compile({
+		const compiled = compileDecisions({
 			rootTable: 'events',
 			decisions: [
 				{ type: 'select', column: 'sequence', alias: 'seq' },
@@ -147,7 +185,7 @@ describe('bigint js column metadata provenance', () => {
 					alias: 'total',
 				},
 			],
-		} as unknown as PlanReport);
+		} as unknown as SimplifiedPlanReport);
 
 		expect(compiled.columnMetadata?.get('seq')).toEqual({
 			table: 'events',
@@ -163,7 +201,7 @@ describe('bigint js column metadata provenance', () => {
 	});
 
 	it('resolves join include output keys through the join alias source table', () => {
-		const compiled = compile({
+		const compiled = compileDecisions({
 			rootTable: 'events',
 			decisions: [
 				{ type: 'select', column: 'id' },
@@ -178,7 +216,7 @@ describe('bigint js column metadata provenance', () => {
 					columns: ['bigCount'],
 				},
 			],
-		} as unknown as PlanReport);
+		} as unknown as SimplifiedPlanReport);
 
 		expect(compiled.columnMetadata?.get('metrics.bigCount')).toEqual({
 			table: 'metrics',
@@ -188,7 +226,7 @@ describe('bigint js column metadata provenance', () => {
 	});
 
 	it('leaves duplicate returned output labels without source mapping', () => {
-		const compiled = compile({
+		const compiled = compileDecisions({
 			rootTable: 'events',
 			decisions: [
 				{ type: 'select', column: '*' },
@@ -203,7 +241,7 @@ describe('bigint js column metadata provenance', () => {
 					columns: ['*'],
 				},
 			],
-		} as unknown as PlanReport);
+		} as unknown as SimplifiedPlanReport);
 		expect(compiled.outputKeyMap?.has('id')).toBe(false);
 	});
 
@@ -301,13 +339,12 @@ describe('bigint js column metadata provenance', () => {
 			?.columns.find((column) => column.name === 'code');
 		(codeColumn as { js?: 'bigint' }).js = 'bigint';
 
-		const adapter = createPgCompileOnlyAdapter();
-		const compiled = adapter.compile(
+		const compiled = compileDecisions(
 			{
 				rootTable: 'docs',
 				decisions: [{ type: 'select', column: 'code' }],
-			} as unknown as PlanReport,
-			{ model: forgedSchema.model },
+			} as unknown as SimplifiedPlanReport,
+			forgedSchema.model,
 		);
 
 		expect(compiled.columnMetadata?.has('code') ?? false).toBe(false);

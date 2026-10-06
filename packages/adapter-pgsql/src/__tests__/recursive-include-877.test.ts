@@ -195,7 +195,7 @@ describe('#877 recursive option refusals', () => {
 			);
 			expect(() => adapter.compile({ ...plan, intent, decisions })).toThrow(
 				new Error(
-					'Includes compile only from a report planned in this process',
+					'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 				),
 			);
 		});
@@ -278,7 +278,7 @@ describe('#877 recursive option refusals', () => {
 			};
 			expect(() => adapter.compile({ ...plan, intent })).toThrow(
 				new Error(
-					'Includes compile only from a report planned in this process',
+					'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 				),
 			);
 		});
@@ -326,7 +326,7 @@ describe('#877 shared plan/compile refusals', () => {
 				adapter.compile({ ...report, intent: intent as QueryIntent }),
 			).toThrow(
 				new Error(
-					'Includes compile only from a report planned in this process',
+					'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 				),
 			);
 		});
@@ -351,7 +351,7 @@ describe('#877 shared plan/compile refusals', () => {
 			).toThrow(`Recursive include option ${name} is not supported`);
 			expect(() => adapter.compile({ ...report, intent })).toThrow(
 				new Error(
-					'Includes compile only from a report planned in this process',
+					'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 				),
 			);
 		});
@@ -384,7 +384,9 @@ describe('#877 shared plan/compile refusals', () => {
 				],
 			}),
 		).toThrow(
-			new Error('Includes compile only from a report planned in this process'),
+			new Error(
+				'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			),
 		);
 	});
 	it('refuses applicable traversed-node default filters in plan and dump', () => {
@@ -475,7 +477,9 @@ describe('#877 shared plan/compile refusals', () => {
 			}),
 		).toThrow("Relation 'categories.children' has mismatched key arity.");
 		expect(() => createPgCompileOnlyAdapter({ model }).compile(report)).toThrow(
-			new Error('Includes compile only from a report planned in this process'),
+			new Error(
+				'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			),
 		);
 	});
 	it('refuses composite self references at both boundaries', () => {
@@ -500,7 +504,9 @@ describe('#877 shared plan/compile refusals', () => {
 			}),
 		).toThrow('Recursive include requires a single parentKey and foreignKey');
 		expect(() => createPgCompileOnlyAdapter({ model }).compile(report)).toThrow(
-			new Error('Includes compile only from a report planned in this process'),
+			new Error(
+				'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			),
 		);
 	});
 	it('refuses stored requested keys at root and every node, and supports via', () => {

@@ -7,7 +7,7 @@
  * Uses a mock pg Pool to avoid requiring a live database.
  */
 
-import { createOrm, schema } from '@dbsp/core';
+import { createOrm, plan, schema } from '@dbsp/core';
 import type { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -122,9 +122,15 @@ describe('#762 physical names through public ORM helpers', () => {
 		} as never;
 		const adapter = createPgCompileOnlyAdapter();
 		expect(() =>
-			adapter.compile({ rootTable: 'users', decisions: [] } as never, {
-				model: malformed,
-			}),
+			adapter.compile(
+				plan(
+					{ type: 'select', from: 'users' },
+					schema({ users: { id: 'integer' } }).model,
+				),
+				{
+					model: malformed,
+				},
+			),
 		).toThrow('primaryKey.map is not a function');
 	});
 });

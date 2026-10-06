@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from './pgsql-adapter.js';
 
 const refusal =
-	'Conditions with relation paths, outer references or subqueries compile only from a report planned in this process';
+	'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation';
 const adapter = createPgCompileOnlyAdapter();
 const relation = exists('posts', { where: eq('id', 1) });
 const plain = eq('id', 1);
@@ -58,8 +58,8 @@ describe('unissued SELECT condition authority', () => {
 		it(`${name} refuses a relation predicate after JSON round-trip`, () => {
 			expect(() => adapter.compile(report(surface(relation)))).toThrow(refusal);
 		});
-		it(`${name} compiles plain-column conditions after JSON round-trip`, () => {
-			expect(adapter.compile(report(surface(plain))).sql).toContain('$1');
+		it(`${name} refuses plain-column conditions after JSON round-trip`, () => {
+			expect(() => adapter.compile(report(surface(plain)))).toThrow(refusal);
 		});
 		it(`${name} checks executable intent conditions`, () => {
 			const plan = {

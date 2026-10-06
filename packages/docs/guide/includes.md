@@ -206,7 +206,7 @@ properties independently in chunks of at most 50 key/value pairs joined with
 selections are root relation columns, so `users | select id, posts.title | flat`
 and `users | select id, posts.title | limit posts 5` retain their behaviour.
 
-Includes compile only from a report planned in the same process. The module-private registry recognises reports issued by `plan()` and other in-process issuers, including the CLI. Serialized, spread, hand-built and legacy decision-context reports with includes are refused with `Includes compile only from a report planned in this process`. Reports without includes compile as before. Include options are validated during planning. Include `select` forms are checked against the resolved strategy:
+Compilation follows [Authored intent and execution authority](./observability.md#authored-intent-and-execution-authority). Include options are validated during planning. Include `select` forms are checked against the resolved strategy:
 `json_agg` accepts fields or all columns, `lateral` accepts only all columns, `join` accepts all columns or plain fields for to-one relations,
 and ordinary non-recursive `cte` refuses explicit selection. Mixed wildcard lists such as `['*', 'id']`
 are refused for every strategy; `['*']` is the all-columns form. Both `json_agg`

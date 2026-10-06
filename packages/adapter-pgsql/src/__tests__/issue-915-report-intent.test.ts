@@ -14,7 +14,8 @@ const model = schema({
 	users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
 }).model;
 const adapter = createPgCompileOnlyAdapter({ model });
-const refusal = 'Includes compile only from a report planned in this process';
+const refusal =
+	'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation';
 function issued() {
 	return plan(
 		{

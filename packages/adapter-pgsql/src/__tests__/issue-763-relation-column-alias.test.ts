@@ -445,7 +445,9 @@ describe('issue 763: relation qualifiers require an emitted SQL alias', () => {
 				{ model: e2eBlogSchema.model },
 			),
 		).toThrow(
-			new Error('Includes compile only from a report planned in this process'),
+			new Error(
+				'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			),
 		);
 	});
 });

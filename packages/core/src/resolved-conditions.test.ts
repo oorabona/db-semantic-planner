@@ -4,10 +4,7 @@ import {
 	type WhereIntent,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import {
-	conditionNeedsPlanning,
-	resolveSelectWhere,
-} from './resolved-conditions.js';
+import { resolveSelectWhere } from './resolved-conditions.js';
 
 function resolve(where: WhereIntent): ResolvedCondition {
 	const allocator = new RangeAllocator();
@@ -89,24 +86,5 @@ describe('typed WHERE resolution', () => {
 				right: { kind: 'parameter', value: 'ada', cast: 'none' },
 			},
 		});
-	});
-	it('classifies external authority without inspecting parameter payloads', () => {
-		expect(
-			conditionNeedsPlanning({
-				kind: 'comparison',
-				field: 'id',
-				operator: 'eq',
-				value: {
-					kind: 'param',
-					value: { kind: 'subquery', query: { from: 'private' } },
-				},
-			}),
-		).toBe(false);
-		expect(
-			conditionNeedsPlanning({
-				kind: 'rawExists',
-				subquery: { from: 'users' },
-			}),
-		).toBe(true);
 	});
 });

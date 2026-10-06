@@ -207,7 +207,7 @@ describe('#911 relation resolution precedence', () => {
 			);
 			expect(() => adapter.compile(legacy, { model: precedenceModel })).toThrow(
 				new Error(
-					'Includes compile only from a report planned in this process',
+					'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 				),
 			);
 		});
@@ -233,7 +233,7 @@ describe('#911 relation resolution precedence', () => {
 				createPgCompileOnlyAdapter({ model }).compile(external, { model }),
 			).toThrow(
 				new Error(
-					'Includes compile only from a report planned in this process',
+					'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 				),
 			);
 		});

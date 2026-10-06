@@ -181,3 +181,5 @@ A `SubqueryBuilder` or `SubqueryExpression` has no `.all()` or `.execute()` meth
 ## Planning refusals
 
 Bodies reached from the root WHERE carry their own resolved ranges and share the query's allocator. Unsupported options refuse at `plan()` with the existing compilation message. `rawExists()` / `rawNotExists()` reject ORDER BY and LIMIT; scalar-comparison bodies retain supported field ordering and LIMIT. Legacy direct scalar bodies outside this route retain their ORDER BY/LIMIT refusals. IN bodies require one named projected column and reject aggregate SELECT, GROUP BY, HAVING, OFFSET, DISTINCT ON, locks and other unsupported structural modifiers. Scalar subqueries used as expressions keep their supported projection, ordering and limit options.
+
+Compilation follows [Authored intent and execution authority](./observability.md#authored-intent-and-execution-authority).

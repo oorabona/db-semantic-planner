@@ -146,8 +146,7 @@ describe('bigint js json_agg SQL projection', () => {
 	});
 
 	it('forces explicit projection and casts opted-in bigint columns to text', () => {
-		const adapter = createPgCompileOnlyAdapter();
-		const compiled = adapter.compile(
+		const compiled = compilePlan(
 			{
 				rootTable: 'parents',
 				decisions: [
@@ -164,7 +163,7 @@ describe('bigint js json_agg SQL projection', () => {
 						targetColumn: ['parentId'],
 					},
 				],
-			} as unknown as PlanReport,
+			},
 			{ model: includeSchema.model },
 		);
 
@@ -195,9 +194,8 @@ describe('bigint js json_agg SQL projection', () => {
 			.getTable('readings')
 			?.columns.find((column) => column.name === 'code');
 		(codeColumn as { js?: 'bigint' }).js = 'bigint';
-		const adapter = createPgCompileOnlyAdapter();
 
-		const compiled = adapter.compile(
+		const compiled = compilePlan(
 			{
 				rootTable: 'parents',
 				decisions: [
@@ -214,7 +212,7 @@ describe('bigint js json_agg SQL projection', () => {
 						targetColumn: ['parentId'],
 					},
 				],
-			} as unknown as PlanReport,
+			},
 			{ model: forgedSchema.model },
 		);
 
