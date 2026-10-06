@@ -638,7 +638,7 @@ export interface QueryBuilder<TResult = unknown> {
 	 * Use when you need to query deleted/inactive records.
 	 *
 	 * Default filters are defined at schema level using the `defaultFilters` option
-	 * in `schema()`. They are applied automatically to all queries unless disabled.
+	 * in `schema()`. They are applied automatically to the root of a query-builder SELECT unless disabled.
 	 *
 	 * @returns A new QueryBuilder with default filters disabled
 	 *
