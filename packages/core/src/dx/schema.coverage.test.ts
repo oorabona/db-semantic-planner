@@ -447,7 +447,7 @@ describe('schema coverage', () => {
 				undefined,
 				{
 					defaultFilters: {
-						users: { field: 'deletedAt', op: 'isNull' },
+						users: { deletedAt: null },
 					},
 				},
 			);
@@ -465,7 +465,7 @@ describe('schema coverage', () => {
 					undefined,
 					{
 						defaultFilters: {
-							products: { field: 'deletedAt', op: 'isNull' }, // Non-existent
+							products: { deletedAt: null }, // Non-existent
 						},
 					},
 				),
@@ -481,8 +481,8 @@ describe('schema coverage', () => {
 				undefined,
 				{
 					defaultFilters: {
-						users: { field: 'deletedAt', op: 'isNull' },
-						posts: { field: 'deletedAt', op: 'isNull' },
+						users: { deletedAt: null },
+						posts: { deletedAt: null },
 					},
 				},
 			);

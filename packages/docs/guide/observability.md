@@ -414,7 +414,7 @@ const hooks = createHookManager()
 const orm = createOrm({ schema: db, adapter: createPgAdapter(pool), hooks });
 ```
 
-> **Note:** `schema()` accepts a `defaultFilters` option as its third argument for table-level default WHERE clauses. Use `defaultFilters` for simple equality/null checks — it is more idiomatic than a manual `beforeQuery` hook for this pattern:
+> **Note:** `schema()` accepts a `defaultFilters` option as its third argument for table-level default WHERE clauses. Use condition helpers or an object filter as in `.where()`; each filter may test only columns of its own table:
 >
 > ```typescript
 > const db = schema(

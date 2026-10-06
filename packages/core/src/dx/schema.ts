@@ -36,6 +36,11 @@ import type {
 	TableReaddressDeclaration,
 } from '../model-ir.js';
 import { createPseudoColumnMetadata } from '../model-ir.js';
+import {
+	isWhereIntent,
+	objectToWhereIntent,
+	type WhereFilter,
+} from './object-filter.js';
 import type { InferTables } from './schema-tables-types.js';
 import { createTablesProxy } from './table-ref-factory.js';
 
@@ -310,7 +315,7 @@ export interface SchemaOptions {
 	 * Default filters applied automatically to all queries per table.
 	 * Override with `.withoutDefaultFilters()` on the query builder.
 	 */
-	defaultFilters?: DefaultFilters;
+	defaultFilters?: Record<string, WhereIntent | WhereFilter>;
 	/**
 	 * Column name treated as the implicit primary key for short-form column
 	 * declarations. When set (default `'id'`), `inferPrimaryKey` resolves the
@@ -665,6 +670,80 @@ export function isRef(
 	);
 }
 
+function validateDefaultFilter(
+	intent: WhereIntent,
+	table: string,
+	columns: Set<string>,
+): void {
+	const refuse = (part: string): never => {
+		throw new SchemaValidationError(
+			`Default filter for table '${table}': ${part}`,
+		);
+	};
+	const column = (field: string): void => {
+		if (typeof field !== 'string' || field.includes('.') || !columns.has(field))
+			refuse(`invalid column '${String(field)}'`);
+	};
+	// Inspect operands too: subqueries and outer references can hide in comparison values.
+	const operand = (value: unknown): void => {
+		if (!value || typeof value !== 'object') return;
+		if (Array.isArray(value)) {
+			value.forEach(operand);
+			return;
+		}
+		const record = value as Record<string, unknown>;
+		if (
+			record.kind === 'subquery' ||
+			record._type === 'subquery' ||
+			record.outer === true ||
+			record.kind === 'fieldRef'
+		)
+			refuse(`forbidden operand '${String(record.kind)}'`);
+		if (record.kind === 'ref') column(record.column as string);
+		Object.values(record).forEach(operand);
+	};
+	if (!intent || typeof intent !== 'object') refuse('missing condition kind');
+	switch (intent.kind) {
+		case 'and':
+		case 'or':
+			if (!Array.isArray(intent.conditions))
+				refuse(`invalid '${intent.kind}' conditions`);
+			for (const child of intent.conditions)
+				validateDefaultFilter(child, table, columns);
+			return;
+		case 'not':
+			validateDefaultFilter(intent.condition, table, columns);
+			return;
+		case 'comparison':
+		case 'like':
+		case 'in':
+		case 'any':
+		case 'null':
+		case 'range':
+		case 'jsonContains':
+		case 'jsonExists':
+			column(intent.field);
+			if ('subquery' in intent) refuse("forbidden subquery in 'in'");
+			operand(intent);
+			return;
+		case 'exists':
+		case 'notExists':
+		case 'rawExists':
+		case 'rawNotExists':
+		case 'relationFilter':
+		case 'subquery':
+		case 'expression':
+			refuse(`forbidden condition kind '${intent.kind}'`);
+			return;
+		default: {
+			const exhaustive: never = intent;
+			refuse(
+				`unknown condition kind '${String((exhaustive as WhereIntent).kind)}'`,
+			);
+		}
+	}
+}
+
 /**
  * Creates a type-safe schema definition and converts it to ModelIR.
  *
@@ -701,10 +780,10 @@ export function schema<const T extends SchemaDefinition>(
 
 	// Validate default filters reference existing tables
 	const defaultFilters = options?.defaultFilters
-		? (Object.assign(
-				Object.create(null),
-				options.defaultFilters,
-			) as DefaultFilters)
+		? (Object.assign(Object.create(null), options.defaultFilters) as Record<
+				string,
+				WhereIntent | WhereFilter
+			>)
 		: undefined;
 	if (defaultFilters) {
 		const tableNameSet = new Set(tableNames as string[]);
@@ -715,6 +794,27 @@ export function schema<const T extends SchemaDefinition>(
 						`Available: ${[...tableNameSet].join(', ')}`,
 				);
 			}
+			const input = defaultFilters[tableName];
+			let intent: WhereIntent;
+			try {
+				if (!input || typeof input !== 'object' || Array.isArray(input))
+					throw new Error('expected condition intent or object filter');
+				intent = isWhereIntent(input)
+					? input
+					: objectToWhereIntent(input as WhereFilter);
+			} catch (error) {
+				throw new SchemaValidationError(
+					`Default filter for table '${tableName}': ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+			validateDefaultFilter(
+				intent,
+				tableName,
+				new Set(
+					model.getTable(tableName)?.columns.map((column) => column.name),
+				),
+			);
+			defaultFilters[tableName] = intent;
 		}
 	}
 
@@ -732,7 +832,9 @@ export function schema<const T extends SchemaDefinition>(
 		model,
 		tableNames,
 		tables,
-		...(defaultFilters ? { defaultFilters } : {}),
+		...(defaultFilters
+			? { defaultFilters: defaultFilters as DefaultFilters }
+			: {}),
 	};
 }
 
