@@ -527,7 +527,7 @@ describe('planner coverage', () => {
 				{
 					relation: 'posts',
 					strategy: 'flat',
-					include: [{ relation: 'comments', limit: 5 }],
+					include: [{ relation: 'comments', strategy: 'flat', limit: 5 }],
 				},
 			],
 		};

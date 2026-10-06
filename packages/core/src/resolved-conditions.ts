@@ -37,7 +37,7 @@ function isRef(value: unknown): value is { target: string } {
 	return value !== null && typeof value === 'object' && REF_BRAND in value;
 }
 
-/** Preserve the legacy ON correlation refusal; parameter payloads are opaque. */
+/** Preserve the legacy ON and include-body correlation refusals; parameter payloads are opaque. */
 function containsOuterReference(value: unknown): boolean {
 	if (!value || typeof value !== 'object' || isParamIntent(value)) return false;
 	if (isSubqueryRef(value) && value.outer === true) return true;
@@ -80,13 +80,16 @@ export function resolveConditionContext(
 	model: ModelIR | undefined,
 	initialAliasCount = 0,
 	additionalOuterRanges: readonly ResolvedRange[] = [],
-	joinOn?: {
-		readonly subqueryRefusal: string;
-		readonly firstJoinByQualifier: ReadonlyMap<string, number>;
-		readonly intentIndex: number;
+	mode?: {
+		readonly subqueryRefusal?: string;
+		readonly firstJoinByQualifier?: ReadonlyMap<string, number>;
+		readonly intentIndex?: number;
+		readonly include?: boolean;
+		readonly aliasState?: { count: number };
+		readonly outerQualifiers?: readonly ReadonlyMap<string, ResolvedRange>[];
 	},
 ): ResolvedCondition | undefined {
-	const subqueryRefusal = joinOn?.subqueryRefusal;
+	const subqueryRefusal = mode?.subqueryRefusal;
 	const rootScope = [...new Set([root, ...visible, ...additionalOuterRanges])];
 	const enclosingScope = (ranges: readonly ResolvedRange[]) =>
 		ranges === visible ? rootScope : ranges;
@@ -101,8 +104,15 @@ export function resolveConditionContext(
 		readonly ResolvedRange[],
 		ReadonlyMap<string, ResolvedRange>
 	>();
+	for (const [index, scope] of enclosing.entries()) {
+		const qualifiers = mode?.outerQualifiers?.[index];
+		if (qualifiers) writtenQualifiers.set(scope, qualifiers);
+	}
+	if (mode?.include)
+		writtenQualifiers.set(visible, new Map([[root.table, root]]));
 	// ON preserves the authored root qualifier even for a self-join.
-	if (joinOn) writtenQualifiers.set(visible, new Map([[root.alias, root]]));
+	if (mode && !mode.include)
+		writtenQualifiers.set(visible, new Map([[root.alias, root]]));
 	const activeNames = new Set(visible.map((r) => r.alias));
 	let scopeIndex = 0;
 	const assertQualifierVisible = (
@@ -113,8 +123,9 @@ export function resolveConditionContext(
 			(ranges === visible ||
 				ranges === rootScope ||
 				enclosing.includes(ranges)) &&
-			joinOn !== undefined &&
-			(joinOn.firstJoinByQualifier.get(qualifier) ?? -1) > joinOn.intentIndex &&
+			mode?.firstJoinByQualifier !== undefined &&
+			mode.intentIndex !== undefined &&
+			(mode.firstJoinByQualifier.get(qualifier) ?? -1) > mode.intentIndex &&
 			!visible.some((range) => range.alias === qualifier)
 		)
 			throw new Error(
@@ -152,7 +163,11 @@ export function resolveConditionContext(
 		enclosing: readonly (readonly ResolvedRange[])[],
 		outer = false,
 	): ResolvedColumnOperand => {
-		const parts = name.split('.');
+		const dot = name.lastIndexOf('.');
+		const parts =
+			mode?.include && !outer && dot >= 0
+				? [name.slice(0, dot), name.slice(dot + 1)]
+				: name.split('.');
 		let range = current;
 		if (outer) {
 			if (!enclosing.length)
@@ -175,11 +190,23 @@ export function resolveConditionContext(
 			const qualifier = parts.shift()!;
 			const found = matchQualifier(qualifier, ranges, false);
 			if (found) range = found;
+			else if (mode?.include) range = allocator.bind(qualifier, qualifier);
 			else
 				throw new Error(
 					`WHERE qualifier '${qualifier}' is not visible in this query.`,
 				);
 		}
+		if (
+			mode?.include &&
+			parts.join('.') !== '*' &&
+			model &&
+			!model
+				.getTable(range.table)
+				?.columns.some((c) => c.name === parts.join('.'))
+		)
+			throw new Error(
+				`Declared column '${range.table}.${parts.join('.')}' is absent from the physical model.`,
+			);
 		return {
 			kind: outer ? 'outerRef' : 'column',
 			range,
@@ -237,7 +264,7 @@ export function resolveConditionContext(
 		enclosing: readonly (readonly ResolvedRange[])[],
 		isExpressionBody = false,
 	): Extract<ResolvedSubqueryBody, { use: U }> {
-		if (subqueryRefusal && isExpressionBody)
+		if ((subqueryRefusal || mode?.include) && isExpressionBody)
 			throw new Error(
 				"compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context.",
 			);
@@ -253,6 +280,16 @@ export function resolveConditionContext(
 							: 'scalar',
 			);
 		else assertNoUnsupportedSubqueryModifiers(query, 'scalar');
+		if (
+			mode?.include &&
+			use !== 'exists' &&
+			containsOuterReference(query.where)
+		)
+			throw new Error(
+				'scalar subquery with correlated outerRef() is not yet supported — ' +
+					'use exists("relation", { where: ... }) when a schema relation exists, ' +
+					'or restructure the query to avoid the correlation.',
+			);
 		if (subqueryRefusal && use !== 'in') throw new Error(subqueryRefusal);
 		let alias: string;
 		const expressionPrior = expressionNext.get(query.from) ?? 0;
@@ -527,6 +564,9 @@ export function resolveConditionContext(
 		const ref = (name: string): ResolvedExpression => ({
 			kind: 'ref',
 			operand: column(name, current, ranges, enclosing),
+			...(mode?.include &&
+				current.id !== root.id &&
+				!name.includes('.') && { unqualified: true as const }),
 		});
 		const expr = (value: ExpressionIntent) =>
 			expression(value, current, ranges, enclosing);
@@ -565,6 +605,12 @@ export function resolveConditionContext(
 			case 'ref':
 				return {
 					kind: 'ref',
+					...(mode?.include &&
+						current.id !== root.id &&
+						!input.column.includes('.') &&
+						!('outer' in input && input.outer) && {
+							unqualified: true as const,
+						}),
 					operand: column(
 						input.column,
 						current,
@@ -772,6 +818,7 @@ export function resolveConditionContext(
 		}
 		if (
 			fieldOverride === undefined &&
+			!mode?.include &&
 			'field' in node &&
 			node.field.includes('.')
 		) {
@@ -874,7 +921,9 @@ export function resolveConditionContext(
 					value:
 						node.operator === 'between'
 							? parameter(node.value)
-							: rangeParameter(node.value),
+							: mode?.include
+								? { ...rangeParameter(node.value), cast: 'none' }
+								: rangeParameter(node.value),
 				};
 			case 'jsonContains':
 				return {
@@ -887,7 +936,7 @@ export function resolveConditionContext(
 				return { kind: 'jsonExists', left: left(), key: parameter(node.key) };
 			case 'rawExists':
 			case 'rawNotExists':
-				if (subqueryRefusal) {
+				if (subqueryRefusal || mode?.include) {
 					assertNoUnsupportedSubqueryModifiers(node.subquery, 'rawExists');
 					if (containsOuterReference(node.subquery.where))
 						throw new Error(
@@ -926,5 +975,7 @@ export function resolveConditionContext(
 				);
 		}
 	};
-	return where ? visit(where, root, visible, enclosing) : undefined;
+	const resolved = where ? visit(where, root, visible, enclosing) : undefined;
+	if (mode?.aliasState) mode.aliasState.count = aliasCount;
+	return resolved;
 }

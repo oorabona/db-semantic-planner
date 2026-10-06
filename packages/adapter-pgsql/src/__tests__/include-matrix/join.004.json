@@ -426,7 +426,7 @@
   },
   {
     "case": "orm/join/1/via-alias/nested/single/expression",
-    "sql": "SELECT roots.*, children.id AS \"children.id\", children.tenant AS \"children.tenant\", children.name AS \"children.name\", children.amount AS \"children.amount\", children.\"rootId\" AS \"children.rootId\", children.id AS __dbsp_presence_children FROM roots JOIN children AS children ON roots.id = children.\"rootId\" WHERE lower(name) = $1",
+    "sql": "SELECT roots.*, children.id AS \"children.id\", children.tenant AS \"children.tenant\", children.name AS \"children.name\", children.amount AS \"children.amount\", children.\"rootId\" AS \"children.rootId\", children.id AS __dbsp_presence_children FROM roots JOIN children AS children ON roots.id = children.\"rootId\" WHERE lower(children.name) = $1",
     "params": [
       "child"
     ],
@@ -512,7 +512,7 @@
   },
   {
     "case": "nql/join/1/via-alias/nested/single/expression",
-    "sql": "SELECT roots.id, children.id AS \"children.id\", children.tenant AS \"children.tenant\", children.name AS \"children.name\", children.amount AS \"children.amount\", children.\"rootId\" AS \"children.rootId\", children.id AS __dbsp_presence_children FROM roots JOIN children AS children ON roots.id = children.\"rootId\" WHERE lower(name) = $1",
+    "sql": "SELECT roots.id, children.id AS \"children.id\", children.tenant AS \"children.tenant\", children.name AS \"children.name\", children.amount AS \"children.amount\", children.\"rootId\" AS \"children.rootId\", children.id AS __dbsp_presence_children FROM roots JOIN children AS children ON roots.id = children.\"rootId\" WHERE lower(children.name) = $1",
     "params": [
       "child"
     ],

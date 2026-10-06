@@ -454,7 +454,7 @@ describe('#915 / #917 / #927 public include contract', () => {
 			.orderBy('author.rank', 'desc')
 			.dump().sql;
 		expect(sql).toBe(
-			'SELECT posts.*, author.name AS "author.name", author.__dbsp_presence_author AS __dbsp_presence_author FROM posts LEFT JOIN (SELECT author.id, author.name, author.email, author.rank, 1 AS __dbsp_presence_author FROM users AS author) AS author ON posts."authorCode" = author.id WHERE lower(email) = $1 ORDER BY author.rank DESC',
+			'SELECT posts.*, author.name AS "author.name", author.__dbsp_presence_author AS __dbsp_presence_author FROM posts LEFT JOIN (SELECT author.id, author.name, author.email, author.rank, 1 AS __dbsp_presence_author FROM users AS author) AS author ON posts."authorCode" = author.id WHERE lower(author.email) = $1 ORDER BY author.rank DESC',
 		);
 	});
 	it('presence discovery lowers the root projection once for multiple join payloads', () => {

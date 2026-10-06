@@ -54,7 +54,7 @@ Each call is independent. Nested paths (like `posts.comments`) automatically tri
 
 ## Include with Options
 
-An include `where` is accepted only when the include compiles as a join, and it is added to the root `WHERE`. Other strategies refuse it. Relation predicates (`exists`, `notExists`, `some`, `every`, `none`) anywhere inside it, including nested query bodies, are also refused. See oorabona/db-semantic-planner#892.
+An include `where` is accepted only when the include compiles as a join, and it is added to the root `WHERE`. Other strategies refuse it at `plan()`. Unqualified `exprRef()` targets the include range; unqualified `outerRef()` targets its immediate source range, and qualified outer references search ancestor scopes nearest first. Relation predicates (`exists`, `notExists`, `some`, `every`, `none`) anywhere inside it, including nested query bodies, are also refused. See oorabona/db-semantic-planner#892.
 
 Pass an options object as the second argument to filter, project, or disambiguate the include:
 

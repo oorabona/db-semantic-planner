@@ -219,28 +219,40 @@ describe('#894 pathless include assignments', () => {
 				postId: ref('posts', { unique: true, as: 'post', inverse: 'children' }),
 			},
 		} as const);
-		const p = plan(
+		expect(() =>
+			plan(
+				{
+					type: 'select',
+					from: 'users',
+					include: [
+						{
+							relation: 'children',
+							include: [{ relation: 'children', join: 'inner' }],
+						},
+					],
+				},
+				repeated.model,
+				{ defaultIncludeStrategy: 'json_agg' },
+			),
+		).toThrow(
+			new Error(
+				'Nested include at include[0](children).include[0](children) has parent strategy json_agg and child strategy join; mixed strategies and includes under cte are refused (oorabona/db-semantic-planner#894).',
+			),
+		);
+		const coherent = plan(
 			{
 				type: 'select',
 				from: 'users',
 				include: [
-					{
-						relation: 'children',
-						include: [{ relation: 'children', join: 'inner' }],
-					},
+					{ relation: 'children', include: [{ relation: 'children' }] },
 				],
 			},
 			repeated.model,
 			{ defaultIncludeStrategy: 'json_agg' },
 		);
-		expect(
-			p.decisions
-				.filter((d) => d.type === 'include-strategy')
-				.map((d) => d.choice),
-		).toEqual(['json_agg', 'join']);
 		expect(() =>
 			createPgCompileOnlyAdapter({ model: repeated.model }).compile(
-				pathless(p),
+				pathless(coherent),
 			),
 		).toThrow(
 			'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
@@ -318,19 +330,20 @@ describe('#900 flat strategy precedence', () => {
 		expect(result.parameters).toEqual([]);
 	});
 	it('preserves include.where refusal with applicable lateral default', () => {
-		const p = plan(
-			{
-				type: 'select',
-				from: 'users',
-				include: [{ relation: 'posts', strategy: 'flat', where: or() }],
-			},
-			db.model,
-			{
-				defaultIncludeStrategy: 'lateral',
-				dialectCapabilities: adapter.dialectCapabilities,
-			},
-		);
-		expect(() => adapter.compile(p)).toThrow(
+		expect(() =>
+			plan(
+				{
+					type: 'select',
+					from: 'users',
+					include: [{ relation: 'posts', strategy: 'flat', where: or() }],
+				},
+				db.model,
+				{
+					defaultIncludeStrategy: 'lateral',
+					dialectCapabilities: adapter.dialectCapabilities,
+				},
+			),
+		).toThrow(
 			new Error(
 				'Include where is not supported for strategy lateral at include[0](posts).where (oorabona/db-semantic-planner#892).',
 			),

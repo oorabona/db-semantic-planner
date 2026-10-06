@@ -194,12 +194,38 @@ function makePositions(
 		...(['inner', 'left'] as const).map((join) => ({
 			name: `include-${join}-where`,
 			table: 'posts' as const,
-			run: (c: WhereIntent) =>
-				orm
+			run: (c: WhereIntent) => {
+				const report = orm
 					.select('comments')
 					.where(eq('score', 31))
 					.include('post', { join, where: c })
-					.dump(),
+					.plan();
+				const poisoned = new Proxy(model, {
+					get(target, property) {
+						if (property === 'getRelation' || property === 'getRelationsFrom')
+							return () => {
+								throw new Error('include relation lookup after planning');
+							};
+						const member = Reflect.get(target, property);
+						return typeof member === 'function' ? member.bind(target) : member;
+					},
+				});
+				const compile = (model: typeof db.model): MatrixOutcome => {
+					try {
+						const result = adapter.compile(report, { model });
+						return { sql: result.sql, params: result.parameters, error: null };
+					} catch (error) {
+						if (!(error instanceof Error)) throw error;
+						return { sql: null, params: null, error: error.message };
+					}
+				};
+				const canonical = compile(model);
+				const actual = compile(poisoned);
+				if (JSON.stringify(actual) !== JSON.stringify(canonical))
+					throw new Error('poisoned include compilation differs');
+				if (actual.error !== null) throw new Error(actual.error);
+				return { sql: actual.sql!, params: actual.params! };
+			},
 		})),
 		{
 			name: 'manual-join-on',

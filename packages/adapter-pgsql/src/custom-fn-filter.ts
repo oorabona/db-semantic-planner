@@ -69,7 +69,6 @@ export function mapToHandlerDecision(
 	return {
 		type: pd.type,
 		resolvedInclude: pd.resolvedInclude,
-		includePredicate: pd.includePredicate,
 		table: pd.table,
 		column: pd.column ?? pd.field,
 		alias: pd.alias,

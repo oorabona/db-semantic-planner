@@ -500,7 +500,7 @@ describe('planner: flat strategy with nested limit', () => {
 				{
 					relation: 'posts',
 					strategy: 'flat',
-					include: [{ relation: 'comments', limit: 3 }],
+					include: [{ relation: 'comments', strategy: 'flat', limit: 3 }],
 				},
 			],
 		};

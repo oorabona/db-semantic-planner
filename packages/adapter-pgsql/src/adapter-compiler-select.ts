@@ -10,7 +10,6 @@ import { countDistinctRelationPathsByName } from '@dbsp/core/internal';
 import type {
 	CompiledQuery,
 	CompileOptions,
-	IncludeIntent,
 	JoinIntent,
 	ModelIR,
 	OutputDescriptor,
@@ -247,7 +246,7 @@ type BatchValuesRangeFnResult = {
  *
  * @param bv - The batch values payload (columns, data, types, alias, ordinality).
  * @param startParamIndex - The 1-based index for the first ParamRef ($N).
- *   Pass 1 when the batch params are first; pass current paramIndex+1 otherwise.
+ *   FROM and JOIN callers start at `$1`; compileJoinDecision offsets join placeholders.
  */
 function buildBatchValuesRangeFn(
 	bv: import('@dbsp/types').BatchValuesJoinPayload,
@@ -982,73 +981,6 @@ function buildSimplifiedPlanReport(
 // compile (SELECT)
 // ============================================================================
 
-/** Validate include predicates before lowering or allocating bindings. */
-function assertSupportedIncludeWhere(
-	includes: readonly IncludeIntent[] | undefined,
-	strategies: ReadonlyMap<string, string>,
-	parent = '',
-	intentParent = '',
-	parentStrategy?: string,
-): void {
-	for (const [index, include] of (includes ?? []).entries()) {
-		const path = `${parent}include[${index}](${include.relation})`;
-		const intentPath = `${intentParent}include[${index}]`;
-		const strategy =
-			strategies.get(intentPath) ?? (include.join ? 'join' : 'json_agg');
-		if (
-			parentStrategy &&
-			(parentStrategy === 'cte' || strategy !== parentStrategy)
-		) {
-			throw new Error(
-				`Nested include at ${path} has parent strategy ${parentStrategy} and child strategy ${strategy}; mixed strategies and includes under cte are refused (oorabona/db-semantic-planner#894).`,
-			);
-		}
-		if (include.where) {
-			// Walk the complete predicate intent, including query and expression bodies.
-			const visit = (node: unknown): void => {
-				if (!node || typeof node !== 'object') return;
-				if (Array.isArray(node)) {
-					for (const child of node) visit(child);
-					return;
-				}
-				const record = node as Record<string, unknown>;
-				if (
-					record.kind === 'exists' ||
-					record.kind === 'notExists' ||
-					record.kind === 'relationFilter'
-				) {
-					throw new Error(
-						`Relation predicates inside an include where are not supported yet at ${path}.where for strategy ${strategy} (oorabona/db-semantic-planner#892).`,
-					);
-				}
-				for (const [key, child] of Object.entries(record)) {
-					// Literal payloads are data, rather than query/expression intent.
-					if (
-						key === 'values' ||
-						(key === 'value' && record.kind !== 'namedArg')
-					)
-						continue;
-					visit(child);
-				}
-			};
-			visit(include.where);
-
-			if (strategy !== 'join') {
-				throw new Error(
-					`Include where is not supported for strategy ${strategy} at ${path}.where (oorabona/db-semantic-planner#892).`,
-				);
-			}
-		}
-		assertSupportedIncludeWhere(
-			include.include,
-			strategies,
-			`${path}.`,
-			`${intentPath}.`,
-			strategy,
-		);
-	}
-}
-
 /** Public SELECT compilation requires authority from this loaded copy of dbsp (plan(), the ORM or NQL). */
 export function assertPlannedReportAuthority(plan: PlanReport): void {
 	if (!isPlannedReport(plan)) {
@@ -1142,17 +1074,6 @@ export function compileSelectEnvelope<T = unknown>(
 	let simplifiedPlan: SimplifiedPlanReport;
 
 	if (execIntent) {
-		const includeStrategies = new Map<string, string>();
-		const indexIncludeStrategies = (
-			nodes: readonly import('@dbsp/types').ResolvedIncludeNode[],
-		) => {
-			for (const node of nodes) {
-				includeStrategies.set(node.intentPath, node.strategy);
-				indexIncludeStrategies(node.children);
-			}
-		};
-		indexIncludeStrategies(planForCompilation.execution?.includes ?? []);
-		assertSupportedIncludeWhere(execIntent.include, includeStrategies);
 		const resolvedWhere = plan.execution?.where;
 		const decisions = intentToDecisions(execIntent, plan.rootTable, {
 			omitRootWhere: true,

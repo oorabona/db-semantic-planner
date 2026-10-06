@@ -260,7 +260,7 @@
 			"position": "include-left-where",
 			"kind": "expression",
 			"shape": "leaf",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND length(name) > $2",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND length(post.name) > $2",
 			"params": [31, 2],
 			"error": null
 		},
@@ -268,7 +268,7 @@
 			"position": "include-left-where",
 			"kind": "expression",
 			"shape": "and",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND length(name) > $2 AND post.score = $3",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND length(post.name) > $2 AND post.score = $3",
 			"params": [31, 2, 13],
 			"error": null
 		},
@@ -276,7 +276,7 @@
 			"position": "include-left-where",
 			"kind": "expression",
 			"shape": "or",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND (length(name) > $2 OR post.score = $3)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND (length(post.name) > $2 OR post.score = $3)",
 			"params": [31, 2, 13],
 			"error": null
 		},
@@ -284,7 +284,7 @@
 			"position": "include-left-where",
 			"kind": "expression",
 			"shape": "not",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (length(name) > $2)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (length(post.name) > $2)",
 			"params": [31, 2],
 			"error": null
 		},
@@ -292,7 +292,7 @@
 			"position": "include-left-where",
 			"kind": "expression",
 			"shape": "two-level",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (length(name) > $3) OR post.score = $4)",
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (length(post.name) > $3) OR post.score = $4)",
 			"params": [31, 13, 2, 17],
 			"error": null
 		},

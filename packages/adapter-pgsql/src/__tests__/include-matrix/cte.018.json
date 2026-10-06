@@ -23,7 +23,7 @@
   },
   {
     "case": "nql/cte/3/via-alias/flat/single/expression",
-    "sql": "SELECT roots.id, tips.id AS \"children.leaves.tips.id\", tips.tenant AS \"children.leaves.tips.tenant\", tips.name AS \"children.leaves.tips.name\", tips.amount AS \"children.leaves.tips.amount\", tips.\"leafId\" AS \"children.leaves.tips.leafId\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" JOIN leaves AS leaves ON children.id = leaves.\"childId\" JOIN tips AS tips ON leaves.id = tips.\"leafId\" WHERE lower(name) = $1 AND lower(name) = $2 AND lower(name) = $3",
+    "sql": "SELECT roots.id, tips.id AS \"children.leaves.tips.id\", tips.tenant AS \"children.leaves.tips.tenant\", tips.name AS \"children.leaves.tips.name\", tips.amount AS \"children.leaves.tips.amount\", tips.\"leafId\" AS \"children.leaves.tips.leafId\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" JOIN leaves AS leaves ON children.id = leaves.\"childId\" JOIN tips AS tips ON leaves.id = tips.\"leafId\" WHERE lower(children.name) = $1 AND lower(leaves.name) = $2 AND lower(tips.name) = $3",
     "params": [
       "child",
       "child",
@@ -140,7 +140,7 @@
   },
   {
     "case": "nql/cte/3/via-alias/flat/single/outer",
-    "sql": "SELECT roots.id, tips.id AS \"children.leaves.tips.id\", tips.tenant AS \"children.leaves.tips.tenant\", tips.name AS \"children.leaves.tips.name\", tips.amount AS \"children.leaves.tips.amount\", tips.\"leafId\" AS \"children.leaves.tips.leafId\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" JOIN leaves AS leaves ON children.id = leaves.\"childId\" JOIN tips AS tips ON leaves.id = tips.\"leafId\" WHERE children.name = $1 AND children.id = roots.id AND leaves.name = $2 AND leaves.id = roots.id AND tips.name = $3 AND tips.id = roots.id",
+    "sql": "SELECT roots.id, tips.id AS \"children.leaves.tips.id\", tips.tenant AS \"children.leaves.tips.tenant\", tips.name AS \"children.leaves.tips.name\", tips.amount AS \"children.leaves.tips.amount\", tips.\"leafId\" AS \"children.leaves.tips.leafId\" FROM roots JOIN children AS children ON roots.id = children.\"rootId\" JOIN leaves AS leaves ON children.id = leaves.\"childId\" JOIN tips AS tips ON leaves.id = tips.\"leafId\" WHERE children.name = $1 AND children.id = roots.id AND leaves.name = $2 AND leaves.id = children.id AND tips.name = $3 AND tips.id = leaves.id",
     "params": [
       "child",
       "child",
@@ -764,7 +764,7 @@
   },
   {
     "case": "nql/cte/3/via-alias/flat/composite/expression",
-    "sql": "SELECT roots.id, \"compositeTips\".id AS \"compositeChildren.compositeLeaves.compositeTips.id\", \"compositeTips\".tenant AS \"compositeChildren.compositeLeaves.compositeTips.tenant\", \"compositeTips\".name AS \"compositeChildren.compositeLeaves.compositeTips.name\", \"compositeTips\".amount AS \"compositeChildren.compositeLeaves.compositeTips.amount\", \"compositeTips\".\"leafId\" AS \"compositeChildren.compositeLeaves.compositeTips.leafId\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant JOIN tips AS \"compositeTips\" ON \"compositeLeaves\".id = \"compositeTips\".\"leafId\" AND \"compositeLeaves\".tenant = \"compositeTips\".tenant WHERE lower(name) = $1 AND lower(name) = $2 AND lower(name) = $3",
+    "sql": "SELECT roots.id, \"compositeTips\".id AS \"compositeChildren.compositeLeaves.compositeTips.id\", \"compositeTips\".tenant AS \"compositeChildren.compositeLeaves.compositeTips.tenant\", \"compositeTips\".name AS \"compositeChildren.compositeLeaves.compositeTips.name\", \"compositeTips\".amount AS \"compositeChildren.compositeLeaves.compositeTips.amount\", \"compositeTips\".\"leafId\" AS \"compositeChildren.compositeLeaves.compositeTips.leafId\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant JOIN tips AS \"compositeTips\" ON \"compositeLeaves\".id = \"compositeTips\".\"leafId\" AND \"compositeLeaves\".tenant = \"compositeTips\".tenant WHERE lower(\"compositeChildren\".name) = $1 AND lower(\"compositeLeaves\".name) = $2 AND lower(\"compositeTips\".name) = $3",
     "params": [
       "child",
       "child",
@@ -881,7 +881,7 @@
   },
   {
     "case": "nql/cte/3/via-alias/flat/composite/outer",
-    "sql": "SELECT roots.id, \"compositeTips\".id AS \"compositeChildren.compositeLeaves.compositeTips.id\", \"compositeTips\".tenant AS \"compositeChildren.compositeLeaves.compositeTips.tenant\", \"compositeTips\".name AS \"compositeChildren.compositeLeaves.compositeTips.name\", \"compositeTips\".amount AS \"compositeChildren.compositeLeaves.compositeTips.amount\", \"compositeTips\".\"leafId\" AS \"compositeChildren.compositeLeaves.compositeTips.leafId\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant JOIN tips AS \"compositeTips\" ON \"compositeLeaves\".id = \"compositeTips\".\"leafId\" AND \"compositeLeaves\".tenant = \"compositeTips\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeChildren\".id = roots.id AND \"compositeLeaves\".name = $2 AND \"compositeLeaves\".id = roots.id AND \"compositeTips\".name = $3 AND \"compositeTips\".id = roots.id",
+    "sql": "SELECT roots.id, \"compositeTips\".id AS \"compositeChildren.compositeLeaves.compositeTips.id\", \"compositeTips\".tenant AS \"compositeChildren.compositeLeaves.compositeTips.tenant\", \"compositeTips\".name AS \"compositeChildren.compositeLeaves.compositeTips.name\", \"compositeTips\".amount AS \"compositeChildren.compositeLeaves.compositeTips.amount\", \"compositeTips\".\"leafId\" AS \"compositeChildren.compositeLeaves.compositeTips.leafId\" FROM roots JOIN children AS \"compositeChildren\" ON roots.id = \"compositeChildren\".\"rootId\" AND roots.tenant = \"compositeChildren\".tenant JOIN leaves AS \"compositeLeaves\" ON \"compositeChildren\".id = \"compositeLeaves\".\"childId\" AND \"compositeChildren\".tenant = \"compositeLeaves\".tenant JOIN tips AS \"compositeTips\" ON \"compositeLeaves\".id = \"compositeTips\".\"leafId\" AND \"compositeLeaves\".tenant = \"compositeTips\".tenant WHERE \"compositeChildren\".name = $1 AND \"compositeChildren\".id = roots.id AND \"compositeLeaves\".name = $2 AND \"compositeLeaves\".id = \"compositeChildren\".id AND \"compositeTips\".name = $3 AND \"compositeTips\".id = \"compositeLeaves\".id",
     "params": [
       "child",
       "child",
