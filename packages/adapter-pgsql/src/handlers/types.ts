@@ -387,7 +387,6 @@ export function createCompilerState(): CompilerState {
  */
 export interface Decision {
 	readonly resolvedInclude?: import('@dbsp/types').ResolvedIncludeNode;
-	readonly includePredicate?: import('@dbsp/types').ResolvedIncludeNode['predicate'];
 	readonly type: string;
 	readonly table?: string;
 	readonly column?: string;

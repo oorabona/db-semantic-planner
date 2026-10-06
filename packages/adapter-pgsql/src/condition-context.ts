@@ -84,7 +84,6 @@ export type ConditionPosition =
 	| 'having'
 	| 'filter'
 	| 'join-on'
-	| 'include-where'
 	| 'recursive-anchor'
 	| 'subquery'
 	| 'case-when'

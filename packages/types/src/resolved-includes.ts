@@ -1,9 +1,5 @@
 import type { ResolvedRelationPath } from './declared-relation-path.js';
-import type {
-	IncludeIntent,
-	IncludeRecursiveOptions,
-	WhereIntent,
-} from './intent-ast.js';
+import type { IncludeIntent, IncludeRecursiveOptions } from './intent-ast.js';
 import type { RelationType } from './model-ir.js';
 import { getNamingPluginForDbCasing } from './naming-plugin.js';
 import type { ResolvedIncludeStrategy } from './planner.js';
@@ -147,7 +143,7 @@ export interface ResolvedIncludeNode {
 		readonly next: ResolvedRange;
 	};
 	readonly predicate?: {
-		readonly condition: WhereIntent;
+		readonly condition: ResolvedCondition;
 		readonly currentRange: ResolvedRange;
 		readonly outerRange: ResolvedRange;
 	};

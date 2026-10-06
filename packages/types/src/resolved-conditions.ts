@@ -28,7 +28,12 @@ export type ResolvedRhs =
 
 export type ResolvedExpression =
 	| { readonly kind: 'wholeRow'; readonly range: ResolvedRange }
-	| { readonly kind: 'ref'; readonly operand: ResolvedColumnOperand }
+	| {
+			readonly kind: 'ref';
+			readonly operand: ResolvedColumnOperand;
+			/** Legacy include-body expression spelling; range authority is retained. */
+			readonly unqualified?: true;
+	  }
 	| {
 			readonly kind: 'subquery';
 			readonly body: Extract<ResolvedSubqueryBody, { use: 'scalar' }>;

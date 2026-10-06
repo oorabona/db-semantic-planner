@@ -376,7 +376,9 @@ function compileResolvedExpressionUnchecked(
 				},
 			};
 		case 'ref':
-			return column(expr.operand, ctx);
+			return expr.unqualified
+				? sqlColumnRef(address(expr.operand, ctx).identifier)
+				: column(expr.operand, ctx);
 		case 'parameter': {
 			const index = ++state.paramIndex;
 			state.parameters.push(expr.value);
@@ -631,9 +633,10 @@ function compileResolvedConditionUnchecked(
 				'Range operators are',
 			);
 			const type = metadata(tree.left, ctx, state)?.type;
-			let castType: string | undefined = type?.endsWith('range')
-				? type
-				: undefined;
+			let castType: string | undefined =
+				tree.value.cast !== 'none' && type?.endsWith('range')
+					? type
+					: undefined;
 			if (castType && tree.value.cast === 'range-element') {
 				castType = castType.replace(/range$/, '');
 				castType =

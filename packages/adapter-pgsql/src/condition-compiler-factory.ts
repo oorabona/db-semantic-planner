@@ -1181,32 +1181,6 @@ export function createConditionCompiler(
 				ctx.paramState,
 			);
 		}
-		// Include predicates share a SELECT with the root. Preserve the existing
-		// condition lowering's parameter and subquery spelling while binding its
-		// field references through the resolved current and enclosing ranges.
-		if (
-			ctx.position === 'include-where' &&
-			intent.kind !== 'and' &&
-			intent.kind !== 'or' &&
-			intent.kind !== 'not'
-		) {
-			const decision = convertWhereCondition(
-				intent,
-				ctx.currentAlias ?? ctx.rootTable,
-			);
-			if (!decision)
-				throw new Error(`Unsupported include predicate '${intent.kind}'`);
-			return dispatcher(
-				mapToHandlerDecision(
-					decision,
-					ctx.rootTable,
-					ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
-					ctx.deriveFkColumnName ?? defaultFkDerivation,
-				),
-				handlerCtx,
-				ctx.paramState,
-			);
-		}
 
 		const havingOperand = ctx.resolveHavingOperand?.(intent);
 		if (havingOperand)

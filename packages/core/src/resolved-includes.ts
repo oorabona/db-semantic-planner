@@ -9,6 +9,7 @@ import {
 	type ResolvedRange,
 	type SelectExecution,
 	toColumnList,
+	type WhereIntent,
 } from '@dbsp/types';
 import {
 	belongsToManyJoinIncludeRefusal,
@@ -24,6 +25,73 @@ import {
 	resolveSelectWhere,
 } from './resolved-conditions.js';
 
+/** Validate include predicates before lowering or allocating bindings. */
+function assertSupportedIncludeWhere(
+	includes: readonly IncludeIntent[] | undefined,
+	strategies: ReadonlyMap<string, string>,
+	parent = '',
+	intentParent = '',
+	parentStrategy?: string,
+): void {
+	for (const [index, include] of (includes ?? []).entries()) {
+		const path = `${parent}include[${index}](${include.relation})`;
+		const intentPath = `${intentParent}include[${index}]`;
+		const strategy =
+			strategies.get(intentPath) ?? (include.join ? 'join' : 'json_agg');
+		if (
+			parentStrategy &&
+			(parentStrategy === 'cte' || strategy !== parentStrategy)
+		) {
+			throw new Error(
+				`Nested include at ${path} has parent strategy ${parentStrategy} and child strategy ${strategy}; mixed strategies and includes under cte are refused (oorabona/db-semantic-planner#894).`,
+			);
+		}
+		if (include.where) {
+			// Walk the complete predicate intent, including query and expression bodies.
+			const visit = (node: unknown): void => {
+				if (!node || typeof node !== 'object') return;
+				if (Array.isArray(node)) {
+					for (const child of node) visit(child);
+					return;
+				}
+				const record = node as Record<string, unknown>;
+				if (
+					record.kind === 'exists' ||
+					record.kind === 'notExists' ||
+					record.kind === 'relationFilter'
+				) {
+					throw new Error(
+						`Relation predicates inside an include where are not supported yet at ${path}.where for strategy ${strategy} (oorabona/db-semantic-planner#892).`,
+					);
+				}
+				for (const [key, child] of Object.entries(record)) {
+					// Literal payloads are data, rather than query/expression intent.
+					if (
+						key === 'values' ||
+						(key === 'value' && record.kind !== 'namedArg')
+					)
+						continue;
+					visit(child);
+				}
+			};
+			visit(include.where);
+
+			if (strategy !== 'join') {
+				throw new Error(
+					`Include where is not supported for strategy ${strategy} at ${path}.where (oorabona/db-semantic-planner#892).`,
+				);
+			}
+		}
+		assertSupportedIncludeWhere(
+			include.include,
+			strategies,
+			`${path}.`,
+			`${intentPath}.`,
+			strategy,
+		);
+	}
+}
+
 /** Called during planning or once after legacy boundary validation. Never by SQL emission. */
 export function resolveReportIncludes(
 	intent: QueryIntent,
@@ -35,6 +103,14 @@ export function resolveReportIncludes(
 		deriveFk?: (table: string, pk: string) => string;
 	} = {},
 ): SelectExecution {
+	assertSupportedIncludeWhere(
+		intent.include,
+		new Map(
+			decisions
+				.filter((d) => d.type === 'include-strategy')
+				.map((d) => [d.context.intentPath!, d.choice]),
+		),
+	);
 	const allocator = new RangeAllocator();
 	const rootRange = allocator.bind(intent.from, intent.from);
 	allocator.reserve(rootRange.alias);
@@ -126,12 +202,24 @@ export function resolveReportIncludes(
 			.filter((d) => d.type === 'include-strategy')
 			.map((d) => [d.context.intentPath, d]),
 	);
+	const predicates = new Map<
+		string,
+		{
+			where: WhereIntent;
+			scopes: readonly (readonly ResolvedRange[])[];
+			qualifiers: readonly ReadonlyMap<string, ResolvedRange>[];
+		}
+	>();
 	const visit = (
 		includes: readonly IncludeIntent[],
 		sourceRange: ResolvedRange,
 		parent = '',
 		intentParent = '',
 		parentFlat = false,
+		outerScopes: readonly (readonly ResolvedRange[])[] = [
+			[rootRange, ...joins.map((j) => j.range)],
+		],
+		outerQualifiers: readonly ReadonlyMap<string, ResolvedRange>[] = [],
 	): ResolvedIncludeNode[] =>
 		includes.map((include, index) => {
 			const intentPath = `${intentParent}include[${index}]`;
@@ -297,6 +385,12 @@ export function resolveReportIncludes(
 					target: targetRange,
 					output: outputRange,
 				});
+			if (include.where)
+				predicates.set(intentPath, {
+					where: include.where,
+					scopes: outerScopes,
+					qualifiers: outerQualifiers,
+				});
 			const node: ResolvedIncludeNode = {
 				nodeId: intentPath,
 				intentPath,
@@ -336,24 +430,25 @@ export function resolveReportIncludes(
 						next: targetRange,
 					},
 				}),
-				...(include.where && {
-					predicate: {
-						condition: include.where,
-						currentRange: targetRange,
-						outerRange: rootRange,
-					},
-				}),
 				children: visit(
 					include.include ?? [],
 					outputRange,
 					relationPath,
 					`${intentPath}.`,
 					flat,
+					[[outputRange], ...outerScopes],
+					[
+						new Map([
+							[include.relation, outputRange],
+							[publicPath, outputRange],
+						]),
+						...outerQualifiers,
+					],
 				),
 			};
 			return node;
 		});
-	const includes = visit(intent.include ?? [], rootRange);
+	const allocatedIncludes = visit(intent.include ?? [], rootRange);
 	const joinedIncludes = (
 		nodes: readonly ResolvedIncludeNode[],
 	): ResolvedRange[] =>
@@ -362,7 +457,47 @@ export function resolveReportIncludes(
 				? [n.outputRange, ...joinedIncludes(n.children)]
 				: [],
 		);
-	const includeRanges = joinedIncludes(includes);
+	const includeRanges = joinedIncludes(allocatedIncludes);
+	const visible = [rootRange, ...joins.map((j) => j.range), ...includeRanges];
+	// Legacy IN/scalar aliases share their sequence across include predicates.
+	const aliasState = {
+		count: joins.length + new Set(includeRanges.map((range) => range.id)).size,
+	};
+	const resolvePredicates = (
+		nodes: readonly ResolvedIncludeNode[],
+	): ResolvedIncludeNode[] =>
+		nodes.map((node) => {
+			const predicate = predicates.get(node.intentPath);
+			return {
+				...node,
+				...(predicate && {
+					predicate: {
+						condition: resolveConditionContext(
+							predicate.where,
+							node.targetRange,
+							[
+								node.targetRange,
+								...visible.filter((r) => r.id !== node.targetRange.id),
+							],
+							predicate.scopes,
+							allocator,
+							model,
+							aliasState.count,
+							[],
+							{
+								include: true,
+								outerQualifiers: predicate.qualifiers,
+								aliasState,
+							},
+						)!,
+						currentRange: node.targetRange,
+						outerRange: node.sourceRange,
+					},
+				}),
+				children: resolvePredicates(node.children),
+			};
+		});
+	const includes = resolvePredicates(allocatedIncludes);
 	const where = resolveSelectWhere(
 		intent.where,
 		rootRange,

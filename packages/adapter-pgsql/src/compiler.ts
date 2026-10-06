@@ -373,6 +373,15 @@ function mergeDuplicateJoinIncludeDecisions(
 			includePredicate?: PlanDecision['includePredicate'];
 			children?: readonly PlanDecision[];
 		};
+		if (
+			decision.includePredicate &&
+			existing.includePredicate &&
+			(decision.includePredicate.currentRange.id !==
+				existing.includePredicate.currentRange.id ||
+				decision.includePredicate.outerRange.id !==
+					existing.includePredicate.outerRange.id)
+		)
+			throw new Error('Cannot merge include predicates with different ranges.');
 		if (decision.includePredicate)
 			mutable.includePredicate = existing.includePredicate
 				? {
@@ -2734,29 +2743,11 @@ export class PlanCompiler {
 		if (decision.includePredicate) {
 			const predicate = decision.includePredicate;
 			const ctx = this.handlerCtx();
-			const condition = compileCondition(predicate.condition, {
-				...ctx,
-				position: 'include-where',
-				logicalSourceTable: predicate.currentRange.table,
-				emittedAlias: predicate.currentRange.alias,
-				outerTable: predicate.outerRange.alias,
-				visibleAliases: new Map(ctx.aliases),
-				paramState: this.state,
-				...(ctx.schema !== undefined && { schemaName: ctx.schema }),
-				compileSubquery: (query, offset, parent) =>
-					buildSubqueryFromIntent(
-						query,
-						offset,
-						this.declaredNames,
-						ctx.schema,
-						'rawExists',
-						ctx.scope,
-						this.dialectCapabilities,
-						this.dbCasing,
-						parent,
-					),
-				compileExpressionSubquery: ctx.compileSubquery,
-			});
+			const condition = compileResolvedCondition(
+				predicate.condition,
+				ctx,
+				this.state,
+			);
 			const projection = this.keylessJoinProjections.get(
 				predicate.currentRange.alias,
 			);
