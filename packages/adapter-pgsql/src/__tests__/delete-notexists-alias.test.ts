@@ -34,7 +34,7 @@ function buildModel(
 		optionality: 'optional' as const,
 		includeStrategy: 'auto' as const,
 		joinDefault: 'auto' as const,
-		...(foreignKey !== undefined && { foreignKey }),
+		foreignKey: effectiveForeignKey,
 	};
 	const relations = new Map([[`${source}.${name}`, rel]]);
 	return {

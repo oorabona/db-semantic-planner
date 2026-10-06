@@ -27,7 +27,7 @@ import type {
 	UpsertIntent,
 	WhereIntent,
 } from '@dbsp/types';
-import { isParamIntent, toColumnList } from '@dbsp/types';
+import { isParamIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { compileSelect } from './adapter-compiler-select.js';
@@ -89,6 +89,7 @@ import {
 	preserveOneToOne,
 } from './projection-envelope.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
+import { resolveRelationKeys } from './relation-keys.js';
 import {
 	queryLocal,
 	resolveDeclaredIdentifier,
@@ -338,20 +339,6 @@ function mutationContext(
 	} as CompilerContext;
 }
 
-function resolveMutationExistsForeignKey(
-	foreignKey: string | readonly string[] | undefined,
-	relationName: string,
-): readonly string[] | undefined {
-	const columns = toColumnList(foreignKey);
-	if (columns.length === 0) return undefined;
-	if (columns.some((column) => column.length === 0)) {
-		throw new Error(
-			`Mutation exists()/notExists() guard relation '${relationName}' has an empty foreignKey column.`,
-		);
-	}
-	return columns;
-}
-
 /**
  * Resolve relation metadata for an exists/notExists WHERE condition.
  *
@@ -379,28 +366,9 @@ function resolveExistsRelation(
 	const relationName = `${sourceTable}.${relation}`;
 	const rel = model.getRelation(relationName);
 	if (!rel) return { targetTable: relation };
-	const targetTable = rel.target;
-	// For belongsTo: FK is on the source table (e.g. embeddings.symbol_id → symbols.id)
-	if (rel.type === 'belongsTo') {
-		const fk = resolveMutationExistsForeignKey(rel.foreignKey, relationName);
-		return {
-			targetTable,
-			...(fk !== undefined && { sourceColumn: fk }),
-			targetColumn:
-				toColumnList(rel.targetKey).length > 0
-					? toColumnList(rel.targetKey)
-					: ['id'],
-		};
-	}
-	// For hasMany/hasOne: FK is on the target table (e.g. symbols.id → calls.callee_id)
-	const fk = resolveMutationExistsForeignKey(rel.foreignKey, relationName);
 	return {
-		targetTable,
-		sourceColumn:
-			toColumnList(rel.sourceKey).length > 0
-				? toColumnList(rel.sourceKey)
-				: ['id'],
-		...(fk !== undefined && { targetColumn: fk }),
+		targetTable: rel.target,
+		...resolveRelationKeys(sourceTable, rel, { model }),
 	};
 }
 
