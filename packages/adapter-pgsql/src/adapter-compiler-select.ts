@@ -40,7 +40,6 @@ import {
 	compiledProjectionLabels,
 	rootProjectionLabels,
 } from './column-metadata.js';
-import { compileWhereIntent, type WhereCompilerCtx } from './compile-where.js';
 import {
 	type CompilerOptions,
 	compilePlan,
@@ -51,7 +50,7 @@ import {
 import { inferPgArrayType, stripArraySuffix } from './compiler-utils.js';
 import { validateDbType } from './db-type.js';
 import { declaredColumnName } from './declared-name-resolver.js';
-import { createCompilerState } from './handlers/types.js';
+import { type CompilerContext, createCompilerState } from './handlers/types.js';
 import { resolveIncludePayloadShapes } from './include-payload-shape.js';
 import { intentToDecisions } from './intent-to-decisions.js';
 import {
@@ -66,10 +65,12 @@ import {
 	type ProjectionEnvelope,
 	supplementOutputDescriptors,
 } from './projection-envelope.js';
+import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
 import {
 	assertProjectedJsonContainerCanBeAggregated,
 	resolveRelationTarget,
 } from './relation-target-projection.js';
+import { compileResolvedCondition } from './resolved-condition-compiler.js';
 import { queryLocal, resolveDeclaredIdentifier } from './sql-identifier.js';
 import { stableJson } from './transition/stable-json.js';
 
@@ -222,7 +223,7 @@ function assertSafeTypeName(typeName: string, colIndex: number): void {
  *
  * Two modes:
  * - Relation mode (no `on`): FK auto-resolved from model, like `include` but flat (no hydration).
- * - Table mode (`on` present): Explicit ON condition compiled via compileWhereIntent().
+ * - Table mode (`on` present): Explicit ON condition compiled from the resolved union.
  *
  * The resulting decisions are appended to `allDecisions` before `compilePlan()`.
  */
@@ -240,9 +241,9 @@ type BatchValuesRangeFnResult = {
  * Build a `unnest($1::type[], ...) AS alias(col1, col2 [, ord])` RangeFunction node
  * from a BatchValuesJoinPayload.
  *
- * The returned `params` array contains the column data arrays in order; they must
- * be spliced into CompilerState.parameters BEFORE other query params so that the
- * $N refs in the AST node match the right positions.
+ * The returned `params` array contains the column data arrays in order, numbered
+ * from `startParamIndex`. A BatchValues FROM places them first in the query; a
+ * BatchValues join numbers them locally and compileJoinDecision offsets them.
  *
  * @param bv - The batch values payload (columns, data, types, alias, ordinality).
  * @param startParamIndex - The 1-based index for the first ParamRef ($N).
@@ -314,7 +315,6 @@ function compileJoinIntents(
 	const rootTable = execution.rootRange.table;
 	const rootBinding = sourceBinding(rootTable, deps);
 
-	const model = deps.model;
 	const results: PlanDecision[] = [];
 	const initialScope = queryScope([
 		...(deps.scope?.bindings.values() ?? []),
@@ -324,12 +324,8 @@ function compileJoinIntents(
 	// One local scope grows in execution order; each ON sees itself and prior joins.
 	const joinBindings = new Map(initialScope.bindings);
 	const joinScope = { bindings: joinBindings };
-	const tableAliasMap = new Map([
-		[execution.rootRange.alias, execution.rootRange.alias],
-	]);
 	for (const join of execution.joins) {
 		const range = join.range;
-		tableAliasMap.set(range.alias, range.alias);
 		if (join.kind === 'values') {
 			const bv = joins[join.intentIndex]?.batchValues;
 			if (!bv) throw new Error(`Join ${join.intentPath} has no values payload`);
@@ -358,6 +354,24 @@ function compileJoinIntents(
 				}),
 			);
 		}
+		const onContext: CompilerContext = {
+			rootTable,
+			currentAlias: rootBinding.qualifier,
+			scope: joinScope,
+			...(schemaName !== undefined && { schema: schemaName }),
+			dbCasing: deps.dbCasing ?? 'preserve',
+			...(deps.declaredNames !== undefined && {
+				declaredNames: deps.declaredNames,
+			}),
+			...(deps.relationTargetProjections !== undefined && {
+				relationTargetProjections: deps.relationTargetProjections,
+			}),
+			...(deps.model !== undefined && { model: deps.model }),
+			...(deps.dialectCapabilities !== undefined && {
+				dialectCapabilities: deps.dialectCapabilities,
+			}),
+			maxRecursiveDepth: MAX_DEPTH_LIMIT,
+		};
 		const resolved = join;
 		const alias = resolved.range.alias;
 
@@ -378,7 +392,7 @@ function compileJoinIntents(
 			// ── BatchValues mode: unnest($N::type[], ...) AS alias(col1, col2) ──
 			// Compiles a batch-values join: the rarg is a RangeFunction wrapping
 			// unnest() instead of a plain RangeVar.
-			// Params are $1, $2, ... (1-indexed); compiler.ts splices them first.
+			// Params start locally at $1; compileJoinDecision offsets both fragments.
 			const bv = joins[resolved.intentIndex]?.batchValues;
 			if (!bv)
 				throw new Error(`Join ${resolved.intentPath} has no values payload`);
@@ -397,36 +411,15 @@ function compileJoinIntents(
 			const bvOnParamState = createCompilerState();
 			bvOnParamState.paramIndex = bvParams.length;
 
-			const bvCtx: WhereCompilerCtx = {
-				rootTable,
-				aliases: new Map<string, string>(),
-				paramState: bvOnParamState,
-				outerTable: alias,
-				...(schemaName !== undefined && { schemaName }),
-				scope: joinScope,
-				dbCasing: deps.dbCasing ?? 'preserve',
-				...(deps.declaredNames !== undefined && {
-					declaredNames: deps.declaredNames,
-				}),
-				...(deps.relationTargetProjections !== undefined && {
-					relationTargetProjections: deps.relationTargetProjections,
-				}),
-				...(model !== undefined && { model }),
-				...(deps.dialectCapabilities !== undefined && {
-					dialectCapabilities: deps.dialectCapabilities,
-				}),
-				compileSubquery: () => {
-					throw new Error(
-						'Subquery in BatchValues JOIN ON condition is not supported.',
-					);
-				},
-			};
-
-			const onNode: Node = compileWhereIntent(resolved.on!, bvCtx);
+			const onNode = compileResolvedCondition(
+				resolved.on!,
+				onContext,
+				bvOnParamState,
+			);
 
 			// Combine bv unnest params + any ON condition params into batchValuesParams.
-			// compiler.ts splices all of these BEFORE other query params so that $1/$2/...
-			// in the RangeFunction and ON condition align with parameters[0], [1], ...
+			// compileJoinDecision appends these together and offsets the RangeFunction
+			// and ON placeholders by the number of parameters already in the query.
 			const allBvParams: unknown[] = [
 				...bvParams,
 				...bvOnParamState.parameters,
@@ -439,46 +432,23 @@ function compileJoinIntents(
 				joinType: resolved.type,
 				joinRarg: rangeFunction,
 				joinOnNode: onNode,
-				// batchValuesParams are spliced into this.state.parameters BEFORE
-				// other params in compiler.ts, so $1/$2/... refs align correctly.
+				// Arrays and ON values share one local parameter sequence.
 				batchValuesParams: allBvParams,
 			});
 		} else {
 			// ── Table mode: explicit ON condition ─────────────────────────────
-			// Compile the ON WhereIntent to an AST Node via compileWhereIntent.
+			// Compile the planned ON condition to an AST node.
 			// ON conditions may include bound params; capture them with the precompiled
 			// join so compiler.ts can merge them into the query's live param sequence.
 			const paramState = createCompilerState();
 
 			const tableAlias = resolved.range.alias;
 
-			// The incremental alias map preserves query-local qualifiers in ON references.
-			const ctx: WhereCompilerCtx = {
-				rootTable,
-				aliases: tableAliasMap,
+			const onNode = compileResolvedCondition(
+				resolved.on!,
+				onContext,
 				paramState,
-				// outerTable = tableAlias so FieldRef(scope:'outer') resolves to the
-				// joined alias (e.g. 'e2' in self-join ON conditions).
-				outerTable: tableAlias,
-				...(schemaName !== undefined && { schemaName }),
-				scope: joinScope,
-				dbCasing: deps.dbCasing ?? 'preserve',
-				...(deps.declaredNames !== undefined && {
-					declaredNames: deps.declaredNames,
-				}),
-				...(deps.relationTargetProjections !== undefined && {
-					relationTargetProjections: deps.relationTargetProjections,
-				}),
-				...(model !== undefined && { model }),
-				...(deps.dialectCapabilities !== undefined && {
-					dialectCapabilities: deps.dialectCapabilities,
-				}),
-				compileSubquery: () => {
-					throw new Error('Subquery in JOIN ON condition is not supported.');
-				},
-			};
-
-			const onNode: Node = compileWhereIntent(resolved.on!, ctx);
+			);
 
 			// Store rarg + onNode separately — the 'join' case in compiler.ts wraps
 			// from[0] as larg so multiple .join() calls chain correctly.

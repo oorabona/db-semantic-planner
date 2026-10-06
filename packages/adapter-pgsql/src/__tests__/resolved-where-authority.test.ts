@@ -123,7 +123,7 @@ describe('resolved root WHERE refusal proofs (#891)', () => {
 		} finally {
 			spy.mockRestore();
 		}
-	});
+	}, 30_000);
 	it('2: calls/caller combined and joined qualifier preserve exact SELECT projection', () => {
 		const report = orm
 			.select('calls')

@@ -522,17 +522,14 @@ export function createConditionCompiler(
 		// Guard: reject scalar subqueries with modifiers that the direct path does not
 		// faithfully emit (LIMIT, ORDER BY, GROUP BY, etc.). This runs BEFORE the
 		// ctx.compileSubquery callback so the modifier error fires first, regardless
-		// of which callback is injected (e.g. the JOIN ON override that throws a
-		// different error).
+		// of which callback is injected.
 		assertNoUnsupportedSubqueryModifiers(
 			subquery as QueryIntent,
 			'scalar-direct',
 		);
 
 		// Route through ctx.compileSubquery so caller-injected overrides are honoured.
-		// Specifically, JOIN ON compilation injects a throw-callback so a scalar subquery
-		// in a JOIN ON condition is correctly rejected (not silently compiled).
-		// This was the original design intent (point 6 of the spec).
+
 		const {
 			sql: subqueryNode,
 			paramCount,

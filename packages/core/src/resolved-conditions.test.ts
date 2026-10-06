@@ -4,7 +4,10 @@ import {
 	type WhereIntent,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { resolveSelectWhere } from './resolved-conditions.js';
+import {
+	resolveConditionContext,
+	resolveSelectWhere,
+} from './resolved-conditions.js';
 
 function resolve(where: WhereIntent): ResolvedCondition {
 	const allocator = new RangeAllocator();
@@ -86,5 +89,41 @@ describe('typed WHERE resolution', () => {
 				right: { kind: 'parameter', value: 'ada', cast: 'none' },
 			},
 		});
+	});
+});
+
+describe('contextual ON resolution', () => {
+	it('owns unqualified leaves at root and outer references at the joined range', () => {
+		const allocator = new RangeAllocator();
+		const root = allocator.bind('users', 'users');
+		const joined = allocator.bind('posts', 'p');
+		const tree = resolveConditionContext(
+			{
+				kind: 'comparison',
+				field: 'id',
+				operator: 'eq',
+				value: { kind: 'ref', column: 'id', outer: true },
+			},
+			root,
+			[root, joined],
+			[[joined]],
+			allocator,
+			undefined,
+		);
+		expect(tree).toMatchObject({
+			kind: 'comparison',
+			left: { range: root },
+			right: { kind: 'outerRef', range: joined },
+		});
+		expect(() =>
+			resolveConditionContext(
+				{ kind: 'expression', expr: { kind: 'ref', column: 'later.id' } },
+				root,
+				[root, joined],
+				[[joined]],
+				allocator,
+				undefined,
+			),
+		).toThrow("WHERE qualifier 'later' is not visible in this query.");
 	});
 });

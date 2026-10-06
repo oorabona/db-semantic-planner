@@ -2,11 +2,9 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { and, eq, exists, not, or } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	conditionMatrix,
-	isRelationLookupFreeJoinOn,
 	type MatrixOutcome,
 	prepareConditionMatrix,
 } from './condition-matrix.cases.js';
@@ -37,29 +35,6 @@ describe('condition compilation differential matrix (#891)', () => {
 		expect(baselinePaths.map((path) => readFileSync(path, 'utf8'))).toEqual(
 			before,
 		);
-	});
-	it('poisons only ON conditions without relation predicates or dotted fields', () => {
-		const plain = eq('score', 7);
-		expect(isRelationLookupFreeJoinOn(and(plain, not(or(plain))))).toBe(true);
-		for (const condition of [
-			exists('posts'),
-			{ kind: 'notExists' as const, relation: 'posts' },
-			...(['some', 'every', 'none'] as const).map((mode) => ({
-				kind: 'relationFilter' as const,
-				relation: 'posts',
-				where: plain,
-				mode,
-			})),
-			eq('posts.score', 7),
-		]) {
-			for (const wrapped of [
-				condition,
-				and(plain, condition),
-				or(plain, condition),
-				not(condition),
-			])
-				expect(isRelationLookupFreeJoinOn(wrapped)).toBe(false);
-		}
 	});
 	it('emits empty groups once per position and observable key-authority profile', () => {
 		for (const position of new Set(

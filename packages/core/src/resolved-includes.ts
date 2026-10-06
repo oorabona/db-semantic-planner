@@ -19,7 +19,10 @@ import {
 } from '@dbsp/types/internal';
 import { singularize } from './conventions.js';
 import { InvalidOperationError } from './dx/errors.js';
-import { resolveSelectWhere } from './resolved-conditions.js';
+import {
+	resolveConditionContext,
+	resolveSelectWhere,
+} from './resolved-conditions.js';
 
 /** Called during planning or once after legacy boundary validation. Never by SQL emission. */
 export function resolveReportIncludes(
@@ -40,6 +43,14 @@ export function resolveReportIncludes(
 		string,
 		{ target: ResolvedRange; output: ResolvedRange }
 	>();
+	const visibleJoinRanges: ResolvedRange[] = [rootRange];
+	const firstJoinByQualifier = new Map<string, number>();
+	(intent.joins ?? []).forEach((join, index) => {
+		const qualifier =
+			join.alias ?? join.relation ?? join.batchValues?.alias ?? join.table!;
+		if (!firstJoinByQualifier.has(qualifier))
+			firstJoinByQualifier.set(qualifier, index);
+	});
 	const joins: ResolvedJoin[] = (intent.joins ?? []).map(
 		(join, intentIndex) => {
 			const alias =
@@ -74,6 +85,24 @@ export function resolveReportIncludes(
 			}
 			const range = allocator.bind(table, alias);
 			allocator.reserve(range.alias);
+			visibleJoinRanges.push(range);
+			const on = resolveConditionContext(
+				join.on,
+				rootRange,
+				[...visibleJoinRanges],
+				[[range]],
+				allocator,
+				model,
+				0,
+				[],
+				{
+					subqueryRefusal: join.batchValues
+						? 'Subquery in BatchValues JOIN ON condition is not supported.'
+						: 'Subquery in JOIN ON condition is not supported.',
+					firstJoinByQualifier,
+					intentIndex,
+				},
+			);
 			return {
 				intentPath: `join[${intentIndex}]`,
 				intentIndex,
@@ -87,7 +116,7 @@ export function resolveReportIncludes(
 				range,
 				sourceRange: rootRange,
 				...(path && { path }),
-				...(join.on && { on: join.on }),
+				...(on && { on }),
 			};
 		},
 	);

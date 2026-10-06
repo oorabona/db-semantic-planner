@@ -37,6 +37,17 @@ function isRef(value: unknown): value is { target: string } {
 	return value !== null && typeof value === 'object' && REF_BRAND in value;
 }
 
+/** Preserve the legacy ON correlation refusal; parameter payloads are opaque. */
+function containsOuterReference(value: unknown): boolean {
+	if (!value || typeof value !== 'object' || isParamIntent(value)) return false;
+	if (isSubqueryRef(value) && value.outer === true) return true;
+	return Object.values(value).some((item) =>
+		Array.isArray(item)
+			? item.some(containsOuterReference)
+			: containsOuterReference(item),
+	);
+}
+
 /** One traversal, with one shared allocator and no reconstruction of ancestor name sets. */
 export function resolveSelectWhere(
 	where: WhereIntent | undefined,
@@ -47,6 +58,35 @@ export function resolveSelectWhere(
 	initialAliasCount = 0,
 	additionalOuterRanges: readonly ResolvedRange[] = [],
 ): ResolvedCondition | undefined {
+	return resolveConditionContext(
+		where,
+		root,
+		visible,
+		[],
+		allocator,
+		model,
+		initialAliasCount,
+		additionalOuterRanges,
+	);
+}
+
+/** Resolve a condition with explicit current, visible and enclosing query ranges. */
+export function resolveConditionContext(
+	where: WhereIntent | undefined,
+	root: ResolvedRange,
+	visible: readonly ResolvedRange[],
+	enclosing: readonly (readonly ResolvedRange[])[],
+	allocator: RangeAllocator,
+	model: ModelIR | undefined,
+	initialAliasCount = 0,
+	additionalOuterRanges: readonly ResolvedRange[] = [],
+	joinOn?: {
+		readonly subqueryRefusal: string;
+		readonly firstJoinByQualifier: ReadonlyMap<string, number>;
+		readonly intentIndex: number;
+	},
+): ResolvedCondition | undefined {
+	const subqueryRefusal = joinOn?.subqueryRefusal;
 	const rootScope = [...new Set([root, ...visible, ...additionalOuterRanges])];
 	const enclosingScope = (ranges: readonly ResolvedRange[]) =>
 		ranges === visible ? rootScope : ranges;
@@ -61,8 +101,50 @@ export function resolveSelectWhere(
 		readonly ResolvedRange[],
 		ReadonlyMap<string, ResolvedRange>
 	>();
+	// ON preserves the authored root qualifier even for a self-join.
+	if (joinOn) writtenQualifiers.set(visible, new Map([[root.alias, root]]));
 	const activeNames = new Set(visible.map((r) => r.alias));
 	let scopeIndex = 0;
+	const assertQualifierVisible = (
+		qualifier: string,
+		ranges: readonly ResolvedRange[],
+	): void => {
+		if (
+			(ranges === visible ||
+				ranges === rootScope ||
+				enclosing.includes(ranges)) &&
+			joinOn !== undefined &&
+			(joinOn.firstJoinByQualifier.get(qualifier) ?? -1) > joinOn.intentIndex &&
+			!visible.some((range) => range.alias === qualifier)
+		)
+			throw new Error(
+				`WHERE qualifier '${qualifier}' is not visible in this query.`,
+			);
+	};
+	const matchQualifier = (
+		qualifier: string,
+		scope: readonly ResolvedRange[],
+		outer: boolean,
+	): ResolvedRange | undefined => {
+		assertQualifierVisible(qualifier, scope);
+		const candidates = scope.filter((r) => r.table === qualifier);
+		const exact =
+			writtenQualifiers.get(scope)?.get(qualifier) ??
+			scope.find(
+				(r) =>
+					r.alias === qualifier &&
+					(r !== scope[0] || r.alias !== r.table || candidates.length < 2),
+			);
+		if (exact) return exact;
+		if (candidates.length > 1)
+			throw new Error(
+				`${outer ? 'outerRef' : 'WHERE'} qualifier '${qualifier}' is ambiguous between ${candidates
+					.map((r) => `'${r.alias}'`)
+					.sort()
+					.join(', ')}${outer ? ' in an enclosing query' : ''}.`,
+			);
+		return candidates[0];
+	};
 	const column = (
 		name: string,
 		current: ResolvedRange,
@@ -80,26 +162,7 @@ export function resolveSelectWhere(
 				const qualifier = parts.shift()!;
 				let found: ResolvedRange | undefined;
 				for (const scope of enclosing) {
-					const candidates = scope.filter((r) => r.table === qualifier);
-					// A self-join makes the logical root name ambiguous even though its default alias matches.
-					found =
-						writtenQualifiers.get(scope)?.get(qualifier) ??
-						scope.find(
-							(r) =>
-								r.alias === qualifier &&
-								(r !== scope[0] ||
-									r.alias !== r.table ||
-									candidates.length < 2),
-						);
-					if (found) break;
-					if (candidates.length > 1)
-						throw new Error(
-							`outerRef qualifier '${qualifier}' is ambiguous between ${candidates
-								.map((r) => `'${r.alias}'`)
-								.sort()
-								.join(', ')} in an enclosing query.`,
-						);
-					found = candidates[0];
+					found = matchQualifier(qualifier, scope, true);
 					if (found) break;
 				}
 				if (!found)
@@ -110,23 +173,8 @@ export function resolveSelectWhere(
 			}
 		} else if (parts.length > 1) {
 			const qualifier = parts.shift()!;
-			const candidates = ranges.filter((r) => r.table === qualifier);
-			const exact =
-				writtenQualifiers.get(ranges)?.get(qualifier) ??
-				ranges.find(
-					(r) =>
-						r.alias === qualifier &&
-						(r !== ranges[0] || r.alias !== r.table || candidates.length < 2),
-				);
-			if (exact) range = exact;
-			else if (candidates.length > 1)
-				throw new Error(
-					`WHERE qualifier '${qualifier}' is ambiguous between ${candidates
-						.map((r) => `'${r.alias}'`)
-						.sort()
-						.join(', ')}.`,
-				);
-			else if (candidates[0]) range = candidates[0];
+			const found = matchQualifier(qualifier, ranges, false);
+			if (found) range = found;
 			else
 				throw new Error(
 					`WHERE qualifier '${qualifier}' is not visible in this query.`,
@@ -189,12 +237,23 @@ export function resolveSelectWhere(
 		enclosing: readonly (readonly ResolvedRange[])[],
 		isExpressionBody = false,
 	): Extract<ResolvedSubqueryBody, { use: U }> {
+		if (subqueryRefusal && isExpressionBody)
+			throw new Error(
+				"compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context.",
+			);
 		if (!isExpressionBody)
 			assertNoUnsupportedSubqueryModifiers(
 				query,
-				use === 'exists' ? 'rawExists' : use === 'in' ? 'IN' : 'scalar',
+				use === 'exists'
+					? 'rawExists'
+					: use === 'in'
+						? 'IN'
+						: subqueryRefusal
+							? 'scalar-direct'
+							: 'scalar',
 			);
 		else assertNoUnsupportedSubqueryModifiers(query, 'scalar');
+		if (subqueryRefusal && use !== 'in') throw new Error(subqueryRefusal);
 		let alias: string;
 		const expressionPrior = expressionNext.get(query.from) ?? 0;
 		if (isExpressionBody) {
@@ -718,18 +777,9 @@ export function resolveSelectWhere(
 		) {
 			const parts = node.field.split('.');
 			const qualifier = parts[0]!;
-			const candidates = ranges.filter((r) => r.table === qualifier);
-			const exact =
-				writtenQualifiers.get(ranges)?.get(qualifier) ??
-				ranges.find(
-					(r) =>
-						r.alias === qualifier &&
-						(r !== ranges[0] || r.alias !== r.table || candidates.length < 2),
-				);
-			if (!exact && candidates.length > 1)
-				column(node.field, current, ranges, enclosing);
-			const source = exact ?? candidates[0] ?? current;
-			if (exact || candidates.length) parts.shift();
+			const found = matchQualifier(qualifier, ranges, false);
+			const source = found ?? current;
+			if (found) parts.shift();
 			if (parts.length > 1) {
 				const field = parts.pop()!;
 				return relation(
@@ -837,6 +887,14 @@ export function resolveSelectWhere(
 				return { kind: 'jsonExists', left: left(), key: parameter(node.key) };
 			case 'rawExists':
 			case 'rawNotExists':
+				if (subqueryRefusal) {
+					assertNoUnsupportedSubqueryModifiers(node.subquery, 'rawExists');
+					if (containsOuterReference(node.subquery.where))
+						throw new Error(
+							`${node.kind}: correlated subqueries (outerRef inside the inner WHERE) are not yet supported. ` +
+								'Workaround: use exists("relation", { where: ... }) when a schema relation exists, or wait for the rawExists correlation pipeline (tracked in TODO).',
+						);
+				}
 				return {
 					kind: 'subquery',
 					use: 'exists',
@@ -868,5 +926,5 @@ export function resolveSelectWhere(
 				);
 		}
 	};
-	return where ? visit(where, root, visible, []) : undefined;
+	return where ? visit(where, root, visible, enclosing) : undefined;
 }

@@ -118,8 +118,8 @@ export interface PlanDecision {
 	readonly joinRarg?: Node;
 	readonly joinOnNode?: Node;
 	// Parameters for BatchValues joins (unnest() source).
-	// When set, these are spliced into this.state.parameters BEFORE other query params.
-	// The joinRarg contains ParamRefs ($1, $2, ...) aligned with these values.
+	// The arrays then the ON values, numbered locally from $1 in joinRarg and joinOnNode;
+	// compileJoinDecision offsets both by the parameters already in the query.
 	readonly batchValuesParams?: readonly unknown[];
 	/**
 	 * Provenance: the ORIGINAL QueryIntent before lowering.

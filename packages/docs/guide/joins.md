@@ -399,7 +399,7 @@ All standard filter helpers (`eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like`, `and
 - **Self-joins require a distinct alias** — use `as` when the default qualifier would equal the root table name; that collision is refused at `plan()`.
 - **Result columns are flat** — `.join()` does not hydrate nested objects. All columns from the joined table appear as top-level keys in the result. Use `include()` for nested hydration.
 - **Right and full outer joins are not supported** — only `'inner'` and `'left'` are valid values for `type`.
-- **Dotted column notation in ON conditions** — use `'table.column'` (e.g. `'embeddings.id'`) to produce qualified column references in the ON clause. Unqualified names may be ambiguous when both sides of the join expose the same column name.
+- **Dotted column notation in ON conditions** — use `'table.column'` (e.g. `'embeddings.id'`) to produce qualified column references in the ON clause. An unqualified name binds to the root range, so qualify a column of the joined or an earlier range.
 - **Multiple joins nest left-to-right** — the SQL FROM clause wraps joins progressively: `((A JOIN B) JOIN C)`. This matches standard PostgreSQL left-associative join behavior and is transparent to the query result.
 
 Compilation follows [Authored intent and execution authority](./observability.md#authored-intent-and-execution-authority).
@@ -411,3 +411,13 @@ In a SELECT's WHERE, a qualified field starts at a visible range when its first 
 With two visible ranges of the same logical table, an exact alias binds to that range; the bare logical table name is ambiguous and refused with the aliases named. `outerRef()` searches enclosing queries nearest first: an exact alias wins, otherwise the logical table must identify a unique range in that scope. An unqualified `outerRef()` binds to the immediately enclosing query.
 
 `plan()` resolves the optimized root WHERE into `execution.where`, including relation paths, declared keys and subquery ranges. Compilation uses that tree; expression references render with their range qualifier. Undeclared relations, missing declared foreign keys, many-to-many traversal and recursive relation predicates are refused during planning.
+
+### ON visibility and planning
+
+An ON condition sees the root range, every earlier join, and the join itself.
+Unqualified fields and relation predicates start at the root range; qualified fields
+can name any of those visible ranges. The written root qualifier identifies the root
+even in a self-join ON. An unqualified `outerRef()` written directly in a table or values
+join ON points to the joined range; inside a subquery body it binds the enclosing query, as in
+WHERE. A qualifier naming a later join is refused by `plan()`
+with the qualifier named in the diagnostic.

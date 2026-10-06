@@ -227,8 +227,9 @@ export interface PrecompiledJoinDecision extends JoinDecision {
 
 /**
  * A pre-compiled 'join' decision backed by a BatchValues unnest() source.
- * `batchValuesParams` must be spliced into compiler state BEFORE other query
- * parameters so that $1/$2/… ParamRefs in the RangeFunction align correctly.
+ * `batchValuesParams` holds the arrays then the ON values, numbered locally
+ * from $1; compileJoinDecision offsets both fragments by the parameters already
+ * in the query and appends these values.
  */
 export interface BatchValuesJoinDecision extends PrecompiledJoinDecision {
 	readonly batchValuesParams: readonly unknown[];
@@ -254,8 +255,8 @@ export function isPrecompiledJoinDecision(
 
 /**
  * Narrows a PlanDecision to BatchValuesJoinDecision.
- * True when the join is a BatchValues unnest() join and carries pre-spliced
- * parameter arrays in `batchValuesParams`.
+ * True when the join is a BatchValues unnest() join and carries its locally
+ * numbered parameters in `batchValuesParams`.
  */
 export function isBatchValuesJoinDecision(
 	d: PlanDecision,
@@ -2820,17 +2821,20 @@ export class PlanCompiler {
 		from: Node[],
 	): void {
 		if (isPrecompiledJoinDecision(decision)) {
-			// BatchValues: splice batch params into state BEFORE other query params
-			// so that $1, $2, ... in the RangeFunction align with parameters[0], [1], ...
 			const isBatchValues = isBatchValuesJoinDecision(decision);
+			let jRarg = decision.joinRarg;
+			let jOn = decision.joinOnNode;
 			if (isBatchValues) {
+				// Both fragments share a local sequence (arrays, then ON values).
+				// Root WHERE and includes may already own parameters in the live state.
+				const offset = this.state.parameters.length;
+				jRarg = renumberParamRefsInAst(jRarg, offset);
+				jOn = renumberParamRefsInAst(jOn, offset);
 				for (const p of decision.batchValuesParams) {
 					this.state.parameters.push(p);
 				}
 				this.state.paramIndex = this.state.parameters.length;
 			}
-			const jRarg = decision.joinRarg;
-			let jOn = decision.joinOnNode;
 			if (!isBatchValues && decision.joinOnParams?.length) {
 				// The ON was compiled in a fresh param state, so its ParamRefs are
 				// numbered 1..joinOnParams.length. A ref beyond that range means the

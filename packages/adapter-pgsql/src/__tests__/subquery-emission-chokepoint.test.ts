@@ -589,30 +589,17 @@ describe('SUMMARY: buildPredicateSubquerySelect routes all handler-path emission
 });
 
 // ============================================================================
-// REGRESSION LOCK — DEFECT 1: JOIN ON scalar subquery must still throw
+// Direct scalar compilation honours caller-injected subquery callbacks.
 // ============================================================================
 
-describe('DEFECT 1 regression: scalar subquery in JOIN ON condition is rejected', () => {
-	/**
-	 * adapter-compiler-select.ts injects a throw-callback for ctx.compileSubquery
-	 * when building JOIN ON conditions (two sites: table-mode and BatchValues-mode).
-	 * Before the fix, handleSubqueryIntent bypassed ctx.compileSubquery and called
-	 * buildSubqueryFromIntent directly — so a scalar subquery in a JOIN ON would
-	 * silently compile instead of throwing.
-	 *
-	 * Fix: handleSubqueryIntent routes through ctx.compileSubquery so the override
-	 * throw fires.  The per-site 'scalar-direct' modifier guard still runs FIRST so
-	 * modifier errors are reported before the JOIN ON error.
-	 */
-	it('scalar subquery in JOIN ON condition throws (table-mode join, injected ctx)', () => {
-		// Simulate the WhereCompilerCtx that adapter-compiler-select.ts builds for
-		// table-mode JOIN ON compilation — compileSubquery is overridden to throw.
+describe('direct compileWhereIntent scalar callback dispatch', () => {
+	it('propagates the injected subquery callback error', () => {
 		const paramState = createCompilerState();
 		const ctx: WhereCompilerCtx = {
 			rootTable: 'orders',
 			aliases: new Map(),
 			paramState,
-			// Exact override used in adapter-compiler-select.ts ~387
+			// Caller-provided refusal callback.
 			compileSubquery: () => {
 				throw new Error('Subquery in JOIN ON condition is not supported.');
 			},
@@ -634,15 +621,14 @@ describe('DEFECT 1 regression: scalar subquery in JOIN ON condition is rejected'
 		);
 	});
 
-	it('scalar subquery in BatchValues JOIN ON condition throws (injected ctx)', () => {
-		// Simulate the BatchValues JOIN ON WhereCompilerCtx from
-		// adapter-compiler-select.ts ~331.
+	it('propagates a distinct injected subquery callback error', () => {
+		// A direct caller supplies a distinct refusal callback.
 		const paramState = createCompilerState();
 		const ctx: WhereCompilerCtx = {
 			rootTable: 'orders',
 			aliases: new Map(),
 			paramState,
-			// Exact override used in adapter-compiler-select.ts ~331
+			// Caller-provided refusal callback.
 			compileSubquery: () => {
 				throw new Error(
 					'Subquery in BatchValues JOIN ON condition is not supported.',
@@ -666,10 +652,8 @@ describe('DEFECT 1 regression: scalar subquery in JOIN ON condition is rejected'
 		);
 	});
 
-	it('modifier guard fires before JOIN ON throw (scalar-direct rejects LIMIT first)', () => {
-		// A scalar subquery with LIMIT in a JOIN ON context: the 'scalar-direct'
-		// modifier guard must fire BEFORE ctx.compileSubquery so the caller sees
-		// the modifier error, not the JOIN ON override error.
+	it('rejects LIMIT before invoking the injected subquery callback', () => {
+		// The scalar-direct modifier guard runs before the injected callback.
 		const paramState = createCompilerState();
 		const ctx: WhereCompilerCtx = {
 			rootTable: 'orders',
@@ -700,9 +684,8 @@ describe('DEFECT 1 regression: scalar subquery in JOIN ON condition is rejected'
 		).toThrow(/LIMIT.*not supported/i);
 	});
 
-	it('non-subquery WHERE condition in JOIN ON still compiles (no false positive)', () => {
-		// A plain comparison in a JOIN ON must compile normally — the fix must not
-		// break the common case.
+	it('compiles a direct comparison without invoking the subquery callback', () => {
+		// A direct comparison does not require subquery compilation.
 		const paramState = createCompilerState();
 		const ctx: WhereCompilerCtx = {
 			rootTable: 'orders',
