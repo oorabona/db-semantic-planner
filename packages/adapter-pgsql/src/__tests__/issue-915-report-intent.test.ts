@@ -1,7 +1,7 @@
+import * as compiler from '@dbsp/adapter-pgsql/internal';
 import { POSTGRESQL_CAPABILITIES, plan, ref, schema } from '@dbsp/core';
 import type { PlanReport } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
-import * as compiler from '../compiler.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const model = schema({

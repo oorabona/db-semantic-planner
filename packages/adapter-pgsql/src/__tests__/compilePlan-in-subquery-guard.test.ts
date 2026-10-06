@@ -36,9 +36,12 @@
  *    (verified by the other guard test files).
  */
 
+import {
+	compilePlan,
+	type SimplifiedPlanReport,
+} from '@dbsp/adapter-pgsql/internal';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
-import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

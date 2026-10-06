@@ -9,12 +9,12 @@
  * which is semantically equivalent. Tests verify absence of "LEFT JOIN".
  */
 
-import { describe, expect, it } from 'vitest';
 import {
 	compilePlan,
 	type PlanDecision,
 	type SimplifiedPlanReport,
-} from '../compiler.js';
+} from '@dbsp/adapter-pgsql/internal';
+import { describe, expect, it } from 'vitest';
 
 function compileToSql(plan: SimplifiedPlanReport): {
 	sql: string;

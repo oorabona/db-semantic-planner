@@ -17,6 +17,10 @@
  * is used.
  */
 
+import {
+	compilePlan,
+	type SimplifiedPlanReport,
+} from '@dbsp/adapter-pgsql/internal';
 import { createOrm, eq, rawExists, schema, subquery } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import {
@@ -24,7 +28,6 @@ import {
 	compileWhereIntent,
 	type WhereCompilerCtx,
 } from '../compile-where.js';
-import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
 import { createCompilerState } from '../handlers/types.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 

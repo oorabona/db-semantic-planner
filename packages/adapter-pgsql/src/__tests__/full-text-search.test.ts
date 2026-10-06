@@ -8,10 +8,13 @@
  * (PlanReport) for full-pipeline tests that include the 't0' root table alias.
  */
 
+import {
+	compilePlan,
+	type SimplifiedPlanReport,
+} from '@dbsp/adapter-pgsql/internal';
 import { createOrm, fullTextSearch, schema, textScore } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
-import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------

@@ -282,7 +282,7 @@ import {
   type CompilerOptions,
   type CompiledResult,
   type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql';
+} from '@dbsp/adapter-pgsql/internal';
 
 const options: CompilerOptions = { schema: 'public' };
 const report: SimplifiedPlanReport = { rootTable: 'users', decisions: [] };

@@ -11,6 +11,10 @@
  */
 
 import {
+	compilePlan,
+	type SimplifiedPlanReport,
+} from '@dbsp/adapter-pgsql/internal';
+import {
 	arrayAgg,
 	cast,
 	createOrm,
@@ -24,7 +28,6 @@ import { stringAgg } from '@dbsp/core/internal';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { buildSubqueryFromIntent } from '../compile-where.js';
-import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { EXPRESSION_HANDLERS } from '../select-expression-handlers.js';
 

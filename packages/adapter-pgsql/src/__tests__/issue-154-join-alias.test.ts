@@ -1,4 +1,8 @@
 import {
+	compilePlan,
+	type SimplifiedPlanReport,
+} from '@dbsp/adapter-pgsql/internal';
+import {
 	createOrm,
 	eq,
 	InvalidOperationError,
@@ -7,7 +11,6 @@ import {
 	schema,
 } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const issue154Schema = schema({

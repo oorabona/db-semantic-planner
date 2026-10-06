@@ -1,4 +1,8 @@
 import {
+	compilePlan,
+	type SimplifiedPlanReport,
+} from '@dbsp/adapter-pgsql/internal';
+import {
 	createOrm,
 	exprRef,
 	fn,
@@ -10,7 +14,6 @@ import {
 } from '@dbsp/core';
 import { compile } from '@dbsp/nql';
 import { describe, expect, it } from 'vitest';
-import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const issue763Schema = schema({

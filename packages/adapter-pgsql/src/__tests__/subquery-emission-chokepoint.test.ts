@@ -39,6 +39,10 @@
  */
 
 import {
+	compilePlan,
+	type SimplifiedPlanReport,
+} from '@dbsp/adapter-pgsql/internal';
+import {
 	and,
 	createOrm,
 	eq,
@@ -55,7 +59,6 @@ import {
 	compileWhereIntent,
 	type WhereCompilerCtx,
 } from '../compile-where.js';
-import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
 import { createCompilerState } from '../handlers/types.js';
 import { convertWhereCondition } from '../intent-to-decisions.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';

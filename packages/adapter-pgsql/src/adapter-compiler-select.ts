@@ -1125,8 +1125,10 @@ export function compileSelectEnvelope<T = unknown>(
 	if (
 		!isPlannedReport(plan) &&
 		(plan.execution?.where ||
-			[plan.intent?.where, plan.executableIntent?.where].some(
-				conditionNeedsPlanning,
+			[plan.intent, plan.executableIntent].some((intent) =>
+				[intent?.where, intent?.having, intent?.select].some(
+					conditionNeedsPlanning,
+				),
 			))
 	)
 		throw new Error(externalConditionRefusal);

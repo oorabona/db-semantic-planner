@@ -19,12 +19,15 @@
  * - Returning clauses
  */
 
+import {
+	PlanCompiler,
+	type SimplifiedPlanReport,
+} from '@dbsp/adapter-pgsql/internal';
 import { POSTGRESQL_CAPABILITIES, ref, schema } from '@dbsp/core';
 import { markNqlTrustedRelationFilter } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from './ast-helpers.js';
 import { queryScope, relationBinding } from './binding-registry.js';
-import { PlanCompiler, type SimplifiedPlanReport } from './compiler.js';
 import {
 	createDeclaredNameResolver,
 	getCachedPgPhysicalModel,

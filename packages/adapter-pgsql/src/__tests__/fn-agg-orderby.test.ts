@@ -16,10 +16,13 @@ import { stringAgg } from '@dbsp/core/internal';
 // ('ref' from @dbsp/core resolves to the schema ref(), not the expression ref())
 const ref = exprRef;
 
+import {
+	compilePlan,
+	type SimplifiedPlanReport,
+} from '@dbsp/adapter-pgsql/internal';
 import type { AggOrderByArg, CustomFnExpressionIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
-import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
 
 // ============================================================================
 // Helpers

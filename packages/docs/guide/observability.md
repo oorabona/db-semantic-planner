@@ -8,6 +8,8 @@ Every query and mutation builder in `@dbsp/core` exposes a `.dump()` method that
 
 ---
 
+The spelling of the generated SQL (qualifiers, generated aliases, casts) may change in a minor version; its meaning and its bound parameters may not.
+
 ## dump()
 
 Call `.dump()` on any builder to get a `Dump` object:

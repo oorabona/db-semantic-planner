@@ -1,11 +1,12 @@
 // ORDERBY-COMPUTED-EXPR regression test
-import { op, exprRef as ref } from '@dbsp/core';
-import { describe, expect, it } from 'vitest';
+
 import {
 	compilePlan,
 	type PlanDecision,
 	type SimplifiedPlanReport,
-} from '../compiler.js';
+} from '@dbsp/adapter-pgsql/internal';
+import { op, exprRef as ref } from '@dbsp/core';
+import { describe, expect, it } from 'vitest';
 
 function compileToSql(plan: SimplifiedPlanReport): {
 	sql: string;

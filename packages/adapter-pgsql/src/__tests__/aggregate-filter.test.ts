@@ -5,9 +5,12 @@
  * at the handler level (unit) and the full compiler pipeline (integration).
  */
 
+import {
+	compilePlan,
+	type SimplifiedPlanReport,
+} from '@dbsp/adapter-pgsql/internal';
 import { describe, expect, it } from 'vitest';
 import { eqExpr, normalizeSQL, sqlColumnRef } from '../ast-helpers.js';
-import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
 import {
 	avgHandler,
 	countDistinctHandler,

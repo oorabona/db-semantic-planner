@@ -9,9 +9,12 @@
  * and the right part as the column name, bypassing root table alias substitution.
  */
 
+import {
+	compilePlan,
+	type SimplifiedPlanReport,
+} from '@dbsp/adapter-pgsql/internal';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
-import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
 
 // ============================================================================
 // Helpers

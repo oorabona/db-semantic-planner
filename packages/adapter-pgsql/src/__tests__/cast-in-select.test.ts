@@ -21,11 +21,14 @@
  * @dbsp/core. The 'ref' export from @dbsp/core is the schema foreign-key ref function.
  */
 
+import {
+	compilePlan,
+	type SimplifiedPlanReport,
+} from '@dbsp/adapter-pgsql/internal';
 import { cast, createOrm, exprRef, fn, param, schema } from '@dbsp/core';
 import type { CastExpressionIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
-import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ============================================================================

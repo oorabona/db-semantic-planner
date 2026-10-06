@@ -1,3 +1,8 @@
+import {
+	type CompilerOptions,
+	compilePlan,
+	type SimplifiedPlanReport,
+} from '@dbsp/adapter-pgsql/internal';
 import { POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 import {
 	DUCKDB_CAPABILITIES,
@@ -8,11 +13,6 @@ import {
 import type { DialectCapabilities, PlanReport } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
-import {
-	type CompilerOptions,
-	compilePlan,
-	type SimplifiedPlanReport,
-} from '../compiler.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 function caps(overrides: Partial<DialectCapabilities>): DialectCapabilities {

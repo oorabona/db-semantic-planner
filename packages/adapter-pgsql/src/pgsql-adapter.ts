@@ -1935,7 +1935,7 @@ function assertRuntimeBindingValuesParameterCount(
  * aggregate kind throws, so a forged or future aggregate variant fails loud
  * here instead of silently mis-typing. Every
  * resolved type name is re-validated via validateDbType — the compiler is
- * never trusted, since PlanCompiler is a public export.
+ * never trusted, since PlanCompiler is available through the internal export.
  */
 function resolvePgTypeForColumnTypeInfo(
 	bindingName: string,

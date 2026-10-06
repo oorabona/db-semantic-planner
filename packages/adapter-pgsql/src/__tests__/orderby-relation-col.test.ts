@@ -1,4 +1,5 @@
 import { EXPRESSION_BRAND } from '@dbsp/types';
+
 /**
  * ORDERBY-RELATION-COL regression test.
  *
@@ -13,13 +14,13 @@ import { EXPRESSION_BRAND } from '@dbsp/types';
  * Fix: added isExpressionSpec() check in orderBy() before the string/array/record branches.
  */
 
-import { relationColumn } from '@dbsp/core';
-import { describe, expect, it } from 'vitest';
 import {
 	compilePlan,
 	type PlanDecision,
 	type SimplifiedPlanReport,
-} from '../compiler.js';
+} from '@dbsp/adapter-pgsql/internal';
+import { relationColumn } from '@dbsp/core';
+import { describe, expect, it } from 'vitest';
 
 // ============================================================================
 // Helpers

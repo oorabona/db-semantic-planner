@@ -6,9 +6,12 @@
  * works with JOINs (INV-E15-05).
  */
 
+import {
+	compilePlan,
+	type SimplifiedPlanReport,
+} from '@dbsp/adapter-pgsql/internal';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
-import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
 
 function sql(plan: SimplifiedPlanReport): string {
 	return normalizeSQL(compilePlan(plan).sql);

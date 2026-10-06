@@ -1,3 +1,4 @@
+import { compilePlan } from '@dbsp/adapter-pgsql/internal';
 import {
 	createOrm,
 	type PlanReport,
@@ -7,7 +8,6 @@ import {
 } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { compileCteQuery } from '../adapter-compiler-recursive.js';
-import { compilePlan } from '../compiler.js';
 import { createDeclaredNameResolver } from '../declared-name-resolver.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { createPgPhysicalModel } from '../physical-model/index.js';

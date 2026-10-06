@@ -1,3 +1,4 @@
+import { compilePlan } from '@dbsp/adapter-pgsql/internal';
 import {
 	and,
 	createOrm,
@@ -21,7 +22,6 @@ import {
 } from '@dbsp/core';
 import type { WhereIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { compilePlan } from '../compiler.js';
 import { convertWhereCondition } from '../intent-to-decisions.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 

@@ -44,3 +44,10 @@ void resolvePgDestructiveOutcome;
 import { executePgTableReaddress } from '@dbsp/adapter-pgsql';
 
 void executePgTableReaddress;
+
+// @ts-expect-error decision lowering is internal only
+import { compilePlan } from '@dbsp/adapter-pgsql';
+import { compilePlan as internalCompilePlan } from '@dbsp/adapter-pgsql/internal';
+
+void compilePlan;
+void internalCompilePlan;
