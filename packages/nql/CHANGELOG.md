@@ -1,5 +1,41 @@
 # Changelog
 
+## [2.0.0](https://github.com/oorabona/db-semantic-planner/compare/nql-v1.10.5...nql-v2.0.0) (2026-10-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* **core:** schema() declares many-to-many relations; relation paths resolve from declared keys ([#940](https://github.com/oorabona/db-semantic-planner/issues/940))
+* **adapter-pgsql:** recursive includes walk the tree per root row ([#937](https://github.com/oorabona/db-semantic-planner/issues/937))
+* **adapter-pgsql:** requested relation names at every depth, enumerated jsonb_build_object payloads, relation.column flat labels, and model-free compilation refused when the report cannot establish keys or read types.
+* **core:** names used only by adapters and the CLI are importable from @dbsp/core/internal and @dbsp/types/internal, no longer from the roots, and root exports no consumer referenced are removed.
+* **adapter-pgsql:** createPgsqlAdapter is createPgAdapter, createPgsqlCompileOnlyAdapter is createPgCompileOnlyAdapter, PgsqlAdapter is PgAdapter, comparePgsqlDatabaseSchema is comparePgDatabaseSchema, the Pgsql*Error classes are Pg*Error, RollbackOnlyPgsqlScope is PgRollbackOnlyScope and derivePostgresqlCapabilitiesForVersion is derivePgCapabilitiesForVersion. The full table is in PR #897.
+
+### Features
+
+* **adapter-pgsql:** Include payload keys resolve once, before SQL and hydration ([#922](https://github.com/oorabona/db-semantic-planner/issues/922)) ([59a85e9](https://github.com/oorabona/db-semantic-planner/commit/59a85e9265737ead76b4dd45973bc3c0616a7d87)), closes [#907](https://github.com/oorabona/db-semantic-planner/issues/907)
+* **core:** Schema() declares many-to-many relations; relation paths resolve from declared keys ([#940](https://github.com/oorabona/db-semantic-planner/issues/940)) ([55f76aa](https://github.com/oorabona/db-semantic-planner/commit/55f76aa4fbad117ba63a1140f9eec1c0830b15fa)), closes [#936](https://github.com/oorabona/db-semantic-planner/issues/936) [#787](https://github.com/oorabona/db-semantic-planner/issues/787)
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** Batch mutations write what each row carries ([#890](https://github.com/oorabona/db-semantic-planner/issues/890)) ([1ff4fb1](https://github.com/oorabona/db-semantic-planner/commit/1ff4fb15e0cfcc5ce7448a2d792d80d02289d16a)), closes [#646](https://github.com/oorabona/db-semantic-planner/issues/646) [#649](https://github.com/oorabona/db-semantic-planner/issues/649) [#650](https://github.com/oorabona/db-semantic-planner/issues/650) [#878](https://github.com/oorabona/db-semantic-planner/issues/878) [#889](https://github.com/oorabona/db-semantic-planner/issues/889)
+* **adapter-pgsql:** Recursive includes walk the tree per root row ([#937](https://github.com/oorabona/db-semantic-planner/issues/937)) ([ec596b0](https://github.com/oorabona/db-semantic-planner/commit/ec596b033459b931d3426e8c1f16c3cb65417dc0)), closes [#877](https://github.com/oorabona/db-semantic-planner/issues/877) [#933](https://github.com/oorabona/db-semantic-planner/issues/933)
+* **nql:** Relation columns are validated against the final target of their path ([#913](https://github.com/oorabona/db-semantic-planner/issues/913)) ([8b8e84f](https://github.com/oorabona/db-semantic-planner/commit/8b8e84ff1f64563117fb01cfe8e39a7f167a8e17))
+
+
+### Code Refactoring
+
+* **adapter-pgsql:** Spell the PostgreSQL marker Pg in every export ([#897](https://github.com/oorabona/db-semantic-planner/issues/897)) ([866014b](https://github.com/oorabona/db-semantic-planner/commit/866014b8f57d4a6c60ce523db0da36ba612f848c))
+* **core:** Keep adapter-only exports behind /internal and drop unused ones ([#898](https://github.com/oorabona/db-semantic-planner/issues/898)) ([94a17bd](https://github.com/oorabona/db-semantic-planner/commit/94a17bda7ecef508cbcd4653d15940c9fd67544f)), closes [#860](https://github.com/oorabona/db-semantic-planner/issues/860)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/types bumped to 6.0.0
+
 ## [1.10.5](https://github.com/oorabona/db-semantic-planner/compare/nql-v1.10.4...nql-v1.10.5) (2026-10-01)
 
 

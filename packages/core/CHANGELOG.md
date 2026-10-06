@@ -1,5 +1,86 @@
 # Changelog
 
+## [6.0.0](https://github.com/oorabona/db-semantic-planner/compare/core-v5.0.0...core-v6.0.0) (2026-10-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* **core:** included rows, joined tables, relation predicates, subqueries, recursive walks and NQL reads now honour schema default filters.
+* **core:** include-where and mixed-strategy refusals surface at plan(), and a nested include's unqualified outerRef() binds its parent, not the root.
+* **core:** a recursive relation predicate in a join ON condition now refuses instead of compiling a plain EXISTS, a qualifier naming a later join refuses, and ON refusals surface at plan().
+* **adapter-pgsql:** internal decision compiler and in-process rule for every select condition ([#952](https://github.com/oorabona/db-semantic-planner/issues/952))
+* **core:** the root where compiles from a typed resolved condition tree planned once ([#949](https://github.com/oorabona/db-semantic-planner/issues/949))
+* **core:** explicit joins resolve at plan() and compile from their resolved ranges ([#947](https://github.com/oorabona/db-semantic-planner/issues/947))
+* **core:** relation predicates always compile as exists; the filter join is removed ([#946](https://github.com/oorabona/db-semantic-planner/issues/946))
+* **core:** relations in a model resolve keys from their declaration or the referenced primary key ([#945](https://github.com/oorabona/db-semantic-planner/issues/945))
+* **adapter-pgsql:** includes compile from resolved include nodes planned once ([#944](https://github.com/oorabona/db-semantic-planner/issues/944))
+* **core:** schema() declares many-to-many relations; relation paths resolve from declared keys ([#940](https://github.com/oorabona/db-semantic-planner/issues/940))
+* **adapter-pgsql:** recursive includes walk the tree per root row ([#937](https://github.com/oorabona/db-semantic-planner/issues/937))
+* **core:** plan() and adapter.compile() apply one set of include rules ([#934](https://github.com/oorabona/db-semantic-planner/issues/934))
+* **adapter-pgsql:** having, case when and select subquery bodies use the one compiler ([#932](https://github.com/oorabona/db-semantic-planner/issues/932))
+* **core:** orm.nql plans with dialect capabilities and returns the requested nested or flat output ([#930](https://github.com/oorabona/db-semantic-planner/issues/930))
+* **adapter-pgsql:** join includes return data instead of the primary key only, and to-many join includes are refused; use exists() to filter roots and .join() for a flat relational join.
+* **adapter-pgsql:** subquery bodies compile through the one condition compiler ([#926](https://github.com/oorabona/db-semantic-planner/issues/926))
+* **core:** expression, predicate and ref brands are non-enumerable Symbol.for properties ([#924](https://github.com/oorabona/db-semantic-planner/issues/924))
+* **adapter-pgsql:** requested relation names at every depth, enumerated jsonb_build_object payloads, relation.column flat labels, and model-free compilation refused when the report cannot establish keys or read types.
+* **adapter-pgsql:** an upsert inserts its values() row and applies doUpdate(set) only on conflict ([#919](https://github.com/oorabona/db-semantic-planner/issues/919))
+* **core:** include ordering accepts field orderings only (IncludeOrderByIntent); strategy conflicts and unsupported include options are refused instead of ignored.
+* **core:** the subquery include strategy is removed. IncludeStrategy no longer has 'subquery'; SubqueryIncludeInfo, CompileResultWithIncludes, PgAdapter.compileSubqueryInclude and ResultHydrator.hydrateIncludes are removed. 'subquery' as a default, per-include strategy or plan decision is refused, and a recursive include on a dialect without recursive CTEs is refused. SQL subqueries are unchanged.
+* **core:** names used only by adapters and the CLI are importable from @dbsp/core/internal and @dbsp/types/internal, no longer from the roots, and root exports no consumer referenced are removed.
+* **adapter-pgsql:** createPgsqlAdapter is createPgAdapter, createPgsqlCompileOnlyAdapter is createPgCompileOnlyAdapter, PgsqlAdapter is PgAdapter, comparePgsqlDatabaseSchema is comparePgDatabaseSchema, the Pgsql*Error classes are Pg*Error, RollbackOnlyPgsqlScope is PgRollbackOnlyScope and derivePostgresqlCapabilitiesForVersion is derivePgCapabilitiesForVersion. The full table is in PR #897.
+* **adapter-pgsql:** result keys follow the declared logical name, with no camel/snake inference; an undeclared table, column or ON CONFLICT ON CONSTRAINT name refuses compilation; compiling without a model works only under dbCasing 'preserve'; recursive edgeTable takes the logical table name; alias and CTE SQL text changes under non-preserve casing; NamingPlugin no longer serves query compilation.
+
+### Features
+
+* **adapter-pgsql:** A join include carries the related row with a private presence marker ([#928](https://github.com/oorabona/db-semantic-planner/issues/928)) ([88a9e69](https://github.com/oorabona/db-semantic-planner/commit/88a9e692cac376374eb54b6f957a3d113f574828))
+* **adapter-pgsql:** Include payload keys resolve once, before SQL and hydration ([#922](https://github.com/oorabona/db-semantic-planner/issues/922)) ([59a85e9](https://github.com/oorabona/db-semantic-planner/commit/59a85e9265737ead76b4dd45973bc3c0616a7d87)), closes [#907](https://github.com/oorabona/db-semantic-planner/issues/907)
+* **adapter-pgsql:** Internal decision compiler and in-process rule for every select condition ([#952](https://github.com/oorabona/db-semantic-planner/issues/952)) ([c050a01](https://github.com/oorabona/db-semantic-planner/commit/c050a015eb75f203fe66a17b3a9022092da267c4)), closes [#891](https://github.com/oorabona/db-semantic-planner/issues/891)
+* **adapter-pgsql:** Query compilation resolves names through the physical model ([#875](https://github.com/oorabona/db-semantic-planner/issues/875)) ([1b3c383](https://github.com/oorabona/db-semantic-planner/commit/1b3c3838d1d88698ca2759b5c5995e3cddacc86f))
+* **core:** Default filters apply to every table scan of a read ([#964](https://github.com/oorabona/db-semantic-planner/issues/964)) ([c4de280](https://github.com/oorabona/db-semantic-planner/commit/c4de280cedd088be22574823f7f892bf1afaf120))
+* **core:** Explicit joins resolve at plan() and compile from their resolved ranges ([#947](https://github.com/oorabona/db-semantic-planner/issues/947)) ([7dd3a6b](https://github.com/oorabona/db-semantic-planner/commit/7dd3a6bae996842027881d736fd50abe67bbb9ab)), closes [#891](https://github.com/oorabona/db-semantic-planner/issues/891)
+* **core:** Include limit, orderBy and select are honoured or refused per strategy, with one strategy precedence ([#912](https://github.com/oorabona/db-semantic-planner/issues/912)) ([e30dd38](https://github.com/oorabona/db-semantic-planner/commit/e30dd38249248a78211aad11327db2d9496d12bd))
+* **core:** Include where resolves at plan() and compiles from the typed condition union ([#960](https://github.com/oorabona/db-semantic-planner/issues/960)) ([64d30f2](https://github.com/oorabona/db-semantic-planner/commit/64d30f21381f03a6afd0613b9e32fe8a3835941f))
+* **core:** Join on conditions resolve at plan() and compile from the typed condition union ([#955](https://github.com/oorabona/db-semantic-planner/issues/955)) ([ac6f64b](https://github.com/oorabona/db-semantic-planner/commit/ac6f64bbf94c43dc9faffa263282e02c1cfe1287))
+* **core:** Relation predicates always compile as exists; the filter join is removed ([#946](https://github.com/oorabona/db-semantic-planner/issues/946)) ([2a10ef0](https://github.com/oorabona/db-semantic-planner/commit/2a10ef0a535e17eb834556708effc3e37bb65939)), closes [#891](https://github.com/oorabona/db-semantic-planner/issues/891)
+* **core:** Schema() declares many-to-many relations; relation paths resolve from declared keys ([#940](https://github.com/oorabona/db-semantic-planner/issues/940)) ([55f76aa](https://github.com/oorabona/db-semantic-planner/commit/55f76aa4fbad117ba63a1140f9eec1c0830b15fa)), closes [#936](https://github.com/oorabona/db-semantic-planner/issues/936) [#787](https://github.com/oorabona/db-semantic-planner/issues/787)
+* **core:** The root where compiles from a typed resolved condition tree planned once ([#949](https://github.com/oorabona/db-semantic-planner/issues/949)) ([af3dc90](https://github.com/oorabona/db-semantic-planner/commit/af3dc907cb4847c3be0248a32f3ba779c93ad38f)), closes [#891](https://github.com/oorabona/db-semantic-planner/issues/891)
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** An upsert inserts its values() row and applies doUpdate(set) only on conflict ([#919](https://github.com/oorabona/db-semantic-planner/issues/919)) ([3712f76](https://github.com/oorabona/db-semantic-planner/commit/3712f76543259587d18177785c29d0a8a13037e2)), closes [#914](https://github.com/oorabona/db-semantic-planner/issues/914)
+* **adapter-pgsql:** Batch mutations write what each row carries ([#890](https://github.com/oorabona/db-semantic-planner/issues/890)) ([1ff4fb1](https://github.com/oorabona/db-semantic-planner/commit/1ff4fb15e0cfcc5ce7448a2d792d80d02289d16a)), closes [#646](https://github.com/oorabona/db-semantic-planner/issues/646) [#649](https://github.com/oorabona/db-semantic-planner/issues/649) [#650](https://github.com/oorabona/db-semantic-planner/issues/650) [#878](https://github.com/oorabona/db-semantic-planner/issues/878) [#889](https://github.com/oorabona/db-semantic-planner/issues/889)
+* **adapter-pgsql:** Empty condition groups are constants on every path ([#896](https://github.com/oorabona/db-semantic-planner/issues/896)) ([9b0e401](https://github.com/oorabona/db-semantic-planner/commit/9b0e401e75d52449dfc06543308090728582ac81)), closes [#888](https://github.com/oorabona/db-semantic-planner/issues/888)
+* **adapter-pgsql:** Expression text is physical SQL; generated policies put AS before FOR ([#882](https://github.com/oorabona/db-semantic-planner/issues/882)) ([c2f6aa6](https://github.com/oorabona/db-semantic-planner/commit/c2f6aa6cbb06ef669887815ac9f50ef3f6119126)), closes [#318](https://github.com/oorabona/db-semantic-planner/issues/318)
+* **adapter-pgsql:** Qualified outerRef resolves every emitted range and refuses ambiguity ([#931](https://github.com/oorabona/db-semantic-planner/issues/931)) ([e4eb17e](https://github.com/oorabona/db-semantic-planner/commit/e4eb17e61c7fb2d20900a1e22d0038ad4b620c7a))
+* **adapter-pgsql:** Recursive includes walk the tree per root row ([#937](https://github.com/oorabona/db-semantic-planner/issues/937)) ([ec596b0](https://github.com/oorabona/db-semantic-planner/commit/ec596b033459b931d3426e8c1f16c3cb65417dc0)), closes [#877](https://github.com/oorabona/db-semantic-planner/issues/877) [#933](https://github.com/oorabona/db-semantic-planner/issues/933)
+* **core:** Expression, predicate and ref brands are non-enumerable Symbol.for properties ([#924](https://github.com/oorabona/db-semantic-planner/issues/924)) ([2e8f121](https://github.com/oorabona/db-semantic-planner/commit/2e8f121ebd91e2e955452eb00d7bf443a892b88a))
+* **core:** Nested aliases own their object's keys; the cli plans binding reads like the tag ([#935](https://github.com/oorabona/db-semantic-planner/issues/935)) ([2c9ff92](https://github.com/oorabona/db-semantic-planner/commit/2c9ff924d654515db547a0f71eec14a4c083ed06)), closes [#929](https://github.com/oorabona/db-semantic-planner/issues/929)
+* **core:** Orm.nql plans with dialect capabilities and returns the requested nested or flat output ([#930](https://github.com/oorabona/db-semantic-planner/issues/930)) ([6c64d7b](https://github.com/oorabona/db-semantic-planner/commit/6c64d7bbe602dc510582dcee6168fc8ebe9635a8))
+* **core:** Plan() and adapter.compile() apply one set of include rules ([#934](https://github.com/oorabona/db-semantic-planner/issues/934)) ([8753a14](https://github.com/oorabona/db-semantic-planner/commit/8753a1408a884548925853c5373fefff8e7569a7)), closes [#915](https://github.com/oorabona/db-semantic-planner/issues/915) [#917](https://github.com/oorabona/db-semantic-planner/issues/917) [#927](https://github.com/oorabona/db-semantic-planner/issues/927)
+* **core:** Plan(), public types and the adapter agree on every include option ([#918](https://github.com/oorabona/db-semantic-planner/issues/918)) ([a0a1492](https://github.com/oorabona/db-semantic-planner/commit/a0a1492fab6c85ad2285b3688a1b7ab11f47e203)), closes [#911](https://github.com/oorabona/db-semantic-planner/issues/911)
+* **core:** Relations in a model resolve keys from their declaration or the referenced primary key ([#945](https://github.com/oorabona/db-semantic-planner/issues/945)) ([9bf24a9](https://github.com/oorabona/db-semantic-planner/commit/9bf24a9085e93ad705dc0f4837b8d61d5570d4dc)), closes [#943](https://github.com/oorabona/db-semantic-planner/issues/943)
+* **core:** Renamed include keys keep their qualifier and generated aliases fit in 63 bytes ([#950](https://github.com/oorabona/db-semantic-planner/issues/950)) ([0c556e4](https://github.com/oorabona/db-semantic-planner/commit/0c556e4010d9395fd710554fb46c7b938a50debc)), closes [#948](https://github.com/oorabona/db-semantic-planner/issues/948)
+* **core:** Schema default filters accept conditions on their own table only ([#962](https://github.com/oorabona/db-semantic-planner/issues/962)) ([46a9b60](https://github.com/oorabona/db-semantic-planner/commit/46a9b60c0476f2c058590ffc685fd8775a13480e))
+
+
+### Code Refactoring
+
+* **adapter-pgsql:** Having, case when and select subquery bodies use the one compiler ([#932](https://github.com/oorabona/db-semantic-planner/issues/932)) ([e537c37](https://github.com/oorabona/db-semantic-planner/commit/e537c37f7d6bdc07877d557079a7373248f988b1)), closes [#891](https://github.com/oorabona/db-semantic-planner/issues/891)
+* **adapter-pgsql:** Includes compile from resolved include nodes planned once ([#944](https://github.com/oorabona/db-semantic-planner/issues/944)) ([5af444e](https://github.com/oorabona/db-semantic-planner/commit/5af444e8802aea122fea1b32ae4813f58b88adfc)), closes [#891](https://github.com/oorabona/db-semantic-planner/issues/891)
+* **adapter-pgsql:** Spell the PostgreSQL marker Pg in every export ([#897](https://github.com/oorabona/db-semantic-planner/issues/897)) ([866014b](https://github.com/oorabona/db-semantic-planner/commit/866014b8f57d4a6c60ce523db0da36ba612f848c))
+* **adapter-pgsql:** Subquery bodies compile through the one condition compiler ([#926](https://github.com/oorabona/db-semantic-planner/issues/926)) ([f80c627](https://github.com/oorabona/db-semantic-planner/commit/f80c6273de31a72b8d47842e65d2c722625a453a))
+* **core:** Keep adapter-only exports behind /internal and drop unused ones ([#898](https://github.com/oorabona/db-semantic-planner/issues/898)) ([94a17bd](https://github.com/oorabona/db-semantic-planner/commit/94a17bda7ecef508cbcd4653d15940c9fd67544f)), closes [#860](https://github.com/oorabona/db-semantic-planner/issues/860)
+* **core:** Remove the subquery include strategy; nested includes keep one strategy per branch ([#901](https://github.com/oorabona/db-semantic-planner/issues/901)) ([3e423ff](https://github.com/oorabona/db-semantic-planner/commit/3e423ff155f9f9d03fe199bec893b5d8979f46e2))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/nql bumped to 2.0.0
+    * @dbsp/types bumped to 6.0.0
+
 ## [5.0.0](https://github.com/oorabona/db-semantic-planner/compare/core-v4.0.0...core-v5.0.0) (2026-10-01)
 
 
