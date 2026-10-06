@@ -40,3 +40,33 @@ it('bound aliases ignore generated reservations and refuse only scope duplicates
 	expect(allocator.bind('other', 'foo_bar', 'inner').alias).toBe('foo_bar');
 	expect(allocator.allocate('other', 'foo_bar').alias).toBe('foo_bar_1');
 });
+
+it('generated aliases fit UTF-8 bytes and check complete truncated suffix collisions', () => {
+	const allocator = new RangeAllocator();
+	const base = 'é'.repeat(32);
+	expect(allocator.allocate('a', base).alias).toBe('é'.repeat(31));
+	expect(allocator.allocate('b', base).alias).toBe(`${'é'.repeat(30)}_1`);
+	expect(allocator.allocate('c', base).alias).toBe(`${'é'.repeat(30)}_2`);
+	for (let suffix = 3; suffix <= 10; suffix++) {
+		const alias = allocator.allocate('d', base).alias;
+		expect(alias).toBe(`${'é'.repeat(30)}_${suffix}`);
+		expect(new TextEncoder().encode(alias).length).toBeLessThanOrEqual(63);
+	}
+});
+
+it('refuses suffixes exceeding 63 UTF-8 bytes and fits valid suffixes', () => {
+	for (const suffix of ['s'.repeat(64), 'é'.repeat(32)]) {
+		expect(() => RangeAllocator.generatedAlias('base', suffix)).toThrow(
+			RangeError,
+		);
+		expect(() => RangeAllocator.generatedAlias('base', suffix)).toThrow(
+			'63-byte limit',
+		);
+	}
+	for (const suffix of ['', 's'.repeat(63), `${'é'.repeat(31)}s`]) {
+		const alias = RangeAllocator.generatedAlias('é'.repeat(40), suffix);
+		expect(alias.endsWith(suffix)).toBe(true);
+		expect(new TextEncoder().encode(alias).length).toBeLessThanOrEqual(63);
+		if (suffix) expect(alias).toBe(suffix);
+	}
+});

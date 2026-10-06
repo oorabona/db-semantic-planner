@@ -6,7 +6,8 @@ export function assertNoUnsupportedSubqueryModifiers(
 ): void {
 	const unsupported: string[] = [];
 
-	// Structural modifiers silently dropped on ALL subquery paths.
+	// The resolved root SELECT WHERE body contract refuses unsupported modifiers
+	// at plan(); legacy direct routes (including mutations) refuse at compilation.
 	if (subquery.groupBy && subquery.groupBy.length > 0)
 		unsupported.push('GROUP BY');
 	if (subquery.having) unsupported.push('HAVING');
@@ -25,8 +26,8 @@ export function assertNoUnsupportedSubqueryModifiers(
 
 	// rawExists and scalar-direct: buildSubqueryFromIntent emits ONLY
 	// SELECT/FROM/WHERE — it does NOT emit sortClause or limitCount.
-	// The decisions-path scalar context allows limit/orderBy because convertSubquery
-	// faithfully propagates them via buildScalarSubquery; the direct path cannot.
+	// The resolved root WHERE scalar body contract retains LIMIT and field ORDER BY;
+	// legacy scalar-direct routes cannot emit them.
 	if (context === 'rawExists' || context === 'scalar-direct') {
 		if (subquery.limit != null) unsupported.push('LIMIT');
 	}
@@ -34,14 +35,14 @@ export function assertNoUnsupportedSubqueryModifiers(
 	// rawExists and scalar-direct: buildSubqueryFromIntent also drops orderBy
 	// entirely (no sortClause emitted), so both field-based and expression-based
 	// ORDER BY produce silently wrong results on the direct path.
-	// The decisions-path scalar context allows field-orderBy because that path
-	// emits it; the direct path cannot.
+	// The resolved root WHERE scalar body contract retains field ORDER BY;
+	// legacy scalar-direct routes cannot emit it.
 	if (context === 'rawExists' || context === 'scalar-direct') {
 		if (subquery.orderBy && subquery.orderBy.length > 0) {
 			unsupported.push('ORDER BY');
 		}
 	} else if (subquery.orderBy && subquery.orderBy.length > 0) {
-		// On the decisions / IN path: only expression-based orderBy is unsupported
+		// On the resolved root WHERE / legacy IN routes: only expression-based orderBy is unsupported
 		// (field references are faithfully emitted there).
 		const hasExpressionSort = subquery.orderBy.some(
 			(o) => !('field' in o) || (o as { field?: unknown }).field == null,
@@ -126,7 +127,7 @@ export function assertNoUnsupportedSubqueryModifiers(
 		}
 	}
 
-	// Scalar SELECT validation — applies to both the decisions path ('scalar') and
+	// Scalar SELECT validation — applies to the resolved root WHERE body contract ('scalar') and
 	// the direct compile-where path ('scalar-direct').  buildSubqueryFromIntent
 	// (used by the direct path) emits only fields[0] from a multi-field list,
 	// silently truncating the projection; expressions SELECT is not emitted at all.
@@ -161,7 +162,7 @@ export function assertNoUnsupportedSubqueryModifiers(
 			select.aggregates.length > 1
 		) {
 			// DEFECT 3 FIX: a scalar subquery must project exactly ONE column.
-			// The decisions path takes only aggregates[0] — extra aggregates are
+			// The legacy scalar compiler takes only aggregates[0] — extra aggregates are
 			// silently dropped. The direct compile-where path (buildSubqueryFromIntent)
 			// emits ALL aggregates as separate ResTarget nodes, producing a multi-column
 			// scalar subquery that PostgreSQL rejects at runtime.

@@ -4,7 +4,7 @@ import {
 	isParamIntent,
 	type ModelIR,
 	type QueryIntent,
-	type RangeAllocator,
+	RangeAllocator,
 	REF_BRAND,
 	type ResolvedCast,
 	type ResolvedColumnOperand,
@@ -99,19 +99,11 @@ export function resolveSelectWhere(
 	let aliasCount = initialAliasCount;
 	const rawNext = new Map<string, number>();
 	const expressionNext = new Map<string, number>();
-	const utf8 = new TextEncoder();
-	const truncate = (name: string, bytes: number) => {
-		let out = '';
-		let size = 0;
-		for (const char of name) {
-			size += utf8.encode(char).length;
-			if (size > bytes) break;
-			out += char;
-		}
-		return out;
-	};
-	const generated = (table: string, suffix: string) =>
-		truncate(table, 63 - utf8.encode(suffix).length) + suffix;
+	const generated = RangeAllocator.generatedAlias;
+	const writtenQualifiers = new Map<
+		readonly ResolvedRange[],
+		ReadonlyMap<string, ResolvedRange>
+	>();
 	const activeNames = new Set(visible.map((r) => r.alias));
 	let scopeIndex = 0;
 	const column = (
@@ -133,11 +125,15 @@ export function resolveSelectWhere(
 				for (const scope of enclosing) {
 					const candidates = scope.filter((r) => r.table === qualifier);
 					// A self-join makes the logical root name ambiguous even though its default alias matches.
-					found = scope.find(
-						(r) =>
-							r.alias === qualifier &&
-							(r !== scope[0] || r.alias !== r.table || candidates.length < 2),
-					);
+					found =
+						writtenQualifiers.get(scope)?.get(qualifier) ??
+						scope.find(
+							(r) =>
+								r.alias === qualifier &&
+								(r !== scope[0] ||
+									r.alias !== r.table ||
+									candidates.length < 2),
+						);
 					if (found) break;
 					if (candidates.length > 1)
 						throw new Error(
@@ -158,11 +154,13 @@ export function resolveSelectWhere(
 		} else if (parts.length > 1) {
 			const qualifier = parts.shift()!;
 			const candidates = ranges.filter((r) => r.table === qualifier);
-			const exact = ranges.find(
-				(r) =>
-					r.alias === qualifier &&
-					(r !== ranges[0] || r.alias !== r.table || candidates.length < 2),
-			);
+			const exact =
+				writtenQualifiers.get(ranges)?.get(qualifier) ??
+				ranges.find(
+					(r) =>
+						r.alias === qualifier &&
+						(r !== ranges[0] || r.alias !== r.table || candidates.length < 2),
+				);
 			if (exact) range = exact;
 			else if (candidates.length > 1)
 				throw new Error(
@@ -451,6 +449,7 @@ export function resolveSelectWhere(
 			ResolvedCondition,
 			{ kind: 'relation' }
 		>['joins'][number][] = [];
+		const includeQualifiers = new Map<string, ResolvedRange>();
 		if ('include' in node && node.include) {
 			for (const [name, options] of Object.entries(node.include)) {
 				let includeSource = target;
@@ -466,6 +465,7 @@ export function resolveSelectWhere(
 					subqueryScope,
 				);
 				allocator.reserve(range.alias);
+				includeQualifiers.set(name, range);
 				includes.push({
 					path: includePath,
 					source: includeSource,
@@ -475,6 +475,7 @@ export function resolveSelectWhere(
 			}
 		}
 		const innerRanges = [target, ...includes.map((i) => i.range)];
+		writtenQualifiers.set(innerRanges, includeQualifiers);
 		return {
 			kind: 'relation',
 			path,
@@ -761,11 +762,13 @@ export function resolveSelectWhere(
 			const parts = node.field.split('.');
 			const qualifier = parts[0]!;
 			const candidates = ranges.filter((r) => r.table === qualifier);
-			const exact = ranges.find(
-				(r) =>
-					r.alias === qualifier &&
-					(r !== ranges[0] || r.alias !== r.table || candidates.length < 2),
-			);
+			const exact =
+				writtenQualifiers.get(ranges)?.get(qualifier) ??
+				ranges.find(
+					(r) =>
+						r.alias === qualifier &&
+						(r !== ranges[0] || r.alias !== r.table || candidates.length < 2),
+				);
 			if (!exact && candidates.length > 1)
 				column(node.field, current, ranges, enclosing);
 			const source = exact ?? candidates[0] ?? current;

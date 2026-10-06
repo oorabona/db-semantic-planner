@@ -22,6 +22,22 @@ export interface ResolvedRange {
  * within each SQL scope and may be reused across scalar subquery scopes.
  */
 export class RangeAllocator {
+	/** Fit generated vocabulary to PostgreSQL's identifier limit without splitting UTF-8. */
+	static generatedAlias(base: string, suffix = ''): string {
+		const utf8 = new TextEncoder();
+		const suffixBytes = utf8.encode(suffix).length;
+		if (suffixBytes > 63)
+			throw new RangeError('Generated alias suffix exceeds the 63-byte limit.');
+		const bytes = 63 - suffixBytes;
+		let out = '';
+		let size = 0;
+		for (const char of base) {
+			size += utf8.encode(char).length;
+			if (size > bytes) break;
+			out += char;
+		}
+		return out + suffix;
+	}
 	private readonly names: Set<string>;
 	private readonly tableSpellings = new Map<string, Set<string>>();
 	private nextId = 0;
@@ -78,14 +94,14 @@ export class RangeAllocator {
 	): ResolvedRange {
 		const names = this.scopedNames.get(scope) ?? new Set<string>();
 		this.scopedNames.set(scope, names);
-		let alias = preferredAlias;
+		let alias = RangeAllocator.generatedAlias(preferredAlias);
 		for (
 			let suffix = 1;
 			this.hasReserved(alias, alias === table ? table : undefined) ||
 			names.has(alias);
 			suffix++
 		)
-			alias = `${preferredAlias}_${suffix}`;
+			alias = RangeAllocator.generatedAlias(preferredAlias, `_${suffix}`);
 		names.add(alias);
 		this.reserveTable(table);
 		return { id: `r${this.nextId++}` as RangeId, table, alias };
