@@ -14,6 +14,7 @@ export function findDefaultFilterScan(
 	filters: DefaultFilters | undefined,
 	path: string,
 	skipRoot = false,
+	derivedRanges: ReadonlySet<string> = new Set(),
 ): { table: string; path: string } | undefined {
 	if (!filters || !Object.keys(filters).length) return;
 	const root = intent as QueryIntent;
@@ -38,7 +39,11 @@ export function findDefaultFilterScan(
 			return;
 		if (typeof node.from === 'string') {
 			source = node.from;
-			if (!(skipRoot && value === intent) && !node.batchValuesSource)
+			if (
+				!(skipRoot && value === intent) &&
+				!node.batchValuesSource &&
+				!derivedRanges.has(source)
+			)
 				refuse(source, `${location}.from`);
 		}
 		const trusted = getTrustedNqlRelationFilterFields(value);
@@ -50,7 +55,11 @@ export function findDefaultFilterScan(
 		}
 		if (typeof node.targetTable === 'string')
 			refuse(node.targetTable, `${location}.targetTable`);
-		if (typeof node.table === 'string' && !node.batchValues)
+		if (
+			typeof node.table === 'string' &&
+			!node.batchValues &&
+			!derivedRanges.has(node.table)
+		)
 			refuse(node.table, `${location}.table`);
 		if (typeof node.relation === 'string' || Array.isArray(node.relation)) {
 			const segments = Array.isArray(node.relation)
@@ -95,8 +104,16 @@ export function assertUnplannedDefaultFilters(
 	filters: DefaultFilters | undefined,
 	path: string,
 	skipRoot = false,
+	derivedRanges: ReadonlySet<string> = new Set(),
 ): void {
-	const scan = findDefaultFilterScan(intent, model, filters, path, skipRoot);
+	const scan = findDefaultFilterScan(
+		intent,
+		model,
+		filters,
+		path,
+		skipRoot,
+		derivedRanges,
+	);
 	if (scan)
 		throw new Error(
 			`Default filter for table '${scan.table}' is not supported at ${scan.path}.`,
@@ -160,16 +177,6 @@ export function assertUnsupportedNqlDefaultFilters(
 			refuse(trusted.targetTable, `${location}.relation`);
 			for (const hop of trusted.hops)
 				refuse(hop.target, `${location}.relation`);
-		}
-		if (
-			node.kind === 'subquery' ||
-			node.kind === 'in' ||
-			node.kind === 'rawExists' ||
-			node.kind === 'rawNotExists'
-		) {
-			const query = (node.query ?? node.subquery) as QueryIntent | undefined;
-			if (query && locals.has(query.from))
-				refuse(query.from, `${location}.subquery.from`);
 		}
 		if (node.kind === 'pseudoColumn')
 			refuse(trusted?.targetTable ?? source, `${location}.pseudoColumn`);

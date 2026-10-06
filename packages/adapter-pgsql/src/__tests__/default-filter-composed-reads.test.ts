@@ -1,4 +1,14 @@
-import { createOrm, eq, isNull, planRecursive, ref, schema } from '@dbsp/core';
+import {
+	createOrm,
+	eq,
+	exists,
+	exprRef,
+	isNull,
+	planRecursive,
+	ref,
+	schema,
+	subquery,
+} from '@dbsp/core';
 import type { RecursiveIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -202,4 +212,76 @@ describe('default filters in composed reads', () => {
 			params: [],
 		});
 	});
+});
+
+function shadowedCte() {
+	const local = createOrm({
+		schema: schema(
+			{
+				users: { id: { type: 'integer', primaryKey: true }, active: 'boolean' },
+				posts: {
+					id: { type: 'integer', primaryKey: true },
+					authorId: ref('users', { as: 'author' }),
+				},
+			},
+			undefined,
+			{ defaultFilters: { users: eq('active', true) } },
+		),
+		adapter,
+	});
+	const query = (body: ReturnType<typeof local.select>) =>
+		local
+			.withCte('users')
+			.fromUnnest({ id: [1] })
+			.query(body);
+	return { local, query };
+}
+
+it('does not filter an explicit join to a CTE-shadowed table', () => {
+	const { local, query } = shadowedCte();
+	expect(
+		dumped(
+			query(
+				local.select('posts').join('users', {
+					as: 'u',
+					type: 'left',
+					on: eq('authorId', exprRef('u.id')),
+				}),
+			),
+		),
+	).toEqual({
+		sql: 'WITH users AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT posts.* FROM posts LEFT JOIN users AS u ON posts."authorId" = u.id',
+		params: [[1]],
+	});
+});
+
+it('refuses an include of a CTE-shadowed table by table and path', () => {
+	const { local, query } = shadowedCte();
+	expect(() =>
+		query(local.select('posts').include('author', { join: 'left' })).dump(),
+	).toThrowError(
+		new Error(
+			"Default filter for table 'users' is not supported at CTE query.include[0].relation.",
+		),
+	);
+});
+
+it.each([
+	[exists('author'), 'CTE query.where.relation'],
+	[eq('author.active', true), 'CTE query.where.field'],
+	[
+		subquery('posts')
+			.select('id')
+			.where(exists('author'))
+			.build()
+			.toWhereIntent('id', 'eq'),
+		'CTE query.where.subquery.where.relation',
+	],
+])('refuses a CTE-shadowed relation read %j', (condition, path) => {
+	const { local, query } = shadowedCte();
+	expect(() =>
+		query(local.select('posts').where(condition)).dump(),
+	).toThrowError(
+		new Error(`Default filter for table 'users' is not supported at ${path}.`),
+	);
 });

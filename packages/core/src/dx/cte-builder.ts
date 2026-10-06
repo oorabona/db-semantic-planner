@@ -162,8 +162,9 @@ export class CteQueryBuilder<TResult = unknown> {
 	 */
 	buildIntent(): CteQueryIntent {
 		const queryIntent =
-			this.outerBuilder.buildRelationalReadIntent?.('CTE query') ??
-			this.outerBuilder.buildIntent();
+			this.outerBuilder.buildRelationalReadIntent?.('CTE query', [
+				this.cteIntent.name,
+			]) ?? this.outerBuilder.buildIntent();
 		return {
 			kind: 'cteQuery',
 			ctes: [this.cteIntent],

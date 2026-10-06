@@ -739,7 +739,9 @@ export function createBindingFinalPlan(
 	return markPlannedReport({
 		rootTable: intent.from,
 		execution: resolveReportIncludes(intent, decisions, model, {
-			...(defaultFilters && { defaultFilters }),
+			...(defaultFilters && {
+				defaultFilters: queryLocalDefaultFilters(bundle, defaultFilters),
+			}),
 			skipRootDefaultFilter: true,
 		}),
 		decisions: observeIncludeDecisions(decisions),
@@ -809,6 +811,17 @@ function createNqlStatementBundle(
 	};
 }
 
+/** Binding bodies retain physical filters; their consumers see derived ranges. */
+function queryLocalDefaultFilters(
+	bundle: CompiledNqlQuery,
+	filters: import('./schema.js').DefaultFilters,
+): import('./schema.js').DefaultFilters {
+	if (!bundle.bindings?.size) return filters;
+	return Object.fromEntries(
+		Object.entries(filters).filter(([table]) => !bundle.bindings?.has(table)),
+	);
+}
+
 /** Plan a final NQL query before compiling its binding/include bundle. */
 export function compileNqlRead<T = unknown>(
 	bundle: CompiledNqlQuery & { query: QueryIntent },
@@ -827,7 +840,10 @@ export function compileNqlRead<T = unknown>(
 			)
 		: executePlan(bundle.query, model, {
 				...(options?.defaultFilters && {
-					defaultFilters: options?.defaultFilters,
+					defaultFilters: queryLocalDefaultFilters(
+						bundle,
+						options.defaultFilters,
+					),
 				}),
 				...(adapter && { dialectCapabilities: adapter.dialectCapabilities }),
 			});
@@ -842,7 +858,9 @@ export function compileNqlRead<T = unknown>(
 		bundle.runtimeBindings ?? new Map(),
 		bundle,
 		finalStep?.bindingDependencies,
-		bindingFinalPlanHasIncludes(planReport) ? planReport : undefined,
+		!bindingFinalQuery || bindingFinalPlanHasIncludes(planReport)
+			? planReport
+			: undefined,
 	);
 	const compiled = adapter?.compile<T>(
 		bindingFinalQuery || hasNqlBindings(finalBundle) ? finalBundle : planReport,
@@ -1675,7 +1693,12 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			throw new Error(UNPLANNED_NQL_READ_PLAN_ERROR);
 		}
 		return executePlan(compiled.intent, this.model, {
-			...(this.defaultFilters && { defaultFilters: this.defaultFilters }),
+			...(this.defaultFilters && {
+				defaultFilters: queryLocalDefaultFilters(
+					compiled.bundle,
+					this.defaultFilters,
+				),
+			}),
 			...(this.adapter && {
 				dialectCapabilities: this.adapter.dialectCapabilities,
 			}),

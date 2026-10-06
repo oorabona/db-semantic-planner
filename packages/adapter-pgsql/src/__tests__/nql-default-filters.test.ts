@@ -587,3 +587,20 @@ c | select id, post.author.name`.dump().sql,
 		);
 	});
 });
+
+it('plans a materialized binding named posts and a physical posts subquery independently', () => {
+	const orm = make({ posts: isNull('deletedAt') });
+	expect(
+		orm.nql`posts | select authorId | bind posts
+ users | where id in (posts)`.dump(),
+	).toMatchObject({
+		sql: 'WITH "posts" as (SELECT posts."authorId" FROM posts WHERE posts."deletedAt" IS NULL) SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0."authorId")',
+		params: [],
+	});
+	expect(
+		orm.nql`users | where id in (posts | select authorId)`.dump(),
+	).toMatchObject({
+		sql: 'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0."authorId" AND posts_exists_0."deletedAt" IS NULL)',
+		params: [],
+	});
+});

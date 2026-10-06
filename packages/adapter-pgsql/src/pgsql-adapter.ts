@@ -3156,20 +3156,28 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 				bindingProjections,
 			);
 			const queryFromBinding = hasBindingName(bindingNames, bundle.query.from);
-			const planReport = queryFromBinding
-				? (bundle.plan ??
-					createNqlBindingSelectPlan(
-						bundle.query as QueryIntent,
-						deps.model,
-						options?.defaultFilters,
-					))
-				: planFn(bundle.query, this.requireNqlCompileModel(options), {
-						...(options?.defaultFilters && {
-							defaultFilters: options?.defaultFilters,
-						}),
-						dialectCapabilities:
-							options?.dialectCapabilities ?? this.dialectCapabilities,
-					});
+			const scanFilters = options?.defaultFilters
+				? Object.fromEntries(
+						Object.entries(options.defaultFilters).filter(
+							([table]) => !hasBindingName(bindingNames, table),
+						),
+					)
+				: undefined;
+			const planReport =
+				bundle.plan ??
+				(queryFromBinding
+					? createNqlBindingSelectPlan(
+							bundle.query as QueryIntent,
+							deps.model,
+							scanFilters,
+						)
+					: planFn(bundle.query, this.requireNqlCompileModel(options), {
+							...(scanFilters && {
+								defaultFilters: scanFilters,
+							}),
+							dialectCapabilities:
+								options?.dialectCapabilities ?? this.dialectCapabilities,
+						}));
 			const compiled = compileSelectEnvelope<T>(planReport, options, deps);
 			const registeredSource = getNqlBindingProjection(
 				bindingProjections,

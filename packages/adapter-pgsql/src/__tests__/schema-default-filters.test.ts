@@ -318,3 +318,22 @@ it('accepts a scalar function over its own column with exact SQL', () => {
 		params: [7],
 	});
 });
+
+it('leaves generic count to PostgreSQL while refusing a structurally marked aggregate', () => {
+	const filter = fn('count', exprRef('id')).eq(1);
+	expect(
+		schema(definition, undefined, { defaultFilters: { posts: filter } })
+			.defaultFilters?.posts,
+	).toBe(filter);
+	expect(() =>
+		schema(definition, undefined, {
+			defaultFilters: {
+				posts: new ExpressionRef({
+					kind: 'aggregate',
+					function: 'count',
+					field: 'id',
+				}).eq(1),
+			},
+		}),
+	).toThrowError("Default filter for table 'posts': forbidden aggregate call");
+});

@@ -1700,7 +1700,39 @@ export class QueryBuilderImpl<TResult = unknown>
 	// --------------------------------------------------------------------------
 
 	/** @internal — keep each relational body bound to its issuing policy. */
-	buildRelationalReadIntent(path: string): QueryIntent {
+	buildRelationalReadIntent(
+		path: string,
+		bindings: readonly string[] = [],
+	): QueryIntent {
+		if (
+			bindings.length &&
+			!this.skipDefaultFilters &&
+			this.ctx.defaultFilters
+		) {
+			// Validate relation reads before removing predicates for derived ranges.
+			// The cloned issuer retains every other physical scan's policy.
+			const derived = new Set(bindings);
+			const shadowed = Object.fromEntries(
+				Object.entries(this.ctx.defaultFilters).filter(([table]) =>
+					derived.has(table),
+				),
+			);
+			assertUnplannedDefaultFilters(
+				this.buildIntent(false),
+				this.ctx.model,
+				shadowed,
+				path,
+				true,
+				derived,
+			);
+			return this.cloneWithCtxOverride({
+				defaultFilters: Object.fromEntries(
+					Object.entries(this.ctx.defaultFilters).filter(
+						([table]) => !derived.has(table),
+					),
+				),
+			}).buildRelationalReadIntent(path);
+		}
 		// Query-local CTE sources have no declared model range. Keep the refusal
 		// census for scans the existing compiler cannot plan on that path.
 		if (!this.ctx.model.getTable(this.from))

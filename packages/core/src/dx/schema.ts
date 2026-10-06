@@ -314,7 +314,10 @@ export interface SchemaOptions {
 	/**
 	 * Default filters are helper-built conditions over their table's own range.
 	 * Self-qualified columns are allowed; anything reaching another range, including
-	 * a self-relation, is refused. Aggregates and context-only expression leaves are refused.
+	 * a self-relation, is refused. Structurally marked aggregate expressions and aggregate
+	 * modifiers (FILTER, ORDER BY, DISTINCT) are refused at schema() construction.
+	 * A generic fn('count', ...) is not identifiable as an aggregate without catalog
+	 * information and is left to PostgreSQL. Context-only expression leaves are refused.
 	 * Filters apply to every table scan of a read. Opt out with a builder's
 	 * `withoutDefaultFilters()` or `orm.withoutDefaultFilters()`.
 	 * Mutations and raw SQL are unfiltered. Many-to-many junction tables (#787),
