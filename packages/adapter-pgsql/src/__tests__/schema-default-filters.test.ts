@@ -1,15 +1,27 @@
 import {
+	aggOrderBy,
 	and,
+	array,
+	caseWhen,
+	cast,
 	createOrm,
+	ExpressionRef,
 	eq,
 	exists,
+	exprRef,
+	fn,
 	inSubquery,
 	isNull,
+	literal,
+	namedArg,
 	not,
+	op,
 	or,
+	param,
 	rawExists,
 	ref,
 	schema,
+	star,
 	subquery,
 } from '@dbsp/core';
 import type { WhereIntent } from '@dbsp/types';
@@ -146,3 +158,99 @@ it.each([{ outer: true }, { kind: 'subquery' }])(
 		expect(dump.params).toEqual([payload]);
 	},
 );
+
+it.each([
+	[exprRef('id').eq(7), 'SELECT posts.* FROM posts WHERE posts.id = $1', [7]],
+	[
+		isNull('posts.deletedAt'),
+		'SELECT posts.* FROM posts WHERE posts."deletedAt" IS NULL',
+		[],
+	],
+	[
+		eq('id', ref('posts.id')),
+		'SELECT posts.* FROM posts WHERE posts.id = posts.id',
+		[],
+	],
+])('accepts and emits own-range default filter %j', (filter, sql, params) => {
+	const db = schema(definition, undefined, {
+		defaultFilters: { posts: filter },
+	});
+	const orm = createOrm({
+		schema: db,
+		adapter: createPgCompileOnlyAdapter({ model: db.model }),
+	});
+	expect(orm.select('posts').dump()).toMatchObject({ sql, params });
+});
+
+it('accepts nested own-range expression operands', () => {
+	const filter = fn(
+		'coalesce',
+		cast(caseWhen(eq('id', 7), exprRef('posts.id')).else(param(0)), 'integer'),
+		namedArg('value', array(exprRef('id'), param(1))),
+	).eq(7);
+	expect(
+		schema(definition, undefined, { defaultFilters: { posts: filter } })
+			.defaultFilters?.posts,
+	).toBe(filter);
+});
+
+it.each([
+	[
+		fn('abs', exprRef('authors.id')).eq(7),
+		"WHERE qualifier 'authors' is not visible in this query.",
+	],
+	[
+		new ExpressionRef({
+			kind: 'subquery',
+			query: subquery('posts').select('id').build().intent,
+		}).eq(7),
+		"forbidden operand 'subquery'",
+	],
+	[
+		fn('count', exprRef('id')).filter(exists('author')).eq(7),
+		"forbidden condition kind 'relation'",
+	],
+])(
+	'refuses another range inside expression %j with its table named',
+	(filter, reason) => {
+		expect(() =>
+			schema(
+				{
+					...definition,
+					posts: { ...definition.posts, authorId: ref('authors') },
+					authors: { id: 'integer' },
+				},
+				undefined,
+				{ defaultFilters: { posts: filter } },
+			),
+		).toThrowError(`Default filter for table 'posts': ${reason}`);
+	},
+);
+
+it.each([
+	op('+', exprRef('id'), param(1)).eq(7),
+	fn('count', star()).filter(eq('id', 7)).eq(1),
+	fn('array_agg', exprRef('id'), aggOrderBy('posts.id')).eq(array(literal(7))),
+	exprRef('id').eq(cast(exprRef('posts.id'), 'integer')),
+	eq('id', cast(exprRef('posts.id'), 'integer')),
+])('accepts own-range expression kind and RHS %j', (filter) => {
+	expect(
+		schema(definition, undefined, { defaultFilters: { posts: filter } })
+			.defaultFilters?.posts,
+	).toBe(filter);
+});
+
+it('refuses relation paths to another table', () => {
+	expect(() =>
+		schema(
+			{
+				posts: { ...definition.posts, authorId: ref('authors') },
+				authors: { id: 'integer' },
+			},
+			undefined,
+			{ defaultFilters: { posts: isNull('author.id') } },
+		),
+	).toThrowError(
+		"Default filter for table 'posts': forbidden condition kind 'relation'",
+	);
+});

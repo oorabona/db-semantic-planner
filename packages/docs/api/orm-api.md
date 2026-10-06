@@ -339,7 +339,7 @@ schema(definition, constraints?, options?, extras?)
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `defaultFilters` | `Record<string, WhereIntent>` | — | Accepts a condition on the table’s own columns, built with condition helpers. Currently applies to the root of a query-builder SELECT, after `beforeQuery` hooks; included rows, joins, relation predicates, NQL and mutations are not filtered yet. Override with `.withoutDefaultFilters()` on the query builder. |
+| `defaultFilters` | `Record<string, WhereIntent>` | — | Accepts conditions and expressions on the table’s own columns. Self-qualified columns are allowed; a relation path reaching another table is refused. Currently applies to the root of a query-builder SELECT, after `beforeQuery` hooks; included rows, joins, relation predicates, NQL and mutations are not filtered yet. Override with `.withoutDefaultFilters()` on the query builder. |
 | `defaultPkColumnName` | `string \| null` | `'id'` | Column name treated as the implicit primary key for short-form columns. Set to `null` to disable the convention; pass a custom string for project-specific naming schemes. Empty or whitespace-only strings are rejected eagerly at `schema()` time. |
 
 #### Example: implicit-PK convention

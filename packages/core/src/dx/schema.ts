@@ -19,6 +19,7 @@ import { brandValue, RangeAllocator, REF_BRAND } from '@dbsp/types';
 import type {
 	ResolvedColumnOperand,
 	ResolvedCondition,
+	ResolvedExpression,
 	ResolvedRhs,
 	WhereIntent,
 } from '@dbsp/types';
@@ -274,7 +275,7 @@ export interface SchemaExtras {
  * Result of schema() function with strongly-typed table/column info.
  */
 /**
- * Per-table default filters applied to all queries.
+ * Per-table default filters applied to the root of a query-builder SELECT.
  * Commonly used for soft delete filtering.
  *
  * @example
@@ -314,7 +315,8 @@ export interface SchemaOptions {
 	/** Explicit many-to-many declarations indexed by source table and relation name. */
 	relations?: Record<string, Record<string, ManyToManyDefinition>>;
 	/**
-	 * Default filters are conditions on each table's own columns, built with condition helpers.
+	 * Default filters are conditions and expressions on each table's own columns.
+	 * Self-qualified columns are allowed; relation paths reaching another table are refused.
 	 * Applied to the root of a query-builder SELECT after beforeQuery hooks.
 	 * Included rows, joins, relation predicates, NQL and mutations are not filtered yet.
 	 * Override with `.withoutDefaultFilters()` on the query builder.
@@ -411,7 +413,8 @@ export interface Schema<T extends SchemaDefinition> {
 	 */
 	readonly introspectedAt?: Date;
 	/**
-	 * Default filters are conditions on each table's own columns, built with condition helpers.
+	 * Default filters are conditions and expressions on each table's own columns.
+	 * Self-qualified columns are allowed; relation paths reaching another table are refused.
 	 * Applied to the root of a query-builder SELECT after beforeQuery hooks.
 	 * Included rows, joins, relation predicates, NQL and mutations are not filtered yet.
 	 * Override with `.withoutDefaultFilters()` on the query builder.
@@ -696,19 +699,61 @@ function validateDefaultFilter(
 		)
 			refuse(`invalid column '${operand.column}'`);
 	};
+	const expression = (node: ResolvedExpression): void => {
+		switch (node.kind) {
+			case 'ref':
+				column(node.operand);
+				return;
+			case 'wholeRow':
+				if (node.range !== range) refuse('forbidden whole-row range');
+				return;
+			case 'call':
+				node.args.forEach(expression);
+				if (node.filter) visit(node.filter);
+				node.orderBy?.forEach((order) => {
+					expression(order.expression);
+				});
+				return;
+			case 'operator':
+				node.operands.forEach(expression);
+				return;
+			case 'cast':
+				expression(node.expression);
+				return;
+			case 'case':
+				node.branches.forEach((branch) => {
+					visit(branch.condition);
+					expression(branch.result);
+				});
+				if (node.fallback) expression(node.fallback);
+				return;
+			case 'array':
+				node.elements.forEach(expression);
+				return;
+			case 'namedArg':
+				expression(node.value);
+				return;
+			case 'literal':
+			case 'parameter':
+			case 'star':
+				return;
+			case 'subquery':
+				refuse("forbidden operand 'subquery'");
+				return;
+			default: {
+				const exhaustive: never = node;
+				refuse(`unsupported expression '${String(exhaustive)}'`);
+			}
+		}
+	};
 	const rhs = (operand: ResolvedRhs): void => {
 		switch (operand.kind) {
-			case 'parameter':
-				return;
 			case 'column':
 			case 'outerRef':
 				column(operand);
 				return;
-			case 'ref':
-				column(operand.operand);
-				return;
 			default:
-				refuse(`forbidden operand '${operand.kind}'`);
+				expression(operand);
 		}
 	};
 	const visit = (node: ResolvedCondition): void => {
@@ -719,6 +764,10 @@ function validateDefaultFilter(
 				return;
 			case 'not':
 				visit(node.condition);
+				return;
+			case 'expression':
+				expression(node.expression);
+				if (node.comparison) rhs(node.comparison.right);
 				return;
 			case 'comparison':
 				column(node.left);
