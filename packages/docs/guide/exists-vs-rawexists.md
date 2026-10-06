@@ -90,7 +90,7 @@ Key observations:
 
 ### Explicit correlation with rawExists()
 
-A subquery body in query WHERE resolves `outerRef()` against its immediately enclosing query when unqualified. Qualified references search enclosing queries nearest first: an exact emitted qualifier wins; otherwise the logical table must have exactly one range in that query. Multiple ranges are refused as ambiguous, naming their aliases:
+A subquery body in query WHERE resolves `outerRef()` against its immediately enclosing query when unqualified. Qualified references search enclosing queries nearest first: in each query, a written include key wins, then an exact emitted qualifier; otherwise the logical table must have exactly one range in that query. Multiple ranges are refused as ambiguous, naming their aliases:
 
 ```typescript
 import { createOrm, rawExists, subquery, gt, outerRef, ref, schema } from '@dbsp/core';
@@ -169,7 +169,7 @@ const dump = (__rawExistsOrm as any)
 
 ### Correlation scope
 
-Query WHERE subquery bodies support `outerRef()` for scalar comparisons, `inSubquery()` and `rawExists()`. Nested same-table `rawExists()` bodies compile with distinct generated aliases and share parameter numbering. Unqualified `outerRef()` binds to the immediately enclosing query; qualified `outerRef('posts.id')` searches enclosing queries nearest first. An exact emitted qualifier wins; otherwise a logical-table match requires exactly one range of that table in that query. Multiple ranges are refused as ambiguous, naming their aliases; no match in any enclosing query is refused as not visible. A manual `.join()` qualifier repeating an emitted range (root, implicit or explicit alias) is refused; the root logical name is also reserved. Generated subquery aliases are reallocated. Root WHERE resolves correlation even alongside dotted relation paths; see [WHERE qualifiers](./joins#where-qualifiers-and-planning). Legacy `compilePlan()` lowering and join include `where` retain their correlation restrictions.
+Query WHERE subquery bodies support `outerRef()` for scalar comparisons, `inSubquery()` and `rawExists()`. Nested same-table `rawExists()` bodies compile with distinct generated aliases and share parameter numbering. Unqualified `outerRef()` binds to the immediately enclosing query; qualified `outerRef('posts.id')` searches enclosing queries nearest first. In each query, a written include key wins, then an exact emitted qualifier; otherwise a logical-table match requires exactly one range of that table in that query. Multiple ranges are refused as ambiguous, naming their aliases; no match in any enclosing query is refused as not visible. A manual `.join()` qualifier repeating an emitted range (root, implicit or explicit alias) is refused; the root logical name is also reserved. Generated subquery aliases are reallocated. Root WHERE resolves correlation even alongside dotted relation paths; see [WHERE qualifiers](./joins#where-qualifiers-and-planning). Legacy `compilePlan()` lowering and join include `where` retain their correlation restrictions.
 
 ### Relation predicate limits
 

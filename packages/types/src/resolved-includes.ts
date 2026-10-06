@@ -25,7 +25,10 @@ export class RangeAllocator {
 	/** Fit generated vocabulary to PostgreSQL's identifier limit without splitting UTF-8. */
 	static generatedAlias(base: string, suffix = ''): string {
 		const utf8 = new TextEncoder();
-		const bytes = 63 - utf8.encode(suffix).length;
+		const suffixBytes = utf8.encode(suffix).length;
+		if (suffixBytes > 63)
+			throw new RangeError('Generated alias suffix exceeds the 63-byte limit.');
+		const bytes = 63 - suffixBytes;
 		let out = '';
 		let size = 0;
 		for (const char of base) {

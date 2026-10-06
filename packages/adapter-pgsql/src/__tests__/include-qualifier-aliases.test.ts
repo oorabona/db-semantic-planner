@@ -1,4 +1,5 @@
 import {
+	and,
 	createOrm,
 	eq,
 	exists,
@@ -25,6 +26,7 @@ const model = schema({
 		fileId: ref('files', { as: 'callerFile' }),
 		childId: ref('children', { as: 'child' }),
 		longId: ref('files', { as: longName }),
+		aliasFileId: ref('files', { as: 'targets_exists_0' }),
 	},
 	children: {
 		id: { type: 'integer', primaryKey: true },
@@ -116,4 +118,26 @@ it('same-named include and 63-byte root use distinct aliases and preserve correl
 	expect(includeAlias).not.toBe(longName);
 	for (const alias of [longName, includeAlias])
 		expect(new TextEncoder().encode(alias).length).toBeLessThanOrEqual(63);
+});
+
+it('a written include key wins over the target emitted alias for columns and nested outerRef', () => {
+	const sql = orm
+		.select('roots')
+		.where(
+			exists('target', {
+				include: { targets_exists_0: { join: 'left' } },
+				where: and(
+					isNull('targets_exists_0.id'),
+					rawExists(
+						subquery('files')
+							.where(eq('id', outerRef('targets_exists_0.id')))
+							.select('id'),
+					),
+				),
+			}),
+		)
+		.dump().sql;
+	expect(sql).toBe(
+		'SELECT roots.* FROM roots WHERE EXISTS (SELECT 1 FROM targets AS targets_exists_0 LEFT JOIN files AS targets_exists_0_1 ON targets_exists_0."aliasFileId" = targets_exists_0_1.id WHERE roots."targetId" = targets_exists_0.id AND targets_exists_0_1.id IS NULL AND EXISTS (SELECT files_sq.id FROM files AS files_sq WHERE files_sq.id = targets_exists_0_1.id))',
+	);
 });

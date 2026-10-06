@@ -53,3 +53,20 @@ it('generated aliases fit UTF-8 bytes and check complete truncated suffix collis
 		expect(new TextEncoder().encode(alias).length).toBeLessThanOrEqual(63);
 	}
 });
+
+it('refuses suffixes exceeding 63 UTF-8 bytes and fits valid suffixes', () => {
+	for (const suffix of ['s'.repeat(64), 'é'.repeat(32)]) {
+		expect(() => RangeAllocator.generatedAlias('base', suffix)).toThrow(
+			RangeError,
+		);
+		expect(() => RangeAllocator.generatedAlias('base', suffix)).toThrow(
+			'63-byte limit',
+		);
+	}
+	for (const suffix of ['', 's'.repeat(63), `${'é'.repeat(31)}s`]) {
+		const alias = RangeAllocator.generatedAlias('é'.repeat(40), suffix);
+		expect(alias.endsWith(suffix)).toBe(true);
+		expect(new TextEncoder().encode(alias).length).toBeLessThanOrEqual(63);
+		if (suffix) expect(alias).toBe(suffix);
+	}
+});
