@@ -1,8 +1,11 @@
 import {
+	and,
 	batchValues,
 	createOrm,
 	eq,
+	exists,
 	exprRef,
+	like,
 	manyToMany,
 	outerRef,
 	ref,
@@ -217,4 +220,171 @@ describe('left-to-right ON visibility', () => {
 			'SELECT a.* FROM a JOIN b AS b1 ON a.id = b1."aId" JOIN unnest(CAST($1 AS integer[])) AS v("bId") ON b1.id = v."bId"',
 		);
 	});
+});
+
+describe('ON planning contract (#891)', () => {
+	it('refuses a later join qualifier by name during planning', () => {
+		expect(() =>
+			orm
+				.select('calls')
+				.join('users', { as: 'u', on: eq('id', exprRef('later.id')) })
+				.join('users', { as: 'later', on: eq('id', 1) })
+				.plan(),
+		).toThrow("WHERE qualifier 'later' is not visible in this query.");
+	});
+	it('root fields and relation predicates retain their owner', () => {
+		const report = orm
+			.select('calls')
+			.join('users', {
+				as: 'u',
+				on: and(like('callerId', 'x%'), exists('caller')),
+			})
+			.plan();
+		expect(adapter.compile(report, { model: poison(db.model) }).sql).toBe(
+			'SELECT calls.* FROM calls JOIN users AS u ON calls."callerId" LIKE $1 AND EXISTS (SELECT 1 FROM users AS users_exists_0 WHERE calls."callerId" = users_exists_0.id)',
+		);
+	});
+	it('table and BatchValues subqueries refuse during planning with their exact messages', () => {
+		const on = {
+			kind: 'subquery' as const,
+			field: 'id',
+			operator: 'eq' as const,
+			subquery: { type: 'select' as const, from: 'users' },
+		};
+		expect
+			.soft(() => orm.select('calls').join('users', { as: 'u', on }).plan())
+			.toThrow('Subquery in JOIN ON condition is not supported.');
+		const values = batchValues([[1]], ['id'], ['integer'], { alias: 'v' });
+		expect(() => orm.select('calls').join(values, { on }).plan()).toThrow(
+			'Subquery in BatchValues JOIN ON condition is not supported.',
+		);
+	});
+	it('recursive relation predicates refuse during planning with the root WHERE message', () => {
+		expect(() =>
+			orm
+				.select('calls')
+				.join('users', {
+					as: 'u',
+					on: exists('caller', {
+						recursive: { direction: 'up', through: 'caller' },
+					}),
+				})
+				.plan(),
+		).toThrow(
+			"WHERE exists('caller'): recursive relation predicates are not supported inside WHERE.",
+		);
+	});
+	it('values ON parameters splice before root WHERE and include parameters', () => {
+		const values = batchValues([[7]], ['id'], ['integer'], { alias: 'v' });
+		const compiled = orm
+			.select('calls')
+			.join(values, {
+				on: and(eq('calls.callerId', outerRef('id')), like('v.id', 'on%')),
+			})
+			.where(like('id', 'root%'))
+			.include('caller', { join: 'left', where: like('name', 'include%') })
+			.dump();
+		expect(compiled.params).toEqual(['root%', 'include%', [7], 'on%']);
+		expect(compiled.sql).toBe(
+			'SELECT calls.*, caller.id AS "caller.id", caller.name AS "caller.name", caller.id AS __dbsp_presence_caller FROM calls JOIN unnest(CAST($3 AS integer[])) AS v(id) ON calls."callerId" = v.id AND v.id LIKE $4 LEFT JOIN users AS caller ON calls."callerId" = caller.id WHERE calls.id LIKE $1 AND caller.name LIKE $2',
+		);
+	});
+});
+
+it('values ON sees root, self, every prior alias and its outerRef target', () => {
+	const values = batchValues([[1]], ['id'], ['integer'], { alias: 'v' });
+	const report = orm
+		.select('calls')
+		.join('users', { as: 'u1', on: eq('calls.callerId', exprRef('u1.id')) })
+		.join('users', { as: 'u2', on: eq('u1.id', exprRef('u2.id')) })
+		.join(values, {
+			on: and(
+				eq('callerId', exprRef('v.id')),
+				eq('u1.id', outerRef('id')),
+				eq('u2.id', exprRef('calls.callerId')),
+			),
+		})
+		.plan();
+	expect(adapter.compile(report, { model: poison(db.model) }).sql).toBe(
+		'SELECT calls.* FROM calls JOIN users AS u1 ON calls."callerId" = u1.id JOIN users AS u2 ON u1.id = u2.id JOIN unnest(CAST($1 AS integer[])) AS v(id) ON calls."callerId" = v.id AND u1.id = v.id AND u2.id = calls."callerId"',
+	);
+});
+
+it('a later alias refuses even when it names a declared root relation', () => {
+	expect(() =>
+		orm
+			.select('calls')
+			.join('users', { as: 'u', on: eq('caller.id', 1) })
+			.join('caller')
+			.plan(),
+	).toThrow("WHERE qualifier 'caller' is not visible in this query.");
+});
+
+it('rawExists modifier refusals happen during ON planning', () => {
+	const on = {
+		kind: 'rawExists' as const,
+		subquery: {
+			type: 'select' as const,
+			from: 'users',
+			orderBy: [{ field: 'id', direction: 'asc' as const }],
+			limit: 1,
+		},
+	};
+	const values = batchValues([[1]], ['id'], ['integer'], { alias: 'v' });
+	for (const query of [
+		orm.select('calls').join('users', { as: 'u', on }),
+		orm.select('calls').join(values, { on }),
+	]) {
+		expect(() => query.plan()).toThrow(
+			'rawExists subquery with LIMIT, ORDER BY is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+		);
+	}
+});
+it('table ON sees root, self, every prior alias and its outerRef target', () => {
+	const report = orm
+		.select('calls')
+		.join('users', { as: 'u1', on: eq('calls.callerId', exprRef('u1.id')) })
+		.join('users', { as: 'u2', on: eq('u1.id', exprRef('u2.id')) })
+		.join('users', {
+			as: 'u3',
+			on: and(
+				eq('callerId', exprRef('u3.id')),
+				eq('u1.id', outerRef('id')),
+				eq('u2.id', exprRef('calls.callerId')),
+			),
+		})
+		.plan();
+	expect(adapter.compile(report, { model: poison(db.model) }).sql).toBe(
+		'SELECT calls.* FROM calls JOIN users AS u1 ON calls."callerId" = u1.id JOIN users AS u2 ON u1.id = u2.id JOIN users AS u3 ON calls."callerId" = u3.id AND u1.id = u3.id AND u2.id = calls."callerId"',
+	);
+});
+
+it('rawExists preserves the legacy outerRef-only correlation refusal', () => {
+	for (const [value, error] of [
+		[
+			outerRef('id'),
+			'rawExists: correlated subqueries (outerRef inside the inner WHERE) are not yet supported. Workaround: use exists("relation", { where: ... }) when a schema relation exists, or wait for the rawExists correlation pipeline (tracked in TODO).',
+		],
+		[
+			{ kind: 'fieldRef', scope: 'outer', column: 'id' },
+			'Subquery in JOIN ON condition is not supported.',
+		],
+	] as const) {
+		const on = {
+			kind: 'rawExists' as const,
+			subquery: {
+				type: 'select' as const,
+				from: 'users',
+				where: {
+					kind: 'comparison' as const,
+					field: 'id',
+					operator: 'eq' as const,
+					value,
+				},
+			},
+		};
+		expect(() =>
+			orm.select('calls').join('users', { as: 'u', on }).plan(),
+		).toThrow(new Error(error));
+	}
 });

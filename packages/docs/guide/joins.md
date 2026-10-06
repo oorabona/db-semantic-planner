@@ -411,3 +411,12 @@ In a SELECT's WHERE, a qualified field starts at a visible range when its first 
 With two visible ranges of the same logical table, an exact alias binds to that range; the bare logical table name is ambiguous and refused with the aliases named. `outerRef()` searches enclosing queries nearest first: an exact alias wins, otherwise the logical table must identify a unique range in that scope. An unqualified `outerRef()` binds to the immediately enclosing query.
 
 `plan()` resolves the optimized root WHERE into `execution.where`, including relation paths, declared keys and subquery ranges. Compilation uses that tree; expression references render with their range qualifier. Undeclared relations, missing declared foreign keys, many-to-many traversal and recursive relation predicates are refused during planning.
+
+### ON visibility and planning
+
+An ON condition sees the root range, every earlier join, and the join itself.
+Unqualified fields and relation predicates start at the root range; qualified fields
+can name any of those visible ranges. The written root qualifier identifies the root
+even in a self-join ON. `outerRef()` in a table or values join ON
+points to the joined range. A qualifier naming a later join is refused by `plan()`
+with the qualifier named in the diagnostic.

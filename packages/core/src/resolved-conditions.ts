@@ -37,6 +37,17 @@ function isRef(value: unknown): value is { target: string } {
 	return value !== null && typeof value === 'object' && REF_BRAND in value;
 }
 
+/** Preserve the legacy ON correlation refusal; parameter payloads are opaque. */
+function containsOuterReference(value: unknown): boolean {
+	if (!value || typeof value !== 'object' || isParamIntent(value)) return false;
+	if (isSubqueryRef(value) && value.outer === true) return true;
+	return Object.values(value).some((item) =>
+		Array.isArray(item)
+			? item.some(containsOuterReference)
+			: containsOuterReference(item),
+	);
+}
+
 /** One traversal, with one shared allocator and no reconstruction of ancestor name sets. */
 export function resolveSelectWhere(
 	where: WhereIntent | undefined,
@@ -47,6 +58,34 @@ export function resolveSelectWhere(
 	initialAliasCount = 0,
 	additionalOuterRanges: readonly ResolvedRange[] = [],
 ): ResolvedCondition | undefined {
+	return resolveConditionContext(
+		where,
+		root,
+		visible,
+		[],
+		allocator,
+		model,
+		initialAliasCount,
+		additionalOuterRanges,
+	);
+}
+
+/** Resolve a condition with explicit current, visible and enclosing query ranges. */
+export function resolveConditionContext(
+	where: WhereIntent | undefined,
+	root: ResolvedRange,
+	visible: readonly ResolvedRange[],
+	enclosing: readonly (readonly ResolvedRange[])[],
+	allocator: RangeAllocator,
+	model: ModelIR | undefined,
+	initialAliasCount = 0,
+	additionalOuterRanges: readonly ResolvedRange[] = [],
+	joinOn?: {
+		readonly subqueryRefusal: string;
+		readonly unavailableQualifiers: readonly string[];
+	},
+): ResolvedCondition | undefined {
+	const subqueryRefusal = joinOn?.subqueryRefusal;
 	const rootScope = [...new Set([root, ...visible, ...additionalOuterRanges])];
 	const enclosingScope = (ranges: readonly ResolvedRange[]) =>
 		ranges === visible ? rootScope : ranges;
@@ -61,6 +100,8 @@ export function resolveSelectWhere(
 		readonly ResolvedRange[],
 		ReadonlyMap<string, ResolvedRange>
 	>();
+	// ON preserves the authored root qualifier even for a self-join.
+	if (joinOn) writtenQualifiers.set(visible, new Map([[root.alias, root]]));
 	const activeNames = new Set(visible.map((r) => r.alias));
 	let scopeIndex = 0;
 	const column = (
@@ -189,12 +230,23 @@ export function resolveSelectWhere(
 		enclosing: readonly (readonly ResolvedRange[])[],
 		isExpressionBody = false,
 	): Extract<ResolvedSubqueryBody, { use: U }> {
+		if (subqueryRefusal && isExpressionBody)
+			throw new Error(
+				"compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context.",
+			);
 		if (!isExpressionBody)
 			assertNoUnsupportedSubqueryModifiers(
 				query,
-				use === 'exists' ? 'rawExists' : use === 'in' ? 'IN' : 'scalar',
+				use === 'exists'
+					? 'rawExists'
+					: use === 'in'
+						? 'IN'
+						: subqueryRefusal
+							? 'scalar-direct'
+							: 'scalar',
 			);
 		else assertNoUnsupportedSubqueryModifiers(query, 'scalar');
+		if (subqueryRefusal && use !== 'in') throw new Error(subqueryRefusal);
 		let alias: string;
 		const expressionPrior = expressionNext.get(query.from) ?? 0;
 		if (isExpressionBody) {
@@ -718,6 +770,13 @@ export function resolveSelectWhere(
 		) {
 			const parts = node.field.split('.');
 			const qualifier = parts[0]!;
+			if (
+				ranges === visible &&
+				joinOn?.unavailableQualifiers.includes(qualifier)
+			)
+				throw new Error(
+					`WHERE qualifier '${qualifier}' is not visible in this query.`,
+				);
 			const candidates = ranges.filter((r) => r.table === qualifier);
 			const exact =
 				writtenQualifiers.get(ranges)?.get(qualifier) ??
@@ -837,6 +896,14 @@ export function resolveSelectWhere(
 				return { kind: 'jsonExists', left: left(), key: parameter(node.key) };
 			case 'rawExists':
 			case 'rawNotExists':
+				if (subqueryRefusal) {
+					assertNoUnsupportedSubqueryModifiers(node.subquery, 'rawExists');
+					if (containsOuterReference(node.subquery.where))
+						throw new Error(
+							`${node.kind}: correlated subqueries (outerRef inside the inner WHERE) are not yet supported. ` +
+								'Workaround: use exists("relation", { where: ... }) when a schema relation exists, or wait for the rawExists correlation pipeline (tracked in TODO).',
+						);
+				}
 				return {
 					kind: 'subquery',
 					use: 'exists',
@@ -868,5 +935,5 @@ export function resolveSelectWhere(
 				);
 		}
 	};
-	return where ? visit(where, root, visible, []) : undefined;
+	return where ? visit(where, root, visible, enclosing) : undefined;
 }

@@ -48,27 +48,6 @@ import {
 import type { WhereIntent } from '@dbsp/types';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
-/** ON conditions stay on model lowering until 3a-W. */
-export function isRelationLookupFreeJoinOn(condition: WhereIntent): boolean {
-	if (
-		condition.kind === 'exists' ||
-		condition.kind === 'notExists' ||
-		condition.kind === 'relationFilter'
-	)
-		return false;
-	if (
-		'field' in condition &&
-		typeof condition.field === 'string' &&
-		condition.field.includes('.')
-	)
-		return false;
-	if (condition.kind === 'and' || condition.kind === 'or')
-		return condition.conditions.every(isRelationLookupFreeJoinOn);
-	if (condition.kind === 'not')
-		return isRelationLookupFreeJoinOn(condition.condition);
-	return true;
-}
-
 const columns = {
 	id: { type: 'integer', primaryKey: true },
 	name: { type: 'text' },
@@ -239,17 +218,21 @@ function makePositions(
 						return typeof member === 'function' ? member.bind(target) : member;
 					},
 				});
-				const canonical = adapter.compile(report, { model });
-				const compiled = adapter.compile(report, {
-					model: isRelationLookupFreeJoinOn(c) ? poisoned : model,
-				});
-				if (
-					compiled.sql !== canonical.sql ||
-					JSON.stringify(compiled.parameters) !==
-						JSON.stringify(canonical.parameters)
-				)
+				const compile = (authority: typeof model): MatrixOutcome => {
+					try {
+						const result = adapter.compile(report, { model: authority });
+						return { sql: result.sql, params: result.parameters, error: null };
+					} catch (error) {
+						if (!(error instanceof Error)) throw error;
+						return { sql: null, params: null, error: error.message };
+					}
+				};
+				const canonical = compile(model);
+				const compiled = compile(poisoned);
+				if (JSON.stringify(compiled) !== JSON.stringify(canonical))
 					throw new Error('poisoned join compilation differs');
-				return { sql: compiled.sql, params: compiled.parameters };
+				if (compiled.error !== null) throw new Error(compiled.error);
+				return { sql: compiled.sql, params: compiled.params };
 			},
 		},
 		// orm.recursive(name, { base, step }) is the raw-CTE API and cannot express start.where.

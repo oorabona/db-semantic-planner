@@ -165,7 +165,7 @@ export interface ResolvedJoin {
 	readonly range: ResolvedRange;
 	readonly sourceRange: ResolvedRange;
 	readonly path?: ResolvedRelationPath;
-	readonly on?: WhereIntent;
+	readonly on?: ResolvedCondition;
 }
 export interface SelectExecution {
 	readonly where?: ResolvedCondition;
