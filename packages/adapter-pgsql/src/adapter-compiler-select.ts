@@ -246,7 +246,7 @@ type BatchValuesRangeFnResult = {
  *
  * @param bv - The batch values payload (columns, data, types, alias, ordinality).
  * @param startParamIndex - The 1-based index for the first ParamRef ($N).
- *   Pass 1 when the batch params are first; pass current paramIndex+1 otherwise.
+ *   FROM and JOIN callers start at `$1`; compileJoinDecision offsets join placeholders.
  */
 function buildBatchValuesRangeFn(
 	bv: import('@dbsp/types').BatchValuesJoinPayload,
