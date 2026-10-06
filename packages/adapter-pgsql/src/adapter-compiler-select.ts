@@ -241,9 +241,9 @@ type BatchValuesRangeFnResult = {
  * Build a `unnest($1::type[], ...) AS alias(col1, col2 [, ord])` RangeFunction node
  * from a BatchValuesJoinPayload.
  *
- * The returned `params` array contains the column data arrays in order; they must
- * be spliced into CompilerState.parameters BEFORE other query params so that the
- * $N refs in the AST node match the right positions.
+ * The returned `params` array contains the column data arrays in order, numbered
+ * from `startParamIndex`. A BatchValues FROM places them first in the query; a
+ * BatchValues join numbers them locally and compileJoinDecision offsets them.
  *
  * @param bv - The batch values payload (columns, data, types, alias, ordinality).
  * @param startParamIndex - The 1-based index for the first ParamRef ($N).

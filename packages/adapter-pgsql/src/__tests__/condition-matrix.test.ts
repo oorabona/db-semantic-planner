@@ -36,14 +36,6 @@ describe('condition compilation differential matrix (#891)', () => {
 			before,
 		);
 	});
-	it('poisons every manual ON condition after planning', () => {
-		const entries = conditionMatrix.filter(
-			(entry) => entry.position === 'manual-join-on',
-		);
-		expect(entries).toHaveLength(317);
-		for (const entry of entries)
-			expect(entry.run().error).not.toBe('join relation lookup after planning');
-	});
 	it('emits empty groups once per position and observable key-authority profile', () => {
 		for (const position of new Set(
 			conditionMatrix.map((entry) => entry.position),

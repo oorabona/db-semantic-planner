@@ -227,8 +227,9 @@ export interface PrecompiledJoinDecision extends JoinDecision {
 
 /**
  * A pre-compiled 'join' decision backed by a BatchValues unnest() source.
- * `batchValuesParams` must be spliced into compiler state BEFORE other query
- * parameters so that $1/$2/… ParamRefs in the RangeFunction align correctly.
+ * `batchValuesParams` holds the arrays then the ON values, numbered locally
+ * from $1; compileJoinDecision offsets both fragments by the parameters already
+ * in the query and appends these values.
  */
 export interface BatchValuesJoinDecision extends PrecompiledJoinDecision {
 	readonly batchValuesParams: readonly unknown[];
@@ -254,8 +255,8 @@ export function isPrecompiledJoinDecision(
 
 /**
  * Narrows a PlanDecision to BatchValuesJoinDecision.
- * True when the join is a BatchValues unnest() join and carries pre-spliced
- * parameter arrays in `batchValuesParams`.
+ * True when the join is a BatchValues unnest() join and carries its locally
+ * numbered parameters in `batchValuesParams`.
  */
 export function isBatchValuesJoinDecision(
 	d: PlanDecision,

@@ -399,7 +399,7 @@ All standard filter helpers (`eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like`, `and
 - **Self-joins require a distinct alias** — use `as` when the default qualifier would equal the root table name; that collision is refused at `plan()`.
 - **Result columns are flat** — `.join()` does not hydrate nested objects. All columns from the joined table appear as top-level keys in the result. Use `include()` for nested hydration.
 - **Right and full outer joins are not supported** — only `'inner'` and `'left'` are valid values for `type`.
-- **Dotted column notation in ON conditions** — use `'table.column'` (e.g. `'embeddings.id'`) to produce qualified column references in the ON clause. Unqualified names may be ambiguous when both sides of the join expose the same column name.
+- **Dotted column notation in ON conditions** — use `'table.column'` (e.g. `'embeddings.id'`) to produce qualified column references in the ON clause. An unqualified name binds to the root range, so qualify a column of the joined or an earlier range.
 - **Multiple joins nest left-to-right** — the SQL FROM clause wraps joins progressively: `((A JOIN B) JOIN C)`. This matches standard PostgreSQL left-associative join behavior and is transparent to the query result.
 
 Compilation follows [Authored intent and execution authority](./observability.md#authored-intent-and-execution-authority).
@@ -417,6 +417,7 @@ With two visible ranges of the same logical table, an exact alias binds to that 
 An ON condition sees the root range, every earlier join, and the join itself.
 Unqualified fields and relation predicates start at the root range; qualified fields
 can name any of those visible ranges. The written root qualifier identifies the root
-even in a self-join ON. `outerRef()` in a table or values join ON
-points to the joined range. A qualifier naming a later join is refused by `plan()`
+even in a self-join ON. An unqualified `outerRef()` written directly in a table or values
+join ON points to the joined range; inside a subquery body it binds the enclosing query, as in
+WHERE. A qualifier naming a later join is refused by `plan()`
 with the qualifier named in the diagnostic.
