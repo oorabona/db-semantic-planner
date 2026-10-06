@@ -43,6 +43,7 @@ import {
 import {
 	aggregateProjectionIdentity,
 	compiledProjectionLabels,
+	expressionProjectionIdentity,
 	rootProjectionLabels,
 } from './column-metadata.js';
 import { compileWhereIntent, type WhereCompilerCtx } from './compile-where.js';
@@ -136,7 +137,7 @@ function deduplicateRootProjection(
 							])
 						: expr.kind === 'aggregate'
 							? aggregateProjectionIdentity(expr)
-							: stableJson(expr);
+							: expressionProjectionIdentity(expr);
 				if (seen.has(identity)) return false;
 				seen.add(identity);
 				return true;
@@ -1126,7 +1127,7 @@ export function compileSelectEnvelope<T = unknown>(
 		!isPlannedReport(plan) &&
 		(plan.execution?.where ||
 			[plan.intent, plan.executableIntent].some((intent) =>
-				[intent?.where, intent?.having, intent?.select].some(
+				[intent?.where, intent?.having, intent?.select, intent?.orderBy].some(
 					conditionNeedsPlanning,
 				),
 			))
