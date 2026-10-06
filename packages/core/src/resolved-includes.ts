@@ -1,5 +1,7 @@
 import {
+	EXPRESSION_BRAND,
 	type IncludeIntent,
+	isParamIntent,
 	type ModelIR,
 	type PlanDecision,
 	type QueryIntent,
@@ -49,7 +51,7 @@ function assertSupportedIncludeWhere(
 		if (include.where) {
 			// Walk the complete predicate intent, including query and expression bodies.
 			const visit = (node: unknown): void => {
-				if (!node || typeof node !== 'object') return;
+				if (!node || typeof node !== 'object' || isParamIntent(node)) return;
 				if (Array.isArray(node)) {
 					for (const child of node) visit(child);
 					return;
@@ -65,10 +67,16 @@ function assertSupportedIncludeWhere(
 					);
 				}
 				for (const [key, child] of Object.entries(record)) {
-					// Literal payloads are data, rather than query/expression intent.
+					// Branded expression values contain intent; literal/parameter data does not.
+					const expressionValue =
+						child !== null &&
+						typeof child === 'object' &&
+						EXPRESSION_BRAND in child;
 					if (
 						key === 'values' ||
-						(key === 'value' && record.kind !== 'namedArg')
+						(key === 'value' &&
+							record.kind !== 'namedArg' &&
+							(record.kind === 'literal' || !expressionValue))
 					)
 						continue;
 					visit(child);

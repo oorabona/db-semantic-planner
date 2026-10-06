@@ -37,7 +37,7 @@ function isRef(value: unknown): value is { target: string } {
 	return value !== null && typeof value === 'object' && REF_BRAND in value;
 }
 
-/** Preserve the legacy ON correlation refusal; parameter payloads are opaque. */
+/** Preserve the legacy ON and include-body correlation refusals; parameter payloads are opaque. */
 function containsOuterReference(value: unknown): boolean {
 	if (!value || typeof value !== 'object' || isParamIntent(value)) return false;
 	if (isSubqueryRef(value) && value.outer === true) return true;
@@ -280,6 +280,16 @@ export function resolveConditionContext(
 							: 'scalar',
 			);
 		else assertNoUnsupportedSubqueryModifiers(query, 'scalar');
+		if (
+			mode?.include &&
+			use !== 'exists' &&
+			containsOuterReference(query.where)
+		)
+			throw new Error(
+				'scalar subquery with correlated outerRef() is not yet supported — ' +
+					'use exists("relation", { where: ... }) when a schema relation exists, ' +
+					'or restructure the query to avoid the correlation.',
+			);
 		if (subqueryRefusal && use !== 'in') throw new Error(subqueryRefusal);
 		let alias: string;
 		const expressionPrior = expressionNext.get(query.from) ?? 0;
@@ -926,7 +936,7 @@ export function resolveConditionContext(
 				return { kind: 'jsonExists', left: left(), key: parameter(node.key) };
 			case 'rawExists':
 			case 'rawNotExists':
-				if (subqueryRefusal) {
+				if (subqueryRefusal || mode?.include) {
 					assertNoUnsupportedSubqueryModifiers(node.subquery, 'rawExists');
 					if (containsOuterReference(node.subquery.where))
 						throw new Error(
