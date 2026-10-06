@@ -17,7 +17,7 @@ const usersWithPosts = await orm.select('users').include('posts').dump();
 
 The relation name maps to the `inverse` or `as` name defined in your schema's `ref()` declaration.
 
-Unknown relations are refused with the include path in both strict and lenient planning. Normalized-name collisions are always refused with an exported `AmbiguousIncludeError` carrying `candidates` and `includePath`; use the exact declared name or `via` to identify the relation. Includes compile only from a report planned in the same process.
+Unknown relations are refused with the include path in both strict and lenient planning. Normalized-name collisions are always refused with an exported `AmbiguousIncludeError` carrying `candidates` and `includePath`; use the exact declared name or `via` to identify the relation. Compilation follows [Authored intent and execution authority](./observability.md#authored-intent-and-execution-authority).
 
 ---
 

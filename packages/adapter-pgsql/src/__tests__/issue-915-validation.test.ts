@@ -106,7 +106,7 @@ describe('#915 include validation', () => {
 		} as PlanReport;
 		expect(() => keylessAdapter.compile(external)).toThrowError(
 			new Error(
-				'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 			),
 		);
 	});
@@ -135,7 +135,7 @@ describe('#915 include validation', () => {
 		} as PlanReport;
 		expect(() => adapter.compile(external)).toThrowError(
 			new Error(
-				'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 			),
 		);
 	});
@@ -153,7 +153,7 @@ describe('#915 include validation', () => {
 		);
 		expect(() => adapter.compile(original)).toThrow(
 			new Error(
-				'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 			),
 		);
 		const external = {
@@ -164,7 +164,7 @@ describe('#915 include validation', () => {
 		} as PlanReport;
 		expect(() => adapter.compile(external)).toThrowError(
 			new Error(
-				'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 			),
 		);
 	});

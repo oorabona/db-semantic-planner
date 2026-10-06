@@ -1,6 +1,6 @@
 import { exists, plan, ref, schema } from '@dbsp/core';
 import type { ExpressionIntent, PlanReport } from '@dbsp/types';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const model = schema({
@@ -12,7 +12,7 @@ const model = schema({
 }).model;
 const adapter = createPgCompileOnlyAdapter({ model });
 const refusal =
-	'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation';
+	'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation';
 function external(): { -readonly [K in keyof PlanReport]: PlanReport[K] } {
 	return JSON.parse(
 		JSON.stringify(plan({ type: 'select', from: 'users' }, model)),
@@ -124,5 +124,45 @@ describe('external expression authority', () => {
 		expect(() => adapter.compile(plan(report.intent!, model))).toThrow(
 			'stableJson cannot serialize cyclic structures',
 		);
+	});
+});
+
+describe('loaded-copy report authority', () => {
+	it('compiles its own issued reports and refuses reports from another module instance', async () => {
+		const firstCore = await import('@dbsp/core');
+		const firstTypes = await import('@dbsp/types/internal');
+		const firstAdapter = await import('../pgsql-adapter.js');
+		const firstModel = firstCore.schema({
+			rows: { id: { type: 'integer', primaryKey: true } },
+		}).model;
+		const firstReport = firstCore.plan(
+			{ type: 'select', from: 'rows' },
+			firstModel,
+		);
+		const first = firstAdapter.createPgCompileOnlyAdapter({
+			model: firstModel,
+		});
+		vi.resetModules();
+		const secondCore = await import('@dbsp/core');
+		const secondTypes = await import('@dbsp/types/internal');
+		const secondAdapter = await import('../pgsql-adapter.js');
+		const secondModel = secondCore.schema({
+			rows: { id: { type: 'integer', primaryKey: true } },
+		}).model;
+		const secondReport = secondCore.plan(
+			{ type: 'select', from: 'rows' },
+			secondModel,
+		);
+		const second = secondAdapter.createPgCompileOnlyAdapter({
+			model: secondModel,
+		});
+		expect(firstTypes.isPlannedReport(firstReport)).toBe(true);
+		expect(secondTypes.isPlannedReport(secondReport)).toBe(true);
+		expect(firstTypes.isPlannedReport(secondReport)).toBe(false);
+		expect(secondTypes.isPlannedReport(firstReport)).toBe(false);
+		expect(first.compile(firstReport).sql).toBe('SELECT rows.* FROM rows');
+		expect(second.compile(secondReport).sql).toBe('SELECT rows.* FROM rows');
+		expect(() => second.compile(firstReport)).toThrow(refusal);
+		expect(() => first.compile(secondReport)).toThrow(refusal);
 	});
 });

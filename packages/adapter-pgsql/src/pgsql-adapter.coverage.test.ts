@@ -2236,7 +2236,7 @@ describe('PgAdapter - Coverage Tests', () => {
 			// Unissued relation reports refuse before attempting model resolution.
 			// Use rawExists(subquery(...)) for EXISTS over uncorrelated/undeclared targets.
 			expect(() => adapter.compile(plan)).toThrow(
-				'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 			);
 		});
 	});
@@ -2437,7 +2437,7 @@ describe('synthetic binding includes', () => {
 				},
 			}),
 		).toThrow(
-			'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 		);
 	});
 });

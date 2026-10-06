@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from './pgsql-adapter.js';
 
 const refusal =
-	'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation';
+	'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation';
 const adapter = createPgCompileOnlyAdapter();
 const relation = exists('posts', { where: eq('id', 1) });
 const plain = eq('id', 1);

@@ -291,4 +291,4 @@ const result: CompiledResult = compiler.compile(report);
 console.log(result.sql, result.parameters);
 ```
 
-Public `adapter.compile()` accepts SELECT `PlanReport` objects only when issued by the planner in this process. Copies and serialized reports remain inspectable, but refuse before lowering. Plan the query in process, or use `compilePlan` from `@dbsp/adapter-pgsql/internal` for decision-level compilation. See [Authored intent and execution authority](../docs/guide/observability.md#authored-intent-and-execution-authority).
+Public `adapter.compile()` accepts SELECT `PlanReport` objects only when planned by this loaded copy of dbsp (`plan()`, the ORM or NQL). Copies and serialized reports remain inspectable, but refuse before lowering. Plan the query with this loaded copy, or use `compilePlan` from `@dbsp/adapter-pgsql/internal` for decision-level compilation. See [Authored intent and execution authority](../docs/guide/observability.md#authored-intent-and-execution-authority).

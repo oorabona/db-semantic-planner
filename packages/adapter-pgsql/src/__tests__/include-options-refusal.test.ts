@@ -641,7 +641,7 @@ for (const select of [
 		);
 		exactError(
 			() => createPgCompileOnlyAdapter({ model }).compile({ ...valid, intent }),
-			'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 		);
 	});
 }
@@ -692,7 +692,7 @@ it('revalidates recorded total order against a compile model without a key', () 
 		createPgCompileOnlyAdapter().compile({ ...report }, { model: noKey }),
 	).toThrowError(
 		new Error(
-			'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 		),
 	);
 });

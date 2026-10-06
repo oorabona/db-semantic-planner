@@ -97,7 +97,7 @@ describe('resolved joins authority', () => {
 		]) {
 			for (const copy of [{ ...report }, JSON.parse(JSON.stringify(report))])
 				expect(() => adapter.compile(copy)).toThrow(
-					'Adapter compilation requires a report planned in this process',
+					'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL)',
 				);
 		}
 	});
@@ -106,7 +106,7 @@ describe('resolved joins authority', () => {
 		expect(adapter.compile(issued).sql).toBe('SELECT calls.* FROM calls');
 		for (const copy of [{ ...issued }, JSON.parse(JSON.stringify(issued))])
 			expect(() => adapter.compile(copy)).toThrow(
-				'Adapter compilation requires a report planned in this process',
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL)',
 			);
 	});
 	it('unissued reports with only join decisions refuse', () => {
@@ -116,7 +116,7 @@ describe('resolved joins authority', () => {
 			decisions: [{ type: 'join' }],
 		} as unknown as PlanReport;
 		expect(() => adapter.compile(report)).toThrow(
-			'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 		);
 	});
 

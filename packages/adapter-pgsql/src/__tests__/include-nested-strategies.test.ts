@@ -67,7 +67,7 @@ describe('#894 nested strategy refusal', () => {
 			it(`refuses external ${parent}→${child} before returning SQL`, () =>
 				expect(() => adapter.compile(nestedPlan(parent, child))).toThrow(
 					new Error(
-						'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+						'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 					),
 				));
 		}
@@ -186,7 +186,7 @@ it.each([10, 20])(
 		};
 		expect(() => adapter.compile(external)).toThrow(
 			new Error(
-				'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 			),
 		);
 		expect(reads).toBe(0);
@@ -243,7 +243,7 @@ describe('#894 pathless include assignments', () => {
 				pathless(p),
 			),
 		).toThrow(
-			'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 		);
 	});
 	it('refuses sibling same-name includes sharing one pathless decision', () => {
@@ -261,7 +261,7 @@ describe('#894 pathless include assignments', () => {
 				decisions: [decision!],
 			}),
 		).toThrow(
-			'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 		);
 	});
 	it('refuses reusing one decision through its relation and alias', () => {
@@ -279,13 +279,13 @@ describe('#894 pathless include assignments', () => {
 				],
 			}),
 		).toThrow(
-			'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 		);
 	});
 	it('refuses unique pathless external assignments', () => {
 		expect(() => adapter.compile(pathless(nestedPlan('join', 'join')))).toThrow(
 			new Error(
-				'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 			),
 		);
 	});

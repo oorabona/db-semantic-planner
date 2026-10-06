@@ -191,7 +191,7 @@ export interface IncludePayloadShape {
 }
 
 export interface PlanReport {
-	/** Normative SELECT execution (root, explicit joins and includes) issued by an in-process planner. */
+	/** Normative SELECT execution (root, explicit joins and includes) planned by this loaded copy of dbsp (plan(), the ORM or NQL). */
 	readonly execution?: import('./resolved-includes.js').SelectExecution;
 	/** Adapter-owned payload descriptors indexed by resolved include identity. */
 	readonly includePayloadsByNodeId?: Readonly<

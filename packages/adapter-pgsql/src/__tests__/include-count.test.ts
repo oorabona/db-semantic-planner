@@ -84,7 +84,7 @@ function makeCountWithJoinPlan(
 
 describe('aggregate join includes refuse payload loss', () => {
 	const refusal =
-		'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation';
+		'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation';
 	for (const joinType of ['left', 'inner'] as const) {
 		for (const withWhere of [false, true]) {
 			it(`refuses external ${joinType} include, where=${withWhere}`, () => {

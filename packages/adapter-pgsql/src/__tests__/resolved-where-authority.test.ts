@@ -51,7 +51,7 @@ function poison(model: ModelIR): ModelIR {
 }
 const poisoned = poison(db.model);
 const refusal =
-	'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation';
+	'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation';
 
 describe('resolved root WHERE refusal proofs (#891)', () => {
 	it('1: all eleven matrix positions retain outcomes under post-plan relation poison', () => {

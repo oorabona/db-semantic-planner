@@ -142,7 +142,7 @@ describe('Issue 15: include camelCase alias — synthesizeMissingJoinDecisions',
 
 		expect(() => compile({ ...plan, decisions: [] })).toThrow(
 			new Error(
-				'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 			),
 		);
 	});
@@ -245,7 +245,7 @@ describe('legacy synthesis camelCase collisions', () => {
 		}
 		expect(error).toBeInstanceOf(Error);
 		expect((error as Error).message).toBe(
-			'Adapter compilation requires a report planned in this process; plan the query in this process, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 		);
 	});
 });

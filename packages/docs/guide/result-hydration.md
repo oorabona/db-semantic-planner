@@ -226,4 +226,4 @@ Compilation resolves these keys before generating SQL. Exact duplicate source/ke
 
 Scalar expression projections retain join include payloads. Expression projections containing a call in `NQL_SELECT_AGGREGATE_FUNCTIONS`, including nested calls, are aggregation. Join includes are refused when aggregation, `groupBy` or `DISTINCT` would drop their data; use `.join()` for relational columns, grouping or ordering.
 
-Includes compile only from a report planned in the same process. The module-private registry recognises reports issued by `plan()` and other in-process issuers, including the CLI. Serialized, spread, hand-built and legacy decision-context reports with includes are refused with `Includes compile only from a report planned in this process`. Reports without includes compile as before.
+Compilation follows [Authored intent and execution authority](./observability.md#authored-intent-and-execution-authority).
