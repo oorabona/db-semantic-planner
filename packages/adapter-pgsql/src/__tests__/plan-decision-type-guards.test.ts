@@ -5,7 +5,6 @@
  * isBatchValuesJoinDecision correctly narrow PlanDecision instances.
  */
 
-import { describe, expect, it } from 'vitest';
 import {
 	type BatchValuesJoinDecision,
 	isBatchValuesJoinDecision,
@@ -14,7 +13,8 @@ import {
 	type JoinDecision,
 	type PlanDecision,
 	type PrecompiledJoinDecision,
-} from '../compiler.js';
+} from '@dbsp/adapter-pgsql/internal';
+import { describe, expect, it } from 'vitest';
 
 // Minimal mock Node for testing — compiler.ts types it as pgsql Node
 const mockNode = {

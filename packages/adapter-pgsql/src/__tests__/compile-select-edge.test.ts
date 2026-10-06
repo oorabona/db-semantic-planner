@@ -9,8 +9,11 @@
  *           → no DISTINCT ON emitted, no error thrown
  */
 
+import {
+	compilePlan,
+	type SimplifiedPlanReport,
+} from '@dbsp/adapter-pgsql/internal';
 import { describe, expect, it } from 'vitest';
-import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
 
 // ---------------------------------------------------------------------------
 // Helper — normalise SQL for deterministic comparison

@@ -1,6 +1,6 @@
+import { compilePlan, type PlanDecision } from '@dbsp/adapter-pgsql/internal';
 import { createOrm, exists, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { compilePlan, type PlanDecision } from '../compiler.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const tables = new Map([

@@ -11,10 +11,13 @@
  * fn() args are compiled recursively via compileExpressionIntent.
  */
 
+import {
+	compilePlan,
+	type SimplifiedPlanReport,
+} from '@dbsp/adapter-pgsql/internal';
 import { exprRef, fn } from '@dbsp/core';
 import type { CustomFnExpressionIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
 
 /**
  * Compile a fn() expression in SELECT context and return normalized SQL.

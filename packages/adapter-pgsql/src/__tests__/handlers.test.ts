@@ -1,10 +1,11 @@
 import { compileWhereIntent } from '../condition-compiler.js';
+
 /**
  * Tests for Handler Infrastructure (Block 1)
  */
 
+import { compilePlan } from '@dbsp/adapter-pgsql/internal';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { compilePlan } from '../compiler.js';
 import * as includeHandlerModule from '../handlers/include/index.js';
 import {
 	ALL_OPERATORS,

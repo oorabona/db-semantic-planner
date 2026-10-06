@@ -17,14 +17,14 @@
  *   SC-06: fn('count', ref('rel.col')) still works (INV-01)
  */
 
-import { exprRef, fn } from '@dbsp/core';
-import type { CustomFnExpressionIntent } from '@dbsp/types';
-import { describe, expect, it } from 'vitest';
 import {
 	compilePlan,
 	type PlanDecision,
 	type SimplifiedPlanReport,
-} from '../compiler.js';
+} from '@dbsp/adapter-pgsql/internal';
+import { exprRef, fn } from '@dbsp/core';
+import type { CustomFnExpressionIntent } from '@dbsp/types';
+import { describe, expect, it } from 'vitest';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 

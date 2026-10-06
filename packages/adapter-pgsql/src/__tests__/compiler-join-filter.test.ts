@@ -3,12 +3,12 @@
  * Unit tests for F-005: relation filters compile as EXISTS.
  */
 
-import { describe, expect, it } from 'vitest';
 import {
 	compilePlan,
 	type PlanDecision,
 	type SimplifiedPlanReport,
-} from '../compiler.js';
+} from '@dbsp/adapter-pgsql/internal';
+import { describe, expect, it } from 'vitest';
 
 // ============================================================================
 // Helpers

@@ -1,3 +1,5 @@
+import { compilePlan } from '@dbsp/adapter-pgsql/internal';
+import { POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 /**
  * Strict branch-coverage tests for pgsql-adapter.ts using pg.Pool mocks.
  *
@@ -3820,10 +3822,18 @@ describe('PgAdapter.execute — row transformation', () => {
 			model,
 		});
 		const query = adapter.compile<Record<string, unknown>>(
-			{
-				rootTable: 'records',
-				decisions: [{ type: 'select', column: 'payload', alias: '__proto__' }],
-			} as never,
+			plan(
+				{
+					type: 'select',
+					from: 'records',
+					select: {
+						type: 'expressions',
+						columns: [{ kind: 'column', column: 'payload', as: '__proto__' }],
+					},
+				},
+				model,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			),
 			{ model },
 		);
 
@@ -3843,13 +3853,21 @@ describe('PgAdapter.execute — row transformation', () => {
 
 		expect(() =>
 			adapter.compile(
-				{
-					rootTable: 'records',
-					decisions: [
-						{ type: 'select', column: 'id', alias: `${prefix}one` },
-						{ type: 'select', column: 'id', alias: `${prefix}two` },
-					],
-				} as never,
+				plan(
+					{
+						type: 'select',
+						from: 'records',
+						select: {
+							type: 'expressions',
+							columns: [
+								{ kind: 'column', column: 'id', as: `${prefix}one` },
+								{ kind: 'column', column: 'id', as: `${prefix}two` },
+							],
+						},
+					},
+					model,
+					{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+				),
 				{ model },
 			),
 		).toThrow(
@@ -5911,7 +5929,11 @@ describe('PgAdapter [P2-T5c]: defaultPkColumnName propagates through withSchema'
 			],
 		} as never;
 
-		const { sql } = scoped.compile(plan);
+		const { sql } = compilePlan(plan, {
+			defaultPkColumnName: Reflect.get(scoped, 'defaultPk'),
+			deriveFkColumnName: Reflect.get(scoped, 'deriveFk'),
+			schema: 's',
+		});
 
 		// The source correlation column MUST be the custom PK, not the default 'id'.
 		// The deparser emits unquoted identifiers for simple column names.
@@ -5962,7 +5984,11 @@ describe('PgAdapter [P2-T5d]: deriveFkColumnName propagates through withSchema',
 			],
 		} as never;
 
-		const { sql } = scoped.compile(plan);
+		const { sql } = compilePlan(plan, {
+			defaultPkColumnName: Reflect.get(scoped, 'defaultPk'),
+			deriveFkColumnName: Reflect.get(scoped, 'deriveFk'),
+			schema: 's',
+		});
 
 		// The target column in the EXISTS correlation must carry the 'z_' prefix.
 		// The deparser emits unquoted identifiers for simple column names.
@@ -6012,7 +6038,10 @@ describe('PgAdapter [P2-T5e]: defaultPkColumnName + deriveFkColumnName propagate
 				],
 			} as never;
 
-			capturedSql = (tx as PgAdapter).compile(plan).sql;
+			capturedSql = compilePlan(plan, {
+				defaultPkColumnName: Reflect.get(tx, 'defaultPk'),
+				deriveFkColumnName: Reflect.get(tx, 'deriveFk'),
+			}).sql;
 		});
 
 		// custom_pk: proves defaultPkColumnName propagated to tx adapter.

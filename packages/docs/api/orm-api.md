@@ -1274,7 +1274,7 @@ const next = await orm.select('users')
 
 ### Observability
 
-Includes compile only from a report planned in the same process. The module-private registry recognises reports issued by `plan()` and other in-process issuers, including the CLI. Serialized, spread, hand-built and legacy decision-context reports with includes are refused with `Includes compile only from a report planned in this process`. Reports without includes compile as before.
+Compilation follows [Authored intent and execution authority](../guide/observability.md#authored-intent-and-execution-authority).
 
 `dump().plan` preserves the original intent, decisions, warnings and metadata. `execution` holds resolved includes; include decisions describe the choice without carrying execution authority.
 

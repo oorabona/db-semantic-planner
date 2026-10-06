@@ -14,11 +14,14 @@
  * - orm.select() with a real model produces double-quoted SQL
  */
 
+import {
+	compilePlan,
+	type SimplifiedPlanReport,
+} from '@dbsp/adapter-pgsql/internal';
 import { createOrm, exprRef, op, schema } from '@dbsp/core';
 import type { WhereComparisonIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
-import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
 import {
 	cosineDistance,
 	rawDistance,

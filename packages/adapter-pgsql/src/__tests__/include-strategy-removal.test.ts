@@ -55,7 +55,9 @@ describe('#894 removed include strategy refusal', () => {
 			),
 		} as PlanReport;
 		expect(() => adapter.compile(stale)).toThrow(
-			new Error('Includes compile only from a report planned in this process'),
+			new Error(
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			),
 		);
 	});
 	for (const missing of [false, true]) {
@@ -146,7 +148,9 @@ describe('#900 recursive strategy contract', () => {
 			),
 		} as PlanReport;
 		expect(() => adapter.compile(unresolved)).toThrow(
-			new Error('Includes compile only from a report planned in this process'),
+			new Error(
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			),
 		);
 	});
 });

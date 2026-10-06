@@ -1,4 +1,5 @@
 import { EXPRESSION_BRAND } from '@dbsp/types';
+
 /**
  * Tests for SubqueryExpression.asExpr() — scalar subqueries as SELECT columns.
  *
@@ -9,11 +10,14 @@ import { EXPRESSION_BRAND } from '@dbsp/types';
  * Also covers parameter renumbering when the outer query already has params.
  */
 
+import {
+	compilePlan,
+	type SimplifiedPlanReport,
+} from '@dbsp/adapter-pgsql/internal';
 import { eq, literal, op, subquery } from '@dbsp/core';
 import type { SubqueryExpressionIntent } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
-import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ============================================================================

@@ -5,6 +5,7 @@ import {
 	exists,
 	fn,
 	outerRef,
+	plan,
 	ref,
 	schema,
 	subquery,
@@ -53,7 +54,7 @@ describe('resolved WHERE alias reservation and operator guards', () => {
 	});
 
 	it.each(['arithmetic', 'comparison', 'range'] as const)(
-		'refuses hostile %s operators from a deserialized plain-column report',
+		'refuses hostile %s operators from an issued plain-column report',
 		(family) => {
 			const where = (family === 'range'
 				? { kind: 'range', field: 'id', operator: hostile, value: 1 }
@@ -103,7 +104,7 @@ describe('resolved WHERE alias reservation and operator guards', () => {
 			).toThrow(`Unsupported ${family} operator '${hostile}'`);
 			expect(state.parameters).toEqual([]);
 			expect(state.paramIndex).toBe(0);
-			expect(() => adapter.compile(report)).toThrow(
+			expect(() => adapter.compile(plan(report.intent!, db.model))).toThrow(
 				`Unsupported ${family} operator '${hostile}'`,
 			);
 		},

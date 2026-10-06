@@ -92,7 +92,9 @@ for (const [name, expression] of [
 		expect(() =>
 			adapter.compile({ ...report, intent: { ...report.intent!, select } }),
 		).toThrow(
-			new Error('Includes compile only from a report planned in this process'),
+			new Error(
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			),
 		);
 		expect(
 			orm

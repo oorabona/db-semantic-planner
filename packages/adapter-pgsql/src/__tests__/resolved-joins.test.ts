@@ -9,7 +9,6 @@ import {
 	schema,
 } from '@dbsp/core';
 import type { ModelIR, PlanReport } from '@dbsp/types';
-import { markPlannedReport } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -91,29 +90,24 @@ describe('resolved joins authority', () => {
 				"Invalid relation: Relation 'posts.tags': many-to-many traversal is not supported yet (#787).",
 			);
 	});
-	it('copied reports with joins refuse, copied reports without joins compile', () => {
-		const report = orm.select('calls').join('caller').plan();
-		for (const copy of [{ ...report }, JSON.parse(JSON.stringify(report))])
-			expect(() => adapter.compile(copy)).toThrow(
-				'Joins compile only from a report planned in this process',
-			);
-		const plain = orm.select('calls').plan();
-		for (const copy of [{ ...plain }, JSON.parse(JSON.stringify(plain))])
-			expect(adapter.compile(copy).sql).toBe(adapter.compile(plain).sql);
-	});
-	it('join-free reports without execution joins compile, including copies', () => {
-		const plain = orm.select('calls').plan();
-		const execution = { rootRange: plain.execution!.rootRange, includes: [] };
-		const issued = markPlannedReport({
-			...plain,
-			execution,
-		} as unknown as PlanReport);
+	it('copied reports with and without joins refuse', () => {
 		for (const report of [
-			issued,
-			{ ...issued },
-			JSON.parse(JSON.stringify(issued)),
-		])
-			expect(adapter.compile(report).sql).toBe(adapter.compile(plain).sql);
+			orm.select('calls').join('caller').plan(),
+			orm.select('calls').plan(),
+		]) {
+			for (const copy of [{ ...report }, JSON.parse(JSON.stringify(report))])
+				expect(() => adapter.compile(copy)).toThrow(
+					'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL)',
+				);
+		}
+	});
+	it('join-free issued reports compile; copies refuse', () => {
+		const issued = orm.select('calls').plan();
+		expect(adapter.compile(issued).sql).toBe('SELECT calls.* FROM calls');
+		for (const copy of [{ ...issued }, JSON.parse(JSON.stringify(issued))])
+			expect(() => adapter.compile(copy)).toThrow(
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL)',
+			);
 	});
 	it('unissued reports with only join decisions refuse', () => {
 		const plain = orm.select('calls').plan();
@@ -122,35 +116,19 @@ describe('resolved joins authority', () => {
 			decisions: [{ type: 'join' }],
 		} as unknown as PlanReport;
 		expect(() => adapter.compile(report)).toThrow(
-			'Joins compile only from a report planned in this process',
+			'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 		);
 	});
 
 	it('issued reports refuse absent or mismatched resolved joins', () => {
-		const report = orm.select('calls').join('caller').plan();
-		for (const execution of [
-			undefined,
-			{
-				rootRange: report.execution!.rootRange,
-				includes: [],
-			} as unknown as NonNullable<PlanReport['execution']>,
-			{ ...report.execution!, joins: [] },
-			{
-				...report.execution!,
-				joins: [...report.execution!.joins, ...report.execution!.joins],
-			},
-		]) {
-			const copy = { ...report };
-			delete copy.execution;
-			const issued = markPlannedReport({
-				...copy,
-				...(execution && { execution }),
+		// The execution snapshot is frozen, but authored intent remains inspectable.
+		for (const count of [1, 2]) {
+			const report = orm.select('calls').plan();
+			Object.assign(report.intent, {
+				joins: Array.from({ length: count }, () => ({ relation: 'caller' })),
 			});
-			expect(() => adapter.compile(issued)).toThrow(
-				expect.objectContaining({
-					name: 'InvalidResolvedJoinsError',
-					message: 'Planned joins require matching resolved execution joins',
-				}),
+			expect(() => adapter.compile(report)).toThrow(
+				expect.objectContaining({ name: 'InvalidResolvedJoinsError' }),
 			);
 		}
 	});

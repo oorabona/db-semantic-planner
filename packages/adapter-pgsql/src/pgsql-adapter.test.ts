@@ -450,10 +450,11 @@ describe('PgAdapter', () => {
 			const adapter = createPgAdapter(pool);
 
 			// Mock plan (simplified)
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [{ type: 'select', column: '*' }],
-			} as any;
+			const plan: PlanReport = nativePlan(
+				{ type: 'select', from: 'users' },
+				mutationTestModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const compiled = adapter.compile(plan);
 
@@ -469,10 +470,11 @@ describe('PgAdapter', () => {
 				schemaName: 'tenant_123',
 			});
 
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [{ type: 'select', column: '*' }],
-			} as any;
+			const plan: PlanReport = nativePlan(
+				{ type: 'select', from: 'users' },
+				mutationTestModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const compiled = adapter.compile(plan);
 
@@ -484,10 +486,11 @@ describe('PgAdapter', () => {
 			const pool = createMockPool();
 			const adapter = createPgAdapter(pool);
 
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [{ type: 'select', column: '*' }],
-			} as any;
+			const plan: PlanReport = nativePlan(
+				{ type: 'select', from: 'users' },
+				mutationTestModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const compiled = adapter.compile(plan, { schemaName: 'custom_schema' });
 
@@ -2877,10 +2880,15 @@ describe('PgAdapter', () => {
 
 		it('should compile SELECT in compile-only mode', () => {
 			const adapter = new PgAdapter(undefined, {});
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [{ type: 'select', column: 'id' }] as any,
-			} as unknown as PlanReport;
+			const plan: PlanReport = nativePlan(
+				{
+					type: 'select',
+					from: 'users',
+					select: { type: 'fields', fields: ['id'] },
+				},
+				mutationTestModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const result = adapter.compile(plan);
 			expect(result.sql).toContain('SELECT');
@@ -2961,10 +2969,15 @@ describe('PgAdapter', () => {
 
 		it('should createDump in compile-only mode', () => {
 			const adapter = new PgAdapter(undefined, {});
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [{ type: 'select', column: 'id' }] as any,
-			} as unknown as PlanReport;
+			const plan: PlanReport = nativePlan(
+				{
+					type: 'select',
+					from: 'users',
+					select: { type: 'fields', fields: ['id'] },
+				},
+				mutationTestModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 			const query = adapter.compile(plan);
 			const dump = adapter.createDump(plan, query);
 

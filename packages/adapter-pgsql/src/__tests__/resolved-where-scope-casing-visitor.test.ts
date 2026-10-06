@@ -113,29 +113,17 @@ for (const dbCasing of ['snake_case', 'camelCase', 'preserve'] as const)
 				: 'SELECT "fooSq".* FROM "fooSq" WHERE EXISTS (SELECT foo_sq_1.id FROM foo AS foo_sq_1 WHERE foo_sq_1."foreignId" = "fooSq".id)',
 		);
 	});
-function external(where: WhereIntent): PlanReport {
-	const report = plan(
-		{ type: 'select', from: 'users', where: eq('id', 1) },
-		db.model,
-	);
-	// Drop process-issued execution authority to exercise the external-report route.
-	return {
-		rootTable: report.rootTable,
-		decisions: [],
-		warnings: [],
-		ctes: [],
-		metadata: report.metadata,
-		intent: { ...report.intent, where },
-	};
+function issued(where: WhereIntent): PlanReport {
+	return plan({ type: 'select', from: 'users', where }, db.model);
 }
 for (const kind of ['futurePolicy', 'futurePolicy\nunsafe'])
 	for (const nested of [false, true])
-		it(`unknown unissued kind ${JSON.stringify(kind)} ${nested}`, () => {
+		it(`unknown issued kind ${JSON.stringify(kind)} ${nested}`, () => {
 			const unknown = { kind } as unknown as WhereIntent;
 			expect(() =>
-				adapter.compile(external(nested ? and(eq('id', 1), unknown) : unknown)),
+				adapter.compile(issued(nested ? and(eq('id', 1), unknown) : unknown)),
 			).toThrow(
-				new Error(`Unsupported predicate kind '${kind.replace('\n', '\\n')}'`),
+				new Error(`processWhere: unhandled WhereIntent kind '${kind}'`),
 			);
 		});
 it('hostile comparison operator refuses on one line', () => {
@@ -145,7 +133,7 @@ it('hostile comparison operator refuses on one line', () => {
 		operator: '=\nunsafe',
 		value: 1,
 	} as unknown as WhereIntent;
-	expect(() => adapter.compile(external(where))).toThrow(
+	expect(() => adapter.compile(issued(where))).toThrow(
 		new Error("Unsupported comparison operator '=\\nunsafe'"),
 	);
 });

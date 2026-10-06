@@ -282,7 +282,7 @@ import {
   type CompilerOptions,
   type CompiledResult,
   type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql';
+} from '@dbsp/adapter-pgsql/internal';
 
 const options: CompilerOptions = { schema: 'public' };
 const report: SimplifiedPlanReport = { rootTable: 'users', decisions: [] };
@@ -290,3 +290,5 @@ const compiler = new PlanCompiler(options);
 const result: CompiledResult = compiler.compile(report);
 console.log(result.sql, result.parameters);
 ```
+
+Public `adapter.compile()` accepts SELECT `PlanReport` objects only when planned by this loaded copy of dbsp (`plan()`, the ORM or NQL). Copies and serialized reports remain inspectable, but refuse before lowering. Plan the query with this loaded copy, or use `compilePlan` from `@dbsp/adapter-pgsql/internal` for decision-level compilation. See [Authored intent and execution authority](../docs/guide/observability.md#authored-intent-and-execution-authority).

@@ -12,9 +12,9 @@
  * - clearHandlers
  */
 
+import { compilePlan } from '@dbsp/adapter-pgsql/internal';
 import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it, vi } from 'vitest';
-import { compilePlan } from '../compiler.js';
 import { compileWhereIntent } from '../condition-compiler.js';
 import {
 	clearHandlers,

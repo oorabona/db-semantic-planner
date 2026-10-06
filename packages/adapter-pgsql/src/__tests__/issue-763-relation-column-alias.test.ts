@@ -1,4 +1,8 @@
 import {
+	compilePlan,
+	type SimplifiedPlanReport,
+} from '@dbsp/adapter-pgsql/internal';
+import {
 	createOrm,
 	exprRef,
 	fn,
@@ -10,7 +14,6 @@ import {
 } from '@dbsp/core';
 import { compile } from '@dbsp/nql';
 import { describe, expect, it } from 'vitest';
-import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const issue763Schema = schema({
@@ -442,7 +445,9 @@ describe('issue 763: relation qualifiers require an emitted SQL alias', () => {
 				{ model: e2eBlogSchema.model },
 			),
 		).toThrow(
-			new Error('Includes compile only from a report planned in this process'),
+			new Error(
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			),
 		);
 	});
 });

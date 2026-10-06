@@ -6,12 +6,12 @@
  * the compiler should produce LEFT JOIN + aliased columns instead of json_agg subquery.
  */
 
-import { describe, expect, it } from 'vitest';
 import {
 	compilePlan,
 	type PlanDecision,
 	type SimplifiedPlanReport,
-} from '../compiler.js';
+} from '@dbsp/adapter-pgsql/internal';
+import { describe, expect, it } from 'vitest';
 
 // ============================================================================
 // Helpers

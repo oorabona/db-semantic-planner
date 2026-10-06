@@ -8,14 +8,14 @@
  * - ResTarget extraction edge cases
  */
 
-import { parseSync } from 'pgsql-parser';
-import { describe, expect, it } from 'vitest';
-import { normalizeSQL } from '../ast-helpers.js';
 import {
 	compilePlan,
 	type PlanDecision,
 	type SimplifiedPlanReport,
-} from '../compiler.js';
+} from '@dbsp/adapter-pgsql/internal';
+import { parseSync } from 'pgsql-parser';
+import { describe, expect, it } from 'vitest';
+import { normalizeSQL } from '../ast-helpers.js';
 
 function buildJsonAggDecision(
 	overrides: Partial<PlanDecision> = {},

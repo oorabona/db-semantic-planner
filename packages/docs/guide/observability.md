@@ -8,6 +8,8 @@ Every query and mutation builder in `@dbsp/core` exposes a `.dump()` method that
 
 ---
 
+The spelling of the generated SQL (qualifiers, generated aliases, casts) may change in a minor version; its meaning and its bound parameters may not.
+
 ## dump()
 
 Call `.dump()` on any builder to get a `Dump` object:
@@ -464,4 +466,4 @@ If a hook returns `undefined`, the previous ctx/results are forwarded unchanged.
 
 ## Authored intent and execution authority
 
-A SELECT report keeps `intent` as authored for inspection. The planner resolves its optimized root WHERE into the typed `execution.where` tree, alongside join and include execution metadata; the adapter emits the root predicate from this tree. Serialized or hand-built reports are not process authority. An unissued report with plain root columns and expressions over them can compile through the same resolver at the adapter boundary. A WHERE needing relation paths, dotted references, `outerRef()` or subqueries, or a report carrying `execution.where`, requires a report issued by this loaded planner copy and otherwise refuses with `Conditions with relation paths, outer references or subqueries compile only from a report planned in this process`.
+`PlanReport` is inspectable and serializable, but `adapter.compile()` requires a report planned by this loaded copy of dbsp (`plan()`, the ORM or NQL). Serialized, spread, and hand-built reports refuse at entry before lowering, even for plain-column queries. Authority is held in a module-local WeakSet in `@dbsp/types`; reports issued by another loaded copy refuse too. Plan the query with this loaded copy, or use `compilePlan` from `@dbsp/adapter-pgsql/internal` for decision-level compilation. The planner retains authored `intent` and supplies resolved execution metadata; issued reports with missing or mismatched execution joins still refuse with `InvalidResolvedJoinsError`.

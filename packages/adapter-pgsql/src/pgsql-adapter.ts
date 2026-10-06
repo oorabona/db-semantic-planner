@@ -92,7 +92,7 @@ import {
 	compileRecursive as compileRecursiveImpl,
 } from './adapter-compiler-recursive.js';
 import {
-	assertPlannedReportIncludeAuthority,
+	assertPlannedReportAuthority,
 	compileSelect,
 	compileSelectEnvelope,
 } from './adapter-compiler-select.js';
@@ -1597,6 +1597,7 @@ function isCompiledNqlQuery(
 	input: PlanReport | CompiledNqlQuery,
 ): input is CompiledNqlQuery {
 	return (
+		!('rootTable' in input) &&
 		!('intent' in input) &&
 		('query' in input ||
 			'cteQuery' in input ||
@@ -1935,7 +1936,7 @@ function assertRuntimeBindingValuesParameterCount(
  * aggregate kind throws, so a forged or future aggregate variant fails loud
  * here instead of silently mis-typing. Every
  * resolved type name is re-validated via validateDbType — the compiler is
- * never trusted, since PlanCompiler is a public export.
+ * never trusted, since PlanCompiler is available through the internal export.
  */
 function resolvePgTypeForColumnTypeInfo(
 	bindingName: string,
@@ -3459,8 +3460,8 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 		if (isCompiledNqlQuery(plan)) {
 			return this.compileNqlBundle<T>(plan, options);
 		}
+		assertPlannedReportAuthority(plan);
 		const deps = this.buildCompileDeps(options);
-		assertPlannedReportIncludeAuthority(plan);
 		this.assertDeclaredPlanReferences(plan, options);
 		return guardCompiledQuery(
 			compileSelect<T>(plan, options, deps),

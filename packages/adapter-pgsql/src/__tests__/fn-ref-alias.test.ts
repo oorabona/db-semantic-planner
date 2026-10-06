@@ -11,11 +11,14 @@
  * Previously the compiler would have emitted `calls.id` (root table qualified).
  */
 
+import {
+	compilePlan,
+	type SimplifiedPlanReport,
+} from '@dbsp/adapter-pgsql/internal';
 import { eq, exprRef, fn } from '@dbsp/core';
 import type { CustomFnExpressionIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
-import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
 
 function compileFnExpr(
 	expr: ReturnType<typeof fn>,

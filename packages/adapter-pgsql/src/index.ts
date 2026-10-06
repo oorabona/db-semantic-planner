@@ -13,21 +13,6 @@ export {
 } from './assert-field.js';
 // AST Helpers — public API (internal helpers remain in ./ast-helpers.js)
 export { normalizeSQL } from './ast-helpers.js';
-// Compiler
-export {
-	type BatchValuesJoinDecision,
-	type CompiledResult,
-	type CompilerOptions,
-	compilePlan,
-	isBatchValuesJoinDecision,
-	isJoinDecision,
-	isPrecompiledJoinDecision,
-	type JoinDecision,
-	PlanCompiler,
-	type PlanDecision,
-	type PrecompiledJoinDecision,
-	type SimplifiedPlanReport,
-} from './compiler.js';
 // PostgreSQL type spelling/canonicalization boundary.
 export { dbTypesEqual } from './db-type.js';
 // DDL Generation

@@ -169,7 +169,7 @@ const dump = (__rawExistsOrm as any)
 
 ### Correlation scope
 
-Query WHERE subquery bodies support `outerRef()` for scalar comparisons, `inSubquery()` and `rawExists()`. Nested same-table `rawExists()` bodies compile with distinct generated aliases and share parameter numbering. Unqualified `outerRef()` binds to the immediately enclosing query; qualified `outerRef('posts.id')` searches enclosing queries nearest first. In each query, a written include key wins, then an exact emitted qualifier; otherwise a logical-table match requires exactly one range of that table in that query. Multiple ranges are refused as ambiguous, naming their aliases; no match in any enclosing query is refused as not visible. A manual `.join()` qualifier repeating an emitted range (root, implicit or explicit alias) is refused; the root logical name is also reserved. Generated subquery aliases are reallocated. Root WHERE resolves correlation even alongside dotted relation paths; see [WHERE qualifiers](./joins#where-qualifiers-and-planning). Legacy `compilePlan()` lowering and join include `where` retain their correlation restrictions.
+Query WHERE subquery bodies support `outerRef()` for scalar comparisons, `inSubquery()` and `rawExists()`. Nested same-table `rawExists()` bodies compile with distinct generated aliases and share parameter numbering. Unqualified `outerRef()` binds to the immediately enclosing query; qualified `outerRef('posts.id')` searches enclosing queries nearest first. In each query, a written include key wins, then an exact emitted qualifier; otherwise a logical-table match requires exactly one range of that table in that query. Multiple ranges are refused as ambiguous, naming their aliases; no match in any enclosing query is refused as not visible. A manual `.join()` qualifier repeating an emitted range (root, implicit or explicit alias) is refused; the root logical name is also reserved. Generated subquery aliases are reallocated. Root WHERE resolves correlation even alongside dotted relation paths; see [WHERE qualifiers](./joins#where-qualifiers-and-planning). Legacy `compilePlan()` lowering (from `@dbsp/adapter-pgsql/internal`) and join include `where` retain their correlation restrictions.
 
 ### Relation predicate limits
 
@@ -188,3 +188,5 @@ hatch or restructure the query as a lateral join.
 - [Expression Primitives](./expression-primitives.md) — `outerRef()`, `op()`, `ref()`, `cast()`
 - [Joins](./joins.md) — manual JOIN API as an alternative to EXISTS for filter-with-data patterns
 - [ORM API Reference](/api/orm-api) — `subquery()` builder full reference
+
+Compilation follows [Authored intent and execution authority](./observability.md#authored-intent-and-execution-authority).

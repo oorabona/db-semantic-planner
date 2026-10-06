@@ -27,6 +27,9 @@ function completeModel(
 }
 
 const coverageModel = completeModel({
+	orders: { user_id: 'integer' },
+	jobs: { id: 'integer' },
+	items: { id: 'integer' },
 	users: {
 		id: { type: 'integer', primaryKey: true },
 		name: 'text',
@@ -166,10 +169,11 @@ describe('PgAdapter - Coverage Tests', () => {
 	describe('compile - basic SELECT', () => {
 		it('compiles minimal SELECT plan', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [{ type: 'select', column: '*' }],
-			} as any;
+			const plan: PlanReport = nativePlan(
+				{ type: 'select', from: 'users' },
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const result = adapter.compile(plan);
 
@@ -180,13 +184,15 @@ describe('PgAdapter - Coverage Tests', () => {
 
 		it('compiles SELECT with specific columns', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: 'id' },
-					{ type: 'select', column: 'name' },
-				],
-			} as any;
+			const plan: PlanReport = nativePlan(
+				{
+					type: 'select',
+					from: 'users',
+					select: { type: 'fields', fields: ['id', 'name'] },
+				},
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const result = adapter.compile(plan);
 
@@ -200,10 +206,11 @@ describe('PgAdapter - Coverage Tests', () => {
 			const adapter = createPgCompileOnlyAdapter({
 				schemaName: 'tenant_123',
 			});
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [{ type: 'select', column: '*' }],
-			} as any;
+			const plan: PlanReport = nativePlan(
+				{ type: 'select', from: 'users' },
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const result = adapter.compile(plan);
 
@@ -212,10 +219,11 @@ describe('PgAdapter - Coverage Tests', () => {
 
 		it('includes schema from compile options', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [{ type: 'select', column: '*' }],
-			} as any;
+			const plan: PlanReport = nativePlan(
+				{ type: 'select', from: 'users' },
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const result = adapter.compile(plan, { schemaName: 'custom_schema' });
 
@@ -226,10 +234,11 @@ describe('PgAdapter - Coverage Tests', () => {
 			const adapter = createPgCompileOnlyAdapter({
 				schemaName: 'adapter_schema',
 			});
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [{ type: 'select', column: '*' }],
-			} as any;
+			const plan: PlanReport = nativePlan(
+				{ type: 'select', from: 'users' },
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const result = adapter.compile(plan, { schemaName: 'override_schema' });
 
@@ -243,10 +252,11 @@ describe('PgAdapter - Coverage Tests', () => {
 			const adapter = createPgCompileOnlyAdapter({
 				schemaName: 'adapter_default',
 			});
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [{ type: 'select', column: '*' }],
-			} as any;
+			const plan: PlanReport = nativePlan(
+				{ type: 'select', from: 'users' },
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const result = adapter.compile(plan, { schemaName: '' });
 
@@ -259,10 +269,11 @@ describe('PgAdapter - Coverage Tests', () => {
 	describe('compile - schemaName validation in options', () => {
 		it('rejects malicious schemaName via compile options (SQL injection)', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [{ type: 'select', column: '*' }],
-			} as any;
+			const plan: PlanReport = nativePlan(
+				{ type: 'select', from: 'users' },
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			expect(() =>
 				adapter.compile(plan, { schemaName: 'x"; DROP TABLE users--' }),
@@ -271,10 +282,11 @@ describe('PgAdapter - Coverage Tests', () => {
 
 		it('rejects schemaName with semicolon via compile options', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [{ type: 'select', column: '*' }],
-			} as any;
+			const plan: PlanReport = nativePlan(
+				{ type: 'select', from: 'users' },
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			expect(() => adapter.compile(plan, { schemaName: 'bad;schema' })).toThrow(
 				/[Ii]nvalid|identifier/,
@@ -283,10 +295,11 @@ describe('PgAdapter - Coverage Tests', () => {
 
 		it('accepts valid identifier in options.schemaName', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [{ type: 'select', column: '*' }],
-			} as any;
+			const plan: PlanReport = nativePlan(
+				{ type: 'select', from: 'users' },
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const result = adapter.compile(plan, { schemaName: 'tenant_42' });
 			expect(result.sql).toContain('tenant_42');
@@ -296,10 +309,16 @@ describe('PgAdapter - Coverage Tests', () => {
 	describe('compile - DISTINCT', () => {
 		it('compiles SELECT DISTINCT', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [{ type: 'select', column: 'email' }, { type: 'distinct' }],
-			} as any;
+			const plan: PlanReport = nativePlan(
+				{
+					type: 'select',
+					from: 'users',
+					distinct: true,
+					select: { type: 'fields', fields: ['email'] },
+				},
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const result = adapter.compile(plan);
 
@@ -310,13 +329,15 @@ describe('PgAdapter - Coverage Tests', () => {
 	describe('compile - ORDER BY', () => {
 		it('compiles ORDER BY ASC', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{ type: 'orderBy', column: 'name', direction: 'ASC' },
-				],
-			} as any;
+			const plan: PlanReport = nativePlan(
+				{
+					type: 'select',
+					from: 'users',
+					orderBy: [{ field: 'name', direction: 'asc' }],
+				},
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const result = adapter.compile(plan);
 
@@ -325,13 +346,15 @@ describe('PgAdapter - Coverage Tests', () => {
 
 		it('compiles ORDER BY DESC', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{ type: 'orderBy', column: 'created_at', direction: 'DESC' },
-				],
-			} as any;
+			const plan: PlanReport = nativePlan(
+				{
+					type: 'select',
+					from: 'users',
+					orderBy: [{ field: 'created_at', direction: 'desc' }],
+				},
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const result = adapter.compile(plan);
 
@@ -343,14 +366,11 @@ describe('PgAdapter - Coverage Tests', () => {
 	describe('compile - LIMIT and OFFSET', () => {
 		it('compiles LIMIT', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{ type: 'limit', limit: { paramIndex: 1 } },
-				],
-				parameters: [10],
-			} as any;
+			const plan: PlanReport = nativePlan(
+				{ type: 'select', from: 'users', limit: 10 },
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const result = adapter.compile(plan);
 
@@ -359,14 +379,11 @@ describe('PgAdapter - Coverage Tests', () => {
 
 		it('compiles OFFSET', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{ type: 'offset', offset: { paramIndex: 1 } },
-				],
-				parameters: [20],
-			} as any;
+			const plan: PlanReport = nativePlan(
+				{ type: 'select', from: 'users', offset: 20 },
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const result = adapter.compile(plan);
 
@@ -375,15 +392,11 @@ describe('PgAdapter - Coverage Tests', () => {
 
 		it('compiles LIMIT and OFFSET together', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{ type: 'limit', limit: { paramIndex: 1 } },
-					{ type: 'offset', offset: { paramIndex: 2 } },
-				],
-				parameters: [10, 20],
-			} as any;
+			const plan: PlanReport = nativePlan(
+				{ type: 'select', from: 'users', limit: 10, offset: 20 },
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const result = adapter.compile(plan);
 
@@ -395,19 +408,20 @@ describe('PgAdapter - Coverage Tests', () => {
 	describe('compile - WHERE with parameters', () => {
 		it('compiles WHERE clause with parameterized value', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{
-						type: 'where',
-						column: 'active',
-						operator: '=',
+			const plan: PlanReport = nativePlan(
+				{
+					type: 'select',
+					from: 'users',
+					where: {
+						kind: 'comparison',
+						field: 'active',
+						operator: 'eq',
 						value: true,
-						paramIndex: 0,
 					},
-				],
-			} as any;
+				},
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const result = adapter.compile(plan);
 
@@ -417,26 +431,26 @@ describe('PgAdapter - Coverage Tests', () => {
 
 		it('compiles WHERE with multiple conditions', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{
-						type: 'where',
-						column: 'active',
-						operator: '=',
-						value: true,
-						paramIndex: 0,
+			const plan: PlanReport = nativePlan(
+				{
+					type: 'select',
+					from: 'users',
+					where: {
+						kind: 'and',
+						conditions: [
+							{
+								kind: 'comparison',
+								field: 'active',
+								operator: 'eq',
+								value: true,
+							},
+							{ kind: 'comparison', field: 'age', operator: 'gt', value: 18 },
+						],
 					},
-					{
-						type: 'where',
-						column: 'age',
-						operator: '>',
-						value: 18,
-						paramIndex: 1,
-					},
-				],
-			} as any;
+				},
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const result = adapter.compile(plan);
 
@@ -447,13 +461,16 @@ describe('PgAdapter - Coverage Tests', () => {
 	describe('compile - GROUP BY', () => {
 		it('compiles GROUP BY', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const plan: PlanReport = {
-				rootTable: 'orders',
-				decisions: [
-					{ type: 'select', column: 'user_id' },
-					{ type: 'groupBy', column: 'user_id' },
-				],
-			} as any;
+			const plan: PlanReport = nativePlan(
+				{
+					type: 'select',
+					from: 'orders',
+					groupBy: ['user_id'],
+					select: { type: 'fields', fields: ['user_id'] },
+				},
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const result = adapter.compile(plan);
 
@@ -474,10 +491,11 @@ describe('PgAdapter - Coverage Tests', () => {
 			const adapter = createPgCompileOnlyAdapter();
 			const scopedAdapter = adapter.withSchema('tenant_456');
 
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [{ type: 'select', column: '*' }],
-			} as any;
+			const plan: PlanReport = nativePlan(
+				{ type: 'select', from: 'users' },
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const result = scopedAdapter.compile(plan);
 
@@ -529,10 +547,11 @@ describe('PgAdapter - Coverage Tests', () => {
 			const adapter = createPgCompileOnlyAdapter();
 			const mockModel = coverageModel;
 
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [{ type: 'select', column: '*' }],
-			} as any;
+			const plan: PlanReport = nativePlan(
+				{ type: 'select', from: 'users' },
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const result = adapter.compile(plan, { model: mockModel as any });
 
@@ -543,10 +562,11 @@ describe('PgAdapter - Coverage Tests', () => {
 	describe('compile - edge cases', () => {
 		it('compiles plan without decisions array', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [],
-			} as any;
+			const plan: PlanReport = nativePlan(
+				{ type: 'select', from: 'users' },
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const result = adapter.compile(plan);
 
@@ -556,15 +576,15 @@ describe('PgAdapter - Coverage Tests', () => {
 
 		it('compiles plan with intent object', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const plan: PlanReport = {
-				rootTable: 'users',
-				intent: {
-					type: 'query',
-					table: 'users',
+			const plan: PlanReport = nativePlan(
+				{
+					type: 'select',
+					from: 'users',
 					select: { type: 'all' },
 				},
-				decisions: [],
-			} as any;
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const result = adapter.compile(plan);
 
@@ -591,10 +611,11 @@ describe('PgAdapter - Coverage Tests', () => {
 				dbCasing: 'snake_case',
 			});
 
-			const plan: PlanReport = {
-				rootTable: 'users',
-				decisions: [{ type: 'select', column: '*' }],
-			} as any;
+			const plan: PlanReport = nativePlan(
+				{ type: 'select', from: 'users' },
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			expect(() => adapter.compile(plan)).toThrow(
 				"PgAdapter compilation with dbCasing 'snake_case' requires a ModelIR",
@@ -1531,16 +1552,16 @@ describe('PgAdapter - Coverage Tests', () => {
 	describe('compile - lock mode variants', () => {
 		it('compiles FOR UPDATE via legacy plan', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const plan = {
-				rootTable: 'jobs',
-				intent: {
-					type: 'query',
-					table: 'jobs',
+			const plan = nativePlan(
+				{
+					type: 'select',
+					from: 'jobs',
 					select: { type: 'all' },
 					lock: { strength: 'forUpdate', waitPolicy: 'block' },
 				},
-				decisions: [],
-			} as any;
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 			const result = adapter.compile(plan);
 			const sql = result.sql.toLowerCase();
 			expect(sql).toContain('for update');
@@ -1548,16 +1569,16 @@ describe('PgAdapter - Coverage Tests', () => {
 
 		it('compiles FOR SHARE with skipLocked via intent', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const plan = {
-				rootTable: 'jobs',
-				intent: {
-					type: 'query',
-					table: 'jobs',
+			const plan = nativePlan(
+				{
+					type: 'select',
+					from: 'jobs',
 					select: { type: 'all' },
 					lock: { strength: 'forShare', waitPolicy: 'skipLocked' },
 				},
-				decisions: [],
-			} as any;
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 			const result = adapter.compile(plan);
 			const sql = result.sql.toLowerCase();
 			expect(sql).toContain('for share');
@@ -1566,16 +1587,16 @@ describe('PgAdapter - Coverage Tests', () => {
 
 		it('compiles FOR NO KEY UPDATE with noWait via intent', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const plan = {
-				rootTable: 'items',
-				intent: {
-					type: 'query',
-					table: 'items',
+			const plan = nativePlan(
+				{
+					type: 'select',
+					from: 'items',
 					select: { type: 'all' },
 					lock: { strength: 'forNoKeyUpdate', waitPolicy: 'noWait' },
 				},
-				decisions: [],
-			} as any;
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 			const result = adapter.compile(plan);
 			const sql = result.sql.toLowerCase();
 			expect(sql).toContain('for no key update');
@@ -1584,16 +1605,16 @@ describe('PgAdapter - Coverage Tests', () => {
 
 		it('compiles FOR KEY SHARE via intent', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const plan = {
-				rootTable: 'posts',
-				intent: {
-					type: 'query',
-					table: 'posts',
+			const plan = nativePlan(
+				{
+					type: 'select',
+					from: 'posts',
 					select: { type: 'all' },
 					lock: { strength: 'forKeyShare', waitPolicy: 'block' },
 				},
-				decisions: [],
-			} as any;
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 			const result = adapter.compile(plan);
 			const sql = result.sql.toLowerCase();
 			expect(sql).toContain('for key share');
@@ -1603,16 +1624,16 @@ describe('PgAdapter - Coverage Tests', () => {
 	describe('compile - existsWrap via intent', () => {
 		it('wraps select in EXISTS when intent has existsWrap', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const plan = {
-				rootTable: 'users',
-				intent: {
-					type: 'query',
-					table: 'users',
+			const plan = nativePlan(
+				{
+					type: 'select',
+					from: 'users',
 					select: { type: 'all' },
 					existsWrap: true,
 				},
-				decisions: [],
-			} as any;
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 			const result = adapter.compile(plan);
 			const sql = result.sql.toLowerCase();
 			expect(sql).toContain('exists');
@@ -1624,10 +1645,11 @@ describe('PgAdapter - Coverage Tests', () => {
 			const adapter = createPgCompileOnlyAdapter({
 				dbCasing: 'snake_case',
 			});
-			const plan = {
-				rootTable: 'users',
-				decisions: [{ type: 'select', column: '*' }],
-			} as any;
+			const plan = nativePlan(
+				{ type: 'select', from: 'users' },
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 			expect(() => adapter.compile(plan)).toThrow('requires a ModelIR');
 		});
 
@@ -1635,10 +1657,11 @@ describe('PgAdapter - Coverage Tests', () => {
 			const adapter = createPgCompileOnlyAdapter({
 				dbCasing: 'camelCase',
 			});
-			const plan = {
-				rootTable: 'users',
-				decisions: [{ type: 'select', column: '*' }],
-			} as any;
+			const plan = nativePlan(
+				{ type: 'select', from: 'users' },
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 			expect(() => adapter.compile(plan)).toThrow('requires a ModelIR');
 		});
 
@@ -1844,13 +1867,11 @@ describe('PgAdapter - Coverage Tests', () => {
 			} as any;
 
 			const adapter = createPgCompileOnlyAdapter({ model });
-			const plan = {
-				rootTable: 'events',
-				decisions: [],
-				intent: {
-					type: 'query',
-					table: 'events',
-					select: { fields: ['id'] },
+			const plan = nativePlan(
+				{
+					type: 'select',
+					from: 'events',
+					select: { type: 'fields', fields: ['id'] },
 					where: {
 						kind: 'range',
 						field: 'period',
@@ -1858,7 +1879,9 @@ describe('PgAdapter - Coverage Tests', () => {
 						value: '2024-01-01',
 					},
 				},
-			} as any;
+				model,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			// Should not throw — enrichment adds dataType to the decision
 			const result = adapter.compile(plan, { model });
@@ -1897,12 +1920,10 @@ describe('PgAdapter - Coverage Tests', () => {
 
 		it('keeps selectRelationColumn when no include covers the relation', () => {
 			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
-			const plan = {
-				rootTable: 'posts',
-				decisions: [],
-				intent: {
-					type: 'query',
-					table: 'posts',
+			const plan = nativePlan(
+				{
+					type: 'select',
+					from: 'posts',
 					select: {
 						fields: [
 							'id',
@@ -1910,7 +1931,9 @@ describe('PgAdapter - Coverage Tests', () => {
 						],
 					},
 				},
-			} as any;
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const result = adapter.compile(plan);
 			expect(result.sql).toContain('SELECT');
@@ -2143,16 +2166,16 @@ describe('PgAdapter - Coverage Tests', () => {
 	describe('compile — existsWrap and lock via intent', () => {
 		it('propagates lock from intent', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const plan = {
-				rootTable: 'jobs',
-				decisions: [],
-				intent: {
-					type: 'query',
-					table: 'jobs',
-					select: { fields: ['id'] },
+			const plan = nativePlan(
+				{
+					type: 'select',
+					from: 'jobs',
+					select: { type: 'fields', fields: ['id'] },
 					lock: { strength: 'forUpdate', waitPolicy: 'block' },
 				},
-			} as any;
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const result = adapter.compile(plan);
 			expect(result.sql).toContain('FOR UPDATE');
@@ -2160,13 +2183,11 @@ describe('PgAdapter - Coverage Tests', () => {
 
 		it('propagates existsWrap from intent', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const plan = {
-				rootTable: 'users',
-				decisions: [],
-				intent: {
-					type: 'query',
-					table: 'users',
-					select: { fields: ['id'] },
+			const plan = nativePlan(
+				{
+					type: 'select',
+					from: 'users',
+					select: { type: 'fields', fields: ['id'] },
 					existsWrap: true,
 					where: {
 						kind: 'comparison',
@@ -2175,7 +2196,9 @@ describe('PgAdapter - Coverage Tests', () => {
 						value: 'test@test.com',
 					},
 				},
-			} as any;
+				coverageModel,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 
 			const result = adapter.compile(plan);
 			expect(result.sql.toLowerCase()).toContain('exists');
@@ -2213,7 +2236,7 @@ describe('PgAdapter - Coverage Tests', () => {
 			// Unissued relation reports refuse before attempting model resolution.
 			// Use rawExists(subquery(...)) for EXISTS over uncorrelated/undeclared targets.
 			expect(() => adapter.compile(plan)).toThrow(
-				'Conditions with relation paths, outer references or subqueries compile only from a report planned in this process',
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 			);
 		});
 	});
@@ -2413,6 +2436,8 @@ describe('synthetic binding includes', () => {
 					supportsJsonAgg: false,
 				},
 			}),
-		).toThrow('Includes compile only from a report planned in this process');
+		).toThrow(
+			'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+		);
 	});
 });

@@ -104,7 +104,8 @@ describe('planned report compilation authority', () => {
 	});
 });
 
-const refusal = 'Includes compile only from a report planned in this process';
+const refusal =
+	'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation';
 describe('external include reports lose registry authority', () => {
 	it.each([
 		'serialized',
@@ -127,6 +128,11 @@ describe('external include reports lose registry authority', () => {
 			new Error(refusal),
 		);
 	});
+	it('refuses report-shaped input carrying an NQL query field before lowering', () => {
+		const report = { ...external(), query: { type: 'select', from: 'posts' } };
+		Reflect.deleteProperty(report, 'intent');
+		expect(() => adapter.compile(report)).toThrow(refusal);
+	});
 	it('compiles the issued report and refuses a forged symbol', () => {
 		expect(adapter.compile(planned()).sql).toContain('posts');
 		const report = external();
@@ -135,13 +141,11 @@ describe('external include reports lose registry authority', () => {
 		});
 		expect(() => adapter.compile(report)).toThrow(new Error(refusal));
 	});
-	it('compiles external reports without includes', () => {
+	it('refuses external reports without includes', () => {
 		const report = plan({ type: 'select', from: 'posts' }, model);
-		expect(adapter.compile({ ...report }).sql).toBe(
-			adapter.compile(report).sql,
-		);
+		expect(() => adapter.compile({ ...report })).toThrow(refusal);
 		const legacy = { ...report };
 		delete legacy.execution;
-		expect(adapter.compile(legacy).sql).toBe(adapter.compile(report).sql);
+		expect(() => adapter.compile(legacy)).toThrow(refusal);
 	});
 });

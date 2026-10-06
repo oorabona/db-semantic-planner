@@ -10,12 +10,12 @@
  * the same way the 'ref' handler in compileExpressionIntent does.
  */
 
-import { describe, expect, it } from 'vitest';
 import {
 	compilePlan,
 	type PlanDecision,
 	type SimplifiedPlanReport,
-} from '../compiler.js';
+} from '@dbsp/adapter-pgsql/internal';
+import { describe, expect, it } from 'vitest';
 
 function compileToSql(plan: SimplifiedPlanReport): {
 	sql: string;

@@ -1,6 +1,7 @@
 import { POSTGRESQL_CAPABILITIES, plan, ref, schema } from '@dbsp/core';
 import type { PlanReport } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
+// Spy on the binding production calls; the /internal facade re-exports it.
 import * as compiler from '../compiler.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -13,7 +14,8 @@ const model = schema({
 	users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
 }).model;
 const adapter = createPgCompileOnlyAdapter({ model });
-const refusal = 'Includes compile only from a report planned in this process';
+const refusal =
+	'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation';
 function issued() {
 	return plan(
 		{

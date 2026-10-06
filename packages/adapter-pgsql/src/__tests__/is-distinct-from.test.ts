@@ -3,6 +3,10 @@
  */
 
 import {
+	compilePlan,
+	type SimplifiedPlanReport,
+} from '@dbsp/adapter-pgsql/internal';
+import {
 	and,
 	createOrm,
 	eq,
@@ -28,7 +32,6 @@ import {
 	compileWhereIntent,
 	type WhereCompilerCtx,
 } from '../compile-where.js';
-import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
 import { createDeclaredNameResolver } from '../declared-name-resolver.js';
 import {
 	createCompilerState,

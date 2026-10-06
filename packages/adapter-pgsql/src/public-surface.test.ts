@@ -134,3 +134,14 @@ describe('renamed package exports', () => {
 		});
 	}
 });
+
+it.each([
+	'compilePlan',
+	'PlanCompiler',
+	'isJoinDecision',
+	'isPrecompiledJoinDecision',
+	'isBatchValuesJoinDecision',
+])('exports %s only through internal', (name) => {
+	expect(root).not.toHaveProperty(name);
+	expect(internal).toHaveProperty(name);
+});

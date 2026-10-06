@@ -1,3 +1,4 @@
+import { compilePlan } from '@dbsp/adapter-pgsql/internal';
 /**
  * PARAM-TYPE-CAST: Explicit parameter type casting in WHERE comparisons.
  *
@@ -11,10 +12,9 @@
 
 import type { ModelIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import {
-	createPgCompileOnlyAdapter,
-	type PgAdapterOptions,
-} from '../pgsql-adapter.js';
+import { createDeclaredNameResolver } from '../declared-name-resolver.js';
+import type { PgAdapterOptions } from '../pgsql-adapter.js';
+import { createPgPhysicalModel } from '../physical-model/index.js';
 
 type ColumnDef = {
 	name: string;
@@ -66,22 +66,40 @@ function compileSelect(
 	whereColumn: string,
 	whereValue: unknown,
 	operator = '=',
-	adapterOptions: Omit<PgAdapterOptions, 'model'> = {},
+	adapterOptions: Pick<PgAdapterOptions, 'schemaName' | 'dbCasing'> = {},
 ): { sql: string; parameters: readonly unknown[] } {
 	const model = buildModel(tableName, columns);
-	const adapter = createPgCompileOnlyAdapter({ ...adapterOptions, model });
-	return adapter.compile({
-		rootTable: tableName,
-		decisions: [
-			{ type: 'select', column: '*' },
-			{
-				type: 'where',
-				column: whereColumn,
-				operator,
-				value: whereValue,
-			},
-		],
-	} as Parameters<typeof adapter.compile>[0]);
+	return compilePlan(
+		{
+			rootTable: tableName,
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: whereColumn,
+					operator,
+					value: whereValue,
+				},
+			],
+		},
+		{
+			model,
+			declaredNames: createDeclaredNameResolver(
+				createPgPhysicalModel({
+					mode: 'logical',
+					model,
+					schema: adapterOptions.schemaName ?? 'public',
+					dbCasing: adapterOptions.dbCasing ?? 'preserve',
+				}),
+			),
+			...(adapterOptions.dbCasing !== undefined && {
+				dbCasing: adapterOptions.dbCasing,
+			}),
+			...(adapterOptions.schemaName !== undefined && {
+				schema: adapterOptions.schemaName,
+			}),
+		},
+	);
 }
 
 describe('PARAM-TYPE-CAST: comparison handler emits CAST when originalDbType set', () => {
@@ -190,14 +208,13 @@ describe('PARAM-TYPE-CAST: comparison handler emits CAST when originalDbType set
 	});
 
 	it('does NOT cast when no model is provided (backward compat)', () => {
-		const adapter = createPgCompileOnlyAdapter();
-		const { sql, parameters } = adapter.compile({
+		const { sql, parameters } = compilePlan({
 			rootTable: 'items',
 			decisions: [
 				{ type: 'select', column: '*' },
 				{ type: 'where', column: 'id', operator: '=', value: 42 },
 			],
-		} as Parameters<typeof adapter.compile>[0]);
+		});
 		expect(sql).not.toContain('CAST');
 		expect(sql).toContain('$1');
 		expect(parameters).toEqual([42]);
@@ -208,19 +225,21 @@ describe('PARAM-TYPE-CAST: comparison handler emits CAST when originalDbType set
 			{ name: 'manager_id', type: 'number', originalDbType: 'integer' },
 			{ name: 'id', type: 'number', originalDbType: 'integer' },
 		]);
-		const adapter = createPgCompileOnlyAdapter({ model });
-		const { sql } = adapter.compile({
-			rootTable: 'employees',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'manager_id',
-					operator: '=',
-					value: { kind: 'fieldRef', column: 'id', scope: 'inner' },
-				},
-			],
-		} as Parameters<typeof adapter.compile>[0]);
+		const { sql } = compilePlan(
+			{
+				rootTable: 'employees',
+				decisions: [
+					{ type: 'select', column: '*' },
+					{
+						type: 'where',
+						column: 'manager_id',
+						operator: '=',
+						value: { kind: 'fieldRef', column: 'id', scope: 'inner' },
+					},
+				],
+			},
+			{ model },
+		);
 		expect(sql).not.toContain('$1');
 		expect(sql).not.toContain('CAST');
 	});
@@ -321,14 +340,16 @@ describe('PARAM-TYPE-CAST: IN handler emits CAST when originalDbType set', () =>
 		const model = buildModel('items', [
 			{ name: 'status', type: 'number', originalDbType: 'integer' },
 		]);
-		const adapter = createPgCompileOnlyAdapter({ model });
-		const { sql, parameters } = adapter.compile({
-			rootTable: 'items',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{ type: 'where', column: 'status', operator: 'in', value: [1, 2, 3] },
-			],
-		} as Parameters<typeof adapter.compile>[0]);
+		const { sql, parameters } = compilePlan(
+			{
+				rootTable: 'items',
+				decisions: [
+					{ type: 'select', column: '*' },
+					{ type: 'where', column: 'status', operator: 'in', value: [1, 2, 3] },
+				],
+			},
+			{ model },
+		);
 		expect(sql).toContain('CAST($1 AS integer[])');
 		expect(parameters).toEqual([[1, 2, 3]]);
 	});
@@ -337,19 +358,21 @@ describe('PARAM-TYPE-CAST: IN handler emits CAST when originalDbType set', () =>
 		const model = buildModel('users', [
 			{ name: 'role_id', type: 'uuid', originalDbType: 'uuid' },
 		]);
-		const adapter = createPgCompileOnlyAdapter({ model });
-		const { sql, parameters } = adapter.compile({
-			rootTable: 'users',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'role_id',
-					operator: 'in',
-					value: ['aaa', 'bbb'],
-				},
-			],
-		} as Parameters<typeof adapter.compile>[0]);
+		const { sql, parameters } = compilePlan(
+			{
+				rootTable: 'users',
+				decisions: [
+					{ type: 'select', column: '*' },
+					{
+						type: 'where',
+						column: 'role_id',
+						operator: 'in',
+						value: ['aaa', 'bbb'],
+					},
+				],
+			},
+			{ model },
+		);
 		expect(sql).toContain('CAST($1 AS uuid[])');
 		expect(parameters).toEqual([['aaa', 'bbb']]);
 	});
@@ -358,27 +381,28 @@ describe('PARAM-TYPE-CAST: IN handler emits CAST when originalDbType set', () =>
 		const model = buildModel('orders', [
 			{ name: 'state', type: 'number', originalDbType: 'integer' },
 		]);
-		const adapter = createPgCompileOnlyAdapter({ model });
-		const { sql, parameters } = adapter.compile({
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{ type: 'where', column: 'state', operator: 'notIn', value: [0, 9] },
-			],
-		} as Parameters<typeof adapter.compile>[0]);
+		const { sql, parameters } = compilePlan(
+			{
+				rootTable: 'orders',
+				decisions: [
+					{ type: 'select', column: '*' },
+					{ type: 'where', column: 'state', operator: 'notIn', value: [0, 9] },
+				],
+			},
+			{ model },
+		);
 		expect(sql).toContain('CAST($1 AS integer[])');
 		expect(parameters).toEqual([[0, 9]]);
 	});
 
 	it('does NOT cast IN when no model is provided (backward compat)', () => {
-		const adapter = createPgCompileOnlyAdapter();
-		const { sql, parameters } = adapter.compile({
+		const { sql, parameters } = compilePlan({
 			rootTable: 'items',
 			decisions: [
 				{ type: 'select', column: '*' },
 				{ type: 'where', column: 'status', operator: 'in', value: [1, 2, 3] },
 			],
-		} as Parameters<typeof adapter.compile>[0]);
+		});
 		expect(sql).not.toContain('CAST');
 		expect(sql).toContain('$1');
 		expect(parameters).toEqual([[1, 2, 3]]);
@@ -386,14 +410,16 @@ describe('PARAM-TYPE-CAST: IN handler emits CAST when originalDbType set', () =>
 
 	it('does NOT cast IN when originalDbType is absent', () => {
 		const model = buildModel('items', [{ name: 'status', type: 'number' }]);
-		const adapter = createPgCompileOnlyAdapter({ model });
-		const { sql, parameters } = adapter.compile({
-			rootTable: 'items',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{ type: 'where', column: 'status', operator: 'in', value: [1, 2, 3] },
-			],
-		} as Parameters<typeof adapter.compile>[0]);
+		const { sql, parameters } = compilePlan(
+			{
+				rootTable: 'items',
+				decisions: [
+					{ type: 'select', column: '*' },
+					{ type: 'where', column: 'status', operator: 'in', value: [1, 2, 3] },
+				],
+			},
+			{ model },
+		);
 		expect(sql).not.toContain('CAST');
 		expect(sql).toContain('$1');
 		expect(parameters).toEqual([[1, 2, 3]]);

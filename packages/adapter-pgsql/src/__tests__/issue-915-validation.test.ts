@@ -105,7 +105,9 @@ describe('#915 include validation', () => {
 			),
 		} as PlanReport;
 		expect(() => keylessAdapter.compile(external)).toThrowError(
-			new Error('Includes compile only from a report planned in this process'),
+			new Error(
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			),
 		);
 	});
 	it('refuses nonexistent recorded key columns even with a primary key', () => {
@@ -132,7 +134,9 @@ describe('#915 include validation', () => {
 			),
 		} as PlanReport;
 		expect(() => adapter.compile(external)).toThrowError(
-			new Error('Includes compile only from a report planned in this process'),
+			new Error(
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			),
 		);
 	});
 	it('refuses external recursive json_agg decisions', () => {
@@ -148,7 +152,9 @@ describe('#915 include validation', () => {
 			),
 		);
 		expect(() => adapter.compile(original)).toThrow(
-			new Error('Includes compile only from a report planned in this process'),
+			new Error(
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			),
 		);
 		const external = {
 			...original,
@@ -157,7 +163,9 @@ describe('#915 include validation', () => {
 			),
 		} as PlanReport;
 		expect(() => adapter.compile(external)).toThrowError(
-			new Error('Includes compile only from a report planned in this process'),
+			new Error(
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			),
 		);
 	});
 });

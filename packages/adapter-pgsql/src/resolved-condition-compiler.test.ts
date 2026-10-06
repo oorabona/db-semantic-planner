@@ -1,3 +1,4 @@
+import { compilePlan } from '@dbsp/adapter-pgsql/internal';
 import {
 	and,
 	any,
@@ -20,7 +21,6 @@ import {
 import { resolveSelectWhere } from '@dbsp/core/internal';
 import { RangeAllocator, type WhereIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { compilePlan } from './compiler.js';
 import {
 	buildSubqueryFromIntent,
 	compileCondition,
