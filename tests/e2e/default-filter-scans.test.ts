@@ -33,10 +33,10 @@ beforeAll(async () => {
 	await createSchema(SCHEMA);
 	await execInSchema(
 		SCHEMA,
-		`CREATE TABLE users (id integer PRIMARY KEY, "deletedAt" timestamp);
- CREATE TABLE posts (id integer PRIMARY KEY, title text, "deletedAt" timestamp, "authorId" integer REFERENCES users(id));
- INSERT INTO users VALUES (1,NULL),(2,'2026-01-01'),(3,NULL),(4,NULL);
- INSERT INTO posts VALUES (10,'hidden','2026-01-01',1),(11,'live',NULL,1),(12,'live',NULL,2),(13,'hidden','2026-01-01',3);`,
+		`CREATE TABLE users (id integer PRIMARY KEY, deleted_at timestamp);
+ CREATE TABLE posts (id integer PRIMARY KEY, title text, deleted_at timestamp, author_id integer REFERENCES users(id));
+ INSERT INTO users (id, deleted_at) VALUES (1,NULL),(2,'2026-01-01'),(3,NULL),(4,NULL);
+ INSERT INTO posts (id, title, deleted_at, author_id) VALUES (10,'hidden','2026-01-01',1),(11,'live',NULL,1),(12,'live',NULL,2),(13,'hidden','2026-01-01',3);`,
 	);
 });
 afterAll(async () => {
@@ -79,14 +79,25 @@ describe('default filters on physical read scans', () => {
 				.withPlanOptions({ defaultIncludeStrategy: strategy })
 				.orderBy('id')
 				.all();
-			expect(rows).toEqual([
-				expect.objectContaining({
-					id: 1,
-					authored: [expect.objectContaining({ id: 11 })],
-				}),
-				expect.objectContaining({ id: 3, authored: [] }),
-				expect.objectContaining({ id: 4, authored: [] }),
-			]);
+			if (strategy === 'json_agg') {
+				expect(rows).toEqual([
+					expect.objectContaining({
+						id: 1,
+						authored: [expect.objectContaining({ id: 11 })],
+					}),
+					expect.objectContaining({ id: 3, authored: [] }),
+					expect.objectContaining({ id: 4, authored: [] }),
+				]);
+			} else {
+				expect(rows).toEqual([
+					expect.objectContaining({
+						id: 1,
+						authored: { id: 11, authorId: 1, deletedAt: null, title: 'live' },
+					}),
+					expect.objectContaining({ id: 3, authored: null }),
+					expect.objectContaining({ id: 4, authored: null }),
+				]);
+			}
 		});
 	}
 	it('makes exists false and every true when all children are filtered out', async () => {

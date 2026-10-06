@@ -29,8 +29,8 @@ beforeAll(async () => {
 	await createSchema(SCHEMA);
 	await execInSchema(
 		SCHEMA,
-		`CREATE TABLE nodes (id integer PRIMARY KEY, "parentId" integer REFERENCES nodes(id), hidden timestamp);
- INSERT INTO nodes VALUES (1,NULL,NULL),(2,1,'2026-01-01'),(3,2,NULL);`,
+		`CREATE TABLE nodes (id integer PRIMARY KEY, parent_id integer REFERENCES nodes(id), hidden timestamp);
+ INSERT INTO nodes (id, parent_id, hidden) VALUES (1,NULL,NULL),(2,1,'2026-01-01'),(3,2,NULL);`,
 	);
 });
 afterAll(async () => {
@@ -56,7 +56,12 @@ it('excludes a filtered node and its visible descendants from a recursive chain'
 			children: [expect.objectContaining({ id: 1 })],
 		}),
 	]);
-	const unfiltered = await read(orm.withoutDefaultFilters()).all();
+	const unfiltered = (await read(
+		orm.withoutDefaultFilters(),
+	).all()) as unknown as {
+		id: number;
+		children: { id: number }[];
+	}[];
 	expect(unfiltered[0]?.children.map((node) => node.id)).toEqual([1, 2, 3]);
 	const intent: RecursiveIntent = {
 		type: 'recursive',
