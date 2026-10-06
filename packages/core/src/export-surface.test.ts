@@ -39,6 +39,7 @@ const excluded = new Set([...names(moved), ...names(removed)]);
 const rootAdditions = ['InvalidJsonAggPayloadError', 'manyToMany'];
 const rootTypeAdditions = ['ManyToManyOptions', 'ManyToManyDefinition'];
 const internalAdditions = [
+	'copyDefaultFilters',
 	'compileNqlRead',
 	'createBindingFinalPlan',
 	'getRelationalReadPlan',

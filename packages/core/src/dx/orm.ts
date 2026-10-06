@@ -3,6 +3,7 @@ import type {
 	UnsupportedFeatureBehavior,
 } from '@dbsp/types';
 import type { Adapter } from '../adapter.js';
+import { copyDefaultFilters } from '../default-filter-map.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanOptions } from '../planner.js';
 import { NamingConventionMismatchError } from './errors.js';
@@ -259,7 +260,7 @@ export function createOrm<T extends SchemaDefinition>(
 		model = schemaObj.model;
 		schemaDefinition = schemaObj.definition;
 		defaultFilters = schemaObj.defaultFilters
-			? Object.assign(Object.create(null), schemaObj.defaultFilters)
+			? copyDefaultFilters(schemaObj.defaultFilters)
 			: undefined;
 
 		// ARCH-006: Validate casing consistency

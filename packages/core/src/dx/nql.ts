@@ -1,3 +1,4 @@
+import { copyDefaultFilters, getDefaultFilter } from '../default-filter-map.js';
 import {
 	validateRecursiveIncludeStrategy,
 	validateRecursiveSetOperation,
@@ -816,10 +817,7 @@ function queryLocalDefaultFilters(
 	bundle: CompiledNqlQuery,
 	filters: import('./schema.js').DefaultFilters,
 ): import('./schema.js').DefaultFilters {
-	if (!bundle.bindings?.size) return filters;
-	return Object.fromEntries(
-		Object.entries(filters).filter(([table]) => !bundle.bindings?.has(table)),
-	);
+	return copyDefaultFilters(filters, (table) => !bundle.bindings?.has(table));
 }
 
 /** Plan a final NQL query before compiling its binding/include bundle. */
@@ -1492,7 +1490,7 @@ export function createNqlTag(
 	defaultFilters?: import('./schema.js').DefaultFilters,
 ): NqlTag {
 	defaultFilters = defaultFilters
-		? Object.assign(Object.create(null), defaultFilters)
+		? copyDefaultFilters(defaultFilters)
 		: undefined;
 	return function nql<T>(
 		strings: TemplateStringsArray,
@@ -1617,7 +1615,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 						`${source}.${include.via ?? include.relation}`,
 					);
 					if (!relation) continue;
-					if (this.defaultFilters?.[relation.target])
+					if (getDefaultFilter(this.defaultFilters, relation.target))
 						validateRecursiveIncludeStrategy(
 							include,
 							relation,

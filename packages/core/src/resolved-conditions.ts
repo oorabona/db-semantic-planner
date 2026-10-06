@@ -25,6 +25,8 @@ import {
 	isSubqueryRef,
 	resolveDeclaredRelationPath,
 } from '@dbsp/types/internal';
+import { getDefaultFilter } from './default-filter-map.js';
+import { getRelationalReadPolicy } from './relational-read-plans.js';
 
 import { escapeDiagnosticText } from './transition/diagnostic-text.js';
 
@@ -92,6 +94,7 @@ export function resolveConditionContext(
 	},
 ): ResolvedCondition | undefined {
 	const subqueryRefusal = mode?.subqueryRefusal;
+	let activeFilters = mode?.defaultFilters;
 	const rootScope = [...new Set([root, ...visible, ...additionalOuterRanges])];
 	const enclosingScope = (ranges: readonly ResolvedRange[]) =>
 		ranges === visible ? rootScope : ranges;
@@ -293,6 +296,9 @@ export function resolveConditionContext(
 					'or restructure the query to avoid the correlation.',
 			);
 		if (subqueryRefusal && use !== 'in') throw new Error(subqueryRefusal);
+		const previousFilters = activeFilters;
+		const issued = getRelationalReadPolicy(query);
+		if (issued) activeFilters = issued.filters;
 		let alias: string;
 		const expressionPrior = expressionNext.get(query.from) ?? 0;
 		if (isExpressionBody) {
@@ -392,11 +398,7 @@ export function resolveConditionContext(
 		}));
 		activeNames.delete(range.alias);
 		if (isExpressionBody) expressionNext.set(query.from, expressionPrior);
-		const defaultFilter = resolveScanDefaultFilter(
-			mode?.defaultFilters,
-			range,
-			model,
-		);
+		const defaultFilter = resolveScanDefaultFilter(activeFilters, range, model);
 		const result: ResolvedSubqueryBody =
 			use === 'exists'
 				? {
@@ -438,6 +440,7 @@ export function resolveConditionContext(
 										: parameter(query.limit),
 							}),
 						};
+		activeFilters = previousFilters;
 		return result as Extract<ResolvedSubqueryBody, { use: U }>;
 	}
 	const relation = (
@@ -503,11 +506,7 @@ export function resolveConditionContext(
 				alias = generated(hop.toTable, `_exists_${aliasCount++}`);
 			const to = allocator.allocate(hop.toTable, alias, subqueryScope);
 			allocator.reserve(to.alias);
-			const defaultFilter = resolveScanDefaultFilter(
-				mode?.defaultFilters,
-				to,
-				model,
-			);
+			const defaultFilter = resolveScanDefaultFilter(activeFilters, to, model);
 			const result = { from, to, ...(defaultFilter && { defaultFilter }) };
 			from = to;
 			return result;
@@ -541,7 +540,7 @@ export function resolveConditionContext(
 					type: options.join ?? 'inner',
 					...(() => {
 						const defaultFilter = resolveScanDefaultFilter(
-							mode?.defaultFilters,
+							activeFilters,
 							range,
 							model,
 						);
@@ -814,8 +813,8 @@ export function resolveConditionContext(
 	): ResolvedCondition => {
 		if (
 			current === root &&
-			node === mode?.defaultFilters?.[root.table] &&
-			mode.rootDefaultFilter
+			node === getDefaultFilter(activeFilters, root.table) &&
+			mode?.rootDefaultFilter
 		)
 			return mode.rootDefaultFilter;
 		if (node.kind === 'and' || node.kind === 'or')
@@ -1152,7 +1151,7 @@ export function resolveScanDefaultFilter(
 	range: ResolvedRange,
 	model: ModelIR | undefined,
 ): ResolvedCondition | undefined {
-	const filter = filters?.[range.table];
+	const filter = getDefaultFilter(filters, range.table);
 	if (!filter) return undefined;
 	const refusal = `Default filter for table '${range.table}' must reference only its own scan.`;
 	let resolved: ResolvedCondition | undefined;

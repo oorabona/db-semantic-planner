@@ -1,4 +1,5 @@
 import { brandValue, RangeAllocator, REF_BRAND } from '@dbsp/types';
+import { copyDefaultFilters, getDefaultFilter } from '../default-filter-map.js';
 /**
  * ARCH-005: Unified Schema API
  *
@@ -739,7 +740,7 @@ export function schema<const T extends SchemaDefinition>(
 
 	// Validate default filters reference existing tables
 	const defaultFilters = options?.defaultFilters
-		? (Object.assign(Object.create(null), options.defaultFilters) as Record<
+		? (copyDefaultFilters(options.defaultFilters) as Record<
 				string,
 				WhereIntent
 			>)
@@ -753,7 +754,7 @@ export function schema<const T extends SchemaDefinition>(
 						`Available: ${[...tableNameSet].join(', ')}`,
 				);
 			}
-			const intent = defaultFilters[tableName];
+			const intent = getDefaultFilter(defaultFilters, tableName);
 			if (!isWhereIntent(intent)) {
 				throw new SchemaValidationError(
 					`Default filter for table '${tableName}': expected a condition intent built with condition helpers, for example isNull('deletedAt')`,

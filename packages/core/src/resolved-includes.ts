@@ -21,6 +21,7 @@ import {
 	resolveIncludeRelationName,
 } from '@dbsp/types/internal';
 import { singularize } from './conventions.js';
+import { getDefaultFilter } from './default-filter-map.js';
 import { findDefaultFilterScan } from './dx/default-filter-refusals.js';
 import { InvalidOperationError } from './dx/errors.js';
 import {
@@ -566,7 +567,10 @@ export function resolveReportIncludes(
 		includeRanges,
 		{ defaultFilters: options.defaultFilters, rootDefaultFilter },
 	);
-	const rootFilterIntent = options.defaultFilters?.[rootRange.table];
+	const rootFilterIntent = getDefaultFilter(
+		options.defaultFilters,
+		rootRange.table,
+	);
 	const alreadyApplied =
 		intent.where === rootFilterIntent ||
 		(intent.where?.kind === 'and' &&
@@ -595,7 +599,7 @@ export function resolveReportIncludes(
 			if (node.kind === 'literal' || node.kind === 'param') return;
 			if (
 				node.kind === 'pseudoColumn' &&
-				options.defaultFilters?.[rootRange.table]
+				getDefaultFilter(options.defaultFilters, rootRange.table)
 			)
 				throw new Error(
 					`Default filter for table '${rootRange.table}' is not supported at expression.pseudoColumn.`,

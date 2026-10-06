@@ -10,7 +10,11 @@ import { assertUnplannedDefaultFilters } from './dx/default-filter-refusals.js';
 // These bodies are in-process intents; policy is not public intent syntax.
 const plans = new WeakMap<
 	QueryIntent,
-	{ report: PlanReport; model: ModelIR; filters: PlanOptions['defaultFilters'] }
+	{
+		report?: PlanReport;
+		model: ModelIR;
+		filters: PlanOptions['defaultFilters'];
+	}
 >();
 export function registerRelationalReadPlan(
 	report: PlanReport,
@@ -36,4 +40,17 @@ export function getRelationalReadPlan(
 		return undefined;
 	}
 	return issued.report;
+}
+
+/** Associate a raw nested body with its issuer, including an explicit opt-out. */
+export function registerRelationalReadPolicy(
+	intent: QueryIntent,
+	model: ModelIR,
+	filters: PlanOptions['defaultFilters'],
+): QueryIntent {
+	plans.set(intent, { model, filters });
+	return intent;
+}
+export function getRelationalReadPolicy(intent: QueryIntent) {
+	return plans.get(intent);
 }

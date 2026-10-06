@@ -1,4 +1,5 @@
 import { RangeAllocator } from '@dbsp/types';
+import { copyDefaultFilters, getDefaultFilter } from './default-filter-map.js';
 import { assertUnplannedDefaultFilters } from './dx/default-filter-refusals.js';
 import { resolveScanDefaultFilter } from './resolved-conditions.js';
 import {
@@ -292,7 +293,9 @@ export function plan(
 
 	const opts: Required<PlanOptions> = {
 		whereReservedNames: options.whereReservedNames ?? [],
-		defaultFilters: options.defaultFilters ?? Object.create(null),
+		defaultFilters: copyDefaultFilters(
+			options.defaultFilters ?? Object.create(null),
+		),
 		forceJoinType: options.forceJoinType as 'left' | 'inner',
 		enableCTEs: options.enableCTEs ?? true,
 		cteThreshold: options.cteThreshold ?? 2,
@@ -510,12 +513,15 @@ export function planRecursive(
 	const allocator = new RangeAllocator();
 	if (
 		intent.traversal.kind === 'edge-table' &&
-		options.defaultFilters?.[intent.traversal.edgeTable]
+		getDefaultFilter(options.defaultFilters, intent.traversal.edgeTable)
 	)
 		throw new Error(
 			`Default filter for table '${intent.traversal.edgeTable}' is not supported at recursive.traversal.edgeTable.`,
 		);
-	if (intent.traversal.kind === 'custom' && options.defaultFilters?.[startFrom])
+	if (
+		intent.traversal.kind === 'custom' &&
+		getDefaultFilter(options.defaultFilters, startFrom)
+	)
 		throw new Error(
 			`Default filter for table '${startFrom}' is not supported at recursive.traversal.custom.`,
 		);

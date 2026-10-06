@@ -5,6 +5,7 @@ import {
 	type QueryIntent,
 } from '@dbsp/types';
 import { getTrustedNqlRelationFilterFields } from '@dbsp/types/internal';
+import { getDefaultFilter } from '../default-filter-map.js';
 import type { DefaultFilters } from './schema.js';
 
 /** Legacy read issuers do not carry resolved scan predicates yet. */
@@ -20,7 +21,8 @@ export function findDefaultFilterScan(
 	const root = intent as QueryIntent;
 	let found: { table: string; path: string } | undefined;
 	const refuse = (table: string, location: string): void => {
-		if (filters[table] && !found) found = { table, path: location };
+		if (getDefaultFilter(filters, table) && !found)
+			found = { table, path: location };
 	};
 	const visit = (value: unknown, source: string, location: string): void => {
 		if (!value || typeof value !== 'object' || isParamIntent(value)) return;
@@ -137,7 +139,7 @@ export function assertUnsupportedNqlDefaultFilters(
 		...(bundle.cteQuery?.ctes.map((cte) => cte.name) ?? []),
 	]);
 	const refuse = (table: string, location: string): void => {
-		if (filters[table])
+		if (getDefaultFilter(filters, table))
 			throw new Error(
 				`Default filter for table '${table}' is not supported at ${location}.`,
 			);

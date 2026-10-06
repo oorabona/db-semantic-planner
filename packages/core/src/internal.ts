@@ -43,6 +43,7 @@ export {
 	requiresDatabase,
 	resolveQueryIndex,
 } from './assert/index.js';
+export { copyDefaultFilters } from './default-filter-map.js';
 export {
 	DUCKDB_CAPABILITIES,
 	MSSQL_CAPABILITIES,

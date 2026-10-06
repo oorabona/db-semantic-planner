@@ -1,4 +1,5 @@
 import {
+	copyDefaultFilters,
 	getRelationalReadPlan,
 	resolveReportIncludes,
 	validateRecursiveSetOperation,
@@ -3157,10 +3158,9 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 			);
 			const queryFromBinding = hasBindingName(bindingNames, bundle.query.from);
 			const scanFilters = options?.defaultFilters
-				? Object.fromEntries(
-						Object.entries(options.defaultFilters).filter(
-							([table]) => !hasBindingName(bindingNames, table),
-						),
+				? copyDefaultFilters(
+						options.defaultFilters,
+						(table) => !hasBindingName(bindingNames, table),
 					)
 				: undefined;
 			const planReport =
