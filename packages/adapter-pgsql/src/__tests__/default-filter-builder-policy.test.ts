@@ -1,11 +1,15 @@
 import {
+	caseWhen,
 	createOrm,
 	exists,
+	fn,
 	isNull,
+	literal,
 	plan,
 	rawExists,
 	ref,
 	schema,
+	star,
 } from '@dbsp/core';
 import { rawNotExists } from '@dbsp/core/internal';
 import type { QueryIntent } from '@dbsp/types';
@@ -73,6 +77,58 @@ describe('nested builder filter ownership', () => {
 			);
 		});
 	}
+	for (const [name, predicate] of Object.entries({ rawExists, rawNotExists })) {
+		for (const position of [
+			'CASE',
+			'ORDER BY',
+			'HAVING',
+			'aggregate FILTER',
+		] as const) {
+			it(`${name} owns its policy in ${position} in both directions`, () => {
+				for (const innerFiltered of [false, true]) {
+					const inner = orm.select('posts').columns(['id']);
+					const condition = predicate(
+						(innerFiltered
+							? inner
+							: inner.withoutDefaultFilters()) as unknown as {
+							buildIntent(): QueryIntent;
+						},
+					);
+					const outer = innerFiltered
+						? orm.withoutDefaultFilters().select('users')
+						: orm.select('users');
+					const expression = caseWhen(condition, literal(1)).else(literal(0));
+					const query =
+						position === 'CASE'
+							? outer.columns([expression.as('hasPosts')])
+							: position === 'ORDER BY'
+								? outer.orderBy(expression)
+								: position === 'HAVING'
+									? outer.count().having(condition)
+									: outer.columns([
+											fn('count', star()).filter(condition).as('visibleCount'),
+										]);
+					const existsSql = `EXISTS (SELECT posts_sq.id FROM posts AS posts_sq${innerFiltered ? ' WHERE posts_sq."deletedAt" IS NULL' : ''})`;
+					const predicateSql =
+						name === 'rawExists' ? existsSql : `NOT (${existsSql})`;
+					const caseSql = `CASE WHEN ${predicateSql} THEN 1 ELSE 0 END`;
+					const rootWhere = innerFiltered
+						? ''
+						: ' WHERE users."deletedAt" IS NULL';
+					const expected =
+						position === 'CASE'
+							? `SELECT ${caseSql} AS "hasPosts" FROM users${rootWhere}`
+							: position === 'ORDER BY'
+								? `SELECT users.* FROM users${rootWhere} ORDER BY ${caseSql} ASC`
+								: position === 'HAVING'
+									? `SELECT count(*) FROM users${rootWhere} HAVING ${predicateSql}`
+									: `SELECT count(*) FILTER (WHERE ${predicateSql}) AS "visibleCount" FROM users${rootWhere}`;
+					expect(query.dump().sql).toBe(expected);
+				}
+			});
+		}
+	}
+
 	it('keeps filters on nested relation scans inside an opted-out outer builder', () => {
 		expect(
 			orm

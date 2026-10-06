@@ -24,6 +24,7 @@ import { singularize } from './conventions.js';
 import { getDefaultFilter } from './default-filter-map.js';
 import { findDefaultFilterScan } from './dx/default-filter-refusals.js';
 import { InvalidOperationError } from './dx/errors.js';
+import { getRelationalReadPolicy } from './relational-read-plans.js';
 import {
 	resolveConditionContext,
 	resolveScanDefaultFilter,
@@ -586,108 +587,119 @@ export function resolveReportIncludes(
 	const expressionSubqueries: NonNullable<
 		SelectExecution['expressionSubqueries']
 	>[number][] = [];
-	if (options.defaultFilters && Object.keys(options.defaultFilters).length) {
-		const inspect = (value: unknown, intentPath: string): void => {
-			if (!value || typeof value !== 'object' || isParamIntent(value)) return;
-			if (Array.isArray(value)) {
-				value.forEach((child, index) => {
-					inspect(child, `${intentPath}[${index}]`);
-				});
-				return;
-			}
-			const node = value as Record<string, unknown>;
-			if (node.kind === 'literal' || node.kind === 'param') return;
+	// Visit each occurrence, but leave cyclic metadata to the compiler's refusal.
+	const inspected = new WeakSet<object>();
+	const inspect = (value: unknown, intentPath: string): void => {
+		if (!value || typeof value !== 'object' || isParamIntent(value)) return;
+		if (inspected.has(value)) return;
+		inspected.add(value);
+		if (Array.isArray(value)) {
+			value.forEach((child, index) => {
+				inspect(child, `${intentPath}[${index}]`);
+			});
+			inspected.delete(value);
+			return;
+		}
+		const node = value as Record<string, unknown>;
+		if (node.kind === 'literal' || node.kind === 'param') return;
+		if (
+			node.kind === 'pseudoColumn' &&
+			getDefaultFilter(options.defaultFilters, rootRange.table)
+		)
+			throw new Error(
+				`Default filter for table '${rootRange.table}' is not supported at expression.pseudoColumn.`,
+			);
+		// Issued bodies own their policy even when the enclosing map is empty.
+		// Preserve legacy lowering for bodies without an issuing builder.
+		if (node.kind === 'subquery' && node.query) {
+			const query = node.query as QueryIntent;
 			if (
-				node.kind === 'pseudoColumn' &&
-				getDefaultFilter(options.defaultFilters, rootRange.table)
-			)
-				throw new Error(
-					`Default filter for table '${rootRange.table}' is not supported at expression.pseudoColumn.`,
-				);
-			if (node.kind === 'subquery' && node.query) {
-				const query = node.query as QueryIntent;
-				if (
-					!model ||
+				!model ||
+				(!getRelationalReadPolicy(query) &&
 					!findDefaultFilterScan(
 						query,
 						model,
 						options.defaultFilters,
 						intentPath,
-					)
-				)
-					return;
-				const resolved = resolveConditionContext(
-					{ kind: 'expression', expr: { kind: 'subquery', query } },
-					rootRange,
-					visible,
-					[],
-					allocator,
-					model,
-					0,
-					[],
-					{ defaultFilters: options.defaultFilters },
-				);
-				if (
-					resolved?.kind === 'expression' &&
-					resolved.expression.kind === 'subquery'
-				)
-					expressionSubqueries.push({
-						intentPath,
-						body: resolved.expression.body,
-					});
+					))
+			)
 				return;
-			}
-			const predicate =
-				[
-					'exists',
-					'notExists',
-					'relationFilter',
-					'rawExists',
-					'rawNotExists',
-				].includes(String(node.kind)) ||
-				(node.kind === 'subquery' && node.subquery) ||
-				(node.kind === 'in' && node.subquery) ||
-				(typeof node.field === 'string' && node.field.includes('.'));
+			const resolved = resolveConditionContext(
+				{ kind: 'expression', expr: { kind: 'subquery', query } },
+				rootRange,
+				visible,
+				[],
+				allocator,
+				model,
+				0,
+				[],
+				{ defaultFilters: options.defaultFilters },
+			);
 			if (
-				predicate &&
-				model &&
+				resolved?.kind === 'expression' &&
+				resolved.expression.kind === 'subquery'
+			)
+				expressionSubqueries.push({
+					intentPath,
+					body: resolved.expression.body,
+				});
+			inspected.delete(value);
+			return;
+		}
+		const predicate =
+			[
+				'exists',
+				'notExists',
+				'relationFilter',
+				'rawExists',
+				'rawNotExists',
+			].includes(String(node.kind)) ||
+			(node.kind === 'subquery' && node.subquery) ||
+			(node.kind === 'in' && node.subquery) ||
+			(typeof node.field === 'string' && node.field.includes('.'));
+		if (
+			predicate &&
+			model &&
+			((node.subquery &&
+				getRelationalReadPolicy(node.subquery as QueryIntent)) ||
 				findDefaultFilterScan(
 					{ type: 'select', from: rootRange.table, where: node },
 					model,
 					options.defaultFilters,
 					intentPath,
 					true,
-				)
-			) {
-				const condition = resolveConditionContext(
-					node as unknown as WhereIntent,
-					rootRange,
-					visible,
-					[],
-					allocator,
-					model,
-					0,
-					[],
-					{ defaultFilters: options.defaultFilters },
-				);
-				if (!condition)
-					throw new Error(`Missing resolved condition at ${intentPath}`);
-				expressionConditions.push({ intentPath, condition });
-				return;
-			}
-			for (const [key, child] of Object.entries(node)) {
-				if (
-					(key === 'value' || key === 'values') &&
-					(!child || typeof child !== 'object' || !(EXPRESSION_BRAND in child))
-				)
-					continue;
-				inspect(child, `${intentPath}.${key}`);
-			}
-		};
-		inspect(intent.select, 'select');
-		inspect(intent.orderBy, 'orderBy');
-		inspect(intent.having, 'having');
-	}
+				))
+		) {
+			const condition = resolveConditionContext(
+				node as unknown as WhereIntent,
+				rootRange,
+				visible,
+				[],
+				allocator,
+				model,
+				0,
+				[],
+				{ defaultFilters: options.defaultFilters },
+			);
+			if (!condition)
+				throw new Error(`Missing resolved condition at ${intentPath}`);
+			expressionConditions.push({ intentPath, condition });
+			inspected.delete(value);
+			return;
+		}
+		for (const [key, child] of Object.entries(node)) {
+			if (
+				(key === 'value' || key === 'values') &&
+				(!child || typeof child !== 'object' || !(EXPRESSION_BRAND in child))
+			)
+				continue;
+			inspect(child, `${intentPath}.${key}`);
+		}
+		inspected.delete(value);
+	};
+	inspect(intent.select, 'select');
+	inspect(intent.orderBy, 'orderBy');
+	inspect(intent.having, 'having');
 	return {
 		rootRange,
 		joins,
