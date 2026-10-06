@@ -1,4 +1,15 @@
-import { createOrm, exists, isNull, notExists, ref, schema } from '@dbsp/core';
+import {
+	createOrm,
+	eq,
+	exists,
+	isNull,
+	notExists,
+	outerRef,
+	rawExists,
+	ref,
+	schema,
+	subquery,
+} from '@dbsp/core';
 import { expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -52,6 +63,25 @@ for (const [title, predicate] of [
 		);
 	});
 }
+it('nested outerRef binds the nearest renamed include by its written qualifier', () => {
+	const sql = orm
+		.select('roots')
+		.join('file', { as: 'callerFile' })
+		.where(
+			exists('target', {
+				include: { callerFile: { join: 'left' } },
+				where: rawExists(
+					subquery('files')
+						.where(eq('id', outerRef('callerFile.id')))
+						.select('id'),
+				),
+			}),
+		)
+		.dump().sql;
+	expect(sql).toBe(
+		'SELECT roots.* FROM roots JOIN files AS "callerFile" ON roots."fileId" = "callerFile".id WHERE EXISTS (SELECT 1 FROM targets AS targets_exists_1 LEFT JOIN files AS "callerFile_1" ON targets_exists_1."fileId" = "callerFile_1".id WHERE roots."targetId" = targets_exists_1.id AND EXISTS (SELECT files_sq.id FROM files AS files_sq WHERE files_sq.id = "callerFile_1".id))',
+	);
+});
 it('nested relation body binds a renamed include by its written qualifier', () => {
 	const sql = orm
 		.select('roots')

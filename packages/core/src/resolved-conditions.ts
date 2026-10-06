@@ -125,11 +125,15 @@ export function resolveSelectWhere(
 				for (const scope of enclosing) {
 					const candidates = scope.filter((r) => r.table === qualifier);
 					// A self-join makes the logical root name ambiguous even though its default alias matches.
-					found = scope.find(
-						(r) =>
-							r.alias === qualifier &&
-							(r !== scope[0] || r.alias !== r.table || candidates.length < 2),
-					);
+					found =
+						writtenQualifiers.get(scope)?.get(qualifier) ??
+						scope.find(
+							(r) =>
+								r.alias === qualifier &&
+								(r !== scope[0] ||
+									r.alias !== r.table ||
+									candidates.length < 2),
+						);
 					if (found) break;
 					if (candidates.length > 1)
 						throw new Error(
