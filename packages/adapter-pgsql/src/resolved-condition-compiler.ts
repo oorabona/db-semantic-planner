@@ -331,6 +331,16 @@ function compileResolvedSubqueryBodyUnchecked(
 			whereClause: compileResolvedConditionUnchecked(body.where, ctx, state),
 		}),
 	};
+	if (body.defaultFilter) {
+		const filter = compileResolvedConditionUnchecked(
+			body.defaultFilter,
+			ctx,
+			state,
+		);
+		stmt.whereClause = stmt.whereClause
+			? andExpr(stmt.whereClause, filter)
+			: filter;
+	}
 	if (body.use !== 'exists') {
 		if (body.orderBy.length)
 			stmt.sortClause = body.orderBy.map((o) =>
@@ -739,26 +749,30 @@ function compileResolvedConditionUnchecked(
 				predicate = notExpr(predicate);
 			for (let i = tree.hops.length - 1; i >= 0; i--) {
 				const hop = tree.hops[i]!;
-				const quals = correlation(
+				let quals = correlation(
 					hop.from,
 					hop.to,
 					tree.path.hops[i]!.pairs,
 					tree.path.logicalSegments[i]!,
 				);
+				if (hop.defaultFilter) quals = andExpr(quals, visit(hop.defaultFilter));
 				let source = from(hop.to, ctx);
 				if (i === tree.hops.length - 1)
-					for (const join of tree.joins)
+					for (const join of tree.joins) {
+						let on = correlation(
+							join.source,
+							join.range,
+							join.path.hops[0]!.pairs,
+							join.path.logicalSegments[0]!,
+						);
+						if (join.defaultFilter) on = andExpr(on, visit(join.defaultFilter));
 						source = joinExpr(
 							join.type === 'left' ? 'JOIN_LEFT' : 'JOIN_INNER',
 							source,
 							from(join.range, ctx),
-							correlation(
-								join.source,
-								join.range,
-								join.path.hops[0]!.pairs,
-								join.path.logicalSegments[0]!,
-							),
+							on,
 						);
+					}
 				predicate = {
 					SubLink: {
 						subLinkType: 'EXISTS_SUBLINK',

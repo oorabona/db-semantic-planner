@@ -1,3 +1,5 @@
+import { andExpr } from '../../ast-helpers.js';
+import { compileResolvedCondition } from '../../resolved-condition-compiler.js';
 /**
  * CTE Include Strategy Handler
  *
@@ -279,6 +281,15 @@ export const cteIncludeHandler: IncludeHandler = {
 			scopedCtx,
 			state,
 		);
+
+		const defaultFilter = decision.resolvedInclude?.defaultFilter;
+		if (defaultFilter && 'SelectStmt' in cteSelect) {
+			const filter = compileResolvedCondition(defaultFilter, scopedCtx, state);
+			const stmt = cteSelect.SelectStmt;
+			stmt.whereClause = stmt.whereClause
+				? andExpr(stmt.whereClause, filter)
+				: filter;
+		}
 
 		// Build the CTE node
 		const cte = buildCTE(cteName, cteSelect, scopedCtx);

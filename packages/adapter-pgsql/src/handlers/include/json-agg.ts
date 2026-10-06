@@ -1,3 +1,4 @@
+import { compileResolvedCondition } from '../../resolved-condition-compiler.js';
 /**
  * JSON_AGG Include Strategy Handler
  *
@@ -213,7 +214,7 @@ function compileJsonAggRecursive(
 	parentAlias: string,
 	depth: number,
 	ctx: CompilerContext,
-	_state: CompilerState,
+	state: CompilerState,
 ): Node {
 	const innerAlias =
 		decision.resolvedInclude?.targetRange.alias ??
@@ -301,6 +302,13 @@ function compileJsonAggRecursive(
 		innerCtx,
 	);
 
+	const defaultFilter = decision.resolvedInclude?.defaultFilter;
+	if (defaultFilter)
+		whereExpr = andExpr(
+			whereExpr,
+			compileResolvedCondition(defaultFilter, innerCtx, state),
+		);
+
 	// Merge pre-compiled filter conditions (from EXISTS propagation via bridge)
 	const compiledFilter = decision._compiledFilterWhere;
 	if (compiledFilter) {
@@ -319,7 +327,7 @@ function compileJsonAggRecursive(
 					innerAlias,
 					depth + 1,
 					innerCtx,
-					_state,
+					state,
 				);
 				// Extract the COALESCE node from the ResTarget wrapper
 				const resTarget = childResTarget as ResTargetNode;

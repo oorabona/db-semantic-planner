@@ -1,4 +1,6 @@
 import {
+	copyDefaultFilters,
+	getRelationalReadPlan,
 	resolveReportIncludes,
 	validateRecursiveSetOperation,
 } from '@dbsp/core/internal';
@@ -2240,6 +2242,7 @@ function compileNqlRuntimeBindingCte(
 export function createNqlBindingSelectPlan(
 	query: QueryIntent,
 	model: ModelIR | undefined,
+	defaultFilters?: CompileOptions['defaultFilters'],
 ): PlanReport {
 	return markPlannedReport({
 		rootTable: query.from,
@@ -2247,7 +2250,10 @@ export function createNqlBindingSelectPlan(
 		warnings: [],
 		ctes: [],
 		intent: query,
-		execution: resolveReportIncludes(query, [], model),
+		execution: resolveReportIncludes(query, [], model, {
+			...(defaultFilters && { defaultFilters }),
+			skipRootDefaultFilter: true,
+		}),
 		metadata: {
 			planningTimeMs: 0,
 			relationsAnalyzed: 0,
@@ -3059,6 +3065,9 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 			scope ??
 			queryScopeForBindingProjections(bindingNames, relationTargetProjections);
 		return {
+			...(options?.defaultFilters && {
+				defaultFilters: options?.defaultFilters,
+			}),
 			dbCasing: this._dbCasing,
 			// `||` (not `??`): empty string is treated as "no override" and falls back to this.schemaName (which may be a configured schema or undefined)
 			schemaName,
@@ -3093,6 +3102,9 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 		bindingNames?: BindingNameRegistry,
 		bindingProjections?: NqlBindingProjectionRegistry,
 	): CompiledQuery {
+		// The carrier applies to standalone read bindings, never mutation bodies.
+		if (options?.defaultFilters)
+			options = { ...options, defaultFilters: undefined };
 		const mutation = bundle.mutation;
 		if (mutation === undefined) {
 			throw new Error('NQL bundle did not contain a mutation intent.');
@@ -3145,13 +3157,27 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 				bindingProjections,
 			);
 			const queryFromBinding = hasBindingName(bindingNames, bundle.query.from);
-			const planReport = queryFromBinding
-				? (bundle.plan ??
-					createNqlBindingSelectPlan(bundle.query as QueryIntent, deps.model))
-				: planFn(bundle.query, this.requireNqlCompileModel(options), {
-						dialectCapabilities:
-							options?.dialectCapabilities ?? this.dialectCapabilities,
-					});
+			const scanFilters = options?.defaultFilters
+				? copyDefaultFilters(
+						options.defaultFilters,
+						(table) => !hasBindingName(bindingNames, table),
+					)
+				: undefined;
+			const planReport =
+				bundle.plan ??
+				(queryFromBinding
+					? createNqlBindingSelectPlan(
+							bundle.query as QueryIntent,
+							deps.model,
+							scanFilters,
+						)
+					: planFn(bundle.query, this.requireNqlCompileModel(options), {
+							...(scanFilters && {
+								defaultFilters: scanFilters,
+							}),
+							dialectCapabilities:
+								options?.dialectCapabilities ?? this.dialectCapabilities,
+						}));
 			const compiled = compileSelectEnvelope<T>(planReport, options, deps);
 			const registeredSource = getNqlBindingProjection(
 				bindingProjections,
@@ -3293,7 +3319,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 			const compiled = this.compileNqlBundleLeafEnvelope(
 				bindingBundle,
 				options,
-				bindingNames,
+				new Set(bindingProjections.keys()),
 				bindingProjections,
 			);
 			assertRelationalOutput(compiled.hydrationPlan, 'Relational bodies');
@@ -3806,12 +3832,18 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 				bindingProjections,
 			);
 			const queryFromBinding = hasBindingName(bindingNames, query.from);
-			const planReport = queryFromBinding
-				? createNqlBindingSelectPlan(query, model)
-				: planFn(query, model, {
-						dialectCapabilities:
-							options?.dialectCapabilities ?? this.dialectCapabilities,
-					});
+			const issuedPlan = getRelationalReadPlan(query, queryFromBinding);
+			const planReport =
+				issuedPlan ??
+				(queryFromBinding
+					? createNqlBindingSelectPlan(query, model, options?.defaultFilters)
+					: planFn(query, model, {
+							...(options?.defaultFilters && {
+								defaultFilters: options.defaultFilters,
+							}),
+							dialectCapabilities:
+								options?.dialectCapabilities ?? this.dialectCapabilities,
+						}));
 			const compiled = compileSelectEnvelope(planReport, leafOptions, deps);
 			const registeredSource = getNqlBindingProjection(
 				bindingProjections,

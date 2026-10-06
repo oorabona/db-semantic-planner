@@ -146,6 +146,8 @@ export class RecursiveQueryBuilder<TResult = unknown> {
 	private dedupe: RecursiveDedupe | undefined;
 
 	// Emit configuration
+	private skipDefaultFilters = false;
+
 	private emitSelect: readonly string[] | undefined;
 	private emitWhere: WhereIntent | undefined;
 	private emitDistinct = false;
@@ -156,6 +158,7 @@ export class RecursiveQueryBuilder<TResult = unknown> {
 		adapter: Adapter,
 		cteName: string,
 		schemaName: string | undefined,
+		private readonly planOptions: import('@dbsp/types').RecursivePlanOptions = {},
 	) {
 		this.schema = schema;
 		this.adapter = adapter;
@@ -524,12 +527,22 @@ export class RecursiveQueryBuilder<TResult = unknown> {
 		return intent;
 	}
 
+	/** Disable node and junction default filters for this standalone read. */
+	withoutDefaultFilters(): this {
+		this.skipDefaultFilters = true;
+		return this;
+	}
+
 	private compileOnce(): {
 		readonly intent: RecursiveIntent;
 		readonly compiled: CompiledQuery<TResult>;
 	} {
 		const intent = this.buildIntent();
-		const report = planRecursive(intent, this.schema);
+		const { defaultFilters, ...otherOptions } = this.planOptions;
+		const report = planRecursive(intent, this.schema, {
+			...otherOptions,
+			...(!this.skipDefaultFilters && defaultFilters && { defaultFilters }),
+		});
 		const compileOptions = this.schemaName
 			? { schemaName: this.schemaName }
 			: undefined;
@@ -592,11 +605,13 @@ export function createRecursiveBuilder<TResult = unknown>(
 	adapter: Adapter,
 	cteName: string,
 	schemaName?: string,
+	planOptions: import('@dbsp/types').RecursivePlanOptions = {},
 ): RecursiveQueryBuilder<TResult> {
 	return new RecursiveQueryBuilder<TResult>(
 		schema,
 		adapter,
 		cteName,
 		schemaName,
+		planOptions,
 	);
 }

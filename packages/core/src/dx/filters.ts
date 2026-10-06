@@ -585,9 +585,11 @@ export function rawExists(
 	sq: SubqueryBuilder | { buildIntent(): QueryIntent },
 ): WhereRawExistsIntent {
 	const intent =
-		'buildIntent' in sq
-			? (sq as { buildIntent(): QueryIntent }).buildIntent()
-			: (sq as SubqueryBuilder).build().toIntent();
+		'buildSubqueryIntent' in sq && typeof sq.buildSubqueryIntent === 'function'
+			? sq.buildSubqueryIntent()
+			: 'buildIntent' in sq
+				? (sq as { buildIntent(): QueryIntent }).buildIntent()
+				: (sq as SubqueryBuilder).build().toIntent();
 	return { kind: 'rawExists', subquery: intent };
 }
 
@@ -621,9 +623,11 @@ export function rawNotExists(
 	sq: SubqueryBuilder | { buildIntent(): QueryIntent },
 ): WhereRawNotExistsIntent {
 	const intent =
-		'buildIntent' in sq
-			? (sq as { buildIntent(): QueryIntent }).buildIntent()
-			: (sq as SubqueryBuilder).build().toIntent();
+		'buildSubqueryIntent' in sq && typeof sq.buildSubqueryIntent === 'function'
+			? sq.buildSubqueryIntent()
+			: 'buildIntent' in sq
+				? (sq as { buildIntent(): QueryIntent }).buildIntent()
+				: (sq as SubqueryBuilder).build().toIntent();
 	return { kind: 'rawNotExists', subquery: intent };
 }
 

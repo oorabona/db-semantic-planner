@@ -43,6 +43,7 @@ export {
 	requiresDatabase,
 	resolveQueryIndex,
 } from './assert/index.js';
+export { copyDefaultFilters } from './default-filter-map.js';
 export {
 	DUCKDB_CAPABILITIES,
 	MSSQL_CAPABILITIES,
@@ -99,6 +100,7 @@ export {
 	validateRecursiveSetOperation,
 	validateResolvedIncludeStrategy,
 } from './planner.js';
+export { getRelationalReadPlan } from './relational-read-plans.js';
 export { resolveSelectWhere } from './resolved-conditions.js';
 export {
 	observeIncludeDecisions,

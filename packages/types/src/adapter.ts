@@ -149,6 +149,8 @@ export interface CompiledQuery<T = unknown> {
  * Adapters can extend this with adapter-specific options.
  */
 export interface CompileOptionsBase {
+	/** Read policy carried to plans issued while compiling an NQL bundle. */
+	readonly defaultFilters?: import('./planner.js').PlanOptions['defaultFilters'];
 	/** Schema name for schema-scoped/multi-tenant queries */
 	readonly schemaName?: string;
 

@@ -174,6 +174,9 @@ export function buildCustomFnFilter(
 		emittedAlias: ctx.currentAlias ?? ctx.rootTable,
 		visibleAliases: new Map(ctx.aliases ?? state.aliases),
 		position: 'filter',
+		...(ctx.resolvedConditions && {
+			resolvedConditions: ctx.resolvedConditions,
+		}),
 		...(ctx.queryRanges !== undefined && { queryRanges: ctx.queryRanges }),
 		...(ctx.enclosingRanges !== undefined && {
 			enclosingRanges: ctx.enclosingRanges,

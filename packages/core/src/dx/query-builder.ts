@@ -1,6 +1,7 @@
 /* biome-ignore-all lint/style/noNonNullAssertion: Builder internals use non-null assertions on validated state */
 import type { Mutable } from '@dbsp/types/internal';
 import { type Adapter, type Dump, executeCompiledQuery } from '../adapter.js';
+import { copyDefaultFilters, getDefaultFilter } from '../default-filter-map.js';
 import type {
 	AggregateIntent,
 	ColumnExpressionIntent,
@@ -19,10 +20,14 @@ import {
 	AmbiguousPlanError,
 	plan,
 	validateIncludeStrategy,
-	validateRecursiveIncludeStrategy,
 } from '../planner.js';
+import {
+	registerRelationalReadPlan,
+	registerRelationalReadPolicy,
+} from '../relational-read-plans.js';
 import type { BatchValuesRef } from './batch-values.js';
 import { isBatchValuesRef } from './batch-values.js';
+import { assertUnplannedDefaultFilters } from './default-filter-refusals.js';
 import {
 	AmbiguousRelationError,
 	ExecutionError,
@@ -698,6 +703,14 @@ export class QueryBuilderImpl<TResult = unknown>
 			: this.ctx.strictMode;
 	}
 
+	private withDefaultFilterPlanOptions(options: PlanOptions): PlanOptions {
+		const sealed = { ...options };
+		delete sealed.defaultFilters;
+		if (!this.skipDefaultFilters && this.ctx.defaultFilters)
+			sealed.defaultFilters = copyDefaultFilters(this.ctx.defaultFilters);
+		return sealed;
+	}
+
 	plan(): PlanReport {
 		const intent = this.buildIntent();
 
@@ -714,13 +727,13 @@ export class QueryBuilderImpl<TResult = unknown>
 		const intentWithHints = this.applyRelationHints(intent);
 
 		// Build plan options: dialectCapabilities + per-query overrides
-		const planOptions: PlanOptions = {
+		const planOptions = this.withDefaultFilterPlanOptions({
 			...(this.ctx.dialectCapabilities && {
 				dialectCapabilities: this.ctx.dialectCapabilities,
 			}),
 			// planOptions (global + per-query) take highest precedence
 			...this.ctx.planOptionsOverride,
-		};
+		});
 
 		try {
 			return plan(intentWithHints, this.ctx.model, planOptions);
@@ -765,6 +778,7 @@ export class QueryBuilderImpl<TResult = unknown>
 			this.ctx.model,
 			this.from,
 			this.ctx.schemaName,
+			this.withDefaultFilterPlanOptions({}),
 		);
 
 		hydrator.hydrateIncludes(mainResults, planReport, compiled);
@@ -1190,6 +1204,15 @@ export class QueryBuilderImpl<TResult = unknown>
 		};
 	}
 
+	/** @internal Raw bodies resolve all scans using their issuing builder's policy. */
+	buildSubqueryIntent(): QueryIntent {
+		return registerRelationalReadPolicy(
+			this.buildIntent(false),
+			this.ctx.model,
+			this.skipDefaultFilters ? undefined : this.ctx.defaultFilters,
+		);
+	}
+
 	/**
 	 * Build the QueryIntent from current state.
 	 * Handles exactOptionalPropertyTypes by only including defined properties.
@@ -1223,7 +1246,7 @@ export class QueryBuilderImpl<TResult = unknown>
 		if (applyDefaultFilters) {
 			const tableDefaultFilter =
 				!this.skipDefaultFilters && this.ctx.defaultFilters
-					? this.ctx.defaultFilters[this.from]
+					? getDefaultFilter(this.ctx.defaultFilters, this.from)
 					: undefined;
 			if (tableDefaultFilter) {
 				allWhereIntents.push(tableDefaultFilter);
@@ -1300,8 +1323,6 @@ export class QueryBuilderImpl<TResult = unknown>
 			intent.batchValuesSource = this.batchValuesSource;
 		}
 
-		if (applyDefaultFilters)
-			this.assertRecursiveDefaultFilters(intent as QueryIntent);
 		return intent as QueryIntent;
 	}
 
@@ -1310,41 +1331,12 @@ export class QueryBuilderImpl<TResult = unknown>
 	 * @internal
 	 */
 	/** @internal — called by stream-impl */
-	private assertRecursiveDefaultFilters(intent: QueryIntent): void {
-		const inspect = (
-			includes: QueryIntent['include'],
-			source: string,
-		): void => {
-			for (const include of includes ?? []) {
-				const relation = this.ctx.model.getRelation(
-					`${source}.${include.via ?? include.relation}`,
-				);
-				if (
-					relation &&
-					(include.recursive || relation.recursive) &&
-					!this.skipDefaultFilters &&
-					this.ctx.defaultFilters?.[relation.target]
-				)
-					validateRecursiveIncludeStrategy(
-						include,
-						relation,
-						'include',
-						include.relation,
-						this.ctx.dialectCapabilities,
-						undefined,
-						intent,
-						false,
-						true,
-					);
-				inspect(include.include, relation?.target ?? source);
-			}
-		};
-		inspect(intent.include, intent.from);
-	}
 	applyDefaultFiltersToIntent(intent: QueryIntent): QueryIntent {
-		this.assertRecursiveDefaultFilters(intent);
 		if (this.skipDefaultFilters || !this.ctx.defaultFilters) return intent;
-		const tableDefaultFilter = this.ctx.defaultFilters[this.from];
+		const tableDefaultFilter = getDefaultFilter(
+			this.ctx.defaultFilters,
+			this.from,
+		);
 		if (!tableDefaultFilter) return intent;
 
 		const existingWhere = intent.where;
@@ -1473,6 +1465,7 @@ export class QueryBuilderImpl<TResult = unknown>
 			this.ctx.model,
 			this.from,
 			this.ctx.schemaName,
+			this.withDefaultFilterPlanOptions({}),
 		);
 		hydrator.hydrateIncludes(mainResults, planReport, compiled);
 		if (this.recursiveIncludes.length > 0) {
@@ -1575,6 +1568,7 @@ export class QueryBuilderImpl<TResult = unknown>
 		intent: QueryIntent,
 		planOptions: PlanOptions,
 	): PlanReport {
+		planOptions = this.withDefaultFilterPlanOptions(planOptions);
 		try {
 			return plan(intent, this.ctx.model, planOptions);
 		} catch (error) {
@@ -1717,6 +1711,61 @@ export class QueryBuilderImpl<TResult = unknown>
 	// --------------------------------------------------------------------------
 	// Set operations (UNION / INTERSECT / EXCEPT)
 	// --------------------------------------------------------------------------
+
+	/** @internal — keep each relational body bound to its issuing policy. */
+	buildRelationalReadIntent(
+		path: string,
+		bindings: readonly string[] = [],
+	): QueryIntent {
+		if (
+			bindings.length &&
+			!this.skipDefaultFilters &&
+			this.ctx.defaultFilters
+		) {
+			// Validate relation reads before removing predicates for derived ranges.
+			// The cloned issuer retains every other physical scan's policy.
+			const derived = new Set(bindings);
+			const shadowed = copyDefaultFilters(this.ctx.defaultFilters, (table) =>
+				derived.has(table),
+			);
+			assertUnplannedDefaultFilters(
+				this.buildIntent(false),
+				this.ctx.model,
+				shadowed,
+				path,
+				true,
+				derived,
+			);
+			return this.cloneWithCtxOverride({
+				defaultFilters: copyDefaultFilters(
+					this.ctx.defaultFilters,
+					(table) => !derived.has(table),
+				),
+			}).buildRelationalReadIntent(path);
+		}
+		// Query-local CTE sources have no declared model range. Keep the refusal
+		// census for scans the existing compiler cannot plan on that path.
+		if (!this.ctx.model.getTable(this.from))
+			return this.buildUnplannedReadIntent(path);
+		return registerRelationalReadPlan(
+			this.plan(),
+			this.ctx.model,
+			this.withDefaultFilterPlanOptions({}).defaultFilters,
+		);
+	}
+
+	/** @internal — remaining legacy read issuers keep refusing filtered scans. */
+	buildUnplannedReadIntent(path: string): QueryIntent {
+		const intent = this.buildIntent();
+		assertUnplannedDefaultFilters(
+			intent,
+			this.ctx.model,
+			this.skipDefaultFilters ? undefined : this.ctx.defaultFilters,
+			path,
+			true,
+		);
+		return intent;
+	}
 
 	union(other: QueryBuilder<TResult>): SetOperationBuilder<TResult> {
 		return new SetOperationBuilderImpl(

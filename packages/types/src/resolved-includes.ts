@@ -104,6 +104,7 @@ export class RangeAllocator {
 	}
 }
 export interface ResolvedIncludeNode {
+	readonly defaultFilter?: ResolvedCondition;
 	readonly nodeId: string;
 	readonly intentPath: string;
 	readonly publicKey: string;
@@ -141,6 +142,8 @@ export interface ResolvedIncludeNode {
 	readonly recursiveRanges?: {
 		readonly walk: ResolvedRange;
 		readonly next: ResolvedRange;
+		readonly anchorDefaultFilter?: ResolvedCondition;
+		readonly stepDefaultFilter?: ResolvedCondition;
 	};
 	readonly predicate?: {
 		readonly condition: ResolvedCondition;
@@ -155,6 +158,7 @@ export interface ResolvedIncludeNode {
  */
 export interface ResolvedJoin {
 	readonly intentPath: string;
+	readonly defaultFilter?: ResolvedCondition;
 	readonly intentIndex: number;
 	readonly kind: 'relation' | 'table' | 'values';
 	readonly type: 'inner' | 'left';
@@ -164,6 +168,17 @@ export interface ResolvedJoin {
 	readonly on?: ResolvedCondition;
 }
 export interface SelectExecution {
+	readonly expressionConditions?: readonly {
+		readonly intentPath: string;
+		readonly condition: ResolvedCondition;
+	}[];
+	readonly expressionSubqueries?: readonly {
+		readonly intentPath: string;
+		readonly body: Extract<
+			import('./resolved-conditions.js').ResolvedSubqueryBody,
+			{ use: 'scalar' }
+		>;
+	}[];
 	readonly where?: ResolvedCondition;
 	readonly rootRange: ResolvedRange;
 	/** Ordered joins: each ON sees the root, every join at a lower index, and itself. */

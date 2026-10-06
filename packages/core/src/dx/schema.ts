@@ -1,4 +1,5 @@
 import { brandValue, RangeAllocator, REF_BRAND } from '@dbsp/types';
+import { copyDefaultFilters, getDefaultFilter } from '../default-filter-map.js';
 /**
  * ARCH-005: Unified Schema API
  *
@@ -16,13 +17,7 @@ import { brandValue, RangeAllocator, REF_BRAND } from '@dbsp/types';
  * ```
  */
 
-import type {
-	ResolvedColumnOperand,
-	ResolvedCondition,
-	ResolvedExpression,
-	ResolvedRhs,
-	WhereIntent,
-} from '@dbsp/types';
+import type { WhereIntent } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
 import type { DbCasing } from '../adapter.js';
 import { ModelIRImpl } from '../model-impl.js';
@@ -42,7 +37,10 @@ import type {
 	TableReaddressDeclaration,
 } from '../model-ir.js';
 import { createPseudoColumnMetadata } from '../model-ir.js';
-import { resolveConditionContext } from '../resolved-conditions.js';
+import {
+	assertScanDefaultFilter,
+	resolveConditionContext,
+} from '../resolved-conditions.js';
 import { isWhereIntent } from './object-filter.js';
 import type { InferTables } from './schema-tables-types.js';
 import { createTablesProxy } from './table-ref-factory.js';
@@ -275,7 +273,7 @@ export interface SchemaExtras {
  * Result of schema() function with strongly-typed table/column info.
  */
 /**
- * Per-table default filters applied to the root of a query-builder SELECT.
+ * Per-table default filters applied to reads. See SchemaOptions.defaultFilters.
  * Commonly used for soft delete filtering.
  *
  * @example
@@ -315,11 +313,17 @@ export interface SchemaOptions {
 	/** Explicit many-to-many declarations indexed by source table and relation name. */
 	relations?: Record<string, Record<string, ManyToManyDefinition>>;
 	/**
-	 * Default filters are conditions and expressions on each table's own columns.
-	 * Self-qualified columns are allowed; relation paths reaching another table are refused.
-	 * Applied to the root of a query-builder SELECT after beforeQuery hooks.
-	 * Included rows, joins, relation predicates, NQL and mutations are not filtered yet.
-	 * Override with `.withoutDefaultFilters()` on the query builder.
+	 * Default filters are helper-built conditions over their table's own range.
+	 * Self-qualified columns are allowed; anything reaching another range, including
+	 * a self-relation, is refused. Structurally marked aggregate expressions and aggregate
+	 * modifiers (FILTER, ORDER BY, DISTINCT) are refused at schema() construction.
+	 * A generic fn('count', ...) is not identifiable as an aggregate without catalog
+	 * information and is left to PostgreSQL. Context-only expression leaves are refused.
+	 * Filters apply to every table scan of a read. Opt out with a builder's
+	 * `withoutDefaultFilters()` or `orm.withoutDefaultFilters()`.
+	 * Mutations and raw SQL are unfiltered. Many-to-many junction tables (#787),
+	 * NQL pseudo-column projections, binding relation-column projections and relation
+	 * reads from projected CTEs refuse applicable filters by table and query path.
 	 */
 	defaultFilters?: Record<string, WhereIntent>;
 	/**
@@ -413,11 +417,7 @@ export interface Schema<T extends SchemaDefinition> {
 	 */
 	readonly introspectedAt?: Date;
 	/**
-	 * Default filters are conditions and expressions on each table's own columns.
-	 * Self-qualified columns are allowed; relation paths reaching another table are refused.
-	 * Applied to the root of a query-builder SELECT after beforeQuery hooks.
-	 * Included rows, joins, relation predicates, NQL and mutations are not filtered yet.
-	 * Override with `.withoutDefaultFilters()` on the query builder.
+	 * Default filters per table. See SchemaOptions.defaultFilters for scope and opt-outs.
 	 */
 	readonly defaultFilters?: DefaultFilters;
 }
@@ -686,110 +686,6 @@ function validateDefaultFilter(
 ): void {
 	const allocator = new RangeAllocator();
 	const range = allocator.bind(table, table);
-	const refuse = (part: string): never => {
-		throw new Error(part);
-	};
-	const column = (operand: ResolvedColumnOperand): void => {
-		if (operand.kind !== 'column' || operand.range !== range)
-			refuse('forbidden column range or outer reference');
-		if (
-			!model
-				.getTable(table)
-				?.columns.some((column) => column.name === operand.column)
-		)
-			refuse(`invalid column '${operand.column}'`);
-	};
-	const expression = (node: ResolvedExpression): void => {
-		switch (node.kind) {
-			case 'ref':
-				column(node.operand);
-				return;
-			case 'wholeRow':
-				if (node.range !== range) refuse('forbidden whole-row range');
-				return;
-			case 'call':
-				node.args.forEach(expression);
-				if (node.filter) visit(node.filter);
-				node.orderBy?.forEach((order) => {
-					expression(order.expression);
-				});
-				return;
-			case 'operator':
-				node.operands.forEach(expression);
-				return;
-			case 'cast':
-				expression(node.expression);
-				return;
-			case 'case':
-				node.branches.forEach((branch) => {
-					visit(branch.condition);
-					expression(branch.result);
-				});
-				if (node.fallback) expression(node.fallback);
-				return;
-			case 'array':
-				node.elements.forEach(expression);
-				return;
-			case 'namedArg':
-				expression(node.value);
-				return;
-			case 'literal':
-			case 'parameter':
-			case 'star':
-				return;
-			case 'subquery':
-				refuse("forbidden operand 'subquery'");
-				return;
-			default: {
-				const exhaustive: never = node;
-				refuse(`unsupported expression '${String(exhaustive)}'`);
-			}
-		}
-	};
-	const rhs = (operand: ResolvedRhs): void => {
-		switch (operand.kind) {
-			case 'column':
-			case 'outerRef':
-				column(operand);
-				return;
-			default:
-				expression(operand);
-		}
-	};
-	const visit = (node: ResolvedCondition): void => {
-		switch (node.kind) {
-			case 'and':
-			case 'or':
-				node.conditions.forEach(visit);
-				return;
-			case 'not':
-				visit(node.condition);
-				return;
-			case 'expression':
-				expression(node.expression);
-				if (node.comparison) rhs(node.comparison.right);
-				return;
-			case 'comparison':
-				column(node.left);
-				rhs(node.right);
-				return;
-			case 'in':
-				column(node.left);
-				if (node.operand.kind !== 'values')
-					refuse("forbidden subquery in 'in'");
-				return;
-			case 'like':
-			case 'any':
-			case 'null':
-			case 'range':
-			case 'jsonContains':
-			case 'jsonExists':
-				column(node.left);
-				return;
-			default:
-				refuse(`forbidden condition kind '${node.kind}'`);
-		}
-	};
 	try {
 		const resolved = resolveConditionContext(
 			intent,
@@ -799,8 +695,8 @@ function validateDefaultFilter(
 			allocator,
 			model,
 		);
-		if (resolved) visit(resolved);
-		else refuse('missing condition kind');
+		if (resolved) assertScanDefaultFilter(resolved, range, model);
+		else throw new Error('missing condition kind');
 	} catch (error) {
 		throw new SchemaValidationError(
 			`Default filter for table '${table}': ${error instanceof Error ? error.message : String(error)}`,
@@ -844,7 +740,7 @@ export function schema<const T extends SchemaDefinition>(
 
 	// Validate default filters reference existing tables
 	const defaultFilters = options?.defaultFilters
-		? (Object.assign(Object.create(null), options.defaultFilters) as Record<
+		? (copyDefaultFilters(options.defaultFilters) as Record<
 				string,
 				WhereIntent
 			>)
@@ -858,7 +754,7 @@ export function schema<const T extends SchemaDefinition>(
 						`Available: ${[...tableNameSet].join(', ')}`,
 				);
 			}
-			const intent = defaultFilters[tableName];
+			const intent = getDefaultFilter(defaultFilters, tableName);
 			if (!isWhereIntent(intent)) {
 				throw new SchemaValidationError(
 					`Default filter for table '${tableName}': expected a condition intent built with condition helpers, for example isNull('deletedAt')`,

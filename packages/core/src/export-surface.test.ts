@@ -38,7 +38,12 @@ const excluded = new Set([...names(moved), ...names(removed)]);
 // Issue #929 adds a caller-visible read error and the shared CLI binding planner.
 const rootAdditions = ['InvalidJsonAggPayloadError', 'manyToMany'];
 const rootTypeAdditions = ['ManyToManyOptions', 'ManyToManyDefinition'];
-const internalAdditions = ['compileNqlRead', 'createBindingFinalPlan'];
+const internalAdditions = [
+	'copyDefaultFilters',
+	'compileNqlRead',
+	'createBindingFinalPlan',
+	'getRelationalReadPlan',
+];
 const rootNames = [
 	'AmbiguousIncludeError',
 	...names(before.root.declarations).filter((name) => !excluded.has(name)),

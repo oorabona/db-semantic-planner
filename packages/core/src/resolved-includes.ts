@@ -21,10 +21,13 @@ import {
 	resolveIncludeRelationName,
 } from '@dbsp/types/internal';
 import { singularize } from './conventions.js';
+import { getDefaultFilter } from './default-filter-map.js';
+import { findDefaultFilterScan } from './dx/default-filter-refusals.js';
 import { InvalidOperationError } from './dx/errors.js';
+import { getRelationalReadPolicy } from './relational-read-plans.js';
 import {
 	resolveConditionContext,
-	resolveSelectWhere,
+	resolveScanDefaultFilter,
 } from './resolved-conditions.js';
 
 /** Validate include predicates before lowering or allocating bindings. */
@@ -106,6 +109,8 @@ export function resolveReportIncludes(
 	decisions: readonly PlanDecision[],
 	model: ModelIR | undefined,
 	options: {
+		defaultFilters?: Readonly<Record<string, WhereIntent>>;
+		skipRootDefaultFilter?: boolean;
 		whereReservedNames?: readonly string[];
 		defaultPk?: string;
 		deriveFk?: (table: string, pk: string) => string;
@@ -122,6 +127,10 @@ export function resolveReportIncludes(
 	const allocator = new RangeAllocator();
 	const rootRange = allocator.bind(intent.from, intent.from);
 	allocator.reserve(rootRange.alias);
+	const rootDefaultFilter =
+		options.skipRootDefaultFilter || intent.batchValuesSource
+			? undefined
+			: resolveScanDefaultFilter(options.defaultFilters, rootRange, model);
 	for (const name of options.whereReservedNames ?? []) allocator.reserve(name);
 	const rangesByPath = new Map<
 		string,
@@ -170,6 +179,9 @@ export function resolveReportIncludes(
 			const range = allocator.bind(table, alias);
 			allocator.reserve(range.alias);
 			visibleJoinRanges.push(range);
+			const defaultFilter = join.batchValues
+				? undefined
+				: resolveScanDefaultFilter(options.defaultFilters, range, model);
 			const on = resolveConditionContext(
 				join.on,
 				rootRange,
@@ -180,6 +192,7 @@ export function resolveReportIncludes(
 				0,
 				[],
 				{
+					defaultFilters: options.defaultFilters,
 					subqueryRefusal: join.batchValues
 						? 'Subquery in BatchValues JOIN ON condition is not supported.'
 						: 'Subquery in JOIN ON condition is not supported.',
@@ -201,6 +214,7 @@ export function resolveReportIncludes(
 				sourceRange: rootRange,
 				...(path && { path }),
 				...(on && { on }),
+				...(defaultFilter && { defaultFilter }),
 			};
 		},
 	);
@@ -435,7 +449,11 @@ export function resolveReportIncludes(
 					recursion,
 					recursiveRanges: {
 						walk: allocator.allocate(targetTable, `${name}_walk`, intentPath),
-						next: targetRange,
+						next: allocator.allocate(
+							targetTable,
+							targetRange.alias,
+							`${intentPath}.step`,
+						),
 					},
 				}),
 				children: visit(
@@ -476,8 +494,40 @@ export function resolveReportIncludes(
 	): ResolvedIncludeNode[] =>
 		nodes.map((node) => {
 			const predicate = predicates.get(node.intentPath);
+			const recursiveRanges = node.recursiveRanges;
+			const anchorDefaultFilter =
+				recursiveRanges &&
+				resolveScanDefaultFilter(
+					options.defaultFilters,
+					node.targetRange,
+					model,
+				);
+			const stepDefaultFilter =
+				recursiveRanges &&
+				resolveScanDefaultFilter(
+					options.defaultFilters,
+					recursiveRanges.next,
+					model,
+				);
 			return {
 				...node,
+				...(recursiveRanges && {
+					recursiveRanges: {
+						...recursiveRanges,
+						...(anchorDefaultFilter && { anchorDefaultFilter }),
+						...(stepDefaultFilter && { stepDefaultFilter }),
+					},
+				}),
+				...(() => {
+					const defaultFilter =
+						!recursiveRanges &&
+						resolveScanDefaultFilter(
+							options.defaultFilters,
+							node.targetRange,
+							model,
+						);
+					return defaultFilter ? { defaultFilter } : {};
+				})(),
 				...(predicate && {
 					predicate: {
 						condition: resolveConditionContext(
@@ -494,6 +544,7 @@ export function resolveReportIncludes(
 							[],
 							{
 								include: true,
+								defaultFilters: options.defaultFilters,
 								outerQualifiers: predicate.qualifiers,
 								aliasState,
 							},
@@ -506,16 +557,157 @@ export function resolveReportIncludes(
 			};
 		});
 	const includes = resolvePredicates(allocatedIncludes);
-	const where = resolveSelectWhere(
+	let where = resolveConditionContext(
 		intent.where,
 		rootRange,
 		[rootRange, ...joins.map((j) => j.range)],
+		[],
 		allocator,
 		model,
 		joins.length + includeRanges.length,
 		includeRanges,
+		{ defaultFilters: options.defaultFilters, rootDefaultFilter },
 	);
-	return { rootRange, joins, includes, ...(where && { where }) };
+	const rootFilterIntent = getDefaultFilter(
+		options.defaultFilters,
+		rootRange.table,
+	);
+	const alreadyApplied =
+		intent.where === rootFilterIntent ||
+		(intent.where?.kind === 'and' &&
+			intent.where.conditions[0] === rootFilterIntent);
+	if (rootDefaultFilter && !alreadyApplied)
+		where = where
+			? { kind: 'and', conditions: [rootDefaultFilter, where] }
+			: rootDefaultFilter;
+
+	const expressionConditions: NonNullable<
+		SelectExecution['expressionConditions']
+	>[number][] = [];
+	const expressionSubqueries: NonNullable<
+		SelectExecution['expressionSubqueries']
+	>[number][] = [];
+	// Visit each occurrence, but leave cyclic metadata to the compiler's refusal.
+	const inspected = new WeakSet<object>();
+	const inspect = (value: unknown, intentPath: string): void => {
+		if (!value || typeof value !== 'object' || isParamIntent(value)) return;
+		if (inspected.has(value)) return;
+		inspected.add(value);
+		if (Array.isArray(value)) {
+			value.forEach((child, index) => {
+				inspect(child, `${intentPath}[${index}]`);
+			});
+			inspected.delete(value);
+			return;
+		}
+		const node = value as Record<string, unknown>;
+		if (node.kind === 'literal' || node.kind === 'param') return;
+		if (
+			node.kind === 'pseudoColumn' &&
+			getDefaultFilter(options.defaultFilters, rootRange.table)
+		)
+			throw new Error(
+				`Default filter for table '${rootRange.table}' is not supported at expression.pseudoColumn.`,
+			);
+		// Issued bodies own their policy even when the enclosing map is empty.
+		// Preserve legacy lowering for bodies without an issuing builder.
+		if (node.kind === 'subquery' && node.query) {
+			const query = node.query as QueryIntent;
+			if (
+				!model ||
+				(!getRelationalReadPolicy(query) &&
+					!findDefaultFilterScan(
+						query,
+						model,
+						options.defaultFilters,
+						intentPath,
+					))
+			)
+				return;
+			const resolved = resolveConditionContext(
+				{ kind: 'expression', expr: { kind: 'subquery', query } },
+				rootRange,
+				visible,
+				[],
+				allocator,
+				model,
+				0,
+				[],
+				{ defaultFilters: options.defaultFilters },
+			);
+			if (
+				resolved?.kind === 'expression' &&
+				resolved.expression.kind === 'subquery'
+			)
+				expressionSubqueries.push({
+					intentPath,
+					body: resolved.expression.body,
+				});
+			inspected.delete(value);
+			return;
+		}
+		const predicate =
+			[
+				'exists',
+				'notExists',
+				'relationFilter',
+				'rawExists',
+				'rawNotExists',
+			].includes(String(node.kind)) ||
+			(node.kind === 'subquery' && node.subquery) ||
+			(node.kind === 'in' && node.subquery) ||
+			(typeof node.field === 'string' && node.field.includes('.'));
+		if (
+			predicate &&
+			model &&
+			((node.subquery &&
+				getRelationalReadPolicy(node.subquery as QueryIntent)) ||
+				findDefaultFilterScan(
+					{ type: 'select', from: rootRange.table, where: node },
+					model,
+					options.defaultFilters,
+					intentPath,
+					true,
+				))
+		) {
+			const condition = resolveConditionContext(
+				node as unknown as WhereIntent,
+				rootRange,
+				visible,
+				[],
+				allocator,
+				model,
+				0,
+				[],
+				{ defaultFilters: options.defaultFilters },
+			);
+			if (!condition)
+				throw new Error(`Missing resolved condition at ${intentPath}`);
+			expressionConditions.push({ intentPath, condition });
+			inspected.delete(value);
+			return;
+		}
+		for (const [key, child] of Object.entries(node)) {
+			if (
+				(key === 'value' || key === 'values') &&
+				(!child || typeof child !== 'object' || !(EXPRESSION_BRAND in child))
+			)
+				continue;
+			inspect(child, `${intentPath}.${key}`);
+		}
+		inspected.delete(value);
+	};
+	inspect(intent.select, 'select');
+	inspect(intent.orderBy, 'orderBy');
+	inspect(intent.having, 'having');
+	return {
+		rootRange,
+		joins,
+		includes,
+		...(where && { where }),
+		...(expressionSubqueries.length && { expressionSubqueries }),
+		...(expressionConditions.length && { expressionConditions }),
+	};
 }
 /** Include decisions retain observations only; resolved authority belongs to execution. */
 export function observeIncludeDecisions(

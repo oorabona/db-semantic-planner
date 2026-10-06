@@ -487,6 +487,8 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 * ```
 	 */
 	withSchema(schemaName: string): OrmInstance<DB>;
+	/** Return a view whose reads omit schema default filters. */
+	withoutDefaultFilters(): OrmInstance<DB>;
 
 	// =========================================================================
 	// Hierarchy List Methods (DX-022)

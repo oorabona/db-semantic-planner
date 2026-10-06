@@ -1,4 +1,7 @@
-import { compileResolvedCondition } from './resolved-condition-compiler.js';
+import {
+	compileResolvedCondition,
+	compileResolvedSubqueryBody,
+} from './resolved-condition-compiler.js';
 /**
  * PlanReport Compiler
  *
@@ -428,6 +431,17 @@ export interface SimplifiedPlanReport {
 	/** Legacy SELECT-expression / NQL body predicate (HAVING, CASE and FILTER still use it); issued root WHERE uses resolvedWhere. */
 	readonly rawWhere?: WhereIntent;
 	readonly resolvedWhere?: import('@dbsp/types').ResolvedCondition;
+	readonly expressionConditions?: readonly {
+		readonly intent: WhereIntent;
+		readonly condition: import('@dbsp/types').ResolvedCondition;
+	}[];
+	readonly expressionSubqueries?: readonly {
+		readonly expression: ExpressionIntent;
+		readonly body: Extract<
+			import('@dbsp/types').ResolvedSubqueryBody,
+			{ use: 'scalar' }
+		>;
+	}[];
 	readonly rawHaving?: WhereIntent;
 	readonly directConditions?: boolean;
 	readonly enclosingRanges?: HandlerCompilerContext['enclosingRanges'];
@@ -1403,11 +1417,27 @@ export class PlanCompiler {
 				aliasColumnAuthorities: this.aliasColumnAuthorities,
 			}),
 			...(this.model != null && { model: this.model }),
+			...(plan.expressionConditions && {
+				resolvedConditions: new Map(
+					plan.expressionConditions.map((entry) => [
+						entry.intent,
+						entry.condition,
+					]),
+				),
+			}),
 			compileSubquery: (
 				query: QueryIntent,
 				paramOffset: number,
 				parent?: HandlerCompilerContext,
-			) => this.compileExpressionSubquery(query, paramOffset, plan, parent),
+				expression?: ExpressionIntent,
+			) =>
+				this.compileExpressionSubquery(
+					query,
+					paramOffset,
+					plan,
+					parent,
+					expression,
+				),
 			compileNqlSelectExpression: (
 				value: unknown,
 				handlerCtx: HandlerCompilerContext,
@@ -1907,10 +1937,25 @@ export class PlanCompiler {
 		paramOffset: number,
 		parentPlan: SimplifiedPlanReport,
 		parentContext?: HandlerCompilerContext,
+		expression?: ExpressionIntent,
 	): {
 		ast: Node;
 		parameters: readonly unknown[];
 	} {
+		const resolved = parentPlan.expressionSubqueries?.find(
+			(entry) => expression !== undefined && entry.expression === expression,
+		);
+		if (resolved) {
+			const state = this.createHandlerState();
+			state.parameters = [];
+			state.paramIndex = paramOffset;
+			const ast = compileResolvedSubqueryBody(
+				resolved.body,
+				parentContext ?? this.createHandlerContext(parentPlan),
+				state,
+			);
+			return { ast, parameters: state.parameters };
+		}
 		if (!parentPlan.directConditions) {
 			assertNoSelectExpressionCorrelation(query);
 			const innerCompiler = new PlanCompiler(this.childCompilerOptions());

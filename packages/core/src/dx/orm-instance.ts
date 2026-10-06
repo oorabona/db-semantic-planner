@@ -8,6 +8,7 @@ import {
 	supportsTransactions,
 	type TransactionOptions,
 } from '../adapter.js';
+import { copyDefaultFilters } from '../default-filter-map.js';
 import type { DialectCapabilities } from '../dialects/index.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanOptions } from '../planner.js';
@@ -519,7 +520,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 	onObserverError?: ObserverErrorHandler,
 ): OrmInstanceInternal<DB> {
 	defaultFilters = defaultFilters
-		? Object.assign(Object.create(null), defaultFilters)
+		? copyDefaultFilters(defaultFilters)
 		: undefined;
 	// Create NQL template tag (DX-040)
 	// NQL compiler is now integrated directly - @dbsp/nql is imported in nql.ts
@@ -571,6 +572,24 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 	);
 
 	return {
+		withoutDefaultFilters(): OrmInstanceInternal<DB> {
+			return createOrmInstance(
+				model,
+				strictMode,
+				relationHints,
+				adapter,
+				schemaName,
+				dialectCapabilities,
+				schemaDefinition,
+				globalPlanOptions,
+				undefined,
+				hookStore,
+				onHookError,
+				inTransaction,
+				tablesProxy,
+				onObserverError,
+			);
+		},
 		strictMode,
 		// Reflect the REAL transaction state of the backing adapter so callers can
 		// enforce a top-level precondition. This is authoritative even when the ORM

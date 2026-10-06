@@ -1,3 +1,5 @@
+import { andExpr } from '../../ast-helpers.js';
+import { compileResolvedCondition } from '../../resolved-condition-compiler.js';
 /**
  * LATERAL Include Strategy Handler
  *
@@ -74,16 +76,24 @@ function buildLateralSubquery(
 	limit: number | undefined,
 	decision: Decision,
 	ctx: CompilerContext,
+	state: CompilerState,
 ): Node {
 	// Build the correlation condition
 	// LATERAL can reference outer columns directly
-	const whereClause = buildKeyCorrelation(
+	let whereClause = buildKeyCorrelation(
 		innerAlias,
 		targetColumn,
 		outerAlias,
 		sourceColumn,
 		ctx,
 	);
+
+	const defaultFilter = decision.resolvedInclude?.defaultFilter;
+	if (defaultFilter)
+		whereClause = andExpr(
+			whereClause,
+			compileResolvedCondition(defaultFilter, ctx, state),
+		);
 
 	// Build target list
 	const targetList = buildLateralTargets(columns, innerAlias, ctx);
@@ -259,6 +269,7 @@ function compileLateralCascade(
 		limit,
 		decision,
 		scopedCtx,
+		state,
 	);
 
 	// Build the JOIN LATERAL
