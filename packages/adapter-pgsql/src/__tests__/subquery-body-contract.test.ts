@@ -430,8 +430,8 @@ it('canonical subquery body avoids repeated recursive validation', () => {
 		.where(inSubquery('id', subquery('posts').select('id').where(body)))
 		.dump();
 	expect(result.params).toEqual([]);
-	// One validation read plus the retained lowering/handler reads.
-	expect(reads).toBe(3);
+	// The resolver validates once; emission never rereads the authored body.
+	expect(reads).toBe(1);
 });
 
 it('qualified outerRef binds nearest enclosing same-table query at depth three', () => {

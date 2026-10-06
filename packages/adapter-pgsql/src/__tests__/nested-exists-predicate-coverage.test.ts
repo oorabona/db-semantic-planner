@@ -6,8 +6,8 @@
  * to `default: return []` in convertWhereToDecisions, silently dropping the
  * predicate and broadening the filter.
  *
- * Fix: convertWhereToDecisions now delegates missing kinds to convertWhereCondition
- * (which applies all guards), and the default throws an exhaustive error.
+ * Fix: resolveSelectWhere preserves every nested predicate in execution.where
+ * and refuses unknown predicate kinds before SQL emission.
  */
 
 import {

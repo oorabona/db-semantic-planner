@@ -403,3 +403,11 @@ All standard filter helpers (`eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like`, `and
 - **Multiple joins nest left-to-right** — the SQL FROM clause wraps joins progressively: `((A JOIN B) JOIN C)`. This matches standard PostgreSQL left-associative join behavior and is transparent to the query result.
 
 A report passed to `adapter.compile()` whose intent, execution, or decisions declare joins must have been planned by the same loaded copy of dbsp (`plan()`, the ORM, or NQL). Copies and hand-built reports are refused. `compilePlan` compiles the decisions it is given.
+
+## WHERE qualifiers and planning
+
+In a SELECT's WHERE, a qualified field starts at a visible range when its first segment names the root table or alias, or a manual join alias. Middle segments traverse declared relations and the last segment names the column. Otherwise the whole dotted path starts at the root as a relation path. For example, `.join('caller').where(eq('caller.name', 'Ada'))` filters the joined `caller` range directly; `caller.posts.title` traverses `posts` from that range. Unqualified fields inside a relation predicate bind to its target.
+
+With two visible ranges of the same logical table, an exact alias binds to that range; the bare logical table name is ambiguous and refused with the aliases named. `outerRef()` searches enclosing queries nearest first: an exact alias wins, otherwise the logical table must identify a unique range in that scope. An unqualified `outerRef()` binds to the immediately enclosing query.
+
+`plan()` resolves the optimized root WHERE into `execution.where`, including relation paths, declared keys and subquery ranges. Compilation uses that tree; expression references render with their range qualifier. Undeclared relations, missing declared foreign keys, many-to-many traversal and recursive relation predicates are refused during planning.

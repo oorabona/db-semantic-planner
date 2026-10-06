@@ -114,7 +114,7 @@ describe('3. op() expression in WHERE with gte', () => {
 		const lineCount = op('-', 'end_line', 'start_line');
 		const dump = orm.select('symbols').where(lineCount.gte(50)).dump();
 		expect(ws(dump.sql)).toEqual(
-			'SELECT symbols.* FROM symbols WHERE (end_line - start_line) >= $1',
+			'SELECT symbols.* FROM symbols WHERE (symbols.end_line - symbols.start_line) >= $1',
 		);
 		expect(dump.params).toEqual([50]);
 	});

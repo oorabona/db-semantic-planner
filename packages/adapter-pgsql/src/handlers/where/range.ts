@@ -54,43 +54,72 @@ export const rangeHandler: WhereHandler = {
 
 		const columnNode = buildColumnRef(column, ctx);
 
-		let paramValue: unknown;
-		let isScalar = false;
-		if (value !== rawValue) {
-			paramValue = value;
-		} else if (isRangeValue(value)) {
-			const lower = value.lower ?? '';
-			const upper = value.upper ?? '';
-			paramValue = `[${lower},${upper})`;
-		} else if (typeof value === 'string' && /^\[.*,.*[)\]]$/.test(value)) {
-			paramValue = value;
-		} else {
-			paramValue = value;
-			isScalar = true;
-		}
-
-		const paramIdx = ++state.paramIndex;
-		state.parameters.push(paramValue);
-
-		let castType = decision.dataType;
-		if (castType && isScalar) {
-			castType = castType.replace(/range$/, '');
-			if (castType === 'int4') castType = 'integer';
-			if (castType === 'int8') castType = 'bigint';
-			if (castType === 'tstz') castType = 'timestamptz';
-			if (castType === 'ts') castType = 'timestamp';
-		}
-		const rexpr = castType
-			? createTypeCastParamRef(paramIdx, castType)
-			: createParamRef(paramIdx);
-
-		return {
-			A_Expr: {
-				kind: 'AEXPR_OP',
-				name: [{ String: { sval: pgOp } }],
-				lexpr: columnNode,
-				rexpr,
-			},
-		};
+		return compileRange(
+			columnNode,
+			pgOp,
+			rawValue,
+			value,
+			state,
+			decision.dataType,
+		);
 	},
 };
+
+/** Typed range primitive; the wrapper supplies the legacy authored cast policy. */
+export function compileRange(
+	columnNode: Node,
+	pgOp: string,
+	rawValue: unknown,
+	value: unknown,
+	state: CompilerState,
+	dataType?: string,
+): Node {
+	let paramValue: unknown;
+	let isScalar = false;
+	if (value !== rawValue) {
+		paramValue = value;
+	} else if (isRangeValue(value)) {
+		const lower = value.lower ?? '';
+		const upper = value.upper ?? '';
+		paramValue = `[${lower},${upper})`;
+	} else if (typeof value === 'string' && /^\[.*,.*[)\]]$/.test(value)) {
+		paramValue = value;
+	} else {
+		paramValue = value;
+		isScalar = true;
+	}
+
+	let castType = dataType;
+	if (castType && isScalar) {
+		castType = castType.replace(/range$/, '');
+		if (castType === 'int4') castType = 'integer';
+		if (castType === 'int8') castType = 'bigint';
+		if (castType === 'tstz') castType = 'timestamptz';
+		if (castType === 'ts') castType = 'timestamp';
+	}
+	return compileRangeParameter(columnNode, pgOp, paramValue, state, castType);
+}
+
+/** Parameter emission after the caller has resolved range/element cast policy. */
+export function compileRangeParameter(
+	columnNode: Node,
+	pgOp: string,
+	value: unknown,
+	state: CompilerState,
+	castType?: string,
+): Node {
+	const paramIdx = ++state.paramIndex;
+	state.parameters.push(value);
+	const rexpr = castType
+		? createTypeCastParamRef(paramIdx, castType)
+		: createParamRef(paramIdx);
+
+	return {
+		A_Expr: {
+			kind: 'AEXPR_OP',
+			name: [{ String: { sval: pgOp } }],
+			lexpr: columnNode,
+			rexpr,
+		},
+	};
+}

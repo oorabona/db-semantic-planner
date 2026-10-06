@@ -17,7 +17,7 @@ import { buildColumnRef } from './utils.js';
 /**
  * Create a NullTest node
  */
-function nullTestExpr(arg: Node, isNull: boolean): Node {
+export function compileNull(arg: Node, isNull: boolean): Node {
 	const nullTest: NullTest = {
 		arg,
 		nulltesttype: isNull ? 'IS_NULL' : 'IS_NOT_NULL',
@@ -47,9 +47,9 @@ export const nullHandler: WhereHandler = {
 		const columnNode = buildColumnRef(column, ctx);
 
 		if (operator === NULL_OPERATORS.IS_NULL || operator === 'isNull') {
-			return nullTestExpr(columnNode, true);
+			return compileNull(columnNode, true);
 		}
 
-		return nullTestExpr(columnNode, false);
+		return compileNull(columnNode, false);
 	},
 };

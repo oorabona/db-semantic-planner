@@ -268,6 +268,18 @@ export type {
 // Shared utility types
 
 export type {
+	ResolvedCast,
+	ResolvedColumnOperand,
+	ResolvedCondition,
+	ResolvedExpression,
+	ResolvedOrder,
+	ResolvedParameter,
+	ResolvedProjection,
+	ResolvedRelationPredicate,
+	ResolvedRhs,
+	ResolvedSubqueryBody,
+} from './resolved-conditions.js';
+export type {
 	RangeId,
 	ResolvedIncludeNode,
 	ResolvedJoin,

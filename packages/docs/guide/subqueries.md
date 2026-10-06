@@ -139,7 +139,7 @@ orm.select('products')
 
 Source: `packages/core/src/dx/subquery-builder.ts:288` — `outerRef(column)` returns a `SubqueryRefIntent`.
 
-Query WHERE scalar comparisons and `inSubquery()` compile the body with its own alias and resolve unqualified `outerRef()` to the immediately enclosing query and qualified references by searching enclosing queries nearest first: an exact emitted qualifier wins; otherwise a logical table must have exactly one range in that query, with multiple ranges refused as ambiguous and their aliases named. `rawExists()` and `rawNotExists()` use the same body compiler; correlated bodies compile in query WHERE and are refused in aggregate FILTER and recursive `start.where` anchors. A query WHERE that also contains a dotted relation path such as `eq('caller.name', 'Ada')`, and a join include's `where`, still compile through the earlier route, which refuses correlated bodies. All levels share one parameter sequence. SELECT-expression subquery bodies use this canonical route too, with their own emitted alias. Legacy `compilePlan()` retains its existing correlation restrictions.
+Query WHERE scalar comparisons and `inSubquery()` compile the body with its own alias and resolve unqualified `outerRef()` to the immediately enclosing query and qualified references by searching enclosing queries nearest first: an exact emitted qualifier wins; otherwise a logical table must have exactly one range in that query, with multiple ranges refused as ambiguous and their aliases named. `rawExists()` and `rawNotExists()` use the same body compiler; correlated bodies compile in query WHERE and are refused in aggregate FILTER and recursive `start.where` anchors. Root WHERE bodies, including those combined with dotted relation paths, resolve during `plan()`; see [WHERE qualifiers](./joins#where-qualifiers-and-planning). A join include's `where` retains its earlier route and correlation restrictions. All levels share one parameter sequence. SELECT-expression subquery bodies use this canonical route too, with their own emitted alias. Legacy `compilePlan()` retains its existing correlation restrictions.
 
 ---
 
@@ -177,3 +177,7 @@ A `SubqueryBuilder` or `SubqueryExpression` has no `.all()` or `.execute()` meth
 - [Set Operations](./set-operations) — UNION, INTERSECT, EXCEPT
 - [Joins](./joins) — explicit JOIN alternatives to subqueries
 - [Expression Primitives](./expression-primitives) — raw operator composition for unsupported subquery patterns
+
+## Planning refusals
+
+Bodies reached from the root WHERE carry their own resolved ranges and share the query's allocator. Unsupported options refuse at `plan()` with the existing compilation message. `rawExists()` / `rawNotExists()` reject ORDER BY and LIMIT; scalar-comparison bodies retain supported field ordering and LIMIT. Legacy direct scalar bodies outside this route retain their ORDER BY/LIMIT refusals. IN bodies require one named projected column and reject aggregate SELECT, GROUP BY, HAVING, OFFSET, DISTINCT ON, locks and other unsupported structural modifiers. Scalar subqueries used as expressions keep their supported projection, ordering and limit options.

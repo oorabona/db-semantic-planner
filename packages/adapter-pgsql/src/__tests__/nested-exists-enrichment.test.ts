@@ -684,61 +684,63 @@ describe('scalar-direct guard: limit and orderBy rejected on direct path', () =>
 describe('nested multi-hop fail-closed for undeclared hops', () => {
 	it('exists(posts) wrapping relationFilter([comments,undeclared]) throws at undeclared hop', () => {
 		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
-		const planReport = plan(
-			{
-				type: 'select',
-				from: 'users',
-				where: {
-					kind: 'exists',
-					relation: 'posts',
+		const planReport = () =>
+			plan(
+				{
+					type: 'select',
+					from: 'users',
 					where: {
-						kind: 'relationFilter',
-						relation: ['comments', 'undeclared'] as unknown as string,
+						kind: 'exists',
+						relation: 'posts',
 						where: {
-							kind: 'comparison',
-							field: 'body',
-							operator: 'eq',
-							value: 'x',
+							kind: 'relationFilter',
+							relation: ['comments', 'undeclared'] as unknown as string,
+							where: {
+								kind: 'comparison',
+								field: 'body',
+								operator: 'eq',
+								value: 'x',
+							},
+							mode: 'some',
 						},
-						mode: 'some',
 					},
 				},
-			},
-			testSchema.model,
-			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
-		);
+				testSchema.model,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 		expect(() =>
-			adapter.compile(planReport, { model: testSchema.model }),
+			adapter.compile(planReport(), { model: testSchema.model }),
 		).toThrow(/no relation 'undeclared' (?:is )?declared on table 'comments'/i);
 	});
 
 	it('exists(posts) wrapping relationFilter([undeclared]) throws on first hop', () => {
 		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
-		const planReport = plan(
-			{
-				type: 'select',
-				from: 'users',
-				where: {
-					kind: 'exists',
-					relation: 'posts',
+		const planReport = () =>
+			plan(
+				{
+					type: 'select',
+					from: 'users',
 					where: {
-						kind: 'relationFilter',
-						relation: ['undeclared'] as unknown as string,
+						kind: 'exists',
+						relation: 'posts',
 						where: {
-							kind: 'comparison',
-							field: 'col',
-							operator: 'eq',
-							value: 1,
+							kind: 'relationFilter',
+							relation: ['undeclared'] as unknown as string,
+							where: {
+								kind: 'comparison',
+								field: 'col',
+								operator: 'eq',
+								value: 1,
+							},
+							mode: 'some',
 						},
-						mode: 'some',
 					},
 				},
-			},
-			testSchema.model,
-			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
-		);
+				testSchema.model,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 		expect(() =>
-			adapter.compile(planReport, { model: testSchema.model }),
+			adapter.compile(planReport(), { model: testSchema.model }),
 		).toThrow(/no relation 'undeclared' (?:is )?declared on table 'posts'/i);
 	});
 

@@ -213,7 +213,7 @@ export interface WhereExistsIntent {
 	readonly where?: WhereIntent;
 	/**
 	 * Recursive options for ancestor/descendant existence checks.
-	 * When present, generates a recursive CTE instead of simple EXISTS.
+	 * When present, `plan()` refuses this recursive WHERE relation predicate.
 	 */
 	readonly recursive?: RecursiveExistsOptions;
 	/**
@@ -245,7 +245,7 @@ export interface WhereNotExistsIntent {
 	readonly where?: WhereIntent;
 	/**
 	 * Recursive options for ancestor/descendant absence checks.
-	 * When present, generates a recursive CTE instead of simple NOT EXISTS.
+	 * When present, `plan()` refuses this recursive WHERE relation predicate.
 	 */
 	readonly recursive?: RecursiveExistsOptions;
 	/**

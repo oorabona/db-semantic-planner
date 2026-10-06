@@ -87,7 +87,7 @@
 			"heuristic-fragment": 0
 		},
 		"packages/docs/guide/exists-vs-rawexists.md": {
-			"explicit-skip": 1,
+			"explicit-skip": 0,
 			"real-db-only": 0,
 			"heuristic-fragment": 0
 		},

@@ -2210,10 +2210,10 @@ describe('PgAdapter - Coverage Tests', () => {
 				},
 			} as any;
 
-			// Without a model the adapter cannot resolve 'author' — it must throw.
+			// Unissued relation reports refuse before attempting model resolution.
 			// Use rawExists(subquery(...)) for EXISTS over uncorrelated/undeclared targets.
 			expect(() => adapter.compile(plan)).toThrow(
-				/exists\('author'\).*cannot resolve relation 'author'.*no model/i,
+				'Conditions with relation paths, outer references or subqueries compile only from a report planned in this process',
 			);
 		});
 	});

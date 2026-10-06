@@ -187,26 +187,27 @@ describe('2. fail-closed guard — declared multi-hop path does not throw', () =
 		const adapterLocal = createPgCompileOnlyAdapter({
 			model: schemaWithAuditLog.model,
 		});
-		const planReport = plan(
-			{
-				type: 'select',
-				from: 'users',
-				where: {
-					kind: 'exists',
-					relation: 'auditLog',
+		const planReport = () =>
+			plan(
+				{
+					type: 'select',
+					from: 'users',
 					where: {
-						kind: 'comparison',
-						field: 'entityType',
-						operator: 'eq',
-						value: 'login',
-					},
-				} as any,
-			},
-			schemaWithAuditLog.model,
-			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
-		);
+						kind: 'exists',
+						relation: 'auditLog',
+						where: {
+							kind: 'comparison',
+							field: 'entityType',
+							operator: 'eq',
+							value: 'login',
+						},
+					} as any,
+				},
+				schemaWithAuditLog.model,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			);
 		expect(() =>
-			adapterLocal.compile(planReport, { model: schemaWithAuditLog.model }),
+			adapterLocal.compile(planReport(), { model: schemaWithAuditLog.model }),
 		).toThrow(/exists\('auditLog'\).*no relation 'auditLog'.*declared/i);
 	});
 });

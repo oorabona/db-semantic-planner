@@ -19,6 +19,7 @@ import {
 } from '@dbsp/types/internal';
 import { singularize } from './conventions.js';
 import { InvalidOperationError } from './dx/errors.js';
+import { resolveSelectWhere } from './resolved-conditions.js';
 
 /** Called during planning or once after legacy boundary validation. Never by SQL emission. */
 export function resolveReportIncludes(
@@ -26,25 +27,23 @@ export function resolveReportIncludes(
 	decisions: readonly PlanDecision[],
 	model: ModelIR | undefined,
 	options: {
+		whereReservedNames?: readonly string[];
 		defaultPk?: string;
 		deriveFk?: (table: string, pk: string) => string;
 	} = {},
 ): SelectExecution {
 	const allocator = new RangeAllocator();
-	const rootRange = allocator.allocate(intent.from, intent.from);
+	const rootRange = allocator.bind(intent.from, intent.from);
 	allocator.reserve(rootRange.alias);
+	for (const name of options.whereReservedNames ?? []) allocator.reserve(name);
 	const rangesByPath = new Map<
 		string,
 		{ target: ResolvedRange; output: ResolvedRange }
 	>();
-	const occupied = new Set([rootRange.alias]);
 	const joins: ResolvedJoin[] = (intent.joins ?? []).map(
 		(join, intentIndex) => {
 			const alias =
 				join.alias ?? join.relation ?? join.batchValues?.alias ?? join.table!;
-			if (occupied.has(alias))
-				throw new Error(`Query scope already binds qualifier '${alias}'.`);
-			occupied.add(alias);
 			let table = join.table ?? alias;
 			let path: ResolvedJoin['path'];
 			if (join.relation !== undefined) {
@@ -73,7 +72,7 @@ export function resolveReportIncludes(
 				path = resolved;
 				table = resolved.targetTable;
 			}
-			const range = allocator.allocate(table, alias);
+			const range = allocator.bind(table, alias);
 			allocator.reserve(range.alias);
 			return {
 				intentPath: `join[${intentIndex}]`,
@@ -241,6 +240,7 @@ export function resolveReportIncludes(
 			const aliasIndex = generatedAliases.get(rootPath) ?? 0;
 			if (strategy === 'lateral' || (strategy === 'cte' && !recursion))
 				generatedAliases.set(rootPath, aliasIndex + 1);
+			// Include range aliases are derived from relation paths, not caller-authored AS names.
 			const targetRange =
 				rangesByPath.get(relationPath)?.target ??
 				allocator.allocate(
@@ -324,7 +324,26 @@ export function resolveReportIncludes(
 			};
 			return node;
 		});
-	return { rootRange, joins, includes: visit(intent.include ?? [], rootRange) };
+	const includes = visit(intent.include ?? [], rootRange);
+	const joinedIncludes = (
+		nodes: readonly ResolvedIncludeNode[],
+	): ResolvedRange[] =>
+		nodes.flatMap((n) =>
+			n.strategy === 'join'
+				? [n.outputRange, ...joinedIncludes(n.children)]
+				: [],
+		);
+	const includeRanges = joinedIncludes(includes);
+	const where = resolveSelectWhere(
+		intent.where,
+		rootRange,
+		[rootRange, ...joins.map((j) => j.range)],
+		allocator,
+		model,
+		joins.length + includeRanges.length,
+		includeRanges,
+	);
+	return { rootRange, joins, includes, ...(where && { where }) };
 }
 /** Include decisions retain observations only; resolved authority belongs to execution. */
 export function observeIncludeDecisions(

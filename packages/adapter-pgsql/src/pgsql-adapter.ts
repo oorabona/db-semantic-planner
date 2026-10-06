@@ -2236,7 +2236,7 @@ function compileNqlRuntimeBindingCte(
 	};
 }
 
-function createNqlBindingSelectPlan(
+export function createNqlBindingSelectPlan(
 	query: QueryIntent,
 	model: ModelIR | undefined,
 ): PlanReport {

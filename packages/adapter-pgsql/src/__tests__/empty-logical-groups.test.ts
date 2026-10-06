@@ -24,7 +24,6 @@ import { describe, expect, it } from 'vitest';
 import { compilePlan } from '../compiler.js';
 import { convertWhereCondition } from '../intent-to-decisions.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
-import { convertWhereToDecisions } from '../plan-decision-extractor.js';
 
 const testSchema = schema({
 	users: {
@@ -381,13 +380,5 @@ describe('#888 empty logical groups', () => {
 				expect(result.sql).toBe('SELECT * FROM users');
 				expect(result.parameters).toEqual([]);
 			});
-		it(`${kind} extractor with null child keeps omission`, () => {
-			expect(
-				convertWhereToDecisions(
-					{ kind, conditions: [{ kind: 'subquery' }] },
-					'users',
-				),
-			).toEqual([]);
-		});
 	}
 });

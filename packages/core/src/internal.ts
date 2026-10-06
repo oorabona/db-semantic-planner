@@ -100,6 +100,11 @@ export {
 	validateResolvedIncludeStrategy,
 } from './planner.js';
 export {
+	conditionNeedsPlanning,
+	externalConditionRefusal,
+	resolveSelectWhere,
+} from './resolved-conditions.js';
+export {
 	observeIncludeDecisions,
 	resolveReportIncludes,
 } from './resolved-includes.js';

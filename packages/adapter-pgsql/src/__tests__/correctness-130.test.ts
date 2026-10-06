@@ -35,7 +35,6 @@ import {
 import { createCompilerState } from '../handlers/types.js';
 import { convertWhereCondition, isOuterRef } from '../intent-to-decisions.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
-import { convertWhereToDecisions } from '../plan-decision-extractor.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -231,7 +230,7 @@ describe('DEFECT 1: single-hop relationFilter threads declared FK columns', () =
 	// -------------------------------------------------------------------------
 	// NEW: DEFECT 1 — nested exists drops its include joins
 	//
-	// Before the fix, convertWhereToDecisions created exists stubs with _rawWhere
+	// Before the fix, the legacy extractor created exists stubs with _rawWhere
 	// but silently dropped w.include.  enrichExistsStubsInConditions never saw the
 	// include so the EXISTS handler never emitted the JOIN inside the subquery,
 	// producing broadened / missing-alias SQL.
@@ -1207,7 +1206,7 @@ describe('NEW-DEFECT-1 (vacuous-every relation validation): undeclared relation 
 // ============================================================================
 // NEW DEFECT 2 (PR #130 correctness suite)
 //
-// Nested range/between in plan-decision-extractor convertWhereToDecisions was
+// Nested range/between in the legacy extractor was
 // hand-rolling the value conversion, passing the { lower, upper } object
 // unchanged into a decision that the BETWEEN handler requires to be a
 // [min, max] two-element array — causing a runtime throw or wrong SQL inside
@@ -1218,7 +1217,7 @@ describe('NEW-DEFECT-1 (vacuous-every relation validation): undeclared relation 
 // ============================================================================
 
 describe('NEW-DEFECT-2 (nested range/between delegation): nested between in exists where compiles correctly', () => {
-	it('convertWhereToDecisions with range kind { lower, upper } produces correct BETWEEN decision', () => {
+	it('convertWhereCondition with range kind { lower, upper } produces correct BETWEEN decision', () => {
 		// This is the shape produced by the NQL BETWEEN compiler:
 		//   { kind: 'range', field: 'views', operator: 'between', value: { lower: 10, upper: 100 } }
 		// Before fix: value passed as-is → BETWEEN handler received { lower, upper } object
@@ -1230,7 +1229,7 @@ describe('NEW-DEFECT-2 (nested range/between delegation): nested between in exis
 			operator: 'between' as const,
 			value: { lower: 10, upper: 100 },
 		};
-		const decisions = convertWhereToDecisions(rangeIntent, 'posts');
+		const decisions = [convertWhereCondition(rangeIntent, 'posts')];
 		expect(decisions).toHaveLength(1);
 		const d = decisions[0];
 		expect(d?.type).toBe('where');
@@ -1293,23 +1292,6 @@ describe('NEW-DEFECT-2 (nested range/between delegation): nested between in exis
 		expect(Array.from(params)).toContain(10);
 		expect(Array.from(params)).toContain(100);
 	});
-
-	it('range operator:gte with scalar value passes through unchanged (regression lock)', () => {
-		// The { operator:'gte', value:100 } shape is handled by the pass-through path —
-		// the BETWEEN handler never sees it; the gte/lte handler does.
-		// Regression lock: convertWhereToDecisions must NOT corrupt this shape.
-		const singleSideRange = {
-			kind: 'range' as const,
-			field: 'price',
-			operator: 'gte' as const,
-			value: 100,
-		};
-		const decisions = convertWhereToDecisions(singleSideRange, 'products');
-		expect(decisions).toHaveLength(1);
-		const d = decisions[0];
-		expect(d?.operator).toBe('gte');
-		expect(d?.value).toBe(100);
-	});
 });
 
 // ============================================================================
@@ -1358,16 +1340,16 @@ describe('NEW-DEFECT-3 (SubqueryRefIntent outer field): outerRef is type-safe an
 		expect(isOuterRef(innerRef)).toBe(false);
 	});
 
-	it('convertWhereToDecisions recognizes outer:true on a comparison value as a FieldRef', () => {
+	it('convertWhereCondition recognizes outer:true on a comparison value as a FieldRef', () => {
 		// A comparison where the value is an outerRef must produce a FieldRef decision
 		// (scope:'outer'), not a parameter — regression lock for the correlated-value path.
 		const comparisonIntent = {
 			kind: 'comparison' as const,
 			field: 'post_id',
-			operator: 'eq',
+			operator: 'eq' as const,
 			value: outerRef('id'),
 		};
-		const decisions = convertWhereToDecisions(comparisonIntent, 'comments');
+		const decisions = [convertWhereCondition(comparisonIntent, 'comments')];
 		expect(decisions).toHaveLength(1);
 		const d = decisions[0];
 		// Value must be converted to a FieldRef (not the raw outerRef object)

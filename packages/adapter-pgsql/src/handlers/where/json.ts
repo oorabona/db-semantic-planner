@@ -59,14 +59,7 @@ export const jsonContainsHandler: WhereHandler = {
 		const right = compileValue(decision.value, state);
 		const op = decision.operator === 'jsonContainedBy' ? '<@' : '@>';
 
-		return {
-			A_Expr: {
-				kind: 'AEXPR_OP',
-				name: [{ String: { sval: op } }],
-				lexpr: left,
-				rexpr: right,
-			},
-		};
+		return compileJsonOperator(left, right, op);
 	},
 };
 
@@ -94,14 +87,7 @@ export const jsonExistsHandler: WhereHandler = {
 		const left = buildColumnRef(column, ctx);
 		const right = compileValue(decision.value, state);
 
-		return {
-			A_Expr: {
-				kind: 'AEXPR_OP',
-				name: [{ String: { sval: '?' } }],
-				lexpr: left,
-				rexpr: right,
-			},
-		};
+		return compileJsonOperator(left, right, '?');
 	},
 };
 
@@ -142,14 +128,7 @@ export const jsonComparisonHandler: WhereHandler = {
 		for (let i = 0; i < jsonPath.length; i++) {
 			const isLast = i === jsonPath.length - 1;
 			const op = isLast && jsonMode === 'text' ? '->>' : '->';
-			node = {
-				A_Expr: {
-					kind: 'AEXPR_OP',
-					name: [{ String: { sval: op } }],
-					lexpr: node,
-					rexpr: compileValue(jsonPath[i]!, state),
-				},
-			};
+			node = compileJsonOperator(node, compileValue(jsonPath[i]!, state), op);
 		}
 
 		const nullComparison = compileLiteralNullComparison(
@@ -164,13 +143,22 @@ export const jsonComparisonHandler: WhereHandler = {
 			return distinctExpr(node, right);
 		}
 
-		return {
-			A_Expr: {
-				kind: 'AEXPR_OP',
-				name: [{ String: { sval: sqlOp } }],
-				lexpr: node,
-				rexpr: right,
-			},
-		};
+		return compileJsonOperator(node, right, sqlOp);
 	},
 };
+
+/** Typed JSON AST primitive; capability and value checks belong to the caller. */
+export function compileJsonOperator(
+	left: Node,
+	right: Node,
+	operator: string,
+): Node {
+	return {
+		A_Expr: {
+			kind: 'AEXPR_OP',
+			name: [{ String: { sval: operator } }],
+			lexpr: left,
+			rexpr: right,
+		},
+	};
+}

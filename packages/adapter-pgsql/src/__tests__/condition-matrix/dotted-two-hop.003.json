@@ -262,7 +262,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.comments.name' is absent from the physical model."
+			"error": "WHERE qualifier 'posts' is not visible in this query."
 		},
 		{
 			"position": "dotted-two-hop",
@@ -270,7 +270,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.comments.name' is absent from the physical model."
+			"error": "WHERE qualifier 'posts' is not visible in this query."
 		},
 		{
 			"position": "dotted-two-hop",
@@ -278,7 +278,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.comments.name' is absent from the physical model."
+			"error": "WHERE qualifier 'posts' is not visible in this query."
 		},
 		{
 			"position": "dotted-two-hop",
@@ -286,7 +286,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.comments.name' is absent from the physical model."
+			"error": "WHERE qualifier 'posts' is not visible in this query."
 		},
 		{
 			"position": "dotted-two-hop",
@@ -294,7 +294,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'posts.comments.name' is absent from the physical model."
+			"error": "WHERE qualifier 'posts' is not visible in this query."
 		},
 		{
 			"position": "dotted-two-hop",

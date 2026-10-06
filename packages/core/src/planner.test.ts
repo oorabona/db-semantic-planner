@@ -403,7 +403,7 @@ describe('Semantic Planner', () => {
 			expect(filterDecision).toBeUndefined();
 		});
 
-		it('should NOT optimize when subquery selects multiple fields', () => {
+		it('should refuse when subquery selects multiple fields', () => {
 			const intent: QueryIntent = {
 				type: 'select',
 				from: 'products',
@@ -418,13 +418,9 @@ describe('Semantic Planner', () => {
 				},
 			};
 
-			const report = plan(intent, q1Schema);
-
-			// Multi-column subquery — no optimization, no filter-strategy
-			const filterDecision = report.decisions.find(
-				(d) => d.type === 'filter-strategy',
+			expect(() => plan(intent, q1Schema)).toThrow(
+				'IN subquery with multi-field projection [productId, locale] (IN subquery must project exactly one named column — use a single field) is not supported — it would silently change which rows match; restructure the query or use a CTE.',
 			);
-			expect(filterDecision).toBeUndefined();
 		});
 
 		it('should optimize IN-subquery within AND conditions', () => {

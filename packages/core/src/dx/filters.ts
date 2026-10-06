@@ -489,14 +489,17 @@ export function not(condition: WhereIntent): WhereNotIntent {
 // ============================================================================
 
 /**
- * EXISTS subquery: filter by existence of related records
+ * EXISTS subquery: filter by existence of related records.
+ * Root SELECT WHERE resolves declared relation paths and keys at plan(); missing
+ * relations/keys, many-to-many traversal and recursive predicates refuse there.
+ * Unqualified nested fields bind to the target range.
  *
  * @param relation - Relation name defined in schema
  * @param options - Optional nested filter on related records, with optional recursive options
  *
  * @example exists('posts') → EXISTS (SELECT 1 FROM posts WHERE ...)
  * @example exists('posts', { where: eq('published', true) })
- * @example exists('ancestors', { recursive: { direction: 'up', through: 'parent', maxDepth: 10 }, where: eq('name', 'Electronics') })
+ * @example // Recursive predicates currently refuse at plan(): exists('ancestors', { recursive: { direction: 'up', through: 'parent', maxDepth: 10 }, where: eq('name', 'Electronics') })
  */
 export function exists(
 	relation: string,
@@ -520,13 +523,15 @@ export function exists(
 }
 
 /**
- * NOT EXISTS subquery: filter by absence of related records
+ * NOT EXISTS subquery: filter by absence of related records.
+ * Root SELECT WHERE resolves relation paths and keys at plan(), with the same
+ * declared-relation requirements and refusals as exists().
  *
  * @param relation - Relation name defined in schema
  * @param options - Optional nested filter on related records, with optional recursive options
  *
  * @example notExists('comments') → NOT EXISTS (SELECT 1 FROM comments WHERE ...)
- * @example notExists('ancestors', { recursive: { direction: 'up', through: 'parent' }, where: eq('name', 'Obsolete') })
+ * @example // Recursive predicates currently refuse at plan(): notExists('ancestors', { recursive: { direction: 'up', through: 'parent' }, where: eq('name', 'Obsolete') })
  */
 export function notExists(
 	relation: string,
@@ -559,6 +564,8 @@ export function notExists(
  * Accepts a SubqueryBuilder (must have `.build()`) or any builder
  * exposing `buildIntent(): QueryIntent` (e.g. QueryBuilder).
  *
+ * Root SELECT WHERE resolves body ranges and supported options at plan();
+ * unsupported modifiers refuse with the existing compilation message.
  * Correlated bodies using `outerRef()` compile in query WHERE and SELECT-expression
  * subquery WHERE bodies, including expressions nested in `op(...)`. Aggregate FILTER
  * and recursive `start.where` refuse correlated bodies at compile time.
@@ -591,6 +598,8 @@ export function rawExists(
  * Accepts a SubqueryBuilder (must have `.build()`) or any builder
  * exposing `buildIntent(): QueryIntent` (e.g. QueryBuilder).
  *
+ * Root SELECT WHERE resolves body ranges and supported options at plan();
+ * unsupported modifiers refuse with the existing compilation message.
  * Correlated bodies using `outerRef()` compile in query WHERE and SELECT-expression
  * subquery WHERE bodies, including expressions nested in `op(...)`. Aggregate FILTER
  * and recursive `start.where` refuse correlated bodies at compile time.
@@ -637,7 +646,9 @@ function getRelationName(
 }
 
 /**
- * EVERY quantifier: filter parent by condition that ALL related records must match
+ * EVERY quantifier: filter parent by condition that ALL related records must match.
+ * In root SELECT WHERE the relationFilter path and keys resolve at plan();
+ * unqualified filter fields bind to the target range.
  *
  * This generates SQL like: NOT EXISTS (SELECT 1 FROM related WHERE NOT condition)
  *
@@ -670,7 +681,8 @@ export function every<TTarget extends string, TTargetType>(
 }
 
 /**
- * NONE quantifier: filter parent by condition that NO related records match
+ * NONE quantifier: filter parent by condition that NO related records match.
+ * Root SELECT WHERE resolves the relationFilter path and declared keys at plan().
  *
  * This is equivalent to: NOT EXISTS (SELECT 1 FROM related WHERE condition)
  *
@@ -703,7 +715,8 @@ export function none<TTarget extends string, TTargetType>(
 }
 
 /**
- * SOME quantifier: filter parent by condition that at least one related record matches
+ * SOME quantifier: filter parent by condition that at least one related record matches.
+ * Root SELECT WHERE resolves the relationFilter path and declared keys at plan().
  *
  * This is the default behavior for relation filters and is equivalent to EXISTS.
  *

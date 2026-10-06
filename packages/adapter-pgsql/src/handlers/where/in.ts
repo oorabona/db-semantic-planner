@@ -170,16 +170,30 @@ export const inHandler: WhereHandler = {
 		const isNotIn =
 			operator === COLLECTION_OPERATORS.NOT_IN || operator === 'notIn';
 
-		if (
-			!supportsDialectCapability(ctx.dialectCapabilities, 'supportsArrayType')
-		) {
-			return createLiteralInListExpr(columnNode, state, values, isNotIn);
-		}
-
-		if (isNotIn) {
-			return createNotInExpr(columnNode, state, values, columnType);
-		}
-
-		return createInExpr(columnNode, state, values, columnType);
+		return compileInValues(
+			columnNode,
+			state,
+			values,
+			isNotIn,
+			columnType,
+			supportsDialectCapability(ctx.dialectCapabilities, 'supportsArrayType'),
+		);
 	},
 };
+
+/** Typed collection primitive after legacy value validation and unwrapping. */
+export function compileInValues(
+	column: Node,
+	state: CompilerState,
+	values: unknown[],
+	negated: boolean,
+	columnType: string | undefined,
+	supportsArrays: boolean,
+): Node {
+	if (!values.length) return booleanConstNode(negated);
+	if (!supportsArrays)
+		return createLiteralInListExpr(column, state, values, negated);
+	return negated
+		? createNotInExpr(column, state, values, columnType)
+		: createInExpr(column, state, values, columnType);
+}

@@ -281,6 +281,9 @@ export function subquery(table: string): SubqueryBuilder {
 /**
  * Create a reference to a parent query column.
  * Used in subquery WHERE conditions to create correlated subqueries.
+ * Root SELECT WHERE resolves it at plan(). Unqualified names bind to the
+ * immediately enclosing query; qualified names search nearest scopes first.
+ * Exact aliases win; a logical table with multiple visible ranges is refused.
  *
  * @param column - Column name (e.g., 'id') or qualified name (e.g., 't0.id')
  * @returns SubqueryRefIntent
