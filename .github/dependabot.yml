@@ -4,3 +4,7 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # A release younger than 14 days is not proposed, matching
+    # minimumReleaseAge in pnpm-workspace.yaml.
+    cooldown:
+      default-days: 14
