@@ -6,12 +6,12 @@ packages:
 # literal range into the manifest. It governs that path only — a hand-edited
 # manifest still needs scripts/check-catalog.mjs, which CI runs.
 catalogMode: strict
-# A version published less than a day ago is refused by `pnpm install`, in CI as
-# well (pnpm 11 default, restated so the choice is visible). A compromised
-# release is usually pulled within that window. Workspace packages are linked,
-# not installed, so the exclusion changes nothing here; it is the line a consumer
+# A version published less than 14 days ago is refused by `pnpm install`, in CI
+# as well, so a compromised or broken release has two weeks to be found and
+# pulled before it can enter the lockfile. Workspace packages are linked, not
+# installed, so the exclusion changes nothing here; it is the line a consumer
 # copies to install a @dbsp release the day it is published.
-minimumReleaseAge: 1440
+minimumReleaseAge: 20160
 minimumReleaseAgeExclude:
   - '@dbsp/*'
 # Which dependency build scripts may run. A name absent from this map is
