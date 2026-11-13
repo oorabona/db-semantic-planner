@@ -27,9 +27,9 @@ Use `include()` instead when you want nested hydration (e.g. `user.posts[]`).
 ```typescript
 // doctest: skip — API signature reference (TypeScript function signature, not executable code)
 // Overload 1 — Relation mode: FK auto-resolved from schema
-.join(relationName: string, opts?: {
-  type?: 'inner' | 'left';  // default: 'inner'
-  as?: string;              // output alias (optional)
+.join(relationPath: string, opts?: {
+  type?: 'inner' | 'left';            // default: 'inner', applied to every hop
+  as?: string | readonly string[];    // last hop's alias, or one alias per hop
 }): QueryBuilder<TResult>
 
 // Overload 2 — Table mode: explicit table + ON condition
@@ -41,8 +41,9 @@ Use `include()` instead when you want nested hydration (e.g. `user.posts[]`).
 ```
 
 **Mode discrimination:** the presence of `opts.on` determines the mode.
-- **No `on`** → relation mode: the first argument is a relation name defined in the schema;
-  the FK column and target table are resolved automatically.
+- **No `on`** → relation mode: the first argument is a relation name defined in the schema,
+  or a dotted relation path (`'callee.file'`); the FK columns and target tables are resolved
+  automatically, one JOIN per relation (see [Relation paths](#_9-relation-paths-several-hops)).
 - **With `on`** → table mode: the first argument is a raw table name; the ON condition
   must be provided explicitly.
 
@@ -382,6 +383,62 @@ const results = await orm.select('calls')
 All standard filter helpers (`eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like`, `and`,
 `or`, `not`, `isNull`, `isNotNull`, `inArray`) are valid in the `on` option.
 
+### 9. Relation paths (several hops)
+
+A dotted relation path joins one range per relation of the path. Each hop is correlated to the
+previous one (the root for the first) on every key pair the model declares, so composite keys need
+nothing more:
+
+```typescript
+import { createOrm, eq, exprRef, fn, ref, relationColumn, schema } from '@dbsp/core';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+
+const __pathDb = schema({
+  files: { id: 'integer', path: 'string', project_id: 'integer' },
+  symbols: { id: 'integer', name: 'string', file_id: ref('files', { as: 'file' }) },
+  calls: { id: 'integer', callee_id: ref('symbols', { as: 'callee' }) },
+} as const);
+const orm = createOrm({ schema: __pathDb, adapter: createPgCompileOnlyAdapter() });
+
+const byFile = orm.select('calls')
+  .join('callee.file', { type: 'left' })
+  .columns([relationColumn('callee.file', 'path', 'file'), fn('count', exprRef('calls.id')).as('n')])
+  .where(eq('callee_file.project_id', 7))
+  .groupBy(['callee.file.path'])
+  .dump();
+
+if (
+  byFile.sql !==
+    'SELECT callee_file.path AS file, count(calls.id) AS n FROM calls LEFT JOIN symbols AS callee ON calls.callee_id = callee.id LEFT JOIN files AS callee_file ON callee.file_id = callee_file.id WHERE callee_file.project_id = $1 GROUP BY callee_file.path' ||
+  byFile.params.length !== 1
+) {
+  throw new Error('relation-path join did not compile as expected');
+}
+```
+
+- **Aliases.** Without `as`, hop *k* is aliased by its path prefix joined with `_`: `callee`, then
+  `callee_file`. `as: 'cf'` names the last hop; `as: ['c', 'cf']` names every hop and must list
+  exactly one alias per relation. Aliases are used verbatim: one that is already bound in the query
+  is refused, never renamed. Join a path once — `.join('callee').join('callee.file')` is refused,
+  because the second call's first hop asks for the alias `callee` again.
+- **Join type.** `type` applies to every hop. With `'left'`, a root row is kept when any hop has no
+  match, and the columns of the missing hops are `NULL`.
+- **Relation paths.** Each hop answers to its relation path, so `relationColumn('callee.file', …)`,
+  `groupBy(['callee.file.path'])`, `orderBy('callee.file.path')` and `distinctOn('callee.file.path')`
+  reach the joined range. The same path joined twice under different aliases is ambiguous and refused.
+- **Conditions.** There is no `on` in relation mode. Filter a hop through its alias in `.where()`
+  (`eq('callee_file.project_id', 7)`), which binds the joined range. A dotted relation path in
+  `.where()` (`eq('callee.file.path', …)`) follows the WHERE rule below: it traverses from the
+  `callee` range as an `EXISTS` instead of binding the joined `callee_file` range. A condition that
+  must sit in the ON of an outer join needs table mode.
+- **From a join include.** A join include under `groupBy`, an aggregate or `DISTINCT` is refused,
+  because its nested data would be dropped. `.include('callee.file', { join: 'left', where })`
+  becomes `.join('callee.file', { type: 'left' })` plus the include's `where` in `.where()`,
+  qualified by the hop alias. An include's `where` already compiled into the root WHERE, never into
+  the ON.
+- **Refused.** An unknown relation at any hop (named with its table), a many-to-many relation at any
+  hop (#787), a relation without declared keys, and an alias list in table or values mode.
+
 ## Key Files
 
 - `packages/core/src/dx/query-builder-types.ts` — `join()` method signatures (overloads 1 and 2)
@@ -397,7 +454,7 @@ All standard filter helpers (`eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like`, `and
 - **`as` does not change FK resolution in relation mode** — `.join('caller', { as: 'c' })` resolves the FK from the `caller` relation, not from `c`. The alias only affects the SQL output name.
 - **Manual join aliases are user-owned** — `.join()` reserves its SQL alias for the query. If a join-backed `include()` would otherwise auto-generate the same alias, the include moves to the next `_N` suffix and the manual alias is preserved. Duplicate join qualifiers and an alias equal to the root table name are refused at `plan()`.
 - **Self-joins require a distinct alias** — use `as` when the default qualifier would equal the root table name; that collision is refused at `plan()`.
-- **Result columns are flat** — `.join()` does not hydrate nested objects. All columns from the joined table appear as top-level keys in the result. Use `include()` for nested hydration.
+- **Result columns are flat** — `.join()` does not hydrate nested objects, and it adds no column to the projection: without `.columns()`, the query selects `<root>.*` only. Select joined columns explicitly (`relationColumn()`, `exprRef('alias.column')`); they appear as top-level keys. Use `include()` for nested hydration.
 - **Right and full outer joins are not supported** — only `'inner'` and `'left'` are valid values for `type`.
 - **Dotted column notation in ON conditions** — use `'table.column'` (e.g. `'embeddings.id'`) to produce qualified column references in the ON clause. An unqualified name binds to the root range, so qualify a column of the joined or an earlier range.
 - **Multiple joins nest left-to-right** — the SQL FROM clause wraps joins progressively: `((A JOIN B) JOIN C)`. This matches standard PostgreSQL left-associative join behavior and is transparent to the query result.

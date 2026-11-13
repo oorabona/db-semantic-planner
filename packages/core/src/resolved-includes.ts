@@ -24,6 +24,7 @@ import { singularize } from './conventions.js';
 import { getDefaultFilter } from './default-filter-map.js';
 import { findDefaultFilterScan } from './dx/default-filter-refusals.js';
 import { InvalidOperationError } from './dx/errors.js';
+import { relationJoinHops } from './dx/relation-join-path.js';
 import { getRelationalReadPolicy } from './relational-read-plans.js';
 import {
 	resolveConditionContext,
@@ -139,83 +140,132 @@ export function resolveReportIncludes(
 	const visibleJoinRanges: ResolvedRange[] = [rootRange];
 	const firstJoinByQualifier = new Map<string, number>();
 	(intent.joins ?? []).forEach((join, index) => {
-		const qualifier =
-			join.alias ?? join.relation ?? join.batchValues?.alias ?? join.table!;
-		if (!firstJoinByQualifier.has(qualifier))
-			firstJoinByQualifier.set(qualifier, index);
+		const qualifiers =
+			join.relation !== undefined
+				? relationJoinHops(join.relation, join.alias).aliases
+				: [join.alias ?? join.batchValues?.alias ?? join.table!];
+		for (const qualifier of qualifiers)
+			if (!firstJoinByQualifier.has(qualifier))
+				firstJoinByQualifier.set(qualifier, index);
 	});
-	const joins: ResolvedJoin[] = (intent.joins ?? []).map(
-		(join, intentIndex) => {
-			const alias =
-				join.alias ?? join.relation ?? join.batchValues?.alias ?? join.table!;
-			let table = join.table ?? alias;
-			let path: ResolvedJoin['path'];
-			if (join.relation !== undefined) {
-				if (!model)
-					throw new Error(
-						`join('${join.relation}'): relation-mode join requires a model for FK resolution.`,
-					);
-				const relations = model.getRelationsFrom(intent.from);
-				const relation = relations.find((r) => r.name === join.relation);
-				if (!relation)
-					throw new Error(
-						`join('${join.relation}'): relation not found on table '${intent.from}'. Available: ${relations.map((r) => r.name).join(', ')}`,
-					);
-				if (relation.type === 'belongsToMany')
-					throw new InvalidOperationError(
-						'relation',
-						belongsToManyJoinIncludeRefusal(`${intent.from}.${relation.name}`),
-					);
-				const resolved = resolveDeclaredRelationPath(model, intent.from, [
-					join.relation,
-				]);
-				if (!resolved.ok)
-					throw new Error(
-						`join('${join.relation}'): relation not found on table '${intent.from}'. Available: ${relations.map((r) => r.name).join(', ')}`,
-					);
-				path = resolved;
-				table = resolved.targetTable;
-			}
-			const range = allocator.bind(table, alias);
-			allocator.reserve(range.alias);
-			visibleJoinRanges.push(range);
-			const defaultFilter = join.batchValues
-				? undefined
-				: resolveScanDefaultFilter(options.defaultFilters, range, model);
-			const on = resolveConditionContext(
-				join.on,
-				rootRange,
-				[...visibleJoinRanges],
-				[[range]],
-				allocator,
-				model,
-				0,
-				[],
-				{
-					defaultFilters: options.defaultFilters,
-					subqueryRefusal: join.batchValues
-						? 'Subquery in BatchValues JOIN ON condition is not supported.'
-						: 'Subquery in JOIN ON condition is not supported.',
-					firstJoinByQualifier,
-					intentIndex,
-				},
+	/** One range per relation of a relation-mode join, each keyed to the previous one. */
+	const resolveRelationJoinHops = (
+		relationPath: string,
+		alias: string | readonly string[] | undefined,
+	): {
+		readonly table: string;
+		readonly alias: string;
+		readonly path: NonNullable<ResolvedJoin['path']>;
+	}[] => {
+		if (!model)
+			throw new Error(
+				`join('${relationPath}'): relation-mode join requires a model for FK resolution.`,
 			);
+		const { segments, aliases } = relationJoinHops(relationPath, alias);
+		const notFound = (segmentIndex: number, table: string): Error => {
+			const available = model
+				.getRelationsFrom(table)
+				.map((r) => r.name)
+				.join(', ');
+			return new Error(
+				segmentIndex === 0
+					? `join('${relationPath}'): relation not found on table '${table}'. Available: ${available}`
+					: `join('${relationPath}'): relation '${segments[segmentIndex]}' not found on table '${table}'. Available: ${available}`,
+			);
+		};
+		let table = intent.from;
+		for (const [segmentIndex, segment] of segments.entries()) {
+			const relation = model
+				.getRelationsFrom(table)
+				.find((r) => r.name === segment);
+			if (!relation) throw notFound(segmentIndex, table);
+			if (relation.type === 'belongsToMany')
+				throw new InvalidOperationError(
+					'relation',
+					belongsToManyJoinIncludeRefusal(`${table}.${relation.name}`),
+				);
+			table = relation.target;
+		}
+		const resolved = resolveDeclaredRelationPath(model, intent.from, segments);
+		if (!resolved.ok)
+			throw notFound(resolved.segmentIndex, resolved.sourceTable);
+		if (
+			resolved.hops.length !== segments.length ||
+			resolved.hops.some((hop, k) => hop.segmentIndex !== k)
+		)
+			throw new Error(
+				`join('${relationPath}'): the resolved relation path does not hold one hop per segment.`,
+			);
+		return segments.map((_, k) => {
+			const target = resolved.relations[k]!.target;
 			return {
-				intentPath: `join[${intentIndex}]`,
-				intentIndex,
-				kind:
-					join.relation !== undefined
-						? 'relation'
-						: join.batchValues
-							? 'values'
-							: 'table',
-				type: join.type,
-				range,
-				sourceRange: rootRange,
-				...(path && { path }),
-				...(on && { on }),
-				...(defaultFilter && { defaultFilter }),
+				table: target,
+				alias: aliases[k]!,
+				path: {
+					ok: true,
+					logicalSegments: segments.slice(0, k + 1),
+					relations: resolved.relations.slice(0, k + 1),
+					hops: resolved.hops.slice(0, k + 1),
+					targetTable: target,
+				},
 			};
+		});
+	};
+	const joins: ResolvedJoin[] = (intent.joins ?? []).flatMap(
+		(join, intentIndex) => {
+			const hops =
+				join.relation !== undefined
+					? resolveRelationJoinHops(join.relation, join.alias)
+					: (() => {
+							const alias =
+								join.alias ?? join.batchValues?.alias ?? join.table!;
+							return [{ table: join.table ?? alias, alias, path: undefined }];
+						})();
+			let sourceRange = rootRange;
+			return hops.map((hop) => {
+				const range = allocator.bind(hop.table, hop.alias);
+				allocator.reserve(range.alias);
+				visibleJoinRanges.push(range);
+				const defaultFilter = join.batchValues
+					? undefined
+					: resolveScanDefaultFilter(options.defaultFilters, range, model);
+				const on = resolveConditionContext(
+					join.on,
+					rootRange,
+					[...visibleJoinRanges],
+					[[range]],
+					allocator,
+					model,
+					0,
+					[],
+					{
+						defaultFilters: options.defaultFilters,
+						subqueryRefusal: join.batchValues
+							? 'Subquery in BatchValues JOIN ON condition is not supported.'
+							: 'Subquery in JOIN ON condition is not supported.',
+						firstJoinByQualifier,
+						intentIndex,
+					},
+				);
+				const resolvedJoin: ResolvedJoin = {
+					intentPath: `join[${intentIndex}]`,
+					intentIndex,
+					kind:
+						join.relation !== undefined
+							? 'relation'
+							: join.batchValues
+								? 'values'
+								: 'table',
+					type: join.type,
+					range,
+					sourceRange,
+					...(hop.path && { path: hop.path }),
+					...(on && { on }),
+					...(defaultFilter && { defaultFilter }),
+				};
+				sourceRange = range;
+				return resolvedJoin;
+			});
 		},
 	);
 	const generatedAliases = new Map<string, number>();

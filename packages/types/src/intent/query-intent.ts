@@ -36,6 +36,7 @@ export type BatchValuesJoinPayload = {
  * Planning resolves each join to a range in SelectExecution; SQL emission uses that authority.
  * Three modes discriminated by `relation`, `table`, or `batchValues`; ON is absent only in relation mode:
  * - **Relation mode** (`relation` set, no `on`): FK auto-resolved, like `include` but flat (no hydration).
+ *   A dotted relation path (`'callee.file'`) joins one range per relation, each correlated to the previous one.
  * - **Table mode** (`table` set, `on` required): Explicit table name + ON condition. Required for self-joins.
  * - **Values mode** (`batchValues` set, `on` required): payload retained in the intent.
  *
@@ -44,6 +45,7 @@ export type BatchValuesJoinPayload = {
  * // Relation mode — FK auto-resolved
  * orm.from(calls).join('caller')
  * orm.from(calls).join('callerFile', { type: 'left' })
+ * orm.from(calls).join('callee.file', { as: ['c', 'cf'] })
  *
  * // Table mode — explicit ON condition
  * orm.from(embeddings).join('embeddings', {
@@ -55,12 +57,13 @@ export type BatchValuesJoinPayload = {
  */
 export type JoinIntent =
 	| {
-			/** FK-based join — relation name resolved to table + FK automatically */
+			/** FK-based join — a relation name or dotted relation path, resolved to tables + FKs automatically */
 			readonly relation: string;
 			readonly table?: never;
 			readonly batchValues?: never;
 			readonly on?: never;
-			readonly alias?: string;
+			/** The last hop's alias, or one alias per hop of a dotted relation path. */
+			readonly alias?: string | readonly string[];
 			readonly type: 'inner' | 'left';
 	  }
 	| {

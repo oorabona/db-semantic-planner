@@ -16,6 +16,7 @@ import type {
 	OutputValueShape,
 	PlanReport,
 	QueryIntent,
+	ResolvedJoin,
 	SelectExecution,
 } from '@dbsp/types';
 import { resolveOutputReadHandling } from '@dbsp/types';
@@ -304,6 +305,24 @@ function buildBatchValuesRangeFn(
 	return { rangeFunction, params };
 }
 
+/**
+ * Each join intent owns a contiguous run of resolved joins, in order: one per relation of a relation path,
+ * one otherwise.
+ */
+function resolvedJoinsCoverIntents(
+	joins: readonly JoinIntent[],
+	resolved: readonly ResolvedJoin[],
+): boolean {
+	let position = 0;
+	for (const [intentIndex, join] of joins.entries()) {
+		const hops =
+			join.relation !== undefined ? join.relation.split('.').length : 1;
+		for (let hop = 0; hop < hops; hop++, position++)
+			if (resolved[position]?.intentIndex !== intentIndex) return false;
+	}
+	return position === resolved.length;
+}
+
 function compileJoinIntents(
 	joins: readonly JoinIntent[],
 	execution: SelectExecution,
@@ -377,7 +396,8 @@ function compileJoinIntents(
 		if (alias === rootBinding.qualifier)
 			throw new Error(`Query scope already binds qualifier '${alias}'.`);
 		if (resolved.kind === 'relation' && !resolved.defaultFilter) {
-			const pairs = resolved.path!.hops[0]!.pairs;
+			// A hop correlates on its own keys: the last hop of its prefix path.
+			const pairs = resolved.path!.hops.at(-1)!.pairs;
 			results.push({
 				type: 'join',
 				targetTable: resolved.range.table,
@@ -386,6 +406,9 @@ function compileJoinIntents(
 				sourceColumn: pairs.map((p) => p.fromColumn),
 				targetColumn: pairs.map((p) => p.toColumn),
 				joinType: resolved.type,
+				...(resolved.sourceRange.id !== execution.rootRange.id && {
+					sourceAlias: resolved.sourceRange.alias,
+				}),
 			});
 		} else if (resolved.kind === 'values') {
 			// ── BatchValues mode: unnest($N::type[], ...) AS alias(col1, col2) ──
@@ -445,7 +468,7 @@ function compileJoinIntents(
 
 			const conditions: Node[] = [];
 			if (resolved.path) {
-				for (const pair of resolved.path.hops[0]!.pairs) {
+				for (const pair of resolved.path.hops.at(-1)!.pairs) {
 					conditions.push(
 						compileResolvedCondition(
 							{
@@ -509,6 +532,10 @@ function compileJoinIntents(
 				type: 'join',
 				targetTable: resolved.range.table,
 				alias: tableAlias,
+				// A filtered relation hop still answers to its relation path.
+				...(resolved.path && {
+					relationName: resolved.path.logicalSegments.join('.'),
+				}),
 				joinType: resolved.type,
 				joinRarg: joinedRangeVar,
 				joinOnNode: onNode,
@@ -1038,10 +1065,14 @@ export function compileSelectEnvelope<T = unknown>(
 
 	const resolvedModelForCompiler = options?.model ?? deps.model;
 	if (
-		[plan.intent, plan.executableIntent].some((intent) => {
-			const count = intent?.joins?.length ?? 0;
-			return count > 0 && plan.execution?.joins?.length !== count;
-		})
+		[plan.intent, plan.executableIntent].some(
+			(intent) =>
+				intent !== undefined &&
+				!resolvedJoinsCoverIntents(
+					intent.joins ?? [],
+					plan.execution?.joins ?? [],
+				),
+		)
 	) {
 		const error = new Error(
 			'Planned joins require matching resolved execution joins',

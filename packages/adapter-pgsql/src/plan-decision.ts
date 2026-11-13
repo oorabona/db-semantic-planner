@@ -22,6 +22,8 @@ export interface PlanDecision {
 	readonly nulls?: 'FIRST' | 'LAST';
 	readonly joinType?: 'inner' | 'left';
 	readonly sourceColumn?: ColumnListInput;
+	/** Qualifier of a relation join's source range when it is an earlier hop, not the root. */
+	readonly sourceAlias?: string;
 	readonly targetColumn?: ColumnListInput;
 	readonly targetTable?: string;
 	readonly function?: string;

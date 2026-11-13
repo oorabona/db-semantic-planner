@@ -5,12 +5,17 @@ import {
 	eq,
 	exists,
 	exprRef,
+	InvalidOperationError,
 	like,
+	ModelIRImpl,
 	manyToMany,
 	outerRef,
 	ref,
+	relationColumn,
 	schema,
+	type TableIR,
 } from '@dbsp/core';
+import type { RelationIR } from '@dbsp/core/internal';
 import type { ModelIR, PlanReport } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -387,4 +392,294 @@ it('rawExists preserves the legacy outerRef-only correlation refusal', () => {
 			orm.select('calls').join('users', { as: 'u', on }).plan(),
 		).toThrow(new Error(error));
 	}
+});
+
+describe('#982: multi-hop relation joins', () => {
+	const hopTables = {
+		projects: { id: { type: 'integer', primaryKey: true }, name: 'string' },
+		files: {
+			id: { type: 'integer', primaryKey: true },
+			path: 'string',
+			lang: 'string',
+			project_id: ref('projects', { as: 'project' }),
+		},
+		symbols: {
+			id: { type: 'integer', primaryKey: true },
+			name: 'string',
+			kind: 'string',
+			file_id: ref('files', { as: 'file' }),
+		},
+		calls: {
+			id: { type: 'integer', primaryKey: true },
+			callee_id: ref('symbols', { as: 'callee' }),
+		},
+	} as const;
+	const hopDb = schema(hopTables);
+	const hopOrm = createOrm({
+		schema: hopDb,
+		adapter: createPgCompileOnlyAdapter(),
+	});
+	const filteredDb = schema(hopTables, undefined, {
+		defaultFilters: {
+			symbols: eq('kind', 'function'),
+			files: eq('lang', 'ts'),
+		},
+	});
+	const filteredOrm = createOrm({
+		schema: filteredDb,
+		adapter: createPgCompileOnlyAdapter(),
+	});
+
+	it('multi-hop relation joins correlate every declared key pair', () => {
+		const column = (name: string): TableIR['columns'][number] => ({
+			name,
+			type: 'integer',
+			nullable: false,
+		});
+		const tables = new Map<string, TableIR>([
+			[
+				'orders',
+				{
+					name: 'orders',
+					columns: [column('orderId'), column('tenantId')],
+					primaryKey: ['orderId', 'tenantId'],
+					foreignKeys: [],
+					indexes: [],
+				},
+			],
+			[
+				'order_items',
+				{
+					name: 'order_items',
+					columns: [column('id'), column('orderId'), column('tenantId')],
+					primaryKey: ['id', 'tenantId'],
+					foreignKeys: [
+						{
+							columns: ['orderId', 'tenantId'],
+							references: { table: 'orders', columns: ['orderId', 'tenantId'] },
+						},
+					],
+					indexes: [],
+				},
+			],
+			[
+				'shipments',
+				{
+					name: 'shipments',
+					columns: [column('id'), column('itemId'), column('tenantId')],
+					primaryKey: 'id',
+					foreignKeys: [
+						{
+							columns: ['itemId', 'tenantId'],
+							references: { table: 'order_items', columns: ['id', 'tenantId'] },
+						},
+					],
+					indexes: [],
+				},
+			],
+		]);
+		const belongsTo = (
+			name: string,
+			source: string,
+			target: string,
+			foreignKey: string[],
+			targetKey: string[],
+		): RelationIR => ({
+			name,
+			type: 'belongsTo',
+			source,
+			target,
+			foreignKey,
+			targetKey,
+			cardinality: 'one',
+			optionality: 'required',
+			includeStrategy: 'auto',
+			joinDefault: 'auto',
+		});
+		const model = new ModelIRImpl(
+			tables,
+			new Map([
+				[
+					'shipments.item',
+					belongsTo(
+						'item',
+						'shipments',
+						'order_items',
+						['itemId', 'tenantId'],
+						['id', 'tenantId'],
+					),
+				],
+				[
+					'order_items.order',
+					belongsTo(
+						'order',
+						'order_items',
+						'orders',
+						['orderId', 'tenantId'],
+						['orderId', 'tenantId'],
+					),
+				],
+			]),
+		);
+		const o = createOrm({
+			model,
+			adapter: createPgCompileOnlyAdapter({ model }),
+		});
+		expect(o.select('shipments').join('item.order').dump().sql).toBe(
+			'SELECT shipments.* FROM shipments JOIN order_items AS item ON shipments."itemId" = item.id AND shipments."tenantId" = item."tenantId" JOIN orders AS item_order ON item."orderId" = item_order."orderId" AND item."tenantId" = item_order."tenantId"',
+		);
+	});
+
+	it("multi-hop relation joins apply each hop's default filter in its ON", () => {
+		const dump = filteredOrm
+			.select('calls')
+			.join('callee.file', { as: ['c', 'cf'] })
+			.columns([
+				relationColumn('callee', 'name', 'name'),
+				relationColumn('callee.file', 'path', 'p'),
+			])
+			.where(eq('calls.id', 9))
+			.dump();
+		expect(dump.sql).toBe(
+			'SELECT c.name AS name, cf.path AS p FROM calls JOIN symbols AS c ON calls.callee_id = c.id AND c.kind = $2 JOIN files AS cf ON c.file_id = cf.id AND cf.lang = $3 WHERE calls.id = $1',
+		);
+		expect(dump.params).toEqual([9, 'function', 'ts']);
+	});
+
+	it('a filtered relation join registers its relation path', () => {
+		const dump = filteredOrm
+			.select('calls')
+			.join('callee', { as: 'c' })
+			.columns([relationColumn('callee', 'name', 'n')])
+			.dump();
+		expect(dump.sql).toBe(
+			'SELECT c.name AS n FROM calls JOIN symbols AS c ON calls.callee_id = c.id AND c.kind = $1',
+		);
+		expect(dump.params).toEqual(['function']);
+	});
+
+	it('multi-hop relation join plans one resolved join per hop', () => {
+		const joins = hopOrm.select('calls').join('callee.file').plan()
+			.execution!.joins;
+		expect(
+			joins.map((join) => ({
+				intentIndex: join.intentIndex,
+				intentPath: join.intentPath,
+				alias: join.range.alias,
+				logicalSegments: join.path!.logicalSegments,
+				hops: join.path!.hops.length,
+			})),
+		).toEqual([
+			{
+				intentIndex: 0,
+				intentPath: 'join[0]',
+				alias: 'callee',
+				logicalSegments: ['callee'],
+				hops: 1,
+			},
+			{
+				intentIndex: 0,
+				intentPath: 'join[0]',
+				alias: 'callee_file',
+				logicalSegments: ['callee', 'file'],
+				hops: 2,
+			},
+		]);
+		expect(joins[1]!.sourceRange).toBe(joins[0]!.range);
+	});
+
+	it('multi-hop relation joins compile with poisoned relation methods after planning', () => {
+		const hopAdapter = createPgCompileOnlyAdapter({ model: hopDb.model });
+		for (const options of [
+			{},
+			{ as: ['c', 'cf'] },
+			{ type: 'left' as const },
+		]) {
+			const report = hopOrm.select('calls').join('callee.file', options).plan();
+			const expected = hopAdapter.compile(report);
+			const actual = hopAdapter.compile(report, {
+				model: poison(hopDb.model),
+			});
+			expect(actual.sql).toBe(expected.sql);
+			expect(actual.parameters).toEqual(expected.parameters);
+		}
+	});
+
+	it('a many-to-many relation is refused at any hop', () => {
+		const m = schema(
+			{
+				posts: { id: 'integer' },
+				tags: { id: 'integer' },
+				postTags: { postId: ref('posts'), tagId: ref('tags') },
+			},
+			undefined,
+			{
+				relations: {
+					posts: {
+						tags: manyToMany('tags', {
+							through: 'postTags',
+							inverse: 'posts',
+							sourceForeignKey: ['postId'],
+							targetForeignKey: ['tagId'],
+						}),
+					},
+				},
+			},
+		);
+		const o = createOrm({
+			schema: m,
+			adapter: createPgCompileOnlyAdapter({ model: m.model }),
+		});
+		expect(() => o.select('postTags').join('post.tags').plan()).toThrow(
+			new InvalidOperationError(
+				'relation',
+				"Relation 'posts.tags': many-to-many traversal is not supported yet (#787).",
+			),
+		);
+	});
+
+	it('a hop without declared keys is refused by the key resolver', () => {
+		const strip = (relation: RelationIR | undefined) =>
+			relation?.name === 'file' && relation.source === 'symbols'
+				? { ...relation, foreignKey: [] }
+				: relation;
+		const model = new Proxy(hopDb.model, {
+			get(target, property) {
+				if (property === 'getRelation')
+					return (key: string) => strip(target.getRelation(key));
+				if (property === 'getRelationsFrom')
+					return (table: string) =>
+						target.getRelationsFrom(table).map((r) => strip(r)!);
+				const member = Reflect.get(target, property);
+				return typeof member === 'function' ? member.bind(target) : member;
+			},
+		});
+		const o = createOrm({
+			model,
+			adapter: createPgCompileOnlyAdapter({ model }),
+		});
+		expect(() => o.select('calls').join('callee.file').plan()).toThrow(
+			new Error(
+				"Relation 'symbols.file' is missing a declared foreign key column.",
+			),
+		);
+	});
+
+	it('a report whose intent lost its joins is refused', () => {
+		const report = hopOrm.select('calls').join('callee.file').plan();
+		Object.assign(report.intent, { joins: [] });
+		expect(() =>
+			createPgCompileOnlyAdapter({ model: hopDb.model }).compile(report),
+		).toThrow(expect.objectContaining({ name: 'InvalidResolvedJoinsError' }));
+	});
+
+	it('a report whose resolved joins miss a hop is refused', () => {
+		const report = hopOrm.select('calls').join('callee').plan();
+		Object.assign(report.intent, {
+			joins: [{ relation: 'callee.file', type: 'inner' }],
+		});
+		expect(() =>
+			createPgCompileOnlyAdapter({ model: hopDb.model }).compile(report),
+		).toThrow(expect.objectContaining({ name: 'InvalidResolvedJoinsError' }));
+	});
 });
