@@ -629,7 +629,7 @@ export class QueryBuilderImpl<TResult = unknown>
 			const bv = relationOrTableOrBatch;
 			if (alias !== undefined && typeof alias !== 'string')
 				throw new Error(
-					`join(${bv.alias}): an alias list requires a relation path.`,
+					`join('${bv.alias}'): an alias list requires a relation path.`,
 				);
 			if (!opts?.on) {
 				throw new Error(
@@ -660,12 +660,12 @@ export class QueryBuilderImpl<TResult = unknown>
 			};
 			builder.joinIntents.push(joinIntent);
 		} else if (opts?.on) {
-			if (alias !== undefined && typeof alias !== 'string')
-				throw new Error(
-					`join(${relationOrTableOrBatch}): an alias list requires a relation path.`,
-				);
 			// FIND-011: Validate string table argument
 			validateIdentifier(relationOrTableOrBatch, 'table');
+			if (alias !== undefined && typeof alias !== 'string')
+				throw new Error(
+					`join('${relationOrTableOrBatch}'): an alias list requires a relation path.`,
+				);
 			// FIND-008: Validate the as alias when provided
 			if (alias !== undefined) validateIdentifier(alias, 'alias');
 			builder.joinIntents.push({

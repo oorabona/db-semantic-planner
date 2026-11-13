@@ -374,6 +374,23 @@ describe('#982: multi-hop relation join', () => {
 		);
 	});
 
+	it('multi-hop relation join — a hop aliased like an earlier hop table', () => {
+		for (const as of [
+			'symbols',
+			['c', 'symbols'],
+			['files', 'symbols'],
+		] as const) {
+			const [first, last] = typeof as === 'string' ? ['callee', as] : as;
+			const dump = buildOrm()
+				.select('calls')
+				.join('callee.file', { as })
+				.dump();
+			expect(ws(dump.sql)).toEqual(
+				`SELECT calls.* FROM calls JOIN symbols AS ${first} ON calls.callee_id = ${first}.id JOIN files AS ${last} ON ${first}.file_id = ${last}.id`,
+			);
+		}
+	});
+
 	it('multi-hop relation join — DISTINCT over a hop column', () => {
 		const dump = buildOrm()
 			.select('calls')

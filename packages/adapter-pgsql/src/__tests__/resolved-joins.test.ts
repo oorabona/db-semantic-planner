@@ -5,6 +5,7 @@ import {
 	eq,
 	exists,
 	exprRef,
+	InvalidOperationError,
 	like,
 	ModelIRImpl,
 	manyToMany,
@@ -630,7 +631,10 @@ describe('#982: multi-hop relation joins', () => {
 			adapter: createPgCompileOnlyAdapter({ model: m.model }),
 		});
 		expect(() => o.select('postTags').join('post.tags').plan()).toThrow(
-			"Invalid relation: Relation 'posts.tags': many-to-many traversal is not supported yet (#787).",
+			new InvalidOperationError(
+				'relation',
+				"Relation 'posts.tags': many-to-many traversal is not supported yet (#787).",
+			),
 		);
 	});
 
@@ -659,6 +663,14 @@ describe('#982: multi-hop relation joins', () => {
 				"Relation 'symbols.file' is missing a declared foreign key column.",
 			),
 		);
+	});
+
+	it('a report whose intent lost its joins is refused', () => {
+		const report = hopOrm.select('calls').join('callee.file').plan();
+		Object.assign(report.intent, { joins: [] });
+		expect(() =>
+			createPgCompileOnlyAdapter({ model: hopDb.model }).compile(report),
+		).toThrow(expect.objectContaining({ name: 'InvalidResolvedJoinsError' }));
 	});
 
 	it('a report whose resolved joins miss a hop is refused', () => {

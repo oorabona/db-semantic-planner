@@ -201,14 +201,16 @@ describe('QueryBuilder.join() — FR-10', () => {
 					// @ts-expect-error an alias list requires a relation path
 					.join('files', { on: eq('files.id', 1), as: ['f'] }),
 			).toThrow(
-				new Error('join(files): an alias list requires a relation path.'),
+				new Error("join('files'): an alias list requires a relation path."),
 			);
 			expect(() =>
 				orm
 					.select('calls')
 					// @ts-expect-error an alias list requires a relation path
 					.join(batch, { on: eq('bv.id', 1), as: ['b'] }),
-			).toThrow(new Error('join(bv): an alias list requires a relation path.'));
+			).toThrow(
+				new Error("join('bv'): an alias list requires a relation path."),
+			);
 		});
 
 		it('refuses an alias list whose length differs from the hop count', () => {

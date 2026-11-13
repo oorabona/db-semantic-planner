@@ -1067,8 +1067,11 @@ export function compileSelectEnvelope<T = unknown>(
 	if (
 		[plan.intent, plan.executableIntent].some(
 			(intent) =>
-				(intent?.joins?.length ?? 0) > 0 &&
-				!resolvedJoinsCoverIntents(intent!.joins!, plan.execution?.joins ?? []),
+				intent !== undefined &&
+				!resolvedJoinsCoverIntents(
+					intent.joins ?? [],
+					plan.execution?.joins ?? [],
+				),
 		)
 	) {
 		const error = new Error(

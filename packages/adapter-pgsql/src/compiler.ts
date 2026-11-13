@@ -3767,9 +3767,10 @@ export class PlanCompiler {
 			throw new Error("Missing required column 'targetColumn' in compileJoin");
 		}
 		const targetName = decision.targetTable ?? '';
+		// A table identity, never a join alias: another hop may be aliased like this table.
 		const target = resolveRelationTarget(
 			queryLocal(targetName),
-			this.createHandlerContext(plan),
+			this.relationTargetContext(),
 		);
 		requireRelationTargetColumns(
 			target,
