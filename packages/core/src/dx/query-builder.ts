@@ -80,6 +80,7 @@ import {
 import * as paginationImpl from './pagination-impl.js';
 import type { QueryBuilderContext } from './query-builder-context.js';
 import type { DumpMetaInput } from './query-builder-types.js';
+import { relationJoinHops } from './relation-join-path.js';
 import { ResultHydrator } from './result-hydrator.js';
 import {
 	buildSetOperationIntent,
@@ -614,13 +615,22 @@ export class QueryBuilderImpl<TResult = unknown>
 
 	join(
 		relationOrTableOrBatch: string | BatchValuesRef,
-		opts?: { type?: 'inner' | 'left'; on?: WhereIntent; as?: string },
+		opts?: {
+			type?: 'inner' | 'left';
+			on?: WhereIntent;
+			as?: string | readonly string[];
+		},
 	): QueryBuilder<TResult> {
 		const builder = this.clone();
 		const type = opts?.type ?? 'inner';
+		const alias = opts?.as;
 
 		if (isBatchValuesRef(relationOrTableOrBatch)) {
 			const bv = relationOrTableOrBatch;
+			if (alias !== undefined && typeof alias !== 'string')
+				throw new Error(
+					`join(${bv.alias}): an alias list requires a relation path.`,
+				);
 			if (!opts?.on) {
 				throw new Error(
 					'join(batchValuesRef): an `on` condition is required for BatchValues joins',
@@ -633,8 +643,8 @@ export class QueryBuilderImpl<TResult = unknown>
 			for (const col of bv.columns) {
 				validateIdentifier(col, 'column');
 			}
-			if (opts.as !== undefined) {
-				validateIdentifier(opts.as, 'alias');
+			if (alias !== undefined) {
+				validateIdentifier(alias, 'alias');
 			}
 			const joinIntent: JoinIntent = {
 				batchValues: {
@@ -646,29 +656,34 @@ export class QueryBuilderImpl<TResult = unknown>
 				},
 				on: opts.on,
 				type,
-				...(opts.as !== undefined ? { alias: opts.as } : { alias: bv.alias }),
+				alias: alias ?? bv.alias,
 			};
 			builder.joinIntents.push(joinIntent);
-		} else {
-			// FIND-011: Validate string table/relation argument
+		} else if (opts?.on) {
+			if (alias !== undefined && typeof alias !== 'string')
+				throw new Error(
+					`join(${relationOrTableOrBatch}): an alias list requires a relation path.`,
+				);
+			// FIND-011: Validate string table argument
 			validateIdentifier(relationOrTableOrBatch, 'table');
 			// FIND-008: Validate the as alias when provided
-			if (opts?.as !== undefined) {
-				validateIdentifier(opts.as, 'alias');
-			}
-			const joinIntent: JoinIntent = opts?.on
-				? {
-						table: relationOrTableOrBatch,
-						on: opts.on,
-						type,
-						...(opts.as !== undefined && { alias: opts.as }),
-					}
-				: {
-						relation: relationOrTableOrBatch,
-						type,
-						...(opts?.as !== undefined && { alias: opts.as }),
-					};
-			builder.joinIntents.push(joinIntent);
+			if (alias !== undefined) validateIdentifier(alias, 'alias');
+			builder.joinIntents.push({
+				table: relationOrTableOrBatch,
+				on: opts.on,
+				type,
+				...(alias !== undefined && { alias }),
+			});
+		} else {
+			// FIND-011/FIND-008: every relation segment and every hop alias is an identifier.
+			relationJoinHops(relationOrTableOrBatch, alias);
+			builder.joinIntents.push({
+				relation: relationOrTableOrBatch,
+				type,
+				...(alias !== undefined && {
+					alias: typeof alias === 'string' ? alias : Object.freeze([...alias]),
+				}),
+			});
 		}
 		return builder;
 	}

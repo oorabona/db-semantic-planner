@@ -13,6 +13,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { JoinIntent, QueryIntent } from '../../intent-ast.js';
+import { InvalidOperationError } from '../errors.js';
 import { eq } from '../filters.js';
 import { createOrm } from '../orm.js';
 import { ref, schema } from '../schema.js';
@@ -170,6 +171,79 @@ describe('QueryBuilder.join() — FR-10', () => {
 			expect(() =>
 				orm.select('calls').join('caller', { as: 'a"; DROP TABLE users; --' }),
 			).toThrow('alias name contains invalid characters');
+			// #982: every alias of a list is an identifier, not only its length.
+			expect(() =>
+				orm.select('calls').join('callee.file', { as: ['c', 'c f'] }),
+			).toThrow(
+				new InvalidOperationError(
+					'alias',
+					'alias name contains invalid characters',
+				),
+			);
+		});
+	});
+
+	describe('#982: relation paths', () => {
+		it('accepts a readonly alias list and refuses one outside relation mode in its types', () => {
+			const aliases: readonly string[] = ['c', 'cf'];
+			// The interface orm.select() returns must accept it; the builder records it unplanned.
+			const builder = orm.select('calls').join('callee.file', { as: aliases });
+			const intent = (
+				builder as unknown as { buildIntent(): QueryIntent }
+			).buildIntent();
+			expect(intent.joins).toEqual([
+				{ relation: 'callee.file', type: 'inner', alias: ['c', 'cf'] },
+			]);
+			const batch = orm.batchValues([[1]], ['id'], ['int4'], { alias: 'bv' });
+			expect(() =>
+				orm
+					.select('calls')
+					// @ts-expect-error an alias list requires a relation path
+					.join('files', { on: eq('files.id', 1), as: ['f'] }),
+			).toThrow(
+				new Error('join(files): an alias list requires a relation path.'),
+			);
+			expect(() =>
+				orm
+					.select('calls')
+					// @ts-expect-error an alias list requires a relation path
+					.join(batch, { on: eq('bv.id', 1), as: ['b'] }),
+			).toThrow(new Error('join(bv): an alias list requires a relation path.'));
+		});
+
+		it('refuses an alias list whose length differs from the hop count', () => {
+			expect(() =>
+				orm.select('calls').join('callee.file', { as: ['c'] }),
+			).toThrow(
+				new Error("join('callee.file'): 'as' lists 1 aliases for 2 hops."),
+			);
+		});
+
+		it('validates every relation segment', () => {
+			for (const path of ['callee..file', '.callee', 'callee.'])
+				expect(() => orm.select('calls').join(path)).toThrow(
+					new InvalidOperationError(
+						'relation',
+						'relation name must not be empty',
+					),
+				);
+			expect(() => orm.select('calls').join('callee.fi le')).toThrow(
+				new InvalidOperationError(
+					'relation',
+					'relation name contains invalid characters',
+				),
+			);
+		});
+
+		it('refuses a default hop alias longer than an identifier', () => {
+			expect(() =>
+				orm.select('calls').join(`${'a'.repeat(40)}.${'b'.repeat(30)}`),
+			).toThrow(
+				new InvalidOperationError(
+					'alias',
+					'alias name must not exceed 63 characters',
+				),
+			);
 		});
 	});
 });

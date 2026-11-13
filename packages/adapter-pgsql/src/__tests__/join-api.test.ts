@@ -9,7 +9,18 @@
  * All assertions use exact `toEqual` SQL matching (normalised whitespace).
  */
 
-import { and, createOrm, eq, exprRef, param, ref, schema } from '@dbsp/core';
+import {
+	and,
+	createOrm,
+	eq,
+	exprRef,
+	fn,
+	neq,
+	param,
+	ref,
+	relationColumn,
+	schema,
+} from '@dbsp/core';
 import type { WhereComparisonIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -27,6 +38,11 @@ const testSchema = schema({
 	files: {
 		id: { type: 'integer', primaryKey: true },
 		path: { type: 'text' },
+		project_id: ref('projects', { as: 'project', inverse: 'files' }),
+	},
+	projects: {
+		id: { type: 'integer', primaryKey: true },
+		name: { type: 'text' },
 	},
 	calls: {
 		id: { type: 'integer', primaryKey: true },
@@ -277,6 +293,207 @@ describe('FR-10 Block 2: JOIN ON aliases pre-population', () => {
 				.dump(),
 		).toThrowError(
 			new Error("Query scope already binds qualifier 'embeddings'."),
+		);
+	});
+});
+
+describe('#982: multi-hop relation join', () => {
+	const CALLEE = 'JOIN symbols AS callee ON calls.callee_id = callee.id';
+	const CALLEE_FILE =
+		'JOIN files AS callee_file ON callee.file_id = callee_file.id';
+	const C = 'JOIN symbols AS c ON calls.callee_id = c.id';
+	const CF = 'JOIN files AS cf ON c.file_id = cf.id';
+
+	it('multi-hop relation join — inner on every hop', () => {
+		const dump = buildOrm().select('calls').join('callee.file').dump();
+		expect(ws(dump.sql)).toEqual(
+			`SELECT calls.* FROM calls ${CALLEE} ${CALLEE_FILE}`,
+		);
+		expect(dump.params).toEqual([]);
+	});
+
+	it('multi-hop relation join — left on every hop', () => {
+		const dump = buildOrm()
+			.select('calls')
+			.join('callee.file', { type: 'left' })
+			.dump();
+		expect(ws(dump.sql)).toEqual(
+			`SELECT calls.* FROM calls LEFT ${CALLEE} LEFT ${CALLEE_FILE}`,
+		);
+	});
+
+	it('multi-hop relation join — third hop correlates to the second', () => {
+		const dump = buildOrm().select('calls').join('callee.file.project').dump();
+		expect(ws(dump.sql)).toEqual(
+			`SELECT calls.* FROM calls ${CALLEE} ${CALLEE_FILE} JOIN projects AS callee_file_project ON callee_file.project_id = callee_file_project.id`,
+		);
+	});
+
+	it('multi-hop relation join — as names the last hop', () => {
+		const dump = buildOrm()
+			.select('calls')
+			.join('callee.file', { as: 'cf' })
+			.dump();
+		expect(ws(dump.sql)).toEqual(
+			`SELECT calls.* FROM calls ${CALLEE} JOIN files AS cf ON callee.file_id = cf.id`,
+		);
+	});
+
+	it('multi-hop relation join — as array names every hop', () => {
+		const dump = buildOrm()
+			.select('calls')
+			.join('callee.file', { as: ['c', 'cf'] })
+			.dump();
+		expect(ws(dump.sql)).toEqual(`SELECT calls.* FROM calls ${C} ${CF}`);
+	});
+
+	it('multi-hop relation join — relation paths of every hop resolve under GROUP BY', () => {
+		const dump = buildOrm()
+			.select('calls')
+			.join('callee.file', { type: 'left', as: ['c', 'cf'] })
+			.columns([
+				relationColumn('callee.file', 'path', 'file'),
+				fn('count', exprRef('calls.id')).as('n'),
+			])
+			.groupBy(['callee.id', 'callee.file.path'])
+			.dump();
+		expect(ws(dump.sql)).toEqual(
+			`SELECT cf.path AS file, count(calls.id) AS n FROM calls LEFT ${C} LEFT ${CF} GROUP BY c.id, cf.path`,
+		);
+	});
+
+	it('multi-hop relation join — default hop aliases group', () => {
+		const dump = buildOrm()
+			.select('calls')
+			.join('callee.file')
+			.columns([relationColumn('callee.file', 'path', 'file')])
+			.groupBy(['callee_file.path'])
+			.dump();
+		expect(ws(dump.sql)).toEqual(
+			`SELECT callee_file.path AS file FROM calls ${CALLEE} ${CALLEE_FILE} GROUP BY callee_file.path`,
+		);
+	});
+
+	it('multi-hop relation join — DISTINCT over a hop column', () => {
+		const dump = buildOrm()
+			.select('calls')
+			.join('callee.file')
+			.columns([relationColumn('callee.file', 'path', 'file')])
+			.distinct()
+			.dump();
+		expect(ws(dump.sql)).toEqual(
+			`SELECT DISTINCT callee_file.path AS file FROM calls ${CALLEE} ${CALLEE_FILE}`,
+		);
+	});
+
+	it('multi-hop relation join — root WHERE on the last hop alias', () => {
+		const dump = buildOrm()
+			.select('calls')
+			.join('callee.file')
+			.where(eq('callee_file.path', 'a.ts'))
+			.dump();
+		expect(ws(dump.sql)).toEqual(
+			`SELECT calls.* FROM calls ${CALLEE} ${CALLEE_FILE} WHERE callee_file.path = $1`,
+		);
+		expect(dump.params).toEqual(['a.ts']);
+	});
+
+	it('multi-hop relation join — DISTINCT ON and ORDER BY by relation path', () => {
+		const dump = buildOrm()
+			.select('calls')
+			.join('callee.file', { as: ['c', 'cf'] })
+			.distinctOn('callee.file.path')
+			.orderBy('callee.file.path')
+			.dump();
+		expect(ws(dump.sql)).toEqual(
+			`SELECT DISTINCT ON (cf.path) calls.* FROM calls ${C} ${CF} ORDER BY cf.path ASC`,
+		);
+	});
+
+	it('multi-hop relation join — HAVING binds a hop alias', () => {
+		const dump = buildOrm()
+			.select('calls')
+			.join('callee.file', { as: ['c', 'cf'] })
+			.columns([fn('count', exprRef('calls.id')).as('n')])
+			.groupBy(['cf.path'])
+			.having(neq('cf.path', 'x'))
+			.dump();
+		expect(ws(dump.sql)).toEqual(
+			`SELECT count(calls.id) AS n FROM calls ${C} ${CF} GROUP BY cf.path HAVING cf.path <> $1`,
+		);
+		expect(dump.params).toEqual(['x']);
+	});
+
+	it('multi-hop relation join — a later ON sees every hop', () => {
+		const dump = buildOrm()
+			.select('calls')
+			.join('callee.file', { as: ['c', 'cf'] })
+			.join('projects', { as: 'p', on: eq('p.id', exprRef('cf.project_id')) })
+			.dump();
+		expect(ws(dump.sql)).toEqual(
+			`SELECT calls.* FROM calls ${C} ${CF} JOIN projects AS p ON p.id = cf.project_id`,
+		);
+	});
+
+	it('multi-hop relation join — a values join after a path keeps its payload', () => {
+		const orm = buildOrm();
+		const query = orm
+			.select('calls')
+			.join('callee.file')
+			.join(orm.batchValues([[1]], ['id'], ['int4'], { alias: 'bv' }), {
+				on: eq('bv.id', exprRef('calls.id')),
+			})
+			.where(eq('calls.id', 9));
+		const dump = query.dump();
+		expect(ws(dump.sql)).toEqual(
+			`SELECT calls.* FROM calls ${CALLEE} ${CALLEE_FILE} JOIN unnest(CAST($2 AS int4[])) AS bv(id) ON bv.id = calls.id WHERE calls.id = $1`,
+		);
+		expect(dump.params).toEqual([9, [1]]);
+		expect(
+			query.plan().execution!.joins.map((join) => join.intentIndex),
+		).toEqual([0, 0, 1]);
+	});
+
+	it('multi-hop relation join — one path joined twice is ambiguous', () => {
+		expect(() =>
+			buildOrm()
+				.select('calls')
+				.join('callee.file', { as: ['c1', 'f1'] })
+				.join('callee.file', { as: ['c2', 'f2'] })
+				.columns([relationColumn('callee.file', 'path', 'p')])
+				.dump(),
+		).toThrowError(
+			new Error(
+				'relation column "callee.file"."path" is ambiguous between emitted aliases "f1" and "f2"',
+			),
+		);
+	});
+
+	it('multi-hop relation join — an unknown middle segment is refused by name', () => {
+		expect(() =>
+			buildOrm().select('calls').join('callee.nope').plan(),
+		).toThrowError(
+			new Error(
+				"join('callee.nope'): relation 'nope' not found on table 'symbols'. Available: file, caller_calls, callee_calls",
+			),
+		);
+	});
+
+	it('multi-hop relation join — a hop alias already bound is refused', () => {
+		expect(() =>
+			buildOrm().select('calls').join('callee').join('callee.file').plan(),
+		).toThrowError(new Error("Query scope already binds qualifier 'callee'."));
+	});
+
+	it('multi-hop relation join — an earlier ON cannot see a later hop alias', () => {
+		expect(() =>
+			buildOrm()
+				.select('calls')
+				.join('files', { on: eq('callee_file.id', exprRef('calls.id')) })
+				.join('callee.file')
+				.plan(),
+		).toThrowError(
+			new Error("WHERE qualifier 'callee_file' is not visible in this query."),
 		);
 	});
 });

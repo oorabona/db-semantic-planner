@@ -3781,7 +3781,7 @@ export class PlanCompiler {
 			queryLocal(decision.alias ?? targetName),
 			target,
 		);
-		const sourceAlias = plan.rootTable;
+		const sourceAlias = decision.sourceAlias ?? plan.rootTable;
 		const onCondition = buildKeyCorrelation(
 			sourceAlias,
 			sourceColumn,

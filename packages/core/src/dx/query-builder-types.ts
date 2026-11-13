@@ -541,14 +541,16 @@ export interface QueryBuilder<TResult = unknown> {
 	 * Add an explicit SQL JOIN clause to the query (non-hydrating, flat result).
 	 *
 	 * Two modes based on whether `opts.on` is provided:
-	 * - **Relation mode** (no `on`): FK auto-resolved from the model, like `include` but flat.
+	 * - **Relation mode** (no `on`): FK auto-resolved from the model, like `include` but flat. A dotted relation
+	 *   path joins one range per relation, each correlated to the previous one on its declared keys.
 	 * - **Table mode** (`on` required): Explicit table + ON condition. Use `as` for self-joins.
 	 *
-	 * @param relationOrTable - Relation name (FK mode) or table name (explicit mode)
+	 * @param relationOrTable - Relation name or dotted relation path (FK mode) or table name (explicit mode)
 	 * @param opts - Optional join configuration
-	 * @param opts.type - Join type: `'inner'` (default) or `'left'`
+	 * @param opts.type - Join type: `'inner'` (default) or `'left'`, applied to every hop of a path
 	 * @param opts.on - ON condition (required for table mode, absent for relation mode)
-	 * @param opts.as - Alias for the joined table (required for self-joins)
+	 * @param opts.as - Alias for the joined table (required for self-joins). In relation mode, a string names the
+	 *   last hop and a list names every hop; unnamed hops are aliased by their path prefix joined with `_`.
 	 * @returns A new QueryBuilder with the join appended
 	 *
 	 * @example
@@ -556,6 +558,9 @@ export interface QueryBuilder<TResult = unknown> {
 	 * // Relation mode — FK auto-resolved
 	 * orm.from(calls).join('caller')
 	 * orm.from(calls).join('callerFile', { type: 'left' })
+	 * // Relation path — JOIN symbols AS callee …, JOIN files AS callee_file ON callee.file_id = callee_file.id
+	 * orm.from(calls).join('callee.file', { type: 'left' })
+	 * orm.from(calls).join('callee.file', { as: ['c', 'cf'] })
 	 *
 	 * // Table mode — explicit ON condition
 	 * orm.from(embeddings).join('embeddings', {
@@ -565,6 +570,14 @@ export interface QueryBuilder<TResult = unknown> {
 	 * })
 	 * ```
 	 */
+	join(
+		relationPath: string,
+		opts?: {
+			type?: 'inner' | 'left';
+			as?: string | readonly string[];
+			on?: never;
+		},
+	): QueryBuilder<TResult>;
 	join(
 		relationOrTable: string,
 		opts?: { type?: 'inner' | 'left'; on?: WhereIntent; as?: string },
