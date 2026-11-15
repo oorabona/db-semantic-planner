@@ -9,7 +9,16 @@
  * - aggOrderBy() intent structure (unit level)
  */
 
-import { aggOrderBy, arrayAgg, exprRef, fn, literal } from '@dbsp/core';
+import {
+	aggOrderBy,
+	arrayAgg,
+	createOrm,
+	exprRef,
+	fn,
+	literal,
+	schema,
+	ref as schemaRef,
+} from '@dbsp/core';
 import { stringAgg } from '@dbsp/core/internal';
 
 // exprRef is the correct alias for expressions.ref from @dbsp/core
@@ -23,6 +32,7 @@ import {
 import type { AggOrderByArg, CustomFnExpressionIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ============================================================================
 // Helpers
@@ -282,5 +292,85 @@ describe('stringAgg() helper', () => {
 		const sql = normalizeSQL(result.sql);
 		// normalizeSQL replaces all commas with ', ' including those inside string literals
 		expect(sql).toContain("string_agg(name, ', ' order by name desc)");
+	});
+});
+
+// ============================================================================
+// aggOrderBy() — qualified names resolve through the query scope (#986)
+// ============================================================================
+
+describe('aggOrderBy() — qualified names through the ORM', () => {
+	const db = schema({
+		files: { id: { type: 'integer', primaryKey: true }, path: 'text' },
+		symbols: {
+			id: { type: 'integer', primaryKey: true },
+			name: 'text',
+			body_hash: 'text',
+			start_line: 'integer',
+			file_id: schemaRef('files', { as: 'file' }),
+		},
+		calls: {
+			id: { type: 'integer', primaryKey: true },
+			callee_id: schemaRef('symbols', { as: 'callee' }),
+		},
+	});
+	const orm = createOrm({
+		schema: db,
+		adapter: createPgCompileOnlyAdapter({ model: db.model }),
+	});
+	const joined = (...orderBy: AggOrderByArg[]) =>
+		orm
+			.select('symbols')
+			.join('file')
+			.groupBy(['body_hash'])
+			.columns([arrayAgg(ref('symbols.name'), ...orderBy).as('names')])
+			.dump().sql;
+
+	it('a relation join alias qualifies the field', () => {
+		expect(joined(aggOrderBy('file.path'), aggOrderBy('start_line'))).toBe(
+			'SELECT array_agg(symbols.name ORDER BY file.path ASC, start_line ASC) AS names FROM symbols JOIN files AS file ON symbols.file_id = file.id GROUP BY symbols.body_hash',
+		);
+	});
+
+	it('the root table qualifies the field', () => {
+		expect(joined(aggOrderBy('symbols.start_line', 'desc'))).toBe(
+			'SELECT array_agg(symbols.name ORDER BY symbols.start_line DESC) AS names FROM symbols JOIN files AS file ON symbols.file_id = file.id GROUP BY symbols.body_hash',
+		);
+	});
+
+	it('an explicit join alias qualifies the field', () => {
+		const { sql } = orm
+			.select('symbols')
+			.join('file', { as: 'f' })
+			.groupBy(['body_hash'])
+			.columns([
+				arrayAgg(ref('symbols.name'), aggOrderBy('f.path')).as('names'),
+			])
+			.dump();
+		expect(sql).toBe(
+			'SELECT array_agg(symbols.name ORDER BY f.path ASC) AS names FROM symbols JOIN files AS f ON symbols.file_id = f.id GROUP BY symbols.body_hash',
+		);
+	});
+
+	it('a second-hop alias qualifies the field', () => {
+		const { sql } = orm
+			.select('calls')
+			.join('callee.file')
+			.groupBy(['id'])
+			.columns([
+				arrayAgg(ref('callee.name'), aggOrderBy('callee_file.path')).as(
+					'names',
+				),
+			])
+			.dump();
+		expect(sql).toBe(
+			'SELECT array_agg(callee.name ORDER BY callee_file.path ASC) AS names FROM calls JOIN symbols AS callee ON calls.callee_id = callee.id JOIN files AS callee_file ON callee.file_id = callee_file.id GROUP BY calls.id',
+		);
+	});
+
+	it('a column absent from the qualified table is refused', () => {
+		expect(() => joined(aggOrderBy('file.nope'))).toThrow(
+			"Declared column 'files.nope' is absent from the physical model.",
+		);
 	});
 });
