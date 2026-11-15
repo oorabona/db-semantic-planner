@@ -14,7 +14,7 @@ import type {
 	ExpressionCompilerContext,
 	ExpressionHandler,
 } from '../types.js';
-import { expressionColumnRef } from '../types.js';
+import { expressionColumnRef, expressionQualifiedColumnRef } from '../types.js';
 import { bindParameter } from './param-value.js';
 
 /**
@@ -24,6 +24,21 @@ import { bindParameter } from './param-value.js';
  * See: src/include/nodes/parsenodes.h in PostgreSQL source
  */
 const WINDOW_FRAME_DEFAULT = 1034;
+
+/**
+ * Compile a window field: `qualifier.column` resolves the qualifier through
+ * the scope (root table, join alias or relation join alias); a bare name is
+ * qualified by the current binding.
+ */
+function windowColumnRef(name: string, ctx: ExpressionCompilerContext): Node {
+	const dotIdx = name.indexOf('.');
+	if (dotIdx === -1) return expressionColumnRef(name, ctx);
+	return expressionQualifiedColumnRef(
+		name.slice(dotIdx + 1),
+		name.slice(0, dotIdx),
+		ctx,
+	);
+}
 
 function isWindowOrderBy(
 	orderBy: Decision['orderBy'],
@@ -48,7 +63,7 @@ function buildSortBy(
 	direction: 'ASC' | 'DESC' | undefined,
 	ctx: ExpressionCompilerContext,
 ): Node {
-	const colRef = expressionColumnRef(column, ctx);
+	const colRef = windowColumnRef(column, ctx);
 
 	const sortBy: SortBy = {
 		node: colRef,
@@ -80,7 +95,7 @@ function buildWindowDef(
 	// PARTITION BY
 	if (partition && partition.length > 0) {
 		windowDef.partitionClause = partition.map((col) =>
-			expressionColumnRef(col, ctx),
+			windowColumnRef(col, ctx),
 		);
 	}
 
@@ -196,7 +211,7 @@ function createLagLeadHandler(
 				throw new Error(`${upperName} requires a column`);
 			}
 
-			const colRef = expressionColumnRef(column, ctx);
+			const colRef = windowColumnRef(column, ctx);
 
 			const args: Node[] = [colRef];
 
@@ -241,7 +256,7 @@ function createColumnWindowHandler(
 				throw new Error(`${upperName} requires a column`);
 			}
 
-			const colRef = expressionColumnRef(column, ctx);
+			const colRef = windowColumnRef(column, ctx);
 
 			return buildWindowFunction(funcName, [colRef], decision, ctx);
 		},
@@ -299,7 +314,7 @@ export const genericWindowHandler: ExpressionHandler = {
 
 		// Add column if specified
 		if (decision.column) {
-			args.push(expressionColumnRef(decision.column, ctx));
+			args.push(windowColumnRef(decision.column, ctx));
 		}
 
 		// Add other args (e.g., offset for lag/lead)
