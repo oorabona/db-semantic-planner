@@ -105,6 +105,15 @@ export const BRAND: unique symbol = Symbol.for('dbsp:brand');
 export const RELATION_PATH: unique symbol = Symbol.for('dbsp:relationPath');
 
 /**
+ * Accessor on a RelationRef returning a RelationRef for the same target with an
+ * empty relation path: its columns compile to the bare column, so a relation
+ * predicate binds them to its own range.
+ *
+ * @internal Used by `every`/`some`/`none`; not part of the public surface.
+ */
+export const RELATION_REROOT: unique symbol = Symbol('dbsp:relationReroot');
+
+/**
  * Type declarations for Symbol keys to enable TypeScript inference.
  *
  * These types allow TypeScript to understand the shape of objects

@@ -43,6 +43,7 @@ import {
 	expressionColumnRef,
 	expressionQualifiedColumnRef,
 	expressionUnqualifiedColumnRef,
+	expressionUserQualifiedColumnRef,
 	expressionWholeRowRef,
 } from '../types.js';
 import { resolveCaseValue } from './case-value.js';
@@ -129,7 +130,7 @@ function expressionNamedColumnRef(
 ): Node {
 	const dotIdx = name.indexOf('.');
 	if (dotIdx === -1) return expressionUnqualifiedColumnRef(name, ctx);
-	return expressionQualifiedColumnRef(
+	return expressionUserQualifiedColumnRef(
 		name.slice(dotIdx + 1),
 		name.slice(0, dotIdx),
 		ctx,

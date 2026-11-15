@@ -10,6 +10,7 @@
 
 import type { ModelIR } from '../model-ir.js';
 import { emitWarning, type WarningCategory } from './logger.js';
+import { RELATION_REROOT } from './symbols.js';
 import {
 	BRAND,
 	COLUMN_META,
@@ -145,8 +146,9 @@ export function createColumnRef(
 		},
 	};
 
-	// Add relation path if provided (for cross-table queries)
-	if (relationPath && relationPath.length > 0) {
+	// A relation path addresses the column from the table the path starts at;
+	// an empty path (a re-rooted RelationRef) addresses the relation's own range.
+	if (relationPath !== undefined) {
 		columnRef[RELATION_PATH] = relationPath;
 	}
 
@@ -228,6 +230,8 @@ export function createRelationRef(
 		[RELATION_META]: { target: targetTable, type: relationType },
 		[BRAND]: 'RelationRef' as const,
 		[RELATION_PATH]: currentPath, // Store path on RelationRef too
+		[RELATION_REROOT]: () =>
+			createRelationRef(targetTable, relationType, model, undefined, []),
 		_type: undefined as unknown, // Phantom type placeholder
 	};
 

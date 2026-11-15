@@ -144,13 +144,12 @@ export function resolveConditionContext(
 	): ResolvedRange | undefined => {
 		assertQualifierVisible(qualifier, scope);
 		const candidates = scope.filter((r) => r.table === qualifier);
+		// A range named by the qualifier binds first, the root included (an alias
+		// replaces a table's name, as in SQL); the table-name fallback applies only
+		// when no range of this scope carries that name.
 		const exact =
 			writtenQualifiers.get(scope)?.get(qualifier) ??
-			scope.find(
-				(r) =>
-					r.alias === qualifier &&
-					(r !== scope[0] || r.alias !== r.table || candidates.length < 2),
-			);
+			scope.find((r) => r.alias === qualifier);
 		if (exact) return exact;
 		if (candidates.length > 1)
 			throw new Error(

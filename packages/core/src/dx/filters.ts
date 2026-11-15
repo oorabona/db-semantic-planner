@@ -51,9 +51,11 @@ import type {
 	SubqueryBuilder,
 	SubqueryExpression,
 } from './subquery-builder.js';
+import { RELATION_REROOT } from './symbols.js';
 import {
 	type ColumnRef,
 	RELATION_META,
+	RELATION_PATH,
 	type RelationRef,
 } from './table-ref.js';
 import type { AliasedExprColumn, ExpressionSpec } from './types.js';
@@ -635,18 +637,40 @@ export function rawNotExists(
 // Quantified Relation Filters (DX-040 Block 7)
 // ============================================================================
 
+type AnyRelationRef = RelationRef<
+	string,
+	unknown,
+	'belongsTo' | 'hasMany' | 'hasOne'
+>;
+
 /**
- * Get relation name from a RelationRef.
+ * Get the relation a quantifier traverses: the RelationRef's relation path from
+ * the table it was taken from (`users.writings.replies` → `writings.replies`).
+ * A RelationRef without a path falls back to its target table.
  * @internal
  */
-function getRelationName(
-	rel: RelationRef<string, unknown, 'belongsTo' | 'hasMany' | 'hasOne'>,
-): string {
+function getRelationName(rel: AnyRelationRef): string {
 	const meta = rel[RELATION_META];
 	if (!meta) {
 		throw new Error('Invalid RelationRef: missing RELATION_META');
 	}
-	return meta.target;
+	const path = (rel as { readonly [RELATION_PATH]?: readonly string[] })[
+		RELATION_PATH
+	];
+	return path !== undefined && path.length > 0 ? path.join('.') : meta.target;
+}
+
+/**
+ * The ref a quantifier callback receives: the related table re-rooted, so its
+ * columns bind to the relation predicate's range and its relations start a new
+ * path. A hand-built RelationRef without the accessor is passed unchanged.
+ * @internal
+ */
+function rerootRelation<T extends AnyRelationRef>(rel: T): T {
+	const reroot = (rel as { readonly [RELATION_REROOT]?: () => T })[
+		RELATION_REROOT
+	];
+	return reroot === undefined ? rel : reroot();
 }
 
 /**
@@ -675,7 +699,7 @@ export function every<TTarget extends string, TTargetType>(
 	filter: (rel: RelationRef<TTarget, TTargetType[], 'hasMany'>) => WhereIntent,
 ): WhereRelationFilterIntent {
 	const relationName = getRelationName(relation);
-	const where = filter(relation);
+	const where = filter(rerootRelation(relation));
 	return {
 		kind: 'relationFilter',
 		relation: relationName,
@@ -709,7 +733,7 @@ export function none<TTarget extends string, TTargetType>(
 	filter: (rel: RelationRef<TTarget, TTargetType[], 'hasMany'>) => WhereIntent,
 ): WhereRelationFilterIntent {
 	const relationName = getRelationName(relation);
-	const where = filter(relation);
+	const where = filter(rerootRelation(relation));
 	return {
 		kind: 'relationFilter',
 		relation: relationName,
@@ -743,7 +767,7 @@ export function some<TTarget extends string, TTargetType>(
 	filter: (rel: RelationRef<TTarget, TTargetType[], 'hasMany'>) => WhereIntent,
 ): WhereRelationFilterIntent {
 	const relationName = getRelationName(relation);
-	const where = filter(relation);
+	const where = filter(rerootRelation(relation));
 	return {
 		kind: 'relationFilter',
 		relation: relationName,
