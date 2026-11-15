@@ -1,5 +1,13 @@
 # Changelog
 
+## [7.1.1](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v7.1.0...adapter-pgsql-v7.1.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** Resolve a qualified aggOrderBy field through the query scope ([#987](https://github.com/oorabona/db-semantic-planner/issues/987)) ([89e4e50](https://github.com/oorabona/db-semantic-planner/commit/89e4e50f72aecc8f10504d198b858f19e5a98b3e)), closes [#986](https://github.com/oorabona/db-semantic-planner/issues/986)
+* **adapter-pgsql:** Resolve qualified window fields through the query scope ([#990](https://github.com/oorabona/db-semantic-planner/issues/990)) ([6ffe5f8](https://github.com/oorabona/db-semantic-planner/commit/6ffe5f82c0a34327782f15be02e243302a69aaa7))
+
 ## [7.1.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v7.0.0...adapter-pgsql-v7.1.0) (2026-11-13)
 
 
