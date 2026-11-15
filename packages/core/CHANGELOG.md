@@ -1,5 +1,20 @@
 # Changelog
 
+## [6.1.0](https://github.com/oorabona/db-semantic-planner/compare/core-v6.0.0...core-v6.1.0) (2026-11-13)
+
+
+### Features
+
+* **core:** Join a dotted relation path with one range per hop ([#984](https://github.com/oorabona/db-semantic-planner/issues/984)) ([c34a3ee](https://github.com/oorabona/db-semantic-planner/commit/c34a3ee732516d090fa7425e4409419b9973b099))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/nql bumped to 2.0.1
+    * @dbsp/types bumped to 6.1.0
+
 ## [6.0.0](https://github.com/oorabona/db-semantic-planner/compare/core-v5.0.0...core-v6.0.0) (2026-10-06)
 
 
