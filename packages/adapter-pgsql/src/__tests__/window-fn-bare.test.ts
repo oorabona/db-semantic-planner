@@ -126,6 +126,32 @@ describe('window fields: qualified names through the ORM', () => {
 		);
 	});
 
+	it('the qualifier, not the column name, picks the range', () => {
+		const { sql } = orm
+			.select('symbols')
+			.join('file')
+			.columns([
+				'id',
+				rowNumber().partitionBy('file.id').orderBy('id').as('rn'),
+			])
+			.dump();
+		expect(sql).toBe(
+			`SELECT symbols.id, row_number() OVER (PARTITION BY file.id ORDER BY symbols.id ASC) AS rn ${FROM}`,
+		);
+	});
+
+	it('a bare name resolves against the root, not the joined table', () => {
+		expect(() =>
+			orm
+				.select('symbols')
+				.join('file')
+				.columns(['id', rowNumber().partitionBy('path').as('rn')])
+				.dump(),
+		).toThrow(
+			"Declared column 'symbols.path' is absent from the physical model.",
+		);
+	});
+
 	it('ORDER BY a relation join alias', () => {
 		const { sql } = orm
 			.select('symbols')
