@@ -851,7 +851,7 @@ describe('Type-safe filters with ColumnRef (DX-040)', () => {
 
 			expect(result).toEqual({
 				kind: 'comparison',
-				field: 'name',
+				field: 'users.name',
 				operator: 'eq',
 				value: 'John',
 			});
@@ -862,7 +862,7 @@ describe('Type-safe filters with ColumnRef (DX-040)', () => {
 
 			expect(result).toEqual({
 				kind: 'comparison',
-				field: 'age',
+				field: 'users.age',
 				operator: 'eq',
 				value: 25,
 			});
@@ -873,7 +873,7 @@ describe('Type-safe filters with ColumnRef (DX-040)', () => {
 
 			expect(result).toEqual({
 				kind: 'comparison',
-				field: 'active',
+				field: 'users.active',
 				operator: 'eq',
 				value: true,
 			});
@@ -886,7 +886,7 @@ describe('Type-safe filters with ColumnRef (DX-040)', () => {
 
 			expect(result).toEqual({
 				kind: 'comparison',
-				field: 'age',
+				field: 'users.age',
 				operator: 'gt',
 				value: 18,
 			});
@@ -897,7 +897,7 @@ describe('Type-safe filters with ColumnRef (DX-040)', () => {
 
 			expect(result).toEqual({
 				kind: 'comparison',
-				field: 'age',
+				field: 'users.age',
 				operator: 'gte',
 				value: 18,
 			});
@@ -908,7 +908,7 @@ describe('Type-safe filters with ColumnRef (DX-040)', () => {
 
 			expect(result).toEqual({
 				kind: 'comparison',
-				field: 'age',
+				field: 'users.age',
 				operator: 'lt',
 				value: 65,
 			});
@@ -919,7 +919,7 @@ describe('Type-safe filters with ColumnRef (DX-040)', () => {
 
 			expect(result).toEqual({
 				kind: 'comparison',
-				field: 'age',
+				field: 'users.age',
 				operator: 'lte',
 				value: 65,
 			});
@@ -932,7 +932,7 @@ describe('Type-safe filters with ColumnRef (DX-040)', () => {
 
 			expect(result).toEqual({
 				kind: 'like',
-				field: 'name',
+				field: 'users.name',
 				pattern: '%John%',
 			});
 		});
@@ -942,7 +942,7 @@ describe('Type-safe filters with ColumnRef (DX-040)', () => {
 
 			expect(result).toEqual({
 				kind: 'like',
-				field: 'email',
+				field: 'users.email',
 				pattern: '%@EXAMPLE.COM',
 				caseInsensitive: true,
 			});
@@ -955,7 +955,7 @@ describe('Type-safe filters with ColumnRef (DX-040)', () => {
 
 			expect(result).toEqual({
 				kind: 'null',
-				field: 'score',
+				field: 'users.score',
 				operator: 'isNull',
 			});
 		});
@@ -965,7 +965,7 @@ describe('Type-safe filters with ColumnRef (DX-040)', () => {
 
 			expect(result).toEqual({
 				kind: 'null',
-				field: 'email',
+				field: 'users.email',
 				operator: 'isNotNull',
 			});
 		});
@@ -977,7 +977,7 @@ describe('Type-safe filters with ColumnRef (DX-040)', () => {
 
 			expect(result).toEqual({
 				kind: 'in',
-				field: 'name',
+				field: 'users.name',
 				values: ['Alice', 'Bob', 'Charlie'],
 			});
 		});
@@ -987,7 +987,7 @@ describe('Type-safe filters with ColumnRef (DX-040)', () => {
 
 			expect(result).toEqual({
 				kind: 'in',
-				field: 'age',
+				field: 'users.age',
 				values: [18, 21, 25],
 			});
 		});

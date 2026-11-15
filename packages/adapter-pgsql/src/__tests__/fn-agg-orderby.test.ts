@@ -374,3 +374,47 @@ describe('aggOrderBy() — qualified names through the ORM', () => {
 		);
 	});
 });
+
+// A table name bound by two ranges is refused rather than bound to the first
+// registered one (#991).
+describe('exprRef() and aggOrderBy() — a table joined twice', () => {
+	const db = schema({
+		symbols: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+		calls: {
+			id: { type: 'integer', primaryKey: true },
+			caller_id: schemaRef('symbols', { as: 'caller', inverse: 'callerCalls' }),
+			callee_id: schemaRef('symbols', { as: 'callee', inverse: 'calleeCalls' }),
+		},
+	});
+	const orm = createOrm({
+		schema: db,
+		adapter: createPgCompileOnlyAdapter({ model: db.model }),
+		suppressDxWarnings: true,
+	});
+	const AMBIGUOUS =
+		"Qualifier 'symbols' is ambiguous between 'callee', 'caller'.";
+
+	it('exprRef names the table', () => {
+		expect(() =>
+			orm
+				.select('calls')
+				.join('caller')
+				.join('callee')
+				.columns([ref('symbols.id').as('v')])
+				.dump(),
+		).toThrow(AMBIGUOUS);
+	});
+
+	it('aggOrderBy names the table', () => {
+		expect(() =>
+			orm
+				.select('calls')
+				.join('caller')
+				.join('callee')
+				.columns([
+					fn('array_agg', ref('caller.id'), aggOrderBy('symbols.id')).as('v'),
+				])
+				.dump(),
+		).toThrow(AMBIGUOUS);
+	});
+});

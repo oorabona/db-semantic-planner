@@ -186,3 +186,110 @@ it('retains the exact refusal for a truly undeclared relation', () => {
 		),
 	);
 });
+
+// Quantifiers traverse the RelationRef's relation path and give their callback
+// refs relative to the related table (#991).
+const namedDb = schema({
+	users: { id: { type: 'integer', primaryKey: true }, email: 'text' },
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		published: 'boolean',
+		author_id: ref('users', { as: 'author', inverse: 'writings' }),
+		editor_id: ref('users', { as: 'editor', inverse: 'edits' }),
+	},
+	comments: {
+		id: { type: 'integer', primaryKey: true },
+		body: 'text',
+		post_id: ref('posts', { as: 'post', inverse: 'replies' }),
+	},
+	nodes: {
+		id: { type: 'integer', primaryKey: true },
+		label: 'text',
+		parent_id: ref('nodes', {
+			nullable: true,
+			as: 'parent',
+			inverse: 'children',
+			roles: { parent: 'parent', children: 'children' },
+		}),
+	},
+});
+const namedOrm = createOrm({
+	schema: namedDb,
+	adapter: createPgCompileOnlyAdapter({ model: namedDb.model }),
+	suppressDxWarnings: true,
+});
+const named = namedOrm.tables;
+const writingsExists = (where: string) =>
+	`SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND ${where})`;
+const repliesWhere =
+	'EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.post_id AND comments_exists_1.body = $1)';
+
+it('some() over a relation named unlike its table binds callback columns to the relation range', () => {
+	expect(
+		namedOrm
+			.select('users')
+			.where(some(named.users.writings, (p) => eq(p.published!, true)))
+			.dump().sql,
+	).toBe(writingsExists('posts_exists_0.published = $1'));
+});
+
+it('some() over a two-hop relation path traverses both hops', () => {
+	expect(
+		namedOrm
+			.select('users')
+			.where(some(named.users.writings.replies, (c) => eq(c.body!, 'x')))
+			.dump().sql,
+	).toBe(writingsExists(repliesWhere));
+});
+
+it('a nested quantifier starts its relation path at the related table', () => {
+	expect(
+		namedOrm
+			.select('users')
+			.where(
+				some(named.users.writings, (p) =>
+					// The callback types `p.replies` as a column (existing typing gap).
+					some(p.replies as never, (c) => eq(c.body!, 'x')),
+				),
+			)
+			.dump().sql,
+	).toBe(writingsExists(repliesWhere));
+});
+
+it('every/some/none pick the relation, not the target table, with two relations to one table', () => {
+	expect(
+		namedOrm
+			.select('users')
+			.where(some(named.users.edits, (p) => eq(p.published!, true)))
+			.dump().sql,
+	).toBe(
+		'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.editor_id AND posts_exists_0.published = $1)',
+	);
+	expect(
+		namedOrm
+			.select('users')
+			.where(every(named.users.writings, (p) => eq(p.published!, true)))
+			.dump().sql,
+	).toBe(
+		'SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND NOT (posts_exists_0.published = $1)))',
+	);
+	expect(
+		namedOrm
+			.select('users')
+			.where(none(named.users.edits, (p) => eq(p.published!, true)))
+			.dump().sql,
+	).toBe(
+		'SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.editor_id AND posts_exists_0.published = $1))',
+	);
+});
+
+it('some() over a self-relation binds the callback column to the inner range', () => {
+	expect(
+		namedOrm
+			.select('nodes')
+			.where(some(named.nodes.children, (c) => eq(c.label!, 'x')))
+			.dump().sql,
+	).toBe(
+		'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND nodes_exists_0.label = $1)',
+	);
+});
