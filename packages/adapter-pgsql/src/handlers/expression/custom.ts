@@ -120,6 +120,23 @@ export function assertSafeOperator(
 }
 
 /**
+ * Compile a column name as `ref()` and `aggOrderBy()` spell it: `qualifier.column`
+ * resolves the qualifier through the scope; a bare name stays bare.
+ */
+function expressionNamedColumnRef(
+	name: string,
+	ctx: ExpressionCompilerContext,
+): Node {
+	const dotIdx = name.indexOf('.');
+	if (dotIdx === -1) return expressionUnqualifiedColumnRef(name, ctx);
+	return expressionQualifiedColumnRef(
+		name.slice(dotIdx + 1),
+		name.slice(0, dotIdx),
+		ctx,
+	);
+}
+
+/**
  * Recursively compile an ExpressionIntent into a PostgreSQL AST Node.
  *
  * Handles all custom expression kinds: customOp, customFn, ref, param, cast, literal, unary.
@@ -177,7 +194,7 @@ export function compileExpressionIntent(
 			const orderByNodes =
 				i.aggOrderBy && i.aggOrderBy.length > 0
 					? i.aggOrderBy.map((ob: AggOrderByArg) => {
-							const colNode = expressionUnqualifiedColumnRef(ob.field, ctx);
+							const colNode = expressionNamedColumnRef(ob.field, ctx);
 							return sortBy(colNode, ob.direction === 'desc' ? 'DESC' : 'ASC');
 						})
 					: undefined;
@@ -204,14 +221,7 @@ export function compileExpressionIntent(
 
 		case 'ref': {
 			const i = intent as RefExpressionIntent;
-			// Support 'table.column' dotted notation
-			const dotIdx = i.column.indexOf('.');
-			if (dotIdx !== -1) {
-				const table = i.column.slice(0, dotIdx);
-				const col = i.column.slice(dotIdx + 1);
-				return expressionQualifiedColumnRef(col, table, ctx);
-			}
-			return expressionUnqualifiedColumnRef(i.column, ctx);
+			return expressionNamedColumnRef(i.column, ctx);
 		}
 
 		case 'param': {
