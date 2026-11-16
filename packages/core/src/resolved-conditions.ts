@@ -352,6 +352,12 @@ export function resolveConditionContext(
 			};
 		else if (select?.type === 'aggregate' && select.aggregates[0]) {
 			const agg = select.aggregates[0];
+			// The resolved projection carries no aggregate FILTER; refusing keeps
+			// the aggregate from silently counting rows the FILTER excludes.
+			if (agg.filter !== undefined)
+				throw new Error(
+					'scalar subquery with an aggregate FILTER is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+				);
 			projection = {
 				kind: 'aggregate',
 				function: agg.function,

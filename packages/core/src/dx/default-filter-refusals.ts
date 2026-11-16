@@ -1,8 +1,4 @@
-import {
-	isParamIntent,
-	type ModelIR,
-	type QueryIntent,
-} from '@dbsp/types';
+import { isParamIntent, type ModelIR, type QueryIntent } from '@dbsp/types';
 import { getTrustedNqlRelationFilterFields } from '@dbsp/types/internal';
 import { getDefaultFilter } from '../default-filter-map.js';
 import { isBoundPayload } from '../intent-payload.js';

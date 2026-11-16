@@ -3529,8 +3529,9 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 				query: import('@dbsp/types').QueryIntent,
 				paramOffset: number,
 			): CompileSubqueryResult {
-				// With a model, a body is the plan core issues for its query, so the
-				// read policy (default filters, policies of nested builders) applies.
+				// With a model, a body is the plan core issues for its query: the
+				// default filters apply to its scans, and a builder nested in its
+				// WHERE or projections keeps its policy where core resolves bodies.
 				if (deps.model !== undefined) {
 					const issued = planFn(query, deps.model, {
 						...(options?.defaultFilters && {
