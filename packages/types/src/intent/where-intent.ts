@@ -55,6 +55,13 @@ export function isFieldRef(value: unknown): value is FieldRef {
 export interface WhereComparisonIntent {
 	readonly kind: 'comparison';
 	readonly field: string;
+	/**
+	 * Set when `field` came from a typed column ref reached through a relation
+	 * (`orm.tables.nodes.parent.label`, or `c.parent.label` from a quantifier
+	 * callback). Core refuses such a leaf inside a relation predicate, quantifier
+	 * callback or subquery body, where its path would be read from the body's row.
+	 */
+	readonly pathRef?: true;
 	readonly operator: ComparisonOperator;
 	readonly value: unknown;
 	/** JSON path extraction before comparison (e.g., data->'key' = 'val') */
@@ -69,6 +76,13 @@ export interface WhereComparisonIntent {
 export interface WhereLikeIntent {
 	readonly kind: 'like';
 	readonly field: string;
+	/**
+	 * Set when `field` came from a typed column ref reached through a relation
+	 * (`orm.tables.nodes.parent.label`, or `c.parent.label` from a quantifier
+	 * callback). Core refuses such a leaf inside a relation predicate, quantifier
+	 * callback or subquery body, where its path would be read from the body's row.
+	 */
+	readonly pathRef?: true;
 	readonly pattern: string | ParamIntent;
 	/** Case-insensitive matching */
 	readonly caseInsensitive?: boolean;
@@ -85,6 +99,13 @@ export interface WhereLikeIntent {
 export interface WhereInValueIntent {
 	readonly kind: 'in';
 	readonly field: string;
+	/**
+	 * Set when `field` came from a typed column ref reached through a relation
+	 * (`orm.tables.nodes.parent.label`, or `c.parent.label` from a quantifier
+	 * callback). Core refuses such a leaf inside a relation predicate, quantifier
+	 * callback or subquery body, where its path would be read from the body's row.
+	 */
+	readonly pathRef?: true;
 	readonly values: readonly unknown[];
 	readonly subquery?: never;
 	readonly not?: boolean;
@@ -96,6 +117,13 @@ export interface WhereInValueIntent {
 export interface WhereInSubqueryIntent {
 	readonly kind: 'in';
 	readonly field: string;
+	/**
+	 * Set when `field` came from a typed column ref reached through a relation
+	 * (`orm.tables.nodes.parent.label`, or `c.parent.label` from a quantifier
+	 * callback). Core refuses such a leaf inside a relation predicate, quantifier
+	 * callback or subquery body, where its path would be read from the body's row.
+	 */
+	readonly pathRef?: true;
 	readonly subquery: QueryIntent;
 	readonly values?: never;
 	readonly not?: boolean;
@@ -114,6 +142,13 @@ export type WhereInIntent = WhereInValueIntent | WhereInSubqueryIntent;
 export interface WhereAnyIntent {
 	readonly kind: 'any';
 	readonly field: string;
+	/**
+	 * Set when `field` came from a typed column ref reached through a relation
+	 * (`orm.tables.nodes.parent.label`, or `c.parent.label` from a quantifier
+	 * callback). Core refuses such a leaf inside a relation predicate, quantifier
+	 * callback or subquery body, where its path would be read from the body's row.
+	 */
+	readonly pathRef?: true;
 	readonly values: readonly unknown[] | ParamIntent;
 }
 
@@ -170,6 +205,13 @@ export interface WhereRangeIntent {
 export interface WhereNullIntent {
 	readonly kind: 'null';
 	readonly field: string;
+	/**
+	 * Set when `field` came from a typed column ref reached through a relation
+	 * (`orm.tables.nodes.parent.label`, or `c.parent.label` from a quantifier
+	 * callback). Core refuses such a leaf inside a relation predicate, quantifier
+	 * callback or subquery body, where its path would be read from the body's row.
+	 */
+	readonly pathRef?: true;
 	readonly operator: NullOperator;
 }
 

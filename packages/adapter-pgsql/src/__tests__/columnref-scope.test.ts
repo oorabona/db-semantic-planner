@@ -5,19 +5,32 @@
  * the query scope like the same string.
  */
 import {
+	and,
 	any,
+	caseWhen,
 	createOrm,
 	eq,
+	every,
+	exists,
+	fn,
 	inArray,
 	inSubquery,
 	isNotNull,
 	isNull,
 	like,
+	literal,
 	neq,
+	notExists,
+	param,
+	rawExists,
 	ref,
+	SubqueryExpression,
 	schema,
+	some,
+	star,
 	subquery,
 } from '@dbsp/core';
+import type { WhereIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -276,5 +289,431 @@ describe('ColumnRef in an upsert guard', () => {
 		).toBe(
 			'INSERT INTO t (id, extra, k) VALUES ($1, $2, $3) ON CONFLICT (id) DO UPDATE SET extra = $4 WHERE t.extra = $5',
 		);
+	});
+});
+
+describe('A relation-path ref inside a body is refused (#991)', () => {
+	const refusal = (field: string) =>
+		new Error(
+			`ColumnRef '${field}' follows a relation; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1005).`,
+		);
+	const L = () => eq(nodes.parent.label, 'x');
+	const writingsDb = schema({
+		users: { id: { type: 'integer', primaryKey: true }, email: 'text' },
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			published: 'boolean',
+			author_id: ref('users', { as: 'author', inverse: 'writings' }),
+		},
+		comments: {
+			id: { type: 'integer', primaryKey: true },
+			body: 'text',
+			post_id: ref('posts', { as: 'post', inverse: 'replies' }),
+		},
+	});
+	const writingsOrm = createOrm({
+		schema: writingsDb,
+		adapter: createPgCompileOnlyAdapter({ model: writingsDb.model }),
+		suppressDxWarnings: true,
+	});
+	const { users, posts } = writingsOrm.tables;
+	const postsDb = schema({
+		users: { id: { type: 'integer', primaryKey: true }, email: 'text' },
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			published: 'boolean',
+			author_id: ref('users', { as: 'author', inverse: 'posts' }),
+		},
+	});
+	const postsOrm = createOrm({
+		schema: postsDb,
+		adapter: createPgCompileOnlyAdapter({ model: postsDb.model }),
+		suppressDxWarnings: true,
+	});
+	const P = () => eq(postsOrm.tables.users.posts.published, true);
+	const dataDb = schema({
+		nodes: {
+			id: { type: 'integer', primaryKey: true },
+			label: 'text',
+			data: { type: 'json', dbType: 'jsonb' },
+			parent_id: ref('nodes', {
+				nullable: true,
+				as: 'parent',
+				inverse: 'children',
+				roles: { parent: 'parent', children: 'children' },
+			}),
+		},
+	});
+	const dataOrm = createOrm({
+		schema: dataDb,
+		adapter: createPgCompileOnlyAdapter({ model: dataDb.model }),
+		suppressDxWarnings: true,
+	});
+	const dataNodes = dataOrm.tables.nodes;
+
+	it.each([
+		['exists', () => exists('parent', { where: L() })],
+		['notExists', () => notExists('parent', { where: L() })],
+	])('AC25 predicate-body-refused %s', (_name, where) => {
+		expect(() => nodeOrm.select('nodes').where(where()).dump()).toThrow(
+			refusal('parent.label'),
+		);
+	});
+
+	it('AC26 cross-table-body-refused in a SELECT and an UPDATE', () => {
+		const body = () =>
+			exists('writings', { where: eq(users.writings.published, true) });
+		expect(() => writingsOrm.select('users').where(body()).dump()).toThrow(
+			refusal('writings.published'),
+		);
+		expect(() =>
+			writingsOrm.update('users').set({ email: 'e' }).where(body()).dump(),
+		).toThrow(refusal('writings.published'));
+	});
+
+	it('AC27 callback-path-refused absolute and from the callback parameter', () => {
+		expect(() =>
+			nodeOrm
+				.select('nodes')
+				.where(some(nodes.children, () => eq(nodes.children.label, 'x')))
+				.dump(),
+		).toThrow(refusal('children.label'));
+		// The callback parameter is typed without its relations (filters.ts).
+		const viaParent = (c: unknown) => eq((c as typeof nodes).parent.label, 'x');
+		expect(() =>
+			nodeOrm.select('nodes').where(some(nodes.children, viaParent)).dump(),
+		).toThrow(refusal('parent.label'));
+		expect(() =>
+			nodeOrm.select('nodes').where(every(nodes.children, viaParent)).dump(),
+		).toThrow(refusal('parent.label'));
+	});
+
+	it.each([
+		['rawExists', () => rawExists(subquery('nodes').select('id').where(L()))],
+		[
+			'inSubquery',
+			() => inSubquery('id', subquery('nodes').select('id').where(L())),
+		],
+	])('AC28 subquery-body-refused %s', (_name, where) => {
+		expect(() => nodeOrm.select('nodes').where(where()).dump()).toThrow(
+			refusal('parent.label'),
+		);
+	});
+
+	it.each([
+		[
+			'FILTER',
+			() =>
+				nodeOrm.select('nodes').columns([
+					fn('count', star())
+						.filter(exists('parent', { where: L() }))
+						.as('n'),
+				]),
+		],
+		[
+			'CASE WHEN',
+			() =>
+				nodeOrm.select('nodes').columns([
+					caseWhen(exists('parent', { where: L() }), literal(1))
+						.else(literal(0))
+						.as('c'),
+				]),
+		],
+		[
+			'HAVING',
+			() =>
+				nodeOrm
+					.select('nodes')
+					.columns(['id'])
+					.groupBy(['id'])
+					.having(exists('parent', { where: L() })),
+		],
+	])('AC29 nested-positions-refused %s', (_name, query) => {
+		expect(() => query().dump()).toThrow(refusal('parent.label'));
+	});
+
+	it('AC29 join-on-body-refused', () => {
+		expect(() =>
+			nodeOrm
+				.select('nodes')
+				.join('nodes', {
+					as: 'n2',
+					on: and(eq('n2.id', 1), exists('parent', { where: L() })),
+				})
+				.dump(),
+		).toThrow(refusal('parent.label'));
+	});
+
+	it('AC30 top-level-unchanged', () => {
+		expect(nodeOrm.select('nodes').where(L()).dump().sql).toBe(
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.parent_id = nodes_exists_0.id AND nodes_exists_0.label = $1)',
+		);
+		expect(nodeOrm.select('nodes').join('parent').where(L()).dump().sql).toBe(
+			`${PARENT_JOIN} WHERE parent.label = $1`,
+		);
+		expect(
+			nodeOrm
+				.select('nodes')
+				.include('parent', { join: 'left', where: L() })
+				.dump().sql,
+		).toBe(
+			'SELECT nodes.*, parent.id AS "parent.id", parent.label AS "parent.label", parent.parent_id AS "parent.parent_id", parent.id AS __dbsp_presence_parent FROM nodes LEFT JOIN nodes AS parent ON nodes.parent_id = parent.id WHERE parent.label = $1',
+		);
+		expect(
+			nodeOrm
+				.select('nodes')
+				.columns([fn('count', star()).filter(L()).as('n')])
+				.dump().sql,
+		).toBe(
+			'SELECT count(*) FILTER (WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.parent_id = nodes_exists_0.id AND nodes_exists_0.label = $1)) AS n FROM nodes',
+		);
+		expect(
+			nodeOrm
+				.select('nodes')
+				.columns([caseWhen(L(), literal(1)).else(literal(0)).as('c')])
+				.dump().sql,
+		).toBe(
+			'SELECT CASE WHEN EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.parent_id = nodes_exists_0.id AND nodes_exists_0.label = $1) THEN 1 ELSE 0 END AS c FROM nodes',
+		);
+		expect(
+			writingsOrm
+				.update('users')
+				.set({ email: 'e' })
+				.where(eq(users.writings.published, true))
+				.dump().sql,
+		).toBe(
+			'UPDATE users SET email = $1 WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND posts_exists_0.published = $2)',
+		);
+	});
+
+	it('AC31 unmarked-refs-accepted', () => {
+		const expected =
+			'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND posts_exists_0.published = $1)';
+		expect(
+			writingsOrm
+				.select('users')
+				.where(some(users.writings, (p) => eq(p.published!, true)))
+				.dump().sql,
+		).toBe(expected);
+		expect(
+			writingsOrm
+				.select('users')
+				.where(exists('writings', { where: eq(posts.published, true) }))
+				.dump().sql,
+		).toBe(expected);
+	});
+
+	it('AC33 direct-body-refused in where, projection, orderBy, having and B9', () => {
+		const projected = (body: Record<string, unknown>) =>
+			postsOrm.select('users').columns([
+				new SubqueryExpression({
+					type: 'select',
+					from: 'posts',
+					...body,
+				} as never).asExpr('v'),
+			]);
+		const caseOf = () => caseWhen(P(), literal(1)).else(literal(0)).intent;
+		for (const query of [
+			() =>
+				postsOrm
+					.select('users')
+					.columns([subquery('posts').where(P()).count().asExpr('n')]),
+			() => projected({ select: { type: 'expressions', columns: [caseOf()] } }),
+			() =>
+				projected({
+					select: { type: 'fields', fields: ['id'] },
+					orderBy: [{ expression: caseOf(), direction: 'asc' }],
+					limit: 1,
+				}),
+			() =>
+				projected({
+					select: { type: 'fields', fields: ['id'] },
+					groupBy: ['id'],
+					having: P(),
+				}),
+		])
+			expect(() => query().dump()).toThrow(refusal('posts.published'));
+		expect(() =>
+			nodeOrm
+				.select('nodes')
+				.columns([subquery('nodes').select('id').where(L()).asExpr('v')])
+				.dump(),
+		).toThrow(refusal('parent.label'));
+	});
+
+	it('AC33 aggregate-filter-body-refused', () => {
+		expect(() =>
+			postsOrm
+				.select('users')
+				.columns([
+					new SubqueryExpression({
+						type: 'select',
+						from: 'posts',
+						select: {
+							type: 'aggregate',
+							aggregates: [{ function: 'count', field: '*', filter: P() }],
+						},
+					} as never).asExpr('n'),
+				])
+				.dump(),
+		).toThrow(refusal('posts.published'));
+	});
+
+	it('AC33 having-body-refused', () => {
+		expect(() =>
+			postsOrm
+				.select('users')
+				.columns(['id'])
+				.groupBy(['id'])
+				.having(
+					inSubquery(
+						postsOrm.tables.users.id,
+						subquery('posts').select('author_id').where(P()),
+					),
+				)
+				.dump(),
+		).toThrow(refusal('posts.published'));
+	});
+
+	it.each([
+		['like', () => like(nodes.parent.label, 'a%'), 'parent.label'],
+		['inArray', () => inArray(nodes.parent.label, ['a']), 'parent.label'],
+		['any', () => any(nodes.parent.label, ['a']), 'parent.label'],
+		['isNull', () => isNull(nodes.parent.label), 'parent.label'],
+		['isNotNull', () => isNotNull(nodes.parent.label), 'parent.label'],
+		[
+			'inSubquery',
+			() => inSubquery(nodes.parent.id, subquery('nodes').select('parent_id')),
+			'parent.id',
+		],
+	])('AC34 per-constructor-marker %s', (_name, leaf, field) => {
+		expect(() =>
+			nodeOrm
+				.select('nodes')
+				.where(exists('parent', { where: leaf() }))
+				.dump(),
+		).toThrow(refusal(field));
+	});
+
+	it('AC35 plan-refuses in a resolved body and a directly lowered body', () => {
+		expect(() =>
+			nodeOrm
+				.select('nodes')
+				.where(exists('parent', { where: L() }))
+				.plan(),
+		).toThrow(refusal('parent.label'));
+		expect(() =>
+			postsOrm
+				.select('users')
+				.columns([subquery('posts').where(P()).count().asExpr('n')])
+				.plan(),
+		).toThrow(refusal('posts.published'));
+	});
+
+	it('AC36 rawnotexists-body-refused and scalar-comparison-body-refused', () => {
+		const body = () =>
+			subquery('nodes').select('id').where(L()).build().toIntent();
+		for (const where of [
+			{ kind: 'rawNotExists', subquery: body() },
+			{ kind: 'subquery', field: 'id', operator: 'eq', subquery: body() },
+		])
+			expect(() =>
+				nodeOrm
+					.select('nodes')
+					.where(where as WhereIntent)
+					.dump(),
+			).toThrow(refusal('parent.label'));
+	});
+
+	it('AC36 in-operand-outside-body', () => {
+		const result = writingsOrm
+			.select('users')
+			.where(inSubquery(users.writings.id, subquery('posts').select('id')))
+			.dump();
+		expect(result.sql).toBe(
+			'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND posts_exists_0.id = ANY (SELECT posts_subq_1.id FROM posts AS posts_subq_1))',
+		);
+		expect(result.params).toEqual([]);
+	});
+
+	it('AC37 bound-payload-opaque plain and through param()', () => {
+		const leaf = eq(dataNodes.parent.label, 'x');
+		const plain = dataOrm
+			.select('nodes')
+			.where(exists('parent', { where: eq('data', leaf) }))
+			.dump();
+		expect(plain.sql).toBe(
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.parent_id = nodes_exists_0.id AND nodes_exists_0.data = CAST($1 AS jsonb))',
+		);
+		expect(plain.params).toEqual([
+			{
+				kind: 'comparison',
+				field: 'parent.label',
+				operator: 'eq',
+				value: 'x',
+				pathRef: true,
+			},
+		]);
+		const wrapped = dataOrm
+			.select('nodes')
+			.where(exists('parent', { where: eq('data', param(leaf)) }))
+			.dump();
+		expect(wrapped.sql).toBe(
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.parent_id = nodes_exists_0.id AND nodes_exists_0.data = $1)',
+		);
+		expect(wrapped.params).toEqual(plain.params);
+	});
+
+	it('AC37 batch-and-window-data-opaque', () => {
+		const leaf = eq(dataNodes.parent.label, 'x');
+		const batch = dataOrm
+			.from(
+				dataOrm.batchValues(
+					[[exists('parent', { where: leaf })]],
+					['data'],
+					['jsonb'],
+				),
+			)
+			.dump();
+		expect(batch.sql).toBe(
+			'SELECT batch.* FROM unnest(CAST($1 AS jsonb[])) AS batch(data)',
+		);
+		expect(batch.params).toEqual([[exists('parent', { where: leaf })]]);
+		const lagBody = new SubqueryExpression({
+			type: 'select',
+			from: 'nodes',
+			select: {
+				type: 'expressions',
+				columns: [
+					{
+						kind: 'window',
+						function: 'lag',
+						field: 'data',
+						alias: 'v',
+						offset: 1,
+						defaultValue: leaf,
+						over: { orderBy: [{ field: 'id', direction: 'asc' }] },
+					},
+				],
+			},
+		} as never);
+		const lagged = dataOrm
+			.select('nodes')
+			.columns([lagBody.asExpr('x')])
+			.dump();
+		expect(lagged.sql).toBe(
+			'SELECT (SELECT lag(nodes_sq.data, $1, $2) OVER (ORDER BY nodes_sq.id ASC) AS v FROM nodes AS nodes_sq) AS x FROM nodes',
+		);
+		expect(lagged.params).toEqual([1, leaf]);
+	});
+
+	it('AC37 shared-occurrence-refused', () => {
+		const shared = L();
+		expect(() =>
+			nodeOrm
+				.select('nodes')
+				.where(and(shared, exists('parent', { where: shared })))
+				.dump(),
+		).toThrow(refusal('parent.label'));
 	});
 });

@@ -26,6 +26,7 @@ import {
 	resolveDeclaredRelationPath,
 } from '@dbsp/types/internal';
 import { getDefaultFilter } from './default-filter-map.js';
+import { assertNoPathRefInConditionBodies } from './path-ref-scan.js';
 import { getRelationalReadPolicy } from './relational-read-plans.js';
 
 import { escapeDiagnosticText } from './transition/diagnostic-text.js';
@@ -60,6 +61,7 @@ export function resolveSelectWhere(
 	initialAliasCount = 0,
 	additionalOuterRanges: readonly ResolvedRange[] = [],
 ): ResolvedCondition | undefined {
+	assertNoPathRefInConditionBodies(where);
 	return resolveConditionContext(
 		where,
 		root,

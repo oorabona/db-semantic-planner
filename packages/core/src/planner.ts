@@ -2,6 +2,10 @@ import { RangeAllocator } from '@dbsp/types';
 import { copyDefaultFilters, getDefaultFilter } from './default-filter-map.js';
 import { assertUnplannedDefaultFilters } from './dx/default-filter-refusals.js';
 import {
+	assertNoPathRefInConditionBodies,
+	assertNoPathRefInQueryBodies,
+} from './path-ref-scan.js';
+import {
 	resolveConditionContext,
 	resolveScanDefaultFilter,
 } from './resolved-conditions.js';
@@ -276,6 +280,7 @@ export function plan(
 	model: ModelIR,
 	options: PlanOptions = {},
 ): PlanReport {
+	assertNoPathRefInQueryBodies(intent);
 	const startTime = performance.now();
 
 	const state: PlannerState = {
@@ -570,6 +575,7 @@ export function planRecursive(
 		throw new Error(`Unknown table: ${startFrom}`);
 	}
 
+	assertNoPathRefInConditionBodies(intent.start.where);
 	// start.where resolves like a root WHERE over the anchor range, once
 	// the shape and the start table are known to be valid.
 	const startWhere = intent.start.where

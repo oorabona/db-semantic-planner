@@ -4,7 +4,7 @@
  * derivation (symbols -> symbol_id) would be visibly wrong.
  */
 
-import { exists, notExists, ref, schema } from '@dbsp/core';
+import { createOrm, eq, exists, notExists, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -375,4 +375,45 @@ describe('composite FK exists() mutation correlation', () => {
 
 		expectCompositeCorrelation(sql, 'orders_exists_0');
 	});
+});
+
+describe('a relation-path ColumnRef in a mutation WHERE body (#991)', () => {
+	const nodeDb = schema({
+		nodes: {
+			id: { type: 'integer', primaryKey: true },
+			name: 'text',
+			parent_id: ref('nodes', {
+				nullable: true,
+				as: 'parent',
+				inverse: 'children',
+				roles: { parent: 'parent', children: 'children' },
+			}),
+		},
+		nodes_archive: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+	});
+	const { nodes } = createOrm({
+		schema: nodeDb,
+		adapter: createPgCompileOnlyAdapter({ model: nodeDb.model }),
+	}).tables;
+	it.each(['compileBatchUpdate', 'compileInsertFrom', 'compileUpsertFrom'])(
+		'AC38 other-mutation-paths-refused %s',
+		(entryPoint) => {
+			const adapter = createPgCompileOnlyAdapter({ model: nodeDb.model });
+			expect(() =>
+				compileMutationWhere(
+					adapter,
+					entryPoint,
+					'nodes',
+					exists('children', {
+						include: { parent: { join: 'inner' } },
+						where: eq(nodes.parent.name, 'x'),
+					}),
+				),
+			).toThrow(
+				new Error(
+					"ColumnRef 'parent.name' follows a relation; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1005).",
+				),
+			);
+		},
+	);
 });

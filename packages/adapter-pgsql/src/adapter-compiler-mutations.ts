@@ -13,7 +13,11 @@ import {
 	POSTGRESQL_CAPABILITIES,
 	plan as planFn,
 } from '@dbsp/core';
-import { inspectMutationRows, resolveSelectWhere } from '@dbsp/core/internal';
+import {
+	assertNoPathRefInConditionBodies,
+	inspectMutationRows,
+	resolveSelectWhere,
+} from '@dbsp/core/internal';
 import type {
 	BatchUpdateIntent,
 	CompiledQuery,
@@ -661,6 +665,7 @@ export function compileInsertFrom(
 		MAX_DEPTH_LIMIT,
 	);
 	const state = createCompilerState();
+	assertNoPathRefInConditionBodies(intent.where);
 	const resolvedWhere = intent.where
 		? resolveExistsIntent(intent.where, intent.source, deps)
 		: undefined;
@@ -894,6 +899,7 @@ export function compileBatchUpdate(
 	// The guard uses the shared `state` so $N numbering continues from unnest params.
 	let whereGuard: import('@pgsql/types').Node | undefined;
 	if (intent.where) {
+		assertNoPathRefInConditionBodies(intent.where);
 		const resolvedWhere = resolveExistsIntent(intent.where, intent.table, deps);
 		const whereCtx: WhereCompilerCtx = {
 			rootTable: intent.table,
@@ -1276,6 +1282,7 @@ export function compileUpsertFrom(
 		MAX_DEPTH_LIMIT,
 	);
 	const state = createCompilerState();
+	assertNoPathRefInConditionBodies(intent.where);
 	const resolvedWhere = intent.where
 		? resolveExistsIntent(intent.where, intent.source, deps)
 		: undefined;

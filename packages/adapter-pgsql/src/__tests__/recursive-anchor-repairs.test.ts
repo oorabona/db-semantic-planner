@@ -1163,3 +1163,57 @@ describe('start.where resolves through core (#891 slice 4)', () => {
 		);
 	});
 });
+
+describe('a relation-path ColumnRef in a recursive start.where (#991)', () => {
+	const nodeDb = schema({
+		nodes: {
+			id: { type: 'integer', primaryKey: true },
+			label: 'text',
+			parent_id: ref('nodes', {
+				nullable: true,
+				as: 'parent',
+				inverse: 'children',
+				roles: { parent: 'parent', children: 'children' },
+			}),
+		},
+	});
+	const nodeOrm = createOrm({
+		schema: nodeDb,
+		adapter: createPgCompileOnlyAdapter({ model: nodeDb.model }),
+		suppressDxWarnings: true,
+	});
+	const { nodes } = nodeOrm.tables;
+	const walk = (where: WhereIntent): RecursiveIntent => ({
+		type: 'recursive',
+		cteName: 'tree',
+		start: { from: 'nodes', nodeIdExpr: { kind: 'column', name: 'id' }, where },
+		traversal: {
+			kind: 'adjacency',
+			nodeTable: 'nodes',
+			nodeId: 'id',
+			parentId: 'parent_id',
+			direction: 'descendants',
+		},
+		maxDepth: 2,
+	});
+	const L = () => eq(nodes.parent.label, 'x');
+	it('AC29 nested-positions-refused recursive start.where body', () => {
+		expect(() =>
+			planRecursive(walk(exists('parent', { where: L() })), nodeDb.model),
+		).toThrow(
+			new Error(
+				"ColumnRef 'parent.label' follows a relation; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1005).",
+			),
+		);
+	});
+	it('AC30 top-level-unchanged recursive start.where', () => {
+		const result = createPgCompileOnlyAdapter().compileRecursive(
+			planRecursive(walk(L()), nodeDb.model),
+			nodeDb.model,
+		);
+		expect(result.sql).toBe(
+			'WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM nodes AS __n WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE __n.parent_id = nodes_exists_0.id AND nodes_exists_0.label = $1) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN nodes AS __n ON __n.parent_id = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree',
+		);
+		expect(result.parameters).toEqual(['x']);
+	});
+});

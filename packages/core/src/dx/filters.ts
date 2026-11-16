@@ -45,7 +45,7 @@ import type {
 	WhereRawNotExistsIntent,
 	WhereRelationFilterIntent,
 } from '../intent-ast.js';
-import { getColumnName } from './column-utils.js';
+import { getColumnName, isRelationPathColumn } from './column-utils.js';
 import { InvalidOperationError, validateIdentifier } from './errors.js';
 import type {
 	SubqueryBuilder,
@@ -151,6 +151,7 @@ function createComparisonFilter(
 		field: getColumnName(field),
 		operator,
 		value,
+		...(isRelationPathColumn(field) && { pathRef: true as const }),
 	});
 }
 
@@ -252,6 +253,7 @@ export function like(
 		kind: 'like',
 		field: getColumnName(field),
 		pattern,
+		...(isRelationPathColumn(field) && { pathRef: true as const }),
 	};
 	const withCi =
 		caseInsensitive !== undefined ? { ...intent, caseInsensitive } : intent;
@@ -283,7 +285,12 @@ export function inArray(
 	field: ColumnRef<string, string, unknown> | string,
 	values: readonly unknown[],
 ): WhereInIntent {
-	return { kind: 'in', field: getColumnName(field), values };
+	return {
+		kind: 'in',
+		field: getColumnName(field),
+		values,
+		...(isRelationPathColumn(field) && { pathRef: true as const }),
+	};
 }
 
 /**
@@ -311,6 +318,7 @@ export function inSubquery(
 		kind: 'in',
 		field: getColumnName(field),
 		subquery: expr.toIntent(),
+		...(isRelationPathColumn(field) && { pathRef: true as const }),
 	};
 }
 
@@ -329,7 +337,12 @@ export function any(
 	field: ColumnRef<string, string, unknown> | string,
 	values: readonly unknown[],
 ): WhereAnyIntent {
-	return { kind: 'any', field: getColumnName(field), values };
+	return {
+		kind: 'any',
+		field: getColumnName(field),
+		values,
+		...(isRelationPathColumn(field) && { pathRef: true as const }),
+	};
 }
 
 // ============================================================================
@@ -349,7 +362,12 @@ export function isNull(field: string): WhereNullIntent;
 export function isNull(
 	field: ColumnRef<string, string, unknown> | string,
 ): WhereNullIntent {
-	return { kind: 'null', field: getColumnName(field), operator: 'isNull' };
+	return {
+		kind: 'null',
+		field: getColumnName(field),
+		operator: 'isNull',
+		...(isRelationPathColumn(field) && { pathRef: true as const }),
+	};
 }
 
 // ============================================================================
@@ -430,7 +448,12 @@ export function isNotNull(field: string): WhereNullIntent;
 export function isNotNull(
 	field: ColumnRef<string, string, unknown> | string,
 ): WhereNullIntent {
-	return { kind: 'null', field: getColumnName(field), operator: 'isNotNull' };
+	return {
+		kind: 'null',
+		field: getColumnName(field),
+		operator: 'isNotNull',
+		...(isRelationPathColumn(field) && { pathRef: true as const }),
+	};
 }
 
 // ============================================================================

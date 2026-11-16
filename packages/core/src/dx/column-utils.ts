@@ -38,6 +38,23 @@ export function getColumnName(
 }
 
 /**
+ * Whether a field is a typed column ref reached through at least one relation:
+ * its `getColumnName` is a relation path that a body would re-read from its own
+ * row (see the `pathRef` marker of the where intents).
+ *
+ * @internal
+ */
+export function isRelationPathColumn(
+	field: ColumnRef<string, string, unknown> | string,
+): boolean {
+	if (typeof field === 'string') return false;
+	const relationPath = (
+		field as { readonly [RELATION_PATH]?: readonly string[] }
+	)[RELATION_PATH];
+	return relationPath !== undefined && relationPath.length > 0;
+}
+
+/**
  * The column's own name, without its table or relation path: for positions that
  * name a column of the builder's own table (the typed builder's `pick()` and
  * `orderBy()`).
