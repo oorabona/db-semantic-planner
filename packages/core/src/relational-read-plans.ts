@@ -54,3 +54,23 @@ export function registerRelationalReadPolicy(
 export function getRelationalReadPolicy(intent: QueryIntent) {
 	return plans.get(intent);
 }
+
+/**
+ * Whether a query, or any query nested in it, carries a policy issued by a
+ * builder. A body without its own policy can still hold one deeper, for
+ * example `rawExists(orm.select(...))` in its WHERE.
+ */
+export function containsRelationalReadPolicy(intent: unknown): boolean {
+	const seen = new Set<object>();
+	const visit = (value: unknown): boolean => {
+		if (!value || typeof value !== 'object' || seen.has(value)) return false;
+		seen.add(value);
+		if (
+			typeof (value as { from?: unknown }).from === 'string' &&
+			plans.has(value as QueryIntent)
+		)
+			return true;
+		return (Array.isArray(value) ? value : Object.values(value)).some(visit);
+	};
+	return visit(intent);
+}
