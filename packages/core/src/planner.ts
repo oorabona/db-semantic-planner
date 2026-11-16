@@ -64,7 +64,7 @@ export type {
 	ResolvedIncludeStrategy,
 } from '@dbsp/types';
 
-import { containsRelationalReadPolicy } from './relational-read-plans.js';
+import { getRelationalReadPolicy } from './relational-read-plans.js';
 
 // ============================================================================
 // Warning Types
@@ -812,7 +812,7 @@ function optimizeInToExists(
 			//                       filters instead of the body's own policy
 			const sq = inWhere.subquery;
 			if (
-				containsRelationalReadPolicy(sq) ||
+				getRelationalReadPolicy(sq) !== undefined ||
 				sq.limit != null ||
 				sq.orderBy?.length ||
 				sq.offset != null ||
