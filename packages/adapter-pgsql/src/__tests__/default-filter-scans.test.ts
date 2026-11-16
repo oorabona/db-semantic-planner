@@ -976,6 +976,28 @@ describe('selectExpression bodies and nested issued policies', () => {
 		);
 	});
 
+	it('does not walk bound payloads looking for nested policies', () => {
+		const docsDb = schema({
+			docs: { id: { type: 'integer', primaryKey: true }, payload: 'json' },
+		});
+		const docs = createOrm({
+			schema: docsDb,
+			adapter: createPgCompileOnlyAdapter({ model: docsDb.model }),
+			suppressDxWarnings: true,
+		});
+		let payload: Record<string, unknown> = { leaf: 1 };
+		for (let i = 0; i < 4000; i++) payload = { child: payload };
+		// plan() is where the nested-policy gate runs; a deep payload must not
+		// make it recurse (dump() serialises parameters separately).
+		const planned = docs
+			.select('docs')
+			.columns([
+				subquery('docs').where(eq('payload', payload)).count().asExpr('n'),
+			])
+			.plan();
+		expect(planned.intent.from).toBe('docs');
+	});
+
 	it('refuses an outerRef in a FROM-less body', () => {
 		expect(
 			() =>
