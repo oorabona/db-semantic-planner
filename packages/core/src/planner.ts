@@ -541,20 +541,6 @@ export function planRecursive(
 		stepRange,
 		model,
 	);
-	// start.where resolves like a root WHERE over the anchor range.
-	const startWhere = intent.start.where
-		? resolveConditionContext(
-				intent.start.where,
-				anchorRange,
-				[anchorRange],
-				[],
-				allocator,
-				model,
-				0,
-				[],
-				{ defaultFilters: options.defaultFilters, label: 'start.where' },
-			)
-		: undefined;
 	const startTime = performance.now();
 
 	// Step 1: Validate shape compatibility
@@ -583,6 +569,22 @@ export function planRecursive(
 	if (!startTable) {
 		throw new Error(`Unknown table: ${startFrom}`);
 	}
+
+	// start.where resolves like a root WHERE over the anchor range, once
+	// the shape and the start table are known to be valid.
+	const startWhere = intent.start.where
+		? resolveConditionContext(
+				intent.start.where,
+				anchorRange,
+				[anchorRange],
+				[],
+				allocator,
+				model,
+				0,
+				[],
+				{ defaultFilters: options.defaultFilters, label: 'start.where' },
+			)
+		: undefined;
 
 	// Step 2: Generate recursive-cte decision
 	const traversalKind = intent.traversal.kind;

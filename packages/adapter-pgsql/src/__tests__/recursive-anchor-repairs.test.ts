@@ -1126,6 +1126,19 @@ describe('start.where resolves through core (#891 slice 4)', () => {
 			),
 		);
 	});
+	it('an unknown start table is reported before a start.where refusal', () => {
+		const query = walk(exists('rel'));
+		expect(() =>
+			planRecursive(
+				{
+					...query,
+					start: { ...query.start, from: 'nope' },
+					traversal: { ...query.traversal, nodeTable: 'nope' },
+				} as RecursiveIntent,
+				plain.model,
+			),
+		).toThrow(new Error('Unknown table: nope'));
+	});
 	it('R2 scalar-aggregate-filter: planRecursive alone refuses', () => {
 		expect(() =>
 			plan(plain, {
