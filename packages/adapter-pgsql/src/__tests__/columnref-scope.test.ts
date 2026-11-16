@@ -1207,6 +1207,83 @@ describe('Typed quantifiers and callback refs inside nested bodies (#991)', () =
 				)
 				.dump(),
 		).toThrow(quantifierRefusal('children'));
+		// A default filter on the body's table makes inspect resolve the
+		// comparison in its scope, so G7 decides: unambiguous kept, ambiguous
+		// refused.
+		const filteredOrm = createOrm({
+			schema: schema(
+				{
+					users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+					posts: {
+						id: { type: 'integer', primaryKey: true },
+						user_id: ref('users', { inverse: 'posts' }),
+					},
+					comments: {
+						id: { type: 'integer', primaryKey: true },
+						post_id: ref('posts', { inverse: 'comments' }),
+					},
+				},
+				undefined,
+				{ defaultFilters: { posts: eq('id', 1) } },
+			),
+			adapter: createPgCompileOnlyAdapter({ model: plainDb.model }),
+			suppressDxWarnings: true,
+		});
+		expect(
+			filteredOrm
+				.select('users')
+				.groupBy(['id'])
+				.having(
+					inSubquery(
+						'users.id',
+						subquery('posts')
+							.select('user_id')
+							.where(some(filteredOrm.tables.posts.comments, () => and())),
+					),
+				)
+				.dump().sql,
+		).toBe(
+			'SELECT users.* FROM users GROUP BY users.id HAVING users.id = ANY (SELECT posts_subq_0.user_id FROM posts AS posts_subq_0 WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_subq_0.id = comments_exists_1.post_id AND true) AND posts_subq_0.id = $1)',
+		);
+		const filteredNodeDb = schema(
+			{
+				nodes: {
+					id: { type: 'integer', primaryKey: true },
+					label: 'text',
+					parent_id: ref('nodes', {
+						nullable: true,
+						as: 'parent',
+						inverse: 'children',
+						roles: { parent: 'parent', children: 'children' },
+					}),
+				},
+			},
+			undefined,
+			{ defaultFilters: { nodes: eq('id', 1) } },
+		);
+		const filteredNodes = createOrm({
+			schema: filteredNodeDb,
+			adapter: createPgCompileOnlyAdapter({ model: filteredNodeDb.model }),
+			suppressDxWarnings: true,
+		});
+		expect(() =>
+			filteredNodes
+				.select('nodes')
+				.groupBy(['id'])
+				.having(
+					inSubquery(
+						'nodes.id',
+						subquery('nodes')
+							.select('parent_id')
+							.where(
+								some(filteredNodes.tables.nodes.children, (c) =>
+									eq(c.label!, 'x'),
+								),
+							),
+					),
+				)
+				.dump(),
+		).toThrow(quantifierRefusal('children'));
 		// The same holds for an expression subquery nested in that body.
 		const body = rawExists(
 			plainOrm
