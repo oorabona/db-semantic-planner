@@ -20,6 +20,7 @@ import {
 	like,
 	literal,
 	neq,
+	none,
 	notExists,
 	param,
 	rawExists,
@@ -715,5 +716,484 @@ describe('A relation-path ref inside a body is refused (#991)', () => {
 				.where(and(shared, exists('parent', { where: shared })))
 				.dump(),
 		).toThrow(refusal('parent.label'));
+	});
+});
+
+describe('Typed quantifiers and callback refs inside nested bodies (#991)', () => {
+	const quantifierRefusal = (relation: string) =>
+		new Error(
+			`RelationRef '${relation}' follows a relation from its table; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1005).`,
+		);
+	const callbackRefusal = (name: string, mode: string) =>
+		new Error(
+			`'${name}' comes from the ${mode}() callback parameter and is used inside a nested relation predicate or subquery body, where it would be read from that body's row (#1005).`,
+		);
+	const quantifiers = { some, every, none } as const;
+	const writingsDb = schema({
+		users: { id: { type: 'integer', primaryKey: true }, email: 'text' },
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			published: 'boolean',
+			author_id: ref('users', { as: 'author', inverse: 'writings' }),
+			editor_id: ref('users', { as: 'editor', inverse: 'edits' }),
+		},
+		comments: {
+			id: { type: 'integer', primaryKey: true },
+			body: 'text',
+			post_id: ref('posts', { as: 'post', inverse: 'replies' }),
+		},
+	});
+	const writingsOrm = createOrm({
+		schema: writingsDb,
+		adapter: createPgCompileOnlyAdapter({ model: writingsDb.model }),
+		suppressDxWarnings: true,
+	});
+	const { users, posts } = writingsOrm.tables;
+	const plainDb = schema({
+		users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			user_id: ref('users', { inverse: 'posts' }),
+		},
+		comments: {
+			id: { type: 'integer', primaryKey: true },
+			post_id: ref('posts', { inverse: 'comments' }),
+		},
+	});
+	const plainOrm = createOrm({
+		schema: plainDb,
+		adapter: createPgCompileOnlyAdapter({ model: plainDb.model }),
+		suppressDxWarnings: true,
+	});
+	const casedDb = schema({
+		userProfiles: {
+			id: { type: 'integer', primaryKey: true },
+			displayName: 'text',
+			ownerId: ref('accounts', { as: 'owner', inverse: 'profiles' }),
+		},
+		accounts: { id: { type: 'integer', primaryKey: true } },
+		profileNotes: {
+			id: { type: 'integer', primaryKey: true },
+			body: 'text',
+			profileId: ref('userProfiles', { as: 'profile', inverse: 'notes' }),
+		},
+	});
+	const casedOrm = createOrm({
+		schema: casedDb,
+		adapter: createPgCompileOnlyAdapter({
+			model: casedDb.model,
+			dbCasing: 'snake_case',
+		}),
+		suppressDxWarnings: true,
+	});
+	const replies = (mode: keyof typeof quantifiers = 'some') =>
+		quantifiers[mode](posts.replies, (r) => eq(r.body!, 'x'));
+	const children = (mode: keyof typeof quantifiers = 'some') =>
+		quantifiers[mode](nodes.children, (c) => eq(c.label!, 'x'));
+
+	it('AC39 table-rooted-quantifier-ambiguous-refused CR1a', () => {
+		expect(() =>
+			nodeOrm
+				.select('nodes')
+				.where(
+					some(nodes.children, () =>
+						some(nodes.children, (g) => eq(g.label!, 'x')),
+					),
+				)
+				.dump(),
+		).toThrow(quantifierRefusal('children'));
+	});
+
+	it.each(['some', 'every', 'none'] as const)(
+		'AC39 table-rooted-quantifier-ambiguous-refused CR1b %s',
+		(mode) => {
+			expect(() =>
+				nodeOrm
+					.select('nodes')
+					.where(exists('parent', { where: children(mode) }))
+					.dump(),
+			).toThrow(quantifierRefusal('children'));
+		},
+	);
+
+	it('AC39 ambiguity-in-current-scope-refused', () => {
+		expect(() =>
+			writingsOrm
+				.select('users')
+				.where(
+					exists('writings', {
+						include: {
+							author: { join: 'inner' },
+							edits: { join: 'inner' },
+						},
+						where: replies(),
+					}),
+				)
+				.dump(),
+		).toThrow(quantifierRefusal('replies'));
+	});
+
+	it('AC39 table-rooted-quantifier-other-table-refused', () => {
+		expect(() =>
+			writingsOrm
+				.select('posts')
+				.where(exists('author', { where: replies() }))
+				.dump(),
+		).toThrow(quantifierRefusal('replies'));
+		expect(() =>
+			writingsOrm
+				.select('users')
+				.where(
+					some(users.writings, () =>
+						some(users.writings.replies, (r) => eq(r.body!, 'x')),
+					),
+				)
+				.dump(),
+		).toThrow(quantifierRefusal('writings.replies'));
+	});
+
+	it('AC39 dotted-relation-value-refused', () => {
+		expect(() =>
+			nodeOrm
+				.select('nodes')
+				.where(eq('parent.id', caseWhen(children(), 1).else(2)))
+				.dump(),
+		).toThrow(quantifierRefusal('children'));
+		expect(
+			nodeOrm
+				.select('nodes')
+				.where(eq('id', caseWhen(children(), 1).else(2)))
+				.dump().sql,
+		).toBe(
+			'SELECT nodes.* FROM nodes WHERE nodes.id = CASE WHEN EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND nodes_exists_0.label = $1) THEN 1 ELSE 2 END',
+		);
+	});
+
+	it.each([
+		[
+			'H1',
+			() =>
+				some(nodes.children, (c) =>
+					exists('parent', {
+						where: some(c.children as never, (g) => eq(g.label!, 'x')),
+					}),
+				),
+		],
+		[
+			'H2',
+			() =>
+				some(nodes.children, (c) =>
+					rawExists(
+						subquery('nodes')
+							.select('id')
+							.where(some(c.children as never, (g) => eq(g.label!, 'x'))),
+					),
+				),
+		],
+		[
+			'H3',
+			() =>
+				some(nodes.children, (c) =>
+					some(c.children as never, () =>
+						some(c.children as never, (h) => eq(h.label!, 'x')),
+					),
+				),
+		],
+	])('AC40 callback-ref-nested-refused %s', (_name, build) => {
+		expect(build).toThrow(callbackRefusal('children', 'some'));
+	});
+
+	it.each(['some', 'every', 'none'] as const)(
+		'AC40 callback-ref-nested-refused C1 %s',
+		(mode) => {
+			expect(() =>
+				quantifiers[mode](nodes.children, (c) =>
+					exists('parent', { where: eq(c.label!, 'x') }),
+				),
+			).toThrow(callbackRefusal('label', mode));
+		},
+	);
+
+	it.each([
+		['like', (c: typeof nodes) => like(c.label!, 'a%'), 'label'],
+		[
+			'like case-insensitive',
+			(c: typeof nodes) => like(c.label!, 'x%', true),
+			'label',
+		],
+		[
+			'like escape',
+			(c: typeof nodes) => like(c.label!, 'x%', { escape: '!' }),
+			'label',
+		],
+		['inArray', (c: typeof nodes) => inArray(c.label!, ['a']), 'label'],
+		['any', (c: typeof nodes) => any(c.label!, ['a']), 'label'],
+		['isNull', (c: typeof nodes) => isNull(c.label!), 'label'],
+		['isNotNull', (c: typeof nodes) => isNotNull(c.label!), 'label'],
+		[
+			'inSubquery',
+			(c: typeof nodes) =>
+				inSubquery(c.id!, subquery('nodes').select('parent_id')),
+			'id',
+		],
+		[
+			'aliased',
+			(c: typeof nodes) => eq(c.label!.as('child_label'), 'x'),
+			'label',
+		],
+	])('AC40 callback-token-per-constructor %s', (_name, leaf, field) => {
+		expect(() =>
+			some(nodes.children, (c) =>
+				exists('parent', { where: leaf(c as never) }),
+			),
+		).toThrow(callbackRefusal(field, 'some'));
+	});
+
+	it('AC40 dotted-field-value-nested', () => {
+		expect(() =>
+			some(nodes.children, (c) =>
+				eq('parent.id', caseWhen(eq(c.label!, 'x'), 1).else(2)),
+			),
+		).toThrow(callbackRefusal('label', 'some'));
+		expect(
+			nodeOrm
+				.select('nodes')
+				.where(
+					some(nodes.children, (c) =>
+						eq('id', caseWhen(eq(c.label!, 'x'), 1).else(2)),
+					),
+				)
+				.dump().sql,
+		).toBe(
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND nodes_exists_0.id = CASE WHEN nodes_exists_0.label = $1 THEN 1 ELSE 2 END)',
+		);
+	});
+
+	it('AC40 refused-at-construction', () => {
+		let built = false;
+		expect(() => {
+			some(nodes.children, (c) =>
+				exists('parent', { where: eq(c.label!, 'x') }),
+			);
+			built = true;
+		}).toThrow(callbackRefusal('label', 'some'));
+		expect(built).toBe(false);
+	});
+
+	it('AC41 callback-and-top-level-kept', () => {
+		expect(nodeOrm.select('nodes').where(children()).dump().sql).toBe(
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND nodes_exists_0.label = $1)',
+		);
+		// A callback's own relation, directly in its condition, starts from the
+		// related row even when an outer range has the same table.
+		expect(
+			nodeOrm
+				.select('nodes')
+				.where(
+					some(nodes.children, (c) =>
+						some(c.children as never, (g) => eq(g.label!, 'x')),
+					),
+				)
+				.dump().sql,
+		).toBe(
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_exists_0.id = nodes_exists_1.parent_id AND nodes_exists_1.label = $1))',
+		);
+	});
+
+	it.each(['some', 'every', 'none'] as const)(
+		'AC44 unambiguous-body-kept exists %s',
+		(mode) => {
+			expect(
+				writingsOrm
+					.select('users')
+					.where(exists('writings', { where: replies(mode) }))
+					.dump().sql,
+			).toBe(
+				{
+					some: 'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.post_id AND comments_exists_1.body = $1))',
+					every:
+						'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.post_id AND NOT (comments_exists_1.body = $1))))',
+					none: 'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND NOT (EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.post_id AND comments_exists_1.body = $1)))',
+				}[mode],
+			);
+		},
+	);
+
+	it('AC44 unambiguous-body-kept rawExists and HAVING', () => {
+		expect(
+			writingsOrm
+				.select('users')
+				.where(rawExists(subquery('posts').select('id').where(replies())))
+				.dump().sql,
+		).toBe(
+			'SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.post_id AND comments_exists_0.body = $1))',
+		);
+		expect(
+			writingsOrm
+				.select('users')
+				.groupBy(['id'])
+				.having(exists('writings', { where: replies() }))
+				.dump().sql,
+		).toBe(
+			'SELECT users.* FROM users GROUP BY users.id HAVING EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.post_id AND comments_exists_1.body = $1))',
+		);
+	});
+
+	it('AC44 qualifier-only-dotted-value-kept', () => {
+		expect(
+			nodeOrm
+				.select('nodes')
+				.where(eq('nodes.id', caseWhen(children(), 1).else(2)))
+				.dump().sql,
+		).toBe(
+			'SELECT nodes.* FROM nodes WHERE nodes.id = CASE WHEN EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND nodes_exists_0.label = $1) THEN 1 ELSE 2 END',
+		);
+	});
+
+	it('AC44 top-level-second-range-kept', () => {
+		expect(
+			nodeOrm.select('nodes').join('parent').where(children()).dump().sql,
+		).toBe(
+			'SELECT nodes.* FROM nodes JOIN nodes AS parent ON nodes.parent_id = parent.id WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes.id = nodes_exists_1.parent_id AND nodes_exists_1.label = $1)',
+		);
+	});
+
+	it('AC44 chained-origin-kept', () => {
+		expect(
+			writingsOrm
+				.select('comments')
+				.where(
+					rawExists(
+						subquery('users')
+							.select('id')
+							.where(some(users.writings.replies, (r) => eq(r.body!, 'x'))),
+					),
+				)
+				.dump().sql,
+		).toBe(
+			'SELECT comments.* FROM comments WHERE EXISTS (SELECT users_sq.id FROM users AS users_sq WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users_sq.id = posts_exists_0.author_id AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.post_id AND comments_exists_1.body = $1)))',
+		);
+	});
+
+	it('AC44 cased-schema-model-name-kept', () => {
+		expect(
+			casedOrm
+				.select('accounts')
+				.where(
+					exists('profiles', {
+						where: some(casedOrm.tables.userProfiles.notes, (n) =>
+							eq(n.body!, 'x'),
+						),
+					}),
+				)
+				.dump().sql,
+		).toBe(
+			'SELECT accounts.* FROM accounts WHERE EXISTS (SELECT 1 FROM user_profiles AS "userProfiles_exists_0" WHERE accounts.id = "userProfiles_exists_0".owner_id AND EXISTS (SELECT 1 FROM profile_notes AS "profileNotes_exists_1" WHERE "userProfiles_exists_0".id = "profileNotes_exists_1".profile_id AND "profileNotes_exists_1".body = $1))',
+		);
+	});
+
+	it('AC45 legacy-route-ambiguous-refused', () => {
+		expect(() =>
+			nodeOrm
+				.select('nodes')
+				.columns([
+					'id',
+					subquery('nodes').select('id').where(children()).count().asExpr('n'),
+				])
+				.dump(),
+		).toThrow(quantifierRefusal('children'));
+		expect(() =>
+			nodeOrm
+				.select('nodes')
+				.columns([
+					'id',
+					subquery('nodes')
+						.select('id')
+						.where(exists('parent', { where: children() }))
+						.count()
+						.asExpr('n'),
+				])
+				.dump(),
+		).toThrow(quantifierRefusal('children'));
+	});
+
+	it('AC45 legacy-route-unambiguous-kept', () => {
+		expect(
+			writingsOrm
+				.select('users')
+				.columns([
+					'id',
+					subquery('posts').select('id').where(replies()).count().asExpr('n'),
+				])
+				.dump().sql,
+		).toBe(
+			'SELECT users.id, (SELECT count(*) FROM posts AS posts WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts.id = comments_exists_0.post_id AND comments_exists_0.body = $1)) AS n FROM users',
+		);
+		expect(
+			writingsOrm
+				.select('users')
+				.columns([
+					'id',
+					subquery('users')
+						.select('id')
+						.where(exists('writings', { where: replies() }))
+						.count()
+						.asExpr('n'),
+				])
+				.dump().sql,
+		).toBe(
+			'SELECT users.id, (SELECT count(*) FROM users AS users_sq WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users_sq.id = posts_exists_0.author_id AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.post_id AND comments_exists_1.body = $1))) AS n FROM users',
+		);
+	});
+
+	it('AC45 legacy-route-other-table-refused', () => {
+		expect(() =>
+			plainOrm
+				.select('posts')
+				.columns([
+					'id',
+					subquery('users')
+						.select('id')
+						.where(some(plainOrm.tables.posts.comments, () => and()))
+						.count()
+						.asExpr('n'),
+				])
+				.dump(),
+		).toThrow(quantifierRefusal('comments'));
+	});
+
+	it('AC45 having-exemption-body-refused', () => {
+		expect(() =>
+			nodeOrm
+				.select('nodes')
+				.groupBy(['id'])
+				.having(
+					inSubquery(
+						'nodes.id',
+						subquery('nodes').select('parent_id').where(children()),
+					),
+				)
+				.dump(),
+		).toThrow(quantifierRefusal('children'));
+	});
+
+	it('AC45 having-builder-body-kept', () => {
+		const body = rawExists(
+			// An issued builder body is accepted at runtime; its type lacks the
+			// SubqueryBuilder shape (#994).
+			plainOrm
+				.select('posts')
+				.columns(['user_id'])
+				.where(some(plainOrm.tables.posts.comments, () => and())) as never,
+		).subquery;
+		expect(
+			plainOrm
+				.select('users')
+				.groupBy(['id'])
+				.having(inSubquery('users.id', new SubqueryExpression(body)))
+				.dump().sql,
+		).toBe(
+			'SELECT users.* FROM users GROUP BY users.id HAVING users.id = ANY (SELECT posts_subq_0.user_id FROM posts AS posts_subq_0 WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_subq_0.id = comments_exists_1.post_id AND true))',
+		);
 	});
 });

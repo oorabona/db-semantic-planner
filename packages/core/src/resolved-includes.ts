@@ -696,17 +696,20 @@ export function resolveReportIncludes(
 		}
 	};
 	collectHavingDotted(intent.having, new Set());
+	// `belowBody`: the descent crossed the body of a node core left to the
+	// adapter, so a predicate resolved on its own here lacks that body's ranges.
 	const inspect = (
 		value: unknown,
 		intentPath: string,
 		condition?: 'HAVING' | 'CASE WHEN' | 'FILTER',
+		belowBody = false,
 	): void => {
 		if (!value || typeof value !== 'object' || isParamIntent(value)) return;
 		if (inspected.has(value)) return;
 		inspected.add(value);
 		if (Array.isArray(value)) {
 			value.forEach((child, index) => {
-				inspect(child, `${intentPath}[${index}]`, condition);
+				inspect(child, `${intentPath}[${index}]`, condition, belowBody);
 			});
 			inspected.delete(value);
 			return;
@@ -793,13 +796,16 @@ export function resolveReportIncludes(
 				model,
 				legacy ? 0 : expressionAliases.count,
 				[],
-				legacy
-					? { defaultFilters: options.defaultFilters }
-					: {
-							defaultFilters: options.defaultFilters,
-							label: condition,
-							aliasState: expressionAliases,
-						},
+				{
+					...(legacy
+						? { defaultFilters: options.defaultFilters }
+						: {
+								defaultFilters: options.defaultFilters,
+								label: condition,
+								aliasState: expressionAliases,
+							}),
+					...(belowBody && { unknownBody: true }),
+				},
 			);
 			if (!resolved)
 				throw new Error(`Missing resolved condition at ${intentPath}`);
@@ -818,6 +824,7 @@ export function resolveReportIncludes(
 							bchild,
 							`${intentPath}.when[${index}].${bkey}`,
 							bkey === 'condition' ? 'CASE WHEN' : condition,
+							belowBody,
 						);
 					}
 				});
@@ -829,7 +836,18 @@ export function resolveReportIncludes(
 				(node.kind === 'customFn' ||
 					node.kind === 'aggregate' ||
 					(node.kind === undefined && typeof node.function === 'string'));
-			inspect(child, `${intentPath}.${key}`, filterRoot ? 'FILTER' : condition);
+			inspect(
+				child,
+				`${intentPath}.${key}`,
+				filterRoot ? 'FILTER' : condition,
+				belowBody ||
+					key === 'subquery' ||
+					key === 'query' ||
+					(key === 'where' &&
+						['exists', 'notExists', 'relationFilter'].includes(
+							String(node.kind),
+						)),
+			);
 		}
 		inspected.delete(value);
 	};

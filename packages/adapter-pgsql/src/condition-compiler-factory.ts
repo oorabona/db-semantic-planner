@@ -1,3 +1,4 @@
+import { refuseTableRootedQuantifier } from '@dbsp/core/internal';
 import { EXPRESSION_BRAND, REF_BRAND } from '@dbsp/types';
 import { compileResolvedCondition } from './resolved-condition-compiler.js';
 /**
@@ -79,7 +80,7 @@ import { unwrapParamIntent } from './param-intent.js';
 import { createParamRef } from './param-ref.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
 import { resolveRelationKeys } from './relation-keys.js';
-import { queryLocal } from './sql-identifier.js';
+import { identifierText, queryLocal } from './sql-identifier.js';
 
 /** Resolve logical names and the unique target aliases exposed by orm.tables. */
 function resolveConditionRelation(
@@ -557,6 +558,36 @@ export function createConditionCompiler(
 	}
 
 	/**
+	 * A table-rooted quantifier (#991) below a body is read from the body's row:
+	 * accepted only when that row is the single visible range of its table, as
+	 * core's resolver decides. A body whose enclosing ranges were lost is refused.
+	 */
+	function assertLegacyTableRootedQuantifier(
+		rf: WhereRelationFilterIntent,
+		ctx: InternalConditionCtx,
+	): void {
+		const table = rf.pathTable;
+		if (table === undefined) return;
+		const enclosing = ctx.enclosingRanges ?? [];
+		if (enclosing.length === 0) {
+			if (ctx.position === 'subquery') refuseTableRootedQuantifier(rf.relation);
+			return;
+		}
+		const qualifiers = new Set(
+			[...(ctx.queryRanges ?? []), ...enclosing.flat()]
+				.filter((binding) => binding.logicalTable === table)
+				.map((binding) => identifierText(binding.qualifier)),
+		);
+		// A condition context carries the logical table of the row it reads; a
+		// handler-built one keeps it as its root table.
+		const current =
+			(ctx as { readonly logicalSourceTable?: string }).logicalSourceTable ??
+			ctx.rootTable;
+		if (current !== table || qualifiers.size !== 1)
+			refuseTableRootedQuantifier(rf.relation);
+	}
+
+	/**
 	 * Handle the 'relationFilter' kind by converting to exists/notExists and recursing.
 	 * The generic dispatcher would fall through to '=' handler — wrong.
 	 */
@@ -565,6 +596,7 @@ export function createConditionCompiler(
 		ctx: InternalConditionCtx,
 	): Node {
 		const rf = intent as WhereRelationFilterIntent;
+		assertLegacyTableRootedQuantifier(rf, ctx);
 		const preResolved = getTrustedNqlRelationFilterFields(rf);
 		if (
 			ctx.position === 'where' &&

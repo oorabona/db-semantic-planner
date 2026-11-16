@@ -44,6 +44,7 @@ const internalAdditions = [
 	'compileNqlRead',
 	'createBindingFinalPlan',
 	'getRelationalReadPlan',
+	'refuseTableRootedQuantifier',
 ];
 const rootNames = [
 	'AmbiguousIncludeError',

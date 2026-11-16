@@ -89,7 +89,10 @@ export type {
 	TableReaddressDeclaration,
 } from './model-ir.js';
 export { inspectMutationRows } from './mutation-rows.js';
-export { assertNoPathRefInConditionBodies } from './path-ref-scan.js';
+export {
+	assertNoPathRefInConditionBodies,
+	refuseTableRootedQuantifier,
+} from './path-ref-scan.js';
 export {
 	normalizeRecursiveIncludeOptions,
 	type RecursivePlanReport,

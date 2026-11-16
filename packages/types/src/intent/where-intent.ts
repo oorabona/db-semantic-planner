@@ -343,6 +343,18 @@ export interface WhereRawNotExistsIntent {
 export interface WhereRelationFilterIntent {
 	readonly kind: 'relationFilter';
 	/**
+	 * Set when the quantifier's RelationRef was taken from a TableRef
+	 * (`orm.tables.users.writings`): its path starts at that table.
+	 */
+	readonly pathRef?: true;
+	/**
+	 * The model name of the table a `pathRef` quantifier's path starts at. Inside
+	 * a relation predicate, quantifier callback or subquery body, the quantifier
+	 * is accepted only when the body reads the single visible range of this
+	 * table, since its path is read from the body's row.
+	 */
+	readonly pathTable?: string;
+	/**
 	 * Relation path for filtering.
 	 * - Single relation: 'posts' or ['posts']
 	 * - Multi-hop (SPEC-002): ['author', 'company'] for author.company traversal
