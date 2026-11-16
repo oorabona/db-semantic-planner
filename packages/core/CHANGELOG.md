@@ -1,5 +1,12 @@
 # Changelog
 
+## [6.1.1](https://github.com/oorabona/db-semantic-planner/compare/core-v6.1.0...core-v6.1.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **core:** SelectExpression bodies and nested builders keep their read policy ([#995](https://github.com/oorabona/db-semantic-planner/issues/995)) ([c233189](https://github.com/oorabona/db-semantic-planner/commit/c233189892fdfeb080d771c3b16b6f85ceb629a3))
+
 ## [6.1.0](https://github.com/oorabona/db-semantic-planner/compare/core-v6.0.0...core-v6.1.0) (2026-11-13)
 
 
