@@ -733,7 +733,13 @@ function resolvedMutationWhere(
 	if (!where || deps.model === undefined) return undefined;
 	const allocator = new RangeAllocator();
 	const root = allocator.bind(table, table);
-	allocator.reserve(root.alias);
+	// Generated subquery aliases must not capture a NQL binding in scope.
+	for (const name of [
+		...(deps.bindingNames ?? []),
+		...(deps.scope?.bindings.keys() ?? []),
+	]) {
+		allocator.reserve(name);
+	}
 	const resolved = resolveSelectWhere(
 		where,
 		root,
@@ -741,7 +747,11 @@ function resolvedMutationWhere(
 		allocator,
 		deps.model,
 	);
-	if (!resolved) return undefined;
+	if (!resolved) {
+		throw new Error(
+			`Internal error: the mutation WHERE on '${table}' resolved to nothing.`,
+		);
+	}
 	return (ctx, state) => compileResolvedCondition(resolved, ctx, state);
 }
 
@@ -1199,10 +1209,8 @@ export function compileUpsert(
 					? actionWhereCompiler(
 							{
 								...mutationContext(deps, intent.table, MAX_DEPTH_LIMIT),
-								currentAlias:
-									declaredMutationTableMetadata(deps, intent.table)
-										?.physicalName ?? declaredMutationTable(deps, intent.table),
-							} as CompilerContext,
+								currentAlias: declaredMutationTable(deps, intent.table),
+							},
 							actionState,
 						)
 					: compileUpsertActionWhere(

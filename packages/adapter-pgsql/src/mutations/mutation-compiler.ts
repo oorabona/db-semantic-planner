@@ -241,7 +241,7 @@ export interface UpdateConfig {
  * Configuration for DELETE compilation
  */
 export interface DeleteConfig {
-	/** A WHERE resolved by core, compiled at the WHERE step so its parameters follow SET's. */
+	/** A WHERE resolved by core, compiled at the WHERE step. */
 	readonly whereCompiler?: (ctx: CompilerContext, state: CompilerState) => Node;
 	/** Table to delete from */
 	table: SqlIdentifier;

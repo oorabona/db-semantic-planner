@@ -821,6 +821,31 @@ describe('mutation WHERE resolves through the root resolver (#891)', () => {
 			);
 		});
 
+		it('a generated subquery alias does not capture a NQL binding of the same name', () => {
+			const any =
+				'users.id = ANY (SELECT p_subq_0_1."authorId" FROM p AS p_subq_0_1)';
+			const ctes =
+				'WITH "p_subq_0" as (SELECT "blogPosts".id AS x FROM "blogPosts"), "p" as (SELECT "blogPosts"."authorId" FROM "blogPosts")';
+			expect(
+				plain.nql`blogPosts | select id as x | bind p_subq_0
+blogPosts | select authorId | bind p
+delete from users where id in (p)`.dump().sql,
+			).toBe(`${ctes} DELETE FROM users WHERE ${any}`);
+			expect(
+				plain.nql`blogPosts | select id as x | bind p_subq_0
+blogPosts | select authorId | bind p
+update users set displayName = 'n' where id in (p)`.dump().sql,
+			).toBe(`${ctes} UPDATE users SET "displayName" = $1 WHERE ${any}`);
+			expect(
+				plain.nql`blogPosts | select id as x | bind p_subq_0
+blogPosts | select authorId | bind p
+upsert into users on id set id = 1, displayName = 'n' where id in (p)`.dump()
+					.sql,
+			).toBe(
+				`${ctes} INSERT INTO users (id, "displayName") VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET id = $3, "displayName" = $4 WHERE ${any}`,
+			);
+		});
+
 		it('NQL mutations compile their WHERE through the same route', () => {
 			const v = 'n';
 			expect(
