@@ -3,8 +3,10 @@ import {
 	any,
 	caseWhen,
 	createOrm,
+	ExpressionRef,
 	eq,
 	exists,
+	exprRef,
 	fn,
 	inArray,
 	inSubquery,
@@ -1482,6 +1484,61 @@ u | select id, case when name = 'x' then 1 else 0 end as flag`.dump() as {
 		).toThrow(
 			'scalar subquery with an aggregate FILTER is not supported — it would silently change which rows match; restructure the query or use a CTE.',
 		);
+	});
+
+	it('AC19 an expressions-select scalar operand of a resolved condition gets the resolver refusal', () => {
+		const expr = () =>
+			new ExpressionRef({
+				kind: 'subquery',
+				query: {
+					type: 'select',
+					from: 'posts',
+					select: {
+						type: 'expressions',
+						columns: [fn('max', exprRef('score')).intent],
+					},
+				},
+			} as never);
+		const refusal =
+			'scalar subquery with expressions SELECT (not supported in scalar subquery) is not supported — it would silently change which rows match; restructure the query or use a CTE.';
+		for (const o of [plain, filtered]) {
+			expect(() =>
+				o
+					.select('users')
+					.columns([
+						fn('count', star()).filter(eq('users.score', expr())).as('n'),
+					])
+					.dump(),
+			).toThrow(refusal);
+			expect(() =>
+				o
+					.select('users')
+					.columns([
+						caseWhen(eq('users.score', expr()), literal(1))
+							.else(literal(0))
+							.as('f'),
+					])
+					.dump(),
+			).toThrow(refusal);
+		}
+		// An undotted comparison is not resolved: it keeps main's output (#1007).
+		expect(
+			sql(
+				plain
+					.select('users')
+					.columns([fn('count', star()).filter(eq('score', expr())).as('n')])
+					.dump(),
+			),
+		).toEqual({
+			sql: 'SELECT count(*) FILTER (WHERE users.score = (SELECT max(score) FROM posts AS posts)) AS n FROM users',
+			params: [],
+		});
+		expect(() =>
+			filtered
+				.select('users')
+				.columns([fn('count', star()).filter(eq('score', expr())).as('n')])
+				.dump(),
+		).toThrow(refusal);
 	});
 
 	it('R1 a qualifier naming no visible range and no relation is refused in CASE WHEN and FILTER', () => {
