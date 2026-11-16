@@ -1,6 +1,7 @@
 import type { QueryBuilder, SubqueryBuilder, WhereIntent } from '@dbsp/core';
 import {
 	caseWhen,
+	namedArg,
 	createOrm,
 	eq,
 	exists,
@@ -974,6 +975,59 @@ describe('selectExpression bodies and nested issued policies', () => {
 		expect(outer.selectExpression(projecting).sql).toBe(
 			'SELECT (SELECT (SELECT count(*) FROM users AS users_sq WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL)) AS n FROM users LIMIT 1)',
 		);
+	});
+
+	describe('a scalar body under a named argument', () => {
+		it('keeps a nested builder policy in a scalar body WHERE', () => {
+			expect(
+				outer
+					.select('users')
+					.columns([
+						subquery('users')
+							.where(
+								fn(
+									'date_part',
+									literal('epoch'),
+									fn('make_interval', namedArg('secs', nestedPolicyBody())),
+								).gt(0),
+							)
+							.count()
+							.asExpr('m'),
+					])
+					.dump().sql,
+			).toBe(
+				"SELECT (SELECT count(*) FROM users AS users_sq WHERE date_part('epoch', make_interval(secs => (SELECT count(*) FROM users AS users_sq_1 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL)))) > $1) AS m FROM users",
+			);
+		});
+
+		it('keeps a nested builder policy in a projected column', () => {
+			expect(
+				outer
+					.select('users')
+					.columns([
+						fn('make_interval', namedArg('secs', nestedPolicyBody())).as('iv'),
+					])
+					.dump().sql,
+			).toBe(
+				'SELECT make_interval(secs => (SELECT count(*) FROM users AS users_sq WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL))) AS iv FROM users',
+			);
+		});
+
+		it('keeps the default filter of the scalar body', () => {
+			expect(
+				filtered
+					.select('users')
+					.columns([
+						fn(
+							'make_interval',
+							namedArg('secs', subquery('posts').count().asExpr('c')),
+						).as('iv'),
+					])
+					.dump().sql,
+			).toBe(
+				'SELECT make_interval(secs => (SELECT count(*) FROM posts AS posts WHERE posts.deleted_at IS NULL)) AS iv FROM users',
+			);
+		});
 	});
 
 	it('does not walk bound payloads looking for nested policies', () => {
