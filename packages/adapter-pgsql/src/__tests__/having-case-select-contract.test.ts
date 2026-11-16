@@ -739,20 +739,21 @@ describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
 		});
 	}
 
-	it('AC18 a CASE in a HAVING expression keeps a dotted path bare without default filters', () => {
-		expect(
-			plain
-				.select('users')
-				.groupBy(['id'])
-				.having(
-					caseWhen(eq('posts.title', 'x'), literal(1)).else(literal(0)).eq(1),
-				)
-				.dump(),
-		).toMatchObject({
-			sql: 'SELECT users.* FROM users GROUP BY users.id HAVING CASE WHEN posts.title = $1 THEN 1 ELSE 0 END = $2',
-			params: ['x', 1],
+	for (const [name, o] of orms)
+		it(`AC18 a CASE in a HAVING expression keeps main's route for a dotted path (${name})`, () => {
+			expect(
+				o
+					.select('users')
+					.groupBy(['id'])
+					.having(
+						caseWhen(eq('posts.title', 'x'), literal(1)).else(literal(0)).eq(1),
+					)
+					.dump(),
+			).toMatchObject({
+				sql: `SELECT users.* FROM users GROUP BY users.id HAVING CASE WHEN ${o === filtered ? titled(true) : 'posts.title = $1'} THEN 1 ELSE 0 END = $2`,
+				params: ['x', 1],
+			});
 		});
-	});
 
 	it("AC18 an exempted HAVING node keeps its issued body's filter under an opted-out outer ORM", () => {
 		const body = (
@@ -777,10 +778,15 @@ describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
 
 	it('AC17 ambiguous and invisible qualifiers are refused with the position label in CASE WHEN and FILTER', () => {
 		const editedDb = schema({
-			users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'text',
+				score: 'integer',
+			},
 			posts: {
 				id: { type: 'integer', primaryKey: true },
 				title: 'text',
+				score: 'integer',
 				authorId: ref('users', { as: 'author', inverse: 'posts' }),
 				editorId: ref('users', { as: 'editor', inverse: 'edited' }),
 			},
@@ -823,5 +829,60 @@ describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
 		expect(() =>
 			joined().groupBy(['id']).count('id', 'n').having(invisible()).dump(),
 		).toThrow("Declared column 'nope.id' is absent from the physical model.");
+		// A scalar comparison with a dotted field in HAVING keeps main's route too.
+		expect(
+			joined()
+				.groupBy(['id', 'author.id', 'editor.id'])
+				.having({
+					kind: 'subquery',
+					field: 'users.score',
+					operator: 'gt',
+					subquery: subquery('posts').max('score').toIntent(),
+				} as WhereIntent)
+				.dump().sql,
+		).toBe(
+			'SELECT posts.* FROM posts JOIN users AS author ON posts."authorId" = author.id JOIN users AS editor ON posts."editorId" = editor.id GROUP BY posts.id, author.id, editor.id HAVING author.score > (SELECT max(posts_subq_2.score) FROM posts AS posts_subq_2)',
+		);
+	});
+
+	it('C1 a condition shared with a body inside HAVING still resolves in a CASE', () => {
+		const sharedTables = {
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'text',
+				deletedAt: { type: 'timestamp', nullable: true },
+			},
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				title: 'text',
+				authorId: ref('users', { as: 'author', inverse: 'posts' }),
+			},
+		} as const;
+		for (const on of [false, true]) {
+			const db = on
+				? schema(sharedTables, undefined, {
+						defaultFilters: { users: isNull('deletedAt') },
+					})
+				: schema(sharedTables);
+			const o = createOrm({
+				schema: db,
+				adapter: createPgCompileOnlyAdapter(),
+				suppressDxWarnings: true,
+			});
+			const c = eq('author.name', 'x');
+			const filter = (alias: string) =>
+				on ? ` AND ${alias}."deletedAt" IS NULL` : '';
+			expect(
+				o
+					.select('posts')
+					.columns(['id', caseWhen(c, literal(1)).else(literal(0)).as('f')])
+					.groupBy(['id'])
+					.having(rawExists(subquery('posts').select('id').where(c)))
+					.dump(),
+			).toMatchObject({
+				sql: `SELECT posts.id, CASE WHEN EXISTS (SELECT 1 FROM users AS users_exists_0 WHERE posts."authorId" = users_exists_0.id${filter('users_exists_0')} AND users_exists_0.name = $1) THEN 1 ELSE 0 END AS f FROM posts GROUP BY posts.id HAVING EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT 1 FROM users AS users_exists_1 WHERE posts_sq."authorId" = users_exists_1.id${filter('users_exists_1')} AND users_exists_1.name = $2))`,
+				params: ['x', 'x'],
+			});
+		}
 	});
 });

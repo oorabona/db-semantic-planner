@@ -660,8 +660,19 @@ export function resolveReportIncludes(
 		node.field.includes('.');
 	// In HAVING a dotted field may name a SELECT alias or a relation path. Until
 	// that is decided per occurrence (#1005), such nodes keep main's gate wherever
-	// the same object appears.
+	// the same object appears. Bodies a resolved predicate absorbs hold no alias,
+	// so the walk stays on HAVING's own condition tree.
 	const havingDotted = new WeakSet<object>();
+	const absorbsBody = (node: Record<string, unknown>): boolean =>
+		[
+			'exists',
+			'notExists',
+			'relationFilter',
+			'rawExists',
+			'rawNotExists',
+		].includes(String(node.kind)) ||
+		((node.kind === 'subquery' || node.kind === 'in') &&
+			(node.subquery !== undefined || node.query !== undefined));
 	const collectHavingDotted = (value: unknown, seen: Set<object>): void => {
 		if (!value || typeof value !== 'object' || isParamIntent(value)) return;
 		if (seen.has(value)) return;
@@ -671,7 +682,14 @@ export function resolveReportIncludes(
 			return;
 		}
 		const node = value as Record<string, unknown>;
-		if (dottedField(node)) havingDotted.add(value);
+		if (
+			dottedField(node) ||
+			(node.kind === 'subquery' &&
+				typeof node.field === 'string' &&
+				node.field.includes('.'))
+		)
+			havingDotted.add(value);
+		if (absorbsBody(node)) return;
 		for (const [key, child] of Object.entries(node)) {
 			if (isBoundPayload(node, key, child)) continue;
 			collectHavingDotted(child, seen);

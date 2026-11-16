@@ -1504,4 +1504,21 @@ u | select id, case when name = 'x' then 1 else 0 end as flag`.dump() as {
 				).toThrow(message(name));
 			}
 	});
+
+	it("R1 in HAVING the same qualifiers keep main's output (C1 exception)", () => {
+		const having = (o: SliceOrm, c: WhereIntent) =>
+			o.select('categories').groupBy(['id']).count('id', 'n').having(c).dump();
+		expect(sql(having(plain, eq('users.name', 'x')))).toEqual({
+			sql: 'SELECT categories.id, count(categories.id) AS n FROM categories GROUP BY categories.id HAVING users.name = $1',
+			params: ['x'],
+		});
+		expect(sql(having(filtered, eq('users.name', 'x')))).toEqual({
+			sql: 'SELECT categories.id, count(categories.id) AS n FROM categories WHERE categories."deletedAt" IS NULL GROUP BY categories.id HAVING users.name = $1',
+			params: ['x'],
+		});
+		for (const o of [plain, filtered])
+			expect(() => having(o, eq('nope.title', 'x'))).toThrow(
+				"Declared column 'nope.title' is absent from the physical model.",
+			);
+	});
 });
