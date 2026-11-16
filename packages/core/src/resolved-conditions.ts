@@ -354,7 +354,7 @@ export function resolveConditionContext(
 			const agg = select.aggregates[0];
 			// The resolved projection carries no aggregate FILTER; refusing keeps
 			// the aggregate from silently counting rows the FILTER excludes.
-			if (agg.filter !== undefined)
+			if (use === 'scalar' && agg.filter !== undefined)
 				throw new Error(
 					'scalar subquery with an aggregate FILTER is not supported — it would silently change which rows match; restructure the query or use a CTE.',
 				);

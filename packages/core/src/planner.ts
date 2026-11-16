@@ -64,6 +64,8 @@ export type {
 	ResolvedIncludeStrategy,
 } from '@dbsp/types';
 
+import { containsRelationalReadPolicy } from './relational-read-plans.js';
+
 // ============================================================================
 // Warning Types
 // ============================================================================
@@ -806,8 +808,11 @@ function optimizeInToExists(
 			//   joins / include    — extra tables in the subquery aren't propagated
 			//   batchValuesSource  — unnest() source, not a real table
 			//   aggregate select   — SELECT max(price) is not a simple FK projection
+			//   issued read policy — the relation predicate would carry the outer
+			//                       filters instead of the body's own policy
 			const sq = inWhere.subquery;
 			if (
+				containsRelationalReadPolicy(sq) ||
 				sq.limit != null ||
 				sq.orderBy?.length ||
 				sq.offset != null ||
