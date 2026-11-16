@@ -18,6 +18,7 @@ import {
 	notExists,
 	or,
 	outerRef,
+	param,
 	rangeContains,
 	rangeOverlaps,
 	rawExists,
@@ -1577,5 +1578,149 @@ u | select id, case when name = 'x' then 1 else 0 end as flag`.dump() as {
 			expect(() => having(o, eq('nope.title', 'x'))).toThrow(
 				"Declared column 'nope.title' is absent from the physical model.",
 			);
+	});
+});
+
+describe('root WHERE resolved parameters and EXISTS projections (#891 slice 4)', () => {
+	const local = schema({
+		categories: {
+			id: { type: 'integer', primaryKey: true },
+			name: 'text',
+			score: 'integer',
+			data: { type: 'json', dbType: 'jsonb' },
+			parentId: ref('categories', {
+				nullable: true,
+				as: 'parent',
+				inverse: 'children',
+				roles: { parent: 'parent', children: 'children' },
+			}),
+		},
+	});
+	const orm = createOrm({
+		schema: local,
+		adapter: createPgCompileOnlyAdapter(),
+	});
+	const where = (condition: WhereIntent) =>
+		orm.select('categories').where(condition).dump();
+	const select = (condition: string) =>
+		`SELECT categories.* FROM categories WHERE ${condition}`;
+	const pr = { paramIndex: 7, value: 'payload' };
+	for (const [key, name, condition, sql, params] of [
+		[
+			'paramref-root',
+			'eq',
+			eq('data', pr),
+			'categories.data = CAST($1 AS jsonb)',
+			[pr],
+		],
+		[
+			'paramref-root',
+			'jsonContains',
+			{ kind: 'jsonContains', field: 'data', value: pr, reversed: false },
+			'categories.data @> $1',
+			[pr],
+		],
+		[
+			'paramintent-nested',
+			'eq',
+			eq('data', { kind: 'param', value: { kind: 'param', value: 'payload' } }),
+			'categories.data = CAST($1 AS jsonb)',
+			[{ kind: 'param', value: 'payload' }],
+		],
+		[
+			'param-wrapper',
+			'jsonContains',
+			{
+				kind: 'jsonContains',
+				field: 'data',
+				value: param({ active: true }),
+				reversed: false,
+			},
+			'categories.data @> $1',
+			[{ active: true }],
+		],
+		[
+			'param-wrapper',
+			'like',
+			{ kind: 'like', field: 'name', pattern: param('x%') },
+			'categories.name LIKE $1',
+			['x%'],
+		],
+		[
+			'param-wrapper',
+			'jsonExists',
+			{ kind: 'jsonExists', field: 'data', key: param('k') },
+			'categories.data ? $1',
+			['k'],
+		],
+		[
+			'in-param-wrapper',
+			'elements',
+			inArray('id', [param(1), param(2)]),
+			'categories.id = ANY ($1)',
+			[[1, 2]],
+		],
+		[
+			'in-param-wrapper',
+			'single array',
+			inArray('id', [param([1, 2])]),
+			'categories.id = ANY ($1)',
+			[[1, 2]],
+		],
+		[
+			'in-param-wrapper',
+			'whole list',
+			{ kind: 'in', field: 'id', values: param([1, 2]) },
+			'categories.id = ANY ($1)',
+			[[1, 2]],
+		],
+	] as const) {
+		it(`AC12 ${key} ${name}: the resolved value binds as data`, () => {
+			const dump = where(condition as WhereIntent);
+			expect(dump.sql).toBe(select(sql));
+			expect(dump.params).toEqual(params);
+		});
+	}
+	const recursion = {
+		kind: 'exists',
+		relation: 'children',
+		where: eq('score', 71),
+		recursive: { direction: 'down', through: 'children', maxDepth: 3 },
+	} as const;
+	it('AC13 exists-projection-recursion: recursion in a dropped EXISTS projection compiles', () => {
+		const dump = where(
+			rawExists(
+				// rawExists() accepts an ORM builder at runtime but not in its type (#994).
+				orm
+					.select('categories')
+					.columns([
+						caseWhen(recursion, literal(1)).else(literal(0)).as('flag'),
+					]) as unknown as Parameters<typeof rawExists>[0],
+			),
+		);
+		expect(dump.sql).toBe(
+			select('EXISTS (SELECT 1 FROM categories AS categories_sq)'),
+		);
+		expect(dump.params).toEqual([]);
+	});
+	it('AC13 exists-aggregate-filter-recursion: the aggregate stays, its FILTER goes', () => {
+		const dump = where({
+			kind: 'rawExists',
+			subquery: {
+				type: 'select',
+				from: 'categories',
+				where: or(),
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'count', field: '*', filter: recursion }],
+				},
+			},
+		} as WhereIntent);
+		expect(dump.sql).toBe(
+			select(
+				'EXISTS (SELECT count(*) FROM categories AS categories_sq WHERE false)',
+			),
+		);
+		expect(dump.params).toEqual([]);
 	});
 });

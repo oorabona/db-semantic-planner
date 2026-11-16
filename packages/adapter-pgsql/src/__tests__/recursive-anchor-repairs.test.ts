@@ -6,15 +6,22 @@ import {
 	eq,
 	every,
 	exists,
+	exprRef,
 	fn,
 	inArray,
+	inSubquery,
+	isNull,
 	like,
+	literal,
+	manyToMany,
 	namedArg,
 	neq,
 	none,
 	not,
 	notExists,
 	or,
+	outerRef,
+	param,
 	planRecursive,
 	rangeOverlaps,
 	rawExists,
@@ -206,7 +213,7 @@ describe('#891 recursive anchor review repairs', () => {
 			[],
 		],
 		['literal null', eq('score', null), '__n.score IS NULL', []],
-		['legacy inequality', neq('score', 7), '__n.score != $1', [7]],
+		['inequality', neq('score', 7), '__n.score <> $1', [7]],
 		['qualified root', eq('users.score', 7), '__n.score = $1', [7]],
 	] as const) {
 		it(`${name === 'qualified root' ? 'EDGE1' : 'COR2'} ${name}`, () => {
@@ -306,7 +313,7 @@ describe('#891 recursive anchor review repairs', () => {
 					: leaf;
 				expect(() => compile(where)).toThrow(
 					new Error(
-						`start.where ${kind}('${nested ? 'comments' : 'posts'}'): recursive relation predicates are not supported in a recursive anchor.`,
+						`start.where ${kind}('${nested ? 'comments' : 'posts'}'): recursive relation predicates are not supported inside start.where.`,
 					),
 				);
 			});
@@ -330,7 +337,7 @@ describe('#891 recursive anchor review repairs', () => {
 			);
 			expect(() => compile(where)).toThrow(
 				new Error(
-					`start.where ${predicate === exists ? 'exists' : 'notExists'}('comments'): recursive relation predicates are not supported in a recursive anchor.`,
+					`start.where ${predicate === exists ? 'exists' : 'notExists'}('comments'): recursive relation predicates are not supported inside start.where.`,
 				),
 			);
 		});
@@ -356,7 +363,7 @@ describe('#891 recursive anchor review repairs', () => {
 					}),
 				).toThrow(
 					new Error(
-						`start.where ${predicate === exists ? 'exists' : 'notExists'}('posts'): recursive relation predicates are not supported in a recursive anchor.`,
+						`start.where ${predicate === exists ? 'exists' : 'notExists'}('posts'): recursive relation predicates are not supported inside start.where.`,
 					),
 				);
 			});
@@ -397,19 +404,21 @@ describe('#891 recursive anchor review repairs', () => {
 			operator: 'eq',
 			value: true,
 		};
-		for (const where of [
-			condition,
-			{
+		expect(() => compile(condition)).toThrow(
+			new Error(
+				"start.where relationFilter('posts'): recursive relation predicates are not supported inside start.where.",
+			),
+		);
+		expect(() =>
+			compile({
 				kind: 'rawExists',
 				subquery: { type: 'select', from: 'posts', having: condition },
-			},
-		] as WhereIntent[]) {
-			expect(() => compile(where)).toThrow(
-				new Error(
-					"start.where relationFilter('posts'): recursive relation predicates are not supported in a recursive anchor.",
-				),
-			);
-		}
+			}),
+		).toThrow(
+			new Error(
+				'rawExists subquery with HAVING is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+			),
+		);
 	});
 	it('SEC1 bound JSON resembling a recursive predicate remains data', () => {
 		const value = {
@@ -433,7 +442,7 @@ describe('#891 recursive anchor review repairs', () => {
 					compile(nested ? exists('posts', { where: leaf }) : leaf),
 				).toThrow(
 					new Error(
-						`start.where relationFilter('${nested ? 'comments' : 'posts'}'): recursive relation predicates are not supported in a recursive anchor.`,
+						`start.where relationFilter('${nested ? 'comments' : 'posts'}'): recursive relation predicates are not supported inside start.where.`,
 					),
 				);
 			});
@@ -466,7 +475,7 @@ describe('#891 recursive anchor review repairs', () => {
 	it('EDGE1 invisible qualifier refused', () => {
 		expect(() => compile(any('invisible.score', []))).toThrow(
 			new Error(
-				"start.where qualifier 'invisible' is not visible in the recursive anchor scope.",
+				"exists('invisible'): no relation 'invisible' is declared on table 'users'. Use rawExists(subquery(...)) for an EXISTS over an undeclared or uncorrelated subquery.",
 			),
 		);
 	});
@@ -496,7 +505,7 @@ describe('#891 recursive anchor review repairs', () => {
 	it('CTR1 invisible outer alias refused', () => {
 		expect(() => compile(namedOuter('invisible'))).toThrow(
 			new Error(
-				"start.where qualifier 'invisible' is not visible in the recursive anchor scope.",
+				"outerRef qualifier 'invisible' is not visible in an enclosing query.",
 			),
 		);
 	});
@@ -535,3 +544,622 @@ for (const kind of ['rawExists', 'rawNotExists'] as const) {
 		});
 	}
 }
+
+describe('start.where resolves through core (#891 slice 4)', () => {
+	const tables = {
+		categories: {
+			id: { type: 'integer', primaryKey: true },
+			name: 'text',
+			score: 'integer',
+			data: { type: 'json', dbType: 'jsonb' },
+			deletedAt: { type: 'timestamp', nullable: true },
+			parentId: ref('categories', {
+				nullable: true,
+				as: 'parent',
+				inverse: 'children',
+				roles: { parent: 'parent', children: 'children' },
+			}),
+		},
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			title: 'text',
+			score: 'integer',
+			deletedAt: { type: 'timestamp', nullable: true },
+			categoryId: ref('categories', { as: 'category', inverse: 'posts' }),
+		},
+		comments: {
+			id: { type: 'integer', primaryKey: true },
+			postId: ref('posts', { as: 'post', inverse: 'comments' }),
+		},
+		archive: {
+			id: { type: 'integer', primaryKey: true },
+			name: 'text',
+			score: 'integer',
+		},
+	} as const;
+	const filters = {
+		categories: isNull('deletedAt'),
+		posts: isNull('deletedAt'),
+	};
+	const plain = schema(tables);
+	const filtered = schema(tables, undefined, { defaultFilters: filters });
+	const typed = schema({
+		...tables,
+		categories: {
+			...tables.categories,
+			id: { type: 'integer', primaryKey: true, dbType: 'int4' },
+		},
+	});
+	const tagged = schema(
+		{
+			...tables,
+			tags: { id: { type: 'integer', primaryKey: true } },
+			catTags: { categoryId: ref('categories'), tagId: ref('tags') },
+		},
+		undefined,
+		{
+			relations: {
+				categories: {
+					tags: manyToMany('tags', {
+						through: 'catTags',
+						inverse: 'categories',
+						sourceForeignKey: ['categoryId'],
+						targetForeignKey: ['tagId'],
+					}),
+				},
+			},
+		},
+	);
+	type Db = Pick<typeof plain, 'model' | 'defaultFilters'>;
+	// rawExists() accepts an ORM builder at runtime but not in its type (#994).
+	const issuedBody = (builder: unknown) =>
+		builder as Parameters<typeof rawExists>[0];
+	const local = createPgCompileOnlyAdapter();
+	const plainOrm = createOrm({ schema: plain, adapter: local });
+	const filteredOrm = createOrm({ schema: filtered, adapter: local });
+	const deleted = ' AND __n."deletedAt" IS NULL';
+	function walk(where: WhereIntent, adjacency = true): RecursiveIntent {
+		return {
+			type: 'recursive',
+			cteName: 'tree',
+			start: {
+				from: 'categories',
+				nodeIdExpr: { kind: 'column', name: 'id' },
+				where,
+			},
+			traversal: adjacency
+				? {
+						kind: 'adjacency',
+						nodeTable: 'categories',
+						nodeId: 'id',
+						parentId: 'parentId',
+						direction: 'descendants',
+					}
+				: {
+						kind: 'edge-table',
+						nodeTable: 'categories',
+						nodeId: 'id',
+						edgeTable: 'archive',
+						edgeFrom: 'id',
+						edgeTo: 'score',
+						direction: 'out',
+					},
+			maxDepth: 2,
+		};
+	}
+	function plan(db: Db, where: WhereIntent, adjacency = true) {
+		return planRecursive(
+			walk(where, adjacency),
+			db.model,
+			db.defaultFilters ? { defaultFilters: db.defaultFilters } : {},
+		);
+	}
+	function run(db: Db, where: WhereIntent, adjacency = true) {
+		return local.compileRecursive(plan(db, where, adjacency), db.model);
+	}
+	function sql(anchor: string, adjacency = true, filter = false) {
+		const join = adjacency
+			? 'JOIN categories AS __n ON __n."parentId" = tree.id'
+			: 'JOIN archive AS __e ON __e.id = tree.id JOIN categories AS __n ON __n.id = __e.score';
+		return `WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM categories AS __n WHERE ${anchor}${filter ? deleted : ''} UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree ${join} WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)${filter ? deleted : ''}) SELECT tree.id AS id FROM tree`;
+	}
+	const rel = (filter: boolean) =>
+		`EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0."categoryId"${filter ? ' AND posts_exists_0."deletedAt" IS NULL' : ''} AND posts_exists_0.title = $1)`;
+	const raw = (filter: boolean) =>
+		`EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.title = $1${filter ? ' AND posts_sq."deletedAt" IS NULL' : ''})`;
+	const forms: readonly [
+		string,
+		(orm: typeof plainOrm) => WhereIntent,
+		(filter: boolean) => string,
+		readonly unknown[],
+	][] = [
+		['rel', () => exists('posts', { where: eq('title', 'x') }), rel, ['x']],
+		[
+			'some',
+			(orm) => some(orm.tables.categories.posts, () => eq('title', 'x')),
+			rel,
+			['x'],
+		],
+		[
+			'none',
+			(orm) => none(orm.tables.categories.posts, () => eq('title', 'x')),
+			(filter) => `NOT (${rel(filter)})`,
+			['x'],
+		],
+		[
+			'rawexists',
+			() => rawExists(subquery('posts').select('id').where(eq('title', 'x'))),
+			raw,
+			['x'],
+		],
+		[
+			'issued',
+			(orm) =>
+				rawExists(
+					issuedBody(
+						orm.select('posts').columns(['id']).where(eq('title', 'x')),
+					),
+				),
+			raw,
+			['x'],
+		],
+		[
+			'insub',
+			() => inSubquery('id', subquery('posts').select('categoryId')),
+			(filter) =>
+				`__n.id = ANY (SELECT posts_subq_0."categoryId" FROM posts AS posts_subq_0${filter ? ' WHERE posts_subq_0."deletedAt" IS NULL' : ''})`,
+			[],
+		],
+	];
+	for (const adjacency of [true, false]) {
+		const walkName = adjacency ? 'adjacency' : 'edge-table';
+		for (const [name, where, anchor, params] of forms) {
+			it(`AC1 ${name}-filtered ${walkName}: the default filter reaches the body`, () => {
+				const result = run(filtered, where(filteredOrm), adjacency);
+				expect(result.sql).toBe(sql(anchor(true), adjacency, true));
+				expect(result.parameters).toEqual(params);
+			});
+			it(`AC3 plain-unchanged ${name} ${walkName}`, () => {
+				const result = run(plain, where(plainOrm), adjacency);
+				expect(result.sql).toBe(sql(anchor(false), adjacency));
+				expect(result.parameters).toEqual(params);
+			});
+		}
+		for (const [name, where, anchor, params] of [
+			['eq', eq('score', 1), '__n.score = $1', [1]],
+			['like', like('name', 'x%'), '__n.name LIKE $1', ['x%']],
+		] as const) {
+			it(`AC3 plain-unchanged ${name} ${walkName}`, () => {
+				const result = run(plain, where, adjacency);
+				expect(result.sql).toBe(sql(anchor, adjacency));
+				expect(result.parameters).toEqual(params);
+			});
+			it(`AC3 filtered-eq-like ${name} ${walkName}: the condition precedes the anchor filter`, () => {
+				const result = run(filtered, where, adjacency);
+				expect(result.sql).toBe(sql(anchor, adjacency, true));
+				expect(result.parameters).toEqual(params);
+			});
+		}
+	}
+	it('AC1 scalar-filtered: a scalar subquery body takes the filter', () => {
+		const result = run(filtered, {
+			kind: 'expression',
+			expr: {
+				kind: 'subquery',
+				query: {
+					...subquery('posts')
+						.select('score')
+						.where(eq('score', 3))
+						.build()
+						.toIntent(),
+					orderBy: [{ field: 'score', direction: 'desc' }],
+					limit: 1,
+				},
+			},
+			operator: 'gt',
+			value: 67,
+		} as WhereIntent);
+		expect(result.sql).toBe(
+			sql(
+				'(SELECT posts.score FROM posts AS posts WHERE posts.score = $1 AND posts."deletedAt" IS NULL ORDER BY posts.score DESC LIMIT 1) > $2',
+				true,
+				true,
+			),
+		);
+		expect(result.parameters).toEqual([3, 67]);
+	});
+	for (const [label, db] of [
+		['plain', plain],
+		['filtered', filtered],
+	] as const) {
+		const filter = label === 'filtered';
+		it(`AC2 dotted ${label}: a dotted relation path compiles to EXISTS`, () => {
+			const result = run(db, eq('posts.title', 'x'));
+			expect(result.sql).toBe(sql(rel(filter), true, filter));
+			expect(result.parameters).toEqual(['x']);
+		});
+		it(`AC2 selfdot ${label}: a self-relation path compiles to EXISTS`, () => {
+			const result = run(db, eq('parent.name', 'x'));
+			expect(result.sql).toBe(
+				sql(
+					`EXISTS (SELECT 1 FROM categories AS categories_exists_0 WHERE __n."parentId" = categories_exists_0.id${filter ? ' AND categories_exists_0."deletedAt" IS NULL' : ''} AND categories_exists_0.name = $1)`,
+					true,
+					filter,
+				),
+			);
+			expect(result.parameters).toEqual(['x']);
+		});
+		it(`AC4 recursive-message ${label}`, () => {
+			expect(() =>
+				run(
+					db,
+					exists('children', {
+						recursive: { direction: 'down', through: 'children' },
+					}),
+				),
+			).toThrow(
+				new Error(
+					"start.where exists('children'): recursive relation predicates are not supported inside start.where.",
+				),
+			);
+		});
+		it(`R1 undeclared-relation ${label}: planRecursive alone refuses`, () => {
+			expect(() => plan(db, exists('nope'))).toThrow(
+				new Error(
+					"exists('nope'): no relation 'nope' is declared on table 'categories'. Use rawExists(subquery(...)) for an EXISTS over an undeclared or uncorrelated subquery.",
+				),
+			);
+		});
+	}
+	const pathBody =
+		'SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0."categoryId" AND EXISTS (SELECT 1 FROM categories AS categories_exists_1 WHERE posts_exists_0."categoryId" = categories_exists_1.id AND categories_exists_1.id = $1)';
+	it('AC2 exists-path: a relation path given to exists() compiles to nested EXISTS', () => {
+		const result = run(plain, exists('posts.category', { where: eq('id', 1) }));
+		expect(result.sql).toBe(sql(`EXISTS (${pathBody})`));
+		expect(result.parameters).toEqual([1]);
+	});
+	it('AC2 notexists-path: a relation path given to notExists() compiles under NOT', () => {
+		const result = run(
+			plain,
+			notExists('posts.category', { where: eq('id', 1) }),
+		);
+		expect(result.sql).toBe(sql(`NOT (EXISTS (${pathBody}))`));
+		expect(result.parameters).toEqual([1]);
+	});
+	it('AC4 outer-invisible: an invisible outerRef qualifier gets the resolver message', () => {
+		expect(() =>
+			run(
+				plain,
+				rawExists(
+					subquery('posts')
+						.select('id')
+						.where(eq('categoryId', outerRef('invisible.id'))),
+				),
+			),
+		).toThrow(
+			new Error(
+				"outerRef qualifier 'invisible' is not visible in an enclosing query.",
+			),
+		);
+	});
+	it('AC4 unknown-kind: an unknown kind gets the shared message', () => {
+		expect(() =>
+			plan(plain, JSON.parse('{"kind":"bogusKind"}') as WhereIntent),
+		).toThrow(new Error("Unsupported predicate kind 'bogusKind'"));
+	});
+	it('AC4 many-to-many: a many-to-many exists carries the start.where label', () => {
+		expect(() => plan(tagged, exists('tags'))).toThrow(
+			new Error(
+				"start.where exists('tags'): many-to-many traversal is not supported yet (#787).",
+			),
+		);
+	});
+	it('AC6 legacy-report: a report without recursiveFilters.start keeps the direct compile', () => {
+		const report = plan(plain, neq('score', 1));
+		const { start, ...rest } = report.recursiveFilters ?? {};
+		expect(start).toBeDefined();
+		const result = local.compileRecursive(
+			{ ...report, recursiveFilters: rest },
+			plain.model,
+		);
+		expect(result.sql).toBe(sql('__n.score != $1'));
+		expect(result.parameters).toEqual([1]);
+	});
+	const correlated = (column: string) =>
+		rawExists(
+			subquery('posts')
+				.select('id')
+				.where(eq('categoryId', outerRef(column))),
+		);
+	for (const column of ['id', 'categories.id']) {
+		for (const [label, db] of [
+			['plain', plain],
+			['filtered', filtered],
+		] as const) {
+			const filter = label === 'filtered';
+			const body = `SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq."categoryId" = __n.id${filter ? ' AND posts_sq."deletedAt" IS NULL' : ''}`;
+			it(`AC9 correlated-rawexists outerRef('${column}') ${label}`, () => {
+				const result = run(db, correlated(column));
+				expect(result.sql).toBe(sql(`EXISTS (${body})`, true, filter));
+				expect(result.parameters).toEqual([]);
+			});
+			it(`AC9 correlated-rawnotexists outerRef('${column}') ${label}`, () => {
+				const result = run(db, {
+					...correlated(column),
+					kind: 'rawNotExists',
+				} as WhereIntent);
+				expect(result.sql).toBe(sql(`NOT (EXISTS (${body}))`, true, filter));
+				expect(result.parameters).toEqual([]);
+			});
+		}
+	}
+	for (const [column, target] of [
+		['id', 'posts_exists_0.id'],
+		['posts.id', 'posts_exists_0.id'],
+		['categories.id', '__n.id'],
+	] as const) {
+		it(`AC9 correlated-nested outerRef('${column}') binds ${target}`, () => {
+			const result = run(
+				plain,
+				exists('posts', {
+					where: rawExists(
+						subquery('categories')
+							.select('id')
+							.where(eq('id', outerRef(column))),
+					),
+				}),
+			);
+			expect(result.sql).toBe(
+				sql(
+					`EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0."categoryId" AND EXISTS (SELECT categories_sq.id FROM categories AS categories_sq WHERE categories_sq.id = ${target}))`,
+				),
+			);
+			expect(result.parameters).toEqual([]);
+		});
+	}
+	it('AC10 issued-policy-filtered: a filtered issuer keeps its filter under an unfiltered plan', () => {
+		const result = run(
+			plain,
+			rawExists(
+				issuedBody(
+					filteredOrm.select('posts').columns(['id']).where(eq('title', 'x')),
+				),
+			),
+		);
+		expect(result.sql).toBe(sql(raw(true)));
+		expect(result.parameters).toEqual(['x']);
+	});
+	it('AC10 issued-policy-optout: an opted-out issuer adds no filter under a filtered plan', () => {
+		const result = run(
+			filtered,
+			rawExists(
+				issuedBody(
+					filteredOrm
+						.select('posts')
+						.withoutDefaultFilters()
+						.columns(['id'])
+						.where(eq('title', 'x')),
+				),
+			),
+		);
+		expect(result.sql).toBe(sql(raw(false), true, true));
+		expect(result.parameters).toEqual(['x']);
+	});
+	for (const [name, where, anchor, params] of [
+		['eq', eq('id', 1), '__n.id = CAST($1 AS int4)', [1]],
+		[
+			'in',
+			inArray('id', [1, 2]),
+			'__n.id = ANY (CAST($1 AS int4[]))',
+			[[1, 2]],
+		],
+		[
+			'ParamIntent',
+			eq('id', { kind: 'param', value: 3 }),
+			'__n.id = CAST($1 AS int4)',
+			[3],
+		],
+		['param() wrapper', eq('id', param(3)), '__n.id = $1', [3]],
+	] as const) {
+		const key =
+			name === 'eq' || name === 'in' ? 'typed-cast' : 'typed-param-forms';
+		it(`AC11 ${key} ${name}`, () => {
+			const result = run(typed, where);
+			expect(result.sql).toBe(sql(anchor));
+			expect(result.parameters).toEqual(params);
+		});
+	}
+	const pr = { paramIndex: 7, value: 'payload' };
+	for (const [key, name, where, anchor, params] of [
+		[
+			'paramref-anchor',
+			'eq',
+			eq('data', pr),
+			'__n.data = CAST($1 AS jsonb)',
+			[pr],
+		],
+		[
+			'paramintent-nested',
+			'eq',
+			eq('data', { kind: 'param', value: { kind: 'param', value: 'payload' } }),
+			'__n.data = CAST($1 AS jsonb)',
+			[{ kind: 'param', value: 'payload' }],
+		],
+		[
+			'param-wrapper',
+			'jsonContains',
+			{
+				kind: 'jsonContains',
+				field: 'data',
+				value: param({ active: true }),
+				reversed: false,
+			},
+			'__n.data @> $1',
+			[{ active: true }],
+		],
+		[
+			'param-wrapper',
+			'like',
+			{ kind: 'like', field: 'name', pattern: param('x%') },
+			'__n.name LIKE $1',
+			['x%'],
+		],
+		[
+			'param-wrapper',
+			'jsonExists',
+			{ kind: 'jsonExists', field: 'data', key: param('k') },
+			'__n.data ? $1',
+			['k'],
+		],
+		[
+			'in-param-wrapper',
+			'elements',
+			inArray('id', [param(1), param(2)]),
+			'__n.id = ANY ($1)',
+			[[1, 2]],
+		],
+		[
+			'in-param-wrapper',
+			'single array',
+			inArray('id', [param([1, 2])]),
+			'__n.id = ANY ($1)',
+			[[1, 2]],
+		],
+		[
+			'in-param-wrapper',
+			'whole list',
+			{ kind: 'in', field: 'id', values: param([1, 2]) },
+			'__n.id = ANY ($1)',
+			[[1, 2]],
+		],
+	] as const) {
+		it(`AC12 ${key} ${name}: the resolved value binds as data`, () => {
+			const result = run(plain, where as WhereIntent);
+			expect(result.sql).toBe(sql(anchor));
+			expect(result.parameters).toEqual(params);
+		});
+	}
+	const recursion = {
+		kind: 'exists',
+		relation: 'children',
+		where: eq('score', 71),
+		recursive: { direction: 'down', through: 'children', maxDepth: 3 },
+	} as const;
+	it('AC13 exists-projection-recursion: recursion in a dropped EXISTS projection compiles', () => {
+		const result = run(
+			plain,
+			rawExists(
+				issuedBody(
+					plainOrm
+						.select('categories')
+						.columns([
+							caseWhen(recursion, literal(1)).else(literal(0)).as('flag'),
+						]),
+				),
+			),
+		);
+		expect(result.sql).toBe(
+			sql('EXISTS (SELECT 1 FROM categories AS categories_sq)'),
+		);
+		expect(result.parameters).toEqual([]);
+	});
+	it('AC13 exists-aggregate-filter-recursion: the aggregate stays, its FILTER goes', () => {
+		const result = run(plain, {
+			kind: 'rawExists',
+			subquery: {
+				type: 'select',
+				from: 'categories',
+				where: or(),
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'count', field: '*', filter: recursion }],
+				},
+			},
+		} as WhereIntent);
+		expect(result.sql).toBe(
+			sql(
+				'EXISTS (SELECT count(*) FROM categories AS categories_sq WHERE false)',
+			),
+		);
+		expect(result.parameters).toEqual([]);
+	});
+	it('AC14 expression-rhs-ref: a column reference on the right compiles to the column', () => {
+		const result = run(plain, {
+			...fn('abs', exprRef('score')).eq(5),
+			value: ref('score'),
+		} as WhereIntent);
+		expect(result.sql).toBe(sql('abs(__n.score) = __n.score'));
+		expect(result.parameters).toEqual([]);
+	});
+	it('AC14 jsonpath-rhs-ref: the JSON extraction is kept', () => {
+		const result = run(plain, {
+			kind: 'comparison',
+			field: 'data',
+			operator: 'eq',
+			jsonPath: ['foo'],
+			jsonMode: 'json',
+			value: exprRef('data'),
+		} as WhereIntent);
+		expect(result.sql).toBe(sql('(__n.data -> $1) = __n.data'));
+		expect(result.parameters).toEqual(['foo']);
+	});
+	const hops = (column: string) =>
+		({
+			kind: 'relationFilter',
+			relation: ['posts', 'comments'],
+			mode: 'some',
+			where: eq('id', outerRef(column)),
+		}) as WhereIntent;
+	it('AC15 multi-hop-outer-unqualified: binds the anchor range', () => {
+		const result = run(plain, hops('id'));
+		expect(result.sql).toBe(
+			sql(
+				'EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE __n.id = posts_exists_0."categoryId" AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1."postId" AND comments_exists_1.id = __n.id))',
+			),
+		);
+		expect(result.parameters).toEqual([]);
+	});
+	it('AC15 multi-hop-outer-intermediate: an intermediate hop qualifier is refused', () => {
+		expect(() => plan(plain, hops('posts.id'))).toThrow(
+			new Error(
+				"outerRef qualifier 'posts' is not visible in an enclosing query.",
+			),
+		);
+	});
+	it('an unknown start table is reported before a start.where refusal', () => {
+		const query = walk(exists('rel'));
+		expect(() =>
+			planRecursive(
+				{
+					...query,
+					start: { ...query.start, from: 'nope' },
+					traversal: { ...query.traversal, nodeTable: 'nope' },
+				} as RecursiveIntent,
+				plain.model,
+			),
+		).toThrow(new Error('Unknown table: nope'));
+	});
+	it('R2 scalar-aggregate-filter: planRecursive alone refuses', () => {
+		expect(() =>
+			plan(plain, {
+				kind: 'subquery',
+				field: 'score',
+				operator: 'gt',
+				subquery: {
+					type: 'select',
+					from: 'posts',
+					select: {
+						type: 'aggregate',
+						aggregates: [
+							{ function: 'count', field: '*', filter: eq('score', 1) },
+						],
+					},
+				},
+			} as WhereIntent),
+		).toThrow(
+			new Error(
+				'scalar subquery with an aggregate FILTER is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+			),
+		);
+	});
+});

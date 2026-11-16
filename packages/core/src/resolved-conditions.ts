@@ -773,15 +773,21 @@ export function resolveConditionContext(
 				);
 		}
 	};
+	// The public param() wrapper is an ExpressionRef; read it as its ParamIntent, once.
+	const authoredParam = (value: unknown): unknown =>
+		isExpression(value) && isParamIntent(value.intent) ? value.intent : value;
 	const parameter = (
 		value: unknown,
 		cast: ResolvedCast = 'none',
-	): ResolvedParameter => ({
-		kind: 'parameter',
-		value: isParamIntent(value) ? value.value : value,
-		cast,
-		bound: isParamIntent(value),
-	});
+	): ResolvedParameter => {
+		const authored = authoredParam(value);
+		return {
+			kind: 'parameter',
+			value: isParamIntent(authored) ? authored.value : authored,
+			cast,
+			bound: isParamIntent(authored),
+		};
+	};
 	const rangeParameter = (value: unknown): ResolvedParameter => {
 		const authored = parameter(value, 'range');
 		if (authored.bound) return authored;
@@ -801,16 +807,18 @@ export function resolveConditionContext(
 		return { ...authored, cast: 'range-element' };
 	};
 
-	const normalizeList = (value: unknown): unknown => {
+	const normalizeList = (raw: unknown): unknown => {
+		const value = authoredParam(raw);
 		if (isParamIntent(value)) return value;
 		if (!Array.isArray(value)) return value;
+		const items = value.map(authoredParam);
 		if (
-			value.length === 1 &&
-			isParamIntent(value[0]) &&
-			Array.isArray(value[0].value)
+			items.length === 1 &&
+			isParamIntent(items[0]) &&
+			Array.isArray(items[0].value)
 		)
-			return value[0];
-		return value.map((v) => (isParamIntent(v) ? v.value : v));
+			return items[0];
+		return items.map((v) => (isParamIntent(v) ? v.value : v));
 	};
 	const visit = (
 		node: WhereIntent,

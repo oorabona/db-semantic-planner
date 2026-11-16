@@ -1,7 +1,10 @@
 import { RangeAllocator } from '@dbsp/types';
 import { copyDefaultFilters, getDefaultFilter } from './default-filter-map.js';
 import { assertUnplannedDefaultFilters } from './dx/default-filter-refusals.js';
-import { resolveScanDefaultFilter } from './resolved-conditions.js';
+import {
+	resolveConditionContext,
+	resolveScanDefaultFilter,
+} from './resolved-conditions.js';
 import {
 	observeIncludeDecisions,
 	resolveReportIncludes,
@@ -485,13 +488,12 @@ export function planRecursive(
 		);
 	}
 
-	// The walk node scans are planned below. Other scans in anchor/emit
-	// expressions still use the legacy compiler and must keep refusing.
+	// The walk node scans and start.where are resolved below. Scans in
+	// start.select and nodeIdExpr still use the legacy compiler and must keep refusing.
 	assertUnplannedDefaultFilters(
 		{
 			type: 'select',
 			from: startFrom,
-			where: intent.start.where,
 			select: intent.start.select,
 			nodeIdExpr: intent.start.nodeIdExpr,
 		},
@@ -568,6 +570,22 @@ export function planRecursive(
 		throw new Error(`Unknown table: ${startFrom}`);
 	}
 
+	// start.where resolves like a root WHERE over the anchor range, once
+	// the shape and the start table are known to be valid.
+	const startWhere = intent.start.where
+		? resolveConditionContext(
+				intent.start.where,
+				anchorRange,
+				[anchorRange],
+				[],
+				allocator,
+				model,
+				0,
+				[],
+				{ defaultFilters: options.defaultFilters, label: 'start.where' },
+			)
+		: undefined;
+
 	// Step 2: Generate recursive-cte decision
 	const traversalKind = intent.traversal.kind;
 
@@ -643,8 +661,9 @@ export function planRecursive(
 
 	// PERF (FIND-051): use .slice() instead of spread — avoids iterable-protocol overhead.
 	const report: RecursivePlanReport = {
-		...((anchorFilter || stepFilter) && {
+		...((anchorFilter || stepFilter || startWhere) && {
 			recursiveFilters: {
+				...(startWhere && { start: startWhere }),
 				...(anchorFilter && { anchor: anchorFilter }),
 				...(stepFilter && { step: stepFilter }),
 			},
