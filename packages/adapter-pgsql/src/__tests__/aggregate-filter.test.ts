@@ -9,6 +9,26 @@ import {
 	compilePlan,
 	type SimplifiedPlanReport,
 } from '@dbsp/adapter-pgsql/internal';
+import {
+	createOrm,
+	eq,
+	exists,
+	exprRef,
+	fn,
+	inSubquery,
+	isNull,
+	none,
+	outerRef,
+	plan,
+	rangeContains,
+	rangeOverlaps,
+	rawExists,
+	ref,
+	schema,
+	some,
+	subquery,
+} from '@dbsp/core';
+import type { QueryIntent, WhereIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { eqExpr, normalizeSQL, sqlColumnRef } from '../ast-helpers.js';
 import {
@@ -22,6 +42,7 @@ import {
 } from '../handlers/expression/aggregate.js';
 import type { CompilerContext, Decision } from '../handlers/types.js';
 import { createCompilerState } from '../handlers/types.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { queryLocal } from '../sql-identifier.js';
 
 // ============================================================================
@@ -336,5 +357,262 @@ describe('compilePlan: FILTER (WHERE ...) clause in aggregates', () => {
 			'select count(*) as total_orders, count(*) filter (where orders.status = $1) as pending_orders, sum(orders.amount) as total_amount from orders',
 		);
 		expect(result.parameters).toEqual(['pending']);
+	});
+});
+
+describe('raw aggregate FILTER resolves through the root resolver (#891 slice 3)', () => {
+	const tables = {
+		users: {
+			id: { type: 'integer', primaryKey: true },
+			name: 'text',
+			score: 'integer',
+			period: { type: 'daterange' },
+		},
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			title: 'text',
+			deletedAt: { type: 'timestamp', nullable: true },
+			authorId: ref('users', { as: 'author', inverse: 'posts' }),
+		},
+	} as const;
+	const plainDb = schema(tables);
+	const filteredDb = schema(tables, undefined, {
+		defaultFilters: { posts: isNull('deletedAt') },
+	});
+	const plainOrm = createOrm({
+		schema: plainDb,
+		adapter: createPgCompileOnlyAdapter(),
+		suppressDxWarnings: true,
+	});
+	const filteredOrm = createOrm({
+		schema: filteredDb,
+		adapter: createPgCompileOnlyAdapter(),
+		suppressDxWarnings: true,
+	});
+	const variants = [
+		{ name: 'plain', db: plainDb, orm: plainOrm, on: false },
+		{ name: 'default filters', db: filteredDb, orm: filteredOrm, on: true },
+	] as const;
+	type Variant = (typeof variants)[number];
+	const deleted = (alias: string, on: boolean) =>
+		on ? ` AND ${alias}."deletedAt" IS NULL` : '';
+	const relationExists = (on: boolean) =>
+		`EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0."authorId"${deleted('posts_exists_0', on)} AND posts_exists_0.title = $1)`;
+	const rawBody = (on: boolean) =>
+		`EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.title = $1${deleted('posts_sq', on)})`;
+	const reportFor = (v: Variant, select: QueryIntent['select']) =>
+		plan(
+			{ type: 'select', from: 'users', select } as QueryIntent,
+			v.db.model,
+			v.on && v.db.defaultFilters
+				? { defaultFilters: v.db.defaultFilters }
+				: {},
+		);
+	const aggregateFilter = (v: Variant, filter: WhereIntent) =>
+		reportFor(v, {
+			type: 'aggregate',
+			aggregates: [{ function: 'count', field: '*', as: 'n', filter }],
+		});
+	const compiled = (report: ReturnType<typeof plan>, model?: unknown) => {
+		const d = createPgCompileOnlyAdapter().compile(
+			report,
+			model === undefined ? undefined : ({ model } as never),
+		);
+		return { sql: d.sql, params: d.parameters };
+	};
+	const counted = (where: string) =>
+		`SELECT count(*) FILTER (WHERE ${where}) AS n FROM users`;
+
+	const cases: readonly {
+		readonly name: string;
+		readonly build: (v: Variant) => WhereIntent;
+		readonly where: (on: boolean) => string;
+		readonly params: readonly unknown[];
+	}[] = [
+		{
+			name: 'exists()',
+			build: () => exists('posts', { where: eq('title', 'x') }),
+			where: relationExists,
+			params: ['x'],
+		},
+		{
+			name: 'some()',
+			build: (v) =>
+				some(
+					v.orm.tables.users?.posts as unknown as Parameters<typeof some>[0],
+					() => eq('title', 'x'),
+				),
+			where: relationExists,
+			params: ['x'],
+		},
+		{
+			name: 'none()',
+			build: (v) =>
+				none(
+					v.orm.tables.users?.posts as unknown as Parameters<typeof none>[0],
+					() => eq('title', 'x'),
+				),
+			where: (on) => `NOT (${relationExists(on)})`,
+			params: ['x'],
+		},
+		{
+			name: 'a dotted path',
+			build: () => eq('posts.title', 'x'),
+			where: relationExists,
+			params: ['x'],
+		},
+		{
+			name: 'rawExists()',
+			build: () =>
+				rawExists(subquery('posts').select('id').where(eq('title', 'x'))),
+			where: rawBody,
+			params: ['x'],
+		},
+		{
+			name: 'rawExists() of an issued builder',
+			build: (v) =>
+				rawExists(
+					v.orm
+						.select('posts')
+						.columns(['id'])
+						.where(eq('title', 'x')) as unknown as Parameters<
+						typeof rawExists
+					>[0],
+				),
+			where: rawBody,
+			params: ['x'],
+		},
+		{
+			name: 'rawNotExists',
+			build: () =>
+				({
+					kind: 'rawNotExists',
+					subquery: subquery('posts')
+						.select('id')
+						.where(eq('title', 'x'))
+						.build()
+						.toIntent(),
+				}) as WhereIntent,
+			where: (on) => `NOT (${rawBody(on)})`,
+			params: ['x'],
+		},
+		{
+			name: 'inSubquery()',
+			build: () => inSubquery('id', subquery('posts').select('authorId')),
+			where: (on) =>
+				`users.id = ANY (SELECT posts_subq_0."authorId" FROM posts AS posts_subq_0${on ? ' WHERE posts_subq_0."deletedAt" IS NULL' : ''})`,
+			params: [],
+		},
+	];
+
+	for (const v of variants)
+		for (const c of cases)
+			it(`AC3 ${c.name} in aggregates[].filter (${v.name}) reads the model and the read policy`, () => {
+				const expected = { sql: counted(c.where(v.on)), params: c.params };
+				expect(compiled(aggregateFilter(v, c.build(v)), v.db.model)).toEqual(
+					expected,
+				);
+				// A report from plan() compiles the same without a compile-time model.
+				expect(compiled(aggregateFilter(v, c.build(v)))).toEqual(expected);
+			});
+
+	it('AC3 the aggregate column of an expressions select carries its FILTER the same way', () => {
+		for (const v of variants)
+			expect(
+				compiled(
+					reportFor(v, {
+						type: 'expressions',
+						columns: [
+							{
+								kind: 'aggregate',
+								function: 'count',
+								field: '*',
+								as: 'n',
+								filter: exists('posts', { where: eq('title', 'x') }),
+							},
+						],
+					} as QueryIntent['select']),
+					v.db.model,
+				),
+			).toEqual({ sql: counted(relationExists(v.on)), params: ['x'] });
+	});
+
+	it('AC13 a model-less selectExpression body keeps its current output', () => {
+		const d = createPgCompileOnlyAdapter().compileSelectExpression({
+			kind: 'subquery',
+			query: {
+				type: 'select',
+				from: 'users',
+				select: {
+					type: 'aggregate',
+					aggregates: [
+						{
+							function: 'count',
+							field: '*',
+							as: 'n',
+							filter: exists('posts', {
+								recursive: { direction: 'down', through: 'posts' },
+							} as never),
+						},
+					],
+				},
+			},
+		} as never);
+		expect(d.sql).toBe(
+			'SELECT (SELECT count(*) FILTER (WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.user_id)) AS n FROM users AS users)',
+		);
+	});
+
+	it('AC15 a correlated rawExists in aggregates[].filter compiles with outerRef bound to the root', () => {
+		for (const v of variants)
+			expect(
+				compiled(
+					aggregateFilter(
+						v,
+						rawExists(
+							subquery('posts')
+								.select('id')
+								.where(eq('authorId', outerRef('id'))),
+						),
+					),
+					v.db.model,
+				),
+			).toEqual({
+				sql: counted(
+					`EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq."authorId" = users.id${deleted('posts_sq', v.on)})`,
+				),
+				params: [],
+			});
+	});
+
+	it('AC16 a raw FILTER compiles every condition like fn().filter()', () => {
+		const [v] = variants;
+		expect(
+			compiled(
+				aggregateFilter(
+					v,
+					rangeOverlaps('period', { lower: '2024-01-01', upper: '2024-02-01' }),
+				),
+				v.db.model,
+			),
+		).toEqual({
+			sql: counted('users.period && CAST($1 AS daterange)'),
+			params: ['[2024-01-01,2024-02-01)'],
+		});
+		expect(
+			compiled(
+				aggregateFilter(v, rangeContains('period', '2024-01-05')),
+				v.db.model,
+			),
+		).toEqual({
+			sql: counted('users.period @> CAST($1 AS date)'),
+			params: ['2024-01-05'],
+		});
+		expect(
+			compiled(
+				aggregateFilter(v, eq('score', fn('length', exprRef('name')))),
+				v.db.model,
+			),
+		).toEqual({ sql: counted('users.score = length(name)'), params: [] });
 	});
 });

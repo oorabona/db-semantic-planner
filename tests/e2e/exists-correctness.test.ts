@@ -31,11 +31,14 @@ import {
 	createOrm,
 	eq,
 	exists,
+	fn,
 	inSubquery,
+	like,
 	not,
 	notExists,
 	or,
 	some,
+	star,
 	subquery,
 } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -663,5 +666,26 @@ describe('mutation WHERE with a quantifier or a dotted relation path touches exa
 			.columns(['name'])
 			.execute()) as Array<{ name: string }>;
 		expect(sortedNames(remaining)).toEqual(['Carol', 'Dave']);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// #891 slice 3 — a dotted relation path in an aggregate FILTER, real rows
+// ---------------------------------------------------------------------------
+describe('aggregate FILTER with a dotted relation path counts on real rows (#891 slice 3)', () => {
+	it("counts the users having a post titled like '%draft' (Alice and Carol)", async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ model: existsCorrectnessModel, adapter });
+
+		const rows = (await orm
+			.withSchema(SCHEMA)
+			.select('users')
+			.columns([
+				fn('count', star()).filter(like('posts.title', '%draft')).as('n'),
+			])
+			.execute()) as Array<{ n: number | string }>;
+
+		// posts 'Alice draft' and 'Carol draft' belong to users 1 and 3; the root has no WHERE.
+		expect(rows.map((r) => Number(r.n))).toEqual([2]);
 	});
 });

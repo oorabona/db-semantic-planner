@@ -49,6 +49,8 @@ export function intentToDecisions(
 	options?: {
 		readonly omitRootWhere?: boolean;
 		readonly directConditions?: boolean;
+		/** Keep aggregate FILTER conditions as intents: core resolved them, so they are not lowered here. */
+		readonly resolvedFilters?: boolean;
 	},
 ): PlanDecision[] {
 	const decisions: PlanDecision[] = [];
@@ -56,7 +58,12 @@ export function intentToDecisions(
 	// 1. SELECT clause
 	if (intent.select) {
 		decisions.push(
-			...convertSelect(intent.select, rootTable, options?.directConditions),
+			...convertSelect(
+				intent.select,
+				rootTable,
+				options?.directConditions,
+				options?.resolvedFilters,
+			),
 		);
 	} else {
 		// Default to SELECT *
@@ -121,8 +128,11 @@ function applyFilterCondition(
 	decision: Mutable<PlanDecision>,
 	filter: WhereIntent | undefined,
 	rootTable: string,
+	resolvedFilters = false,
 ): void {
 	if (filter) {
+		decision.filterIntent = filter;
+		if (resolvedFilters) return;
 		const filterDecision = convertWhereCondition(filter, rootTable);
 		if (filterDecision) decision.filterCondition = filterDecision;
 	}
@@ -132,6 +142,7 @@ function convertSelect(
 	select: SelectIntent,
 	rootTable: string,
 	directConditions = false,
+	resolvedFilters = false,
 ): PlanDecision[] {
 	// Handle different SelectIntent types using discriminator
 	const selectType = 'type' in select ? select.type : undefined;
@@ -177,7 +188,7 @@ function convertSelect(
 				rootTable,
 				decisions,
 				(decision, filter, table) =>
-					applyFilterCondition(decision, filter, table),
+					applyFilterCondition(decision, filter, table, resolvedFilters),
 				(condition, table) => convertWhereCondition(condition, table),
 			);
 		}
@@ -213,7 +224,7 @@ function convertSelect(
 			if (agg.distinct === true) {
 				aggDecision.distinct = true;
 			}
-			applyFilterCondition(aggDecision, agg.filter, rootTable);
+			applyFilterCondition(aggDecision, agg.filter, rootTable, resolvedFilters);
 			decisions.push(aggDecision);
 		}
 

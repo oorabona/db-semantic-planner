@@ -91,8 +91,10 @@ export function resolveConditionContext(
 		readonly include?: boolean;
 		readonly aliasState?: { count: number };
 		readonly outerQualifiers?: readonly ReadonlyMap<string, ResolvedRange>[];
+		readonly label?: string;
 	},
 ): ResolvedCondition | undefined {
+	const label = mode?.label ?? 'WHERE';
 	const subqueryRefusal = mode?.subqueryRefusal;
 	let activeFilters = mode?.defaultFilters;
 	const rootScope = [...new Set([root, ...visible, ...additionalOuterRanges])];
@@ -134,7 +136,7 @@ export function resolveConditionContext(
 			!visible.some((range) => range.alias === qualifier)
 		)
 			throw new Error(
-				`WHERE qualifier '${qualifier}' is not visible in this query.`,
+				`${label} qualifier '${qualifier}' is not visible in this query.`,
 			);
 	};
 	const matchQualifier = (
@@ -154,7 +156,7 @@ export function resolveConditionContext(
 		if (exact) return exact;
 		if (candidates.length > 1)
 			throw new Error(
-				`${outer ? 'outerRef' : 'WHERE'} qualifier '${qualifier}' is ambiguous between ${candidates
+				`${outer ? 'outerRef' : label} qualifier '${qualifier}' is ambiguous between ${candidates
 					.map((r) => `'${r.alias}'`)
 					.sort()
 					.join(', ')}${outer ? ' in an enclosing query' : ''}.`,
@@ -198,7 +200,7 @@ export function resolveConditionContext(
 			else if (mode?.include) range = allocator.bind(qualifier, qualifier);
 			else
 				throw new Error(
-					`WHERE qualifier '${qualifier}' is not visible in this query.`,
+					`${label} qualifier '${qualifier}' is not visible in this query.`,
 				);
 		}
 		if (
@@ -252,7 +254,7 @@ export function resolveConditionContext(
 				);
 			if (rel.type === 'belongsToMany')
 				throw new Error(
-					`WHERE ${kind}('${segments.join('.')}'): many-to-many traversal is not supported yet (#787).`,
+					`${label} ${kind}('${segments.join('.')}'): many-to-many traversal is not supported yet (#787).`,
 				);
 			names.push(rel.name);
 			table = rel.target;
@@ -464,7 +466,7 @@ export function resolveConditionContext(
 			trusted?.recursive
 		)
 			throw new Error(
-				`WHERE ${node.kind}('${segments.join('.')}'): recursive relation predicates are not supported inside WHERE.`,
+				`${label} ${node.kind}('${segments.join('.')}'): recursive relation predicates are not supported inside ${label}.`,
 			);
 		const path = trusted
 			? {

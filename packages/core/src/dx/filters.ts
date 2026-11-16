@@ -566,9 +566,9 @@ export function notExists(
  *
  * Root SELECT WHERE resolves body ranges and supported options at plan();
  * unsupported modifiers refuse with the existing compilation message.
- * Correlated bodies using `outerRef()` compile in query WHERE and SELECT-expression
- * subquery WHERE bodies, including expressions nested in `op(...)`. Aggregate FILTER
- * and recursive `start.where` refuse correlated bodies at compile time.
+ * Correlated bodies using `outerRef()` compile in query WHERE, CASE WHEN, aggregate
+ * FILTER and SELECT-expression subquery WHERE bodies, including expressions nested in
+ * `op(...)`. Recursive `start.where` refuses correlated bodies at compile time.
  *
  * @param subquery - A SubqueryBuilder or any object with buildIntent()
  *
@@ -602,9 +602,9 @@ export function rawExists(
  *
  * Root SELECT WHERE resolves body ranges and supported options at plan();
  * unsupported modifiers refuse with the existing compilation message.
- * Correlated bodies using `outerRef()` compile in query WHERE and SELECT-expression
- * subquery WHERE bodies, including expressions nested in `op(...)`. Aggregate FILTER
- * and recursive `start.where` refuse correlated bodies at compile time.
+ * Correlated bodies using `outerRef()` compile in query WHERE, CASE WHEN, aggregate
+ * FILTER and SELECT-expression subquery WHERE bodies, including expressions nested in
+ * `op(...)`. Recursive `start.where` refuses correlated bodies at compile time.
  *
  * @param subquery - A SubqueryBuilder or any object with buildIntent()
  *

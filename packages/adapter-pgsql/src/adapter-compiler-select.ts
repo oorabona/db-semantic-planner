@@ -1153,6 +1153,7 @@ export function compileSelectEnvelope<T = unknown>(
 		const decisions = intentToDecisions(execIntent, plan.rootTable, {
 			omitRootWhere: true,
 			directConditions: true,
+			resolvedFilters: plan.execution !== undefined,
 		});
 
 		const enrichedUnifiedDecisions = planForCompilation.execution
@@ -1224,6 +1225,8 @@ export function compileSelectEnvelope<T = unknown>(
 				const projection = compilePlan(
 					{
 						rootTable: plan.rootTable,
+						directConditions: true,
+						...(plan.execution !== undefined && { resolvedExecution: true }),
 						...(expressionConditions && { expressionConditions }),
 						...(plan.execution?.expressionSubqueries && {
 							expressionSubqueries: bindExpressionSubqueries(
@@ -1239,6 +1242,10 @@ export function compileSelectEnvelope<T = unknown>(
 									...(execIntent.select && { select: execIntent.select }),
 								},
 								plan.rootTable,
+								{
+									directConditions: true,
+									resolvedFilters: plan.execution !== undefined,
+								},
 							).filter(
 								(d) =>
 									d.type !== 'selectRelationColumn' ||
@@ -1305,6 +1312,7 @@ export function compileSelectEnvelope<T = unknown>(
 		simplifiedPlan = {
 			...simplifiedPlan,
 			directConditions: true,
+			...(plan.execution !== undefined && { resolvedExecution: true }),
 			...(expressionConditions && { expressionConditions }),
 			...(plan.execution?.expressionSubqueries && {
 				expressionSubqueries: bindExpressionSubqueries(

@@ -5,18 +5,25 @@ import {
 	ExpressionRef,
 	eq,
 	exists,
+	exprRef,
 	fn,
+	gt,
 	inSubquery,
+	isNull,
 	literal,
+	not,
 	op,
 	outerRef,
 	rangeOverlaps,
+	rawExists,
 	ref,
+	SubqueryExpression,
 	schema,
 	star,
 	subquery,
 } from '@dbsp/core';
-import { expect, it } from 'vitest';
+import type { QueryIntent, WhereIntent } from '@dbsp/types';
+import { describe, expect, it } from 'vitest';
 import { resolveCaseValue } from '../handlers/expression/case-value.js';
 import { createCompilerState } from '../handlers/types.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -529,4 +536,292 @@ it('FILTER nested in HAVING labels invalid operator refusal FILTER', () => {
 			.having(fn('count', star()).filter(condition).gt(1))
 			.dump(),
 	).toThrow('No FILTER handler registered for operator: invalid');
+});
+
+describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
+	const tables = {
+		users: {
+			id: { type: 'integer', primaryKey: true },
+			name: 'text',
+			score: 'integer',
+		},
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			title: 'text',
+			deletedAt: { type: 'timestamp', nullable: true },
+			authorId: ref('users', { as: 'author', inverse: 'posts' }),
+		},
+		categories: {
+			id: { type: 'integer', primaryKey: true },
+			name: 'text',
+			deletedAt: { type: 'timestamp', nullable: true },
+			parentId: ref('categories', {
+				nullable: true,
+				as: 'parent',
+				inverse: 'children',
+				roles: { parent: 'parent', children: 'children' },
+			}),
+		},
+	} as const;
+	const plainDb = schema(tables);
+	const filteredDb = schema(tables, undefined, {
+		defaultFilters: {
+			posts: isNull('deletedAt'),
+			categories: isNull('deletedAt'),
+		},
+	});
+	const plain = createOrm({
+		schema: plainDb,
+		adapter: createPgCompileOnlyAdapter(),
+		suppressDxWarnings: true,
+	});
+	const filtered = createOrm({
+		schema: filteredDb,
+		adapter: createPgCompileOnlyAdapter(),
+		suppressDxWarnings: true,
+	});
+	const orms = [
+		['plain', plain],
+		['default filters', filtered],
+	] as const;
+	const recursive = () =>
+		exists('children', {
+			recursive: { direction: 'down', through: 'children' },
+		}) as WhereIntent;
+	const refusal = (label: string) =>
+		`${label} exists('children'): recursive relation predicates are not supported inside ${label}.`;
+	const titled = (on: boolean) =>
+		`EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0."authorId"${on ? ' AND posts_exists_0."deletedAt" IS NULL' : ''} AND posts_exists_0.title = $1)`;
+
+	for (const [name, o] of orms) {
+		it(`AC4 refusals name the innermost condition root (${name})`, () => {
+			const categories = () => o.select('categories');
+			expect(() =>
+				categories()
+					.groupBy(['id'])
+					.count('id', 'n')
+					.having(recursive())
+					.dump(),
+			).toThrow(refusal('HAVING'));
+			expect(() =>
+				categories()
+					.columns([caseWhen(recursive(), literal(1)).else(literal(0)).as('f')])
+					.dump(),
+			).toThrow(refusal('CASE WHEN'));
+			expect(() =>
+				categories()
+					.columns([fn('count', star()).filter(recursive()).as('n')])
+					.dump(),
+			).toThrow(refusal('FILTER'));
+			expect(() =>
+				categories()
+					.groupBy(['id'])
+					.having(fn('count', star()).filter(recursive()).gt(1))
+					.dump(),
+			).toThrow(refusal('FILTER'));
+			// A CASE inside a relation body inside a FILTER takes the FILTER's label.
+			expect(() =>
+				categories()
+					.columns([
+						fn('count', star())
+							.filter(
+								exists('children', {
+									where: caseWhen(recursive(), literal(1))
+										.else(literal(0))
+										.eq(1),
+								}),
+							)
+							.as('n'),
+					])
+					.dump(),
+			).toThrow(refusal('FILTER'));
+			// A FILTER wrapping not(...) inside a CASE condition is the innermost root.
+			expect(() =>
+				categories()
+					.groupBy(['id'])
+					.columns([
+						'id',
+						caseWhen(
+							fn('count', star()).filter(not(recursive())).gt(1),
+							literal(1),
+						)
+							.else(literal(0))
+							.as('f'),
+					])
+					.dump(),
+			).toThrow(refusal('FILTER'));
+			// A CASE absorbed as the right operand of a resolved dotted comparison.
+			expect(() =>
+				categories()
+					.columns([
+						fn('count', star())
+							.filter(
+								eq(
+									'categories.id',
+									caseWhen(recursive(), literal(1)).else(literal(0)),
+								),
+							)
+							.as('n'),
+					])
+					.dump(),
+			).toThrow(refusal('FILTER'));
+		});
+
+		it(`AC18 HAVING dotted fields keep main's route (${name})`, () => {
+			const on = o === filtered;
+			const users = () => o.select('users').groupBy(['id']);
+			const dotted = () => eq('posts.title', 'x');
+			expect(users().count('id', 'n').having(dotted()).dump()).toMatchObject({
+				sql: `SELECT users.id, count(users.id) AS n FROM users GROUP BY users.id HAVING ${on ? titled(true) : 'posts.title = $1'}`,
+				params: ['x'],
+			});
+			expect(
+				users().having(fn('count', star()).filter(dotted()).gt(19)).dump(),
+			).toMatchObject({
+				sql: `SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE ${on ? titled(true) : 'posts.title = $1'}) > $2`,
+				params: ['x', 19],
+			});
+			expect(
+				o.nql`users | group by id | where posts.title = 'x'`.dump(),
+			).toMatchObject({
+				sql: `SELECT users.* FROM users GROUP BY users.id HAVING ${on ? titled(true) : 'posts.title = $1'}`,
+				params: ['x'],
+			});
+			for (const alias of ['stats.total', 'users.id']) {
+				expect(
+					users().count('id', alias).having(gt(alias, 1)).dump(),
+				).toMatchObject({
+					sql: `SELECT users.id, count(users.id) AS "${alias}" FROM users GROUP BY users.id HAVING count(users.id) > CAST($1 AS bigint)`,
+					params: [1],
+				});
+				expect(
+					users()
+						.count('id', alias)
+						.having(
+							caseWhen(gt(alias, 1), literal(true))
+								.else(literal(false))
+								.eq(true),
+						)
+						.dump(),
+				).toMatchObject({
+					sql: `SELECT users.id, count(users.id) AS "${alias}" FROM users GROUP BY users.id HAVING CASE WHEN count(users.id) > CAST($1 AS bigint) THEN true ELSE false END = $2`,
+					params: [1, true],
+				});
+			}
+			expect(
+				users()
+					.columns(['id', literal('x').as('posts.title')])
+					.having(dotted())
+					.dump(),
+			).toMatchObject({
+				sql: `SELECT users.id, 'x' AS "posts.title" FROM users GROUP BY users.id HAVING ${on ? titled(true) : 'posts.title = $1'}`,
+				params: ['x'],
+			});
+			const shared = gt('users.id', 1);
+			const expected = {
+				sql: 'SELECT users.id, count(users.id) AS "users.id" FROM users GROUP BY users.id HAVING count(users.id) > CAST($1 AS bigint) ORDER BY CASE WHEN users.id > $2 THEN 1 ELSE 0 END ASC',
+				params: [1, 1],
+			};
+			expect(
+				users()
+					.count('id', 'users.id')
+					.having(shared)
+					.orderBy(caseWhen(shared, literal(1)).else(literal(0)))
+					.dump(),
+			).toMatchObject(expected);
+			expect(
+				users()
+					.count('id', 'users.id')
+					.having(gt('users.id', 1))
+					.orderBy(caseWhen(gt('users.id', 1), literal(1)).else(literal(0)))
+					.dump(),
+			).toMatchObject(expected);
+		});
+	}
+
+	it('AC18 a CASE in a HAVING expression keeps a dotted path bare without default filters', () => {
+		expect(
+			plain
+				.select('users')
+				.groupBy(['id'])
+				.having(
+					caseWhen(eq('posts.title', 'x'), literal(1)).else(literal(0)).eq(1),
+				)
+				.dump(),
+		).toMatchObject({
+			sql: 'SELECT users.* FROM users GROUP BY users.id HAVING CASE WHEN posts.title = $1 THEN 1 ELSE 0 END = $2',
+			params: ['x', 1],
+		});
+	});
+
+	it("AC18 an exempted HAVING node keeps its issued body's filter under an opted-out outer ORM", () => {
+		const body = (
+			rawExists(
+				filtered.select('posts').columns(['authorId']) as unknown as Parameters<
+					typeof rawExists
+				>[0],
+			) as { subquery: QueryIntent }
+		).subquery;
+		expect(
+			filtered
+				.withoutDefaultFilters()
+				.select('users')
+				.columns(['id'])
+				.groupBy(['id'])
+				.having(inSubquery('users.id', new SubqueryExpression(body)))
+				.dump().sql,
+		).toBe(
+			'SELECT users.id FROM users GROUP BY users.id HAVING users.id = ANY (SELECT posts_subq_0."authorId" FROM posts AS posts_subq_0 WHERE posts_subq_0."deletedAt" IS NULL)',
+		);
+	});
+
+	it('AC17 ambiguous and invisible qualifiers are refused with the position label in CASE WHEN and FILTER', () => {
+		const editedDb = schema({
+			users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				title: 'text',
+				authorId: ref('users', { as: 'author', inverse: 'posts' }),
+				editorId: ref('users', { as: 'editor', inverse: 'edited' }),
+			},
+		} as const);
+		const editedOrm = createOrm({
+			schema: editedDb,
+			adapter: createPgCompileOnlyAdapter(),
+			suppressDxWarnings: true,
+		});
+		const joined = () =>
+			editedOrm.select('posts').join('author').join('editor');
+		const ambiguous = () => eq('users.name', 'x');
+		const invisible = () => eq('posts.id', exprRef('nope.id'));
+		const inCase = (c: WhereIntent) =>
+			joined()
+				.columns([caseWhen(c, literal(1)).else(literal(0)).as('f')])
+				.dump();
+		const inFilter = (c: WhereIntent) =>
+			joined()
+				.columns([fn('count', star()).filter(c).as('n')])
+				.dump();
+		expect(() => inCase(ambiguous())).toThrow(
+			"CASE WHEN qualifier 'users' is ambiguous between 'author', 'editor'.",
+		);
+		expect(() => inFilter(ambiguous())).toThrow(
+			"FILTER qualifier 'users' is ambiguous between 'author', 'editor'.",
+		);
+		expect(() => inCase(invisible())).toThrow(
+			"CASE WHEN qualifier 'nope' is not visible in this query.",
+		);
+		expect(() => inFilter(invisible())).toThrow(
+			"FILTER qualifier 'nope' is not visible in this query.",
+		);
+		// HAVING dotted fields keep main's output (AC18).
+		expect(
+			joined().groupBy(['id']).count('id', 'n').having(ambiguous()).dump().sql,
+		).toBe(
+			'SELECT posts.id, count(posts.id) AS n FROM posts JOIN users AS author ON posts."authorId" = author.id JOIN users AS editor ON posts."editorId" = editor.id GROUP BY posts.id HAVING author.name = $1',
+		);
+		expect(() =>
+			joined().groupBy(['id']).count('id', 'n').having(invisible()).dump(),
+		).toThrow("Declared column 'nope.id' is absent from the physical model.");
+	});
 });

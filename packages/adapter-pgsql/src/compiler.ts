@@ -444,6 +444,8 @@ export interface SimplifiedPlanReport {
 	}[];
 	readonly rawHaving?: WhereIntent;
 	readonly directConditions?: boolean;
+	/** Set when the report carries core's execution: FILTER and NQL CASE conditions read the resolved nodes. */
+	readonly resolvedExecution?: boolean;
 	readonly enclosingRanges?: HandlerCompilerContext['enclosingRanges'];
 	readonly rootAlias?: string;
 	readonly rootTable: string;
@@ -1384,6 +1386,7 @@ export class PlanCompiler {
 					outerAlias: identifierText(plan.enclosingRanges[0][0].qualifier),
 				}),
 			}),
+			...(plan.resolvedExecution && { resolvedExecution: true }),
 			...(plan.directConditions && {
 				compileCaseCondition: (
 					intent: WhereIntent,
@@ -2248,6 +2251,27 @@ export class PlanCompiler {
 		return compileValue(arg, state);
 	}
 
+	private compileLegacyNqlCaseCondition(
+		condition: WhereIntent,
+		ctx: HandlerCompilerContext,
+		state: HandlerCompilerState,
+	): Node {
+		const conditionDecision = convertWhereCondition(condition, ctx.rootTable);
+		if (!conditionDecision) {
+			throw new Error('NQL CASE WHEN condition could not be compiled');
+		}
+		return createWhereDispatcher(compileWhereIntent)(
+			mapToHandlerDecision(
+				conditionDecision,
+				ctx.rootTable,
+				this.defaultPk,
+				this.deriveFk,
+			),
+			ctx,
+			state,
+		);
+	}
+
 	private compileNqlCaseExpressionArg(
 		expr: Record<string, unknown>,
 		ctx: HandlerCompilerContext,
@@ -2258,27 +2282,14 @@ export class PlanCompiler {
 			throw new Error('NQL CASE expression requires at least one WHEN clause');
 		}
 
-		const dispatcher = createWhereDispatcher(compileWhereIntent);
 		const args: Node[] = whenClauses.map((branch) => {
-			const condition = (branch as { condition?: unknown }).condition;
+			const condition = (branch as { condition?: unknown })
+				.condition as WhereIntent;
 			const result = (branch as { result?: unknown }).result;
-			const conditionDecision = convertWhereCondition(
-				condition as import('@dbsp/types').WhereIntent,
-				ctx.rootTable,
-			);
-			if (!conditionDecision) {
-				throw new Error('NQL CASE WHEN condition could not be compiled');
-			}
-			const whenNode = dispatcher(
-				mapToHandlerDecision(
-					conditionDecision,
-					ctx.rootTable,
-					this.defaultPk,
-					this.deriveFk,
-				),
-				ctx,
-				state,
-			);
+			const whenNode =
+				ctx.resolvedExecution && ctx.compileCaseCondition
+					? ctx.compileCaseCondition(condition, ctx, state)
+					: this.compileLegacyNqlCaseCondition(condition, ctx, state);
 			const thenNode = this.compileNqlFunctionArg(result, ctx, state);
 			return {
 				CaseWhen: {
@@ -2359,12 +2370,21 @@ export class PlanCompiler {
 					this.deriveFk,
 				);
 				// Compile FILTER (WHERE ...) clause if present
-				const filterNode = compileFilterCondition(
-					decision.filterCondition,
-					createWhereDispatcher(compileWhereIntent),
-					ctx,
-					state,
-				);
+				const filterNode =
+					plan.resolvedExecution && decision.filterIntent
+						? this.compilePositionCondition(
+								decision.filterIntent,
+								plan,
+								ctx,
+								state,
+								'filter',
+							)
+						: compileFilterCondition(
+								decision.filterCondition,
+								createWhereDispatcher(compileWhereIntent),
+								ctx,
+								state,
+							);
 				const hydratedDecision = filterNode
 					? { ...handlerDecision, filterWhere: filterNode }
 					: handlerDecision;
@@ -3124,7 +3144,7 @@ export class PlanCompiler {
 		plan: SimplifiedPlanReport,
 		ctx: HandlerCompilerContext,
 		state: HandlerCompilerState,
-		position: 'having' | 'case-when',
+		position: 'having' | 'case-when' | 'filter',
 	): Node {
 		return compileCondition(intent, {
 			...ctx,
