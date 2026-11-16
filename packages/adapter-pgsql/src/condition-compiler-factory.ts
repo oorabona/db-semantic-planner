@@ -609,9 +609,10 @@ export function createConditionCompiler(
 			);
 		const relationPath = preResolved?.relation ?? rf.relation;
 
+		// A dotted string is a relation path, as core reads it (#991 C3).
 		const hops: string[] = Array.isArray(relationPath)
 			? [...relationPath]
-			: [relationPath];
+			: relationPath.split('.');
 
 		// mode:'some'  → EXISTS         (at least one matches)
 		// mode:'none'  → NOT EXISTS     (none match)

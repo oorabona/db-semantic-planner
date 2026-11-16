@@ -1,4 +1,4 @@
-import { isBoundPayload } from './intent-payload.js';
+import { EXPRESSION_BRAND } from '@dbsp/types';
 
 /** Predicates whose `where` (and includes) are evaluated from the related row. */
 const RELATION_BODIES = new Set(['exists', 'notExists', 'relationFilter']);
@@ -16,6 +16,23 @@ function isObject(value: unknown): value is Node {
 function own(node: Node, key: string | symbol): unknown {
 	const descriptor = Object.getOwnPropertyDescriptor(node, key);
 	return descriptor && 'value' in descriptor ? descriptor.value : undefined;
+}
+
+/** An array's own enumerable data elements; an accessor element is not read. */
+function items(array: readonly unknown[]): unknown[] {
+	return Object.values(Object.getOwnPropertyDescriptors(array))
+		.filter((descriptor) => descriptor.enumerable && 'value' in descriptor)
+		.map((descriptor) => descriptor.value);
+}
+
+/**
+ * Whether `child`, under `key` of a node of `kind`, is a bound or literal
+ * payload (as `isBoundPayload` decides), read without touching accessors.
+ */
+function isPayload(kind: unknown, key: string, child: unknown): boolean {
+	if (key !== 'value' && key !== 'values') return false;
+	if (kind === 'namedArg') return false;
+	return !isObject(child) || !(EXPRESSION_BRAND in child);
 }
 
 /**
@@ -44,7 +61,7 @@ function walk(
 	if (!isObject(value) || path.has(value)) return;
 	path.add(value);
 	if (Array.isArray(value)) {
-		for (const child of value) walk(child, inBody, path, matches, onHit);
+		for (const child of items(value)) walk(child, inBody, path, matches, onHit);
 		path.delete(value);
 		return;
 	}
@@ -62,7 +79,7 @@ function walk(
 	)) {
 		if (!('value' in descriptor) || !descriptor.enumerable) continue;
 		const child: unknown = descriptor.value;
-		if (key === 'defaultValue' || isBoundPayload(value, key, child)) continue;
+		if (key === 'defaultValue' || isPayload(kind, key, child)) continue;
 		if ((key === 'subquery' || key === 'query') && isObject(child))
 			walkQuery(child, true, path, matches, onHit);
 		else
@@ -104,7 +121,7 @@ function walkQuery(
 	visit(own(query, 'having'));
 	const joins = own(query, 'joins');
 	if (Array.isArray(joins))
-		for (const join of joins) if (isObject(join)) visit(own(join, 'on'));
+		for (const join of items(joins)) if (isObject(join)) visit(own(join, 'on'));
 	walkIncludes(own(query, 'include'), visit, path);
 	const select = own(query, 'select');
 	if (isObject(select)) {
@@ -112,12 +129,12 @@ function walkQuery(
 		if (Array.isArray(columns)) visit(columns);
 		const aggregates = own(select, 'aggregates');
 		if (Array.isArray(aggregates))
-			for (const aggregate of aggregates)
+			for (const aggregate of items(aggregates))
 				if (isObject(aggregate)) visit(own(aggregate, 'filter'));
 	}
 	const orderBy = own(query, 'orderBy');
 	if (Array.isArray(orderBy))
-		for (const order of orderBy)
+		for (const order of items(orderBy))
 			if (isObject(order)) visit(own(order, 'expression'));
 	path.delete(query);
 }
@@ -129,7 +146,7 @@ function walkIncludes(
 ): void {
 	if (!Array.isArray(includes) || path.has(includes)) return;
 	path.add(includes);
-	for (const include of includes) {
+	for (const include of items(includes)) {
 		if (!isObject(include) || path.has(include)) continue;
 		path.add(include);
 		visit(own(include, 'where'));

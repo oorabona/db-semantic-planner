@@ -747,7 +747,10 @@ export function resolveReportIncludes(
 				model,
 				0,
 				[],
-				{ defaultFilters: options.defaultFilters },
+				{
+					defaultFilters: options.defaultFilters,
+					...(belowBody && { unknownBody: true }),
+				},
 			);
 			if (
 				resolved?.kind === 'expression' &&

@@ -220,7 +220,7 @@ export const lte: ComparisonFilter = createComparisonFilter('lte');
  * Standard SQL (SQL:2003).
  *
  * @example isDistinctFrom('status', 'active') → status IS DISTINCT FROM 'active'
- * @example isDistinctFrom(users.status, null) → status IS DISTINCT FROM NULL
+ * @example isDistinctFrom(users.status, null) → users.status IS DISTINCT FROM NULL
  */
 export const isDistinctFrom: ComparisonFilter =
 	createComparisonFilter('isDistinctFrom');

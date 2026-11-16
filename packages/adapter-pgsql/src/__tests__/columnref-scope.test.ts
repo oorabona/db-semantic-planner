@@ -899,6 +899,24 @@ describe('Typed quantifiers and callback refs inside nested bodies (#991)', () =
 					),
 				),
 		],
+		[
+			'H1 with every inside',
+			() =>
+				some(nodes.children, (c) =>
+					exists('parent', {
+						where: every(c.children as never, (g) => eq(g.label!, 'x')),
+					}),
+				),
+		],
+		[
+			'H1 with none inside',
+			() =>
+				some(nodes.children, (c) =>
+					exists('parent', {
+						where: none(c.children as never, (g) => eq(g.label!, 'x')),
+					}),
+				),
+		],
 	])('AC40 callback-ref-nested-refused %s', (_name, build) => {
 		expect(build).toThrow(callbackRefusal('children', 'some'));
 	});
@@ -1144,6 +1162,20 @@ describe('Typed quantifiers and callback refs inside nested bodies (#991)', () =
 		).toBe(
 			'SELECT users.id, (SELECT count(*) FROM users AS users_sq WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users_sq.id = posts_exists_0.author_id AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.post_id AND comments_exists_1.body = $1))) AS n FROM users',
 		);
+		// A two-hop relation path on the same route traverses both hops (C3).
+		expect(
+			writingsOrm
+				.select('comments')
+				.columns([
+					subquery('users')
+						.where(some(users.writings.replies, (r) => eq(r.body!, 'x')))
+						.count()
+						.asExpr('n'),
+				])
+				.dump().sql,
+		).toBe(
+			'SELECT (SELECT count(*) FROM users AS users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.post_id AND comments_exists_1.body = $1))) AS n FROM comments',
+		);
 	});
 
 	it('AC45 legacy-route-other-table-refused', () => {
@@ -1175,6 +1207,27 @@ describe('Typed quantifiers and callback refs inside nested bodies (#991)', () =
 				)
 				.dump(),
 		).toThrow(quantifierRefusal('children'));
+		// The same holds for an expression subquery nested in that body.
+		const body = rawExists(
+			plainOrm
+				.select('posts')
+				.columns(['id'])
+				.where(some(plainOrm.tables.posts.comments, () => and())) as never,
+		).subquery;
+		expect(() =>
+			plainOrm
+				.select('users')
+				.groupBy(['id'])
+				.having(
+					inSubquery(
+						'users.id',
+						subquery('posts')
+							.select('user_id')
+							.where(eq('id', new SubqueryExpression(body).asExpr('n'))),
+					),
+				)
+				.dump(),
+		).toThrow(quantifierRefusal('comments'));
 	});
 
 	it('AC45 having-builder-body-kept', () => {
