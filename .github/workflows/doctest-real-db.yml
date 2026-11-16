@@ -1,18 +1,10 @@
 name: Doctest (real DB)
 
 # Runs the doctest suite against a real PostgreSQL container (the `// doctest:
-# real-db-only` blocks). Triggered on:
-#
-#   - PRs that touch documentation, the doctest framework, source dirs of
-#     packages whose code feeds into doctests (types, nql, core,
-#     adapter-pgsql), or build inputs that can affect runtime/DB behavior
-#     (per-package package.json/tsconfig.json/tsup.config.ts, root
-#     package.json/tsconfig.json, pnpm-lock.yaml, pnpm-workspace.yaml).
-#     Code-only PRs in unrelated packages (cli, gui, mcp-server) skip this
-#     job to keep CI snappy.
-#   - Pushes to main (always — catches anything that landed without a PR).
-#   - workflow_dispatch (manual full-coverage run).
-#   - Nightly cron (safety net for any path-filter blind spot).
+# real-db-only` blocks). `test-docs-real-db` is a required check on `main`, so
+# it runs on every pull request: a path filter would leave PRs outside it
+# blocked with no way to report the check. Also runs on pushes to main,
+# workflow_dispatch and a nightly cron.
 #
 # Compile-only doctests still run unconditionally as the `Verify documentation
 # examples` step inside the `test` job in ci.yml. This workflow only governs
@@ -23,33 +15,6 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-    paths:
-      - '**/*.md'
-      - 'packages/docs/**'
-      - 'tests/docs-verification/**'
-      - 'packages/core/src/**'
-      - 'packages/adapter-pgsql/src/**'
-      - 'packages/types/src/**'
-      - 'packages/nql/src/**'
-      # Build inputs that can affect runtime/DB behavior without touching src/.
-      - 'packages/core/package.json'
-      - 'packages/core/tsconfig.json'
-      - 'packages/core/tsup.config.ts'
-      - 'packages/adapter-pgsql/package.json'
-      - 'packages/adapter-pgsql/tsconfig.json'
-      - 'packages/adapter-pgsql/tsup.config.ts'
-      - 'packages/types/package.json'
-      - 'packages/types/tsconfig.json'
-      - 'packages/types/tsup.config.ts'
-      - 'packages/nql/package.json'
-      - 'packages/nql/tsconfig.json'
-      - 'packages/nql/tsup.config.ts'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
-      # Root-level build/test inputs (test:docs script, base TS config).
-      - 'package.json'
-      - 'tsconfig.json'
-      - '.github/workflows/doctest-real-db.yml'
   workflow_dispatch:
   schedule:
     # 03:17 UTC every night — slightly off-the-hour to avoid GHA contention.
