@@ -500,40 +500,40 @@
 			"position": "update-where",
 			"kind": "like-escape",
 			"shape": "leaf",
-			"sql": "UPDATE users SET score = $1 WHERE users.name LIKE $2",
-			"params": [41, "c!_%"],
+			"sql": "UPDATE users SET score = $1 WHERE users.name LIKE $2 ESCAPE $3",
+			"params": [41, "c!_%", "!"],
 			"error": null
 		},
 		{
 			"position": "update-where",
 			"kind": "like-escape",
 			"shape": "and",
-			"sql": "UPDATE users SET score = $1 WHERE users.name LIKE $2 AND users.score = $3",
-			"params": [41, "c!_%", 13],
+			"sql": "UPDATE users SET score = $1 WHERE users.name LIKE $2 ESCAPE $3 AND users.score = $4",
+			"params": [41, "c!_%", "!", 13],
 			"error": null
 		},
 		{
 			"position": "update-where",
 			"kind": "like-escape",
 			"shape": "or",
-			"sql": "UPDATE users SET score = $1 WHERE users.name LIKE $2 OR users.score = $3",
-			"params": [41, "c!_%", 13],
+			"sql": "UPDATE users SET score = $1 WHERE users.name LIKE $2 ESCAPE $3 OR users.score = $4",
+			"params": [41, "c!_%", "!", 13],
 			"error": null
 		},
 		{
 			"position": "update-where",
 			"kind": "like-escape",
 			"shape": "not",
-			"sql": "UPDATE users SET score = $1 WHERE NOT (users.name LIKE $2)",
-			"params": [41, "c!_%"],
+			"sql": "UPDATE users SET score = $1 WHERE NOT (users.name LIKE $2 ESCAPE $3)",
+			"params": [41, "c!_%", "!"],
 			"error": null
 		},
 		{
 			"position": "update-where",
 			"kind": "like-escape",
 			"shape": "two-level",
-			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (users.name LIKE $3) OR users.score = $4)",
-			"params": [41, 13, "c!_%", 17],
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (users.name LIKE $3 ESCAPE $4) OR users.score = $5)",
+			"params": [41, 13, "c!_%", "!", 17],
 			"error": null
 		},
 		{
@@ -780,25 +780,25 @@
 			"position": "update-where",
 			"kind": "between",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "BETWEEN handler requires a column"
+			"sql": "UPDATE users SET score = $1 WHERE users.period BETWEEN $2 AND $3",
+			"params": [41, "2026-01-01", "2026-02-01"],
+			"error": null
 		},
 		{
 			"position": "update-where",
 			"kind": "between",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "BETWEEN handler requires a column"
+			"sql": "UPDATE users SET score = $1 WHERE users.period BETWEEN $2 AND $3 AND users.score = $4",
+			"params": [41, "2026-01-01", "2026-02-01", 13],
+			"error": null
 		},
 		{
 			"position": "update-where",
 			"kind": "between",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "BETWEEN handler requires a column"
+			"sql": "UPDATE users SET score = $1 WHERE users.period BETWEEN $2 AND $3 OR users.score = $4",
+			"params": [41, "2026-01-01", "2026-02-01", 13],
+			"error": null
 		}
 	]
 }
