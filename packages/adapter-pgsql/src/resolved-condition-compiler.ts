@@ -53,7 +53,7 @@ import {
 	resolveAddressedColumn,
 	resolveAddressedColumnMetadata,
 } from './handlers/where/utils.js';
-import { createParamRef } from './param-ref.js';
+import { createParamRef, createTypeCastParamRef } from './param-ref.js';
 import { queryLocal, resolveDeclaredIdentifier } from './sql-identifier.js';
 import { validateIdentifier } from './validate.js';
 
@@ -232,7 +232,12 @@ function parameter(
 		left && (p.cast === 'column-db-type' || p.cast === 'column-array')
 			? columnType(left, ctx, state)
 			: undefined;
-	return compileValue(p.value, state, type, p.bound || force);
+	// A resolved parameter's value is data: no parameter syntax is read in it.
+	if (!p.bound && !force && (p.value === null || p.value === undefined))
+		return nullConstNode();
+	const index = ++state.paramIndex;
+	state.parameters.push(p.value);
+	return type ? createTypeCastParamRef(index, type) : createParamRef(index);
 }
 function rhs(
 	value: ResolvedRhs,

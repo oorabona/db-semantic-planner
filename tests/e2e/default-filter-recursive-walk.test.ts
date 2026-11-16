@@ -1,4 +1,12 @@
-import { createOrm, eq, isNull, planRecursive, ref, schema } from '@dbsp/core';
+import {
+	createOrm,
+	eq,
+	exists,
+	isNull,
+	planRecursive,
+	ref,
+	schema,
+} from '@dbsp/core';
 import type { RecursiveIntent } from '@dbsp/types';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import {
@@ -94,4 +102,41 @@ it('excludes a filtered node and its visible descendants from a recursive chain'
 	expect(
 		(await adapter.execute(unfilteredWalk)).map((node) => node.id),
 	).toEqual([1, 2, 3]);
+});
+
+it('AC7 e2e-walk: a start.where relation predicate reads only visible children (#891 slice 4)', async () => {
+	const adapter = await getTestAdapter();
+	const intent: RecursiveIntent = {
+		type: 'recursive',
+		cteName: 'walk',
+		start: {
+			from: 'nodes',
+			nodeIdExpr: { kind: 'column', name: 'id' },
+			where: exists('children'),
+		},
+		traversal: {
+			kind: 'adjacency',
+			nodeTable: 'nodes',
+			nodeId: 'id',
+			parentId: 'parentId',
+			direction: 'descendants',
+		},
+		maxDepth: 3,
+	};
+	const filteredWalk = adapter.compileRecursive<{ id: number }>(
+		planRecursive(intent, db.model, { defaultFilters: db.defaultFilters }),
+		db.model,
+		{ schemaName: SCHEMA },
+	);
+	expect(await adapter.execute(filteredWalk)).toEqual([]);
+	const unfilteredWalk = adapter.compileRecursive<{ id: number }>(
+		planRecursive(intent, db.model),
+		db.model,
+		{ schemaName: SCHEMA },
+	);
+	expect(
+		(await adapter.execute(unfilteredWalk))
+			.map((node) => node.id)
+			.sort((a, b) => a - b),
+	).toEqual([1, 2, 2, 3, 3]);
 });

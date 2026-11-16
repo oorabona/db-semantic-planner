@@ -305,6 +305,7 @@ export interface RecursivePlanReport
 	extends Omit<PlanReport, 'intent' | 'metadata'> {
 	readonly intent: RecursiveIntent;
 	readonly recursiveFilters?: {
+		readonly start?: import('./resolved-conditions.js').ResolvedCondition;
 		readonly anchor?: import('./resolved-conditions.js').ResolvedCondition;
 		readonly step?: import('./resolved-conditions.js').ResolvedCondition;
 	};
