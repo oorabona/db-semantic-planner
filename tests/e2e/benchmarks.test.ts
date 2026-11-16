@@ -300,9 +300,9 @@ describe('Performance Benchmarks', () => {
 				`\n📈 ORM Overhead: ${overheadMs.toFixed(3)}ms (${overheadPercent.toFixed(1)}%)`,
 			);
 
-			// ORM overhead should be acceptable (< 100% of raw query time)
-			// This is a soft assertion - we just want to track it
-			expect(overheadPercent).toBeLessThan(200);
+			// The ratio is logged, not asserted: both timings are sub-millisecond on a
+			// shared runner, so it measures the runner rather than the ORM (#992).
+			expect(ormResult.executionMs).toBeLessThan(10);
 		});
 	});
 
@@ -333,8 +333,8 @@ describe('Performance Benchmarks', () => {
 				`\n📉 Query consistency: avg=${avg.toFixed(3)}ms, stdDev=${stdDev.toFixed(3)}ms`,
 			);
 
-			// Standard deviation should be reasonable (< 50% of average)
-			expect(stdDev / avg).toBeLessThan(0.5);
+			// The spread is logged, not asserted, for the same reason as the ratio (#992).
+			expect(avg).toBeLessThan(10);
 		});
 	});
 });
