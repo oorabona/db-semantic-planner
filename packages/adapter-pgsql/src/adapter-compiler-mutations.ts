@@ -13,7 +13,7 @@ import {
 	POSTGRESQL_CAPABILITIES,
 	plan as planFn,
 } from '@dbsp/core';
-import { inspectMutationRows } from '@dbsp/core/internal';
+import { inspectMutationRows, resolveSelectWhere } from '@dbsp/core/internal';
 import type {
 	BatchUpdateIntent,
 	CompiledQuery,
@@ -27,7 +27,7 @@ import type {
 	UpsertIntent,
 	WhereIntent,
 } from '@dbsp/types';
-import { isParamIntent } from '@dbsp/types';
+import { isParamIntent, RangeAllocator } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { compileSelect } from './adapter-compiler-select.js';
@@ -57,6 +57,7 @@ import { quoteIdent } from './ddl/phases/utils.js';
 import { deparseQuoted } from './deparse.js';
 import {
 	type CompilerContext,
+	type CompilerState,
 	createCompilerState,
 	type Decision,
 } from './handlers/index.js';
@@ -90,6 +91,7 @@ import {
 } from './projection-envelope.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
 import { resolveRelationKeys } from './relation-keys.js';
+import { compileResolvedCondition } from './resolved-condition-compiler.js';
 import {
 	queryLocal,
 	resolveDeclaredIdentifier,
@@ -717,6 +719,32 @@ export function compileInsertFrom(
 	);
 }
 
+/**
+ * Resolve a mutation WHERE through core's root condition resolver, as a SELECT
+ * WHERE is, and return a compiler for it. Mutations stay unfiltered: no default
+ * filters are applied; a builder nested in the WHERE keeps its own policy.
+ * Without a model the old route is kept (undefined).
+ */
+function resolvedMutationWhere(
+	where: WhereIntent | undefined,
+	table: string,
+	deps: AdapterCompilerDeps,
+): ((ctx: CompilerContext, state: CompilerState) => Node) | undefined {
+	if (!where || deps.model === undefined) return undefined;
+	const allocator = new RangeAllocator();
+	const root = allocator.bind(table, table);
+	allocator.reserve(root.alias);
+	const resolved = resolveSelectWhere(
+		where,
+		root,
+		[root],
+		allocator,
+		deps.model,
+	);
+	if (!resolved) return undefined;
+	return (ctx, state) => compileResolvedCondition(resolved, ctx, state);
+}
+
 // ============================================================================
 // compileUpdate
 // ============================================================================
@@ -736,9 +764,11 @@ export function compileUpdate(
 
 	const setColumns = Object.keys(intent.set ?? {});
 	const columnTypes = getColumnTypes(intent.table, setColumns, deps);
-	const resolvedWhere = intent.where
-		? resolveExistsIntent(intent.where, intent.table, deps)
-		: undefined;
+	const whereCompiler = resolvedMutationWhere(intent.where, intent.table, deps);
+	const resolvedWhere =
+		intent.where && !whereCompiler
+			? resolveExistsIntent(intent.where, intent.table, deps)
+			: undefined;
 
 	const config: UpdateConfig = {
 		table: declaredMutationTable(deps, intent.table),
@@ -748,6 +778,7 @@ export function compileUpdate(
 			value,
 		})),
 		...(resolvedWhere && { where: [whereIntentAsDecision(resolvedWhere)] }),
+		...(whereCompiler && { whereCompiler }),
 		...(intent.returning && { returning: [...intent.returning] }),
 		...(intent.returning && {
 			returningSources: mutationReturningSources(
@@ -939,14 +970,17 @@ export function compileDelete(
 
 	// Resolve exists/notExists relation name → real table name before compiling.
 	// The mutation path bypasses the planner, so we must resolve targetTable here.
-	const resolvedWhere = intent.where
-		? resolveExistsIntent(intent.where, intent.table, deps)
-		: undefined;
+	const whereCompiler = resolvedMutationWhere(intent.where, intent.table, deps);
+	const resolvedWhere =
+		intent.where && !whereCompiler
+			? resolveExistsIntent(intent.where, intent.table, deps)
+			: undefined;
 
 	const config: DeleteConfig = {
 		table: declaredMutationTable(deps, intent.table),
 		tableMetadata: declaredMutationTableMetadata(deps, intent.table),
 		...(resolvedWhere && { where: [whereIntentAsDecision(resolvedWhere)] }),
+		...(whereCompiler && { whereCompiler }),
 		...(intent.returning && { returning: [...intent.returning] }),
 		...(intent.returning && {
 			returningSources: mutationReturningSources(
@@ -1101,8 +1135,15 @@ export function compileUpsert(
 		intent.action.type === 'doUpdate' && intent.action.where
 			? intent.action.where
 			: undefined;
+	const actionWhereCompiler = resolvedMutationWhere(
+		actionWhere,
+		intent.table,
+		deps,
+	);
 	const resolvedActionWhere = actionWhere
-		? resolveExistsIntent(actionWhere, intent.table, deps)
+		? actionWhereCompiler
+			? actionWhere
+			: resolveExistsIntent(actionWhere, intent.table, deps)
 		: undefined;
 
 	const config: UpsertConfig = {
@@ -1154,13 +1195,23 @@ export function compileUpsert(
 				// Lower the action in its own parameter namespace, then append it. The
 				// complete upsert statement is checked once after all parameters exist.
 				const actionState = createCompilerState();
-				const actionWhere = compileUpsertActionWhere(
-					where,
-					intent.table,
-					actionState,
-					deps,
-					schemaName,
-				);
+				const actionWhere = actionWhereCompiler
+					? actionWhereCompiler(
+							{
+								...mutationContext(deps, intent.table, MAX_DEPTH_LIMIT),
+								currentAlias:
+									declaredMutationTableMetadata(deps, intent.table)
+										?.physicalName ?? declaredMutationTable(deps, intent.table),
+							} as CompilerContext,
+							actionState,
+						)
+					: compileUpsertActionWhere(
+							where,
+							intent.table,
+							actionState,
+							deps,
+							schemaName,
+						);
 				const shifted = renumberParamRefsInAst(
 					actionWhere,
 					paramState.paramIndex,
