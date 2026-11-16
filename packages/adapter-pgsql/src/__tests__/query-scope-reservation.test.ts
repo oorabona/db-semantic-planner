@@ -72,7 +72,7 @@ for (const nested of [false, true]) {
 			const projected = nested ? `${innerSql} + 1` : `${innerSql} AS n`;
 			expect(result.sql).toBe(
 				entry === 'compileSelectExpression'
-					? `SELECT (SELECT ${projected} FROM symbols AS symbols)`
+					? `SELECT (SELECT ${projected} FROM symbols)`
 					: `SELECT symbols.id, ${projected} FROM symbols`,
 			);
 			expect('params' in result ? result.params : result.parameters).toEqual(

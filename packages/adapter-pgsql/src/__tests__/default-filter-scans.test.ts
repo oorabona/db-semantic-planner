@@ -10,6 +10,9 @@ import {
 	isNull,
 	literal,
 	notExists,
+	op,
+	outerRef,
+	plan,
 	rawExists,
 	ref,
 	relationColumn,
@@ -829,5 +832,208 @@ describe('default filters in SELECT expression conditions', () => {
 			sql: 'SELECT author.name AS "authorName" FROM posts LEFT JOIN users AS author ON posts."authorId" = author.id',
 			params: [],
 		});
+	});
+});
+
+// orm.selectExpression() applies the ORM's read policy to its subquery bodies,
+// and a policy issued by a nested builder applies whatever the outer filters
+// (#891, slice 1).
+describe('selectExpression bodies and nested issued policies', () => {
+	const definition = {
+		users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			score: 'integer',
+			deleted_at: { type: 'timestamp', nullable: true },
+			author_id: ref('users', { as: 'author' }),
+		},
+		comments: {
+			id: { type: 'integer', primaryKey: true },
+			deleted_at: { type: 'timestamp', nullable: true },
+			post_id: ref('posts', { as: 'post' }),
+		},
+	} as const;
+	const filters = {
+		posts: isNull('deleted_at'),
+		comments: isNull('deleted_at'),
+	};
+	const filteredDb = schema(definition, undefined, { defaultFilters: filters });
+	const plainDb = schema(definition);
+	const adapter = createPgCompileOnlyAdapter({ model: filteredDb.model });
+	const filtered = createOrm({
+		schema: filteredDb,
+		adapter,
+		suppressDxWarnings: true,
+	});
+	const plain = createOrm({
+		schema: plainDb,
+		adapter: createPgCompileOnlyAdapter({ model: plainDb.model }),
+		suppressDxWarnings: true,
+	});
+	const outer = filtered.withoutDefaultFilters();
+	// rawExists() accepts an ORM builder at runtime, as its JSDoc example shows;
+	// its public type does not list QueryBuilder yet, hence the cast.
+	const issuedPosts = () =>
+		filtered.select('posts').columns(['id']) as unknown as Parameters<
+			typeof rawExists
+		>[0];
+	const nestedPolicyBody = () =>
+		subquery('users').where(rawExists(issuedPosts())).count().asExpr('n');
+
+	it('filters the body table', () => {
+		const result = filtered.selectExpression(
+			subquery('posts').where(eq('score', 1)).max('score').asExpr('m'),
+		);
+		expect(result.sql).toBe(
+			'SELECT (SELECT max(posts.score) FROM posts WHERE posts.deleted_at IS NULL AND posts.score = $1)',
+		);
+		expect(result.parameters).toEqual([1]);
+	});
+
+	it('filters a relation scanned inside the body', () => {
+		expect(
+			filtered.selectExpression(
+				subquery('posts').where(exists('comments')).count().asExpr('n'),
+			).sql,
+		).toBe(
+			'SELECT (SELECT count(*) FROM posts WHERE posts.deleted_at IS NULL AND EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts.id = comments_exists_0.post_id AND comments_exists_0.deleted_at IS NULL))',
+		);
+	});
+
+	it('filters a body nested in an operator', () => {
+		expect(
+			filtered.selectExpression(
+				op('+', subquery('posts').max('score').asExpr('m'), literal(1)),
+			).sql,
+		).toBe(
+			'SELECT (SELECT max(posts.score) FROM posts WHERE posts.deleted_at IS NULL) + 1',
+		);
+	});
+
+	it('renumbers the parameters of sibling bodies', () => {
+		const result = filtered.selectExpression(
+			op(
+				'+',
+				subquery('posts').where(eq('score', 1)).count().asExpr('a'),
+				subquery('posts').where(eq('score', 2)).count().asExpr('b'),
+			),
+		);
+		expect(result.sql).toBe(
+			'SELECT (SELECT count(*) FROM posts WHERE posts.deleted_at IS NULL AND posts.score = $1) + (SELECT count(*) FROM posts WHERE posts.deleted_at IS NULL AND posts.score = $2)',
+		);
+		expect(result.parameters).toEqual([1, 2]);
+	});
+
+	it('compiles an unfiltered body as an issued plan', () => {
+		expect(
+			plain.selectExpression(subquery('posts').max('score').asExpr('m')).sql,
+		).toBe('SELECT (SELECT max(posts.score) FROM posts)');
+	});
+
+	it('keeps the schema of withSchema', () => {
+		expect(
+			filtered
+				.withSchema('t1')
+				.selectExpression(
+					subquery('posts').where(eq('score', 1)).max('score').asExpr('m'),
+				).sql,
+		).toBe(
+			'SELECT (SELECT max(posts.score) FROM t1.posts WHERE posts.deleted_at IS NULL AND posts.score = $1)',
+		);
+	});
+
+	it('applies a nested builder policy in the body WHERE without outer filters', () => {
+		expect(outer.selectExpression(nestedPolicyBody()).sql).toBe(
+			'SELECT (SELECT count(*) FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL))',
+		);
+	});
+
+	it('applies a nested builder policy in a SELECT-column body without outer filters', () => {
+		expect(
+			outer.select('users').columns(['id', nestedPolicyBody()]).dump().sql,
+		).toBe(
+			'SELECT users.id, (SELECT count(*) FROM users AS users_sq WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL)) AS n FROM users',
+		);
+	});
+
+	it('applies a nested builder policy in a scalar projected by a selectExpression body', () => {
+		const projecting = {
+			intent: {
+				kind: 'subquery',
+				query: {
+					type: 'select',
+					from: 'users',
+					select: {
+						type: 'expressions',
+						columns: [nestedPolicyBody().intent],
+					},
+					limit: 1,
+				},
+			},
+		} as unknown as Parameters<typeof outer.selectExpression>[0];
+		expect(outer.selectExpression(projecting).sql).toBe(
+			'SELECT (SELECT (SELECT count(*) FROM users AS users_sq WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL)) AS n FROM users LIMIT 1)',
+		);
+	});
+
+	it('refuses an outerRef in a FROM-less body', () => {
+		expect(
+			() =>
+				filtered.selectExpression(
+					subquery('posts')
+						.where(eq('author_id', outerRef('users.id')))
+						.max('score')
+						.asExpr('m'),
+				).sql,
+		).toThrow('outerRef() requires an enclosing query range.');
+	});
+
+	const projectNested = (query: Record<string, unknown>) =>
+		adapter.compile(
+			plan(
+				{
+					type: 'select',
+					from: 'users',
+					select: {
+						type: 'expressions',
+						columns: [{ kind: 'subquery', as: 'v', query }],
+					},
+				} as never,
+				filteredDb.model,
+			),
+		);
+	const nestedPolicyWhere = () => rawExists(issuedPosts());
+
+	it('refuses a nested-policy body with an expression SELECT', () => {
+		expect(() =>
+			projectNested({
+				type: 'select',
+				from: 'users',
+				where: nestedPolicyWhere(),
+				select: {
+					type: 'expressions',
+					columns: [fn('lower', exprRef('name')).as('l').intent],
+				},
+				limit: 1,
+			}),
+		).toThrow(
+			'scalar subquery with expressions SELECT (not supported in scalar subquery) is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+		);
+	});
+
+	it('refuses a nested-policy body with GROUP BY and HAVING', () => {
+		expect(() =>
+			projectNested({
+				type: 'select',
+				from: 'users',
+				where: nestedPolicyWhere(),
+				select: { type: 'fields', fields: ['id'] },
+				groupBy: ['id'],
+				having: { kind: 'comparison', field: 'id', operator: 'gt', value: 0 },
+				limit: 1,
+			}),
+		).toThrow(
+			'scalar subquery with GROUP BY, HAVING is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+		);
 	});
 });
