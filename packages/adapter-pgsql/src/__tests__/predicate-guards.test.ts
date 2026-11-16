@@ -275,7 +275,7 @@ for (const where of [
 ]) {
 	it(`refuses recursive anchor unknown_kind inside ${where.kind}`, () => {
 		expect(() => recursive(where)).toThrow(
-			/recursive start\.where.*unknown_kind/,
+			new Error("Unsupported predicate kind 'unknown_kind'"),
 		);
 	});
 }

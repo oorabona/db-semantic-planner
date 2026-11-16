@@ -668,41 +668,41 @@
 			"position": "recursive-start-where-adjacency",
 			"kind": "expression-scalar-subquery",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE (SELECT posts.score FROM posts AS posts WHERE posts.score = $1 ORDER BY posts.score DESC LIMIT 1) > $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [59, 67],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where-adjacency",
 			"kind": "expression-scalar-subquery",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE (SELECT posts.score FROM posts AS posts WHERE posts.score = $1 ORDER BY posts.score DESC LIMIT 1) > $2 AND __n.score = $3 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [59, 67, 13],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where-adjacency",
 			"kind": "expression-scalar-subquery",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE (SELECT posts.score FROM posts AS posts WHERE posts.score = $1 ORDER BY posts.score DESC LIMIT 1) > $2 OR __n.score = $3 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [59, 67, 13],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where-adjacency",
 			"kind": "expression-scalar-subquery",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE NOT ((SELECT posts.score FROM posts AS posts WHERE posts.score = $1 ORDER BY posts.score DESC LIMIT 1) > $2) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [59, 67],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where-adjacency",
 			"kind": "expression-scalar-subquery",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context."
+			"sql": "WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score = $1 AND (NOT ((SELECT posts.score FROM posts AS posts WHERE posts.score = $2 ORDER BY posts.score DESC LIMIT 1) > $3) OR __n.score = $4) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree",
+			"params": [13, 59, 67, 17],
+			"error": null
 		},
 		{
 			"position": "recursive-start-where-adjacency",
@@ -710,7 +710,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "start.where exists('posts'): recursive relation predicates are not supported in a recursive anchor."
+			"error": "start.where exists('posts'): recursive relation predicates are not supported inside start.where."
 		},
 		{
 			"position": "recursive-start-where-adjacency",
@@ -718,7 +718,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "start.where exists('posts'): recursive relation predicates are not supported in a recursive anchor."
+			"error": "start.where exists('posts'): recursive relation predicates are not supported inside start.where."
 		},
 		{
 			"position": "recursive-start-where-adjacency",
@@ -726,7 +726,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "start.where exists('posts'): recursive relation predicates are not supported in a recursive anchor."
+			"error": "start.where exists('posts'): recursive relation predicates are not supported inside start.where."
 		},
 		{
 			"position": "recursive-start-where-adjacency",
@@ -734,7 +734,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "start.where exists('posts'): recursive relation predicates are not supported in a recursive anchor."
+			"error": "start.where exists('posts'): recursive relation predicates are not supported inside start.where."
 		},
 		{
 			"position": "recursive-start-where-adjacency",
@@ -742,7 +742,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "start.where exists('posts'): recursive relation predicates are not supported in a recursive anchor."
+			"error": "start.where exists('posts'): recursive relation predicates are not supported inside start.where."
 		},
 		{
 			"position": "recursive-start-where-adjacency",
@@ -750,7 +750,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "start.where exists('posts'): recursive relation predicates are not supported in a recursive anchor."
+			"error": "start.where exists('posts'): recursive relation predicates are not supported inside start.where."
 		},
 		{
 			"position": "recursive-start-where-adjacency",
@@ -758,7 +758,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "start.where exists('posts'): recursive relation predicates are not supported in a recursive anchor."
+			"error": "start.where exists('posts'): recursive relation predicates are not supported inside start.where."
 		},
 		{
 			"position": "recursive-start-where-adjacency",
@@ -766,7 +766,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "start.where exists('posts'): recursive relation predicates are not supported in a recursive anchor."
+			"error": "start.where exists('posts'): recursive relation predicates are not supported inside start.where."
 		},
 		{
 			"position": "recursive-start-where-adjacency",
@@ -774,7 +774,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "start.where exists('posts'): recursive relation predicates are not supported in a recursive anchor."
+			"error": "start.where exists('posts'): recursive relation predicates are not supported inside start.where."
 		},
 		{
 			"position": "recursive-start-where-adjacency",
@@ -782,7 +782,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "start.where exists('posts'): recursive relation predicates are not supported in a recursive anchor."
+			"error": "start.where exists('posts'): recursive relation predicates are not supported inside start.where."
 		},
 		{
 			"position": "recursive-start-where-adjacency",
@@ -790,7 +790,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "start.where notExists('posts'): recursive relation predicates are not supported in a recursive anchor."
+			"error": "start.where notExists('posts'): recursive relation predicates are not supported inside start.where."
 		},
 		{
 			"position": "recursive-start-where-adjacency",
@@ -798,7 +798,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "start.where notExists('posts'): recursive relation predicates are not supported in a recursive anchor."
+			"error": "start.where notExists('posts'): recursive relation predicates are not supported inside start.where."
 		},
 		{
 			"position": "recursive-start-where-adjacency",
@@ -806,7 +806,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "start.where notExists('posts'): recursive relation predicates are not supported in a recursive anchor."
+			"error": "start.where notExists('posts'): recursive relation predicates are not supported inside start.where."
 		},
 		{
 			"position": "recursive-start-where-adjacency",
@@ -814,7 +814,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "start.where notExists('posts'): recursive relation predicates are not supported in a recursive anchor."
+			"error": "start.where notExists('posts'): recursive relation predicates are not supported inside start.where."
 		},
 		{
 			"position": "recursive-start-where-adjacency",
@@ -822,7 +822,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "start.where notExists('posts'): recursive relation predicates are not supported in a recursive anchor."
+			"error": "start.where notExists('posts'): recursive relation predicates are not supported inside start.where."
 		},
 		{
 			"position": "recursive-start-where-adjacency",
@@ -830,7 +830,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "start.where notExists('posts'): recursive relation predicates are not supported in a recursive anchor."
+			"error": "start.where notExists('posts'): recursive relation predicates are not supported inside start.where."
 		},
 		{
 			"position": "recursive-start-where-adjacency",
@@ -838,7 +838,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "start.where notExists('posts'): recursive relation predicates are not supported in a recursive anchor."
+			"error": "start.where notExists('posts'): recursive relation predicates are not supported inside start.where."
 		},
 		{
 			"position": "recursive-start-where-adjacency",
@@ -846,7 +846,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "start.where notExists('posts'): recursive relation predicates are not supported in a recursive anchor."
+			"error": "start.where notExists('posts'): recursive relation predicates are not supported inside start.where."
 		}
 	]
 }

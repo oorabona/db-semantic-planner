@@ -1,5 +1,20 @@
 # Changelog
 
+## [7.1.2](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v7.1.1...adapter-pgsql-v7.1.2) (2026-11-16)
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** Resolve mutation WHERE through the root resolver ([#997](https://github.com/oorabona/db-semantic-planner/issues/997)) ([baffe00](https://github.com/oorabona/db-semantic-planner/commit/baffe001f650b64742aaa0673421c3197f2a9d53)), closes [#891](https://github.com/oorabona/db-semantic-planner/issues/891)
+* **core:** SelectExpression bodies and nested builders keep their read policy ([#995](https://github.com/oorabona/db-semantic-planner/issues/995)) ([c233189](https://github.com/oorabona/db-semantic-planner/commit/c233189892fdfeb080d771c3b16b6f85ceb629a3))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/core bumped to 6.1.1
+
 ## [7.1.1](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v7.1.0...adapter-pgsql-v7.1.1) (2026-11-15)
 
 

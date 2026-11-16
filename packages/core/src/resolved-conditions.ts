@@ -91,8 +91,10 @@ export function resolveConditionContext(
 		readonly include?: boolean;
 		readonly aliasState?: { count: number };
 		readonly outerQualifiers?: readonly ReadonlyMap<string, ResolvedRange>[];
+		readonly label?: string;
 	},
 ): ResolvedCondition | undefined {
+	const label = mode?.label ?? 'WHERE';
 	const subqueryRefusal = mode?.subqueryRefusal;
 	let activeFilters = mode?.defaultFilters;
 	const rootScope = [...new Set([root, ...visible, ...additionalOuterRanges])];
@@ -134,7 +136,7 @@ export function resolveConditionContext(
 			!visible.some((range) => range.alias === qualifier)
 		)
 			throw new Error(
-				`WHERE qualifier '${qualifier}' is not visible in this query.`,
+				`${label} qualifier '${qualifier}' is not visible in this query.`,
 			);
 	};
 	const matchQualifier = (
@@ -153,7 +155,7 @@ export function resolveConditionContext(
 		if (exact) return exact;
 		if (candidates.length > 1)
 			throw new Error(
-				`${outer ? 'outerRef' : 'WHERE'} qualifier '${qualifier}' is ambiguous between ${candidates
+				`${outer ? 'outerRef' : label} qualifier '${qualifier}' is ambiguous between ${candidates
 					.map((r) => `'${r.alias}'`)
 					.sort()
 					.join(', ')}${outer ? ' in an enclosing query' : ''}.`,
@@ -197,7 +199,7 @@ export function resolveConditionContext(
 			else if (mode?.include) range = allocator.bind(qualifier, qualifier);
 			else
 				throw new Error(
-					`WHERE qualifier '${qualifier}' is not visible in this query.`,
+					`${label} qualifier '${qualifier}' is not visible in this query.`,
 				);
 		}
 		if (
@@ -251,7 +253,7 @@ export function resolveConditionContext(
 				);
 			if (rel.type === 'belongsToMany')
 				throw new Error(
-					`WHERE ${kind}('${segments.join('.')}'): many-to-many traversal is not supported yet (#787).`,
+					`${label} ${kind}('${segments.join('.')}'): many-to-many traversal is not supported yet (#787).`,
 				);
 			names.push(rel.name);
 			table = rel.target;
@@ -351,6 +353,12 @@ export function resolveConditionContext(
 			};
 		else if (select?.type === 'aggregate' && select.aggregates[0]) {
 			const agg = select.aggregates[0];
+			// The resolved projection carries no aggregate FILTER; refusing keeps
+			// the aggregate from silently counting rows the FILTER excludes.
+			if (use === 'scalar' && agg.filter !== undefined)
+				throw new Error(
+					'scalar subquery with an aggregate FILTER is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+				);
 			projection = {
 				kind: 'aggregate',
 				function: agg.function,
@@ -457,7 +465,7 @@ export function resolveConditionContext(
 			trusted?.recursive
 		)
 			throw new Error(
-				`WHERE ${node.kind}('${segments.join('.')}'): recursive relation predicates are not supported inside WHERE.`,
+				`${label} ${node.kind}('${segments.join('.')}'): recursive relation predicates are not supported inside ${label}.`,
 			);
 		const path = trusted
 			? {
@@ -764,15 +772,21 @@ export function resolveConditionContext(
 				);
 		}
 	};
+	// The public param() wrapper is an ExpressionRef; read it as its ParamIntent, once.
+	const authoredParam = (value: unknown): unknown =>
+		isExpression(value) && isParamIntent(value.intent) ? value.intent : value;
 	const parameter = (
 		value: unknown,
 		cast: ResolvedCast = 'none',
-	): ResolvedParameter => ({
-		kind: 'parameter',
-		value: isParamIntent(value) ? value.value : value,
-		cast,
-		bound: isParamIntent(value),
-	});
+	): ResolvedParameter => {
+		const authored = authoredParam(value);
+		return {
+			kind: 'parameter',
+			value: isParamIntent(authored) ? authored.value : authored,
+			cast,
+			bound: isParamIntent(authored),
+		};
+	};
 	const rangeParameter = (value: unknown): ResolvedParameter => {
 		const authored = parameter(value, 'range');
 		if (authored.bound) return authored;
@@ -792,16 +806,18 @@ export function resolveConditionContext(
 		return { ...authored, cast: 'range-element' };
 	};
 
-	const normalizeList = (value: unknown): unknown => {
+	const normalizeList = (raw: unknown): unknown => {
+		const value = authoredParam(raw);
 		if (isParamIntent(value)) return value;
 		if (!Array.isArray(value)) return value;
+		const items = value.map(authoredParam);
 		if (
-			value.length === 1 &&
-			isParamIntent(value[0]) &&
-			Array.isArray(value[0].value)
+			items.length === 1 &&
+			isParamIntent(items[0]) &&
+			Array.isArray(items[0].value)
 		)
-			return value[0];
-		return value.map((v) => (isParamIntent(v) ? v.value : v));
+			return items[0];
+		return items.map((v) => (isParamIntent(v) ? v.value : v));
 	};
 	const visit = (
 		node: WhereIntent,

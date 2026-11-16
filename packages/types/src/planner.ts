@@ -304,7 +304,15 @@ export interface PlanOptions {
 export interface RecursivePlanReport
 	extends Omit<PlanReport, 'intent' | 'metadata'> {
 	readonly intent: RecursiveIntent;
+	/**
+	 * Conditions core resolved for the walk. `start` is the resolved
+	 * `intent.start.where`, present whenever the intent has one, with or without
+	 * default filters; the adapter compiles it instead of `intent.start.where`, so
+	 * a report whose intent changes must be planned again. `anchor` and `step` are
+	 * the default filters of the anchor and recursive scans.
+	 */
 	readonly recursiveFilters?: {
+		readonly start?: import('./resolved-conditions.js').ResolvedCondition;
 		readonly anchor?: import('./resolved-conditions.js').ResolvedCondition;
 		readonly step?: import('./resolved-conditions.js').ResolvedCondition;
 	};

@@ -500,40 +500,40 @@
 			"position": "delete-where",
 			"kind": "like-escape",
 			"shape": "leaf",
-			"sql": "DELETE FROM users WHERE users.name LIKE $1",
-			"params": ["c!_%"],
+			"sql": "DELETE FROM users WHERE users.name LIKE $1 ESCAPE $2",
+			"params": ["c!_%", "!"],
 			"error": null
 		},
 		{
 			"position": "delete-where",
 			"kind": "like-escape",
 			"shape": "and",
-			"sql": "DELETE FROM users WHERE users.name LIKE $1 AND users.score = $2",
-			"params": ["c!_%", 13],
+			"sql": "DELETE FROM users WHERE users.name LIKE $1 ESCAPE $2 AND users.score = $3",
+			"params": ["c!_%", "!", 13],
 			"error": null
 		},
 		{
 			"position": "delete-where",
 			"kind": "like-escape",
 			"shape": "or",
-			"sql": "DELETE FROM users WHERE users.name LIKE $1 OR users.score = $2",
-			"params": ["c!_%", 13],
+			"sql": "DELETE FROM users WHERE users.name LIKE $1 ESCAPE $2 OR users.score = $3",
+			"params": ["c!_%", "!", 13],
 			"error": null
 		},
 		{
 			"position": "delete-where",
 			"kind": "like-escape",
 			"shape": "not",
-			"sql": "DELETE FROM users WHERE NOT (users.name LIKE $1)",
-			"params": ["c!_%"],
+			"sql": "DELETE FROM users WHERE NOT (users.name LIKE $1 ESCAPE $2)",
+			"params": ["c!_%", "!"],
 			"error": null
 		},
 		{
 			"position": "delete-where",
 			"kind": "like-escape",
 			"shape": "two-level",
-			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.name LIKE $2) OR users.score = $3)",
-			"params": [13, "c!_%", 17],
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.name LIKE $2 ESCAPE $3) OR users.score = $4)",
+			"params": [13, "c!_%", "!", 17],
 			"error": null
 		},
 		{
@@ -780,25 +780,25 @@
 			"position": "delete-where",
 			"kind": "between",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "BETWEEN handler requires a column"
+			"sql": "DELETE FROM users WHERE users.period BETWEEN $1 AND $2",
+			"params": ["2026-01-01", "2026-02-01"],
+			"error": null
 		},
 		{
 			"position": "delete-where",
 			"kind": "between",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "BETWEEN handler requires a column"
+			"sql": "DELETE FROM users WHERE users.period BETWEEN $1 AND $2 AND users.score = $3",
+			"params": ["2026-01-01", "2026-02-01", 13],
+			"error": null
 		},
 		{
 			"position": "delete-where",
 			"kind": "between",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "BETWEEN handler requires a column"
+			"sql": "DELETE FROM users WHERE users.period BETWEEN $1 AND $2 OR users.score = $3",
+			"params": ["2026-01-01", "2026-02-01", 13],
+			"error": null
 		}
 	]
 }

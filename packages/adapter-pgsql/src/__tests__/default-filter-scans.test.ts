@@ -9,10 +9,15 @@ import {
 	inSubquery,
 	isNull,
 	literal,
+	namedArg,
 	notExists,
+	op,
+	outerRef,
+	plan,
 	rawExists,
 	ref,
 	relationColumn,
+	SubqueryExpression,
 	schema,
 	star,
 	subquery,
@@ -829,5 +834,394 @@ describe('default filters in SELECT expression conditions', () => {
 			sql: 'SELECT author.name AS "authorName" FROM posts LEFT JOIN users AS author ON posts."authorId" = author.id',
 			params: [],
 		});
+	});
+});
+
+// orm.selectExpression() applies the ORM's read policy to its subquery bodies,
+// and a policy issued by a nested builder applies whatever the outer filters
+// (#891, slice 1).
+describe('selectExpression bodies and nested issued policies', () => {
+	const definition = {
+		users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			score: 'integer',
+			deleted_at: { type: 'timestamp', nullable: true },
+			author_id: ref('users', { as: 'author' }),
+		},
+		comments: {
+			id: { type: 'integer', primaryKey: true },
+			deleted_at: { type: 'timestamp', nullable: true },
+			post_id: ref('posts', { as: 'post' }),
+		},
+	} as const;
+	const filters = {
+		posts: isNull('deleted_at'),
+		comments: isNull('deleted_at'),
+	};
+	const filteredDb = schema(definition, undefined, { defaultFilters: filters });
+	const plainDb = schema(definition);
+	const adapter = createPgCompileOnlyAdapter({ model: filteredDb.model });
+	const filtered = createOrm({
+		schema: filteredDb,
+		adapter,
+		suppressDxWarnings: true,
+	});
+	const plain = createOrm({
+		schema: plainDb,
+		adapter: createPgCompileOnlyAdapter({ model: plainDb.model }),
+		suppressDxWarnings: true,
+	});
+	const outer = filtered.withoutDefaultFilters();
+	// rawExists() accepts an ORM builder at runtime, as its JSDoc example shows;
+	// its public type does not list QueryBuilder yet, hence the cast.
+	const issuedPosts = () =>
+		filtered.select('posts').columns(['id']) as unknown as Parameters<
+			typeof rawExists
+		>[0];
+	const nestedPolicyBody = () =>
+		subquery('users').where(rawExists(issuedPosts())).count().asExpr('n');
+
+	it('filters the body table', () => {
+		const result = filtered.selectExpression(
+			subquery('posts').where(eq('score', 1)).max('score').asExpr('m'),
+		);
+		expect(result.sql).toBe(
+			'SELECT (SELECT max(posts.score) FROM posts WHERE posts.deleted_at IS NULL AND posts.score = $1)',
+		);
+		expect(result.parameters).toEqual([1]);
+	});
+
+	it('filters a relation scanned inside the body', () => {
+		expect(
+			filtered.selectExpression(
+				subquery('posts').where(exists('comments')).count().asExpr('n'),
+			).sql,
+		).toBe(
+			'SELECT (SELECT count(*) FROM posts WHERE posts.deleted_at IS NULL AND EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts.id = comments_exists_0.post_id AND comments_exists_0.deleted_at IS NULL))',
+		);
+	});
+
+	it('filters a body nested in an operator', () => {
+		expect(
+			filtered.selectExpression(
+				op('+', subquery('posts').max('score').asExpr('m'), literal(1)),
+			).sql,
+		).toBe(
+			'SELECT (SELECT max(posts.score) FROM posts WHERE posts.deleted_at IS NULL) + 1',
+		);
+	});
+
+	it('renumbers the parameters of sibling bodies', () => {
+		const result = filtered.selectExpression(
+			op(
+				'+',
+				subquery('posts').where(eq('score', 1)).count().asExpr('a'),
+				subquery('posts').where(eq('score', 2)).count().asExpr('b'),
+			),
+		);
+		expect(result.sql).toBe(
+			'SELECT (SELECT count(*) FROM posts WHERE posts.deleted_at IS NULL AND posts.score = $1) + (SELECT count(*) FROM posts WHERE posts.deleted_at IS NULL AND posts.score = $2)',
+		);
+		expect(result.parameters).toEqual([1, 2]);
+	});
+
+	it('compiles an unfiltered body as an issued plan', () => {
+		expect(
+			plain.selectExpression(subquery('posts').max('score').asExpr('m')).sql,
+		).toBe('SELECT (SELECT max(posts.score) FROM posts)');
+	});
+
+	it('keeps the schema of withSchema', () => {
+		expect(
+			filtered
+				.withSchema('t1')
+				.selectExpression(
+					subquery('posts').where(eq('score', 1)).max('score').asExpr('m'),
+				).sql,
+		).toBe(
+			'SELECT (SELECT max(posts.score) FROM t1.posts WHERE posts.deleted_at IS NULL AND posts.score = $1)',
+		);
+	});
+
+	it('applies a nested builder policy in the body WHERE without outer filters', () => {
+		expect(outer.selectExpression(nestedPolicyBody()).sql).toBe(
+			'SELECT (SELECT count(*) FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL))',
+		);
+	});
+
+	it('applies a nested builder policy in a SELECT-column body without outer filters', () => {
+		expect(
+			outer.select('users').columns(['id', nestedPolicyBody()]).dump().sql,
+		).toBe(
+			'SELECT users.id, (SELECT count(*) FROM users AS users_sq WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL)) AS n FROM users',
+		);
+	});
+
+	it('applies a nested builder policy in a scalar projected by a selectExpression body', () => {
+		const projecting = {
+			intent: {
+				kind: 'subquery',
+				query: {
+					type: 'select',
+					from: 'users',
+					select: {
+						type: 'expressions',
+						columns: [nestedPolicyBody().intent],
+					},
+					limit: 1,
+				},
+			},
+		} as unknown as Parameters<typeof outer.selectExpression>[0];
+		expect(outer.selectExpression(projecting).sql).toBe(
+			'SELECT (SELECT (SELECT count(*) FROM users AS users_sq WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL)) AS n FROM users LIMIT 1)',
+		);
+	});
+
+	describe('a scalar body under a named argument', () => {
+		it('keeps a nested builder policy in a scalar body WHERE', () => {
+			expect(
+				outer
+					.select('users')
+					.columns([
+						subquery('users')
+							.where(
+								fn(
+									'date_part',
+									literal('epoch'),
+									fn('make_interval', namedArg('secs', nestedPolicyBody())),
+								).gt(0),
+							)
+							.count()
+							.asExpr('m'),
+					])
+					.dump().sql,
+			).toBe(
+				"SELECT (SELECT count(*) FROM users AS users_sq WHERE date_part('epoch', make_interval(secs => (SELECT count(*) FROM users AS users_sq_1 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL)))) > $1) AS m FROM users",
+			);
+		});
+
+		it('keeps a nested builder policy in a projected column', () => {
+			expect(
+				outer
+					.select('users')
+					.columns([
+						fn('make_interval', namedArg('secs', nestedPolicyBody())).as('iv'),
+					])
+					.dump().sql,
+			).toBe(
+				'SELECT make_interval(secs => (SELECT count(*) FROM users AS users_sq WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL))) AS iv FROM users',
+			);
+		});
+
+		it('keeps the default filter of the scalar body', () => {
+			expect(
+				filtered
+					.select('users')
+					.columns([
+						fn(
+							'make_interval',
+							namedArg('secs', subquery('posts').count().asExpr('c')),
+						).as('iv'),
+					])
+					.dump().sql,
+			).toBe(
+				'SELECT make_interval(secs => (SELECT count(*) FROM posts AS posts WHERE posts.deleted_at IS NULL)) AS iv FROM users',
+			);
+		});
+	});
+
+	it('refuses an aggregate FILTER in a scalar body the resolved route plans', () => {
+		const scalar = new SubqueryExpression({
+			type: 'select',
+			from: 'posts',
+			where: rawExists(issuedPosts()),
+			select: {
+				type: 'aggregate',
+				aggregates: [{ function: 'count', field: '*', filter: eq('score', 1) }],
+			},
+		} as never).asExpr('n');
+		expect(() => outer.select('users').columns([scalar]).dump()).toThrow(
+			'scalar subquery with an aggregate FILTER is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+		);
+	});
+
+	it('compiles an aggregate FILTER in an EXISTS body, where only existence counts', () => {
+		const body = {
+			buildIntent: () => ({
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'count', field: '*', filter: eq('id', 1) }],
+				},
+			}),
+		} as unknown as Parameters<typeof rawExists>[0];
+		expect(filtered.select('users').where(rawExists(body)).dump().sql).toBe(
+			'SELECT users.* FROM users WHERE EXISTS (SELECT count(*) FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL)',
+		);
+	});
+
+	describe('an IN body carrying its own policy is not rewritten to EXISTS', () => {
+		const inBody = (orm: typeof filtered) =>
+			new SubqueryExpression(
+				rawExists(
+					orm.select('posts').columns(['author_id']) as unknown as Parameters<
+						typeof rawExists
+					>[0],
+				).subquery,
+			);
+		it('keeps a nested opt-out in a selectExpression body', () => {
+			expect(
+				filtered.selectExpression(
+					subquery('users')
+						.where(inSubquery('id', inBody(filtered.withoutDefaultFilters())))
+						.count()
+						.asExpr('n'),
+				).sql,
+			).toBe(
+				'SELECT (SELECT count(*) FROM users WHERE users.id = ANY (SELECT posts_subq_0.author_id FROM posts AS posts_subq_0))',
+			);
+		});
+		it('keeps a nested filtered builder under an unfiltered ORM', () => {
+			expect(
+				outer.selectExpression(
+					subquery('users')
+						.where(inSubquery('id', inBody(filtered)))
+						.count()
+						.asExpr('n'),
+				).sql,
+			).toBe(
+				'SELECT (SELECT count(*) FROM users WHERE users.id = ANY (SELECT posts_subq_0.author_id FROM posts AS posts_subq_0 WHERE posts_subq_0.deleted_at IS NULL))',
+			);
+		});
+		it('keeps a nested opt-out in a root WHERE', () => {
+			expect(
+				filtered
+					.select('users')
+					.where(inSubquery('id', inBody(filtered.withoutDefaultFilters())))
+					.dump().sql,
+			).toBe(
+				'SELECT users.* FROM users WHERE users.id = ANY (SELECT posts_subq_0.author_id FROM posts AS posts_subq_0)',
+			);
+		});
+	});
+
+	it('does not walk bound payloads looking for nested policies', () => {
+		const docsDb = schema({
+			docs: { id: { type: 'integer', primaryKey: true }, payload: 'json' },
+		});
+		const docs = createOrm({
+			schema: docsDb,
+			adapter: createPgCompileOnlyAdapter({ model: docsDb.model }),
+			suppressDxWarnings: true,
+		});
+		let payload: Record<string, unknown> = { leaf: 1 };
+		for (let i = 0; i < 4000; i++) payload = { child: payload };
+		// plan() is where the nested-policy gate runs; a deep payload must not
+		// make it recurse (dump() serialises parameters separately).
+		const planned = docs
+			.select('docs')
+			.columns([
+				subquery('docs').where(eq('payload', payload)).count().asExpr('n'),
+			])
+			.plan();
+		expect(planned.intent.from).toBe('docs');
+	});
+
+	it('refuses an outerRef in a FROM-less body', () => {
+		expect(
+			() =>
+				filtered.selectExpression(
+					subquery('posts')
+						.where(eq('author_id', outerRef('users.id')))
+						.max('score')
+						.asExpr('m'),
+				).sql,
+		).toThrow('outerRef() requires an enclosing query range.');
+	});
+
+	const projectNested = (query: Record<string, unknown>) =>
+		adapter.compile(
+			plan(
+				{
+					type: 'select',
+					from: 'users',
+					select: {
+						type: 'expressions',
+						columns: [{ kind: 'subquery', as: 'v', query }],
+					},
+				} as never,
+				filteredDb.model,
+			),
+		);
+	const nestedPolicyWhere = () => rawExists(issuedPosts());
+
+	it('refuses a nested-policy body with an expression SELECT', () => {
+		expect(() =>
+			projectNested({
+				type: 'select',
+				from: 'users',
+				where: nestedPolicyWhere(),
+				select: {
+					type: 'expressions',
+					columns: [fn('lower', exprRef('name')).as('l').intent],
+				},
+				limit: 1,
+			}),
+		).toThrow(
+			'scalar subquery with expressions SELECT (not supported in scalar subquery) is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+		);
+	});
+
+	it('refuses a nested-policy body with GROUP BY and HAVING', () => {
+		expect(() =>
+			projectNested({
+				type: 'select',
+				from: 'users',
+				where: nestedPolicyWhere(),
+				select: { type: 'fields', fields: ['id'] },
+				groupBy: ['id'],
+				having: { kind: 'comparison', field: 'id', operator: 'gt', value: 0 },
+				limit: 1,
+			}),
+		).toThrow(
+			'scalar subquery with GROUP BY, HAVING is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+		);
+	});
+});
+
+describe('dotted fields outside conditions under default filters (#891 slice 3)', () => {
+	it('AC8 orders by a joined alias column when the joined table has a default filter', () => {
+		const joinedDb = schema(
+			{
+				users: {
+					id: { type: 'integer', primaryKey: true },
+					name: 'text',
+					deletedAt: { type: 'timestamp', nullable: true },
+				},
+				posts: {
+					id: { type: 'integer', primaryKey: true },
+					title: 'text',
+					authorId: ref('users', { as: 'author', inverse: 'posts' }),
+				},
+			},
+			undefined,
+			{ defaultFilters: { users: isNull('deletedAt') } },
+		);
+		const joinedOrm = createOrm({
+			schema: joinedDb,
+			adapter: createPgCompileOnlyAdapter(),
+			suppressDxWarnings: true,
+		});
+		const result = joinedOrm
+			.select('posts')
+			.join('author')
+			.orderBy('author.name')
+			.dump();
+		expect(result.sql).toBe(
+			'SELECT posts.* FROM posts JOIN users AS author ON posts."authorId" = author.id AND author."deletedAt" IS NULL ORDER BY author.name ASC',
+		);
+		expect(result.params).toEqual([]);
 	});
 });

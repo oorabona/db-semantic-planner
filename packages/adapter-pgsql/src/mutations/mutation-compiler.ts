@@ -219,6 +219,8 @@ export interface InsertConfig {
  * Configuration for UPDATE compilation
  */
 export interface UpdateConfig {
+	/** A WHERE resolved by core, compiled at the WHERE step so its parameters follow SET's. */
+	readonly whereCompiler?: (ctx: CompilerContext, state: CompilerState) => Node;
 	/** Table to update */
 	table: SqlIdentifier;
 	tableMetadata?: MutationTableMetadata;
@@ -239,6 +241,8 @@ export interface UpdateConfig {
  * Configuration for DELETE compilation
  */
 export interface DeleteConfig {
+	/** A WHERE resolved by core, compiled at the WHERE step. */
+	readonly whereCompiler?: (ctx: CompilerContext, state: CompilerState) => Node;
 	/** Table to delete from */
 	table: SqlIdentifier;
 	tableMetadata?: MutationTableMetadata;
@@ -472,7 +476,12 @@ export function compileUpdate(
 
 	// Build WHERE clause if present
 	let whereClause: Node | undefined;
-	if (config.where && config.where.length > 0) {
+	if (config.whereCompiler) {
+		whereClause = config.whereCompiler(
+			{ ...ctx, currentAlias: tableAlias },
+			state,
+		);
+	} else if (config.where && config.where.length > 0) {
 		const dispatch = createWhereDispatcher(compileWhereIntent);
 		const subCtx = { ...ctx, currentAlias: tableAlias };
 
@@ -671,7 +680,12 @@ export function compileDelete(
 
 	// Build WHERE clause if present
 	let whereClause: Node | undefined;
-	if (config.where && config.where.length > 0) {
+	if (config.whereCompiler) {
+		whereClause = config.whereCompiler(
+			{ ...ctx, currentAlias: tableAlias },
+			state,
+		);
+	} else if (config.where && config.where.length > 0) {
 		const dispatch = createWhereDispatcher(compileWhereIntent);
 		const subCtx = { ...ctx, currentAlias: tableAlias };
 

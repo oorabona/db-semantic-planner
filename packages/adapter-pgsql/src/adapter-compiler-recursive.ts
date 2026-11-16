@@ -404,49 +404,51 @@ export function compileRecursive<T = unknown>(
 	});
 	const anchorScope = withRelationBinding(deps.scope, anchorBinding);
 
-	// Build anchor WHERE from intent.start.where
-	const anchorWhere = intent.start.where
-		? compileCondition(intent.start.where, {
-				position: 'recursive-anchor',
-				logicalSourceTable: startTable,
-				emittedAlias: '__n',
-				visibleAliases: new Map([['__n', startTable]]),
-				paramState: state,
-				defaultPkColumnName: deps.defaultPk,
-				deriveFkColumnName: deps.deriveFk,
-				aliasColumnAuthorities: bindAliasAuthority(
-					undefined,
-					queryLocal('__n'),
-					{
-						target: queryLocal(startTable),
-						logicalTable: startTable,
-					},
-				),
-				...(deps.model !== undefined && { model: deps.model }),
-				...(deps.declaredNames !== undefined && {
-					declaredNames: deps.declaredNames,
-				}),
-				...(schemaName !== undefined && { schemaName }),
-				...(deps.dbCasing !== undefined && { dbCasing: deps.dbCasing }),
-				...(deps.dialectCapabilities !== undefined && {
-					dialectCapabilities: deps.dialectCapabilities,
-				}),
-				scope: anchorScope,
-				currentBinding: anchorBinding,
-				compileSubquery: (query, offset, parent) =>
-					buildSubqueryFromIntent(
-						query,
-						offset,
-						deps.declaredNames,
-						schemaName,
-						'rawExists',
-						anchorScope,
-						deps.dialectCapabilities,
-						deps.dbCasing,
-						parent,
+	// A report planRecursive issued carries start.where resolved (recursiveFilters.start);
+	// a report without it (hand-built) keeps the direct compile.
+	const anchorWhere =
+		intent.start.where && !report.recursiveFilters?.start
+			? compileCondition(intent.start.where, {
+					position: 'recursive-anchor',
+					logicalSourceTable: startTable,
+					emittedAlias: '__n',
+					visibleAliases: new Map([['__n', startTable]]),
+					paramState: state,
+					defaultPkColumnName: deps.defaultPk,
+					deriveFkColumnName: deps.deriveFk,
+					aliasColumnAuthorities: bindAliasAuthority(
+						undefined,
+						queryLocal('__n'),
+						{
+							target: queryLocal(startTable),
+							logicalTable: startTable,
+						},
 					),
-			})
-		: undefined;
+					...(deps.model !== undefined && { model: deps.model }),
+					...(deps.declaredNames !== undefined && {
+						declaredNames: deps.declaredNames,
+					}),
+					...(schemaName !== undefined && { schemaName }),
+					...(deps.dbCasing !== undefined && { dbCasing: deps.dbCasing }),
+					...(deps.dialectCapabilities !== undefined && {
+						dialectCapabilities: deps.dialectCapabilities,
+					}),
+					scope: anchorScope,
+					currentBinding: anchorBinding,
+					compileSubquery: (query, offset, parent) =>
+						buildSubqueryFromIntent(
+							query,
+							offset,
+							deps.declaredNames,
+							schemaName,
+							'rawExists',
+							anchorScope,
+							deps.dialectCapabilities,
+							deps.dbCasing,
+							parent,
+						),
+				})
+			: undefined;
 
 	let config: RecursiveCteConfig;
 
@@ -641,6 +643,12 @@ export function compileRecursive<T = unknown>(
 	}
 
 	// Build the recursive CTE
+	if (report.recursiveFilters?.start)
+		config.anchorWhere = compileResolvedCondition(
+			report.recursiveFilters.start,
+			config.ctx,
+			state,
+		);
 	if (report.recursiveFilters?.anchor) {
 		const predicate = compileResolvedCondition(
 			report.recursiveFilters.anchor,

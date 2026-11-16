@@ -75,7 +75,7 @@ for (const withPostId of [false, true]) {
 							caseWhen(condition, literal(1)).else(literal(0)).as('flag'),
 						])
 						.dump(),
-				).toThrowError(refusal('CASE-WHEN'));
+				).toThrowError(refusal('CASE WHEN'));
 			});
 		}
 		it('refuses a nested include resolved from a previously joined table', () => {

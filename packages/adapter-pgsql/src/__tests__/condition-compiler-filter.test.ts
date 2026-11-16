@@ -421,14 +421,14 @@ it('belongsTo FILTER resolves the referenced table key and source foreign key', 
 
 for (const [operator, sql] of [
 	['eq', '='],
-	['neq', '!='],
+	['neq', '<>'],
 	['gt', '>'],
 	['gte', '>='],
 	['lt', '<'],
 	['lte', '<='],
 	['isDistinctFrom', 'IS DISTINCT FROM'],
 	['=', '='],
-	['!=', '!='],
+	['!=', '<>'],
 	['>', '>'],
 	['>=', '>='],
 	['<', '<'],
@@ -468,7 +468,9 @@ for (const predicate of [exists, notExists]) {
 		expect(result.params).toEqual([]);
 	});
 }
-it('multi-hop FILTER relationFilter preserves outerRef', () => {
+// The hops of one relation path are not enclosing queries: outerRef binds the query's range,
+// as in the root WHERE; nesting the predicates binds a hop (see the nested tests above).
+it('multi-hop FILTER relationFilter binds outerRef to the query range', () => {
 	const result = orm
 		.select('users')
 		.columns([
@@ -481,7 +483,42 @@ it('multi-hop FILTER relationFilter preserves outerRef', () => {
 		])
 		.dump();
 	expect(result.sql).toBe(
-		'SELECT count(*) FILTER (WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0."authorId" AND EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE posts_exists_0.id = posts_exists_1."parentId" AND posts_exists_1."parentId" = posts_exists_0.id))) AS n FROM users',
+		'SELECT count(*) FILTER (WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0."authorId" AND EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE posts_exists_0.id = posts_exists_1."parentId" AND posts_exists_1."parentId" = users.id))) AS n FROM users',
+	);
+	expect(result.params).toEqual([]);
+});
+
+it('multi-hop FILTER relationFilter refuses an outerRef qualified by a hop', () => {
+	expect(() =>
+		orm
+			.select('users')
+			.columns([
+				aggregate({
+					kind: 'relationFilter',
+					relation: ['posts', 'children'],
+					mode: 'some',
+					where: eq('parentId', outerRef('posts.id')),
+				}).as('n'),
+			])
+			.dump(),
+	).toThrow("outerRef qualifier 'posts' is not visible in an enclosing query.");
+});
+
+it('FILTER compiles a correlated rawExists body with outerRef bound to the root', () => {
+	const result = orm
+		.select('users')
+		.columns([
+			aggregate(
+				rawExists(
+					subquery('posts')
+						.select('id')
+						.where(eq('authorId', outerRef('id'))),
+				),
+			).as('n'),
+		])
+		.dump();
+	expect(result.sql).toBe(
+		'SELECT count(*) FILTER (WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq."authorId" = users.id)) AS n FROM users',
 	);
 	expect(result.params).toEqual([]);
 });
@@ -544,7 +581,7 @@ it('FILTER include refuses an undeclared model relation', () => {
 			.dump(),
 	).toThrow(
 		new Error(
-			"FILTER include('typo'): no relation 'typo' is declared on table 'posts'.",
+			"include('typo'): no relation 'typo' is declared on table 'posts'. Use rawExists(subquery(...)) for an EXISTS over an undeclared or uncorrelated subquery.",
 		),
 	);
 });

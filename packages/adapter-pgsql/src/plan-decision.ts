@@ -108,6 +108,8 @@ export interface PlanDecision {
 	readonly subqueryOperator?: string;
 	// FILTER (WHERE ...) condition for aggregate expressions (WhereIntent serialized as PlanDecision)
 	readonly filterCondition?: PlanDecision;
+	// The FILTER condition as written; compiled through the resolved route when the plan carries core's execution
+	readonly filterIntent?: import('@dbsp/types').WhereIntent;
 	// Custom expression intent for selectCustomExpression, WHERE expression, and ORDER BY expression
 	readonly expressionIntent?: unknown;
 	// LIKE escape character

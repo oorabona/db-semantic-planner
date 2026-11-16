@@ -31,10 +31,14 @@ import {
 	createOrm,
 	eq,
 	exists,
+	fn,
 	inSubquery,
+	like,
 	not,
 	notExists,
 	or,
+	some,
+	star,
 	subquery,
 } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -44,7 +48,9 @@ import {
 	dropExistsCorrectnessSchema,
 	existsCorrectnessModel,
 	getTestAdapter,
+	getTestPool,
 	seedExistsCorrectnessData,
+	sql,
 } from './testkit/index.js';
 
 const SCHEMA = 'exists_correctness_e2e';
@@ -584,5 +590,102 @@ describe('Case 11: inSubquery + include — optimizer EXISTS must NOT filter the
 		// Both must return ALL of Alice's posts (p1 and p2) — decoupled from the filter.
 		expect(aliceExists!.posts).toHaveLength(2);
 		expect(aliceInSub!.posts).toHaveLength(2);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Mutation WHERE through the root resolver (#891): real rows touched
+// ---------------------------------------------------------------------------
+describe('mutation WHERE with a quantifier or a dotted relation path touches exactly the matching rows (#891)', () => {
+	// Own schema: these cases mutate rows, and posts cascade so a user can be deleted.
+	const MUTATION_SCHEMA = 'exists_correctness_mutation_e2e';
+
+	beforeAll(async () => {
+		const pool = await getTestPool();
+		const s = sql.ref(MUTATION_SCHEMA);
+		await dropExistsCorrectnessSchema(MUTATION_SCHEMA);
+		await sql`CREATE SCHEMA ${s}`.execute(pool);
+		await sql`
+      CREATE TABLE ${s}.users (
+        id     INTEGER PRIMARY KEY,
+        name   TEXT    NOT NULL,
+        active BOOLEAN NOT NULL DEFAULT true
+      )
+    `.execute(pool);
+		await sql`
+      CREATE TABLE ${s}.posts (
+        id        INTEGER PRIMARY KEY,
+        title     TEXT    NOT NULL,
+        author_id INTEGER NOT NULL REFERENCES ${s}.users(id) ON DELETE CASCADE,
+        published BOOLEAN NOT NULL DEFAULT false
+      )
+    `.execute(pool);
+		await sql`
+      INSERT INTO ${s}.users (id, name) VALUES
+        (1, 'Alice'), (2, 'Bob'), (3, 'Carol'), (4, 'Dave')
+    `.execute(pool);
+		await sql`
+      INSERT INTO ${s}.posts (id, title, author_id) VALUES
+        (1, 'x', 1), (2, 'y', 1), (3, 'x', 3), (4, 'y', 2)
+    `.execute(pool);
+	});
+
+	afterAll(async () => {
+		await dropExistsCorrectnessSchema(MUTATION_SCHEMA);
+	});
+
+	it('UPDATE with some() updates the users having a matching post, then DELETE with a dotted path deletes those users', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ model: existsCorrectnessModel, adapter });
+		const scoped = orm.withSchema(MUTATION_SCHEMA);
+		// A model-built ORM carries no relation types on orm.tables.
+		const usersPosts = orm.tables.users?.posts as unknown as Parameters<
+			typeof some
+		>[0];
+
+		const updated = await scoped
+			.update('users')
+			.set({ active: false })
+			.where(some(usersPosts, () => eq('title', 'x')))
+			.affectedRows();
+		expect(updated).toBe(2);
+		const inactive = (await scoped
+			.select('users')
+			.where(eq('active', false))
+			.columns(['name'])
+			.execute()) as Array<{ name: string }>;
+		expect(sortedNames(inactive)).toEqual(['Alice', 'Carol']);
+
+		const deleted = await scoped
+			.delete('users')
+			.where(eq('posts.title', 'y'))
+			.affectedRows();
+		expect(deleted).toBe(2);
+		const remaining = (await scoped
+			.select('users')
+			.columns(['name'])
+			.execute()) as Array<{ name: string }>;
+		expect(sortedNames(remaining)).toEqual(['Carol', 'Dave']);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// #891 slice 3 — a dotted relation path in an aggregate FILTER, real rows
+// ---------------------------------------------------------------------------
+describe('aggregate FILTER with a dotted relation path counts on real rows (#891 slice 3)', () => {
+	it("counts the users having a post titled like '%draft' (Alice and Carol)", async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ model: existsCorrectnessModel, adapter });
+
+		const rows = (await orm
+			.withSchema(SCHEMA)
+			.select('users')
+			.columns([
+				fn('count', star()).filter(like('posts.title', '%draft')).as('n'),
+			])
+			.execute()) as Array<{ n: number | string }>;
+
+		// posts 'Alice draft' and 'Carol draft' belong to users 1 and 3; the root has no WHERE.
+		expect(rows.map((r) => Number(r.n))).toEqual([2]);
 	});
 });

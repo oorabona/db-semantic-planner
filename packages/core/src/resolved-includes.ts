@@ -25,7 +25,11 @@ import { getDefaultFilter } from './default-filter-map.js';
 import { findDefaultFilterScan } from './dx/default-filter-refusals.js';
 import { InvalidOperationError } from './dx/errors.js';
 import { relationJoinHops } from './dx/relation-join-path.js';
-import { getRelationalReadPolicy } from './relational-read-plans.js';
+import { isBoundPayload } from './intent-payload.js';
+import {
+	containsRelationalReadPolicy,
+	getRelationalReadPolicy,
+} from './relational-read-plans.js';
 import {
 	resolveConditionContext,
 	resolveScanDefaultFilter,
@@ -639,13 +643,70 @@ export function resolveReportIncludes(
 	>[number][] = [];
 	// Visit each occurrence, but leave cyclic metadata to the compiler's refusal.
 	const inspected = new WeakSet<object>();
-	const inspect = (value: unknown, intentPath: string): void => {
+	// Expression-position bodies share one alias counter, as the legacy FILTER lowering did.
+	const expressionAliases = { count: 0 };
+	const dottedField = (node: Record<string, unknown>): boolean =>
+		[
+			'comparison',
+			'like',
+			'in',
+			'any',
+			'null',
+			'range',
+			'jsonContains',
+			'jsonExists',
+		].includes(String(node.kind)) &&
+		typeof node.field === 'string' &&
+		node.field.includes('.');
+	// In HAVING a dotted field may name a SELECT alias or a relation path. Until
+	// that is decided per occurrence (#1005), such nodes keep main's gate wherever
+	// the same object appears. Bodies a resolved predicate absorbs hold no alias,
+	// so the walk stays on HAVING's own condition tree.
+	const havingDotted = new WeakSet<object>();
+	const absorbsBody = (node: Record<string, unknown>): boolean =>
+		[
+			'exists',
+			'notExists',
+			'relationFilter',
+			'rawExists',
+			'rawNotExists',
+		].includes(String(node.kind)) ||
+		((node.kind === 'subquery' || node.kind === 'in') &&
+			(node.subquery !== undefined || node.query !== undefined));
+	const collectHavingDotted = (value: unknown, seen: Set<object>): void => {
+		if (!value || typeof value !== 'object' || isParamIntent(value)) return;
+		if (seen.has(value)) return;
+		seen.add(value);
+		if (Array.isArray(value)) {
+			for (const child of value) collectHavingDotted(child, seen);
+			return;
+		}
+		const node = value as Record<string, unknown>;
+		if (
+			dottedField(node) ||
+			(node.kind === 'subquery' &&
+				typeof node.field === 'string' &&
+				node.field.includes('.'))
+		)
+			havingDotted.add(value);
+		if (absorbsBody(node)) return;
+		for (const [key, child] of Object.entries(node)) {
+			if (isBoundPayload(node, key, child)) continue;
+			collectHavingDotted(child, seen);
+		}
+	};
+	collectHavingDotted(intent.having, new Set());
+	const inspect = (
+		value: unknown,
+		intentPath: string,
+		condition?: 'HAVING' | 'CASE WHEN' | 'FILTER',
+	): void => {
 		if (!value || typeof value !== 'object' || isParamIntent(value)) return;
 		if (inspected.has(value)) return;
 		inspected.add(value);
 		if (Array.isArray(value)) {
 			value.forEach((child, index) => {
-				inspect(child, `${intentPath}[${index}]`);
+				inspect(child, `${intentPath}[${index}]`, condition);
 			});
 			inspected.delete(value);
 			return;
@@ -665,7 +726,7 @@ export function resolveReportIncludes(
 			const query = node.query as QueryIntent;
 			if (
 				!model ||
-				(!getRelationalReadPolicy(query) &&
+				(!containsRelationalReadPolicy(query) &&
 					!findDefaultFilterScan(
 						query,
 						model,
@@ -706,12 +767,15 @@ export function resolveReportIncludes(
 			].includes(String(node.kind)) ||
 			(node.kind === 'subquery' && node.subquery) ||
 			(node.kind === 'in' && node.subquery) ||
-			(typeof node.field === 'string' && node.field.includes('.'));
+			dottedField(node);
+		const legacy = havingDotted.has(value);
 		if (
 			predicate &&
 			model &&
-			((node.subquery &&
-				getRelationalReadPolicy(node.subquery as QueryIntent)) ||
+			condition &&
+			(!legacy ||
+				(node.subquery &&
+					getRelationalReadPolicy(node.subquery as QueryIntent)) ||
 				findDefaultFilterScan(
 					{ type: 'select', from: rootRange.table, where: node },
 					model,
@@ -720,36 +784,58 @@ export function resolveReportIncludes(
 					true,
 				))
 		) {
-			const condition = resolveConditionContext(
+			const resolved = resolveConditionContext(
 				node as unknown as WhereIntent,
 				rootRange,
 				visible,
 				[],
 				allocator,
 				model,
-				0,
+				legacy ? 0 : expressionAliases.count,
 				[],
-				{ defaultFilters: options.defaultFilters },
+				legacy
+					? { defaultFilters: options.defaultFilters }
+					: {
+							defaultFilters: options.defaultFilters,
+							label: condition,
+							aliasState: expressionAliases,
+						},
 			);
-			if (!condition)
+			if (!resolved)
 				throw new Error(`Missing resolved condition at ${intentPath}`);
-			expressionConditions.push({ intentPath, condition });
+			expressionConditions.push({ intentPath, condition: resolved });
 			inspected.delete(value);
 			return;
 		}
 		for (const [key, child] of Object.entries(node)) {
-			if (
-				(key === 'value' || key === 'values') &&
-				(!child || typeof child !== 'object' || !(EXPRESSION_BRAND in child))
-			)
+			if (isBoundPayload(node, key, child)) continue;
+			// A CASE WHEN root is the condition of a CASE branch.
+			if (node.kind === 'case' && key === 'when' && Array.isArray(child)) {
+				child.forEach((branch, index) => {
+					if (!branch || typeof branch !== 'object') return;
+					for (const [bkey, bchild] of Object.entries(branch)) {
+						inspect(
+							bchild,
+							`${intentPath}.when[${index}].${bkey}`,
+							bkey === 'condition' ? 'CASE WHEN' : condition,
+						);
+					}
+				});
 				continue;
-			inspect(child, `${intentPath}.${key}`);
+			}
+			// A FILTER root is the filter of a function or aggregate call.
+			const filterRoot =
+				key === 'filter' &&
+				(node.kind === 'customFn' ||
+					node.kind === 'aggregate' ||
+					(node.kind === undefined && typeof node.function === 'string'));
+			inspect(child, `${intentPath}.${key}`, filterRoot ? 'FILTER' : condition);
 		}
 		inspected.delete(value);
 	};
 	inspect(intent.select, 'select');
 	inspect(intent.orderBy, 'orderBy');
-	inspect(intent.having, 'having');
+	inspect(intent.having, 'having', 'HAVING');
 	return {
 		rootRange,
 		joins,
