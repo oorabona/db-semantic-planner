@@ -1,11 +1,11 @@
 import {
-	EXPRESSION_BRAND,
 	isParamIntent,
 	type ModelIR,
 	type QueryIntent,
 } from '@dbsp/types';
 import { getTrustedNqlRelationFilterFields } from '@dbsp/types/internal';
 import { getDefaultFilter } from '../default-filter-map.js';
+import { isBoundPayload } from '../intent-payload.js';
 import type { DefaultFilters } from './schema.js';
 
 /** Legacy read issuers do not carry resolved scan predicates yet. */
@@ -88,11 +88,7 @@ export function findDefaultFilterScan(
 		}
 		for (const [key, child] of Object.entries(node)) {
 			// Bound and literal payloads are data, never query structure.
-			if (
-				(key === 'value' || key === 'values') &&
-				(!child || typeof child !== 'object' || !(EXPRESSION_BRAND in child))
-			)
-				continue;
+			if (isBoundPayload(node, key, child)) continue;
 			visit(child, source, `${location}.${key}`);
 		}
 	};
@@ -196,11 +192,7 @@ export function assertUnsupportedNqlDefaultFilters(
 			}
 		}
 		for (const [key, child] of Object.entries(node)) {
-			if (
-				(key === 'value' || key === 'values') &&
-				(!child || typeof child !== 'object' || !(EXPRESSION_BRAND in child))
-			)
-				continue;
+			if (isBoundPayload(node, key, child)) continue;
 			visit(child, source, `${location}.${key}`);
 		}
 	};

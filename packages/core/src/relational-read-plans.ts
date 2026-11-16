@@ -1,5 +1,4 @@
 import {
-	EXPRESSION_BRAND,
 	isParamIntent,
 	type ModelIR,
 	type PlanOptions,
@@ -7,6 +6,7 @@ import {
 	type QueryIntent,
 } from '@dbsp/types';
 import { assertUnplannedDefaultFilters } from './dx/default-filter-refusals.js';
+import { isBoundPayload } from './intent-payload.js';
 
 // Retain the plan issued with each builder's policy, including opted-out leaves.
 // These bodies are in-process intents; policy is not public intent syntax.
@@ -80,11 +80,7 @@ export function containsRelationalReadPolicy(intent: unknown): boolean {
 			return true;
 		if (Array.isArray(value)) return value.some(visit);
 		for (const [key, child] of Object.entries(node)) {
-			if (
-				(key === 'value' || key === 'values') &&
-				(!child || typeof child !== 'object' || !(EXPRESSION_BRAND in child))
-			)
-				continue;
+			if (isBoundPayload(node, key, child)) continue;
 			if (visit(child)) return true;
 		}
 		return false;
