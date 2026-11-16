@@ -1046,6 +1046,67 @@ describe('selectExpression bodies and nested issued policies', () => {
 		);
 	});
 
+	it('compiles an aggregate FILTER in an EXISTS body, where only existence counts', () => {
+		const body = {
+			buildIntent: () => ({
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'count', field: '*', filter: eq('id', 1) }],
+				},
+			}),
+		} as unknown as Parameters<typeof rawExists>[0];
+		expect(filtered.select('users').where(rawExists(body)).dump().sql).toBe(
+			'SELECT users.* FROM users WHERE EXISTS (SELECT count(*) FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL)',
+		);
+	});
+
+	describe('an IN body carrying its own policy is not rewritten to EXISTS', () => {
+		const inBody = (orm: typeof filtered) =>
+			new SubqueryExpression(
+				rawExists(
+					orm.select('posts').columns(['author_id']) as unknown as Parameters<
+						typeof rawExists
+					>[0],
+				).subquery,
+			);
+		it('keeps a nested opt-out in a selectExpression body', () => {
+			expect(
+				filtered.selectExpression(
+					subquery('users')
+						.where(inSubquery('id', inBody(filtered.withoutDefaultFilters())))
+						.count()
+						.asExpr('n'),
+				).sql,
+			).toBe(
+				'SELECT (SELECT count(*) FROM users WHERE users.id = ANY (SELECT posts_subq_0.author_id FROM posts AS posts_subq_0))',
+			);
+		});
+		it('keeps a nested filtered builder under an unfiltered ORM', () => {
+			expect(
+				outer.selectExpression(
+					subquery('users')
+						.where(inSubquery('id', inBody(filtered)))
+						.count()
+						.asExpr('n'),
+				).sql,
+			).toBe(
+				'SELECT (SELECT count(*) FROM users WHERE users.id = ANY (SELECT posts_subq_0.author_id FROM posts AS posts_subq_0 WHERE posts_subq_0.deleted_at IS NULL))',
+			);
+		});
+		it('keeps a nested opt-out in a root WHERE', () => {
+			expect(
+				filtered
+					.select('users')
+					.where(inSubquery('id', inBody(filtered.withoutDefaultFilters())))
+					.dump().sql,
+			).toBe(
+				'SELECT users.* FROM users WHERE users.id = ANY (SELECT posts_subq_0.author_id FROM posts AS posts_subq_0)',
+			);
+		});
+	});
+
 	it('does not walk bound payloads looking for nested policies', () => {
 		const docsDb = schema({
 			docs: { id: { type: 'integer', primaryKey: true }, payload: 'json' },
