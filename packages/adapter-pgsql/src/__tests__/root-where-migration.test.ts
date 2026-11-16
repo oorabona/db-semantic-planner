@@ -5,19 +5,24 @@ import {
 	exists,
 	fn,
 	inSubquery,
+	isNull,
+	like,
+	none,
 	not,
 	notExists,
 	or,
 	outerRef,
 	rangeOverlaps,
+	rawExists,
 	ref,
 	schema,
+	some,
 	star,
 	subquery,
 } from '@dbsp/core';
 import type { WhereIntent } from '@dbsp/types';
 import { deparseSync } from 'pgsql-deparser';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as conditions from '../condition-compiler.js';
 import type { ConditionCompilerCtx } from '../condition-context.js';
 import { createWhereDispatcher } from '../handlers/index.js';
@@ -442,4 +447,390 @@ it('4a item 4 refuses recursive relations before dotted sibling routing', () => 
 			);
 		}
 	}
+});
+
+describe('mutation WHERE resolves through the root resolver (#891)', () => {
+	const mutationDb = schema({
+		users: {
+			id: { type: 'integer', primaryKey: true },
+			name: 'text',
+			score: 'integer',
+		},
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			title: 'text',
+			author_id: ref('users', { as: 'author', inverse: 'posts' }),
+			parent_id: ref('posts', {
+				roles: { parent: 'parent', children: 'children' },
+			}),
+		},
+	} as const);
+	const mutationAdapter = createPgCompileOnlyAdapter({
+		model: mutationDb.model,
+	});
+	const mutationOrm = createOrm({
+		schema: mutationDb,
+		adapter: mutationAdapter,
+		suppressDxWarnings: true,
+	});
+	const { users } = mutationOrm.tables;
+	const update = (c: WhereIntent) =>
+		mutationOrm.update('users').set({ name: 'n' }).where(c).dump();
+	const remove = (c: WhereIntent) =>
+		mutationOrm.delete('users').where(c).dump();
+	const guard = (c: WhereIntent) =>
+		mutationOrm
+			.upsertInto(users)
+			.values({ id: 1, name: 'a', score: 0 })
+			.onConflict(['id'])
+			.doUpdate({ name: 'b' }, c)
+			.dump();
+	const titled = () =>
+		exists('posts', { where: eq('title', 'x') }) as WhereIntent;
+	const relationExists = (n: number) =>
+		`EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND posts_exists_0.title = $${n})`;
+
+	it('AC1 some() compiles in UPDATE and DELETE', () => {
+		const c = () => some(users.posts, () => eq('title', 'x'));
+		expect(update(c())).toMatchObject({
+			sql: `UPDATE users SET name = $1 WHERE ${relationExists(2)}`,
+			parameters: ['n', 'x'],
+		});
+		expect(remove(c())).toMatchObject({
+			sql: `DELETE FROM users WHERE ${relationExists(1)}`,
+			parameters: ['x'],
+		});
+	});
+
+	it('AC2 none() compiles in UPDATE and DELETE', () => {
+		const c = () => none(users.posts, () => eq('title', 'x'));
+		expect(update(c())).toMatchObject({
+			sql: `UPDATE users SET name = $1 WHERE NOT (${relationExists(2)})`,
+			parameters: ['n', 'x'],
+		});
+		expect(remove(c())).toMatchObject({
+			sql: `DELETE FROM users WHERE NOT (${relationExists(1)})`,
+			parameters: ['x'],
+		});
+	});
+
+	it('AC3 rawExists() compiles in UPDATE and DELETE', () => {
+		const c = () =>
+			rawExists(subquery('posts').select('id').where(eq('title', 'x')));
+		expect(update(c())).toMatchObject({
+			sql: 'UPDATE users SET name = $1 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.title = $2)',
+			parameters: ['n', 'x'],
+		});
+		expect(remove(c())).toMatchObject({
+			sql: 'DELETE FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.title = $1)',
+			parameters: ['x'],
+		});
+	});
+
+	it('AC4 a dotted relation path compiles to the relation EXISTS in UPDATE, DELETE and the upsert guard', () => {
+		const c = () => eq('posts.title', 'x');
+		expect(update(c())).toMatchObject({
+			sql: `UPDATE users SET name = $1 WHERE ${relationExists(2)}`,
+			parameters: ['n', 'x'],
+		});
+		expect(remove(c())).toMatchObject({
+			sql: `DELETE FROM users WHERE ${relationExists(1)}`,
+			parameters: ['x'],
+		});
+		expect(guard(c())).toMatchObject({
+			sql: `INSERT INTO users (id, name, score) VALUES ($1, $2, $3) ON CONFLICT (id) DO UPDATE SET name = $4 WHERE ${relationExists(5)}`,
+			parameters: [1, 'a', 0, 'b', 'x'],
+		});
+	});
+
+	it('AC5 eq, exists and inSubquery keep their SQL in every mutation position', () => {
+		const head =
+			'INSERT INTO users (id, name, score) VALUES ($1, $2, $3) ON CONFLICT (id) DO UPDATE SET name = $4 WHERE';
+		const any = (n: string) =>
+			`users.id = ANY (SELECT posts_subq_0.author_id FROM posts AS posts_subq_0)${n}`;
+		const insub = () => inSubquery('id', subquery('posts').select('author_id'));
+		const rows = [
+			[
+				update(eq('score', 1)),
+				'UPDATE users SET name = $1 WHERE users.score = $2',
+				['n', 1],
+			],
+			[remove(eq('score', 1)), 'DELETE FROM users WHERE users.score = $1', [1]],
+			[guard(eq('score', 1)), `${head} users.score = $5`, [1, 'a', 0, 'b', 1]],
+			[
+				update(titled()),
+				`UPDATE users SET name = $1 WHERE ${relationExists(2)}`,
+				['n', 'x'],
+			],
+			[remove(titled()), `DELETE FROM users WHERE ${relationExists(1)}`, ['x']],
+			[guard(titled()), `${head} ${relationExists(5)}`, [1, 'a', 0, 'b', 'x']],
+			[update(insub()), `UPDATE users SET name = $1 WHERE ${any('')}`, ['n']],
+			[remove(insub()), `DELETE FROM users WHERE ${any('')}`, []],
+			[guard(insub()), `${head} ${any('')}`, [1, 'a', 0, 'b']],
+		] as const;
+		for (const [result, sql, parameters] of rows) {
+			expect(result.sql).toBe(sql);
+			expect(result.parameters).toEqual(parameters);
+		}
+	});
+
+	it('AC9 LIKE keeps its ESCAPE clause in UPDATE', () => {
+		expect(update(like('name', 'c!_%', { escape: '!' }))).toMatchObject({
+			sql: 'UPDATE users SET name = $1 WHERE users.name LIKE $2 ESCAPE $3',
+			parameters: ['n', 'c!_%', '!'],
+		});
+	});
+
+	it('AC10 refuses a recursive relation predicate in every mutation position', () => {
+		const c = () =>
+			exists('posts', {
+				recursive: { maxDepth: 5, direction: 'down', through: 'children' },
+			});
+		for (const compile of [update, remove, guard]) {
+			expect(() => compile(c())).toThrow(
+				"WHERE exists('posts'): recursive relation predicates are not supported inside WHERE.",
+			);
+		}
+	});
+
+	it('R1 refuses an undeclared relation with the root resolver message', () => {
+		for (const compile of [update, remove]) {
+			expect(() => compile(exists('nope'))).toThrow(
+				"exists('nope'): no relation 'nope' is declared on table 'users'. Use rawExists(subquery(...)) for an EXISTS over an undeclared or uncorrelated subquery.",
+			);
+		}
+	});
+
+	it('C2 without a model, the old route keeps its outcome per position', () => {
+		const noModel = createPgCompileOnlyAdapter();
+		const quantifier = some(users.posts, () => eq('title', 'x'));
+		const raw = rawExists(
+			subquery('posts').select('id').where(eq('title', 'x')),
+		);
+		for (const where of [quantifier, raw]) {
+			expect(() =>
+				noModel.compileUpdate({
+					type: 'update',
+					table: 'users',
+					set: { name: 'n' },
+					where,
+				}),
+			).toThrow('No WHERE handler registered for operator: undefined');
+			expect(() =>
+				noModel.compileDelete({ type: 'delete', table: 'users', where }),
+			).toThrow('No WHERE handler registered for operator: undefined');
+		}
+		const spy = vi.spyOn(mutationAdapter, 'compileUpsert');
+		guard(raw);
+		const intent = spy.mock.calls[0]?.[0];
+		expect(intent).toBeDefined();
+		expect(noModel.compileUpsert(intent!)).toMatchObject({
+			sql: 'INSERT INTO users (id, name, score) VALUES ($1, $2, $3) ON CONFLICT (id) DO UPDATE SET name = $4 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.title = $5)',
+			parameters: [1, 'a', 0, 'b', 'x'],
+		});
+	});
+
+	describe('a snake_case target and nested read policies', () => {
+		const policyDb = schema(
+			{
+				userProfiles: {
+					id: { type: 'integer', primaryKey: true },
+					displayName: 'text',
+				},
+				posts: {
+					id: { type: 'integer', primaryKey: true },
+					title: 'text',
+					deleted_at: { type: 'timestamp', nullable: true },
+					authorId: ref('userProfiles', { as: 'author', inverse: 'posts' }),
+				},
+			} as const,
+			undefined,
+			{ defaultFilters: { posts: isNull('deleted_at') } },
+		);
+		const snake = createOrm({
+			schema: policyDb,
+			adapter: createPgCompileOnlyAdapter({
+				model: policyDb.model,
+				dbCasing: 'snake_case',
+			}),
+			suppressDxWarnings: true,
+		});
+		const filtered = createOrm({
+			schema: policyDb,
+			adapter: createPgCompileOnlyAdapter({ model: policyDb.model }),
+			suppressDxWarnings: true,
+		});
+		const outer = filtered.withoutDefaultFilters();
+		// rawExists() accepts an ORM builder at runtime; its public type does not
+		// list QueryBuilder yet (#994), hence the cast.
+		const issued = (builder: unknown) =>
+			builder as Parameters<typeof rawExists>[0];
+		const snakeGuard = (c: WhereIntent) =>
+			snake
+				.upsertInto(snake.tables.userProfiles)
+				.values({ id: 1, displayName: 'a' })
+				.onConflict(['id'])
+				.doUpdate({ displayName: 'b' }, c)
+				.dump().sql;
+		const snakeHead =
+			'INSERT INTO user_profiles (id, display_name) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET display_name = $3 WHERE';
+
+		it('AC11 UPDATE and DELETE keep the physical target name', () => {
+			expect(
+				snake
+					.update('userProfiles')
+					.set({ displayName: 'n' })
+					.where(eq('id', 1))
+					.dump().sql,
+			).toBe(
+				'UPDATE user_profiles SET display_name = $1 WHERE user_profiles.id = $2',
+			);
+			expect(snake.delete('userProfiles').where(eq('id', 1)).dump().sql).toBe(
+				'DELETE FROM user_profiles WHERE user_profiles.id = $1',
+			);
+		});
+
+		it('AC11 the upsert guard qualifies by the physical target name', () => {
+			expect(snakeGuard(eq('id', 1))).toBe(
+				`${snakeHead} user_profiles.id = $4`,
+			);
+			expect(snakeGuard(exists('posts', { where: eq('title', 'x') }))).toBe(
+				`${snakeHead} EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE user_profiles.id = posts_exists_0.author_id AND posts_exists_0.title = $4)`,
+			);
+		});
+
+		it('AC12 a nested filtered builder keeps its policy under an unfiltered ORM', () => {
+			expect(
+				outer
+					.update('userProfiles')
+					.set({ displayName: 'n' })
+					.where(rawExists(issued(filtered.select('posts').columns(['id']))))
+					.dump().sql,
+			).toBe(
+				'UPDATE "userProfiles" SET "displayName" = $1 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL)',
+			);
+		});
+
+		it('AC12 a nested opted-out builder applies no filter', () => {
+			expect(
+				outer
+					.delete('userProfiles')
+					.where(
+						rawExists(
+							issued(
+								filtered
+									.withoutDefaultFilters()
+									.select('posts')
+									.columns(['id']),
+							),
+						),
+					)
+					.dump().sql,
+			).toBe(
+				'DELETE FROM "userProfiles" WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq)',
+			);
+		});
+
+		it('AC12 a plain exists in a filtered ORM mutation stays unfiltered', () => {
+			expect(
+				filtered
+					.update('userProfiles')
+					.set({ displayName: 'n' })
+					.where(exists('posts', { where: eq('title', 'x') }))
+					.dump(),
+			).toMatchObject({
+				sql: 'UPDATE "userProfiles" SET "displayName" = $1 WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE "userProfiles".id = posts_exists_0."authorId" AND posts_exists_0.title = $2)',
+				parameters: ['n', 'x'],
+			});
+		});
+
+		it('AC13 the unnest upsert compiles a dotted guard after the unnest arrays', () => {
+			const rows = Array.from({ length: 200 }, (_, i) => ({
+				id: i + 1,
+				displayName: 'a',
+			}));
+			const result = filtered
+				.upsertInto(filtered.tables.userProfiles)
+				.values(rows)
+				.onConflict(['id'])
+				.doUpdate({ displayName: 'b' }, eq('posts.title', 'x'))
+				.dump();
+			expect(result.sql).toBe(
+				'INSERT INTO "userProfiles" (id, "displayName") SELECT unnest(CAST($1 AS int4[])) AS id, unnest(CAST($2 AS text[])) AS "displayName" ON CONFLICT (id) DO UPDATE SET "displayName" = $3 WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE "userProfiles".id = posts_exists_0."authorId" AND posts_exists_0.title = $4)',
+			);
+			expect(result.parameters).toHaveLength(4);
+			expect(result.parameters.slice(2)).toEqual(['b', 'x']);
+		});
+	});
+
+	describe('AC7 schema, casing and NQL context', () => {
+		const blogDb = schema({
+			users: { id: { type: 'integer', primaryKey: true }, displayName: 'text' },
+			blogPosts: {
+				id: { type: 'integer', primaryKey: true },
+				postTitle: 'text',
+				authorId: ref('users', { as: 'author', inverse: 'posts' }),
+			},
+		} as const);
+		const plain = createOrm({
+			schema: blogDb,
+			adapter: createPgCompileOnlyAdapter({ model: blogDb.model }),
+			suppressDxWarnings: true,
+		});
+		const snake = createOrm({
+			schema: blogDb,
+			adapter: createPgCompileOnlyAdapter({
+				model: blogDb.model,
+				dbCasing: 'snake_case',
+			}),
+			suppressDxWarnings: true,
+		});
+		const titledPost = () =>
+			exists('posts', { where: eq('postTitle', 'x') }) as WhereIntent;
+
+		it('withSchema qualifies the target and the relation table', () => {
+			expect(
+				plain
+					.withSchema('t1')
+					.update('users')
+					.set({ displayName: 'n' })
+					.where(titledPost())
+					.dump().sql,
+			).toBe(
+				'UPDATE t1.users SET "displayName" = $1 WHERE EXISTS (SELECT 1 FROM t1."blogPosts" AS "blogPosts_exists_0" WHERE users.id = "blogPosts_exists_0"."authorId" AND "blogPosts_exists_0"."postTitle" = $2)',
+			);
+		});
+
+		it('snake_case casing applies inside the resolved condition', () => {
+			expect(
+				snake
+					.update('users')
+					.set({ displayName: 'n' })
+					.where(titledPost())
+					.dump().sql,
+			).toBe(
+				'UPDATE users SET display_name = $1 WHERE EXISTS (SELECT 1 FROM blog_posts AS "blogPosts_exists_0" WHERE users.id = "blogPosts_exists_0".author_id AND "blogPosts_exists_0".post_title = $2)',
+			);
+			expect(
+				snake
+					.delete('users')
+					.where(some(snake.tables.users.posts, () => eq('postTitle', 'x')))
+					.dump().sql,
+			).toBe(
+				'DELETE FROM users WHERE EXISTS (SELECT 1 FROM blog_posts AS "blogPosts_exists_0" WHERE users.id = "blogPosts_exists_0".author_id AND "blogPosts_exists_0".post_title = $1)',
+			);
+		});
+
+		it('NQL mutations compile their WHERE through the same route', () => {
+			const v = 'n';
+			expect(
+				plain.nql`update users set displayName = ${v} where id = 1`.dump().sql,
+			).toBe('UPDATE users SET "displayName" = $1 WHERE users.id = $2');
+			expect(
+				plain.nql`delete from users where posts.postTitle = 'x'`.dump().sql,
+			).toBe(
+				'DELETE FROM users WHERE EXISTS (SELECT 1 FROM "blogPosts" AS "blogPosts_exists_0" WHERE users.id = "blogPosts_exists_0"."authorId" AND "blogPosts_exists_0"."postTitle" = $1)',
+			);
+		});
+	});
 });
