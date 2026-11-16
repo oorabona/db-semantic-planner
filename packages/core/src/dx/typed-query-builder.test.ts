@@ -114,7 +114,7 @@ describe('DX-040 Block 4: Typed Query Builder', () => {
 
 			expect(plan.intent.where).toEqual({
 				kind: 'comparison',
-				field: 'active',
+				field: 'users.active',
 				operator: 'eq',
 				value: true,
 			});
@@ -135,8 +135,13 @@ describe('DX-040 Block 4: Typed Query Builder', () => {
 			expect(plan.intent.where).toEqual({
 				kind: 'and',
 				conditions: [
-					{ kind: 'comparison', field: 'active', operator: 'eq', value: true },
-					{ kind: 'comparison', field: 'age', operator: 'gt', value: 18 },
+					{
+						kind: 'comparison',
+						field: 'users.active',
+						operator: 'eq',
+						value: true,
+					},
+					{ kind: 'comparison', field: 'users.age', operator: 'gt', value: 18 },
 				],
 			});
 		});
@@ -200,8 +205,13 @@ describe('DX-040 Block 4: Typed Query Builder', () => {
 			expect(plan.intent.where).toEqual({
 				kind: 'and',
 				conditions: [
-					{ kind: 'comparison', field: 'active', operator: 'eq', value: true },
-					{ kind: 'comparison', field: 'age', operator: 'gt', value: 21 },
+					{
+						kind: 'comparison',
+						field: 'users.active',
+						operator: 'eq',
+						value: true,
+					},
+					{ kind: 'comparison', field: 'users.age', operator: 'gt', value: 21 },
 				],
 			});
 			expect(plan.intent.orderBy).toEqual([
@@ -361,7 +371,7 @@ describe('DX-040 Block 4: Typed Query Builder', () => {
 			});
 			expect(plan.intent.where).toEqual({
 				kind: 'comparison',
-				field: 'active',
+				field: 'users.active',
 				operator: 'eq',
 				value: true,
 			});

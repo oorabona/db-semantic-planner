@@ -69,7 +69,7 @@ describe('DX-040 Block 5: SQL Functions', () => {
 			expect(isAggregateExpr(expr)).toBe(true);
 			expect(expr._intent.kind).toBe('aggregate');
 			expect(expr._intent.function).toBe('count');
-			expect(expr._intent.field).toBe('id');
+			expect(expr._intent.field).toBe('users.id');
 		});
 
 		it('count() supports .as() for aliasing', () => {
@@ -85,7 +85,7 @@ describe('DX-040 Block 5: SQL Functions', () => {
 			const expr = count(users.id).as('userCount');
 
 			expect(expr._intent.as).toBe('userCount');
-			expect(expr._intent.field).toBe('id');
+			expect(expr._intent.field).toBe('users.id');
 		});
 	});
 
@@ -99,7 +99,7 @@ describe('DX-040 Block 5: SQL Functions', () => {
 			expect(isAggregateExpr(expr)).toBe(true);
 			expect(expr._intent.kind).toBe('aggregate');
 			expect(expr._intent.function).toBe('sum');
-			expect(expr._intent.field).toBe('amount');
+			expect(expr._intent.field).toBe('orders.amount');
 		});
 
 		it('sum() supports .as() for aliasing', () => {
@@ -122,7 +122,7 @@ describe('DX-040 Block 5: SQL Functions', () => {
 			expect(isAggregateExpr(expr)).toBe(true);
 			expect(expr._intent.kind).toBe('aggregate');
 			expect(expr._intent.function).toBe('avg');
-			expect(expr._intent.field).toBe('salary');
+			expect(expr._intent.field).toBe('users.salary');
 		});
 
 		it('avg() supports .as() for aliasing', () => {
@@ -145,7 +145,7 @@ describe('DX-040 Block 5: SQL Functions', () => {
 			expect(isAggregateExpr(expr)).toBe(true);
 			expect(expr._intent.kind).toBe('aggregate');
 			expect(expr._intent.function).toBe('min');
-			expect(expr._intent.field).toBe('createdAt');
+			expect(expr._intent.field).toBe('users.createdAt');
 		});
 
 		it('min() supports .as() for aliasing', () => {
@@ -168,7 +168,7 @@ describe('DX-040 Block 5: SQL Functions', () => {
 			expect(isAggregateExpr(expr)).toBe(true);
 			expect(expr._intent.kind).toBe('aggregate');
 			expect(expr._intent.function).toBe('max');
-			expect(expr._intent.field).toBe('salary');
+			expect(expr._intent.field).toBe('users.salary');
 		});
 
 		it('max() supports .as() for aliasing', () => {
@@ -195,7 +195,7 @@ describe('DX-040 Block 5: SQL Functions', () => {
 			expect(isScalarExpr(expr)).toBe(true);
 			expect(expr._intent.kind).toBe('coalesce');
 			if (expr._intent.kind === 'coalesce') {
-				expect(expr._intent.fields).toEqual(['nickname', 'name']);
+				expect(expr._intent.fields).toEqual(['users.nickname', 'users.name']);
 			}
 		});
 
@@ -217,7 +217,7 @@ describe('DX-040 Block 5: SQL Functions', () => {
 			expect(isScalarExpr(expr)).toBe(true);
 			expect(expr._intent.kind).toBe('coalesce');
 			if (expr._intent.kind === 'coalesce') {
-				expect(expr._intent.fields).toContain('nickname');
+				expect(expr._intent.fields).toContain('users.nickname');
 				expect(expr._intent.fields).toContain('Anonymous');
 			}
 		});
@@ -356,8 +356,8 @@ describe('DX-040 Block 5: SQL Functions', () => {
 			expect(isCaseExpr(expr)).toBe(true);
 			expect(expr._intent.kind).toBe('raw');
 			if (expr._intent.kind === 'raw') {
-				expect(expr._intent.sql).toContain('THEN email');
-				expect(expr._intent.sql).toContain('ELSE name');
+				expect(expr._intent.sql).toContain('THEN users.email');
+				expect(expr._intent.sql).toContain('ELSE users.name');
 			}
 		});
 	});

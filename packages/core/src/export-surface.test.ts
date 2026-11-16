@@ -39,10 +39,12 @@ const excluded = new Set([...names(moved), ...names(removed)]);
 const rootAdditions = ['InvalidJsonAggPayloadError', 'manyToMany'];
 const rootTypeAdditions = ['ManyToManyOptions', 'ManyToManyDefinition'];
 const internalAdditions = [
+	'assertNoPathRefInConditionBodies',
 	'copyDefaultFilters',
 	'compileNqlRead',
 	'createBindingFinalPlan',
 	'getRelationalReadPlan',
+	'refuseTableRootedQuantifier',
 ];
 const rootNames = [
 	'AmbiguousIncludeError',

@@ -13,7 +13,11 @@ import {
 	POSTGRESQL_CAPABILITIES,
 	plan as planFn,
 } from '@dbsp/core';
-import { inspectMutationRows, resolveSelectWhere } from '@dbsp/core/internal';
+import {
+	assertNoPathRefInConditionBodies,
+	inspectMutationRows,
+	resolveSelectWhere,
+} from '@dbsp/core/internal';
 import type {
 	BatchUpdateIntent,
 	CompiledQuery,
@@ -61,6 +65,10 @@ import {
 	createCompilerState,
 	type Decision,
 } from './handlers/index.js';
+import {
+	currentExpressionBinding,
+	type ExpressionCompilerContext,
+} from './handlers/types.js';
 import {
 	type BatchUpdateConfig,
 	compileDelete as compileDeleteMutation,
@@ -501,6 +509,28 @@ function getColumnTypes(
 	return result;
 }
 
+/**
+ * A mutation guard's subquery body sees the guard's row as its enclosing range,
+ * as a SELECT body does, so a relation path inside it is checked against every
+ * visible range (#991).
+ */
+function guardSubqueryParent(
+	parent: WhereCompilerCtx | undefined,
+): WhereCompilerCtx | undefined {
+	return (
+		parent && {
+			...parent,
+			// A guard context is a where context of the mutation's table; the
+			// binding helper reads only its current alias, root table and scope.
+			queryRanges: parent.queryRanges ?? [
+				currentExpressionBinding(
+					parent as unknown as ExpressionCompilerContext,
+				),
+			],
+		}
+	);
+}
+
 function compileUpsertActionWhere(
 	where: WhereIntent,
 	table: string,
@@ -526,7 +556,7 @@ function compileUpsertActionWhere(
 		...(deps.dialectCapabilities !== undefined && {
 			dialectCapabilities: deps.dialectCapabilities,
 		}),
-		compileSubquery: (sqIntent, paramOffset) =>
+		compileSubquery: (sqIntent, paramOffset, parent) =>
 			buildSubqueryFromIntent(
 				sqIntent,
 				paramOffset,
@@ -536,6 +566,7 @@ function compileUpsertActionWhere(
 				deps.scope,
 				deps.dialectCapabilities,
 				deps.dbCasing,
+				guardSubqueryParent(parent),
 			),
 	};
 	return compileWhereIntent(where, whereCtx);
@@ -661,6 +692,7 @@ export function compileInsertFrom(
 		MAX_DEPTH_LIMIT,
 	);
 	const state = createCompilerState();
+	assertNoPathRefInConditionBodies(intent.where);
 	const resolvedWhere = intent.where
 		? resolveExistsIntent(intent.where, intent.source, deps)
 		: undefined;
@@ -717,6 +749,19 @@ export function compileInsertFrom(
 		intent.source,
 		sourceCte,
 	);
+}
+
+/**
+ * The model-less fallback of a mutation WHERE: core's resolver does not see it,
+ * so the relation-path refusal (#991) runs here before exists() enrichment.
+ */
+function resolveModelLessWhere(
+	where: WhereIntent,
+	table: string,
+	deps: AdapterCompilerDeps,
+): WhereIntent {
+	assertNoPathRefInConditionBodies(where);
+	return resolveExistsIntent(where, table, deps);
 }
 
 /**
@@ -777,7 +822,7 @@ export function compileUpdate(
 	const whereCompiler = resolvedMutationWhere(intent.where, intent.table, deps);
 	const resolvedWhere =
 		intent.where && !whereCompiler
-			? resolveExistsIntent(intent.where, intent.table, deps)
+			? resolveModelLessWhere(intent.where, intent.table, deps)
 			: undefined;
 
 	const config: UpdateConfig = {
@@ -894,6 +939,7 @@ export function compileBatchUpdate(
 	// The guard uses the shared `state` so $N numbering continues from unnest params.
 	let whereGuard: import('@pgsql/types').Node | undefined;
 	if (intent.where) {
+		assertNoPathRefInConditionBodies(intent.where);
 		const resolvedWhere = resolveExistsIntent(intent.where, intent.table, deps);
 		const whereCtx: WhereCompilerCtx = {
 			rootTable: intent.table,
@@ -912,7 +958,7 @@ export function compileBatchUpdate(
 			...(deps.dialectCapabilities !== undefined && {
 				dialectCapabilities: deps.dialectCapabilities,
 			}),
-			compileSubquery: (sqIntent, paramOffset) =>
+			compileSubquery: (sqIntent, paramOffset, parent) =>
 				buildSubqueryFromIntent(
 					sqIntent,
 					paramOffset,
@@ -922,6 +968,7 @@ export function compileBatchUpdate(
 					deps.scope,
 					deps.dialectCapabilities,
 					deps.dbCasing,
+					guardSubqueryParent(parent),
 				),
 		};
 		whereGuard = compileWhereIntent(resolvedWhere, whereCtx);
@@ -983,7 +1030,7 @@ export function compileDelete(
 	const whereCompiler = resolvedMutationWhere(intent.where, intent.table, deps);
 	const resolvedWhere =
 		intent.where && !whereCompiler
-			? resolveExistsIntent(intent.where, intent.table, deps)
+			? resolveModelLessWhere(intent.where, intent.table, deps)
 			: undefined;
 
 	const config: DeleteConfig = {
@@ -1153,7 +1200,7 @@ export function compileUpsert(
 	const resolvedActionWhere = actionWhere
 		? actionWhereCompiler
 			? actionWhere
-			: resolveExistsIntent(actionWhere, intent.table, deps)
+			: resolveModelLessWhere(actionWhere, intent.table, deps)
 		: undefined;
 
 	const config: UpsertConfig = {
@@ -1276,6 +1323,7 @@ export function compileUpsertFrom(
 		MAX_DEPTH_LIMIT,
 	);
 	const state = createCompilerState();
+	assertNoPathRefInConditionBodies(intent.where);
 	const resolvedWhere = intent.where
 		? resolveExistsIntent(intent.where, intent.source, deps)
 		: undefined;

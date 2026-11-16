@@ -17,6 +17,7 @@ import {
 	type ResolvedRhs,
 	type ResolvedSubqueryBody,
 	type WhereIntent,
+	type WhereRelationFilterIntent,
 } from '@dbsp/types';
 import {
 	assertNoUnsupportedSubqueryModifiers,
@@ -26,6 +27,10 @@ import {
 	resolveDeclaredRelationPath,
 } from '@dbsp/types/internal';
 import { getDefaultFilter } from './default-filter-map.js';
+import {
+	assertNoPathRefInConditionBodies,
+	refuseTableRootedQuantifier,
+} from './path-ref-scan.js';
 import { getRelationalReadPolicy } from './relational-read-plans.js';
 
 import { escapeDiagnosticText } from './transition/diagnostic-text.js';
@@ -60,6 +65,7 @@ export function resolveSelectWhere(
 	initialAliasCount = 0,
 	additionalOuterRanges: readonly ResolvedRange[] = [],
 ): ResolvedCondition | undefined {
+	assertNoPathRefInConditionBodies(where);
 	return resolveConditionContext(
 		where,
 		root,
@@ -92,9 +98,39 @@ export function resolveConditionContext(
 		readonly aliasState?: { count: number };
 		readonly outerQualifiers?: readonly ReadonlyMap<string, ResolvedRange>[];
 		readonly label?: string;
+		/** The condition sits in a body whose ranges this call does not hold. */
+		readonly unknownBody?: boolean;
 	},
 ): ResolvedCondition | undefined {
 	const label = mode?.label ?? 'WHERE';
+	const entryDepth = enclosing.length;
+	/**
+	 * A table-rooted quantifier (#991) below a body is read from the body's row:
+	 * accepted only when that row is the single visible range of its table.
+	 */
+	const assertTableRootedQuantifier = (
+		node: WhereRelationFilterIntent,
+		current: ResolvedRange,
+		ranges: readonly ResolvedRange[],
+		scopes: readonly (readonly ResolvedRange[])[],
+	): void => {
+		const table = node.pathTable;
+		if (table === undefined) return;
+		if (mode?.unknownBody !== true && scopes.length <= entryDepth) return;
+		const sameTable = new Set(
+			[ranges, ...scopes]
+				.flat()
+				.filter((range) => range.table === table)
+				.map((range) => range.id),
+		);
+		if (
+			mode?.unknownBody === true ||
+			current.table !== table ||
+			sameTable.size !== 1 ||
+			!sameTable.has(current.id)
+		)
+			refuseTableRootedQuantifier(node.relation);
+	};
 	const subqueryRefusal = mode?.subqueryRefusal;
 	let activeFilters = mode?.defaultFilters;
 	const rootScope = [...new Set([root, ...visible, ...additionalOuterRanges])];
@@ -146,13 +182,12 @@ export function resolveConditionContext(
 	): ResolvedRange | undefined => {
 		assertQualifierVisible(qualifier, scope);
 		const candidates = scope.filter((r) => r.table === qualifier);
+		// A range named by the qualifier binds first, the root included (an alias
+		// replaces a table's name, as in SQL); the table-name fallback applies only
+		// when no range of this scope carries that name.
 		const exact =
 			writtenQualifiers.get(scope)?.get(qualifier) ??
-			scope.find(
-				(r) =>
-					r.alias === qualifier &&
-					(r !== scope[0] || r.alias !== r.table || candidates.length < 2),
-			);
+			scope.find((r) => r.alias === qualifier);
 		if (exact) return exact;
 		if (candidates.length > 1)
 			throw new Error(
@@ -850,6 +885,8 @@ export function resolveConditionContext(
 			node.kind === 'notExists' ||
 			node.kind === 'relationFilter'
 		) {
+			if (node.kind === 'relationFilter')
+				assertTableRootedQuantifier(node, current, ranges, enclosing);
 			const name =
 				getTrustedNqlRelationFilterFields(node)?.relation ?? node.relation;
 			return relation(

@@ -90,6 +90,24 @@ describe('orm.from() table-ref API', () => {
 		]);
 	});
 
+	it('filters on a joined table column ref, not the root column of the same name (#991)', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+		const { posts, authors } = orm.tables;
+		if (posts === undefined || authors === undefined)
+			throw new Error('Expected posts and authors tables');
+
+		const rows = await orm
+			.from(posts)
+			.join('author')
+			.where(eq(authors.id, 2))
+			.columns(['id'])
+			.orderBy('id')
+			.all();
+
+		expect(rows).toEqual([{ id: 3 }, { id: 5 }]);
+	});
+
 	it('populates orm.tables and executes from() for model-created ORMs', async () => {
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ model: blogModel, adapter }).withSchema(SCHEMA);

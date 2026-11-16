@@ -45,17 +45,25 @@ import type {
 	WhereRawNotExistsIntent,
 	WhereRelationFilterIntent,
 } from '../intent-ast.js';
-import { getColumnName } from './column-utils.js';
+import { assertCallbackScope } from '../path-ref-scan.js';
+import { getColumnName, isRelationPathColumn } from './column-utils.js';
 import { InvalidOperationError, validateIdentifier } from './errors.js';
 import type {
 	SubqueryBuilder,
 	SubqueryExpression,
 } from './subquery-builder.js';
 import {
+	CALLBACK_SCOPE,
+	RELATION_FROM_TABLE,
+	RELATION_REROOT,
+} from './symbols.js';
+import {
 	type ColumnRef,
 	RELATION_META,
+	RELATION_PATH,
 	type RelationRef,
 } from './table-ref.js';
+import { withCallbackScope } from './table-ref-factory.js';
 import type { AliasedExprColumn, ExpressionSpec } from './types.js';
 
 // ============================================================================
@@ -144,12 +152,17 @@ function createComparisonFilter(
 	return (
 		field: ColumnRef<string, string, unknown> | string,
 		value: unknown,
-	): WhereComparisonIntent => ({
-		kind: 'comparison',
-		field: getColumnName(field),
-		operator,
-		value,
-	});
+	): WhereComparisonIntent =>
+		scoped(
+			{
+				kind: 'comparison',
+				field: getColumnName(field),
+				operator,
+				value,
+				...(isRelationPathColumn(field) && { pathRef: true as const }),
+			},
+			field,
+		);
 }
 
 /**
@@ -207,7 +220,7 @@ export const lte: ComparisonFilter = createComparisonFilter('lte');
  * Standard SQL (SQL:2003).
  *
  * @example isDistinctFrom('status', 'active') → status IS DISTINCT FROM 'active'
- * @example isDistinctFrom(users.status, null) → status IS DISTINCT FROM NULL
+ * @example isDistinctFrom(users.status, null) → users.status IS DISTINCT FROM NULL
  */
 export const isDistinctFrom: ComparisonFilter =
 	createComparisonFilter('isDistinctFrom');
@@ -250,13 +263,15 @@ export function like(
 		kind: 'like',
 		field: getColumnName(field),
 		pattern,
+		...(isRelationPathColumn(field) && { pathRef: true as const }),
 	};
 	const withCi =
 		caseInsensitive !== undefined ? { ...intent, caseInsensitive } : intent;
+	// The callback scope goes on the intent finally returned (spreads drop it).
 	if (escapeChar !== undefined) {
-		return { ...withCi, escape: escapeChar };
+		return scoped({ ...withCi, escape: escapeChar }, field);
 	}
-	return withCi;
+	return scoped(withCi, field);
 }
 
 // ============================================================================
@@ -281,7 +296,15 @@ export function inArray(
 	field: ColumnRef<string, string, unknown> | string,
 	values: readonly unknown[],
 ): WhereInIntent {
-	return { kind: 'in', field: getColumnName(field), values };
+	return scoped(
+		{
+			kind: 'in',
+			field: getColumnName(field),
+			values,
+			...(isRelationPathColumn(field) && { pathRef: true as const }),
+		},
+		field,
+	);
 }
 
 /**
@@ -305,11 +328,15 @@ export function inSubquery(
 		'build' in query
 			? (query as SubqueryBuilder).build()
 			: (query as SubqueryExpression);
-	return {
-		kind: 'in',
-		field: getColumnName(field),
-		subquery: expr.toIntent(),
-	};
+	return scoped(
+		{
+			kind: 'in',
+			field: getColumnName(field),
+			subquery: expr.toIntent(),
+			...(isRelationPathColumn(field) && { pathRef: true as const }),
+		},
+		field,
+	);
 }
 
 /**
@@ -327,7 +354,15 @@ export function any(
 	field: ColumnRef<string, string, unknown> | string,
 	values: readonly unknown[],
 ): WhereAnyIntent {
-	return { kind: 'any', field: getColumnName(field), values };
+	return scoped(
+		{
+			kind: 'any',
+			field: getColumnName(field),
+			values,
+			...(isRelationPathColumn(field) && { pathRef: true as const }),
+		},
+		field,
+	);
 }
 
 // ============================================================================
@@ -347,7 +382,15 @@ export function isNull(field: string): WhereNullIntent;
 export function isNull(
 	field: ColumnRef<string, string, unknown> | string,
 ): WhereNullIntent {
-	return { kind: 'null', field: getColumnName(field), operator: 'isNull' };
+	return scoped(
+		{
+			kind: 'null',
+			field: getColumnName(field),
+			operator: 'isNull',
+			...(isRelationPathColumn(field) && { pathRef: true as const }),
+		},
+		field,
+	);
 }
 
 // ============================================================================
@@ -428,7 +471,15 @@ export function isNotNull(field: string): WhereNullIntent;
 export function isNotNull(
 	field: ColumnRef<string, string, unknown> | string,
 ): WhereNullIntent {
-	return { kind: 'null', field: getColumnName(field), operator: 'isNotNull' };
+	return scoped(
+		{
+			kind: 'null',
+			field: getColumnName(field),
+			operator: 'isNotNull',
+			...(isRelationPathColumn(field) && { pathRef: true as const }),
+		},
+		field,
+	);
 }
 
 // ============================================================================
@@ -635,18 +686,85 @@ export function rawNotExists(
 // Quantified Relation Filters (DX-040 Block 7)
 // ============================================================================
 
+type AnyRelationRef = RelationRef<
+	string,
+	unknown,
+	'belongsTo' | 'hasMany' | 'hasOne'
+>;
+
 /**
- * Get relation name from a RelationRef.
+ * Get the relation a quantifier traverses: the RelationRef's relation path from
+ * the table it was taken from (`users.writings.replies` → `writings.replies`).
+ * A RelationRef without a path falls back to its target table.
  * @internal
  */
-function getRelationName(
-	rel: RelationRef<string, unknown, 'belongsTo' | 'hasMany' | 'hasOne'>,
-): string {
+function getRelationName(rel: AnyRelationRef): string {
 	const meta = rel[RELATION_META];
 	if (!meta) {
 		throw new Error('Invalid RelationRef: missing RELATION_META');
 	}
-	return meta.target;
+	const path = (rel as { readonly [RELATION_PATH]?: readonly string[] })[
+		RELATION_PATH
+	];
+	return path !== undefined && path.length > 0 ? path.join('.') : meta.target;
+}
+
+/**
+ * The ref a quantifier callback receives: the related table re-rooted, so its
+ * columns bind to the relation predicate's range and its relations start a new
+ * path. A hand-built RelationRef without the accessor is passed unchanged.
+ * @internal
+ */
+function rerootRelation<T extends AnyRelationRef>(rel: T, scope: object): T {
+	const reroot = (rel as { readonly [RELATION_REROOT]?: (s: object) => T })[
+		RELATION_REROOT
+	];
+	return reroot === undefined ? rel : reroot(scope);
+}
+
+/**
+ * Build a quantifier's `relationFilter` (#991). Its callback gets a re-rooted
+ * ref carrying a fresh scope token, refused below a body nested in the returned
+ * condition; a relation taken from a TableRef marks the intent `pathRef` with
+ * its table (`pathTable`), and a relation from an enclosing callback carries
+ * that callback's token.
+ */
+function quantify<TTarget extends string, TTargetType>(
+	mode: 'every' | 'some' | 'none',
+	relation: RelationRef<TTarget, TTargetType[], 'hasMany'>,
+	filter: (rel: RelationRef<TTarget, TTargetType[], 'hasMany'>) => WhereIntent,
+): WhereRelationFilterIntent {
+	const relationName = getRelationName(relation);
+	const scope = {};
+	const where = filter(rerootRelation(relation, scope));
+	assertCallbackScope(where, CALLBACK_SCOPE, scope, mode);
+	const origin = relation as {
+		readonly [RELATION_FROM_TABLE]?: string;
+		readonly [CALLBACK_SCOPE]?: object;
+	};
+	return withCallbackScope(
+		{
+			kind: 'relationFilter',
+			relation: relationName,
+			where,
+			mode,
+			...(typeof origin[RELATION_FROM_TABLE] === 'string' && {
+				pathRef: true as const,
+				pathTable: origin[RELATION_FROM_TABLE],
+			}),
+		},
+		origin[CALLBACK_SCOPE],
+	);
+}
+
+/** Carry a typed callback column's scope token onto the intent built from it. */
+function scoped<T extends object>(intent: T, field: unknown): T {
+	return typeof field === 'object' && field !== null
+		? withCallbackScope(
+				intent,
+				(field as { readonly [CALLBACK_SCOPE]?: object })[CALLBACK_SCOPE],
+			)
+		: intent;
 }
 
 /**
@@ -674,14 +792,7 @@ export function every<TTarget extends string, TTargetType>(
 	relation: RelationRef<TTarget, TTargetType[], 'hasMany'>,
 	filter: (rel: RelationRef<TTarget, TTargetType[], 'hasMany'>) => WhereIntent,
 ): WhereRelationFilterIntent {
-	const relationName = getRelationName(relation);
-	const where = filter(relation);
-	return {
-		kind: 'relationFilter',
-		relation: relationName,
-		where,
-		mode: 'every',
-	};
+	return quantify('every', relation, filter);
 }
 
 /**
@@ -708,14 +819,7 @@ export function none<TTarget extends string, TTargetType>(
 	relation: RelationRef<TTarget, TTargetType[], 'hasMany'>,
 	filter: (rel: RelationRef<TTarget, TTargetType[], 'hasMany'>) => WhereIntent,
 ): WhereRelationFilterIntent {
-	const relationName = getRelationName(relation);
-	const where = filter(relation);
-	return {
-		kind: 'relationFilter',
-		relation: relationName,
-		where,
-		mode: 'none',
-	};
+	return quantify('none', relation, filter);
 }
 
 /**
@@ -742,14 +846,7 @@ export function some<TTarget extends string, TTargetType>(
 	relation: RelationRef<TTarget, TTargetType[], 'hasMany'>,
 	filter: (rel: RelationRef<TTarget, TTargetType[], 'hasMany'>) => WhereIntent,
 ): WhereRelationFilterIntent {
-	const relationName = getRelationName(relation);
-	const where = filter(relation);
-	return {
-		kind: 'relationFilter',
-		relation: relationName,
-		where,
-		mode: 'some',
-	};
+	return quantify('some', relation, filter);
 }
 
 // ============================================================================

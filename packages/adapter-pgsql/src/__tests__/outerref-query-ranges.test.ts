@@ -451,3 +451,21 @@ it('relation predicate sibling includes refuse duplicate logical ranges in both 
 		);
 	}
 });
+
+it('a root-named outerRef binds the outer root in a self-join (#991)', () => {
+	expect(
+		orm
+			.select('nodes')
+			.join('parent')
+			.where(
+				rawExists(
+					subquery('nodes')
+						.select('id')
+						.where(eq('id', outerRef('nodes.id'))),
+				),
+			)
+			.dump().sql,
+	).toBe(
+		'SELECT nodes.* FROM nodes JOIN nodes AS parent ON nodes."parentId" = parent.id WHERE EXISTS (SELECT nodes_sq.id FROM nodes AS nodes_sq WHERE nodes_sq.id = nodes.id)',
+	);
+});

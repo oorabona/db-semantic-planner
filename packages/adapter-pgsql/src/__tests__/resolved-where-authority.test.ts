@@ -151,7 +151,7 @@ describe('resolved root WHERE refusal proofs (#891)', () => {
 			'SELECT calls.* FROM calls JOIN users AS caller ON calls."callerId" = caller.id WHERE caller.name = $1',
 		);
 	});
-	it('3: explicit alias, self-join ambiguity, predicate target and nearest outer range', () => {
+	it('3: explicit alias, self-join root name, predicate target and nearest outer range', () => {
 		expect(
 			orm
 				.select('users')
@@ -159,13 +159,17 @@ describe('resolved root WHERE refusal proofs (#891)', () => {
 				.where(eq('other.name', 'Ada'))
 				.dump().sql,
 		).toContain('WHERE other.name = $1');
-		expect(() =>
+		// The root's own name binds the root in a self-join (#991): an alias
+		// replaces a table's name, so `users` names only the unaliased range.
+		expect(
 			orm
 				.select('users')
 				.join('users', { as: 'other', on: eq('id', 1) })
 				.where(eq('users.name', 'Ada'))
-				.plan(),
-		).toThrow("WHERE qualifier 'users' is ambiguous between 'other', 'users'.");
+				.dump().sql,
+		).toBe(
+			'SELECT users.* FROM users JOIN users AS other ON users.id = $2 WHERE users.name = $1',
+		);
 		const report = orm
 			.select('users')
 			.where(exists('calls', { where: eq('id', 7) }))

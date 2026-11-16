@@ -11,6 +11,11 @@
 import type { ModelIR } from '../model-ir.js';
 import { emitWarning, type WarningCategory } from './logger.js';
 import {
+	CALLBACK_SCOPE,
+	RELATION_FROM_TABLE,
+	RELATION_REROOT,
+} from './symbols.js';
+import {
 	BRAND,
 	COLUMN_META,
 	RELATION_META,
@@ -125,6 +130,7 @@ export function createColumnRef(
 	tableName: string,
 	columnName: string,
 	relationPath?: readonly string[],
+	scope?: object,
 ): object {
 	const columnRef: Record<symbol | string, unknown> = {
 		[TABLE_META]: tableName,
@@ -138,19 +144,39 @@ export function createColumnRef(
 					`Invalid alias "${alias}": must match /^[a-zA-Z_][a-zA-Z0-9_]*$/`,
 				);
 			}
-			return {
-				...this,
-				_alias: alias,
-			};
+			// The spread drops the non-enumerable callback scope; carry it over.
+			return withCallbackScope(
+				{ ...this, _alias: alias },
+				(this as { readonly [CALLBACK_SCOPE]?: object })[CALLBACK_SCOPE],
+			);
 		},
 	};
 
-	// Add relation path if provided (for cross-table queries)
-	if (relationPath && relationPath.length > 0) {
+	// A relation path addresses the column from the table the path starts at;
+	// an empty path (a re-rooted RelationRef) addresses the relation's own range.
+	if (relationPath !== undefined) {
 		columnRef[RELATION_PATH] = relationPath;
 	}
 
-	return columnRef;
+	return withCallbackScope(columnRef, scope);
+}
+
+/**
+ * Attach a quantifier callback's scope token, non-enumerable so that intents
+ * built from the ref compare and serialize as before.
+ *
+ * @internal
+ */
+export function withCallbackScope<T extends object>(
+	target: T,
+	scope: object | undefined,
+): T {
+	if (scope !== undefined)
+		Object.defineProperty(target, CALLBACK_SCOPE, {
+			value: scope,
+			enumerable: false,
+		});
+	return target;
 }
 
 /**
@@ -217,6 +243,7 @@ export function createRelationRef(
 	model: ModelIR,
 	relationName?: string,
 	parentPath?: readonly string[],
+	origin: { readonly fromTable?: string; readonly scope?: object } = {},
 ): object {
 	// Build the current relation path
 	const currentPath: readonly string[] =
@@ -228,8 +255,16 @@ export function createRelationRef(
 		[RELATION_META]: { target: targetTable, type: relationType },
 		[BRAND]: 'RelationRef' as const,
 		[RELATION_PATH]: currentPath, // Store path on RelationRef too
+		[RELATION_REROOT]: (scope?: object) =>
+			createRelationRef(targetTable, relationType, model, undefined, [], {
+				...(scope !== undefined && { scope }),
+			}),
+		...(origin.fromTable !== undefined && {
+			[RELATION_FROM_TABLE]: origin.fromTable,
+		}),
 		_type: undefined as unknown, // Phantom type placeholder
 	};
+	withCallbackScope(base, origin.scope);
 
 	// Use Proxy for lazy column access on the relation
 	return new Proxy(base, {
@@ -253,7 +288,12 @@ export function createRelationRef(
 			const targetTableIR = model.getTable(targetTable);
 			if (targetTableIR && hasColumn(targetTableIR.columns, prop as string)) {
 				// Pass the relation path for cross-table query support
-				return createColumnRef(targetTable, prop as string, currentPath);
+				return createColumnRef(
+					targetTable,
+					prop as string,
+					currentPath,
+					origin.scope,
+				);
 			}
 
 			// Check if this is a relation from the target table (chained relations)
@@ -265,6 +305,7 @@ export function createRelationRef(
 						model,
 						prop as string,
 						currentPath,
+						origin,
 					);
 				}
 			}
@@ -278,6 +319,7 @@ export function createRelationRef(
 						model,
 						prop as string,
 						currentPath,
+						origin,
 					);
 				}
 			}
@@ -419,6 +461,8 @@ export function createTableRef(
 					relation.type,
 					model,
 					propStr,
+					undefined,
+					{ fromTable: tableName },
 				);
 			}
 

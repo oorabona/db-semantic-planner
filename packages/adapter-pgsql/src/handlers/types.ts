@@ -30,6 +30,7 @@ import type {
 	RelationTargetProjectionRegistry,
 } from '../relation-target-projection.js';
 import {
+	identifierText,
 	queryLocal,
 	resolveDeclaredIdentifier,
 	type SqlIdentifier,
@@ -322,6 +323,39 @@ export function expressionQualifiedColumnRef(
 ): Node {
 	const binding = expressionRelationBinding(qualifier, ctx);
 	return expressionColumnRef(column, ctx, binding);
+}
+
+/**
+ * Compile a field the user wrote as `qualifier.column` (window arguments,
+ * `ref()`, `aggOrderBy()`). A qualifier naming a scope binding, or the root's
+ * logical table, resolves as {@link expressionQualifiedColumnRef} does; a table
+ * name bound by more than one range of the scope is refused rather than bound to
+ * whichever range was registered first.
+ */
+export function expressionUserQualifiedColumnRef(
+	column: string,
+	qualifier: string,
+	ctx: ExpressionCompilerContext,
+): Node {
+	if (
+		relationBindingFor(ctx.scope, queryLocal(qualifier)) === undefined &&
+		qualifier !== ctx.rootTable
+	) {
+		const sameTable = [...(ctx.scope?.bindings.values() ?? [])].filter(
+			(binding) =>
+				binding.kind === 'declared-table' && binding.logicalTable === qualifier,
+		);
+		if (sameTable.length > 1) {
+			const aliases = sameTable
+				.map((binding) => `'${identifierText(binding.qualifier)}'`)
+				.sort()
+				.join(', ');
+			throw new Error(
+				`Qualifier '${qualifier}' is ambiguous between ${aliases}.`,
+			);
+		}
+	}
+	return expressionQualifiedColumnRef(column, qualifier, ctx);
 }
 
 /**

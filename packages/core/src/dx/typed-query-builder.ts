@@ -14,7 +14,7 @@ import type { QueryIntent, SelectIntent, WhereIntent } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanReport } from '../planner.js';
 import { plan as executePlan } from '../planner.js';
-import { getColumnName } from './column-utils.js';
+import { getBareColumnName } from './column-utils.js';
 import { InvalidOperationError } from './errors.js';
 import { buildExistsIntent } from './exists-intent.js';
 import {
@@ -204,7 +204,7 @@ class FromBuilderImpl<
 		...columns: TCols
 	): FromBuilder<TTable, InferPickedColumns<TCols>> {
 		const copy = this.clone<InferPickedColumns<TCols>>();
-		copy.selectColumns = columns.map((col) => getColumnName(col));
+		copy.selectColumns = columns.map((col) => getBareColumnName(col));
 		return copy;
 	}
 
@@ -240,7 +240,7 @@ class FromBuilderImpl<
 		direction: 'asc' | 'desc' = 'asc',
 	): FromBuilder<TTable, TResult> {
 		const copy = this.clone();
-		copy.orderByItems.push({ field: getColumnName(column), direction });
+		copy.orderByItems.push({ field: getBareColumnName(column), direction });
 		return copy;
 	}
 

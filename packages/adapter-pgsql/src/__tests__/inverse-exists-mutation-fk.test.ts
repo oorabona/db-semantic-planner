@@ -4,7 +4,19 @@
  * derivation (symbols -> symbol_id) would be visibly wrong.
  */
 
-import { exists, notExists, ref, schema } from '@dbsp/core';
+import {
+	and,
+	createOrm,
+	eq,
+	exists,
+	notExists,
+	rawExists,
+	ref,
+	schema,
+	some,
+	subquery,
+} from '@dbsp/core';
+import type { WhereIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -374,5 +386,165 @@ describe('composite FK exists() mutation correlation', () => {
 		} as any);
 
 		expectCompositeCorrelation(sql, 'orders_exists_0');
+	});
+});
+
+describe('a relation-path ColumnRef in a mutation WHERE body (#991)', () => {
+	const nodeDb = schema({
+		nodes: {
+			id: { type: 'integer', primaryKey: true },
+			name: 'text',
+			parent_id: ref('nodes', {
+				nullable: true,
+				as: 'parent',
+				inverse: 'children',
+				roles: { parent: 'parent', children: 'children' },
+			}),
+		},
+		nodes_archive: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+	});
+	const { nodes } = createOrm({
+		schema: nodeDb,
+		adapter: createPgCompileOnlyAdapter({ model: nodeDb.model }),
+	}).tables;
+	it.each(['compileBatchUpdate', 'compileInsertFrom', 'compileUpsertFrom'])(
+		'AC38 other-mutation-paths-refused %s',
+		(entryPoint) => {
+			const adapter = createPgCompileOnlyAdapter({ model: nodeDb.model });
+			expect(() =>
+				compileMutationWhere(
+					adapter,
+					entryPoint,
+					'nodes',
+					exists('children', {
+						include: { parent: { join: 'inner' } },
+						where: eq(nodes.parent.name, 'x'),
+					}),
+				),
+			).toThrow(
+				new Error(
+					"ColumnRef 'parent.name' follows a relation; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1005).",
+				),
+			);
+		},
+	);
+});
+
+describe('typed relation refs in mutation guard bodies (#991)', () => {
+	const relationRefusal = (relation: string) =>
+		new Error(
+			`RelationRef '${relation}' follows a relation from its table; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1005).`,
+		);
+	const writingsDb = schema({
+		users: { id: { type: 'integer', primaryKey: true }, email: 'text' },
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			published: 'boolean',
+			author_id: ref('users', { as: 'author', inverse: 'writings' }),
+		},
+	});
+	const { users } = createOrm({
+		schema: writingsDb,
+		adapter: createPgCompileOnlyAdapter({ model: writingsDb.model }),
+	}).tables;
+	const plainDb = schema({
+		users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			name: 'text',
+			published: 'boolean',
+			user_id: ref('users', { inverse: 'posts' }),
+		},
+		comments: {
+			id: { type: 'integer', primaryKey: true },
+			post_id: ref('posts', { inverse: 'comments' }),
+		},
+	});
+	const plainOrm = createOrm({
+		schema: plainDb,
+		adapter: createPgCompileOnlyAdapter({ model: plainDb.model }),
+	});
+	const { posts } = plainOrm.tables;
+	const ambiguousBody = () =>
+		rawExists(
+			subquery('users')
+				.select('id')
+				.where(some(plainOrm.tables.users.posts, () => and())),
+		);
+	const unambiguousBody = () =>
+		rawExists(
+			subquery('posts')
+				.select('id')
+				.where(some(posts.comments, () => and())),
+		);
+	const topLevel = () =>
+		some(plainOrm.tables.users.posts, (p) => eq(p.published!, true));
+	const batchSet = (where: WhereIntent) =>
+		plainOrm
+			.update('users')
+			.batchSet('id', [{ id: 1, name: 'changed' }])
+			.where(where)
+			.dump().sql;
+
+	it.each(['compileUpdate', 'compileDelete', 'compileUpsert.action.where'])(
+		'AC42 model-less-mutation-refused %s',
+		(entryPoint) => {
+			expect(() =>
+				compileMutationWhere(
+					createPgCompileOnlyAdapter(),
+					entryPoint,
+					'users',
+					exists('writings', { where: eq(users.writings.published!, true) }),
+				),
+			).toThrow(
+				new Error(
+					"ColumnRef 'writings.published' follows a relation; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1005).",
+				),
+			);
+		},
+	);
+
+	it('AC46 mutation-guard-body-refused', () => {
+		expect(() => batchSet(ambiguousBody())).toThrow(relationRefusal('posts'));
+		expect(() =>
+			compileMutationWhere(
+				createPgCompileOnlyAdapter(),
+				'compileUpsert.action.where',
+				'users',
+				ambiguousBody(),
+			),
+		).toThrow(relationRefusal('posts'));
+	});
+
+	it('AC46 mutation-guard-unambiguous-body-kept', () => {
+		expect(batchSet(unambiguousBody())).toBe(
+			'UPDATE users SET name = t.name FROM unnest(CAST($1 AS int4[]), CAST($2 AS text[])) AS t(id, name) WHERE users.id = t.id AND EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.post_id AND true))',
+		);
+		expect(
+			compileMutationWhere(
+				createPgCompileOnlyAdapter(),
+				'compileUpsert.action.where',
+				'users',
+				unambiguousBody(),
+			),
+		).toBe(
+			'INSERT INTO users (id, name) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET name = $3 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.post_id AND true))',
+		);
+	});
+
+	it('AC46 mutation-guard-top-level-kept', () => {
+		expect(batchSet(topLevel())).toBe(
+			'UPDATE users SET name = t.name FROM unnest(CAST($2 AS int4[]), CAST($3 AS text[])) AS t(id, name) WHERE users.id = t.id AND EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.user_id AND posts_exists_0.published = $1)',
+		);
+		expect(
+			compileMutationWhere(
+				createPgCompileOnlyAdapter(),
+				'compileUpsert.action.where',
+				'users',
+				topLevel(),
+			),
+		).toBe(
+			'INSERT INTO users (id, name) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET name = $3 WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.user_id AND posts_exists_0.published = $4)',
+		);
 	});
 });

@@ -386,7 +386,7 @@ describe('DX-021: Window Functions Builder Pattern', () => {
 				.as('dept_rank');
 			const intent = getWindowIntent(spec);
 
-			expect(intent.over.partitionBy).toEqual(['department']);
+			expect(intent.over.partitionBy).toEqual(['employees.department']);
 		});
 
 		it('should accept ColumnRef in orderBy()', () => {
@@ -399,7 +399,7 @@ describe('DX-021: Window Functions Builder Pattern', () => {
 			const intent = getWindowIntent(spec);
 
 			expect(intent.over.orderBy).toEqual([
-				{ field: 'salary', direction: 'desc' },
+				{ field: 'employees.salary', direction: 'desc' },
 			]);
 		});
 
@@ -413,9 +413,9 @@ describe('DX-021: Window Functions Builder Pattern', () => {
 				.as('salary_rank');
 			const intent = getWindowIntent(spec);
 
-			expect(intent.over.partitionBy).toEqual(['department']);
+			expect(intent.over.partitionBy).toEqual(['employees.department']);
 			expect(intent.over.orderBy).toEqual([
-				{ field: 'salary', direction: 'desc' },
+				{ field: 'employees.salary', direction: 'desc' },
 			]);
 		});
 
@@ -428,7 +428,10 @@ describe('DX-021: Window Functions Builder Pattern', () => {
 				.as('category_total');
 			const intent = getWindowIntent(spec);
 
-			expect(intent.over.partitionBy).toEqual(['category', 'date']);
+			expect(intent.over.partitionBy).toEqual([
+				'products.category',
+				'sales.date',
+			]);
 		});
 
 		it('should mix strings and ColumnRefs in partitionBy()', () => {
@@ -441,7 +444,10 @@ describe('DX-021: Window Functions Builder Pattern', () => {
 				.as('regional_dept_rank');
 			const intent = getWindowIntent(spec);
 
-			expect(intent.over.partitionBy).toEqual(['region', 'department']);
+			expect(intent.over.partitionBy).toEqual([
+				'region',
+				'employees.department',
+			]);
 		});
 
 		it('wAvg() with ColumnRef partition', () => {
@@ -455,7 +461,7 @@ describe('DX-021: Window Functions Builder Pattern', () => {
 
 			expect(intent.function).toBe('avg');
 			expect(intent.field).toBe('salary');
-			expect(intent.over.partitionBy).toEqual(['department']);
+			expect(intent.over.partitionBy).toEqual(['employees.department']);
 		});
 
 		it('lag() with ColumnRef orderBy', () => {
@@ -467,7 +473,7 @@ describe('DX-021: Window Functions Builder Pattern', () => {
 
 			expect(intent.function).toBe('lag');
 			expect(intent.over.orderBy).toEqual([
-				{ field: 'hireDate', direction: 'asc' },
+				{ field: 'employees.hireDate', direction: 'asc' },
 			]);
 		});
 
@@ -482,7 +488,7 @@ describe('DX-021: Window Functions Builder Pattern', () => {
 
 			expect(intent.function).toBe('lead');
 			expect(intent.over.orderBy).toEqual([
-				{ field: 'salary', direction: 'desc' },
+				{ field: 'employees.salary', direction: 'desc' },
 			]);
 		});
 	});

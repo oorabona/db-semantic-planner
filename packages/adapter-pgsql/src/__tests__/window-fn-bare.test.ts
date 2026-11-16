@@ -211,3 +211,103 @@ describe('window fields: qualified names through the ORM', () => {
 		);
 	});
 });
+
+// A ColumnRef addresses its own table's range (#991).
+describe('window fields: ColumnRefs keep their table', () => {
+	const db = schema({
+		files: { id: { type: 'integer', primaryKey: true }, path: 'text' },
+		symbols: {
+			id: { type: 'integer', primaryKey: true },
+			start_line: 'integer',
+			file_id: ref('files', { as: 'file' }),
+		},
+		calls: {
+			id: { type: 'integer', primaryKey: true },
+			caller_id: ref('symbols', { as: 'caller', inverse: 'callerCalls' }),
+			callee_id: ref('symbols', { as: 'callee', inverse: 'calleeCalls' }),
+		},
+	});
+	const orm = createOrm({
+		schema: db,
+		adapter: createPgCompileOnlyAdapter({ model: db.model }),
+		suppressDxWarnings: true,
+	});
+	const { files, symbols } = orm.tables;
+
+	it('partitionBy and orderBy a joined table column', () => {
+		const { sql } = orm
+			.select('symbols')
+			.join('file')
+			.columns([
+				'id',
+				rowNumber().partitionBy(files.id).orderBy(files.path, 'desc').as('rn'),
+			])
+			.dump();
+		expect(sql).toBe(
+			'SELECT symbols.id, row_number() OVER (PARTITION BY file.id ORDER BY file.path DESC) AS rn FROM symbols JOIN files AS file ON symbols.file_id = file.id',
+		);
+	});
+
+	it.each([
+		['caller', 'callee'],
+		['callee', 'caller'],
+	])('a table joined twice is refused (%s, then %s)', (first, second) => {
+		expect(() =>
+			orm
+				.select('calls')
+				.join(first)
+				.join(second)
+				.columns(['id', rowNumber().partitionBy(symbols.id).as('rn')])
+				.dump(),
+		).toThrow("Qualifier 'symbols' is ambiguous between 'callee', 'caller'.");
+	});
+
+	describe('a self-join under snake_case', () => {
+		const snake = schema({
+			userProfiles: {
+				id: { type: 'integer', primaryKey: true },
+				parentId: ref('userProfiles', {
+					nullable: true,
+					as: 'parent',
+					inverse: 'children',
+					roles: { parent: 'parent', children: 'children' },
+				}),
+			},
+		});
+		const snakeOrm = createOrm({
+			schema: snake,
+			adapter: createPgCompileOnlyAdapter({
+				model: snake.model,
+				dbCasing: 'snake_case',
+			}),
+			suppressDxWarnings: true,
+		});
+		const FROM =
+			'FROM user_profiles JOIN user_profiles AS parent ON user_profiles.parent_id = parent.id';
+
+		it('the root TableRef column binds the root', () => {
+			const { sql } = snakeOrm
+				.select('userProfiles')
+				.join('parent')
+				.columns([
+					'id',
+					rowNumber().partitionBy(snakeOrm.tables.userProfiles.id).as('rn'),
+				])
+				.dump();
+			expect(sql).toBe(
+				`SELECT user_profiles.id, row_number() OVER (PARTITION BY user_profiles.id) AS rn ${FROM}`,
+			);
+		});
+
+		it('the join alias binds the join', () => {
+			const { sql } = snakeOrm
+				.select('userProfiles')
+				.join('parent')
+				.columns(['id', rowNumber().partitionBy('parent.id').as('rn')])
+				.dump();
+			expect(sql).toBe(
+				`SELECT user_profiles.id, row_number() OVER (PARTITION BY parent.id) AS rn ${FROM}`,
+			);
+		});
+	});
+});

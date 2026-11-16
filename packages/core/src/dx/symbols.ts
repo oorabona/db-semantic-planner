@@ -105,6 +105,38 @@ export const BRAND: unique symbol = Symbol.for('dbsp:brand');
 export const RELATION_PATH: unique symbol = Symbol.for('dbsp:relationPath');
 
 /**
+ * Accessor on a RelationRef returning a RelationRef for the same target with an
+ * empty relation path: its columns compile to the bare column, so a relation
+ * predicate binds them to its own range.
+ *
+ * @internal Used by `every`/`some`/`none`; not part of the public surface.
+ */
+export const RELATION_REROOT: unique symbol = Symbol('dbsp:relationReroot');
+
+/**
+ * Set on a RelationRef whose relation chain starts at a TableRef
+ * (`orm.tables.users.writings`), unlike one re-rooted for a quantifier
+ * callback; its value is that table's model name. A quantifier over it reads
+ * its path from the table, so inside a body it is accepted only on the single
+ * visible range of that table (#991).
+ *
+ * @internal
+ */
+export const RELATION_FROM_TABLE: unique symbol = Symbol.for(
+	'dbsp:relationFromTable',
+);
+
+/**
+ * Non-enumerable token of the quantifier callback a ref comes from, carried by
+ * the re-rooted RelationRef, its chained relations, their ColumnRefs and the
+ * intents built from them; the quantifier refuses its own token below a body
+ * nested in its condition (#991).
+ *
+ * @internal
+ */
+export const CALLBACK_SCOPE: unique symbol = Symbol.for('dbsp:callbackScope');
+
+/**
  * Type declarations for Symbol keys to enable TypeScript inference.
  *
  * These types allow TypeScript to understand the shape of objects

@@ -14,7 +14,10 @@ import type {
 	ExpressionCompilerContext,
 	ExpressionHandler,
 } from '../types.js';
-import { expressionColumnRef, expressionQualifiedColumnRef } from '../types.js';
+import {
+	expressionColumnRef,
+	expressionUserQualifiedColumnRef,
+} from '../types.js';
 import { bindParameter } from './param-value.js';
 
 /**
@@ -33,7 +36,7 @@ const WINDOW_FRAME_DEFAULT = 1034;
 function windowColumnRef(name: string, ctx: ExpressionCompilerContext): Node {
 	const dotIdx = name.indexOf('.');
 	if (dotIdx === -1) return expressionColumnRef(name, ctx);
-	return expressionQualifiedColumnRef(
+	return expressionUserQualifiedColumnRef(
 		name.slice(dotIdx + 1),
 		name.slice(0, dotIdx),
 		ctx,

@@ -43,9 +43,9 @@ describe('table-ref-factory coverage', () => {
 			expect(ref[RELATION_PATH]).toEqual(['author']);
 		});
 
-		it('should create column ref with empty relation path', () => {
+		it('keeps an empty relation path, which addresses the relation range', () => {
 			const ref = createColumnRef('users', 'email', []);
-			expect(ref[RELATION_PATH]).toBeUndefined();
+			expect(ref[RELATION_PATH]).toEqual([]);
 		});
 
 		it('should support as() method for aliasing', () => {
