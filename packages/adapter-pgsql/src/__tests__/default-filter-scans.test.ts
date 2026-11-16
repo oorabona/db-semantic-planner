@@ -1,7 +1,6 @@
 import type { QueryBuilder, SubqueryBuilder, WhereIntent } from '@dbsp/core';
 import {
 	caseWhen,
-	namedArg,
 	createOrm,
 	eq,
 	exists,
@@ -10,6 +9,7 @@ import {
 	inSubquery,
 	isNull,
 	literal,
+	namedArg,
 	notExists,
 	op,
 	outerRef,
@@ -17,6 +17,7 @@ import {
 	rawExists,
 	ref,
 	relationColumn,
+	SubqueryExpression,
 	schema,
 	star,
 	subquery,
@@ -1028,6 +1029,21 @@ describe('selectExpression bodies and nested issued policies', () => {
 				'SELECT make_interval(secs => (SELECT count(*) FROM posts AS posts WHERE posts.deleted_at IS NULL)) AS iv FROM users',
 			);
 		});
+	});
+
+	it('refuses an aggregate FILTER in a scalar body the resolved route plans', () => {
+		const scalar = new SubqueryExpression({
+			type: 'select',
+			from: 'posts',
+			where: rawExists(issuedPosts()),
+			select: {
+				type: 'aggregate',
+				aggregates: [{ function: 'count', field: '*', filter: eq('score', 1) }],
+			},
+		} as never).asExpr('n');
+		expect(() => outer.select('users').columns([scalar]).dump()).toThrow(
+			'scalar subquery with an aggregate FILTER is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+		);
 	});
 
 	it('does not walk bound payloads looking for nested policies', () => {
