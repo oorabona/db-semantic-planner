@@ -1190,3 +1190,38 @@ describe('selectExpression bodies and nested issued policies', () => {
 		);
 	});
 });
+
+describe('dotted fields outside conditions under default filters (#891 slice 3)', () => {
+	it('AC8 orders by a joined alias column when the joined table has a default filter', () => {
+		const joinedDb = schema(
+			{
+				users: {
+					id: { type: 'integer', primaryKey: true },
+					name: 'text',
+					deletedAt: { type: 'timestamp', nullable: true },
+				},
+				posts: {
+					id: { type: 'integer', primaryKey: true },
+					title: 'text',
+					authorId: ref('users', { as: 'author', inverse: 'posts' }),
+				},
+			},
+			undefined,
+			{ defaultFilters: { users: isNull('deletedAt') } },
+		);
+		const joinedOrm = createOrm({
+			schema: joinedDb,
+			adapter: createPgCompileOnlyAdapter(),
+			suppressDxWarnings: true,
+		});
+		const result = joinedOrm
+			.select('posts')
+			.join('author')
+			.orderBy('author.name')
+			.dump();
+		expect(result.sql).toBe(
+			'SELECT posts.* FROM posts JOIN users AS author ON posts."authorId" = author.id AND author."deletedAt" IS NULL ORDER BY author.name ASC',
+		);
+		expect(result.params).toEqual([]);
+	});
+});
