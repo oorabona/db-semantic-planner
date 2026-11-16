@@ -65,7 +65,7 @@ it('compileSelectExpression nested scalar binds its enclosing subquery range', (
 		},
 	});
 	expect(result.sql).toBe(
-		'SELECT (SELECT (SELECT count(*) FROM calls AS calls WHERE calls."symbolId" = symbols.id AND calls.score = $1) AS "callCount" FROM symbols AS symbols)',
+		'SELECT (SELECT (SELECT count(*) FROM calls AS calls WHERE calls."symbolId" = symbols.id AND calls.score = $1) AS "callCount" FROM symbols)',
 	);
 	expect(result.parameters).toEqual([7]);
 });
@@ -182,7 +182,7 @@ it('nested SELECT CASE uses its own source and reserved alias', () => {
 		},
 	});
 	expect(result.sql).toBe(
-		'SELECT (SELECT (SELECT (SELECT CASE WHEN calls_sq.period && CAST($1 AS tsrange) AND calls_sq.score = $2 THEN 1 ELSE 0 END AS rank FROM calls AS calls_sq) FROM symbols AS symbols) FROM calls AS calls)',
+		'SELECT (SELECT (SELECT (SELECT CASE WHEN calls_sq.period && CAST($1 AS tsrange) AND calls_sq.score = $2 THEN 1 ELSE 0 END AS rank FROM calls AS calls_sq) FROM symbols AS symbols) FROM calls)',
 	);
 	expect(result.parameters).toEqual(['[2026-01-01,2026-02-01)', 4]);
 });
@@ -215,7 +215,7 @@ it('nested SELECT HAVING uses its own logical source', () => {
 		},
 	});
 	expect(result.sql).toBe(
-		'SELECT (SELECT (SELECT calls.period FROM calls AS calls GROUP BY calls.period HAVING calls.period && CAST($1 AS tsrange)) FROM symbols AS symbols)',
+		'SELECT (SELECT (SELECT calls.period FROM calls AS calls GROUP BY calls.period HAVING calls.period && CAST($1 AS tsrange)) FROM symbols)',
 	);
 	expect(result.parameters).toEqual(['[2026-01-01,2026-02-01)']);
 });

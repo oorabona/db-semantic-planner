@@ -246,6 +246,15 @@ describe('op() with SubqueryExpression.asExpr() as argument', () => {
 		expect(normalized).toContain('+ 1');
 	});
 
+	it('compiles a body through the model-less route without a model (#891)', () => {
+		const { sql, parameters } =
+			createPgCompileOnlyAdapter().compileSelectExpression(
+				op('+', subquery('t').select('col').asExpr('x'), literal(1)).intent,
+			);
+		expect(sql).toBe('SELECT (SELECT t.col FROM t AS t) + 1');
+		expect(parameters).toEqual([]);
+	});
+
 	it('toExpressionIntent does not treat ExpressionSpec as a param value', () => {
 		// If the bug is present, toExpressionIntent would wrap the ExpressionSpec
 		// object in { kind: 'param', value: exprSpec }, and the adapter would

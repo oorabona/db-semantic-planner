@@ -3529,6 +3529,24 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 				query: import('@dbsp/types').QueryIntent,
 				paramOffset: number,
 			): CompileSubqueryResult {
+				// With a model, a body is the plan core issues for its query: the
+				// default filters apply to its scans, and a builder nested in its
+				// WHERE or projections keeps its policy where core resolves bodies.
+				if (deps.model !== undefined) {
+					const issued = planFn(query, deps.model, {
+						...(options?.defaultFilters && {
+							defaultFilters: options.defaultFilters,
+						}),
+						...(dialectCapabilities !== undefined && { dialectCapabilities }),
+					});
+					const envelope = compileSelectEnvelope(issued, options, deps);
+					if (envelope.ast === undefined)
+						throw new Error('A planned selectExpression body produced no AST.');
+					return {
+						ast: renumberParamRefsInAst(envelope.ast, paramOffset),
+						parameters: envelope.parameters,
+					};
+				}
 				const innerCompiler = new PlanCompiler({
 					dbCasing: deps.dbCasing ?? 'preserve',
 					defaultPkColumnName: deps.defaultPk,

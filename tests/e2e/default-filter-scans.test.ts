@@ -1,4 +1,12 @@
-import { createOrm, eq, exists, isNull, ref, schema } from '@dbsp/core';
+import {
+	createOrm,
+	eq,
+	exists,
+	isNull,
+	ref,
+	schema,
+	subquery,
+} from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
@@ -51,6 +59,18 @@ async function makeOrm() {
 }
 
 describe('default filters on physical read scans', () => {
+	it('counts only visible rows in a selectExpression body (#891)', async () => {
+		const orm = await makeOrm();
+		const count = subquery('posts').count().asExpr('n');
+		const rows = await orm.selectExpression(count).execute();
+		expect(rows).toHaveLength(1);
+		expect(Object.values(rows[0] as object)).toEqual(['2']);
+		const unfiltered = await orm
+			.withoutDefaultFilters()
+			.selectExpression(count)
+			.execute();
+		expect(Object.values(unfiltered[0] as object)).toEqual(['4']);
+	});
 	it('preserves a left-joined parent when its author is filtered out', async () => {
 		const orm = await makeOrm();
 		const rows = await orm

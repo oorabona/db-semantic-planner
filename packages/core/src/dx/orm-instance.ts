@@ -1138,7 +1138,10 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 						'Pass an adapter when creating the ORM.',
 				);
 			}
-			const compiled = adapter.compileSelectExpression(expr.intent, { model });
+			const compiled = adapter.compileSelectExpression(expr.intent, {
+				model,
+				...(defaultFilters !== undefined && { defaultFilters }),
+			});
 			return {
 				sql: compiled.sql,
 				parameters: compiled.parameters,

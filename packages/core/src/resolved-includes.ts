@@ -25,7 +25,11 @@ import { getDefaultFilter } from './default-filter-map.js';
 import { findDefaultFilterScan } from './dx/default-filter-refusals.js';
 import { InvalidOperationError } from './dx/errors.js';
 import { relationJoinHops } from './dx/relation-join-path.js';
-import { getRelationalReadPolicy } from './relational-read-plans.js';
+import { isBoundPayload } from './intent-payload.js';
+import {
+	containsRelationalReadPolicy,
+	getRelationalReadPolicy,
+} from './relational-read-plans.js';
 import {
 	resolveConditionContext,
 	resolveScanDefaultFilter,
@@ -665,7 +669,7 @@ export function resolveReportIncludes(
 			const query = node.query as QueryIntent;
 			if (
 				!model ||
-				(!getRelationalReadPolicy(query) &&
+				(!containsRelationalReadPolicy(query) &&
 					!findDefaultFilterScan(
 						query,
 						model,
@@ -738,11 +742,7 @@ export function resolveReportIncludes(
 			return;
 		}
 		for (const [key, child] of Object.entries(node)) {
-			if (
-				(key === 'value' || key === 'values') &&
-				(!child || typeof child !== 'object' || !(EXPRESSION_BRAND in child))
-			)
-				continue;
+			if (isBoundPayload(node, key, child)) continue;
 			inspect(child, `${intentPath}.${key}`);
 		}
 		inspected.delete(value);
