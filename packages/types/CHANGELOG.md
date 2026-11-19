@@ -1,5 +1,13 @@
 # Changelog
 
+## [6.1.1](https://github.com/oorabona/db-semantic-planner/compare/types-v6.1.0...types-v6.1.1) (2026-11-19)
+
+
+### Bug Fixes
+
+* **core:** A typed ColumnRef addresses the range its table or relation binds ([#993](https://github.com/oorabona/db-semantic-planner/issues/993)) ([9ac0704](https://github.com/oorabona/db-semantic-planner/commit/9ac0704447794a11c51cc0c7a2d025203582a333)), closes [#991](https://github.com/oorabona/db-semantic-planner/issues/991)
+* **core:** Resolve recursive start.where through core ([#1012](https://github.com/oorabona/db-semantic-planner/issues/1012)) ([a015bae](https://github.com/oorabona/db-semantic-planner/commit/a015bae091e590cc7ad2792f351e8a6797b82328)), closes [#891](https://github.com/oorabona/db-semantic-planner/issues/891)
+
 ## [6.1.0](https://github.com/oorabona/db-semantic-planner/compare/types-v6.0.0...types-v6.1.0) (2026-11-13)
 
 
