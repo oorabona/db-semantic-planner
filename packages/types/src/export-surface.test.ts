@@ -44,6 +44,9 @@ const brandExports = [
 const rootNames = [
 	'ResolvedCast',
 	'ResolvedColumnOperand',
+	// A HAVING alias's aggregate as a condition's left operand (#1005).
+	'ResolvedAggregateOperand',
+	'ResolvedLeftOperand',
 	'ResolvedParameter',
 	'ResolvedRhs',
 	'ResolvedExpression',
