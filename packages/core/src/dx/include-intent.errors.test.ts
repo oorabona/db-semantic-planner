@@ -1,11 +1,11 @@
 /**
- * @fileoverview Error path tests for IntentBuilder.
+ * @fileoverview Error path tests for the include-intent helpers.
  *
  * Covers:
  * - parseDotNotationInclude: empty path, empty segments
  * - validateRecursiveInclude: missing direction, non-self-referential,
  *   direction vs cardinality mismatch
- * - IntentBuilder.addInclude: recursive validation delegation
+ * - orm.select().include: recursive validation delegation
  */
 
 import { describe, expect, it } from 'vitest';
@@ -13,7 +13,7 @@ import { InvalidOperationError } from './errors.js';
 import {
 	parseDotNotationInclude,
 	validateRecursiveInclude,
-} from './intent-builder.js';
+} from './include-intent.js';
 import { createOrm } from './orm.js';
 import { ref, schema } from './schema.js';
 import { createMockAdapter } from './test-utils.js';
@@ -202,10 +202,10 @@ describe('validateRecursiveInclude — unknown relation', () => {
 });
 
 // ============================================================================
-// IntentBuilder.addInclude — recursive validation via builder
+// orm.select().include() — recursive validation via the public entry point
 // ============================================================================
 
-describe('IntentBuilder.addInclude — recursive include validation', () => {
+describe('orm.select().include — recursive include validation', () => {
 	it('should throw when adding recursive include on non-self-referential via ORM', () => {
 		expect(() => {
 			orm.select('posts').include('author', {
