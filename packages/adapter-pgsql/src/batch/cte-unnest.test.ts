@@ -196,7 +196,12 @@ describe('SC-14b: a scalar body on a CTE keeps its route with its subtree', () =
 			.dump();
 		return { sql: d.sql, params: d.params };
 	};
-	const notYet = (run: () => unknown, construct: string, issue: number) => {
+	const notYet = (
+		run: () => unknown,
+		construct: string,
+		issue: number,
+		position = 'scalar subquery body',
+	) => {
 		let error: unknown;
 		try {
 			run();
@@ -204,8 +209,24 @@ describe('SC-14b: a scalar body on a CTE keeps its route with its subtree', () =
 			error = e;
 		}
 		expect(error).toBeInstanceOf(NotYetSupportedError);
-		expect((error as NotYetSupportedError).issue).toBe(issue);
-		expect((error as NotYetSupportedError).construct).toBe(construct);
+		expect(error).toMatchObject({
+			construct,
+			position,
+			issue,
+			message: `${construct} in a ${position} is not supported yet (#${issue}).`,
+		});
+	};
+	/** The refusal of a local-source subtree that needs a filter or a policy. */
+	const localFiltered = (run: () => unknown) => {
+		notYet(
+			run,
+			'a filtered or policy-bearing body',
+			1040,
+			'local-source subquery body',
+		);
+		expect(run).toThrow(
+			'a filtered or policy-bearing body in a local-source subquery body is not supported yet (#1040).',
+		);
 	};
 
 	it.each(configs)(
@@ -265,13 +286,11 @@ describe('SC-14b: a scalar body on a CTE keeps its route with its subtree', () =
 		);
 	});
 	it('R7 local-filtered-descendant-refused: a descendant scanning a filtered table is refused, an unfiltered one keeps the route', () => {
-		expect(dump(ormOf(), onCte(count('items'))).sql).toContain(
-			'(SELECT (SELECT count(*) FROM items AS items) AS n FROM recent_items AS recent_items LIMIT 1)',
+		expect(dump(ormOf(), onCte(count('items'))).sql).toBe(
+			'WITH recent_items AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT users.id, (SELECT (SELECT count(*) FROM items AS items) AS n FROM recent_items AS recent_items LIMIT 1) AS v FROM users',
 		);
-		notYet(
-			() => dump(ormOf({ items: isNull('deletedAt') }), onCte(count('items'))),
-			'a filtered or policy-bearing body',
-			1040,
+		localFiltered(() =>
+			dump(ormOf({ items: isNull('deletedAt') }), onCte(count('items'))),
 		);
 	});
 	it.each(configs)('R7 local-policy-descendant-refused (%s)', (_name, o) => {
@@ -280,11 +299,7 @@ describe('SC-14b: a scalar body on a CTE keeps its route with its subtree', () =
 				buildSubqueryIntent(): QueryIntent;
 			}
 		).buildSubqueryIntent();
-		notYet(
-			() => dump(o, onCte(issued)),
-			'a filtered or policy-bearing body',
-			1040,
-		);
+		localFiltered(() => dump(o, onCte(issued)));
 	});
 });
 
