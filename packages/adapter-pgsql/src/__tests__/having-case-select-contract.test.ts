@@ -1233,6 +1233,21 @@ describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
 		).toBe(
 			'SELECT users.id FROM users GROUP BY users.id HAVING users.id = ANY (SELECT posts_subq_0."authorId" FROM posts AS posts_subq_0 WHERE posts_subq_0."deletedAt" IS NULL)',
 		);
+		// Shared by HAVING and an ORDER BY CASE, the copied node keeps its issued
+		// body, so both occurrences keep the body's filter.
+		const shared = inSubquery('users.id', new SubqueryExpression(body));
+		expect(
+			filtered
+				.withoutDefaultFilters()
+				.select('users')
+				.columns(['id'])
+				.groupBy(['id'])
+				.having(shared)
+				.orderBy(caseWhen(shared, literal(1)).else(literal(0)))
+				.dump().sql,
+		).toBe(
+			'SELECT users.id FROM users GROUP BY users.id HAVING users.id = ANY (SELECT posts_subq_1."authorId" FROM posts AS posts_subq_1 WHERE posts_subq_1."deletedAt" IS NULL) ORDER BY CASE WHEN users.id = ANY (SELECT posts_subq_0."authorId" FROM posts AS posts_subq_0 WHERE posts_subq_0."deletedAt" IS NULL) THEN 1 ELSE 0 END ASC',
+		);
 	});
 
 	it('AC17 ambiguous and invisible qualifiers are refused with the position label in CASE WHEN, FILTER and HAVING', () => {
