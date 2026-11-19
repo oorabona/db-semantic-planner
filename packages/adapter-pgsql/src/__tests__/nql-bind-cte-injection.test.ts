@@ -1,4 +1,4 @@
-import { schema } from '@dbsp/core';
+import { isNull, schema } from '@dbsp/core';
 import { compile } from '@dbsp/nql';
 import type {
 	ColumnJsReadType,
@@ -443,6 +443,26 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect(result.sql).toContain('FROM tenant_1.items');
 		expect(result.sql).toContain('FROM recent_items');
 		expect(result.sql).not.toContain('tenant_1.recent_items');
+		// A body on a binding keeps the adapter's route, with or without a
+		// default filter on the model table it reads (#891 slice 5b, R7).
+		expect(
+			[undefined, { items: isNull('name') }].map((defaultFilters) => {
+				const compiled = adapter.compile(bundle, {
+					model: testSchema.model,
+					...(defaultFilters && { defaultFilters }),
+				});
+				return { sql: compiled.sql, params: compiled.parameters };
+			}),
+		).toEqual([
+			{
+				sql: 'WITH "recent_items" as (SELECT items.id FROM tenant_1.items) SELECT items.id, (SELECT count(*) AS total FROM recent_items AS recent_items) AS recent_count FROM tenant_1.items',
+				params: [],
+			},
+			{
+				sql: 'WITH "recent_items" as (SELECT items.id FROM tenant_1.items WHERE items.name IS NULL) SELECT items.id, (SELECT count(*) AS total FROM recent_items AS recent_items) AS recent_count FROM tenant_1.items WHERE items.name IS NULL',
+				params: [],
+			},
+		]);
 	});
 
 	it('allows distinct NQL bind names that would collide only after casing', () => {
@@ -469,6 +489,30 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect(error).toBeUndefined();
 		expect(sql).toContain('WITH "items" as');
 		expect(sql).toContain('FROM items AS items_subq_0');
+		// A scalar body on the shadowing binding reads the binding, not the
+		// model table: its star is not counted against the table (#891 slice 5b, R7).
+		const shadowing = compileNqlBundle(
+			'items | select id | bind items\nposts | select (items | select *) as v',
+		);
+		const adapter = createPgCompileOnlyAdapter();
+		expect(
+			[undefined, { posts: isNull('title') }].map((defaultFilters) => {
+				const compiled = adapter.compile(shadowing, {
+					model: testSchema.model,
+					...(defaultFilters && { defaultFilters }),
+				});
+				return { sql: compiled.sql, params: compiled.parameters };
+			}),
+		).toEqual([
+			{
+				sql: 'WITH "items" as (SELECT items.id FROM items) SELECT (SELECT items.* FROM items AS items) AS v FROM posts',
+				params: [],
+			},
+			{
+				sql: 'WITH "items" as (SELECT items.id FROM items) SELECT (SELECT items.* FROM items AS items) AS v FROM posts WHERE posts.title IS NULL',
+				params: [],
+			},
+		]);
 	});
 
 	it('allows a read binding to shadow a snake_case table name', () => {

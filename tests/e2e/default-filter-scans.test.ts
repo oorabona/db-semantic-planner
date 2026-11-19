@@ -2,8 +2,12 @@ import {
 	createOrm,
 	eq,
 	exists,
+	gt,
 	isNull,
+	outerRef,
+	type QueryIntent,
 	ref,
+	SubqueryExpression,
 	schema,
 	subquery,
 } from '@dbsp/core';
@@ -14,6 +18,7 @@ import {
 	dropSchema,
 	execInSchema,
 	getTestAdapter,
+	getTestPool,
 } from './testkit/index.js';
 
 const SCHEMA = 'default_filter_scans_e2e';
@@ -146,5 +151,76 @@ describe('default filters on physical read scans', () => {
 			.orderBy('id')
 			.all();
 		expect(unfiltered.map((row) => row.id)).toEqual([1, 2, 3]);
+	});
+});
+
+describe('scalar subquery bodies select the rows a hand-written query selects (#891 slice 5b)', () => {
+	type Orm = Awaited<ReturnType<typeof makeOrm>>;
+	// buildIntent() is a builder internal, absent from the public QueryBuilder type.
+	const body = (q: unknown) =>
+		new SubqueryExpression((q as { buildIntent(): QueryIntent }).buildIntent());
+	const authored = (o: Orm) =>
+		o.select('posts').where(eq('authorId', outerRef('id')));
+	const rowsOf = async (o: Orm, b: SubqueryExpression) =>
+		(
+			await o
+				.select('users')
+				.columns(['id', b.asExpr('v')])
+				.orderBy('id')
+				.all()
+		).map((row) => ({ ...row }));
+	const oracle = async (text: string) =>
+		(await (await getTestPool()).query(text)).rows.map((row) => ({ ...row }));
+	const grouped = (o: Orm) =>
+		body(
+			authored(o)
+				.columns([])
+				.groupBy(['authorId'])
+				.count('id', 'n')
+				.having(gt('n', 0)),
+		);
+
+	it('AC8 e2e-groupby: a correlated GROUP BY body', async () => {
+		const orm = (await makeOrm()).withoutDefaultFilters();
+		const expected = await oracle(
+			`SELECT u.id, (SELECT count(p.id) FROM ${SCHEMA}.posts p WHERE p.author_id = u.id GROUP BY p.author_id HAVING count(p.id) > 0) AS v FROM ${SCHEMA}.users u ORDER BY u.id`,
+		);
+		expect(expected).toEqual([
+			{ id: 1, v: '2' },
+			{ id: 2, v: '1' },
+			{ id: 3, v: '1' },
+			{ id: 4, v: null },
+		]);
+		expect(await rowsOf(orm, grouped(orm))).toEqual(expected);
+	});
+
+	it('AC8 e2e-offset: the n-th item of each parent', async () => {
+		const orm = (await makeOrm()).withoutDefaultFilters();
+		const nth = body(
+			authored(orm).columns(['id']).orderBy('id').limit(1).offset(1),
+		);
+		const expected = await oracle(
+			`SELECT u.id, (SELECT p.id FROM ${SCHEMA}.posts p WHERE p.author_id = u.id ORDER BY p.id LIMIT 1 OFFSET 1) AS v FROM ${SCHEMA}.users u ORDER BY u.id`,
+		);
+		expect(expected).toEqual([
+			{ id: 1, v: 11 },
+			{ id: 2, v: null },
+			{ id: 3, v: null },
+			{ id: 4, v: null },
+		]);
+		expect(await rowsOf(orm, nth)).toEqual(expected);
+	});
+
+	it('AC8 e2e-groupby-filtered: the GROUP BY body under default filters', async () => {
+		const orm = await makeOrm();
+		const expected = await oracle(
+			`SELECT u.id, (SELECT count(p.id) FROM ${SCHEMA}.posts p WHERE p.deleted_at IS NULL AND p.author_id = u.id GROUP BY p.author_id HAVING count(p.id) > 0) AS v FROM ${SCHEMA}.users u WHERE u.deleted_at IS NULL ORDER BY u.id`,
+		);
+		expect(expected).toEqual([
+			{ id: 1, v: '1' },
+			{ id: 3, v: null },
+			{ id: 4, v: null },
+		]);
+		expect(await rowsOf(orm, grouped(orm))).toEqual(expected);
 	});
 });

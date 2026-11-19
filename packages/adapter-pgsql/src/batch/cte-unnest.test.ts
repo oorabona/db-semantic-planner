@@ -14,8 +14,13 @@ import {
 	eq,
 	exprRef,
 	InvalidOperationError,
+	isNull,
+	NotYetSupportedError,
+	type QueryIntent,
 	ref,
+	SubqueryExpression,
 	schema,
+	type WhereIntent,
 } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -124,6 +129,162 @@ describe('SC-14: CTE with unnest + WITH ORDINALITY index', () => {
 		expect(result.sql).toContain('ordinality');
 		expect(result.sql).toContain('1');
 		expect(result.sql).toContain('idx');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// SC-14b: a scalar body on a CTE keeps the adapter's route (#891 slice 5b, R7)
+// ---------------------------------------------------------------------------
+describe('SC-14b: a scalar body on a CTE keeps its route with its subtree', () => {
+	const tables = {
+		users: {
+			id: { type: 'integer', primaryKey: true },
+			deletedAt: { type: 'timestamp', nullable: true },
+		},
+		items: {
+			id: { type: 'integer', primaryKey: true },
+			deletedAt: { type: 'timestamp', nullable: true },
+			user_id: ref('users', { as: 'owner', inverse: 'items' }),
+		},
+	} as const;
+	const ormOf = (defaultFilters?: Record<string, WhereIntent>) => {
+		const db = schema(
+			tables,
+			undefined,
+			defaultFilters ? { defaultFilters } : undefined,
+		);
+		return createOrm({
+			schema: db,
+			adapter: createPgCompileOnlyAdapter({ model: db.model }),
+			suppressDxWarnings: true,
+		});
+	};
+	type Orm = ReturnType<typeof ormOf>;
+	// "filtered" filters the outer root only, so the CTE body's subtree stays
+	// unfiltered unless a test filters it on purpose.
+	const configs = [
+		['plain', ormOf()],
+		['filtered', ormOf({ users: isNull('deletedAt') })],
+	] as const;
+	const rootFilter = (name: string) =>
+		name === 'filtered' ? ' WHERE users."deletedAt" IS NULL' : '';
+	const count = (from: string): QueryIntent => ({
+		type: 'select',
+		from,
+		select: {
+			type: 'aggregate',
+			aggregates: [{ function: 'count', field: '*' }],
+		},
+	});
+	/** A body on the CTE projecting one more body. */
+	const onCte = (inner: QueryIntent, extra: Partial<QueryIntent> = {}) =>
+		new SubqueryExpression({
+			type: 'select',
+			from: 'recent_items',
+			select: {
+				type: 'expressions',
+				columns: [{ kind: 'subquery', query: inner, as: 'n' }],
+			},
+			limit: 1,
+			...extra,
+		} as QueryIntent);
+	const dump = (o: Orm, body: SubqueryExpression) => {
+		const d = o
+			.withCte('recent_items')
+			.fromUnnest({ id: [1, 2] })
+			.query(o.select('users').columns(['id', body.asExpr('v')]))
+			.dump();
+		return { sql: d.sql, params: d.params };
+	};
+	const notYet = (run: () => unknown, construct: string, issue: number) => {
+		let error: unknown;
+		try {
+			run();
+		} catch (e) {
+			error = e;
+		}
+		expect(error).toBeInstanceOf(NotYetSupportedError);
+		expect((error as NotYetSupportedError).issue).toBe(issue);
+		expect((error as NotYetSupportedError).construct).toBe(construct);
+	};
+
+	it.each(configs)(
+		'R7 local-subtree: a model-table body below the CTE body keeps the CTE route (%s)',
+		(name, o) => {
+			expect(dump(o, onCte(count('items')))).toEqual({
+				sql: `WITH recent_items AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT users.id, (SELECT (SELECT count(*) FROM items AS items) AS n FROM recent_items AS recent_items LIMIT 1) AS v FROM users${rootFilter(name)}`,
+				params: [[1, 2]],
+			});
+		},
+	);
+	it.each(configs)('R7 local-join-refused (%s)', (_name, o) => {
+		notYet(
+			() =>
+				dump(
+					o,
+					onCte(count('items'), {
+						joins: [{ type: 'inner', relation: 'owner' }],
+					} as Partial<QueryIntent>),
+				),
+			'join',
+			1039,
+		);
+	});
+	it.each(configs)('R7 local-descendant-join-refused (%s)', (_name, o) => {
+		notYet(
+			() =>
+				dump(
+					o,
+					onCte({
+						...count('items'),
+						joins: [{ type: 'inner', relation: 'owner' }],
+					} as QueryIntent),
+				),
+			'join',
+			1039,
+		);
+	});
+	it.each(configs)('R7 local-nested-include-refused (%s)', (_name, o) => {
+		expect(() =>
+			dump(o, onCte(count('items'), { include: [{ relation: 'owner' }] })),
+		).toThrow(
+			"include('owner') in a scalar subquery body hydrates nested objects; a scalar subquery yields one value.",
+		);
+	});
+	it.each(configs)('R7 local-flat-include-refused (%s)', (_name, o) => {
+		notYet(
+			() =>
+				dump(
+					o,
+					onCte(count('items'), {
+						include: [{ relation: 'owner', strategy: 'flat' }],
+					}),
+				),
+			"flat include('owner')",
+			1030,
+		);
+	});
+	it('R7 local-filtered-descendant-refused: a descendant scanning a filtered table is refused, an unfiltered one keeps the route', () => {
+		expect(dump(ormOf(), onCte(count('items'))).sql).toContain(
+			'(SELECT (SELECT count(*) FROM items AS items) AS n FROM recent_items AS recent_items LIMIT 1)',
+		);
+		notYet(
+			() => dump(ormOf({ items: isNull('deletedAt') }), onCte(count('items'))),
+			'a filtered or policy-bearing body',
+			1040,
+		);
+	});
+	it.each(configs)('R7 local-policy-descendant-refused (%s)', (_name, o) => {
+		const issued = (
+			o.select('items').columns([]).count('id', 'n') as unknown as {
+				buildSubqueryIntent(): QueryIntent;
+			}
+		).buildSubqueryIntent();
+		notYet(
+			() => dump(o, onCte(issued)),
+			'a filtered or policy-bearing body',
+			1040,
+		);
 	});
 });
 

@@ -14,8 +14,31 @@ import {
 	compilePlan,
 	type SimplifiedPlanReport,
 } from '@dbsp/adapter-pgsql/internal';
-import { eq, literal, op, subquery } from '@dbsp/core';
-import type { SubqueryExpressionIntent } from '@dbsp/types/internal';
+import {
+	caseWhen,
+	createOrm,
+	eq,
+	exprRef,
+	fn,
+	gt,
+	isNull,
+	literal,
+	NotYetSupportedError,
+	op,
+	outerRef,
+	plan,
+	planRecursive,
+	type QueryIntent,
+	ref,
+	SubqueryExpression,
+	schema,
+	star,
+	subquery,
+} from '@dbsp/core';
+import {
+	markPlannedReport,
+	type SubqueryExpressionIntent,
+} from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -284,5 +307,865 @@ describe('op() with SubqueryExpression.asExpr() as argument', () => {
 		expect(normalized).toContain('100');
 		expect(normalized).toContain('count(*)');
 		expect(normalized).toContain('from t');
+	});
+});
+
+// ============================================================================
+// #891 slice 5b: a scalar subquery body is the root resolver's nested select
+// ============================================================================
+
+describe('scalar subquery bodies compile every clause through core (#891 slice 5b)', () => {
+	const tables = {
+		users: {
+			id: { type: 'integer', primaryKey: true },
+			name: 'text',
+			bonus: 'integer',
+		},
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			title: 'text',
+			score: 'integer',
+			deletedAt: { type: 'timestamp', nullable: true },
+			user_id: ref('users', { as: 'author', inverse: 'writings' }),
+		},
+		comments: {
+			id: { type: 'integer', primaryKey: true },
+			post_id: ref('posts', { as: 'post', inverse: 'replies' }),
+		},
+		tags: { id: { type: 'integer', primaryKey: true }, label: 'text' },
+	} as const;
+	const plainDb = schema(tables);
+	const filteredDb = schema(tables, undefined, {
+		defaultFilters: { posts: isNull('deletedAt') },
+	});
+	const ormOf = (db: typeof plainDb, schemaName?: string) => {
+		const adapter = createPgCompileOnlyAdapter({ model: db.model });
+		return createOrm({
+			schema: db,
+			adapter: schemaName ? adapter.withSchema(schemaName) : adapter,
+			suppressDxWarnings: true,
+		});
+	};
+	const plain = ormOf(plainDb);
+	const filtered = ormOf(filteredDb);
+	type Orm = typeof plain;
+	const configs = [
+		['plain', plain],
+		['filtered', filtered],
+	] as const;
+	const FILTER = 'posts."deletedAt" IS NULL AND ';
+	/** The root's WHERE prefix for a posts body: the default filter first, when configured. */
+	const where = (name: 'plain' | 'filtered') =>
+		name === 'filtered' ? FILTER : '';
+	// buildIntent() and buildSubqueryIntent() are builder internals, absent from
+	// the public QueryBuilder type.
+	const body = (q: unknown) =>
+		new SubqueryExpression((q as { buildIntent(): QueryIntent }).buildIntent());
+	const issuedBody = (q: unknown) =>
+		new SubqueryExpression(
+			(q as { buildSubqueryIntent(): QueryIntent }).buildSubqueryIntent(),
+		);
+	const correlated = (o: Orm) =>
+		o.select('posts').where(eq('user_id', outerRef('id')));
+	const projected = (o: Orm, b: SubqueryExpression) => {
+		const d = o
+			.select('users')
+			.columns(['id', b.asExpr('v')])
+			.dump();
+		return { sql: d.sql, params: d.params };
+	};
+	/** AC1's GROUP BY body: HAVING on an aggregate alias, only the aggregate projected. */
+	const grouped = (o: Orm) =>
+		body(
+			correlated(o)
+				.columns([])
+				.groupBy(['user_id'])
+				.count('id', 'n')
+				.having(gt('n', 1)),
+		);
+	const groupedSql = (name: 'plain' | 'filtered') =>
+		`(SELECT count(posts.id) AS n FROM posts WHERE ${where(name)}posts.user_id = users.id GROUP BY posts.user_id HAVING count(posts.id) > CAST($1 AS bigint))`;
+
+	const recursiveSql = (
+		db: typeof plainDb,
+		where: QueryIntent['where'],
+		schemaName?: string,
+	) => {
+		const adapter = createPgCompileOnlyAdapter({ model: db.model });
+		const compiled = (
+			schemaName ? adapter.withSchema(schemaName) : adapter
+		).compileRecursive(
+			planRecursive(
+				{
+					type: 'recursive',
+					cteName: 'tree',
+					start: {
+						from: 'users',
+						nodeIdExpr: { kind: 'column', name: 'id' },
+						where: where!,
+					},
+					traversal: {
+						kind: 'adjacency',
+						nodeTable: 'users',
+						nodeId: 'id',
+						parentId: 'bonus',
+						direction: 'descendants',
+					},
+					maxDepth: 2,
+				},
+				db.model,
+				db.defaultFilters ? { defaultFilters: db.defaultFilters } : {},
+			),
+			db.model,
+		);
+		return { sql: compiled.sql, params: compiled.parameters };
+	};
+	describe('AC1 clauses equal the root SQL of the same intent', () => {
+		it.each(configs)('AC1 groupby-having (%s)', (name, o) => {
+			expect(projected(o, grouped(o))).toEqual({
+				sql: `SELECT users.id, ${groupedSql(name)} AS v FROM users`,
+				params: [1],
+			});
+		});
+		it.each(configs)('AC1 expression-projection (%s)', (name, o) => {
+			expect(
+				projected(
+					o,
+					body(correlated(o).columns([fn('max', exprRef('score')).as('m')])),
+				),
+			).toEqual({
+				sql: `SELECT users.id, (SELECT max(score) AS m FROM posts WHERE ${where(name)}posts.user_id = users.id) AS v FROM users`,
+				params: [],
+			});
+		});
+		it.each(configs)('AC1 distinct (%s)', (name, o) => {
+			expect(
+				projected(
+					o,
+					body(correlated(o).columns(['title']).distinct().limit(1)),
+				),
+			).toEqual({
+				sql: `SELECT users.id, (SELECT DISTINCT posts.title FROM posts WHERE ${where(name)}posts.user_id = users.id LIMIT 1) AS v FROM users`,
+				params: [],
+			});
+		});
+		it.each(configs)('AC1 distinct-on (%s)', (name, o) => {
+			expect(
+				projected(
+					o,
+					body(correlated(o).columns(['title']).distinctOn('title').limit(1)),
+				),
+			).toEqual({
+				sql: `SELECT users.id, (SELECT DISTINCT ON (title) posts.title FROM posts WHERE ${where(name)}posts.user_id = users.id LIMIT 1) AS v FROM users`,
+				params: [],
+			});
+		});
+		it.each(configs)('AC1 offset (%s)', (name, o) => {
+			expect(
+				projected(o, body(correlated(o).columns(['id']).limit(1).offset(1))),
+			).toEqual({
+				sql: `SELECT users.id, (SELECT posts.id FROM posts WHERE ${where(name)}posts.user_id = users.id LIMIT 1 OFFSET 1) AS v FROM users`,
+				params: [],
+			});
+		});
+		it.each(configs)('AC1 orderby-limit (%s)', (name, o) => {
+			expect(
+				projected(
+					o,
+					body(correlated(o).columns(['id']).orderBy('score', 'desc').limit(1)),
+				),
+			).toEqual({
+				sql: `SELECT users.id, (SELECT posts.id FROM posts WHERE ${where(name)}posts.user_id = users.id ORDER BY posts.score DESC LIMIT 1) AS v FROM users`,
+				params: [],
+			});
+		});
+		it.each(configs)('AC1 aggregate-filter (%s)', (name, o) => {
+			expect(
+				projected(
+					o,
+					body(
+						correlated(o).columns([
+							fn('count', star()).filter(eq('score', 1)).as('n'),
+						]),
+					),
+				),
+			).toEqual({
+				sql: `SELECT users.id, (SELECT count(*) FILTER (WHERE posts.score = $1) AS n FROM posts WHERE ${where(name)}posts.user_id = users.id) AS v FROM users`,
+				params: [1],
+			});
+		});
+		it.each(configs)('AC1 case-column (%s)', (name, o) => {
+			expect(
+				projected(
+					o,
+					body(
+						correlated(o)
+							.columns([
+								caseWhen(eq('score', 1), literal(1)).else(literal(0)).as('c'),
+							])
+							.limit(1),
+					),
+				),
+			).toEqual({
+				sql: `SELECT users.id, (SELECT CASE WHEN posts.score = $1 THEN 1 ELSE 0 END AS c FROM posts WHERE ${where(name)}posts.user_id = users.id LIMIT 1) AS v FROM users`,
+				params: [1],
+			});
+		});
+		it.each(configs)('AC1 lock (%s)', (name, o) => {
+			expect(
+				projected(o, body(correlated(o).columns(['id']).limit(1).forUpdate())),
+			).toEqual({
+				sql: `SELECT users.id, (SELECT posts.id FROM posts WHERE ${where(name)}posts.user_id = users.id LIMIT 1 FOR UPDATE) AS v FROM users`,
+				params: [],
+			});
+		});
+	});
+
+	it('AC2 filter-once: a filtered body holds its default filter once, first in WHERE', () => {
+		const bodies = [
+			grouped(filtered),
+			body(correlated(filtered).columns([fn('max', exprRef('score')).as('m')])),
+			body(correlated(filtered).columns(['title']).distinct().limit(1)),
+			body(
+				correlated(filtered).columns(['title']).distinctOn('title').limit(1),
+			),
+			body(correlated(filtered).columns(['id']).limit(1).offset(1)),
+			body(
+				correlated(filtered).columns(['id']).orderBy('score', 'desc').limit(1),
+			),
+			body(
+				correlated(filtered).columns([
+					fn('count', star()).filter(eq('score', 1)).as('n'),
+				]),
+			),
+			body(correlated(filtered).columns(['id']).limit(1).forUpdate()),
+		];
+		expect(
+			bodies.map((b) => {
+				const { sql } = projected(filtered, b);
+				return [
+					sql.split('posts."deletedAt" IS NULL').length - 1,
+					sql.includes(`FROM posts WHERE ${FILTER}posts.user_id = users.id`),
+				];
+			}),
+		).toEqual(bodies.map(() => [1, true]));
+	});
+
+	describe('AC2b a body policy wins over the enclosing filters', () => {
+		it('AC2b disabled-body-under-filtered-parent', () => {
+			const disabled = issuedBody(
+				filtered.select('posts').withoutDefaultFilters().columns(['id']),
+			);
+			expect(projected(filtered, disabled)).toEqual({
+				sql: 'SELECT users.id, (SELECT posts.id FROM posts) AS v FROM users',
+				params: [],
+			});
+		});
+		it('AC2b filtered-body-under-unfiltered-parent', () => {
+			const issued = issuedBody(correlated(filtered).columns(['id']).limit(1));
+			expect(projected(plain, issued)).toEqual({
+				sql: `SELECT users.id, (SELECT posts.id FROM posts WHERE ${FILTER}posts.user_id = users.id LIMIT 1) AS v FROM users`,
+				params: [],
+			});
+		});
+		it('AC2b registered-plan-union-arm', () => {
+			const set = filtered
+				.select('posts')
+				.withoutDefaultFilters()
+				.columns(['id'])
+				.union(filtered.select('posts').columns(['id'])) as unknown as {
+				intent: { left: QueryIntent };
+			};
+			expect(
+				projected(filtered, new SubqueryExpression(set.intent.left)),
+			).toEqual({
+				sql: 'SELECT users.id, (SELECT posts.id FROM posts) AS v FROM users',
+				params: [],
+			});
+		});
+	});
+
+	describe('AC3 the GROUP BY body compiles in every position', () => {
+		it.each(configs)('AC3 select-columns (%s)', (name, o) => {
+			expect(projected(o, grouped(o))).toEqual({
+				sql: `SELECT users.id, ${groupedSql(name)} AS v FROM users`,
+				params: [1],
+			});
+		});
+		it.each(configs)('AC3 orderby-asexpr (%s)', (name, o) => {
+			const d = o.select('users').orderBy(grouped(o).asExpr('v')).dump();
+			expect({ sql: d.sql, params: d.params }).toEqual({
+				sql: `SELECT users.* FROM users ORDER BY ${groupedSql(name)} ASC`,
+				params: [1],
+			});
+		});
+		it.each(configs)('AC3 having-operand (%s)', (name, o) => {
+			const d = o
+				.select('users')
+				.groupBy(['id'])
+				.count('id', 'n')
+				.having(gt('n', fn('abs', grouped(o).asExpr('v'))))
+				.dump();
+			expect({ sql: d.sql, params: d.params }).toEqual({
+				sql: `SELECT users.id, count(users.id) AS n FROM users GROUP BY users.id HAVING count(users.id) > abs(${groupedSql(name)})`,
+				params: [1],
+			});
+		});
+		it.each(configs)('AC3 root-where-expression (%s)', (name, o) => {
+			const d = o
+				.select('users')
+				.where(fn('abs', grouped(o).asExpr('v')).gt(0))
+				.dump();
+			expect({ sql: d.sql, params: d.params }).toEqual({
+				sql: `SELECT users.* FROM users WHERE abs(${groupedSql(name)}) > $2`,
+				params: [1, 0],
+			});
+		});
+		it.each(configs)('AC3 op-nested (%s)', (name, o) => {
+			const d = o
+				.select('users')
+				.columns([op('+', grouped(o).asExpr('v'), literal(1)).as('w')])
+				.dump();
+			expect({ sql: d.sql, params: d.params }).toEqual({
+				sql: `SELECT ${groupedSql(name)} + 1 AS w FROM users`,
+				params: [1],
+			});
+		});
+		it.each(configs)('AC3 aggregate-filter-condition (%s)', (name, o) => {
+			const d = o
+				.select('users')
+				.columns([
+					fn('count', star())
+						.filter(fn('abs', grouped(o).asExpr('v')).gt(0))
+						.as('k'),
+				])
+				.dump();
+			expect({ sql: d.sql, params: d.params }).toEqual({
+				sql: `SELECT count(*) FILTER (WHERE abs(${groupedSql(name)}) > $2) AS k FROM users`,
+				params: [1, 0],
+			});
+		});
+	});
+
+	describe('AC3b shared callers of the condition resolver', () => {
+		/**
+		 * In a mutation WHERE, a body without its own policy is never filtered. The
+		 * body is built by the plain ORM: buildIntent() on a filtered builder
+		 * writes the filter into the body's own WHERE (#1035).
+		 */
+		const mutationGrouped =
+			'(SELECT count(posts.id) AS n FROM posts WHERE posts.user_id = users.id GROUP BY posts.user_id HAVING count(posts.id) > CAST($2 AS bigint))';
+		const dumped = (d: { sql: string; parameters: readonly unknown[] }) => ({
+			sql: d.sql,
+			params: d.parameters,
+		});
+		it.each(configs)('AC3b update-where (%s)', (_name, o) => {
+			expect(
+				dumped(
+					o
+						.update('users')
+						.set({ bonus: 1 })
+						.where(fn('abs', grouped(plain).asExpr('v')).gt(0))
+						.dump(),
+				),
+			).toEqual({
+				sql: `UPDATE users SET bonus = $1 WHERE abs(${mutationGrouped}) > $3`,
+				params: [1, 1, 0],
+			});
+		});
+		it.each(configs)('AC3b delete-where (%s)', (_name, o) => {
+			expect(
+				dumped(
+					o
+						.delete('users')
+						.where(fn('abs', grouped(plain).asExpr('v')).gt(0))
+						.dump(),
+				),
+			).toEqual({
+				sql: `DELETE FROM users WHERE abs(${mutationGrouped.replace('$2', '$1')}) > $2`,
+				params: [1, 0],
+			});
+		});
+		it.each(configs)('AC3b upsert-doupdate-where (%s)', (_name, o) => {
+			expect(
+				dumped(
+					o
+						.upsert('users')
+						.values({ id: 1, bonus: 2 })
+						.onConflict(['id'])
+						.doUpdate({ bonus: 3 }, fn('abs', grouped(plain).asExpr('v')).gt(0))
+						.dump(),
+				),
+			).toEqual({
+				sql: `INSERT INTO users (id, bonus) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET bonus = $3 WHERE abs(${mutationGrouped.replace('$2', '$4')}) > $5`,
+				params: [1, 2, 3, 1, 0],
+			});
+		});
+		it.each([
+			['plain', plainDb, plain],
+			['filtered', filteredDb, filtered],
+		] as const)('AC3b recursive-start-where (%s)', (name, db, o) => {
+			expect(recursiveSql(db, fn('abs', grouped(o).asExpr('v')).gt(0))).toEqual(
+				{
+					sql: `WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE abs((SELECT count(posts.id) AS n FROM posts WHERE ${where(name)}posts.user_id = __n.id GROUP BY posts.user_id HAVING count(posts.id) > CAST($1 AS bigint))) > $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.bonus = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree`,
+					params: [1, 0],
+				},
+			);
+		});
+		it.each(configs)('AC3b mutation-unfiltered (%s)', (_name, o) => {
+			const count = subquery('posts')
+				.where(eq('user_id', outerRef('id')))
+				.count()
+				.asExpr('v');
+			expect(
+				dumped(
+					o
+						.update('users')
+						.set({ bonus: 1 })
+						.where(fn('abs', count).gt(0))
+						.dump(),
+				),
+			).toEqual({
+				sql: 'UPDATE users SET bonus = $1 WHERE abs((SELECT count(*) FROM posts WHERE posts.user_id = users.id)) > $2',
+				params: [1, 0],
+			});
+		});
+		it.each(configs)('AC3b mutation-body-policy (%s)', (_name, o) => {
+			const issued = issuedBody(correlated(filtered).columns(['id']).limit(1));
+			expect(
+				dumped(
+					o
+						.update('users')
+						.set({ bonus: 1 })
+						.where(fn('abs', issued.asExpr('v')).gt(0))
+						.dump(),
+				),
+			).toEqual({
+				sql: `UPDATE users SET bonus = $1 WHERE abs((SELECT posts.id FROM posts WHERE ${FILTER}posts.user_id = users.id LIMIT 1)) > $2`,
+				params: [1, 0],
+			});
+		});
+	});
+
+	describe('AC4 body aliases and correlation', () => {
+		it.each(configs)('AC4 same-table (%s)', (name, o) => {
+			const d = o
+				.select('posts')
+				.columns([
+					'id',
+					body(
+						o
+							.select('posts')
+							.where(eq('user_id', outerRef('user_id')))
+							.count('id', 'n')
+							.columns([]),
+					).asExpr('v'),
+				])
+				.dump();
+			expect(d.sql).toBe(
+				name === 'plain'
+					? 'SELECT posts.id, (SELECT count(posts_1.id) AS n FROM posts AS posts_1 WHERE posts_1.user_id = posts.user_id) AS v FROM posts'
+					: 'SELECT posts.id, (SELECT count(posts_1.id) AS n FROM posts AS posts_1 WHERE posts_1."deletedAt" IS NULL AND posts_1.user_id = posts.user_id) AS v FROM posts WHERE posts."deletedAt" IS NULL',
+			);
+		});
+		it.each(configs)('AC4 siblings (%s)', (name, o) => {
+			const sibling = () =>
+				body(correlated(o).columns(['id']).limit(1)).asExpr('v');
+			const d = o
+				.select('users')
+				.columns([
+					sibling(),
+					subquery('posts')
+						.where(eq('user_id', outerRef('id')))
+						.count()
+						.asExpr('w'),
+				])
+				.dump();
+			expect(d.sql).toBe(
+				`SELECT (SELECT posts.id FROM posts WHERE ${where(name)}posts.user_id = users.id LIMIT 1) AS v, (SELECT count(*) FROM posts AS posts_1 WHERE ${where(name).replaceAll('posts.', 'posts_1.')}posts_1.user_id = users.id) AS w FROM users`,
+			);
+		});
+		it.each(configs)('AC4 mutation-same-table (%s)', (_name, o) => {
+			const d = o
+				.update('posts')
+				.set({ score: 1 })
+				.where(
+					fn(
+						'abs',
+						body(
+							plain
+								.select('posts')
+								.where(eq('user_id', outerRef('id')))
+								.count('id', 'n')
+								.columns([]),
+						).asExpr('v'),
+					).gt(0),
+				)
+				.dump();
+			expect({ sql: d.sql, params: d.parameters }).toEqual({
+				sql: 'UPDATE posts SET score = $1 WHERE abs((SELECT count(posts_1.id) AS n FROM posts AS posts_1 WHERE posts_1.user_id = posts.id)) > $2',
+				params: [1, 0],
+			});
+		});
+		it.each(configs)('AC4 nested-same-table (%s)', (name, o) => {
+			const inner = body(
+				o
+					.select('posts')
+					.where(eq('user_id', outerRef('user_id')))
+					.count('id', 'n')
+					.columns([]),
+			);
+			const middle = body(
+				o
+					.select('posts')
+					.where(eq('id', outerRef('id')))
+					.columns([inner.asExpr('m')])
+					.limit(1),
+			);
+			const d = o
+				.select('posts')
+				.columns(['id', middle.asExpr('v')])
+				.dump();
+			const f = (alias: string) =>
+				name === 'filtered' ? `${alias}."deletedAt" IS NULL AND ` : '';
+			expect(d.sql).toBe(
+				`SELECT posts.id, (SELECT (SELECT count(posts_2.id) AS n FROM posts AS posts_2 WHERE ${f('posts_2')}posts_2.user_id = posts_1.user_id) AS m FROM posts AS posts_1 WHERE ${f('posts_1')}posts_1.id = posts.id LIMIT 1) AS v FROM posts${name === 'filtered' ? ' WHERE posts."deletedAt" IS NULL' : ''}`,
+			);
+			// The same nesting through the middle body's WHERE.
+			const throughWhere = body(
+				o
+					.select('posts')
+					.where(eq('id', outerRef('id')))
+					.where(fn('abs', inner.asExpr('m')).gt(0))
+					.columns(['id'])
+					.limit(1),
+			);
+			expect(
+				o
+					.select('posts')
+					.columns(['id', throughWhere.asExpr('v')])
+					.dump().sql,
+			).toBe(
+				`SELECT posts.id, (SELECT posts_1.id FROM posts AS posts_1 WHERE ${f('posts_1')}posts_1.id = posts.id AND abs((SELECT count(posts_2.id) AS n FROM posts AS posts_2 WHERE ${f('posts_2')}posts_2.user_id = posts_1.user_id)) > $1 LIMIT 1) AS v FROM posts${name === 'filtered' ? ' WHERE posts."deletedAt" IS NULL' : ''}`,
+			);
+		});
+	});
+
+	describe('AC4b alias edge cases', () => {
+		const long = 'p'.repeat(63);
+		const edgeDb = schema({
+			posts: { id: { type: 'integer', primaryKey: true } },
+			posts_1: { id: { type: 'integer', primaryKey: true } },
+			[long]: { id: { type: 'integer', primaryKey: true } },
+		});
+		const edge = ormOf(edgeDb as unknown as typeof plainDb) as unknown as {
+			select(table: string): {
+				columns(c: unknown[]): { dump(): { sql: string } };
+			};
+		};
+		it('AC4b literal-posts-1-table', () => {
+			expect(
+				edge
+					.select('posts')
+					.columns([
+						subquery('posts_1').count().asExpr('a'),
+						subquery('posts').count().asExpr('b'),
+					])
+					.dump().sql,
+			).toBe(
+				'SELECT (SELECT count(*) FROM posts_1) AS a, (SELECT count(*) FROM posts AS posts_2) AS b FROM posts',
+			);
+		});
+		it('AC4b long-name', () => {
+			const alias = `${'p'.repeat(61)}_1`;
+			expect(
+				edge
+					.select(long)
+					.columns([subquery(long).count().asExpr('a')])
+					.dump().sql,
+			).toBe(
+				`SELECT (SELECT count(*) FROM ${long} AS ${alias}) AS a FROM ${long}`,
+			);
+		});
+	});
+
+	it.each(configs)('AC5 nested-bodies (%s)', (name, o) => {
+		const inner = subquery('comments')
+			.where(eq('post_id', outerRef('id')))
+			.count()
+			.asExpr('c');
+		expect(projected(o, body(correlated(o).columns([inner]).limit(1)))).toEqual(
+			{
+				sql: `SELECT users.id, (SELECT (SELECT count(*) FROM comments WHERE comments.post_id = posts.id) AS c FROM posts WHERE ${where(name)}posts.user_id = users.id LIMIT 1) AS v FROM users`,
+				params: [],
+			},
+		);
+	});
+
+	it.each(configs)('AC6 having-aggregate-outerref (%s)', (name, o) => {
+		expect(
+			projected(
+				o,
+				body(
+					correlated(o)
+						.columns([])
+						.groupBy(['user_id'])
+						.count('id', 'n')
+						.having(gt('n', outerRef('bonus'))),
+				),
+			),
+		).toEqual({
+			sql: `SELECT users.id, (SELECT count(posts.id) AS n FROM posts WHERE ${where(name)}posts.user_id = users.id GROUP BY posts.user_id HAVING count(posts.id) > users.bonus) AS v FROM users`,
+			params: [],
+		});
+	});
+
+	it.each(configs)('AC6b having-grouped-column-outerref (%s)', (name, o) => {
+		expect(
+			projected(
+				o,
+				body(
+					o
+						.select('posts')
+						.columns([])
+						.groupBy(['user_id'])
+						.count('id', 'n')
+						.having(gt('user_id', outerRef('id'))),
+				),
+			),
+		).toEqual({
+			sql: `SELECT users.id, (SELECT count(posts.id) AS n FROM posts${name === 'filtered' ? ' WHERE posts."deletedAt" IS NULL' : ''} GROUP BY posts.user_id HAVING posts.user_id > users.id) AS v FROM users`,
+			params: [],
+		});
+	});
+
+	describe('AC4e a body reads the schema the root reads', () => {
+		const tenant = (o: Orm) => o.withSchema('tenant_1');
+		const tenantGrouped = (name: 'plain' | 'filtered') =>
+			groupedSql(name).replace('FROM posts', 'FROM tenant_1.posts');
+		it.each(configs)('AC4e schema-select (%s)', (name, o) => {
+			expect(projected(tenant(o) as unknown as Orm, grouped(o)).sql).toBe(
+				`SELECT users.id, ${tenantGrouped(name)} AS v FROM tenant_1.users`,
+			);
+		});
+		it.each(configs)('AC4e schema-root-where (%s)', (name, o) => {
+			expect(
+				tenant(o)
+					.select('users')
+					.where(fn('abs', grouped(o).asExpr('v')).gt(0))
+					.dump().sql,
+			).toBe(
+				`SELECT users.* FROM tenant_1.users WHERE abs(${tenantGrouped(name)}) > $2`,
+			);
+		});
+		it.each(configs)('AC4e schema-update-where (%s)', (_name, o) => {
+			expect(
+				tenant(o)
+					.update('users')
+					.set({ bonus: 1 })
+					.where(fn('abs', grouped(plain).asExpr('v')).gt(0))
+					.dump().sql,
+			).toBe(
+				'UPDATE tenant_1.users SET bonus = $1 WHERE abs((SELECT count(posts.id) AS n FROM tenant_1.posts WHERE posts.user_id = users.id GROUP BY posts.user_id HAVING count(posts.id) > CAST($2 AS bigint))) > $3',
+			);
+		});
+		it.each([
+			['plain', plainDb, plain],
+			['filtered', filteredDb, filtered],
+		] as const)('AC4e schema-recursive (%s)', (name, db, o) => {
+			expect(
+				recursiveSql(db, fn('abs', grouped(o).asExpr('v')).gt(0), 'tenant_1')
+					.sql,
+			).toBe(
+				`WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM tenant_1.users AS __n WHERE abs((SELECT count(posts.id) AS n FROM tenant_1.posts WHERE ${where(name)}posts.user_id = __n.id GROUP BY posts.user_id HAVING count(posts.id) > CAST($1 AS bigint))) > $2 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN tenant_1.users AS __n ON __n.bonus = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree`,
+			);
+		});
+	});
+
+	it.each(configs)('AC7 astix (%s)', (name, o) => {
+		const d = o
+			.select('users')
+			.columns([
+				'id',
+				subquery('posts')
+					.where(eq('user_id', outerRef('id')))
+					.count()
+					.asExpr('n'),
+			])
+			.dump();
+		expect({ sql: d.sql, params: d.params }).toEqual({
+			sql: `SELECT users.id, (SELECT count(*) FROM posts WHERE ${where(name)}posts.user_id = users.id) AS n FROM users`,
+			params: [],
+		});
+	});
+
+	describe('R1 a scalar body projects one column', () => {
+		const tag = (o: Orm) =>
+			o.select('tags' as never) as unknown as ReturnType<Orm['select']>;
+		const refusal = (n: number) =>
+			`scalar subquery body projects ${n} columns; a scalar subquery yields one value.`;
+		it.each(configs)('R1 absent-select (%s)', (_name, o) => {
+			expect(() => projected(o, body(tag(o)))).toThrow(refusal(2));
+		});
+		it.each(configs)('R1 star (%s)', (_name, o) => {
+			expect(() => projected(o, body(tag(o).columns([star()])))).toThrow(
+				refusal(2),
+			);
+		});
+		it.each(configs)('R1 duplicate-fields (%s)', (name, o) => {
+			expect(
+				projected(o, body(correlated(o).columns(['id', 'id']).limit(1))).sql,
+			).toBe(
+				`SELECT users.id, (SELECT posts.id FROM posts WHERE ${where(name)}posts.user_id = users.id LIMIT 1) AS v FROM users`,
+			);
+		});
+		it.each(configs)('R1 duplicate-aggregate (%s)', (name, o) => {
+			expect(
+				projected(
+					o,
+					body(correlated(o).columns([]).count('id', 'n').count('id', 'n')),
+				).sql,
+			).toBe(
+				`SELECT users.id, (SELECT count(posts.id) AS n FROM posts WHERE ${where(name)}posts.user_id = users.id) AS v FROM users`,
+			);
+		});
+		it.each(configs)('R1 duplicate-expression (%s)', (name, o) => {
+			expect(
+				projected(
+					o,
+					body(
+						correlated(o).columns([
+							fn('max', exprRef('score')).as('m'),
+							fn('max', exprRef('score')).as('m'),
+						]),
+					),
+				).sql,
+			).toBe(
+				`SELECT users.id, (SELECT max(score) AS m FROM posts WHERE ${where(name)}posts.user_id = users.id) AS v FROM users`,
+			);
+		});
+		it.each(configs)('R1 groupby-field-and-count (%s)', (_name, o) => {
+			expect(() =>
+				projected(o, body(correlated(o).groupBy(['user_id']).count('id', 'n'))),
+			).toThrow(refusal(2));
+		});
+		it.each(configs)('R1 two-expressions (%s)', (_name, o) => {
+			expect(() =>
+				projected(
+					o,
+					body(
+						correlated(o).columns([
+							fn('max', exprRef('score')).as('m'),
+							fn('min', exprRef('score')).as('x'),
+						]),
+					),
+				),
+			).toThrow(refusal(2));
+		});
+		it.each(configs)('R1 exists-wrap (%s)', (name, o) => {
+			const query = {
+				type: 'select',
+				from: 'posts',
+				select: { type: 'fields', fields: ['id', 'title'] },
+				where: eq('user_id', outerRef('id')),
+				existsWrap: true,
+			} as QueryIntent;
+			expect(projected(o, new SubqueryExpression(query)).sql).toBe(
+				`SELECT users.id, (SELECT EXISTS (SELECT 1 FROM posts WHERE ${where(name)}posts.user_id = users.id) AS "exists") AS v FROM users`,
+			);
+		});
+	});
+
+	describe('R2-R6 constructs a scalar body refuses', () => {
+		const notYet = (
+			run: () => unknown,
+			construct: string,
+			issue: number,
+		): void => {
+			let error: unknown;
+			try {
+				run();
+			} catch (e) {
+				error = e;
+			}
+			expect(error).toBeInstanceOf(NotYetSupportedError);
+			expect(error).toMatchObject({
+				construct,
+				position: 'scalar subquery body',
+				issue,
+				message: `${construct} in a scalar subquery body is not supported yet (#${issue}).`,
+			});
+		};
+		it.each(configs)('R2 nested-hydration-include (%s)', (_name, o) => {
+			expect(() =>
+				projected(
+					o,
+					body(correlated(o).include('replies').columns(['id']).limit(1)),
+				),
+			).toThrow(
+				"include('replies') in a scalar subquery body hydrates nested objects; a scalar subquery yields one value.",
+			);
+		});
+		it.each(configs)('R3 flat-include (%s)', (_name, o) => {
+			const intent = (
+				correlated(o).columns(['id']).limit(1) as unknown as {
+					buildIntent(): QueryIntent;
+				}
+			).buildIntent();
+			notYet(
+				() =>
+					projected(
+						o,
+						new SubqueryExpression({
+							...intent,
+							include: [{ relation: 'replies', strategy: 'flat' }],
+						}),
+					),
+				"flat include('replies')",
+				1030,
+			);
+		});
+		it.each(configs)('R4 batch-values-source (%s)', (_name, o) => {
+			const values = body(
+				o
+					.from(o.batchValues([[1]], ['id'], ['int4'], { alias: 'bv' }))
+					.columns(['id']),
+			);
+			notYet(() => projected(o, values), 'batchValuesSource', 1031);
+		});
+		it.each(configs)('R5 no-fallback (%s)', (_name, o) => {
+			const planned = plan(
+				(
+					o
+						.select('users')
+						.columns(['id', grouped(o).asExpr('v')]) as unknown as {
+						buildIntent(): QueryIntent;
+					}
+				).buildIntent(),
+				o === plain ? plainDb.model : filteredDb.model,
+			);
+			const withoutBody = markPlannedReport({
+				...planned,
+				execution: { ...planned.execution!, expressionSubqueries: [] },
+			});
+			expect(() =>
+				createPgCompileOnlyAdapter({
+					model: plainDb.model,
+				}).compile(withoutBody),
+			).toThrow(
+				'An expression subquery reached the adapter without its nested select.',
+			);
+		});
+		it.each(configs)('R6 joins (%s)', (_name, o) => {
+			notYet(
+				() =>
+					projected(
+						o,
+						body(correlated(o).join('author').columns(['id']).limit(1)),
+					),
+				'join',
+				1039,
+			);
+		});
 	});
 });
