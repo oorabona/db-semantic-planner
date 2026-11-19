@@ -273,6 +273,8 @@ export interface InsertFromConfig {
 	}[];
 	/** WHERE conditions for source query */
 	where?: Decision[];
+	/** Core-resolved source WHERE, compiled in place of `where` when present. */
+	readonly whereCompiler?: (ctx: CompilerContext, state: CompilerState) => Node;
 	/** LIMIT for source query */
 	limit?: number | ParamIntent;
 	/** Columns to return (RETURNING clause) */
@@ -300,6 +302,8 @@ export interface UpsertFromConfig {
 	}[];
 	/** WHERE conditions for source query */
 	where?: Decision[];
+	/** Core-resolved source WHERE, compiled in place of `where` when present. */
+	readonly whereCompiler?: (ctx: CompilerContext, state: CompilerState) => Node;
 	/** LIMIT for source query */
 	limit?: number | ParamIntent;
 	/** Columns to return (RETURNING clause) */
@@ -766,7 +770,12 @@ export function compileInsertFrom(
 
 	// Build WHERE clause for source query if present
 	let whereClause: Node | undefined;
-	if (config.where && config.where.length > 0) {
+	if (config.whereCompiler) {
+		whereClause = config.whereCompiler(
+			{ ...ctx, currentAlias: sourceAlias },
+			state,
+		);
+	} else if (config.where && config.where.length > 0) {
 		const dispatch = createWhereDispatcher(compileWhereIntent);
 		const subCtx = { ...ctx, currentAlias: sourceAlias };
 
@@ -878,7 +887,12 @@ export function compileUpsertFrom(
 
 	// Build WHERE clause for source query if present
 	let whereClause: Node | undefined;
-	if (config.where && config.where.length > 0) {
+	if (config.whereCompiler) {
+		whereClause = config.whereCompiler(
+			{ ...ctx, currentAlias: sourceAlias },
+			state,
+		);
+	} else if (config.where && config.where.length > 0) {
 		const dispatch = createWhereDispatcher(compileWhereIntent);
 		const subCtx = { ...ctx, currentAlias: sourceAlias };
 

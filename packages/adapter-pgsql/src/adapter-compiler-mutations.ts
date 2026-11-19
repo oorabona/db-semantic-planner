@@ -693,9 +693,15 @@ export function compileInsertFrom(
 	);
 	const state = createCompilerState();
 	assertNoPathRefInConditionBodies(intent.where);
-	const resolvedWhere = intent.where
-		? resolveExistsIntent(intent.where, intent.source, deps)
-		: undefined;
+	const whereCompiler = resolvedMutationWhere(
+		intent.where,
+		intent.source,
+		deps,
+	);
+	const resolvedWhere =
+		intent.where && !whereCompiler
+			? resolveExistsIntent(intent.where, intent.source, deps)
+			: undefined;
 
 	const sourceBinding = mutationBinding(
 		{ ...deps, ...(bindingNames !== undefined && { bindingNames }) },
@@ -729,6 +735,7 @@ export function compileInsertFrom(
 			})),
 		}),
 		...(resolvedWhere && { where: [whereIntentAsDecision(resolvedWhere)] }),
+		...(whereCompiler && { whereCompiler }),
 		...(intent.limit !== undefined && { limit: intent.limit }),
 		...(intent.returning && { returning: [...intent.returning] }),
 		...(intent.returning && {
@@ -938,7 +945,19 @@ export function compileBatchUpdate(
 	// Compile optional WHERE guard (e.g., AND EXISTS(...))
 	// The guard uses the shared `state` so $N numbering continues from unnest params.
 	let whereGuard: import('@pgsql/types').Node | undefined;
-	if (intent.where) {
+	const guardCompiler = resolvedMutationWhere(intent.where, intent.table, deps);
+	// The guard qualifies the updated table by its physical name, as UPDATE's WHERE does.
+	if (guardCompiler)
+		whereGuard = guardCompiler(
+			{
+				...ctx,
+				currentAlias:
+					declaredMutationTableMetadata(deps, intent.table)?.physicalName ??
+					declaredMutationTable(deps, intent.table),
+			},
+			state,
+		);
+	else if (intent.where) {
 		assertNoPathRefInConditionBodies(intent.where);
 		const resolvedWhere = resolveExistsIntent(intent.where, intent.table, deps);
 		const whereCtx: WhereCompilerCtx = {
@@ -1324,9 +1343,15 @@ export function compileUpsertFrom(
 	);
 	const state = createCompilerState();
 	assertNoPathRefInConditionBodies(intent.where);
-	const resolvedWhere = intent.where
-		? resolveExistsIntent(intent.where, intent.source, deps)
-		: undefined;
+	const whereCompiler = resolvedMutationWhere(
+		intent.where,
+		intent.source,
+		deps,
+	);
+	const resolvedWhere =
+		intent.where && !whereCompiler
+			? resolveExistsIntent(intent.where, intent.source, deps)
+			: undefined;
 
 	// Derive columns from model if not explicitly specified (needed for ON CONFLICT SET)
 	let columns: string[] | undefined;
@@ -1377,6 +1402,7 @@ export function compileUpsertFrom(
 			})),
 		}),
 		...(resolvedWhere && { where: [whereIntentAsDecision(resolvedWhere)] }),
+		...(whereCompiler && { whereCompiler }),
 		...(intent.limit !== undefined && { limit: intent.limit }),
 		...(intent.returning && { returning: [...intent.returning] }),
 		...(intent.returning && {
