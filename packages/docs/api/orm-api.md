@@ -747,8 +747,9 @@ orm.select('posts')
 //      GROUP BY posts.published HAVING count(posts.id) > CAST($1 AS bigint)
 ```
 
-Without `.columns()`, the `groupBy` fields are projected before the aggregates; with `.columns()`, its
-columns are projected instead and the aggregates follow them.
+Without `.columns()`, the `groupBy` fields are projected before the aggregates; string `.columns()` are
+projected instead. Beside an expression projection from `.columns()` or `.coalesce()`, these aggregate methods
+throw an `InvalidOperationError`: put the aggregate in `.columns()`, e.g. `fn('count', star()).as('n')`.
 
 ### Window Functions
 

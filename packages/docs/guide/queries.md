@@ -221,16 +221,27 @@ orm.select('posts')
 //      GROUP BY posts.published HAVING count(posts.id) > CAST($1 AS bigint)
 ```
 
-Without `.columns()`, the `groupBy` fields are projected before the aggregates. With `.columns()`,
-those columns are projected instead, and the aggregates follow them:
+Without `.columns()`, the `groupBy` fields are projected before the aggregates. With string `.columns()`,
+those columns are projected instead:
 
 ```typescript
-import { exprRef } from '@dbsp/core';
+orm.select('posts')
+  .groupBy(['authorId', 'published'])
+  .columns(['authorId'])
+  .count({ as: 'postCount' })
+  .dump();
+// SQL: SELECT posts."authorId", count(*) AS "postCount" FROM posts GROUP BY posts."authorId", posts.published
+```
+
+`count()`, `sum()`, `avg()`, `min()` and `max()` throw an `InvalidOperationError` beside an expression
+projection from `.columns()` or `.coalesce()`. Put the aggregate in `.columns()` instead:
+
+```typescript
+import { exprRef, fn, star } from '@dbsp/core';
 
 orm.select('posts')
+  .columns([exprRef('authorId').as('author'), fn('count', star()).as('postCount')])
   .groupBy(['authorId'])
-  .count({ as: 'postCount' })
-  .columns([exprRef('authorId').as('author')])
   .dump();
 // SQL: SELECT "authorId" AS author, count(*) AS "postCount" FROM posts GROUP BY posts."authorId"
 ```

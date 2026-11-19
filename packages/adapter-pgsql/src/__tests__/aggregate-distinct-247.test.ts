@@ -9,8 +9,8 @@
  * onto non-distinct aggregates. Also covers the scalar-subquery aggregate
  * DISTINCT propagation (intent-to-decisions.ts convertSubquery / subquery-emission.ts).
  *
- * #1015: builder aggregates are appended to the `.columns()` projection instead of
- * replacing it.
+ * #1015: string `.columns()` replace the group-by fields beside builder aggregates
+ * instead of being dropped.
  */
 
 import {
@@ -22,7 +22,6 @@ import {
 	cast,
 	createOrm,
 	distinct,
-	exprRef,
 	fn,
 	gt,
 	literal,
@@ -426,31 +425,7 @@ describe('#247 aggregate DISTINCT', () => {
 	});
 });
 
-describe('#1015 builder aggregates keep the columns() projection', () => {
-	it('appends the aggregate to expression columns set after it', () => {
-		const dump = buildOrm()
-			.select('tool_metrics')
-			.groupBy(['session_id'])
-			.count('*', 'n')
-			.columns([exprRef('session_id').as('s')])
-			.dump();
-		expect(dump.sql).toBe(
-			'SELECT session_id AS s, count(*) AS n FROM tool_metrics GROUP BY tool_metrics.session_id',
-		);
-	});
-
-	it('appends the aggregate to expression columns set before it', () => {
-		const dump = buildOrm()
-			.select('tool_metrics')
-			.columns([exprRef('session_id').as('s')])
-			.groupBy(['session_id'])
-			.count({ as: 'n' })
-			.dump();
-		expect(dump.sql).toBe(
-			'SELECT session_id AS s, count(*) AS n FROM tool_metrics GROUP BY tool_metrics.session_id',
-		);
-	});
-
+describe('#1015 builder aggregates keep string columns()', () => {
 	it('projects string columns instead of the group-by fields', () => {
 		const dump = buildOrm()
 			.select('tool_metrics')
@@ -463,41 +438,16 @@ describe('#1015 builder aggregates keep the columns() projection', () => {
 		);
 	});
 
-	it('keeps DISTINCT and an unaliased count beside expression columns', () => {
+	it('keeps string columns set after a DISTINCT aggregate and resolves its HAVING alias', () => {
 		const dump = buildOrm()
 			.select('tool_metrics')
-			.groupBy(['session_id'])
-			.count(distinct('id'), 'n')
-			.count()
-			.columns([exprRef('session_id').as('s')])
-			.dump();
-		expect(dump.sql).toBe(
-			'SELECT session_id AS s, count(DISTINCT tool_metrics.id) AS n, count(*) FROM tool_metrics GROUP BY tool_metrics.session_id',
-		);
-	});
-
-	it('appends the aggregate to a coalesce() projection', () => {
-		const dump = buildOrm()
-			.select('tool_metrics')
-			.groupBy(['session_id'])
-			.coalesce(['session_id'], 'sid')
-			.max('tokens_saved', 'm')
-			.dump();
-		expect(dump.sql).toBe(
-			'SELECT COALESCE(tool_metrics.session_id) AS sid, max(tool_metrics.tokens_saved) AS m FROM tool_metrics GROUP BY tool_metrics.session_id',
-		);
-	});
-
-	it('resolves a HAVING alias of an aggregate appended to expression columns', () => {
-		const dump = buildOrm()
-			.select('tool_metrics')
-			.groupBy(['session_id'])
-			.count({ as: 'n' })
-			.columns([exprRef('session_id').as('s')])
+			.groupBy(['id', 'session_id'])
+			.count(distinct('tokens_saved'), 'n')
+			.columns(['session_id'])
 			.having(gt('n', 2))
 			.dump();
 		expect(dump.sql).toBe(
-			'SELECT session_id AS s, count(*) AS n FROM tool_metrics GROUP BY tool_metrics.session_id HAVING count(*) > CAST($1 AS bigint)',
+			'SELECT tool_metrics.session_id, count(DISTINCT tool_metrics.tokens_saved) AS n FROM tool_metrics GROUP BY tool_metrics.id, tool_metrics.session_id HAVING count(DISTINCT tool_metrics.tokens_saved) > CAST($1 AS bigint)',
 		);
 		expect(dump.params).toEqual([2]);
 	});
