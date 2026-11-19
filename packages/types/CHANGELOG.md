@@ -1,5 +1,12 @@
 # Changelog
 
+## [6.2.0](https://github.com/oorabona/db-semantic-planner/compare/types-v6.1.1...types-v6.2.0) (2026-11-19)
+
+
+### Features
+
+* **core:** Resolve HAVING field references per occurrence ([#1005](https://github.com/oorabona/db-semantic-planner/issues/1005)) ([#1020](https://github.com/oorabona/db-semantic-planner/issues/1020)) ([a89fba4](https://github.com/oorabona/db-semantic-planner/commit/a89fba48a4ea589754b7a5c869969f19acc4db64)), closes [#1004](https://github.com/oorabona/db-semantic-planner/issues/1004)
+
 ## [6.1.1](https://github.com/oorabona/db-semantic-planner/compare/types-v6.1.0...types-v6.1.1) (2026-11-19)
 
 
