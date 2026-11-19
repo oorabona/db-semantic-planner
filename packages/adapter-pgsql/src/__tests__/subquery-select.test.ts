@@ -1235,6 +1235,159 @@ describe('scalar subquery bodies compile every clause through core (#891 slice 5
 		});
 	});
 
+	describe('an outerRef naming an include key binds the include range (COR3)', () => {
+		// The root joins `comments AS author`; the exists includes its own
+		// `author` relation, allocated `author_1`. In a body below that exists,
+		// outerRef('author.id') names the include key, so it binds `author_1`.
+		const corr = () => gt('user_id', outerRef('author.id'));
+		const scan = (name: string) =>
+			name === 'filtered' ? ' WHERE posts."deletedAt" IS NULL' : '';
+		/** Each body, and its SQL bound to `author_1`. */
+		const bodies = {
+			where: [
+				(o: Orm) =>
+					body(
+						o
+							.select('posts')
+							.where(eq('user_id', outerRef('author.id')))
+							.count(),
+					),
+				(name: 'plain' | 'filtered') =>
+					`(SELECT count(*) FROM posts WHERE ${where(name)}posts.user_id = author_1.id)`,
+			],
+			having: [
+				(_o: Orm) =>
+					new SubqueryExpression({
+						type: 'select',
+						from: 'posts',
+						select: {
+							type: 'aggregate',
+							fields: [],
+							aggregates: [{ function: 'count', field: 'id', as: 'n' }],
+						},
+						groupBy: ['user_id'],
+						having: corr(),
+					} as QueryIntent),
+				(name: 'plain' | 'filtered') =>
+					`(SELECT count(posts.id) AS n FROM posts${scan(name)} GROUP BY posts.user_id HAVING posts.user_id > author_1.id)`,
+			],
+			case: [
+				(o: Orm) =>
+					body(
+						o
+							.select('posts')
+							.columns([caseWhen(corr(), literal(1)).else(literal(0)).as('c')])
+							.limit(1),
+					),
+				(name: 'plain' | 'filtered') =>
+					`(SELECT CASE WHEN posts.user_id > author_1.id THEN 1 ELSE 0 END AS c FROM posts${scan(name)} LIMIT 1)`,
+			],
+			filter: [
+				(o: Orm) =>
+					body(
+						o
+							.select('posts')
+							.columns([fn('count', star()).filter(corr()).as('n')]),
+					),
+				(name: 'plain' | 'filtered') =>
+					`(SELECT count(*) FILTER (WHERE posts.user_id > author_1.id) AS n FROM posts${scan(name)})`,
+			],
+		} as const;
+		/** Each condition body between the exists and the body, and its SQL around `c`. */
+		const positions = {
+			direct: [(_o: Orm, x: WhereIntent) => x, (c: string) => c],
+			rawExists: [
+				(_o: Orm, x: WhereIntent) =>
+					rawExists(subquery('comments').select('id').where(x)),
+				(c: string) =>
+					`EXISTS (SELECT comments_sq.id FROM comments AS comments_sq WHERE ${c})`,
+			],
+			in: [
+				(_o: Orm, x: WhereIntent) =>
+					inSubquery('id', subquery('comments').select('post_id').where(x)),
+				(c: string) =>
+					`posts_exists_1.id = ANY (SELECT comments_subq_2.post_id FROM comments AS comments_subq_2 WHERE ${c})`,
+			],
+			'scalar-comparison': [
+				(_o: Orm, x: WhereIntent) =>
+					subquery('comments')
+						.select('post_id')
+						.where(x)
+						.build()
+						.toWhereIntent('id', 'eq'),
+				(c: string) =>
+					`posts_exists_1.id = (SELECT comments_subq_2.post_id FROM comments AS comments_subq_2 WHERE ${c})`,
+			],
+			some: [
+				(o: Orm, x: WhereIntent) => some(o.tables.posts.replies, () => x),
+				(c: string) =>
+					`EXISTS (SELECT 1 FROM comments AS comments_exists_2 WHERE posts_exists_1.id = comments_exists_2.post_id AND ${c})`,
+			],
+		} as const;
+		const dump = (o: Orm, x: WhereIntent) => {
+			const d = o
+				.select('users')
+				.join('comments', { as: 'author', on: eq('users.id', 1) })
+				.where(
+					exists('writings', {
+						include: { author: { join: 'inner' } },
+						where: x,
+					}),
+				)
+				.dump();
+			return { sql: d.sql, params: d.params };
+		};
+		const statement = (name: string, condition: string) => ({
+			sql: `SELECT users.* FROM users JOIN comments AS author ON users.id = $2 WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_1 JOIN users AS author_1 ON posts_exists_1.user_id = author_1.id WHERE users.id = posts_exists_1.user_id${name === 'filtered' ? ' AND posts_exists_1."deletedAt" IS NULL' : ''} AND ${condition})`,
+			params: [0, 1],
+		});
+		const cond = (b: SubqueryExpression) =>
+			fn('abs', b.asExpr('v')).gt(0) as WhereIntent;
+		const cases = configs.flatMap(([name, o]) =>
+			Object.entries(bodies).flatMap(([bodyName, [build, bodySql]]) =>
+				Object.entries(positions).map(
+					([positionName, [wrap, around]]) =>
+						[
+							`${bodyName} under ${positionName} (${name})`,
+							() => dump(o, wrap(o, cond(build(o)))),
+							statement(name, around(`abs(${bodySql(name)}) > $1`)),
+						] as const,
+				),
+			),
+		);
+		it.each(cases)('COR3 %s', (_label, run, expected) => {
+			expect(run()).toEqual(expected);
+		});
+		/** The body one level deeper, in the projection of a body on comments. */
+		const deep = configs.flatMap(([name, o]) =>
+			Object.entries(bodies).map(
+				([bodyName, [build, bodySql]]) =>
+					[
+						`${bodyName} nested (${name})`,
+						() =>
+							dump(
+								o,
+								cond(
+									body(
+										o
+											.select('comments')
+											.columns([build(o).asExpr('w')])
+											.limit(1),
+									),
+								),
+							),
+						statement(
+							name,
+							`abs((SELECT ${bodySql(name)} AS w FROM comments LIMIT 1)) > $1`,
+						),
+					] as const,
+			),
+		);
+		it.each(deep)('COR3 %s', (_label, run, expected) => {
+			expect(run()).toEqual(expected);
+		});
+	});
+
 	describe('a body on a mutation local source keeps the adapter route (CON1)', () => {
 		const dbs = [
 			['plain', plainDb],
