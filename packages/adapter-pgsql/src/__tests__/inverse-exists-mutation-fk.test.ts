@@ -643,15 +643,17 @@ describe('#891 slice 5a: batchSet guards and insert/upsert-from WHERE resolve th
 	);
 
 	it('AC1 insert-upsert-from-quantifier-body: the same body compiles in insert-from and upsert-from', () => {
-		const { adapter } = guardOrm(false);
-		expect(fromSource(adapter, 'insert', quantifierBody())).toMatchObject({
-			sql: `${insertHead} ${nestedExists}`,
-			parameters: [],
-		});
-		expect(fromSource(adapter, 'upsert', quantifierBody())).toMatchObject({
-			sql: `${insertHead} ${nestedExists}${onConflict}`,
-			parameters: [],
-		});
+		for (const filtered of [false, true]) {
+			const { adapter } = guardOrm(filtered);
+			expect(fromSource(adapter, 'insert', quantifierBody())).toMatchObject({
+				sql: `${insertHead} ${nestedExists}`,
+				parameters: [],
+			});
+			expect(fromSource(adapter, 'upsert', quantifierBody())).toMatchObject({
+				sql: `${insertHead} ${nestedExists}${onConflict}`,
+				parameters: [],
+			});
+		}
 	});
 
 	it('AC2 batchset-issued-body-filter: an issued rawExists body keeps its builder filter in a batchSet guard', () => {
