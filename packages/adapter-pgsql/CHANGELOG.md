@@ -1,5 +1,23 @@
 # Changelog
 
+## [7.1.3](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v7.1.2...adapter-pgsql-v7.1.3) (2026-11-19)
+
+
+### Bug Fixes
+
+* **core:** A typed ColumnRef addresses the range its table or relation binds ([#993](https://github.com/oorabona/db-semantic-planner/issues/993)) ([9ac0704](https://github.com/oorabona/db-semantic-planner/commit/9ac0704447794a11c51cc0c7a2d025203582a333)), closes [#991](https://github.com/oorabona/db-semantic-planner/issues/991)
+* **core:** Columns() keeps string columns beside builder aggregates and refuses expressions ([#1015](https://github.com/oorabona/db-semantic-planner/issues/1015)) ([#1016](https://github.com/oorabona/db-semantic-planner/issues/1016)) ([96df131](https://github.com/oorabona/db-semantic-planner/commit/96df1314cf93adb86c90cbbbe2f13a0edea2129e))
+* **core:** Resolve HAVING, CASE WHEN and aggregate FILTER conditions through core ([#1006](https://github.com/oorabona/db-semantic-planner/issues/1006)) ([152cd26](https://github.com/oorabona/db-semantic-planner/commit/152cd260e9138b8b0ab4972f991cab669ae7c05b))
+* **core:** Resolve recursive start.where through core ([#1012](https://github.com/oorabona/db-semantic-planner/issues/1012)) ([a015bae](https://github.com/oorabona/db-semantic-planner/commit/a015bae091e590cc7ad2792f351e8a6797b82328)), closes [#891](https://github.com/oorabona/db-semantic-planner/issues/891)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/core bumped to 6.1.2
+    * @dbsp/types bumped to 6.1.1
+
 ## [7.1.2](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v7.1.1...adapter-pgsql-v7.1.2) (2026-11-16)
 
 
