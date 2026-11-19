@@ -1,5 +1,17 @@
 # Changelog
 
+## [5.0.6](https://github.com/oorabona/db-semantic-planner/compare/cli-v5.0.5...cli-v5.0.6) (2026-11-19)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/adapter-pgsql bumped to 7.3.0
+    * @dbsp/core bumped to 6.3.0
+    * @dbsp/nql bumped to 2.0.4
+    * @dbsp/types bumped to 6.3.0
+
 ## [5.0.5](https://github.com/oorabona/db-semantic-planner/compare/cli-v5.0.4...cli-v5.0.5) (2026-11-19)
 
 

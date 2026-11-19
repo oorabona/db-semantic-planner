@@ -1,5 +1,12 @@
 # Changelog
 
+## [6.3.0](https://github.com/oorabona/db-semantic-planner/compare/types-v6.2.0...types-v6.3.0) (2026-11-19)
+
+
+### Features
+
+* **core:** Resolve scalar subquery bodies as nested selects ([#1041](https://github.com/oorabona/db-semantic-planner/issues/1041)) ([5af94ed](https://github.com/oorabona/db-semantic-planner/commit/5af94ed7e558c9dc2069a42508367fe222c32263))
+
 ## [6.2.0](https://github.com/oorabona/db-semantic-planner/compare/types-v6.1.1...types-v6.2.0) (2026-11-19)
 
 
