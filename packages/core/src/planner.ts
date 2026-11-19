@@ -328,6 +328,7 @@ export function planNestedSelect(
 		execution: report.execution,
 		intent: report.executableIntent ?? report.intent,
 		decisions: report.decisions,
+		enclosing: scope.nested.enclosing,
 	};
 }
 

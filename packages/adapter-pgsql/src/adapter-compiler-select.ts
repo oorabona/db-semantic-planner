@@ -1447,15 +1447,6 @@ export function nestedSelectCompiler(
 ): NonNullable<CompilerContext['compileNestedSelect']> {
 	return (select, parent) => {
 		const range = select.execution.rootRange;
-		const own = parent.queryRanges?.length
-			? parent.queryRanges
-			: [
-					relationBinding({
-						qualifier: queryLocal(parent.currentAlias ?? parent.rootTable),
-						kind: 'declared-table',
-						logicalTable: parent.rootTable,
-					}),
-				];
 		// In a nested select, an outerRef names a range by its core alias; a root
 		// whose alias is its table name is emitted under its table identifier.
 		const enclosingQualifiers = new Map(parent.enclosingQualifiers ?? []);
@@ -1482,6 +1473,30 @@ export function nestedSelectCompiler(
 						),
 					),
 		);
+		// The enclosing scopes are core's, so every outerRef the adapter compiles
+		// in the body (HAVING, CASE WHEN, FILTER, in any clause) binds the range
+		// core bound; a binding the parent already established is reused.
+		const known = [
+			...(parent.queryRanges ?? []),
+			...(parent.enclosingRanges ?? []).flat(),
+			...(parent.scope?.bindings.values() ?? []),
+		];
+		const enclosingRanges = select.enclosing.map((scope) =>
+			scope.map((enclosingRange) => {
+				const emitted =
+					enclosingQualifiers.get(enclosingRange.alias) ?? enclosingRange.alias;
+				return (
+					known.find(
+						(binding) => identifierText(binding.qualifier) === emitted,
+					) ??
+					relationBinding({
+						qualifier: queryLocal(emitted),
+						kind: 'declared-table',
+						logicalTable: enclosingRange.table,
+					})
+				);
+			}),
+		);
 		const envelope = compileSelectEnvelope(
 			markPlannedReport({
 				rootTable: select.intent.from,
@@ -1500,7 +1515,7 @@ export function nestedSelectCompiler(
 			deps,
 			{
 				...(range.alias !== range.table && { rootAlias: range.alias }),
-				enclosingRanges: [own, ...(parent.enclosingRanges ?? [])],
+				enclosingRanges,
 				enclosingQualifiers,
 			},
 		);

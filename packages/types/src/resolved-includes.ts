@@ -192,4 +192,9 @@ export interface ResolvedNestedSelect {
 	/** The intent the adapter compiles, with per-occurrence copies. */
 	readonly intent: import('./intent-ast.js').QueryIntent;
 	readonly decisions: readonly import('./planner.js').PlanDecision[];
+	/**
+	 * The enclosing queries' ranges, innermost first, as core bound the body: an
+	 * unqualified outerRef() names the first range of the first scope.
+	 */
+	readonly enclosing: readonly (readonly ResolvedRange[])[];
 }
