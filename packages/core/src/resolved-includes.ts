@@ -16,6 +16,7 @@ import {
 import {
 	belongsToManyJoinIncludeRefusal,
 	getTrustedNqlRelationFilterFields,
+	isFieldRef,
 	resolveDeclaredRelationKeys,
 	resolveDeclaredRelationPath,
 	resolveIncludeRelationName,
@@ -31,6 +32,33 @@ import {
 	resolveScanDefaultFilter,
 } from './resolved-conditions.js';
 import { classifyScalarBody, nextSelectBody } from './scalar-body.js';
+
+/** An outerRef() operand: a SubqueryRefIntent or an outer FieldRef. */
+function isOuterRef(value: unknown): boolean {
+	if (!value || typeof value !== 'object') return false;
+	const node = value as Record<string, unknown>;
+	return (
+		(node.kind === 'ref' && node.outer === true) ||
+		(isFieldRef(node) && node.scope === 'outer')
+	);
+}
+
+/** A condition holding an outerRef() outside any nested query body. */
+function holdsOuterRef(value: unknown): boolean {
+	if (!value || typeof value !== 'object' || isParamIntent(value)) return false;
+	if (Array.isArray(value)) return value.some(holdsOuterRef);
+	if (isOuterRef(value)) return true;
+	const node = value as Record<string, unknown>;
+	if (node.kind === 'literal' || node.kind === 'param') return false;
+	if (absorbsBody(node) || (node.kind === 'subquery' && node.query))
+		return false;
+	// A compared value is a bound payload unless it is an outerRef().
+	return dataEntries(node).some(
+		([key, child]) =>
+			isOuterRef(child) ||
+			(!isBoundPayload(node, key, child) && holdsOuterRef(child)),
+	);
+}
 
 /** Own enumerable data properties; accessors are never invoked. */
 function dataEntries(value: object): [string, unknown][] {
@@ -1005,6 +1033,9 @@ export function resolveReportIncludes(
 			condition &&
 			((relationSensitive && model) ||
 				(inHaving && namesAlias(node)) ||
+				// In a body, a HAVING leaf correlated by outerRef() binds the
+				// immediately enclosing range, which only core's scopes know.
+				(nested !== undefined && underHaving && holdsOuterRef(node)) ||
 				invisibleQualifier(node, inHaving))
 		) {
 			const resolved = resolveConditionContext(
