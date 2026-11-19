@@ -69,7 +69,10 @@ function copyNode(
 	child: (key: string, value: unknown) => unknown,
 ): object {
 	const copy: object = Array.isArray(value)
-		? new Array<unknown>(value.length)
+		? Object.setPrototypeOf(
+				new Array<unknown>(value.length),
+				Object.getPrototypeOf(value),
+			)
 		: (Object.create(Object.getPrototypeOf(value)) as object);
 	for (const key of Reflect.ownKeys(value)) {
 		if (Array.isArray(value) && key === 'length') continue;
@@ -896,13 +899,20 @@ export function resolveReportIncludes(
 		intentPath: string,
 		condition?: 'HAVING' | 'CASE WHEN' | 'FILTER',
 		inHaving = false,
+		underHaving = false,
 	): void => {
 		if (!value || typeof value !== 'object' || isParamIntent(value)) return;
 		if (inspected.has(value)) return;
 		inspected.add(value);
 		if (Array.isArray(value)) {
 			value.forEach((child, index) => {
-				inspect(child, `${intentPath}[${index}]`, condition, inHaving);
+				inspect(
+					child,
+					`${intentPath}[${index}]`,
+					condition,
+					inHaving,
+					underHaving,
+				);
 			});
 			inspected.delete(value);
 			return;
@@ -984,6 +994,7 @@ export function resolveReportIncludes(
 					label: condition,
 					aliasState: expressionAliases,
 					...(inHaving && { havingAliases }),
+					...(underHaving && { fromHaving: true }),
 				},
 			);
 			if (!resolved)
@@ -1010,6 +1021,7 @@ export function resolveReportIncludes(
 							`${intentPath}.when[${index}].${bkey}`,
 							bkey === 'condition' ? 'CASE WHEN' : condition,
 							inHaving,
+							underHaving,
 						);
 					}
 				});
@@ -1027,13 +1039,14 @@ export function resolveReportIncludes(
 				`${intentPath}.${key}`,
 				filterRoot ? 'FILTER' : condition,
 				inHaving && !filterRoot,
+				underHaving,
 			);
 		}
 		inspected.delete(value);
 	};
 	inspect(executable.select, 'select');
 	inspect(executable.orderBy, 'orderBy');
-	inspect(executable.having, 'having', 'HAVING', true);
+	inspect(executable.having, 'having', 'HAVING', true, true);
 	return {
 		execution: {
 			rootRange,

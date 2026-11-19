@@ -18,6 +18,7 @@ import {
 	not,
 	op,
 	outerRef,
+	param,
 	rangeOverlaps,
 	rawExists,
 	ref,
@@ -990,6 +991,38 @@ describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
 			}
 		});
 
+		it('AC3b a param() wrapper compared with an alias keeps the aggregate cast', () => {
+			expect(
+				users()
+					.count('id', 'n')
+					.having(gt('n', param(1)))
+					.dump(),
+			).toMatchObject({
+				sql: 'SELECT users.id, count(users.id) AS n FROM users GROUP BY users.id HAVING count(users.id) > CAST($1 AS bigint)',
+				params: [1],
+			});
+		});
+
+		it('a HAVING alias inside a scalar subquery keeps naming its aggregate', () => {
+			const body = (
+				plain
+					.select('posts')
+					.where(eq('id', 1))
+					.groupBy(['id'])
+					.count('id', 'n')
+					.having(gt('n', 1)) as unknown as { buildIntent(): QueryIntent }
+			).buildIntent();
+			expect(
+				plain
+					.select('users')
+					.columns(['id', new SubqueryExpression(body).asExpr('v')])
+					.dump(),
+			).toMatchObject({
+				sql: 'SELECT users.id, (SELECT posts.id, count(posts.id) AS n FROM posts AS posts WHERE posts.id = $1 GROUP BY posts.id HAVING count(posts.id) > CAST($2 AS bigint)) AS v FROM users',
+				params: [1, 1],
+			});
+		});
+
 		it('AC3b ANY on a sum alias casts to the aggregate result type', () => {
 			expect(
 				users()
@@ -1126,6 +1159,31 @@ describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
 			expect(() => users().having(eq('users.id', filtered())).dump()).toThrow(
 				filterRefusal,
 			);
+			// The innermost position wins whichever HAVING root the walk enters.
+			const nope = () => eq('id', exprRef('nope.id'));
+			expect(() =>
+				users()
+					.having(
+						caseWhen(
+							eq('users.id', fn('count', star()).filter(nope())),
+							literal(1),
+						)
+							.else(literal(0))
+							.eq(1),
+					)
+					.dump(),
+			).toThrow(filterRefusal);
+			expect(() =>
+				users()
+					.having(
+						fn('count', star())
+							.filter(
+								eq('users.id', caseWhen(nope(), literal(1)).else(literal(0))),
+							)
+							.gt(1),
+					)
+					.dump(),
+			).toThrow(refusal);
 			expect(() => users().having(eq('users.id', kase())).dump()).toThrow(
 				refusal,
 			);

@@ -111,6 +111,8 @@ export function resolveConditionContext(
 		readonly label?: string;
 		/** HAVING's aggregate aliases, read at HAVING's own level only. */
 		readonly havingAliases?: ReadonlyMap<string, HavingAggregate>;
+		/** The condition sits inside HAVING: its nested positions name themselves. */
+		readonly fromHaving?: boolean;
 	},
 ): ResolvedCondition | undefined {
 	const label = mode?.label ?? 'WHERE';
@@ -120,7 +122,7 @@ export function resolveConditionContext(
 	const within = <T>(position: 'CASE WHEN' | 'FILTER', run: () => T): T => {
 		// A resolution entered from HAVING names its innermost CASE WHEN or FILTER;
 		// one entered from a CASE WHEN or FILTER root keeps that root's label.
-		const relabel = label === 'HAVING';
+		const relabel = label === 'HAVING' || mode?.fromHaving === true;
 		if (position === 'FILTER') filterDepth++;
 		if (relabel) labels.push(position);
 		try {
@@ -1055,7 +1057,11 @@ export function resolveConditionContext(
 					kind: 'comparison',
 					left: leftOperand(),
 					operator: node.operator,
-					right: rhs(node.value, node.jsonPath ? 'none' : 'column-db-type'),
+					// A param() wrapper compared with an aggregate keeps the aggregate's cast.
+					right: rhs(
+						aliasOperand ? authoredParam(node.value) : node.value,
+						node.jsonPath ? 'none' : 'column-db-type',
+					),
 					...(node.jsonPath && {
 						jsonPath: node.jsonPath.map((v) => parameter(v)),
 					}),

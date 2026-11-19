@@ -1223,6 +1223,9 @@ export function createConditionCompiler(
 			);
 		}
 
+		const havingOperand = ctx.resolveHavingOperand?.(intent);
+		if (havingOperand)
+			return dispatcher(havingOperand, handlerCtx, ctx.paramState);
 		if (intent.kind === 'range') {
 			return handleRangeIntent(intent, ctx, dispatcher, handlerCtx);
 		}
