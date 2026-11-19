@@ -191,17 +191,20 @@ It returns the same query builder surface as `orm.select('users')`, including `.
 ## Aggregation
 
 ```typescript
-// COUNT — total rows
-const { sql: totalSql } = orm.select('users').dump();
+import { distinct } from '@dbsp/core';
 
-// COUNT with alias
-const { sql: resultSql } = orm.select('posts').dump();
+orm.select('users').count().dump();
+// SQL: SELECT count(*) FROM users
 
-// SUM, AVG, MIN, MAX (use dump() to inspect compiled SQL)
-orm.select('posts').dump()
-orm.select('posts').dump()
-orm.select('users').dump()
-orm.select('users').dump()
+orm.select('posts').count({ as: 'postCount' }).dump();
+// SQL: SELECT count(*) AS "postCount" FROM posts
+
+orm.select('posts').count(distinct('authorId'), 'authors').dump();
+// SQL: SELECT count(DISTINCT posts."authorId") AS authors FROM posts
+
+// sum(), avg(), min() and max() take a field and an optional alias
+orm.select('users').max('createdAt', 'latestSignup').dump();
+// SQL: SELECT max(users."createdAt") AS "latestSignup" FROM users
 ```
 
 ### GROUP BY and HAVING
@@ -209,11 +212,25 @@ orm.select('users').dump()
 ```typescript
 import { gt } from '@dbsp/core';
 
-const summary = await orm.select('posts')
+orm.select('posts')
   .groupBy(['published'])
+  .count('id', 'postCount')
+  .having(gt('postCount', 10))
   .dump();
-// SQL: SELECT "status", COUNT("id") AS "orderCount"
-//      FROM "posts"
-//      GROUP BY "status"
-//      HAVING "orderCount" > $1
+// SQL: SELECT posts.published, count(posts.id) AS "postCount" FROM posts
+//      GROUP BY posts.published HAVING count(posts.id) > CAST($1 AS bigint)
+```
+
+Without `.columns()`, the `groupBy` fields are projected before the aggregates. With `.columns()`,
+those columns are projected instead, and the aggregates follow them:
+
+```typescript
+import { exprRef } from '@dbsp/core';
+
+orm.select('posts')
+  .groupBy(['authorId'])
+  .count({ as: 'postCount' })
+  .columns([exprRef('authorId').as('author')])
+  .dump();
+// SQL: SELECT "authorId" AS author, count(*) AS "postCount" FROM posts GROUP BY posts."authorId"
 ```

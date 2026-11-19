@@ -744,8 +744,11 @@ orm.select('posts')
   .having(gt('postCount', 10))
   .dump()
 // SQL: SELECT posts.published, count(posts.id) AS "postCount" FROM posts
-//      GROUP BY posts.published HAVING count(posts.id) > $1
+//      GROUP BY posts.published HAVING count(posts.id) > CAST($1 AS bigint)
 ```
+
+Without `.columns()`, the `groupBy` fields are projected before the aggregates; with `.columns()`, its
+columns are projected instead and the aggregates follow them.
 
 ### Window Functions
 

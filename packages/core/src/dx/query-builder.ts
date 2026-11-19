@@ -3,6 +3,7 @@ import type { Mutable } from '@dbsp/types/internal';
 import { type Adapter, type Dump, executeCompiledQuery } from '../adapter.js';
 import { copyDefaultFilters, getDefaultFilter } from '../default-filter-map.js';
 import type {
+	AggregateExpressionIntent,
 	AggregateIntent,
 	ColumnExpressionIntent,
 	ExpressionIntent,
@@ -107,6 +108,21 @@ import {
 	type SortDirection,
 	type StreamOptions,
 } from './types.js';
+
+/** A builder aggregate as a select expression; a field-less count counts `*`. */
+function aggregateToExpression(
+	aggregate: AggregateIntent,
+): AggregateExpressionIntent {
+	return {
+		kind: 'aggregate',
+		function: aggregate.function,
+		field: aggregate.field ?? '*',
+		...(aggregate.as !== undefined && { as: aggregate.as }),
+		...(aggregate.distinct !== undefined && { distinct: aggregate.distinct }),
+		...(aggregate.filter !== undefined && { filter: aggregate.filter }),
+	};
+}
+
 /**
  * Internal query builder implementation.
  */
@@ -1239,15 +1255,30 @@ export class QueryBuilderImpl<TResult = unknown>
 			from: this.from,
 		};
 
-		// Handle aggregates - convert to SelectAggregateIntent
-		if (this.aggregates.length > 0) {
+		// Builder aggregates are appended to the columns() projection; without
+		// columns(), the group-by fields are the non-aggregate projection.
+		if (
+			this.aggregates.length > 0 &&
+			this.selectIntent?.type === 'expressions'
+		) {
+			intent.select = {
+				type: 'expressions',
+				columns: [
+					...this.selectIntent.columns,
+					...this.aggregates.map(aggregateToExpression),
+				],
+			};
+		} else if (this.aggregates.length > 0) {
 			const aggregateSelect: Mutable<SelectAggregateIntent> = {
 				type: 'aggregate',
 				aggregates: [...this.aggregates],
 			};
-			// Add group by fields to the select for projection
-			if (this.groupByFields.length > 0) {
-				aggregateSelect.fields = [...this.groupByFields];
+			const fields =
+				this.selectIntent?.type === 'fields'
+					? this.selectIntent.fields
+					: this.groupByFields;
+			if (fields.length > 0) {
+				aggregateSelect.fields = [...fields];
 			}
 			intent.select = aggregateSelect as SelectAggregateIntent;
 		} else if (this.selectIntent !== undefined) {
