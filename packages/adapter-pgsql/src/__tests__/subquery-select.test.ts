@@ -1386,6 +1386,89 @@ describe('scalar subquery bodies compile every clause through core (#891 slice 5
 		it.each(deep)('COR3 %s', (_label, run, expected) => {
 			expect(run()).toEqual(expected);
 		});
+
+		// A body on the CTE `recent` keeps the adapter's route, which does not
+		// see the include key `author` written below the root's own `author`.
+		const local = (column: string) =>
+			new SubqueryExpression({
+				type: 'select',
+				from: 'recent',
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'count', field: '*' }],
+				},
+				where: eq('id', outerRef(column)),
+			} as QueryIntent);
+		const withRecent = (o: Orm, x: WhereIntent) => {
+			const d = o
+				.withCte('recent')
+				.fromUnnest({ id: [1, 2] })
+				.query(
+					o
+						.select('users')
+						.join('comments', { as: 'author', on: eq('users.id', 1) })
+						.where(
+							exists('writings', {
+								include: { author: { join: 'inner' } },
+								where: x,
+							}),
+						),
+				)
+				.dump();
+			return { sql: d.sql, params: d.params };
+		};
+		/** The local body in the projection of a body on comments, a nested select. */
+		const belowNested = (o: Orm, column: string) =>
+			withRecent(
+				o,
+				cond(
+					body(
+						o
+							.select('comments')
+							.columns([local(column).asExpr('n')])
+							.limit(1),
+					),
+				),
+			);
+		const recentSql = (name: string, condition: string) =>
+			`WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT users.* FROM users JOIN comments AS author ON users.id = $3 WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_1 JOIN users AS author_1 ON posts_exists_1.user_id = author_1.id WHERE users.id = posts_exists_1.user_id${name === 'filtered' ? ' AND posts_exists_1."deletedAt" IS NULL' : ''} AND ${condition})`;
+		it.each(configs)(
+			'COR3 local-qualified-below-nested-refused (%s)',
+			(_name, o) => {
+				let error: unknown;
+				try {
+					belowNested(o, 'author.id');
+				} catch (e) {
+					error = e;
+				}
+				expect(error).toBeInstanceOf(NotYetSupportedError);
+				expect(error).toMatchObject({
+					construct: 'a qualified outerRef()',
+					position: 'local-source subquery body',
+					issue: 1040,
+					message:
+						'a qualified outerRef() in a local-source subquery body is not supported yet (#1040).',
+				});
+			},
+		);
+		it.each(configs)('COR3 local-unqualified-below-nested (%s)', (name, o) => {
+			expect(belowNested(o, 'id')).toEqual({
+				sql: recentSql(
+					name,
+					'abs((SELECT (SELECT count(*) FROM recent AS recent WHERE recent.id = comments.id) AS n FROM comments LIMIT 1)) > $2',
+				),
+				params: [[1, 2], 0, 1],
+			});
+		});
+		it.each(configs)('COR3 local-qualified-in-where (%s)', (name, o) => {
+			expect(withRecent(o, cond(local('author.id')))).toEqual({
+				sql: recentSql(
+					name,
+					'abs((SELECT count(*) FROM recent AS recent WHERE recent.id = author_1.id)) > $2',
+				),
+				params: [[1, 2], 0, 1],
+			});
+		});
 	});
 
 	describe('a body on a mutation local source keeps the adapter route (CON1)', () => {
