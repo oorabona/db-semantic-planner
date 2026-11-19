@@ -36,8 +36,10 @@ import {
 	ref,
 	SubqueryExpression,
 	schema,
+	some,
 	star,
 	subquery,
+	type WhereIntent,
 } from '@dbsp/core';
 import {
 	markPlannedReport,
@@ -1102,6 +1104,134 @@ describe('scalar subquery bodies compile every clause through core (#891 slice 5
 					? 'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.user_id AND abs((SELECT count(posts.id) AS n FROM posts GROUP BY posts.user_id HAVING posts.user_id > posts_exists_0.id)) > $1)'
 					: 'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.user_id AND posts_exists_0."deletedAt" IS NULL AND abs((SELECT count(posts.id) AS n FROM posts WHERE posts."deletedAt" IS NULL GROUP BY posts.user_id HAVING posts.user_id > posts_exists_0.id)) > $1)',
 			);
+		});
+	});
+
+	describe('every outerRef the adapter compiles in a body binds the scope core bound (COR2)', () => {
+		const corr = () => gt('score', outerRef('id'));
+		const caseOf = () => caseWhen(corr(), literal(1)).else(literal(0));
+		const filtered_ = (name: string) =>
+			name === 'filtered' ? ' WHERE posts."deletedAt" IS NULL' : '';
+		/** Each body, and its SQL correlated to the enclosing range `q`. */
+		const bodies = {
+			'select-filter': [
+				(o: Orm) =>
+					body(
+						o
+							.select('posts')
+							.columns([fn('count', star()).filter(corr()).as('n')]),
+					),
+				(q: string, name: string) =>
+					`(SELECT count(*) FILTER (WHERE posts.score > ${q}.id) AS n FROM posts${filtered_(name)})`,
+			],
+			'select-case': [
+				(o: Orm) =>
+					body(
+						o
+							.select('posts')
+							.columns([caseOf().as('c')])
+							.limit(1),
+					),
+				(q: string, name: string) =>
+					`(SELECT CASE WHEN posts.score > ${q}.id THEN 1 ELSE 0 END AS c FROM posts${filtered_(name)} LIMIT 1)`,
+			],
+			'orderby-case': [
+				(o: Orm) =>
+					body(
+						o
+							.select('posts')
+							.columns(['id'])
+							.orderBy(caseOf().as('c'))
+							.limit(1),
+					),
+				(q: string, name: string) =>
+					`(SELECT posts.id FROM posts${filtered_(name)} ORDER BY CASE WHEN posts.score > ${q}.id THEN 1 ELSE 0 END ASC LIMIT 1)`,
+			],
+			'orderby-filter': [
+				(o: Orm) =>
+					body(
+						o
+							.select('posts')
+							.columns([])
+							.count('id', 'n')
+							.orderBy(fn('count', star()).filter(corr()).as('k')),
+					),
+				(q: string, name: string) =>
+					`(SELECT count(posts.id) AS n FROM posts${filtered_(name)} ORDER BY count(*) FILTER (WHERE posts.score > ${q}.id) ASC)`,
+			],
+		} as const;
+		const own = (q: string, name: string) =>
+			name === 'filtered' ? ` AND ${q}."deletedAt" IS NULL` : '';
+		/** Each intermediate condition body, and the statement around the body SQL. */
+		const positions = {
+			rawExists: [
+				(o: Orm, x: WhereIntent) =>
+					o
+						.select('users')
+						.where(rawExists(subquery('posts').select('id').where(x))),
+				(b: string, name: string) =>
+					`SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE abs(${b}) > $1${own('posts_sq', name)})`,
+				'posts_sq',
+			],
+			in: [
+				(o: Orm, x: WhereIntent) =>
+					o
+						.select('users')
+						.where(
+							inSubquery('id', subquery('posts').select('score').where(x)),
+						),
+				(b: string, name: string) =>
+					`SELECT users.* FROM users WHERE users.id = ANY (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE abs(${b}) > $1${own('posts_subq_0', name)})`,
+				'posts_subq_0',
+			],
+			'scalar-comparison': [
+				(o: Orm, x: WhereIntent) =>
+					o
+						.select('users')
+						.where(
+							subquery('posts')
+								.select('id')
+								.where(x)
+								.build()
+								.toWhereIntent('id', 'eq'),
+						),
+				(b: string, name: string) =>
+					`SELECT users.* FROM users WHERE users.id = (SELECT posts_subq_0.id FROM posts AS posts_subq_0 WHERE abs(${b}) > $1${own('posts_subq_0', name)})`,
+				'posts_subq_0',
+			],
+			exists: [
+				(o: Orm, x: WhereIntent) =>
+					o.select('users').where(exists('writings', { where: x })),
+				(b: string, name: string) =>
+					`SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.user_id${own('posts_exists_0', name)} AND abs(${b}) > $1)`,
+				'posts_exists_0',
+			],
+			some: [
+				(o: Orm, x: WhereIntent) =>
+					o.select('users').where(some(o.tables.users.writings, () => x)),
+				(b: string, name: string) =>
+					`SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.user_id${own('posts_exists_0', name)} AND abs(${b}) > $1)`,
+				'posts_exists_0',
+			],
+		} as const;
+		const cases = configs.flatMap(([name, o]) =>
+			Object.entries(bodies).flatMap(([bodyName, [build, bodySql]]) =>
+				Object.entries(positions).map(
+					([positionName, [wrap, statement, range]]) =>
+						[
+							`${bodyName} under ${positionName} (${name})`,
+							() =>
+								wrap(
+									o,
+									fn('abs', build(o).asExpr('v')).gt(0) as WhereIntent,
+								).dump().sql,
+							statement(bodySql(range, name), name),
+						] as const,
+				),
+			),
+		);
+		it.each(cases)('COR2 %s', (_label, run, expected) => {
+			expect(run()).toBe(expected);
 		});
 	});
 
