@@ -3,6 +3,7 @@ import {
 	type IncludeIntent,
 	isParamIntent,
 	type ModelIR,
+	NotYetSupportedError,
 	type PlanDecision,
 	type QueryIntent,
 	RangeAllocator,
@@ -57,6 +58,32 @@ function holdsOuterRef(value: unknown): boolean {
 		([key, child]) =>
 			isOuterRef(child) ||
 			(!isBoundPayload(node, key, child) && holdsOuterRef(child)),
+	);
+}
+
+/** A qualified outerRef() anywhere below, nested query bodies included. */
+function holdsQualifiedOuterRef(
+	value: unknown,
+	seen = new Set<object>(),
+): boolean {
+	if (!value || typeof value !== 'object' || isParamIntent(value)) return false;
+	if (seen.has(value)) return false;
+	seen.add(value);
+	if (Array.isArray(value))
+		return value.some((item) => holdsQualifiedOuterRef(item, seen));
+	if (isOuterRef(value)) {
+		const ref = value as { column?: unknown; alias?: unknown };
+		return (
+			Boolean(ref.alias) ||
+			(typeof ref.column === 'string' && ref.column.includes('.'))
+		);
+	}
+	const node = value as Record<string, unknown>;
+	if (node.kind === 'literal' || node.kind === 'param') return false;
+	return dataEntries(node).some(
+		([key, child]) =>
+			(isOuterRef(child) || !isBoundPayload(node, key, child)) &&
+			holdsQualifiedOuterRef(child, seen),
 	);
 }
 
@@ -998,6 +1025,15 @@ export function resolveReportIncludes(
 					options.isLocalSource,
 				) === 'local'
 			) {
+				// Below a nested select, the adapter's route for a local body does
+				// not see the names written in enclosing scopes: a qualified
+				// outerRef() there is not realised yet.
+				if (nested && holdsQualifiedOuterRef(query))
+					throw new NotYetSupportedError(
+						'a qualified outerRef()',
+						'local-source subquery body',
+						1040,
+					);
 				inspected.delete(value);
 				return;
 			}
