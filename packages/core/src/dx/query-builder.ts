@@ -1239,15 +1239,28 @@ export class QueryBuilderImpl<TResult = unknown>
 			from: this.from,
 		};
 
-		// Handle aggregates - convert to SelectAggregateIntent
+		// String columns() replace the group-by fields beside builder aggregates;
+		// an expression projection carries its aggregates itself.
+		if (
+			this.aggregates.length > 0 &&
+			this.selectIntent?.type === 'expressions'
+		) {
+			throw new InvalidOperationError(
+				'aggregate',
+				"count(), sum(), avg(), min() and max() combine only with string columns(); with an expression projection from columns() or coalesce(), put the aggregate in columns(), e.g. columns([exprRef('a').as('x'), fn('count', star()).as('n')])",
+			);
+		}
 		if (this.aggregates.length > 0) {
 			const aggregateSelect: Mutable<SelectAggregateIntent> = {
 				type: 'aggregate',
 				aggregates: [...this.aggregates],
 			};
-			// Add group by fields to the select for projection
-			if (this.groupByFields.length > 0) {
-				aggregateSelect.fields = [...this.groupByFields];
+			const fields =
+				this.selectIntent?.type === 'fields'
+					? this.selectIntent.fields
+					: this.groupByFields;
+			if (fields.length > 0) {
+				aggregateSelect.fields = [...fields];
 			}
 			intent.select = aggregateSelect as SelectAggregateIntent;
 		} else if (this.selectIntent !== undefined) {

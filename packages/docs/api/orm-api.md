@@ -744,8 +744,12 @@ orm.select('posts')
   .having(gt('postCount', 10))
   .dump()
 // SQL: SELECT posts.published, count(posts.id) AS "postCount" FROM posts
-//      GROUP BY posts.published HAVING count(posts.id) > $1
+//      GROUP BY posts.published HAVING count(posts.id) > CAST($1 AS bigint)
 ```
+
+Without `.columns()`, the `groupBy` fields are projected before the aggregates; string `.columns()` are
+projected instead. Beside an expression projection from `.columns()` or `.coalesce()`, these aggregate methods
+throw an `InvalidOperationError`: put the aggregate in `.columns()`, e.g. `fn('count', star()).as('n')`.
 
 ### Window Functions
 

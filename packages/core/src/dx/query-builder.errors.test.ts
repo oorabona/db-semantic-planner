@@ -20,6 +20,7 @@ import {
 	InvalidOperationError,
 	NotFoundError,
 } from './errors.js';
+import { ref as exprRef } from './expressions.js';
 import { createHookManager } from './hooks.js';
 import { createOrm } from './orm.js';
 import { QueryBuilderImpl } from './query-builder.js';
@@ -467,5 +468,49 @@ describe('NotFoundError shape', () => {
 			expect(error).toBeInstanceOf(NotFoundError);
 			expect((error as NotFoundError).hint).toContain('primary key');
 		}
+	});
+});
+
+describe('#1015 builder aggregates refuse an expression projection', () => {
+	const message =
+		"Invalid aggregate: count(), sum(), avg(), min() and max() combine only with string columns(); with an expression projection from columns() or coalesce(), put the aggregate in columns(), e.g. columns([exprRef('a').as('x'), fn('count', star()).as('n')])";
+
+	it('refuses expression columns set after the aggregate', () => {
+		const query = orm
+			.select('users')
+			.groupBy(['name'])
+			.count({ as: 'n' })
+			.columns([exprRef('name').as('label')]);
+		expect(() => query.dump()).toThrow(InvalidOperationError);
+		expect(() => query.dump()).toThrow(message);
+	});
+
+	it('refuses expression columns set before the aggregate', () => {
+		const query = orm
+			.select('users')
+			.columns([exprRef('name').as('label')])
+			.groupBy(['name'])
+			.max('id', 'top');
+		expect(() => query.dump()).toThrow(message);
+	});
+
+	it('refuses a coalesce() projection beside an aggregate', () => {
+		const query = orm
+			.select('users')
+			.groupBy(['name'])
+			.coalesce(['name'], 'label')
+			.count();
+		expect(() => query.dump()).toThrow(message);
+	});
+
+	it('refuses on execution before reaching the adapter', async () => {
+		// The mock adapter throws "not implemented" if reached, so only the
+		// builder's own refusal carries this message.
+		const query = orm
+			.select('users')
+			.groupBy(['name'])
+			.sum('id', 'total')
+			.columns([exprRef('name').as('label')]);
+		await expect(query.all()).rejects.toThrow(message);
 	});
 });

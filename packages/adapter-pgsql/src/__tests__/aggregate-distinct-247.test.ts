@@ -8,6 +8,9 @@
  * .having(), cast(), nested), not just .columns() — and must NOT force DISTINCT
  * onto non-distinct aggregates. Also covers the scalar-subquery aggregate
  * DISTINCT propagation (intent-to-decisions.ts convertSubquery / subquery-emission.ts).
+ *
+ * #1015: string `.columns()` replace the group-by fields beside builder aggregates
+ * instead of being dropped.
  */
 
 import {
@@ -20,6 +23,7 @@ import {
 	createOrm,
 	distinct,
 	fn,
+	gt,
 	literal,
 	schema,
 	star,
@@ -418,5 +422,33 @@ describe('#247 aggregate DISTINCT', () => {
 				'SELECT avg(DISTINCT tool_metrics.tokens_saved) AS uniq FROM tool_metrics',
 			);
 		});
+	});
+});
+
+describe('#1015 builder aggregates keep string columns()', () => {
+	it('projects string columns instead of the group-by fields', () => {
+		const dump = buildOrm()
+			.select('tool_metrics')
+			.groupBy(['id', 'session_id'])
+			.columns(['session_id'])
+			.sum('tokens_saved', 'total')
+			.dump();
+		expect(dump.sql).toBe(
+			'SELECT tool_metrics.session_id, sum(tool_metrics.tokens_saved) AS total FROM tool_metrics GROUP BY tool_metrics.id, tool_metrics.session_id',
+		);
+	});
+
+	it('keeps string columns set after a DISTINCT aggregate and resolves its HAVING alias', () => {
+		const dump = buildOrm()
+			.select('tool_metrics')
+			.groupBy(['id', 'session_id'])
+			.count(distinct('tokens_saved'), 'n')
+			.columns(['session_id'])
+			.having(gt('n', 2))
+			.dump();
+		expect(dump.sql).toBe(
+			'SELECT tool_metrics.session_id, count(DISTINCT tool_metrics.tokens_saved) AS n FROM tool_metrics GROUP BY tool_metrics.id, tool_metrics.session_id HAVING count(DISTINCT tool_metrics.tokens_saved) > CAST($1 AS bigint)',
+		);
+		expect(dump.params).toEqual([2]);
 	});
 });
