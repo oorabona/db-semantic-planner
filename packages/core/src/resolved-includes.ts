@@ -191,9 +191,9 @@ function havingAggregateAliases(
 	if (select?.type === 'aggregate')
 		for (const aggregate of select.aggregates) add(aggregate.as, aggregate);
 	else if (select?.type === 'expressions')
+		// A column aggregate compiled as a SELECT aggregate: with a field, or a
+		// field-less count (count(*)); a field-less call with extra arguments is not.
 		for (const column of select.columns)
-			// A column aggregate compiled as a SELECT aggregate: with a field, or a
-			// field-less count (count(*)); a field-less call with extra arguments is not.
 			if (
 				column.kind === 'aggregate' &&
 				(column.field ||

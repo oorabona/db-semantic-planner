@@ -114,9 +114,6 @@ export function resolveConditionContext(
 	},
 ): ResolvedCondition | undefined {
 	const label = mode?.label ?? 'WHERE';
-	// Expression positions name the innermost one in their refusals.
-	const nestedLabels =
-		label === 'HAVING' || label === 'CASE WHEN' || label === 'FILTER';
 	const labels = [label];
 	const currentLabel = (): string => labels[labels.length - 1]!;
 	let filterDepth = 0;
