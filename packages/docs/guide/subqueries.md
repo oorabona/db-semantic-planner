@@ -189,6 +189,7 @@ With a model, a scalar subquery used as a value — in `.columns()`, `.orderBy()
 - Its GROUP BY, HAVING, DISTINCT, DISTINCT ON, ORDER BY, LIMIT, OFFSET, expression projections and lock compile as they do at the root, and its SQL is the root SQL of the same query apart from its alias and the `outerRef()` correlation.
 - Its default filter applies once, first in its WHERE, as at the root. A body built with its own policy (`buildSubqueryIntent()`, `withoutDefaultFilters()`) keeps it; in a mutation WHERE, a body without its own policy is not filtered.
 - Its alias is its table name when no range of the statement uses that name, otherwise `<table>_1`, `<table>_2`… (cut to 63 bytes).
+- Its plan warnings, raw SQL included, follow the enclosing query's own warnings in that query's `PlanReport.warnings`. A body in a mutation WHERE or in a recursive `start.where` has no such report, so its warnings are not surfaced.
 - A body that projects more than one column is refused: `scalar subquery body projects <n> columns; a scalar subquery yields one value.` A star counts as every column of the body's table; duplicate columns count once.
 - An `include()` that hydrates nested objects is refused: `include('<relation>') in a scalar subquery body hydrates nested objects; a scalar subquery yields one value.`
 - A flat include (#1030), a `batchValuesSource` (#1031) and a join (#1039) are not supported yet: they throw `NotYetSupportedError`, whose `issue` field names the issue.
