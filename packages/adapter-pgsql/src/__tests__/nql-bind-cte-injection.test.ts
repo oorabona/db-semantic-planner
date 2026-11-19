@@ -1,4 +1,4 @@
-import { isNull, schema } from '@dbsp/core';
+import { createOrm, isNull, schema } from '@dbsp/core';
 import { compile } from '@dbsp/nql';
 import type {
 	ColumnJsReadType,
@@ -1586,5 +1586,46 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect(sql).toBeUndefined();
 		expect(error).toBeInstanceOf(Error);
 		expect((error as Error).message).toContain('source table is unavailable');
+	});
+});
+
+describe('orm.nql keeps a scalar body on a binding on the adapter route (#891 slice 5b, R7)', () => {
+	const tables = {
+		items: { id: { type: 'integer', primaryKey: true }, name: 'string' },
+		posts: { id: { type: 'integer', primaryKey: true }, title: 'string' },
+	} as const;
+	const configs = [
+		['plain', undefined],
+		['filtered', { posts: isNull('title'), items: isNull('name') }],
+	] as const;
+	const ormOf = (defaultFilters: (typeof configs)[number][1]) =>
+		createOrm({
+			schema: schema(
+				tables,
+				undefined,
+				defaultFilters ? { defaultFilters } : undefined,
+			),
+			adapter: createPgCompileOnlyAdapter(),
+			suppressDxWarnings: true,
+		});
+	it.each(configs)('T4 binding body (%s)', (name, filters) => {
+		const query = ormOf(filters).nql`items | select id | bind recent_items
+items | select id, (recent_items | select count() as total) as recent_count`;
+		expect(query.dump().sql).toBe(
+			name === 'plain'
+				? 'WITH "recent_items" as (SELECT items.id FROM items) SELECT items.id, (SELECT count(*) AS total FROM recent_items AS recent_items) AS recent_count FROM items'
+				: 'WITH "recent_items" as (SELECT items.id FROM items WHERE items.name IS NULL) SELECT items.id, (SELECT count(*) AS total FROM recent_items AS recent_items) AS recent_count FROM items WHERE items.name IS NULL',
+		);
+		expect(query.plan().execution).toBeDefined();
+	});
+	it.each(configs)('T4 shadowing binding body (%s)', (name, filters) => {
+		const query = ormOf(filters).nql`items | select id | bind items
+posts | select (items | select *) as v`;
+		expect(query.dump().sql).toBe(
+			name === 'plain'
+				? 'WITH "items" as (SELECT items.id FROM items) SELECT (SELECT items.* FROM items AS items) AS v FROM posts'
+				: 'WITH "items" as (SELECT items.id FROM items WHERE items.name IS NULL) SELECT (SELECT items.* FROM items AS items) AS v FROM posts WHERE posts.title IS NULL',
+		);
+		expect(query.plan().execution).toBeDefined();
 	});
 });

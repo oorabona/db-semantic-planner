@@ -18,9 +18,11 @@ import {
 	caseWhen,
 	createOrm,
 	eq,
+	exists,
 	exprRef,
 	fn,
 	gt,
+	inSubquery,
 	isNull,
 	literal,
 	NotYetSupportedError,
@@ -30,6 +32,7 @@ import {
 	planRecursive,
 	type QueryIntent,
 	raw,
+	rawExists,
 	ref,
 	SubqueryExpression,
 	schema,
@@ -334,6 +337,7 @@ describe('scalar subquery bodies compile every clause through core (#891 slice 5
 			post_id: ref('posts', { as: 'post', inverse: 'replies' }),
 		},
 		tags: { id: { type: 'integer', primaryKey: true }, label: 'text' },
+		singles: { id: { type: 'integer', primaryKey: true } },
 	} as const;
 	const plainDb = schema(tables);
 	const filteredDb = schema(tables, undefined, {
@@ -1019,6 +1023,284 @@ describe('scalar subquery bodies compile every clause through core (#891 slice 5
 			]);
 		},
 	);
+
+	describe('a HAVING outerRef in a body below a condition body binds that body (COR1)', () => {
+		const grouped = () =>
+			new SubqueryExpression({
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'aggregate',
+					fields: [],
+					aggregates: [{ function: 'count', field: 'id', as: 'n' }],
+				},
+				groupBy: ['user_id'],
+				having: gt('user_id', outerRef('id')),
+			} as QueryIntent);
+		const cond = () => fn('abs', grouped().asExpr('v')).gt(0);
+		const sqlOf = (d: { sql: string }) => d.sql;
+		it.each(configs)('COR1 rawExists (%s)', (name, o) => {
+			expect(
+				sqlOf(
+					o
+						.select('users')
+						.where(rawExists(subquery('posts').select('id').where(cond())))
+						.dump(),
+				),
+			).toBe(
+				name === 'plain'
+					? 'SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE abs((SELECT count(posts.id) AS n FROM posts GROUP BY posts.user_id HAVING posts.user_id > posts_sq.id)) > $1)'
+					: 'SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE abs((SELECT count(posts.id) AS n FROM posts WHERE posts."deletedAt" IS NULL GROUP BY posts.user_id HAVING posts.user_id > posts_sq.id)) > $1 AND posts_sq."deletedAt" IS NULL)',
+			);
+		});
+		it.each(configs)('COR1 in-subquery (%s)', (name, o) => {
+			expect(
+				sqlOf(
+					o
+						.select('users')
+						.where(
+							inSubquery('id', subquery('posts').select('score').where(cond())),
+						)
+						.dump(),
+				),
+			).toBe(
+				name === 'plain'
+					? 'SELECT users.* FROM users WHERE users.id = ANY (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE abs((SELECT count(posts.id) AS n FROM posts GROUP BY posts.user_id HAVING posts.user_id > posts_subq_0.id)) > $1)'
+					: 'SELECT users.* FROM users WHERE users.id = ANY (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE abs((SELECT count(posts.id) AS n FROM posts WHERE posts."deletedAt" IS NULL GROUP BY posts.user_id HAVING posts.user_id > posts_subq_0.id)) > $1 AND posts_subq_0."deletedAt" IS NULL)',
+			);
+		});
+		it.each(configs)('COR1 scalar-comparison (%s)', (name, o) => {
+			expect(
+				sqlOf(
+					o
+						.select('users')
+						.where(
+							subquery('posts')
+								.select('id')
+								.where(cond())
+								.build()
+								.toWhereIntent('id', 'eq'),
+						)
+						.dump(),
+				),
+			).toBe(
+				name === 'plain'
+					? 'SELECT users.* FROM users WHERE users.id = (SELECT posts_subq_0.id FROM posts AS posts_subq_0 WHERE abs((SELECT count(posts.id) AS n FROM posts GROUP BY posts.user_id HAVING posts.user_id > posts_subq_0.id)) > $1)'
+					: 'SELECT users.* FROM users WHERE users.id = (SELECT posts_subq_0.id FROM posts AS posts_subq_0 WHERE abs((SELECT count(posts.id) AS n FROM posts WHERE posts."deletedAt" IS NULL GROUP BY posts.user_id HAVING posts.user_id > posts_subq_0.id)) > $1 AND posts_subq_0."deletedAt" IS NULL)',
+			);
+		});
+		it.each(configs)('COR1 relation-exists (%s)', (name, o) => {
+			expect(
+				sqlOf(
+					o
+						.select('users')
+						.where(exists('writings', { where: cond() }))
+						.dump(),
+				),
+			).toBe(
+				name === 'plain'
+					? 'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.user_id AND abs((SELECT count(posts.id) AS n FROM posts GROUP BY posts.user_id HAVING posts.user_id > posts_exists_0.id)) > $1)'
+					: 'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.user_id AND posts_exists_0."deletedAt" IS NULL AND abs((SELECT count(posts.id) AS n FROM posts WHERE posts."deletedAt" IS NULL GROUP BY posts.user_id HAVING posts.user_id > posts_exists_0.id)) > $1)',
+			);
+		});
+	});
+
+	describe('a body on a mutation local source keeps the adapter route (CON1)', () => {
+		const dbs = [
+			['plain', plainDb],
+			['filtered', filteredDb],
+		] as const;
+		const where = () => fn('abs', subquery('ids').count().asExpr('n')).gt(0);
+		const source: QueryIntent = {
+			type: 'select',
+			from: 'users',
+			select: { type: 'fields', fields: ['id'] },
+		};
+		const ids: QueryIntent = {
+			type: 'select',
+			from: 'users',
+			select: { type: 'fields', fields: ['id'] },
+		};
+		const compileWith = (db: typeof plainDb) => {
+			const adapter = createPgCompileOnlyAdapter({ model: db.model });
+			const options = {
+				model: db.model,
+				...(db.defaultFilters && { defaultFilters: db.defaultFilters }),
+			};
+			return { adapter, options };
+		};
+		const bundled = (db: typeof plainDb, mutation: unknown) => {
+			const { adapter, options } = compileWith(db);
+			const compiled = adapter.compile(
+				{ mutation, bindings: new Map([['ids', ids]]) } as never,
+				options,
+			);
+			return { sql: compiled.sql, params: compiled.parameters };
+		};
+		it.each(dbs)('CON1 insert-from (%s)', (_name, db) => {
+			const { adapter, options } = compileWith(db);
+			const compiled = adapter.compileInsertFrom(
+				{
+					type: 'insert_from',
+					table: 'singles',
+					source: 'ids',
+					sourceQuery: source,
+					where: where(),
+				} as never,
+				options,
+			);
+			expect({ sql: compiled.sql, params: compiled.parameters }).toEqual({
+				sql: 'WITH "ids" as (SELECT users.id FROM users) INSERT INTO singles SELECT * FROM ids WHERE abs((SELECT count(*) FROM ids AS ids_sq)) > $1',
+				params: [0],
+			});
+		});
+		it.each(dbs)('CON1 upsert-from (%s)', (_name, db) => {
+			const { adapter, options } = compileWith(db);
+			const compiled = adapter.compileUpsertFrom(
+				{
+					type: 'upsert_from',
+					table: 'tags',
+					source: 'ids',
+					sourceQuery: {
+						type: 'select',
+						from: 'tags',
+						select: { type: 'fields', fields: ['id', 'label'] },
+					},
+					conflictColumns: ['id'],
+					where: where(),
+				} as never,
+				options,
+			);
+			expect({ sql: compiled.sql, params: compiled.parameters }).toEqual({
+				sql: 'WITH "ids" as (SELECT tags.id, tags.label FROM tags) INSERT INTO tags (id, label) SELECT ids.id AS id, ids.label AS label FROM ids WHERE abs((SELECT count(*) FROM ids AS ids_sq)) > $1 ON CONFLICT (id) DO UPDATE SET label = excluded.label',
+				params: [0],
+			});
+		});
+		it.each(dbs)('CON1 update (%s)', (_name, db) => {
+			expect(
+				bundled(db, {
+					type: 'update',
+					table: 'users',
+					set: { bonus: 1 },
+					where: where(),
+				}),
+			).toEqual({
+				sql: 'WITH "ids" as (SELECT users.id FROM users) UPDATE users SET bonus = $1 WHERE abs((SELECT count(*) FROM ids AS ids_sq)) > $2',
+				params: [1, 0],
+			});
+		});
+		it.each(dbs)('CON1 delete (%s)', (_name, db) => {
+			expect(
+				bundled(db, { type: 'delete', table: 'users', where: where() }),
+			).toEqual({
+				sql: 'WITH "ids" as (SELECT users.id FROM users) DELETE FROM users WHERE abs((SELECT count(*) FROM ids AS ids_sq)) > $1',
+				params: [0],
+			});
+		});
+		it.each(dbs)('CON1 upsert-guard (%s)', (_name, db) => {
+			expect(
+				bundled(db, {
+					type: 'upsert',
+					table: 'users',
+					values: [{ id: 1, bonus: 2 }],
+					onConflict: { columns: ['id'] },
+					action: { type: 'doUpdate', set: { bonus: 3 }, where: where() },
+				}),
+			).toEqual({
+				sql: 'WITH "ids" as (SELECT users.id FROM users) INSERT INTO users (id, bonus) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET bonus = $3 WHERE abs((SELECT count(*) FROM ids AS ids_sq)) > $4',
+				params: [1, 2, 3, 0],
+			});
+		});
+	});
+
+	describe('placeholders follow the root compiler order (T1)', () => {
+		it.each(configs)('T1 filter-and-where-params (%s)', (name, o) => {
+			expect(
+				projected(
+					o,
+					body(
+						o
+							.select('posts')
+							.where(eq('title', 'x'))
+							.columns([fn('count', star()).filter(eq('score', 1)).as('n')]),
+					),
+				),
+			).toEqual({
+				sql: `SELECT users.id, (SELECT count(*) FILTER (WHERE posts.score = $1) AS n FROM posts WHERE ${where(name)}posts.title = $2) AS v FROM users`,
+				params: [1, 'x'],
+			});
+		});
+		it.each(configs)('T1 sibling-bodies (%s)', (name, o) => {
+			const titled = (title: string) =>
+				body(correlated(o).where(eq('title', title)).columns(['id']).limit(1));
+			const d = o
+				.select('users')
+				.columns([titled('a').asExpr('v'), titled('b').asExpr('w')])
+				.dump();
+			expect({ sql: d.sql, params: d.params }).toEqual({
+				sql: `SELECT (SELECT posts.id FROM posts WHERE ${where(name)}posts.user_id = users.id AND posts.title = $1 LIMIT 1) AS v, (SELECT posts_1.id FROM posts AS posts_1 WHERE ${where(name).replaceAll('posts.', 'posts_1.')}posts_1.user_id = users.id AND posts_1.title = $2 LIMIT 1) AS w FROM users`,
+				params: ['a', 'b'],
+			});
+		});
+		it.each(configs)('T1 body-in-body (%s)', (name, o) => {
+			const inner = subquery('comments').where(eq('id', 5)).count().asExpr('c');
+			expect(
+				projected(
+					o,
+					body(correlated(o).where(eq('title', 'a')).columns([inner]).limit(1)),
+				),
+			).toEqual({
+				sql: `SELECT users.id, (SELECT (SELECT count(*) FROM comments WHERE comments.id = $1) AS c FROM posts WHERE ${where(name)}posts.user_id = users.id AND posts.title = $2 LIMIT 1) AS v FROM users`,
+				params: [5, 'a'],
+			});
+		});
+	});
+
+	describe('R1 stars as raw intents (T2)', () => {
+		const fields = (from: string, field: string) =>
+			new SubqueryExpression({
+				type: 'select',
+				from,
+				select: { type: 'fields', fields: [field] },
+			} as QueryIntent);
+		it.each(configs)('T2 bare-star-two-columns (%s)', (_name, o) => {
+			expect(() => projected(o, fields('tags', '*'))).toThrow(
+				'scalar subquery body projects 2 columns; a scalar subquery yields one value.',
+			);
+		});
+		it.each(configs)('T2 qualified-star-two-columns (%s)', (_name, o) => {
+			expect(() => projected(o, fields('tags', 'tags.*'))).toThrow(
+				'scalar subquery body projects 2 columns; a scalar subquery yields one value.',
+			);
+		});
+		// A qualified star field is refused by the root compiler itself
+		// (declared column 'singles.singles.*'), so the one-column case uses '*'.
+		it.each(configs)('T2 star-one-column (%s)', (_name, o) => {
+			expect(projected(o, fields('singles', '*'))).toEqual({
+				sql: 'SELECT users.id, (SELECT singles.* FROM singles) AS v FROM users',
+				params: [],
+			});
+		});
+	});
+
+	describe('an expression body stays refused under ON and an include where (T3)', () => {
+		const refusal =
+			"compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context.";
+		const cond = () => fn('abs', subquery('posts').count().asExpr('v')).gt(0);
+		it.each(configs)('T3 include-where (%s)', (_name, o) => {
+			expect(() =>
+				o
+					.select('posts')
+					.include('author', { join: 'left', where: cond() })
+					.dump(),
+			).toThrow(refusal);
+		});
+		it.each(configs)('T3 join-on (%s)', (_name, o) => {
+			expect(() =>
+				o.select('posts').join('users', { on: cond(), as: 'u' }).dump(),
+			).toThrow(refusal);
+		});
+	});
 
 	it.each(configs)('AC7 astix (%s)', (name, o) => {
 		const d = o

@@ -265,6 +265,50 @@ describe('SC-14b: a scalar body on a CTE keeps its route with its subtree', () =
 			1039,
 		);
 	});
+	it.each(configs)(
+		'R7 local-descendant-nested-include-refused (%s)',
+		(_name, o) => {
+			expect(() =>
+				dump(o, onCte({ ...count('items'), include: [{ relation: 'owner' }] })),
+			).toThrow(
+				"include('owner') in a scalar subquery body hydrates nested objects; a scalar subquery yields one value.",
+			);
+		},
+	);
+	it.each(configs)(
+		'R7 local-descendant-flat-include-refused (%s)',
+		(_name, o) => {
+			notYet(
+				() =>
+					dump(
+						o,
+						onCte({
+							...count('items'),
+							include: [{ relation: 'owner', strategy: 'flat' }],
+						}),
+					),
+				"flat include('owner')",
+				1030,
+			);
+		},
+	);
+	it.each(configs)(
+		'R7 local-descendant-batch-values-refused (%s)',
+		(_name, o) => {
+			notYet(
+				() =>
+					dump(
+						o,
+						onCte({
+							...count('bv'),
+							batchValuesSource: { alias: 'bv', columns: ['id'] },
+						} as unknown as QueryIntent),
+					),
+				'batchValuesSource',
+				1031,
+			);
+		},
+	);
 	it.each(configs)('R7 local-nested-include-refused (%s)', (_name, o) => {
 		expect(() =>
 			dump(o, onCte(count('items'), { include: [{ relation: 'owner' }] })),
