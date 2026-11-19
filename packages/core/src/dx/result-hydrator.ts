@@ -24,8 +24,8 @@ import {
 	planForJsonAggHydration,
 	requireIncludePayloads,
 } from './hydration-utils.js';
+import type { RecursiveIncludeConfig } from './include-intent.js';
 import { hydrateResolvedIncludes } from './include-payload-hydration.js';
-import type { RecursiveIncludeConfig } from './intent-builder.js';
 
 // ============================================================================
 // Helper Types

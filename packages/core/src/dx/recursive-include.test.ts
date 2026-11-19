@@ -9,6 +9,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import type { QueryIntent } from '../intent-ast.js';
 import { InvalidOperationError } from './errors.js';
 import { createOrm } from './orm.js';
 import { ref, schema } from './schema.js';
@@ -189,19 +190,19 @@ describe('Valid recursive include combinations', () => {
 // Intent conversion (DX-017 fix)
 // ============================================================================
 
-import { IntentBuilder } from './intent-builder.js';
+// QueryBuilderImpl.buildIntent is not on the public QueryBuilder type.
+const intentOf = (builder: unknown): QueryIntent =>
+	(builder as { buildIntent(): QueryIntent }).buildIntent();
 
 describe('Intent conversion (DX-017)', () => {
 	it('should convert recursive options to IncludeIntent.recursive', () => {
-		// Use IntentBuilder directly to verify intent structure
-		const builder = new IntentBuilder(testSchema.model, 'categories');
-		builder.addInclude('children', {
-			recursive: true,
-			direction: 'descendants',
-			maxDepth: 10,
-		} satisfies RecursiveIncludeOptions);
-
-		const intent = builder.buildIntent();
+		const intent = intentOf(
+			orm.select('categories').include('children', {
+				recursive: true,
+				direction: 'descendants',
+				maxDepth: 10,
+			} satisfies RecursiveIncludeOptions),
+		);
 
 		expect(intent.include).toBeDefined();
 		expect(intent.include?.length).toBe(1);
@@ -214,26 +215,24 @@ describe('Intent conversion (DX-017)', () => {
 	});
 
 	it('should convert includeDepth to track.depth', () => {
-		const builder = new IntentBuilder(testSchema.model, 'categories');
-		builder.addInclude('children', {
-			recursive: true,
-			direction: 'descendants',
-			includeDepth: true,
-		} satisfies RecursiveIncludeOptions);
-
-		const intent = builder.buildIntent();
+		const intent = intentOf(
+			orm.select('categories').include('children', {
+				recursive: true,
+				direction: 'descendants',
+				includeDepth: true,
+			} satisfies RecursiveIncludeOptions),
+		);
 
 		expect(intent.include?.[0]!.recursive?.track?.depth).toBe(true);
 	});
 
 	it('should NOT store recursive includes in separate array anymore', () => {
-		const builder = new IntentBuilder(testSchema.model, 'categories');
-		builder.addInclude('children', {
-			recursive: true,
-			direction: 'descendants',
-		} satisfies RecursiveIncludeOptions);
-
-		const intent = builder.buildIntent();
+		const intent = intentOf(
+			orm.select('categories').include('children', {
+				recursive: true,
+				direction: 'descendants',
+			} satisfies RecursiveIncludeOptions),
+		);
 
 		// Recursive includes should be in the main includes array
 		expect(intent.include?.length).toBe(1);

@@ -422,7 +422,7 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 			const orm = createOrm({ adapter, schema: nestedSchema });
 
 			// Dot-notation propagates join:'inner' to every intermediate hop
-			// (core/src/dx/intent-builder.ts: parseDotNotationInclude).
+			// (core/src/dx/include-intent.ts: parseDotNotationInclude).
 			const dump = orm
 				.select('users')
 				.include('posts.comments', {

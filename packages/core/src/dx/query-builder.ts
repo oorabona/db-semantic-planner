@@ -69,7 +69,7 @@ import {
 	parseDotNotationInclude,
 	type RecursiveIncludeConfig,
 	validateRecursiveInclude,
-} from './intent-builder.js';
+} from './include-intent.js';
 import { validateLimit } from './limit-validation.js';
 import { emitWarning } from './logger.js';
 import {

@@ -180,15 +180,12 @@ export {
 	type QueryHookContext,
 	type QueryResultType,
 } from './hooks.js';
-// DX-103: Extracted components for SRP compliance
-// IntentBuilder - builds QueryIntent AST from builder state
+// Include-intent helpers
 export {
-	IntentBuilder,
-	type IntentBuilderState,
 	isRecursiveIncludeOptions,
 	type RecursiveIncludeConfig,
 	validateRecursiveInclude,
-} from './intent-builder.js';
+} from './include-intent.js';
 // Lightweight ModelIR (DX-023)
 export {
 	type CardinalityShorthand,

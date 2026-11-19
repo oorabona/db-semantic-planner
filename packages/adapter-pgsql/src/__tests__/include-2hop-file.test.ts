@@ -7,7 +7,7 @@
  * The nested `file` join then references the intermediate table (`symbols`) in its
  * ON clause, but `symbols` is not in the outer FROM clause → PostgreSQL error.
  *
- * Fix (core/src/dx/intent-builder.ts: parseDotNotationInclude): propagate the
+ * Fix (core/src/dx/include-intent.ts: parseDotNotationInclude): propagate the
  * `join` option to ALL intermediate wrapper relations so every hop uses the
  * join strategy, placing each intermediate table in the outer FROM clause.
  *
