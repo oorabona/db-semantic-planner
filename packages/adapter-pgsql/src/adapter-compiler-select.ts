@@ -1473,9 +1473,10 @@ export function nestedSelectCompiler(
 						),
 					),
 		);
-		// The enclosing scopes are core's, so every outerRef the adapter compiles
-		// in the body (HAVING, CASE WHEN, FILTER, in any clause) binds the range
-		// core bound; a binding the parent already established is reused.
+		// Core binds every outerRef of the body itself (WHERE, and each HAVING,
+		// CASE WHEN or FILTER condition that holds one). These scopes, core's,
+		// serve a body below it that keeps the adapter's route (a query-local
+		// source); a binding the parent already established is reused.
 		const known = [
 			...(parent.queryRanges ?? []),
 			...(parent.enclosingRanges ?? []).flat(),

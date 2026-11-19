@@ -379,13 +379,18 @@ export function resolveConditionContext(
 		// Every enclosing range was reserved when it entered the query, so the
 		// body's alias avoids them all; the nested plan reserves the body's alias.
 		const scopes = [enclosingScope(ranges), ...enclosing];
+		// The body binds its outerRefs by the rules of this resolver: a name
+		// written for a range (an include key) travels with its scope.
+		const qualifiers = scopes.map(
+			(scope) => writtenQualifiers.get(scope) ?? new Map(),
+		);
 		const select = planNestedSelect(
 			query,
 			model,
 			issued ? issued.filters : activeFilters,
 			{
 				isLocalSource: mode?.isLocalSource,
-				nested: { allocator, enclosing: scopes, entryDepth },
+				nested: { allocator, enclosing: scopes, qualifiers, entryDepth },
 			},
 		);
 		return { kind: 'subquery', select };

@@ -368,6 +368,8 @@ export function resolveReportIncludes(
 		nested?: {
 			readonly allocator: RangeAllocator;
 			readonly enclosing: readonly (readonly ResolvedRange[])[];
+			/** The names written for ranges of each enclosing scope, aligned with `enclosing`. */
+			readonly qualifiers: readonly ReadonlyMap<string, ResolvedRange>[];
 			readonly entryDepth: number;
 		};
 	} = {},
@@ -390,8 +392,13 @@ export function resolveReportIncludes(
 		: allocator.bind(intent.from, intent.from);
 	allocator.reserve(rootRange.alias);
 	const enclosing = nested?.enclosing ?? [];
+	// Every resolution in a body reads the enclosing scopes core bound it in,
+	// with the names written in them: core alone binds the body's outerRefs.
 	const scopeMode = {
-		...(nested && { entryDepth: nested.entryDepth }),
+		...(nested && {
+			entryDepth: nested.entryDepth,
+			outerQualifiers: nested.qualifiers,
+		}),
 		...(options.isLocalSource && { isLocalSource: options.isLocalSource }),
 	};
 	const rootDefaultFilter =
@@ -1033,9 +1040,10 @@ export function resolveReportIncludes(
 			condition &&
 			((relationSensitive && model) ||
 				(inHaving && namesAlias(node)) ||
-				// In a body, a HAVING leaf correlated by outerRef() binds the
-				// immediately enclosing range, which only core's scopes know.
-				(nested !== undefined && underHaving && holdsOuterRef(node)) ||
+				// In a body, every condition correlated by outerRef() (HAVING,
+				// CASE WHEN, FILTER, in any clause) is bound by core, the one
+				// resolver that holds the enclosing scopes and their written names.
+				(nested !== undefined && holdsOuterRef(node)) ||
 				invisibleQualifier(node, inHaving))
 		) {
 			const resolved = resolveConditionContext(

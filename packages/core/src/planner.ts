@@ -293,6 +293,8 @@ export interface PlanScope {
 	readonly nested?: {
 		readonly allocator: RangeAllocator;
 		readonly enclosing: readonly (readonly ResolvedRange[])[];
+		/** The names written for ranges of each enclosing scope (an include key), aligned with `enclosing`. */
+		readonly qualifiers: readonly ReadonlyMap<string, ResolvedRange>[];
 		readonly entryDepth: number;
 	};
 }
