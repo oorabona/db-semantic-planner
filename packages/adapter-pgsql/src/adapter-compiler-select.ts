@@ -1144,8 +1144,6 @@ export function compileSelectEnvelope<T = unknown>(
 	const execIntent = deduplicateRootProjection(
 		plan.executableIntent ?? plan.intent,
 	);
-	if (nested && execIntent)
-		assertScalarBodyArity(execIntent, resolvedModelForCompiler);
 	let hydrationPlan: PlanReport | undefined;
 	// planForCompilation: a view of the plan where .intent is the executable intent.
 	// Condition extraction still consumes executable WHERE until PR 3.
@@ -1353,6 +1351,8 @@ export function compileSelectEnvelope<T = unknown>(
 	}
 
 	const result = compilePlan(simplifiedPlan, compilerOptions);
+	if (nested)
+		assertScalarBodyArity(result.ast, plan.rootTable, resolvedModelForCompiler);
 	const baseEnv = fromAstProjection<T>({
 		sql: result.sql,
 		parameters: result.parameters,
@@ -1527,37 +1527,29 @@ export function nestedSelectCompiler(
 }
 
 /**
- * A scalar subquery yields one value: its target list, after the root's
- * deduplication, holds one column. A star stands for every column of the
- * body's table; existsWrap replaces the list with one EXISTS column.
+ * A scalar subquery yields one value: the target list the nested select
+ * emits holds one column. A star stands for every column of the body's table
+ * in the model (a body has no join); existsWrap emits one EXISTS target.
  */
 function assertScalarBodyArity(
-	intent: QueryIntent,
+	ast: Node,
+	table: string,
 	model: ModelIR | undefined,
 ): void {
-	if (intent.existsWrap) return;
-	const star = model?.getTable(intent.from)?.columns.length ?? 1;
-	const field = (name: string): number =>
-		name === '*' || name.endsWith('.*') ? star : 1;
-	const select = intent.select;
-	const columns =
-		!select || select.type === 'all'
-			? star
-			: select.type === 'fields'
-				? select.fields.reduce((n, name) => n + field(name), 0)
-				: select.type === 'aggregate'
-					? (select.fields ?? []).reduce((n, name) => n + field(name), 0) +
-						select.aggregates.length
-					: select.columns.reduce(
-							(n, column) =>
-								n +
-								(column.kind === 'star'
-									? star
-									: column.kind === 'column' || column.kind === 'ref'
-										? field(column.column)
-										: 1),
-							0,
-						);
+	const targets =
+		(ast as { SelectStmt?: { targetList?: readonly unknown[] } }).SelectStmt
+			?.targetList ?? [];
+	const star = model?.getTable(table)?.columns.length ?? 1;
+	const columns = targets.reduce<number>((n, target) => {
+		const fields = (
+			target as { ResTarget?: { val?: { ColumnRef?: { fields?: unknown } } } }
+		).ResTarget?.val?.ColumnRef?.fields;
+		const last = Array.isArray(fields) ? fields.at(-1) : undefined;
+		return (
+			n +
+			(last !== null && typeof last === 'object' && 'A_Star' in last ? star : 1)
+		);
+	}, 0);
 	if (columns !== 1)
 		throw new Error(
 			`scalar subquery body projects ${columns} columns; a scalar subquery yields one value.`,

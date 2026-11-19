@@ -1551,13 +1551,14 @@ describe('scalar subquery bodies compile every clause through core (#891 slice 5
 				'scalar subquery body projects 2 columns; a scalar subquery yields one value.',
 			);
 		});
-		it.each(configs)('T2 qualified-star-two-columns (%s)', (_name, o) => {
+		// A qualified star field is refused by the root compiler itself, before
+		// any target exists to count, as it is at the root; so the one-column
+		// case uses '*'.
+		it.each(configs)('T2 qualified-star-field-refused (%s)', (_name, o) => {
 			expect(() => projected(o, fields('tags', 'tags.*'))).toThrow(
-				'scalar subquery body projects 2 columns; a scalar subquery yields one value.',
+				"Declared column 'tags.tags.*' is absent from the physical model.",
 			);
 		});
-		// A qualified star field is refused by the root compiler itself
-		// (declared column 'singles.singles.*'), so the one-column case uses '*'.
 		it.each(configs)('T2 star-one-column (%s)', (_name, o) => {
 			expect(projected(o, fields('singles', '*'))).toEqual({
 				sql: 'SELECT users.id, (SELECT singles.* FROM singles) AS v FROM users',
@@ -1676,6 +1677,43 @@ describe('scalar subquery bodies compile every clause through core (#891 slice 5
 			expect(projected(o, new SubqueryExpression(query)).sql).toBe(
 				`SELECT users.id, (SELECT EXISTS (SELECT 1 FROM posts WHERE ${where(name)}posts.user_id = users.id) AS "exists") AS v FROM users`,
 			);
+		});
+		// The count reads the target list the body emits, not the intent.
+		const single = (o: Orm) =>
+			o.select('singles' as never) as unknown as ReturnType<Orm['select']>;
+		/** A pseudoColumn emits no target of its own in a body. */
+		const pseudo = {
+			kind: 'pseudoColumn',
+			traversal: 'parent',
+			targetColumn: 'label',
+			as: 'p',
+		};
+		const tagsOf = (columns: readonly unknown[]) =>
+			new SubqueryExpression({
+				type: 'select',
+				from: 'tags',
+				select: { type: 'expressions', columns },
+				limit: 1,
+			} as QueryIntent);
+		it.each(configs)('R1 empty-columns-one-column-table (%s)', (_name, o) => {
+			expect(projected(o, body(single(o).columns([])))).toEqual({
+				sql: 'SELECT users.id, (SELECT * FROM singles) AS v FROM users',
+				params: [],
+			});
+		});
+		it.each(configs)('R1 empty-columns-two-column-table (%s)', (_name, o) => {
+			expect(() => projected(o, body(tag(o).columns([])))).toThrow(refusal(2));
+		});
+		it.each(configs)('R1 pseudo-column-and-field (%s)', (_name, o) => {
+			expect(
+				projected(o, tagsOf([pseudo, { kind: 'column', column: 'id' }])),
+			).toEqual({
+				sql: 'SELECT users.id, (SELECT tags.id FROM tags LIMIT 1) AS v FROM users',
+				params: [],
+			});
+		});
+		it.each(configs)('R1 pseudo-column-alone (%s)', (_name, o) => {
+			expect(() => projected(o, tagsOf([pseudo]))).toThrow(refusal(2));
 		});
 	});
 
