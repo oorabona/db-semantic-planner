@@ -1018,6 +1018,21 @@ describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
 					.having(fn('count', star()).filter(gt('stats.total', 1)).gt(1))
 					.dump(),
 			).toThrow(whereRefusal);
+			// The same FILTER inside a HAVING comparison resolved as a whole.
+			expect(() =>
+				users()
+					.count('id', 'stats.total')
+					.having(
+						eq(
+							'users.id',
+							caseWhen(
+								fn('count', star()).filter(gt('stats.total', 1)).gt(1),
+								literal(1),
+							).else(literal(0)),
+						),
+					)
+					.dump(),
+			).toThrow(whereRefusal);
 		});
 
 		it('AC3b a name equal to an aggregate alias inside a subquery body is the body column', () => {
