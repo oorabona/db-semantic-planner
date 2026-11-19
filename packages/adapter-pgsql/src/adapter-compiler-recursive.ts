@@ -51,6 +51,7 @@ import {
 import {
 	emittedBindName,
 	hasBindingName,
+	localSourcePredicate,
 	relationBinding,
 	withBindingName,
 	withRelationBinding,
@@ -143,8 +144,7 @@ function createPlanReportForCteQuery(
 ): PlanReport {
 	const queryLocalSource =
 		hasRegisteredSource || hasBindingName(deps.bindingNames, query.from);
-	const isLocalSource = (name: string): boolean =>
-		hasBindingName(deps.bindingNames, name);
+	const isLocalSource = localSourcePredicate(deps.bindingNames, deps.scope);
 	const issued = getRelationalReadPlan(query, queryLocalSource);
 	if (issued) return issued;
 	if (queryLocalSource) {

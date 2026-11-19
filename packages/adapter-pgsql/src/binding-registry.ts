@@ -6,7 +6,11 @@
  * ranges are local SQL vocabulary and must retain their spelling verbatim.
  */
 import type { OutputDescriptor } from '@dbsp/types';
-import { identifierText, type SqlIdentifier } from './sql-identifier.js';
+import {
+	identifierText,
+	queryLocal,
+	type SqlIdentifier,
+} from './sql-identifier.js';
 
 export type RelationBindingKind =
 	| 'declared-table'
@@ -146,6 +150,26 @@ export function hasBindingName(
 	if (scope !== undefined && 'has' in scope) return scope.has(name);
 	const binding = (scope as QueryScope | undefined)?.bindings.get(name);
 	return binding?.kind === 'cte-bind';
+}
+
+/**
+ * Whether a FROM name is a query-local source here: an NQL binding or CTE
+ * name, or a CTE or BatchValues range of the scope. Core's body
+ * classification and the adapter's body route read this one predicate.
+ */
+export function localSourcePredicate(
+	bindingNames: BindingNameRegistry | undefined,
+	scope: QueryScope | undefined,
+): (name: string) => boolean {
+	return (name) => {
+		const local = queryLocal(name);
+		const binding = relationBindingFor(scope, local);
+		return (
+			hasBindingName(bindingNames, local) ||
+			binding?.kind === 'cte-bind' ||
+			binding?.kind === 'batch-values'
+		);
+	};
 }
 
 export function schemaForFromName(

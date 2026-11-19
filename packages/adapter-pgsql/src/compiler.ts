@@ -58,6 +58,7 @@ import {
 	type BindingNameRegistry,
 	declaredRelationBindingFor,
 	hasBindingName,
+	localSourcePredicate,
 	type QueryScope,
 	queryScope,
 	relationBinding,
@@ -1461,13 +1462,7 @@ export class PlanCompiler {
 
 	/** A FROM name bound in this query to a local source (an NQL binding, a CTE or a BatchValues range). */
 	private isQueryLocalSource(name: string): boolean {
-		const local = queryLocal(name);
-		const binding = relationBindingFor(this.scope, local);
-		return (
-			hasBindingName(this.bindingNames, local) ||
-			binding?.kind === 'cte-bind' ||
-			binding?.kind === 'batch-values'
-		);
+		return localSourcePredicate(this.bindingNames, this.scope)(name);
 	}
 
 	private isNqlBindingRoot(plan: SimplifiedPlanReport): boolean {

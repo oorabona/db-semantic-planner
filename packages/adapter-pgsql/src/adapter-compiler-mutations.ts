@@ -41,6 +41,7 @@ import {
 import {
 	emittedBindName,
 	hasBindingName,
+	localSourcePredicate,
 	queryScope,
 	relationBinding,
 	withBindingName,
@@ -697,11 +698,11 @@ export function compileInsertFrom(
 	);
 	const state = createCompilerState();
 	assertNoPathRefInConditionBodies(intent.where);
-	const whereCompiler = resolvedMutationWhere(
-		intent.where,
-		intent.source,
-		deps,
-	);
+	// The source CTE is a local source of the WHERE, as in its compile context.
+	const whereCompiler = resolvedMutationWhere(intent.where, intent.source, {
+		...deps,
+		...(bindingNames !== undefined && { bindingNames }),
+	});
 	const resolvedWhere =
 		intent.where && !whereCompiler
 			? resolveExistsIntent(intent.where, intent.source, deps)
@@ -802,6 +803,9 @@ function resolvedMutationWhere(
 		[root],
 		allocator,
 		deps.model,
+		0,
+		[],
+		localSourcePredicate(deps.bindingNames, deps.scope),
 	);
 	if (!resolved) {
 		throw new Error(
@@ -1347,11 +1351,11 @@ export function compileUpsertFrom(
 	);
 	const state = createCompilerState();
 	assertNoPathRefInConditionBodies(intent.where);
-	const whereCompiler = resolvedMutationWhere(
-		intent.where,
-		intent.source,
-		deps,
-	);
+	// The source CTE is a local source of the WHERE, as in its compile context.
+	const whereCompiler = resolvedMutationWhere(intent.where, intent.source, {
+		...deps,
+		...(bindingNames !== undefined && { bindingNames }),
+	});
 	const resolvedWhere =
 		intent.where && !whereCompiler
 			? resolveExistsIntent(intent.where, intent.source, deps)

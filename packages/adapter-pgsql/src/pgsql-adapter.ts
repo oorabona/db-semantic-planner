@@ -109,6 +109,7 @@ import {
 	type BindingNameRegistry,
 	emittedBindName,
 	hasBindingName,
+	localSourcePredicate,
 	type QueryScope,
 	relationBindingFor,
 } from './binding-registry.js';
@@ -3164,8 +3165,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 				bindingProjections,
 			);
 			const queryFromBinding = hasBindingName(bindingNames, bundle.query.from);
-			const isLocalSource = (name: string): boolean =>
-				hasBindingName(bindingNames, name);
+			const isLocalSource = localSourcePredicate(bindingNames, deps.scope);
 			const scanFilters = options?.defaultFilters
 				? copyDefaultFilters(
 						options.defaultFilters,
@@ -3865,8 +3865,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 				bindingProjections,
 			);
 			const queryFromBinding = hasBindingName(bindingNames, query.from);
-			const isLocalSource = (name: string): boolean =>
-				hasBindingName(bindingNames, name);
+			const isLocalSource = localSourcePredicate(bindingNames, deps.scope);
 			const issuedPlan = getRelationalReadPlan(query, queryFromBinding);
 			const planReport =
 				issuedPlan ??

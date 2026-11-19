@@ -77,6 +77,7 @@ export function resolveSelectWhere(
 	model: ModelIR | undefined,
 	initialAliasCount = 0,
 	additionalOuterRanges: readonly ResolvedRange[] = [],
+	isLocalSource?: (name: string) => boolean,
 ): ResolvedCondition | undefined {
 	assertNoPathRefInConditionBodies(where);
 	return resolveConditionContext(
@@ -88,6 +89,7 @@ export function resolveSelectWhere(
 		model,
 		initialAliasCount,
 		additionalOuterRanges,
+		isLocalSource ? { isLocalSource } : undefined,
 	);
 }
 
