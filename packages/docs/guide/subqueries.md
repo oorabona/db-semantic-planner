@@ -194,6 +194,7 @@ With a model, a scalar subquery used as a value — in `.columns()`, `.orderBy()
 - An `include()` that hydrates nested objects is refused: `include('<relation>') in a scalar subquery body hydrates nested objects; a scalar subquery yields one value.`
 - A flat include (#1030), a `batchValuesSource` (#1031) and a join (#1039) are not supported yet: they throw `NotYetSupportedError`, whose `issue` field names the issue.
 - A body whose FROM names an NQL binding or a CTE keeps the adapter's route, with every body below it. Such a subtree that scans a table with a default filter, or carries a builder policy, throws `NotYetSupportedError` (#1040).
+- Inside a body planned as a nested select, such a body in a column, ORDER BY or HAVING expression throws `NotYetSupportedError` when it, or a body below it, holds a qualified `outerRef()`: `a qualified outerRef() in a local-source subquery body is not supported yet (#1040).` An unqualified `outerRef()` there binds the immediately enclosing query. In a WHERE, or in a condition holding an `outerRef()` of its own or naming a HAVING aggregate alias, core binds both forms.
 
 Without a model, the adapter compiles a scalar subquery body from its intent, and the rules above do not apply.
 
