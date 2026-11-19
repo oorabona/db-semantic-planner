@@ -26,14 +26,222 @@ import { findDefaultFilterScan } from './dx/default-filter-refusals.js';
 import { InvalidOperationError } from './dx/errors.js';
 import { relationJoinHops } from './dx/relation-join-path.js';
 import { isBoundPayload } from './intent-payload.js';
+import { containsRelationalReadPolicy } from './relational-read-plans.js';
 import {
-	containsRelationalReadPolicy,
-	getRelationalReadPolicy,
-} from './relational-read-plans.js';
-import {
+	type HavingAggregate,
 	resolveConditionContext,
 	resolveScanDefaultFilter,
 } from './resolved-conditions.js';
+
+/** Own enumerable data properties; accessors are never invoked. */
+function dataEntries(value: object): [string, unknown][] {
+	const entries: [string, unknown][] = [];
+	for (const key of Object.keys(value)) {
+		const descriptor = Object.getOwnPropertyDescriptor(value, key);
+		if (descriptor && 'value' in descriptor)
+			entries.push([key, descriptor.value]);
+	}
+	return entries;
+}
+
+/** Nodes whose body another resolution absorbs whole; their children stay shared. */
+function absorbsBody(node: Record<string, unknown>): boolean {
+	return (
+		[
+			'exists',
+			'notExists',
+			'relationFilter',
+			'rawExists',
+			'rawNotExists',
+		].includes(String(node.kind)) ||
+		((node.kind === 'subquery' || node.kind === 'in') &&
+			(node.subquery !== undefined || node.query !== undefined))
+	);
+}
+
+/** Copy one object or array: prototype, descriptors writable and configurable, accessors kept. */
+function copyNode(
+	value: object,
+	child: (key: string, value: unknown) => unknown,
+): object {
+	if (Array.isArray(value)) {
+		const copy: unknown[] = value.map((item, index) =>
+			child(String(index), item),
+		);
+		for (const key of Reflect.ownKeys(value)) {
+			if (key === 'length' || (typeof key === 'string' && /^\d+$/.test(key)))
+				continue;
+			const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
+			Object.defineProperty(copy, key, { ...descriptor, configurable: true });
+		}
+		return copy;
+	}
+	const copy = Object.create(Object.getPrototypeOf(value)) as object;
+	for (const key of Reflect.ownKeys(value)) {
+		const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
+		Object.defineProperty(
+			copy,
+			key,
+			'value' in descriptor
+				? {
+						...descriptor,
+						value:
+							typeof key === 'string'
+								? child(key, descriptor.value)
+								: descriptor.value,
+						writable: true,
+						configurable: true,
+					}
+				: { ...descriptor, configurable: true },
+		);
+	}
+	return copy;
+}
+
+/**
+ * The executable intent: an object reached more than once across
+ * `where`, `having`, select and `orderBy` gets a distinct copy at each occurrence
+ * outside `where`, ancestors included, so a resolution bound to an object binds
+ * one occurrence. The caller's intent is never written.
+ */
+function copyRepeatedOccurrences(intent: QueryIntent): QueryIntent {
+	const counts = new Map<object, number>();
+	const walk = (value: unknown, path: Set<object>): void => {
+		if (!value || typeof value !== 'object' || isParamIntent(value)) return;
+		if (path.has(value)) return;
+		const node = value as Record<string, unknown>;
+		if (!Array.isArray(value)) {
+			if (node.kind === 'literal' || node.kind === 'param') return;
+			counts.set(value, (counts.get(value) ?? 0) + 1);
+			if (absorbsBody(node)) return;
+		}
+		path.add(value);
+		for (const [key, child] of dataEntries(node)) {
+			if (!Array.isArray(value) && isBoundPayload(node, key, child)) continue;
+			walk(child, path);
+		}
+		path.delete(value);
+	};
+	const positions = ['where', 'having', 'select', 'orderBy'] as const;
+	for (const position of positions) walk(intent[position], new Set());
+	if (![...counts.values()].some((n) => n > 1)) return intent;
+	const repeated = new Map<object, boolean>();
+	const holdsRepeated = (value: unknown, path: Set<object>): boolean => {
+		if (!value || typeof value !== 'object' || isParamIntent(value))
+			return false;
+		const known = repeated.get(value);
+		if (known !== undefined) return known;
+		if (path.has(value)) return false;
+		const node = value as Record<string, unknown>;
+		let result = (counts.get(value) ?? 0) > 1;
+		if (!result && (Array.isArray(value) || !absorbsBody(node))) {
+			path.add(value);
+			result = dataEntries(node).some(
+				([key, child]) =>
+					(Array.isArray(value) || !isBoundPayload(node, key, child)) &&
+					holdsRepeated(child, path),
+			);
+			path.delete(value);
+		}
+		repeated.set(value, result);
+		return result;
+	};
+	const copy = (value: unknown, path: Set<object>): unknown => {
+		if (!holdsRepeated(value, new Set()) || path.has(value as object))
+			return value;
+		const node = value as Record<string, unknown>;
+		const absorbed = !Array.isArray(value) && absorbsBody(node);
+		path.add(value as object);
+		const result = copyNode(value as object, (key, child) =>
+			absorbed || (!Array.isArray(value) && isBoundPayload(node, key, child))
+				? child
+				: copy(child, path),
+		);
+		path.delete(value as object);
+		return result;
+	};
+	const replaced = new Map<string, unknown>();
+	for (const position of ['having', 'select', 'orderBy'] as const) {
+		const next = copy(intent[position], new Set());
+		if (next !== intent[position]) replaced.set(position, next);
+	}
+	if (replaced.size === 0) return intent;
+	return copyNode(intent, (key, child) =>
+		replaced.has(key) ? replaced.get(key) : child,
+	) as QueryIntent;
+}
+
+/** HAVING's aggregate aliases: builder aggregates and aggregate columns with a field. */
+function havingAggregateAliases(
+	select: QueryIntent['select'],
+): ReadonlyMap<string, HavingAggregate> {
+	const aliases = new Map<string, HavingAggregate>();
+	const add = (
+		as: string | undefined,
+		aggregate: {
+			function: string;
+			field?: string | undefined;
+			distinct?: boolean | undefined;
+			filter?: WhereIntent | undefined;
+		},
+	): void => {
+		if (as === undefined || aliases.has(as)) return;
+		aliases.set(as, {
+			function: aggregate.function,
+			...(aggregate.field !== undefined && { field: aggregate.field }),
+			...(aggregate.distinct === true && { distinct: true }),
+			...(aggregate.filter !== undefined && { filter: aggregate.filter }),
+		});
+	};
+	if (select?.type === 'aggregate')
+		for (const aggregate of select.aggregates) add(aggregate.as, aggregate);
+	else if (select?.type === 'expressions')
+		for (const column of select.columns)
+			if (column.kind === 'aggregate' && column.field) add(column.as, column);
+	return aliases;
+}
+
+function dataValue(value: object, key: string): unknown {
+	const descriptor = Object.getOwnPropertyDescriptor(value, key);
+	return descriptor && 'value' in descriptor ? descriptor.value : undefined;
+}
+
+/** Column names an operand of a condition leaf references, bodies and FILTERs excluded. */
+function conditionRefs(node: Record<string, unknown>): string[] {
+	const names: string[] = [];
+	const walk = (value: unknown): void => {
+		if (!value || typeof value !== 'object' || isParamIntent(value)) return;
+		if (Array.isArray(value)) {
+			value.forEach(walk);
+			return;
+		}
+		const item = value as Record<string, unknown>;
+		const intent = dataValue(item, 'intent');
+		if (intent && typeof intent === 'object') {
+			walk(intent);
+			return;
+		}
+		if (typeof item.kind !== 'string' || item.kind === 'literal') return;
+		if (
+			(item.kind === 'ref' && item.outer !== true) ||
+			item.kind === 'column' ||
+			item.kind === 'columnAlias'
+		) {
+			if (typeof item.column === 'string') names.push(item.column);
+			return;
+		}
+		for (const [key, child] of dataEntries(item)) {
+			if (key === 'query' || key === 'subquery' || key === 'filter') continue;
+			walk(child);
+		}
+	};
+	const value = dataValue(node, 'value');
+	const intent =
+		value && typeof value === 'object' ? dataValue(value, 'intent') : undefined;
+	if (intent && typeof intent === 'object') walk(intent);
+	if (node.kind === 'expression') walk(dataValue(node, 'expr'));
+	return names;
+}
 
 /** Validate include predicates before lowering or allocating bindings. */
 function assertSupportedIncludeWhere(
@@ -108,7 +316,10 @@ function assertSupportedIncludeWhere(
 	}
 }
 
-/** Called during planning or once after legacy boundary validation. Never by SQL emission. */
+/**
+ * Called during planning or once after legacy boundary validation. Never by SQL emission.
+ * Returns the execution and the intent the adapter compiles, which holds per-occurrence copies.
+ */
 export function resolveReportIncludes(
 	intent: QueryIntent,
 	decisions: readonly PlanDecision[],
@@ -120,7 +331,7 @@ export function resolveReportIncludes(
 		defaultPk?: string;
 		deriveFk?: (table: string, pk: string) => string;
 	} = {},
-): SelectExecution {
+): { readonly execution: SelectExecution; readonly intent: QueryIntent } {
 	assertSupportedIncludeWhere(
 		intent.include,
 		new Map(
@@ -635,6 +846,7 @@ export function resolveReportIncludes(
 			? { kind: 'and', conditions: [rootDefaultFilter, where] }
 			: rootDefaultFilter;
 
+	const executable = copyRepeatedOccurrences(intent);
 	const expressionConditions: NonNullable<
 		SelectExecution['expressionConditions']
 	>[number][] = [];
@@ -658,58 +870,37 @@ export function resolveReportIncludes(
 		].includes(String(node.kind)) &&
 		typeof node.field === 'string' &&
 		node.field.includes('.');
-	// In HAVING a dotted field may name a SELECT alias or a relation path. Until
-	// that is decided per occurrence (#1005), such nodes keep main's gate wherever
-	// the same object appears. Bodies a resolved predicate absorbs hold no alias,
-	// so the walk stays on HAVING's own condition tree.
-	const havingDotted = new WeakSet<object>();
-	const absorbsBody = (node: Record<string, unknown>): boolean =>
-		[
-			'exists',
-			'notExists',
-			'relationFilter',
-			'rawExists',
-			'rawNotExists',
-		].includes(String(node.kind)) ||
-		((node.kind === 'subquery' || node.kind === 'in') &&
-			(node.subquery !== undefined || node.query !== undefined));
-	const collectHavingDotted = (value: unknown, seen: Set<object>): void => {
-		if (!value || typeof value !== 'object' || isParamIntent(value)) return;
-		if (seen.has(value)) return;
-		seen.add(value);
-		if (Array.isArray(value)) {
-			for (const child of value) collectHavingDotted(child, seen);
-			return;
-		}
-		const node = value as Record<string, unknown>;
-		if (
-			dottedField(node) ||
-			(node.kind === 'subquery' &&
-				typeof node.field === 'string' &&
-				node.field.includes('.'))
-		)
-			havingDotted.add(value);
-		if (absorbsBody(node)) return;
-		for (const [key, child] of Object.entries(node)) {
-			if (isBoundPayload(node, key, child)) continue;
-			collectHavingDotted(child, seen);
-		}
-	};
-	collectHavingDotted(intent.having, new Set());
-	// `belowBody`: the descent crossed the body of a node core left to the
-	// adapter, so a predicate resolved on its own here lacks that body's ranges.
+	const havingAliases = havingAggregateAliases(intent.select);
+	/** A leaf HAVING decides through an aggregate alias, directly or in an operand. */
+	const namesAlias = (node: Record<string, unknown>): boolean =>
+		havingAliases.size > 0 &&
+		((typeof node.field === 'string' && havingAliases.has(node.field)) ||
+			conditionRefs(node).some((name) => havingAliases.has(name)));
+	/** An operand qualifier naming no visible range (#1004): refused by core. */
+	const invisibleQualifier = (
+		node: Record<string, unknown>,
+		inHaving: boolean,
+	): boolean =>
+		conditionRefs(node).some((name) => {
+			const dot = name.indexOf('.');
+			if (dot < 0 || (inHaving && havingAliases.has(name))) return false;
+			const qualifier = name.slice(0, dot);
+			return !visible.some(
+				(range) => range.alias === qualifier || range.table === qualifier,
+			);
+		});
 	const inspect = (
 		value: unknown,
 		intentPath: string,
 		condition?: 'HAVING' | 'CASE WHEN' | 'FILTER',
-		belowBody = false,
+		inHaving = false,
 	): void => {
 		if (!value || typeof value !== 'object' || isParamIntent(value)) return;
 		if (inspected.has(value)) return;
 		inspected.add(value);
 		if (Array.isArray(value)) {
 			value.forEach((child, index) => {
-				inspect(child, `${intentPath}[${index}]`, condition, belowBody);
+				inspect(child, `${intentPath}[${index}]`, condition, inHaving);
 			});
 			inspected.delete(value);
 			return;
@@ -747,10 +938,7 @@ export function resolveReportIncludes(
 				model,
 				0,
 				[],
-				{
-					defaultFilters: options.defaultFilters,
-					...(belowBody && { unknownBody: true }),
-				},
+				{ defaultFilters: options.defaultFilters },
 			);
 			if (
 				resolved?.kind === 'expression' &&
@@ -763,7 +951,7 @@ export function resolveReportIncludes(
 			inspected.delete(value);
 			return;
 		}
-		const predicate =
+		const relationSensitive =
 			[
 				'exists',
 				'notExists',
@@ -774,21 +962,11 @@ export function resolveReportIncludes(
 			(node.kind === 'subquery' && node.subquery) ||
 			(node.kind === 'in' && node.subquery) ||
 			dottedField(node);
-		const legacy = havingDotted.has(value);
 		if (
-			predicate &&
-			model &&
 			condition &&
-			(!legacy ||
-				(node.subquery &&
-					getRelationalReadPolicy(node.subquery as QueryIntent)) ||
-				findDefaultFilterScan(
-					{ type: 'select', from: rootRange.table, where: node },
-					model,
-					options.defaultFilters,
-					intentPath,
-					true,
-				))
+			((relationSensitive && model) ||
+				(inHaving && namesAlias(node)) ||
+				invisibleQualifier(node, inHaving))
 		) {
 			const resolved = resolveConditionContext(
 				node as unknown as WhereIntent,
@@ -797,17 +975,13 @@ export function resolveReportIncludes(
 				[],
 				allocator,
 				model,
-				legacy ? 0 : expressionAliases.count,
+				expressionAliases.count,
 				[],
 				{
-					...(legacy
-						? { defaultFilters: options.defaultFilters }
-						: {
-								defaultFilters: options.defaultFilters,
-								label: condition,
-								aliasState: expressionAliases,
-							}),
-					...(belowBody && { unknownBody: true }),
+					defaultFilters: options.defaultFilters,
+					label: condition,
+					aliasState: expressionAliases,
+					...(inHaving && { havingAliases }),
 				},
 			);
 			if (!resolved)
@@ -827,13 +1001,14 @@ export function resolveReportIncludes(
 							bchild,
 							`${intentPath}.when[${index}].${bkey}`,
 							bkey === 'condition' ? 'CASE WHEN' : condition,
-							belowBody,
+							inHaving,
 						);
 					}
 				});
 				continue;
 			}
-			// A FILTER root is the filter of a function or aggregate call.
+			// A FILTER root is the filter of a function or aggregate call; HAVING's
+			// aliases are not visible there.
 			const filterRoot =
 				key === 'filter' &&
 				(node.kind === 'customFn' ||
@@ -843,27 +1018,24 @@ export function resolveReportIncludes(
 				child,
 				`${intentPath}.${key}`,
 				filterRoot ? 'FILTER' : condition,
-				belowBody ||
-					key === 'subquery' ||
-					key === 'query' ||
-					(key === 'where' &&
-						['exists', 'notExists', 'relationFilter'].includes(
-							String(node.kind),
-						)),
+				inHaving && !filterRoot,
 			);
 		}
 		inspected.delete(value);
 	};
-	inspect(intent.select, 'select');
-	inspect(intent.orderBy, 'orderBy');
-	inspect(intent.having, 'having', 'HAVING');
+	inspect(executable.select, 'select');
+	inspect(executable.orderBy, 'orderBy');
+	inspect(executable.having, 'having', 'HAVING', true);
 	return {
-		rootRange,
-		joins,
-		includes,
-		...(where && { where }),
-		...(expressionSubqueries.length && { expressionSubqueries }),
-		...(expressionConditions.length && { expressionConditions }),
+		execution: {
+			rootRange,
+			joins,
+			includes,
+			...(where && { where }),
+			...(expressionSubqueries.length && { expressionSubqueries }),
+			...(expressionConditions.length && { expressionConditions }),
+		},
+		intent: executable,
 	};
 }
 /** Include decisions retain observations only; resolved authority belongs to execution. */

@@ -6,10 +6,12 @@ import {
 	type QueryIntent,
 	RangeAllocator,
 	REF_BRAND,
+	type ResolvedAggregateOperand,
 	type ResolvedCast,
 	type ResolvedColumnOperand,
 	type ResolvedCondition,
 	type ResolvedExpression,
+	type ResolvedLeftOperand,
 	type ResolvedOrder,
 	type ResolvedParameter,
 	type ResolvedProjection,
@@ -34,6 +36,15 @@ import {
 import { getRelationalReadPolicy } from './relational-read-plans.js';
 
 import { escapeDiagnosticText } from './transition/diagnostic-text.js';
+
+/** An aggregate HAVING may name by its SELECT alias. */
+export interface HavingAggregate {
+	readonly function: string;
+	/** Absent or `'*'` for `count(*)`. */
+	readonly field?: string;
+	readonly distinct?: boolean;
+	readonly filter?: WhereIntent;
+}
 
 function isExpression(value: unknown): value is { intent: ExpressionIntent } {
 	return (
@@ -98,11 +109,30 @@ export function resolveConditionContext(
 		readonly aliasState?: { count: number };
 		readonly outerQualifiers?: readonly ReadonlyMap<string, ResolvedRange>[];
 		readonly label?: string;
-		/** The condition sits in a body whose ranges this call does not hold. */
-		readonly unknownBody?: boolean;
+		/** HAVING's aggregate aliases, read at HAVING's own level only. */
+		readonly havingAliases?: ReadonlyMap<string, HavingAggregate>;
 	},
 ): ResolvedCondition | undefined {
 	const label = mode?.label ?? 'WHERE';
+	// Expression positions name the innermost one in their refusals.
+	const nestedLabels =
+		label === 'HAVING' || label === 'CASE WHEN' || label === 'FILTER';
+	const labels = [label];
+	const currentLabel = (): string => labels[labels.length - 1]!;
+	let filterDepth = 0;
+	const within = <T>(position: 'CASE WHEN' | 'FILTER', run: () => T): T => {
+		// Below HAVING a nested CASE WHEN or FILTER names itself; inside a CASE WHEN
+		// or FILTER the enclosing condition root keeps its label.
+		const relabel = nestedLabels && currentLabel() === 'HAVING';
+		if (position === 'FILTER') filterDepth++;
+		if (relabel) labels.push(position);
+		try {
+			return run();
+		} finally {
+			if (relabel) labels.pop();
+			if (position === 'FILTER') filterDepth--;
+		}
+	};
 	const entryDepth = enclosing.length;
 	/**
 	 * A table-rooted quantifier (#991) below a body is read from the body's row:
@@ -116,7 +146,7 @@ export function resolveConditionContext(
 	): void => {
 		const table = node.pathTable;
 		if (table === undefined) return;
-		if (mode?.unknownBody !== true && scopes.length <= entryDepth) return;
+		if (scopes.length <= entryDepth) return;
 		const sameTable = new Set(
 			[ranges, ...scopes]
 				.flat()
@@ -124,7 +154,6 @@ export function resolveConditionContext(
 				.map((range) => range.id),
 		);
 		if (
-			mode?.unknownBody === true ||
 			current.table !== table ||
 			sameTable.size !== 1 ||
 			!sameTable.has(current.id)
@@ -172,7 +201,7 @@ export function resolveConditionContext(
 			!visible.some((range) => range.alias === qualifier)
 		)
 			throw new Error(
-				`${label} qualifier '${qualifier}' is not visible in this query.`,
+				`${currentLabel()} qualifier '${qualifier}' is not visible in this query.`,
 			);
 	};
 	const matchQualifier = (
@@ -191,7 +220,7 @@ export function resolveConditionContext(
 		if (exact) return exact;
 		if (candidates.length > 1)
 			throw new Error(
-				`${outer ? 'outerRef' : label} qualifier '${qualifier}' is ambiguous between ${candidates
+				`${outer ? 'outerRef' : currentLabel()} qualifier '${qualifier}' is ambiguous between ${candidates
 					.map((r) => `'${r.alias}'`)
 					.sort()
 					.join(', ')}${outer ? ' in an enclosing query' : ''}.`,
@@ -235,7 +264,7 @@ export function resolveConditionContext(
 			else if (mode?.include) range = allocator.bind(qualifier, qualifier);
 			else
 				throw new Error(
-					`${label} qualifier '${qualifier}' is not visible in this query.`,
+					`${currentLabel()} qualifier '${qualifier}' is not visible in this query.`,
 				);
 		}
 		if (
@@ -289,7 +318,7 @@ export function resolveConditionContext(
 				);
 			if (rel.type === 'belongsToMany')
 				throw new Error(
-					`${label} ${kind}('${segments.join('.')}'): many-to-many traversal is not supported yet (#787).`,
+					`${currentLabel()} ${kind}('${segments.join('.')}'): many-to-many traversal is not supported yet (#787).`,
 				);
 			names.push(rel.name);
 			table = rel.target;
@@ -501,7 +530,7 @@ export function resolveConditionContext(
 			trusted?.recursive
 		)
 			throw new Error(
-				`${label} ${node.kind}('${segments.join('.')}'): recursive relation predicates are not supported inside ${label}.`,
+				`${currentLabel()} ${node.kind}('${segments.join('.')}'): recursive relation predicates are not supported inside ${currentLabel()}.`,
 			);
 		const path = trusted
 			? {
@@ -620,6 +649,51 @@ export function resolveConditionContext(
 				}),
 		};
 	};
+	/** HAVING's own level: not inside an aggregate FILTER or an absorbed body. */
+	const aliasActive = (ranges: readonly ResolvedRange[]): boolean =>
+		mode?.havingAliases !== undefined &&
+		filterDepth === 0 &&
+		ranges === visible;
+	const aggregateOperand = (
+		aggregate: HavingAggregate,
+		enclosing: readonly (readonly ResolvedRange[])[],
+	): ResolvedAggregateOperand => ({
+		kind: 'aggregate',
+		function: aggregate.function,
+		...(aggregate.field &&
+			aggregate.field !== '*' && {
+				column: column(aggregate.field, root, visible, enclosing),
+			}),
+		...(aggregate.distinct === true && { distinct: true }),
+		...(aggregate.filter && {
+			filter: within('FILTER', () =>
+				visit(aggregate.filter!, root, visible, enclosing),
+			),
+		}),
+	});
+	const aliasExpression = (
+		name: string,
+		ranges: readonly ResolvedRange[],
+		enclosing: readonly (readonly ResolvedRange[])[],
+	): ResolvedExpression | undefined => {
+		const aggregate = aliasActive(ranges)
+			? mode!.havingAliases!.get(name)
+			: undefined;
+		if (!aggregate) return undefined;
+		const operand = aggregateOperand(aggregate, enclosing);
+		return {
+			kind: 'call',
+			aggregate: true,
+			name: operand.function.toLowerCase(),
+			args: [
+				operand.column
+					? { kind: 'ref', operand: operand.column }
+					: { kind: 'star' },
+			],
+			...(operand.distinct && { distinct: true }),
+			...(operand.filter && { filter: operand.filter }),
+		};
+	};
 	const expression = (
 		input: ExpressionIntent,
 		current: ResolvedRange,
@@ -668,6 +742,10 @@ export function resolveConditionContext(
 		};
 		switch (input.kind) {
 			case 'ref':
+				if (!('outer' in input && input.outer)) {
+					const aliased = aliasExpression(input.column, ranges, enclosing);
+					if (aliased) return aliased;
+				}
 				return {
 					kind: 'ref',
 					...(mode?.include &&
@@ -686,7 +764,9 @@ export function resolveConditionContext(
 				};
 			case 'column':
 			case 'columnAlias':
-				return ref(input.column);
+				return (
+					aliasExpression(input.column, ranges, enclosing) ?? ref(input.column)
+				);
 			case 'relationColumn':
 				return ref(`${input.relation}.${input.column}`);
 			case 'param':
@@ -770,7 +850,9 @@ export function resolveConditionContext(
 					args: input.args.map(expr),
 					...(input.distinct !== undefined && { distinct: input.distinct }),
 					...(input.filter && {
-						filter: visit(input.filter, current, ranges, enclosing),
+						filter: within('FILTER', () =>
+							visit(input.filter!, current, ranges, enclosing),
+						),
 					}),
 					...(input.aggOrderBy && {
 						orderBy: input.aggOrderBy.map((o) => ({
@@ -790,14 +872,18 @@ export function resolveConditionContext(
 					],
 					...(input.distinct !== undefined && { distinct: input.distinct }),
 					...(input.filter && {
-						filter: visit(input.filter, current, ranges, enclosing),
+						filter: within('FILTER', () =>
+							visit(input.filter!, current, ranges, enclosing),
+						),
 					}),
 				};
 			case 'case':
 				return {
 					kind: 'case',
 					branches: input.when.map((b) => ({
-						condition: visit(b.condition, current, ranges, enclosing),
+						condition: within('CASE WHEN', () =>
+							visit(b.condition, current, ranges, enclosing),
+						),
 						result: caseValue(b.result),
 					})),
 					...(input.else !== undefined && { fallback: caseValue(input.else) }),
@@ -898,7 +984,23 @@ export function resolveConditionContext(
 				node.where,
 			);
 		}
+		const alias =
+			fieldOverride === undefined && 'field' in node && aliasActive(ranges)
+				? mode!.havingAliases!.get(node.field)
+				: undefined;
 		if (
+			alias &&
+			(node.kind === 'like' ||
+				node.kind === 'range' ||
+				node.kind === 'jsonContains' ||
+				node.kind === 'jsonExists')
+		)
+			throw new Error(
+				`HAVING alias '${node.field}' names an aggregate; a ${node.kind} condition does not apply to it.`,
+			);
+		const aliasOperand = alias && aggregateOperand(alias, enclosing);
+		if (
+			!aliasOperand &&
 			fieldOverride === undefined &&
 			!mode?.include &&
 			'field' in node &&
@@ -926,6 +1028,7 @@ export function resolveConditionContext(
 			if (!('field' in node)) throw new Error('Condition requires a column');
 			return column(fieldOverride ?? node.field, current, ranges, enclosing);
 		};
+		const leftOperand = (): ResolvedLeftOperand => aliasOperand || left();
 		const rhs = (value: unknown, cast: ResolvedCast): ResolvedRhs => {
 			if (isParamIntent(value)) return parameter(value, cast);
 			if (isFieldRef(value))
@@ -953,7 +1056,7 @@ export function resolveConditionContext(
 			case 'comparison':
 				return {
 					kind: 'comparison',
-					left: left(),
+					left: leftOperand(),
 					operator: node.operator,
 					right: rhs(node.value, node.jsonPath ? 'none' : 'column-db-type'),
 					...(node.jsonPath && {
@@ -972,7 +1075,7 @@ export function resolveConditionContext(
 			case 'in':
 				return {
 					kind: 'in',
-					left: left(),
+					left: leftOperand(),
 					negated: node.not === true,
 					operand: node.subquery
 						? {
@@ -990,11 +1093,11 @@ export function resolveConditionContext(
 			case 'any':
 				return {
 					kind: 'any',
-					left: left(),
+					left: leftOperand(),
 					values: parameter(node.values, 'any-array'),
 				};
 			case 'null':
-				return { kind: 'null', left: left(), operator: node.operator };
+				return { kind: 'null', left: leftOperand(), operator: node.operator };
 			case 'range':
 				return {
 					kind: 'range',
@@ -1036,7 +1139,7 @@ export function resolveConditionContext(
 				return {
 					kind: 'subquery',
 					use: 'scalar',
-					left: left(),
+					left: leftOperand(),
 					operator: node.operator,
 					body: body(node.subquery, 'scalar', ranges, enclosing),
 				};
@@ -1072,7 +1175,8 @@ export function assertScanDefaultFilter(
 	const refuse = (part: string): never => {
 		throw new Error(part);
 	};
-	const column = (operand: ResolvedColumnOperand): void => {
+	const column = (operand: ResolvedLeftOperand): void => {
+		if (operand.kind === 'aggregate') refuse("forbidden operand 'aggregate'");
 		if (operand.kind !== 'column' || operand.range !== range)
 			refuse('forbidden column range or outer reference');
 		if (

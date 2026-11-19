@@ -296,7 +296,7 @@ describe('ColumnRef in an upsert guard', () => {
 describe('A relation-path ref inside a body is refused (#991)', () => {
 	const refusal = (field: string) =>
 		new Error(
-			`ColumnRef '${field}' follows a relation; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1005).`,
+			`ColumnRef '${field}' follows a relation; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1014).`,
 		);
 	const L = () => eq(nodes.parent.label, 'x');
 	const writingsDb = schema({
@@ -722,11 +722,11 @@ describe('A relation-path ref inside a body is refused (#991)', () => {
 describe('Typed quantifiers and callback refs inside nested bodies (#991)', () => {
 	const quantifierRefusal = (relation: string) =>
 		new Error(
-			`RelationRef '${relation}' follows a relation from its table; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1005).`,
+			`RelationRef '${relation}' follows a relation from its table; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1014).`,
 		);
 	const callbackRefusal = (name: string, mode: string) =>
 		new Error(
-			`'${name}' comes from the ${mode}() callback parameter and is used inside a nested relation predicate or subquery body, where it would be read from that body's row (#1005).`,
+			`'${name}' comes from the ${mode}() callback parameter and is used inside a nested relation predicate or subquery body, where it would be read from that body's row (#1014).`,
 		);
 	const quantifiers = { some, every, none } as const;
 	const writingsDb = schema({
@@ -1192,6 +1192,25 @@ describe('Typed quantifiers and callback refs inside nested bodies (#991)', () =
 				])
 				.dump(),
 		).toThrow(quantifierRefusal('comments'));
+	});
+
+	it('AC11b having-body-quantifier-resolved: a table-rooted quantifier in a dotted HAVING comparison body follows the unambiguous-range rule', () => {
+		expect(
+			plainOrm
+				.select('users')
+				.groupBy(['id'])
+				.having(
+					inSubquery(
+						'users.id',
+						subquery('posts')
+							.select('user_id')
+							.where(some(plainOrm.tables.posts.comments, () => and())),
+					),
+				)
+				.dump().sql,
+		).toBe(
+			'SELECT users.* FROM users GROUP BY users.id HAVING users.id = ANY (SELECT posts_subq_0.user_id FROM posts AS posts_subq_0 WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_subq_0.id = comments_exists_1.post_id AND true))',
+		);
 	});
 
 	it('AC45 having-exemption-body-refused', () => {

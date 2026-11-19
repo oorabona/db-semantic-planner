@@ -15,6 +15,19 @@ export interface ResolvedColumnOperand {
 	readonly range: ResolvedRange; // replaces textual qualifier/alias lookup
 	readonly column: string; // unqualified logical field/column/target
 }
+/** An aggregate a HAVING alias names, compared in place of a column. */
+export interface ResolvedAggregateOperand {
+	readonly kind: 'aggregate';
+	readonly function: string;
+	/** Absent for `count(*)`. */
+	readonly column?: ResolvedColumnOperand;
+	readonly distinct?: boolean;
+	readonly filter?: ResolvedCondition;
+}
+/** The left operand of a filter leaf: a column, or in HAVING an aliased aggregate. */
+export type ResolvedLeftOperand =
+	| ResolvedColumnOperand
+	| ResolvedAggregateOperand;
 export interface ResolvedParameter {
 	readonly kind: 'parameter';
 	readonly value: unknown;
@@ -148,7 +161,7 @@ export type ResolvedCondition =
 	| { readonly kind: 'not'; readonly condition: ResolvedCondition }
 	| {
 			readonly kind: 'comparison';
-			readonly left: ResolvedColumnOperand;
+			readonly left: ResolvedLeftOperand;
 			readonly operator: ComparisonOperator;
 			readonly right: ResolvedRhs;
 			readonly jsonPath?: readonly ResolvedParameter[];
@@ -163,7 +176,7 @@ export type ResolvedCondition =
 	  }
 	| {
 			readonly kind: 'in';
-			readonly left: ResolvedColumnOperand;
+			readonly left: ResolvedLeftOperand;
 			readonly negated: boolean;
 			readonly operand:
 				| { kind: 'values'; parameter: ResolvedParameter }
@@ -174,12 +187,12 @@ export type ResolvedCondition =
 	  }
 	| {
 			readonly kind: 'any';
-			readonly left: ResolvedColumnOperand;
+			readonly left: ResolvedLeftOperand;
 			readonly values: ResolvedParameter;
 	  }
 	| {
 			readonly kind: 'null';
-			readonly left: ResolvedColumnOperand;
+			readonly left: ResolvedLeftOperand;
 			readonly operator: NullOperator;
 	  }
 	| {
@@ -217,7 +230,7 @@ export type ResolvedCondition =
 	| {
 			readonly kind: 'subquery';
 			readonly use: 'scalar';
-			readonly left: ResolvedColumnOperand;
+			readonly left: ResolvedLeftOperand;
 			readonly operator: ComparisonOperator;
 			readonly body: Extract<ResolvedSubqueryBody, { use: 'scalar' }>;
 	  };

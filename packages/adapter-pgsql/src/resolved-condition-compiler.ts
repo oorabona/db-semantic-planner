@@ -3,6 +3,7 @@ import type {
 	ResolvedColumnOperand,
 	ResolvedCondition,
 	ResolvedExpression,
+	ResolvedLeftOperand,
 	ResolvedParameter,
 	ResolvedProjection,
 	ResolvedRange,
@@ -41,7 +42,10 @@ import { assertSafeOperator } from './handlers/expression/custom.js';
 import { numericLiteralNode } from './handlers/expression/numeric-literal.js';
 import type { CompilerContext, CompilerState } from './handlers/types.js';
 import { compileAny } from './handlers/where/any.js';
-import { compileComparison } from './handlers/where/comparison.js';
+import {
+	aggregateResultPgType,
+	compileComparison,
+} from './handlers/where/comparison.js';
 import { compileInValues } from './handlers/where/in.js';
 import { compileJsonOperator } from './handlers/where/json.js';
 import { compileLike } from './handlers/where/like.js';
@@ -221,16 +225,28 @@ function columnType(
 	validateDbType(type);
 	return dbTypeCastTarget(type);
 }
+/** A column's cast type, or for an aggregate HAVING alias its result type. */
+function leftType(
+	operand: ResolvedLeftOperand,
+	ctx: CompilerContext,
+	state: CompilerState,
+): string | undefined {
+	if (operand.kind !== 'aggregate') return columnType(operand, ctx, state);
+	return aggregateResultPgType(
+		operand.function,
+		operand.column ? columnType(operand.column, ctx, state) : undefined,
+	);
+}
 function parameter(
 	p: ResolvedParameter,
 	ctx: CompilerContext,
 	state: CompilerState,
-	left?: ResolvedColumnOperand,
+	left?: ResolvedLeftOperand,
 	force = false,
 ): Node {
 	const type =
 		left && (p.cast === 'column-db-type' || p.cast === 'column-array')
-			? columnType(left, ctx, state)
+			? leftType(left, ctx, state)
 			: undefined;
 	// A resolved parameter's value is data: no parameter syntax is read in it.
 	if (!p.bound && !force && (p.value === null || p.value === undefined))
@@ -243,7 +259,7 @@ function rhs(
 	value: ResolvedRhs,
 	ctx: CompilerContext,
 	state: CompilerState,
-	left?: ResolvedColumnOperand,
+	left?: ResolvedLeftOperand,
 ): Node {
 	if ('range' in value && 'column' in value) return column(value, ctx);
 	if (value.kind === 'parameter' && 'cast' in value)
@@ -256,7 +272,7 @@ function comparison(
 	right: ResolvedRhs,
 	ctx: CompilerContext,
 	state: CompilerState,
-	operand?: ResolvedColumnOperand,
+	operand?: ResolvedLeftOperand,
 ): Node {
 	if (right.kind === 'parameter' && 'bound' in right && !right.bound) {
 		const nullResult = compileLiteralNullComparison(
@@ -515,6 +531,15 @@ function compileResolvedConditionUnchecked(
 	const visit = (n: ResolvedCondition) =>
 		compileResolvedConditionUnchecked(n, ctx, state);
 	const col = (c: ResolvedColumnOperand) => column(c, ctx);
+	/** A HAVING alias compiles as its aggregate call, its FILTER bound first. */
+	const left = (c: ResolvedLeftOperand): Node =>
+		c.kind !== 'aggregate'
+			? col(c)
+			: funcCall(c.function.toLowerCase(), c.column ? [col(c.column)] : [], {
+					...(!c.column && { star: true }),
+					...(c.distinct && { distinct: true }),
+					...(c.filter && { filter: visit(c.filter) }),
+				});
 	switch (tree.kind) {
 		case 'and':
 		case 'or': {
@@ -530,10 +555,10 @@ function compileResolvedConditionUnchecked(
 		case 'not':
 			return notExpr(visit(tree.condition));
 		case 'null':
-			return compileNull(col(tree.left), tree.operator === 'isNull');
+			return compileNull(left(tree.left), tree.operator === 'isNull');
 		case 'comparison': {
 			assertComparisonOperator(tree.operator);
-			let left = col(tree.left);
+			let leftNode = left(tree.left);
 			if (tree.jsonPath?.length) {
 				assertDialectCapability(
 					ctx.dialectCapabilities,
@@ -541,8 +566,8 @@ function compileResolvedConditionUnchecked(
 					'JSON operators are',
 				);
 				tree.jsonPath.forEach((p, i) => {
-					left = compileJsonOperator(
-						left,
+					leftNode = compileJsonOperator(
+						leftNode,
 						parameter(p, ctx, state),
 						i === tree.jsonPath!.length - 1 && tree.jsonMode !== 'json'
 							? '->>'
@@ -552,7 +577,7 @@ function compileResolvedConditionUnchecked(
 			}
 			return comparison(
 				tree.operator,
-				left,
+				leftNode,
 				tree.right,
 				ctx,
 				state,
@@ -584,13 +609,13 @@ function compileResolvedConditionUnchecked(
 				'supportsArrayType',
 				'ANY array operator is',
 			);
-			const type = columnType(tree.left, ctx, state);
+			const type = leftType(tree.left, ctx, state);
 			return compileAny(
-				col(tree.left),
+				left(tree.left),
 				Array.isArray(tree.values.value) ? tree.values.value : [],
 				state,
 				type,
-				type
+				type || tree.left.kind === 'aggregate'
 					? undefined
 					: mapModelIRTypeToPgBase(metadata(tree.left, ctx, state)?.type ?? ''),
 			);
@@ -600,7 +625,7 @@ function compileResolvedConditionUnchecked(
 				const node: Node = {
 					SubLink: {
 						subLinkType: 'ANY_SUBLINK',
-						testexpr: col(tree.left),
+						testexpr: left(tree.left),
 						operName: [{ String: { sval: '=' } }],
 						subselect: compileResolvedSubqueryBodyUnchecked(
 							tree.operand.body,
@@ -614,15 +639,15 @@ function compileResolvedConditionUnchecked(
 			const values = tree.operand.parameter.value;
 			if (!Array.isArray(values))
 				throw new Error(
-					`[in handler] Received a non-array value for operator '${tree.negated ? 'notIn' : 'in'}' on column '${tree.left.column}'. This is a compiler bug: expected a scalar array but received ${values == null ? String(values) : typeof values}. File a bug report.`,
+					`[in handler] Received a non-array value for operator '${tree.negated ? 'notIn' : 'in'}' on column '${tree.left.kind === 'aggregate' ? tree.left.function : tree.left.column}'. This is a compiler bug: expected a scalar array but received ${values == null ? String(values) : typeof values}. File a bug report.`,
 				);
 			return compileInValues(
-				col(tree.left),
+				left(tree.left),
 				state,
 				values,
 				tree.negated,
 				tree.operand.parameter.cast === 'column-array'
-					? columnType(tree.left, ctx, state)
+					? leftType(tree.left, ctx, state)
 					: undefined,
 				supportsDialectCapability(ctx.dialectCapabilities, 'supportsArrayType'),
 			);
@@ -722,7 +747,7 @@ function compileResolvedConditionUnchecked(
 				? tree.negated
 					? notExpr(node)
 					: node
-				: compileComparison(op(tree.operator), col(tree.left), node);
+				: compileComparison(op(tree.operator), left(tree.left), node);
 		}
 		case 'relation': {
 			if (tree.vacuous) return booleanConstNode(true);

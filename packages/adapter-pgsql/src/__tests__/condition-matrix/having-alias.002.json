@@ -348,81 +348,81 @@
 			"position": "having-alias",
 			"kind": "inSubquery",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = ANY (SELECT posts_subq_0.id FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1)",
+			"params": [53],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "inSubquery",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = ANY (SELECT posts_subq_0.id FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1) AND count(*) = CAST($2 AS bigint)",
+			"params": [53, 13],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "inSubquery",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = ANY (SELECT posts_subq_0.id FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1) OR count(*) = CAST($2 AS bigint)",
+			"params": [53, 13],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "inSubquery",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (count(*) = ANY (SELECT posts_subq_0.id FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1))",
+			"params": [53],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "inSubquery",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (count(*) = ANY (SELECT posts_subq_0.id FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $2)) OR count(*) = CAST($3 AS bigint))",
+			"params": [13, 53, 17],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "scalar-subquery",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1)",
+			"params": [59],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "scalar-subquery",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1) AND count(*) = CAST($2 AS bigint)",
+			"params": [59, 13],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "scalar-subquery",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1) OR count(*) = CAST($2 AS bigint)",
+			"params": [59, 13],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "scalar-subquery",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (count(*) = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1))",
+			"params": [59],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "scalar-subquery",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (count(*) = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $2)) OR count(*) = CAST($3 AS bigint))",
+			"params": [13, 59, 17],
+			"error": null
 		},
 		{
 			"position": "having-alias",
@@ -548,41 +548,41 @@
 			"position": "having-alias",
 			"kind": "inSubquery-order-limit",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = ANY (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 ORDER BY posts_subq_0.score DESC LIMIT 1)",
+			"params": [59],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "inSubquery-order-limit",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = ANY (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 ORDER BY posts_subq_0.score DESC LIMIT 1) AND count(*) = CAST($2 AS bigint)",
+			"params": [59, 13],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "inSubquery-order-limit",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = ANY (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 ORDER BY posts_subq_0.score DESC LIMIT 1) OR count(*) = CAST($2 AS bigint)",
+			"params": [59, 13],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "inSubquery-order-limit",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (count(*) = ANY (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 ORDER BY posts_subq_0.score DESC LIMIT 1))",
+			"params": [59],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "inSubquery-order-limit",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (count(*) = ANY (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $2 ORDER BY posts_subq_0.score DESC LIMIT 1)) OR count(*) = CAST($3 AS bigint))",
+			"params": [13, 59, 17],
+			"error": null
 		},
 		{
 			"position": "having-alias",
@@ -628,41 +628,41 @@
 			"position": "having-alias",
 			"kind": "scalar-subquery-order-limit",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 ORDER BY posts_subq_0.score DESC LIMIT 1)",
+			"params": [59],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "scalar-subquery-order-limit",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 ORDER BY posts_subq_0.score DESC LIMIT 1) AND count(*) = CAST($2 AS bigint)",
+			"params": [59, 13],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "scalar-subquery-order-limit",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 ORDER BY posts_subq_0.score DESC LIMIT 1) OR count(*) = CAST($2 AS bigint)",
+			"params": [59, 13],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "scalar-subquery-order-limit",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (count(*) = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1 ORDER BY posts_subq_0.score DESC LIMIT 1))",
+			"params": [59],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "scalar-subquery-order-limit",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (count(*) = (SELECT posts_subq_0.score FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $2 ORDER BY posts_subq_0.score DESC LIMIT 1)) OR count(*) = CAST($3 AS bigint))",
+			"params": [13, 59, 17],
+			"error": null
 		},
 		{
 			"position": "having-alias",

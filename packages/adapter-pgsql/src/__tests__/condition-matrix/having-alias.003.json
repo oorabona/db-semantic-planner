@@ -260,41 +260,41 @@
 			"position": "having-alias",
 			"kind": "expression",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING length(count(*)) > $1",
+			"params": [2],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "expression",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING length(count(*)) > $1 AND count(*) = CAST($2 AS bigint)",
+			"params": [2, 13],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "expression",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING length(count(*)) > $1 OR count(*) = CAST($2 AS bigint)",
+			"params": [2, 13],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "expression",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (length(count(*)) > $1)",
+			"params": [2],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "expression",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.n' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (length(count(*)) > $2) OR count(*) = CAST($3 AS bigint))",
+			"params": [13, 2, 17],
+			"error": null
 		},
 		{
 			"position": "having-alias",

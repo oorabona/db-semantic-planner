@@ -439,22 +439,29 @@ export function plan(
 				isAmbiguous: false,
 			});
 
-	const report: PlanReport = {
-		rootTable: intent.from,
-		execution: resolveReportIncludes(plannedIntent, state.decisions, model, {
+	const resolution = resolveReportIncludes(
+		plannedIntent,
+		state.decisions,
+		model,
+		{
 			whereReservedNames: opts.whereReservedNames,
 			defaultFilters: opts.defaultFilters,
-		}),
+		},
+	);
+	const report: PlanReport = {
+		rootTable: intent.from,
+		execution: resolution.execution,
 		decisions: Object.freeze(observeIncludeDecisions(state.decisions)),
 		warnings: Object.freeze(state.warnings.slice()),
 		ctes: Object.freeze(state.ctes.slice()),
 		// intent is ALWAYS the original submitted intent (contract: observable via dump()).
-		// executableIntent carries the optimized WHERE (e.g. IN→EXISTS) when the
-		// optimizer rewrote it, so the adapter compiles the correct SQL from that field.
-		// When no optimization applies, executableIntent is left undefined and the
-		// adapter falls back to intent.
+		// executableIntent is the intent the adapter compiles: the optimized WHERE
+		// (e.g. IN→EXISTS) and per-occurrence copies of shared conditions. When it
+		// equals intent it is left undefined and the adapter falls back to intent.
 		intent,
-		...(plannedIntent !== intent && { executableIntent: plannedIntent }),
+		...(resolution.intent !== intent && {
+			executableIntent: resolution.intent,
+		}),
 		metadata,
 	};
 

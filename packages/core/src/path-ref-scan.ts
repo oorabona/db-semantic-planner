@@ -171,14 +171,14 @@ const hasPathRef = (node: Node): boolean =>
  */
 export function refuseTableRootedQuantifier(relation: unknown): never {
 	throw new Error(
-		`RelationRef '${String(relation)}' follows a relation from its table; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1005).`,
+		`RelationRef '${String(relation)}' follows a relation from its table; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1014).`,
 	);
 }
 
 /** The refusal of a `pathRef` leaf below a body. */
 function refusePathRef(node: Node): never {
 	throw new Error(
-		`ColumnRef '${String(own(node, 'field'))}' follows a relation; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1005).`,
+		`ColumnRef '${String(own(node, 'field'))}' follows a relation; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1014).`,
 	);
 }
 
@@ -225,7 +225,7 @@ export function assertCallbackScope(
 		(node) => {
 			const name = own(node, 'field') ?? own(node, 'relation');
 			throw new Error(
-				`'${String(name)}' comes from the ${mode}() callback parameter and is used inside a nested relation predicate or subquery body, where it would be read from that body's row (#1005).`,
+				`'${String(name)}' comes from the ${mode}() callback parameter and is used inside a nested relation predicate or subquery body, where it would be read from that body's row (#1014).`,
 			);
 		},
 	);

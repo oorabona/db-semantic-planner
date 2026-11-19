@@ -109,16 +109,20 @@ export function createPlanReportForQuery(
 	model: ModelIR | undefined,
 	defaultFilters?: CompileOptions['defaultFilters'],
 ): PlanReport {
+	const resolution = resolveReportIncludes(query, [], model, {
+		...(defaultFilters && { defaultFilters }),
+		skipRootDefaultFilter: true,
+	});
 	return markPlannedReport({
 		rootTable: query.from,
 		decisions: [],
 		warnings: [],
 		ctes: [],
 		intent: query,
-		execution: resolveReportIncludes(query, [], model, {
-			...(defaultFilters && { defaultFilters }),
-			skipRootDefaultFilter: true,
+		...(resolution.intent !== query && {
+			executableIntent: resolution.intent,
 		}),
+		execution: resolution.execution,
 		metadata: {
 			planningTimeMs: 0,
 			relationsAnalyzed: 0,

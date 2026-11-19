@@ -737,18 +737,22 @@ export function createBindingFinalPlan(
 			),
 		];
 	});
+	const resolution = resolveReportIncludes(intent, decisions, model, {
+		...(defaultFilters && {
+			defaultFilters: queryLocalDefaultFilters(bundle, defaultFilters),
+		}),
+		skipRootDefaultFilter: true,
+	});
 	return markPlannedReport({
 		rootTable: intent.from,
-		execution: resolveReportIncludes(intent, decisions, model, {
-			...(defaultFilters && {
-				defaultFilters: queryLocalDefaultFilters(bundle, defaultFilters),
-			}),
-			skipRootDefaultFilter: true,
-		}),
+		execution: resolution.execution,
 		decisions: observeIncludeDecisions(decisions),
 		warnings: [],
 		ctes: [],
 		intent,
+		...(resolution.intent !== intent && {
+			executableIntent: resolution.intent,
+		}),
 		metadata: {
 			planningTimeMs: 0,
 			relationsAnalyzed: 0,
