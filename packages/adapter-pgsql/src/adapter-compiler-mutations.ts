@@ -34,7 +34,10 @@ import type {
 import { isParamIntent, RangeAllocator } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
-import { compileSelect } from './adapter-compiler-select.js';
+import {
+	compileSelect,
+	nestedSelectCompiler,
+} from './adapter-compiler-select.js';
 import {
 	emittedBindName,
 	hasBindingName,
@@ -346,6 +349,7 @@ function mutationContext(
 		maxRecursiveDepth,
 		compileCustomFnFilter: buildCustomFnFilter,
 		createWhereDispatcher: () => createWhereDispatcher(compileWhereIntent),
+		compileNestedSelect: nestedSelectCompiler(undefined, deps),
 	} as CompilerContext;
 }
 

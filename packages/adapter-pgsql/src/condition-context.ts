@@ -45,6 +45,9 @@ export type WhereCompilerCtx = {
 		import('@dbsp/types').ResolvedCondition
 	>;
 	readonly compileExpressionSubquery?: CompilerContext['compileSubquery'];
+	readonly compileNestedSelect?: CompilerContext['compileNestedSelect'];
+	readonly enclosingQualifiers?: CompilerContext['enclosingQualifiers'];
+	readonly rootRangeAlias?: CompilerContext['rootRangeAlias'];
 	/** Lexically visible relation bindings. */
 	readonly scope?: QueryScope;
 	/** Enclosing query ranges, nearest query first; excludes the current query. */

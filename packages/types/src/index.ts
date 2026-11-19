@@ -69,7 +69,10 @@ export {
 } from './column-list.js';
 // Dialect types (capabilities, column type unions)
 export type { DialectCapabilities } from './dialects.js';
-export { AmbiguousIncludeError } from './include-errors.js';
+export {
+	AmbiguousIncludeError,
+	NotYetSupportedError,
+} from './include-errors.js';
 // IntentAST types (shared between core and nql)
 export {
 	type AdjacencyTraversal,
@@ -285,6 +288,7 @@ export type {
 	RangeId,
 	ResolvedIncludeNode,
 	ResolvedJoin,
+	ResolvedNestedSelect,
 	ResolvedRange,
 	SelectExecution,
 } from './resolved-includes.js';

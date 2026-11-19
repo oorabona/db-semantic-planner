@@ -4,6 +4,7 @@ import type {
 	ResolvedCondition,
 	ResolvedExpression,
 	ResolvedLeftOperand,
+	ResolvedNestedSelect,
 	ResolvedParameter,
 	ResolvedProjection,
 	ResolvedRange,
@@ -58,6 +59,7 @@ import {
 	resolveAddressedColumnMetadata,
 } from './handlers/where/utils.js';
 import { createParamRef, createTypeCastParamRef } from './param-ref.js';
+import { renumberParamRefsInAst } from './param-renumber.js';
 import { queryLocal, resolveDeclaredIdentifier } from './sql-identifier.js';
 import { validateIdentifier } from './validate.js';
 
@@ -182,12 +184,16 @@ function address(
 	ctx: CompilerContext,
 	correlationRelation?: string,
 ) {
-	// A root over a batch/CTE source keeps that source's emitted qualifier.
+	// A root over a batch/CTE source keeps that source's emitted qualifier. In a
+	// nested select, an outerRef names an enclosing range by its emitted qualifier.
 	const alias =
-		operand.range.table === ctx.rootTable &&
-		operand.range.alias === ctx.rootTable
-			? (ctx.currentAlias ?? operand.range.alias)
-			: operand.range.alias;
+		operand.kind === 'outerRef' && ctx.enclosingQualifiers !== undefined
+			? (ctx.enclosingQualifiers.get(operand.range.alias) ??
+				operand.range.alias)
+			: operand.range.table === ctx.rootTable &&
+					operand.range.alias === ctx.rootTable
+				? (ctx.currentAlias ?? operand.range.alias)
+				: operand.range.alias;
 	return resolveAddressedColumn(
 		{ ...operand, range: { ...operand.range, alias } },
 		ctx,
@@ -383,6 +389,22 @@ function compileResolvedSubqueryBodyUnchecked(
 	}
 	return { SelectStmt: stmt };
 }
+/** A nested select, compiled by the root select compiler, in this statement's parameter sequence. */
+function nestedSelect(
+	select: ResolvedNestedSelect,
+	ctx: CompilerContext,
+	state: CompilerState,
+): Node {
+	if (!ctx.compileNestedSelect)
+		throw new Error(
+			'An expression subquery reached the adapter without its nested select.',
+		);
+	const compiled = ctx.compileNestedSelect(select, ctx);
+	const ast = renumberParamRefsInAst(compiled.ast, state.paramIndex);
+	state.parameters.push(...compiled.parameters);
+	state.paramIndex += compiled.parameters.length;
+	return ast;
+}
 function compileResolvedExpressionUnchecked(
 	expr: ResolvedExpression,
 	ctx: CompilerContext,
@@ -451,11 +473,10 @@ function compileResolvedExpressionUnchecked(
 			return {
 				SubLink: {
 					subLinkType: 'EXPR_SUBLINK',
-					subselect: compileResolvedSubqueryBodyUnchecked(
-						expr.body,
-						ctx,
-						state,
-					),
+					subselect:
+						'select' in expr
+							? nestedSelect(expr.select, ctx, state)
+							: compileResolvedSubqueryBodyUnchecked(expr.body, ctx, state),
 				},
 			};
 		case 'operator': {

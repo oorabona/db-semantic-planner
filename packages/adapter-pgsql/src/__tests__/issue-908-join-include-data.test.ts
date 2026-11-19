@@ -390,7 +390,7 @@ it('908f: scalar subquery aggregation does not aggregate the outer projection', 
 		.dump();
 	expect(compiled.sql).toBe(
 		// #891 arbitration, 2026-10-04: natural inner alias; outer projection stays non-aggregate.
-		`SELECT (SELECT count(*) FROM comments AS comments) AS n, ${authorPayloadSql}`,
+		`SELECT (SELECT count(*) FROM comments) AS n, ${authorPayloadSql}`,
 	);
 	expect(compiled.params).toEqual([]);
 });
@@ -409,7 +409,7 @@ it('908f: aggregate expression inside a scalar subquery stays in its own scope',
 		.dump();
 	expect(compiled.sql).toBe(
 		// #891 arbitration, 2026-10-04: natural inner alias; outer projection stays non-aggregate.
-		`SELECT (SELECT count(*) FROM comments AS comments) AS n, ${authorPayloadSql}`,
+		`SELECT (SELECT count(*) FROM comments) AS n, ${authorPayloadSql}`,
 	);
 	expect(compiled.params).toEqual([]);
 });

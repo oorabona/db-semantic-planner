@@ -33,6 +33,8 @@ import type {
 	RecursivePlanOptions,
 	RecursivePlanReport,
 	ResolvedIncludeStrategy,
+	ResolvedNestedSelect,
+	ResolvedRange,
 } from '@dbsp/types';
 import { resolveJsonAggOrderKey, toColumnList } from '@dbsp/types';
 import {
@@ -280,6 +282,51 @@ export function plan(
 	model: ModelIR,
 	options: PlanOptions = {},
 ): PlanReport {
+	return planInScope(intent, model, options, {});
+}
+
+/** Where a query is planned: the local sources it can see, and for a nested body its enclosing query. */
+export interface PlanScope {
+	/** Whether a FROM name is a query-local source (an NQL binding or a CTE), which wins over a model table. */
+	readonly isLocalSource?: ((name: string) => boolean) | undefined;
+	/** A scalar subquery body: ranges are allocated by the enclosing query's allocator. */
+	readonly nested?: {
+		readonly allocator: RangeAllocator;
+		readonly enclosing: readonly (readonly ResolvedRange[])[];
+		readonly entryDepth: number;
+	};
+}
+
+/**
+ * Plan a scalar subquery body with the root planner, inside its enclosing
+ * query: one allocator, the enclosing ranges in scope.
+ */
+export function planNestedSelect(
+	intent: QueryIntent,
+	model: ModelIR,
+	defaultFilters: PlanOptions['defaultFilters'],
+	scope: PlanScope & { readonly nested: NonNullable<PlanScope['nested']> },
+): ResolvedNestedSelect {
+	const report = planInScope(
+		intent,
+		model,
+		defaultFilters ? { defaultFilters } : {},
+		scope,
+	);
+	return {
+		execution: report.execution!,
+		intent: report.executableIntent ?? report.intent,
+		decisions: report.decisions,
+	};
+}
+
+/** plan() with the local sources visible to the query and, for a body, its enclosing query. */
+export function planInScope(
+	intent: QueryIntent,
+	model: ModelIR,
+	options: PlanOptions,
+	scope: PlanScope,
+): PlanReport {
 	assertNoPathRefInQueryBodies(intent);
 	const startTime = performance.now();
 
@@ -446,6 +493,8 @@ export function plan(
 		{
 			whereReservedNames: opts.whereReservedNames,
 			defaultFilters: opts.defaultFilters,
+			isLocalSource: scope.isLocalSource,
+			...(scope.nested && { nested: scope.nested }),
 		},
 	);
 	const report: PlanReport = {
@@ -465,7 +514,8 @@ export function plan(
 		metadata,
 	};
 
-	return markPlannedReport(report);
+	// A body's execution is snapshotted once, inside its enclosing report.
+	return scope.nested ? report : markPlannedReport(report);
 }
 
 // ============================================================================

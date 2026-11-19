@@ -33,7 +33,9 @@ import {
 	assertNoPathRefInConditionBodies,
 	refuseTableRootedQuantifier,
 } from './path-ref-scan.js';
+import { planNestedSelect } from './planner.js';
 import { getRelationalReadPolicy } from './relational-read-plans.js';
+import { classifyScalarBody } from './scalar-body.js';
 
 import { escapeDiagnosticText } from './transition/diagnostic-text.js';
 
@@ -113,6 +115,12 @@ export function resolveConditionContext(
 		readonly havingAliases?: ReadonlyMap<string, HavingAggregate>;
 		/** The condition sits inside HAVING: its nested positions name themselves. */
 		readonly fromHaving?: boolean;
+		/** The enclosing scope count of the outermost resolution; a nested body keeps its parent's. */
+		readonly entryDepth?: number;
+		/** Whether a FROM name is a visible query-local source (an NQL binding or a CTE). */
+		readonly isLocalSource?: (name: string) => boolean;
+		/** The caller already reserved every range of the root scope, names and tables. */
+		readonly rootScopeReserved?: boolean;
 	},
 ): ResolvedCondition | undefined {
 	const label = mode?.label ?? 'WHERE';
@@ -132,7 +140,7 @@ export function resolveConditionContext(
 			if (position === 'FILTER') filterDepth--;
 		}
 	};
-	const entryDepth = enclosing.length;
+	const entryDepth = mode?.entryDepth ?? enclosing.length;
 	/**
 	 * A table-rooted quantifier (#991) below a body is read from the body's row:
 	 * accepted only when that row is the single visible range of its table.
@@ -164,9 +172,10 @@ export function resolveConditionContext(
 	const rootScope = [...new Set([root, ...visible, ...additionalOuterRanges])];
 	const enclosingScope = (ranges: readonly ResolvedRange[]) =>
 		ranges === visible ? rootScope : ranges;
-	for (const range of rootScope) {
-		allocator.reserve(range.alias, range.table);
-	}
+	if (!mode?.rootScopeReserved)
+		for (const range of rootScope) {
+			allocator.reserve(range.alias, range.table);
+		}
 	let aliasCount = initialAliasCount;
 	const rawNext = new Map<string, number>();
 	const expressionNext = new Map<string, number>();
@@ -327,6 +336,58 @@ export function resolveConditionContext(
 			throw new Error(`Unresolved condition relation '${segments.join('.')}'`);
 		return path;
 	};
+	/** Bodies below a query-local source keep today's reduced route. */
+	let localSubtree = 0;
+	/**
+	 * An expression-subquery body. With a model it is planned by the root
+	 * planner inside this query: one allocator, the enclosing ranges in scope.
+	 * Without a model, and below a query-local source, it keeps the reduced body.
+	 */
+	const expressionSubquery = (
+		query: QueryIntent,
+		ranges: readonly ResolvedRange[],
+		enclosing: readonly (readonly ResolvedRange[])[],
+	): ResolvedExpression => {
+		if (subqueryRefusal || mode?.include)
+			throw new Error(
+				"compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context.",
+			);
+		if (!model || localSubtree > 0)
+			return {
+				kind: 'subquery',
+				body: body(query, 'scalar', ranges, enclosing, true),
+			};
+		if (
+			classifyScalarBody(query, model, activeFilters, mode?.isLocalSource) ===
+			'local'
+		) {
+			localSubtree++;
+			try {
+				return {
+					kind: 'subquery',
+					body: body(query, 'scalar', ranges, enclosing, true),
+				};
+			} finally {
+				localSubtree--;
+			}
+		}
+		// A body's own policy wins, an explicit disable included; otherwise it
+		// reads the filters in force here (none in a mutation WHERE).
+		const issued = getRelationalReadPolicy(query);
+		// Every enclosing range was reserved when it entered the query, so the
+		// body's alias avoids them all; the nested plan reserves the body's alias.
+		const scopes = [enclosingScope(ranges), ...enclosing];
+		const select = planNestedSelect(
+			query,
+			model,
+			issued ? issued.filters : activeFilters,
+			{
+				isLocalSource: mode?.isLocalSource,
+				nested: { allocator, enclosing: scopes, entryDepth },
+			},
+		);
+		return { kind: 'subquery', select };
+	};
 	function body<U extends 'exists' | 'in' | 'scalar'>(
 		query: QueryIntent,
 		use: U,
@@ -334,10 +395,6 @@ export function resolveConditionContext(
 		enclosing: readonly (readonly ResolvedRange[])[],
 		isExpressionBody = false,
 	): Extract<ResolvedSubqueryBody, { use: U }> {
-		if ((subqueryRefusal || mode?.include) && isExpressionBody)
-			throw new Error(
-				"compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context.",
-			);
 		if (!isExpressionBody)
 			assertNoUnsupportedSubqueryModifiers(
 				query,
@@ -779,10 +836,7 @@ export function resolveConditionContext(
 			case 'star':
 				return { kind: 'star' };
 			case 'subquery':
-				return {
-					kind: 'subquery',
-					body: body(input.query, 'scalar', ranges, enclosing, true),
-				};
+				return expressionSubquery(input.query, ranges, enclosing);
 			case 'cast':
 				return {
 					kind: 'cast',

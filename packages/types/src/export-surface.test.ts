@@ -56,6 +56,8 @@ const rootNames = [
 	'ResolvedRelationPredicate',
 	'ResolvedCondition',
 	'AmbiguousIncludeError',
+	'NotYetSupportedError',
+	'ResolvedNestedSelect',
 	...brandExports,
 	...names(before.root.declarations).filter((name) => !excluded.has(name)),
 	'IncludePayloadShape',
@@ -69,6 +71,7 @@ const rootNames = [
 const rootRuntime = [
 	'RangeAllocator',
 	'AmbiguousIncludeError',
+	'NotYetSupportedError',
 	...brandExports,
 	...before.root.runtime.filter((name) => !excluded.has(name)),
 ];

@@ -19,6 +19,7 @@ import type { PlanOptions, PlanReport } from '../planner.js';
 import {
 	AmbiguousPlanError,
 	plan,
+	planInScope,
 	validateIncludeStrategy,
 } from '../planner.js';
 import {
@@ -726,7 +727,7 @@ export class QueryBuilderImpl<TResult = unknown>
 		return sealed;
 	}
 
-	plan(): PlanReport {
+	plan(localSources: readonly string[] = []): PlanReport {
 		const intent = this.buildIntent();
 
 		// E15: Warn when lock is used outside a transaction context
@@ -751,7 +752,11 @@ export class QueryBuilderImpl<TResult = unknown>
 		});
 
 		try {
-			return plan(intentWithHints, this.ctx.model, planOptions);
+			return localSources.length
+				? planInScope(intentWithHints, this.ctx.model, planOptions, {
+						isLocalSource: (name) => localSources.includes(name),
+					})
+				: plan(intentWithHints, this.ctx.model, planOptions);
 		} catch (error) {
 			if (error instanceof AmbiguousPlanError) {
 				return this.handleAmbiguity(error, intentWithHints, planOptions);
@@ -1744,6 +1749,7 @@ export class QueryBuilderImpl<TResult = unknown>
 	buildRelationalReadIntent(
 		path: string,
 		bindings: readonly string[] = [],
+		localSources: readonly string[] = bindings,
 	): QueryIntent {
 		if (
 			bindings.length &&
@@ -1769,14 +1775,14 @@ export class QueryBuilderImpl<TResult = unknown>
 					this.ctx.defaultFilters,
 					(table) => !derived.has(table),
 				),
-			}).buildRelationalReadIntent(path);
+			}).buildRelationalReadIntent(path, [], localSources);
 		}
 		// Query-local CTE sources have no declared model range. Keep the refusal
 		// census for scans the existing compiler cannot plan on that path.
 		if (!this.ctx.model.getTable(this.from))
 			return this.buildUnplannedReadIntent(path);
 		return registerRelationalReadPlan(
-			this.plan(),
+			this.plan(localSources),
 			this.ctx.model,
 			this.withDefaultFilterPlanOptions({}).defaultFilters,
 		);

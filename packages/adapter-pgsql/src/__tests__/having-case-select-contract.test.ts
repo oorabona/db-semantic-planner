@@ -53,7 +53,7 @@ const correlated = () =>
 it('columns scalar subquery binds the enclosing range', () => {
 	const result = orm.select('symbols').columns(['id', correlated()]).dump();
 	expect(result.sql).toBe(
-		'SELECT symbols.id, (SELECT count(*) FROM calls AS calls WHERE calls."symbolId" = symbols.id AND calls.score = $1) AS "callCount" FROM symbols',
+		'SELECT symbols.id, (SELECT count(*) FROM calls WHERE calls."symbolId" = symbols.id AND calls.score = $1) AS "callCount" FROM symbols',
 	);
 	expect(result.params).toEqual([7]);
 });
@@ -63,7 +63,7 @@ it('op nested scalar subquery binds the enclosing range', () => {
 		.columns([op('+', correlated(), literal(1)).as('next')])
 		.dump();
 	expect(result.sql).toBe(
-		'SELECT (SELECT count(*) FROM calls AS calls WHERE calls."symbolId" = symbols.id AND calls.score = $1) + 1 AS next FROM symbols',
+		'SELECT (SELECT count(*) FROM calls WHERE calls."symbolId" = symbols.id AND calls.score = $1) + 1 AS next FROM symbols',
 	);
 	expect(result.params).toEqual([7]);
 });
@@ -77,7 +77,7 @@ it('compileSelectExpression nested scalar binds its enclosing subquery range', (
 		},
 	});
 	expect(result.sql).toBe(
-		'SELECT (SELECT (SELECT count(*) FROM calls AS calls WHERE calls."symbolId" = symbols.id AND calls.score = $1) AS "callCount" FROM symbols)',
+		'SELECT (SELECT (SELECT count(*) FROM calls WHERE calls."symbolId" = symbols.id AND calls.score = $1) AS "callCount" FROM symbols)',
 	);
 	expect(result.parameters).toEqual([7]);
 });
@@ -196,7 +196,7 @@ it('nested SELECT CASE uses its own source and reserved alias', () => {
 		},
 	});
 	expect(result.sql).toBe(
-		'SELECT (SELECT (SELECT (SELECT CASE WHEN calls_sq.period && CAST($1 AS tsrange) AND calls_sq.score = $2 THEN 1 ELSE 0 END AS rank FROM calls AS calls_sq) FROM symbols AS symbols) FROM calls)',
+		'SELECT (SELECT (SELECT (SELECT CASE WHEN calls_1.period && CAST($1 AS tsrange) AND calls_1.score = $2 THEN 1 ELSE 0 END AS rank FROM calls AS calls_1) FROM symbols) FROM calls)',
 	);
 	expect(result.parameters).toEqual(['[2026-01-01,2026-02-01)', 4]);
 });
@@ -229,7 +229,7 @@ it('nested SELECT HAVING uses its own logical source', () => {
 		},
 	});
 	expect(result.sql).toBe(
-		'SELECT (SELECT (SELECT calls.period FROM calls AS calls GROUP BY calls.period HAVING calls.period && CAST($1 AS tsrange)) FROM symbols)',
+		'SELECT (SELECT (SELECT calls.period FROM calls GROUP BY calls.period HAVING calls.period && CAST($1 AS tsrange)) FROM symbols)',
 	);
 	expect(result.parameters).toEqual(['[2026-01-01,2026-02-01)']);
 });
@@ -355,10 +355,10 @@ for (const position of ['CASE', 'HAVING', 'FILTER'] as const) {
 			const result = query.columns([expr]).dump();
 			const sql =
 				position === 'CASE'
-					? 'SELECT (SELECT count(*) FROM symbols AS symbols WHERE CASE WHEN symbols.id = caller.id THEN true ELSE false END = $1) AS n FROM calls JOIN symbols AS caller ON calls.id = $2'
+					? 'SELECT (SELECT count(*) FROM symbols WHERE CASE WHEN symbols.id = caller.id THEN true ELSE false END = $1) AS n FROM calls JOIN symbols AS caller ON calls.id = $2'
 					: position === 'HAVING'
-						? 'SELECT (SELECT count(*) FROM symbols AS symbols HAVING symbols.id = caller.id) AS n FROM calls JOIN symbols AS caller ON calls.id = $1'
-						: 'SELECT (SELECT count(*) FILTER (WHERE symbols.id = caller.id) FROM symbols AS symbols) AS n FROM calls JOIN symbols AS caller ON calls.id = $1';
+						? 'SELECT (SELECT count(*) FROM symbols HAVING symbols.id = caller.id) AS n FROM calls JOIN symbols AS caller ON calls.id = $1'
+						: 'SELECT (SELECT count(*) FILTER (WHERE symbols.id = caller.id) FROM symbols) AS n FROM calls JOIN symbols AS caller ON calls.id = $1';
 			expect
 				.soft(result.sql)
 				.toBe(qualifier ? sql : sql.replace('caller.id', 'calls.id'));
@@ -1007,6 +1007,7 @@ describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
 			const body = (
 				plain
 					.select('posts')
+					.columns([])
 					.where(eq('id', 1))
 					.groupBy(['id'])
 					.count('id', 'n')
@@ -1018,7 +1019,7 @@ describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
 					.columns(['id', new SubqueryExpression(body).asExpr('v')])
 					.dump(),
 			).toMatchObject({
-				sql: 'SELECT users.id, (SELECT posts.id, count(posts.id) AS n FROM posts AS posts WHERE posts.id = $1 GROUP BY posts.id HAVING count(posts.id) > CAST($2 AS bigint)) AS v FROM users',
+				sql: 'SELECT users.id, (SELECT count(posts.id) AS n FROM posts WHERE posts.id = $1 GROUP BY posts.id HAVING count(posts.id) > CAST($2 AS bigint)) AS v FROM users',
 				params: [1, 1],
 			});
 		});

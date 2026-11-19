@@ -132,6 +132,16 @@ export interface CompilerContext {
 		expression?: import('@dbsp/types').ExpressionIntent,
 	) => { ast: Node; parameters: readonly unknown[] };
 	/**
+	 * Compile a scalar subquery body that core resolved as a nested select, with
+	 * the root select compiler, inside `parent`. Its parameters are numbered from
+	 * $1; the caller renumbers them into its own sequence.
+	 */
+	readonly compileNestedSelect?: NestedSelectCompiler;
+	/** In a nested select: the emitted qualifier of each enclosing root range, by its core alias. */
+	readonly enclosingQualifiers?: ReadonlyMap<string, string>;
+	/** In a nested select whose alias differs from its table: the core alias of its root range. */
+	readonly rootRangeAlias?: string;
+	/**
 	 * Optional recursive compiler for NQL-origin SELECT expression values nested
 	 * inside handler arguments, such as coalesce(upper(name), :fallback) or
 	 * (price + :a) * :b.
@@ -838,3 +848,9 @@ export function isSelectWithFields(value: unknown): value is SelectWithFields {
 			(value as Record<string, unknown>).fields === undefined)
 	);
 }
+
+/** Compiles core's nested select of a scalar subquery body inside its enclosing context. */
+export type NestedSelectCompiler = (
+	select: import('@dbsp/types').ResolvedNestedSelect,
+	parent: CompilerContext,
+) => { ast: Node; parameters: readonly unknown[] };

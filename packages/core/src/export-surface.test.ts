@@ -44,16 +44,21 @@ const internalAdditions = [
 	'compileNqlRead',
 	'createBindingFinalPlan',
 	'getRelationalReadPlan',
+	'planInScope',
 	'refuseTableRootedQuantifier',
 ];
+// The scope a query is planned in: local sources and a body's enclosing query (#891 slice 5b).
+const internalTypeAdditions = ['PlanScope'];
 const rootNames = [
 	'AmbiguousIncludeError',
+	'NotYetSupportedError',
 	...names(before.root.declarations).filter((name) => !excluded.has(name)),
 	...rootAdditions,
 	...rootTypeAdditions,
 ];
 const rootRuntime = [
 	'AmbiguousIncludeError',
+	'NotYetSupportedError',
 	...before.root.runtime.filter((name) => !excluded.has(name)),
 	...rootAdditions,
 ];
@@ -73,6 +78,7 @@ const internalNames = [
 	...names(before.internal.declarations),
 	...names(moved),
 	...internalAdditions,
+	...internalTypeAdditions,
 ];
 const movedRuntime = before.root.runtime.filter((name) =>
 	names(moved).includes(name),

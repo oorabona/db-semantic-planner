@@ -668,7 +668,7 @@
 			"position": "having-alias",
 			"kind": "expression-scalar-subquery",
 			"shape": "leaf",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING (SELECT posts.score FROM posts AS posts WHERE posts.score = $1 ORDER BY posts.score DESC LIMIT 1) > $2",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING (SELECT posts.score FROM posts WHERE posts.score = $1 ORDER BY posts.score DESC LIMIT 1) > $2",
 			"params": [59, 67],
 			"error": null
 		},
@@ -676,7 +676,7 @@
 			"position": "having-alias",
 			"kind": "expression-scalar-subquery",
 			"shape": "and",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING (SELECT posts.score FROM posts AS posts WHERE posts.score = $1 ORDER BY posts.score DESC LIMIT 1) > $2 AND count(*) = CAST($3 AS bigint)",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING (SELECT posts.score FROM posts WHERE posts.score = $1 ORDER BY posts.score DESC LIMIT 1) > $2 AND count(*) = CAST($3 AS bigint)",
 			"params": [59, 67, 13],
 			"error": null
 		},
@@ -684,7 +684,7 @@
 			"position": "having-alias",
 			"kind": "expression-scalar-subquery",
 			"shape": "or",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING (SELECT posts.score FROM posts AS posts WHERE posts.score = $1 ORDER BY posts.score DESC LIMIT 1) > $2 OR count(*) = CAST($3 AS bigint)",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING (SELECT posts.score FROM posts WHERE posts.score = $1 ORDER BY posts.score DESC LIMIT 1) > $2 OR count(*) = CAST($3 AS bigint)",
 			"params": [59, 67, 13],
 			"error": null
 		},
@@ -692,7 +692,7 @@
 			"position": "having-alias",
 			"kind": "expression-scalar-subquery",
 			"shape": "not",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT ((SELECT posts.score FROM posts AS posts WHERE posts.score = $1 ORDER BY posts.score DESC LIMIT 1) > $2)",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT ((SELECT posts.score FROM posts WHERE posts.score = $1 ORDER BY posts.score DESC LIMIT 1) > $2)",
 			"params": [59, 67],
 			"error": null
 		},
@@ -700,7 +700,7 @@
 			"position": "having-alias",
 			"kind": "expression-scalar-subquery",
 			"shape": "two-level",
-			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT ((SELECT posts.score FROM posts AS posts WHERE posts.score = $2 ORDER BY posts.score DESC LIMIT 1) > $3) OR count(*) = CAST($4 AS bigint))",
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT ((SELECT posts.score FROM posts WHERE posts.score = $2 ORDER BY posts.score DESC LIMIT 1) > $3) OR count(*) = CAST($4 AS bigint))",
 			"params": [13, 59, 67, 17],
 			"error": null
 		},

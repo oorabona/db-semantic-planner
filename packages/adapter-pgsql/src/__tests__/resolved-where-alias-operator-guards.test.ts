@@ -48,7 +48,7 @@ describe('resolved WHERE alias reservation and operator guards', () => {
 			)
 			.dump();
 		expect(result.sql).toBe(
-			'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 JOIN category AS category ON posts_exists_0."categoryId" = category.id WHERE users.id = posts_exists_0."userId" AND abs((SELECT category_sq.id FROM category AS category_sq WHERE category_sq.id = category.id)) > $1)',
+			'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 JOIN category AS category ON posts_exists_0."categoryId" = category.id WHERE users.id = posts_exists_0."userId" AND abs((SELECT category_1.id FROM category AS category_1 WHERE category_1.id = category.id)) > $1)',
 		);
 		expect(result.params).toEqual([0]);
 	});

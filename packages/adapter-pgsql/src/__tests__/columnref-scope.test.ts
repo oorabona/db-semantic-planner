@@ -57,7 +57,7 @@ const { files, symbols, calls } = fileOrm.tables;
 const FILE_JOIN =
 	'SELECT symbols.* FROM symbols JOIN files AS file ON symbols.file_id = file.id';
 
-const nodeDb = schema({
+const nodeTables = {
 	nodes: {
 		id: { type: 'integer', primaryKey: true },
 		label: 'text',
@@ -68,7 +68,8 @@ const nodeDb = schema({
 			roles: { parent: 'parent', children: 'children' },
 		}),
 	},
-});
+} as const;
+const nodeDb = schema(nodeTables);
 const nodeOrm = createOrm({
 	schema: nodeDb,
 	adapter: createPgCompileOnlyAdapter({ model: nodeDb.model }),
@@ -703,7 +704,7 @@ describe('A relation-path ref inside a body is refused (#991)', () => {
 			.columns([lagBody.asExpr('x')])
 			.dump();
 		expect(lagged.sql).toBe(
-			'SELECT (SELECT lag(nodes_sq.data, $1, $2) OVER (ORDER BY nodes_sq.id ASC) AS v FROM nodes AS nodes_sq) AS x FROM nodes',
+			'SELECT (SELECT lag(nodes_1.data, $1, $2) OVER (ORDER BY nodes_1.id ASC) AS v FROM nodes AS nodes_1) AS x FROM nodes',
 		);
 		expect(lagged.params).toEqual([1, leaf]);
 	});
@@ -1111,6 +1112,24 @@ describe('Typed quantifiers and callback refs inside nested bodies (#991)', () =
 	});
 
 	it('AC45 legacy-route-ambiguous-refused', () => {
+		// A filtered model takes the same route since #891 slice 5b: the body is
+		// a nested select either way, and the refusal holds at its first level.
+		const filteredNodes = createOrm({
+			schema: schema(nodeTables, undefined, {
+				defaultFilters: { nodes: isNull('label') },
+			}),
+			adapter: createPgCompileOnlyAdapter({ model: nodeDb.model }),
+			suppressDxWarnings: true,
+		});
+		expect(() =>
+			filteredNodes
+				.select('nodes')
+				.columns([
+					'id',
+					subquery('nodes').select('id').where(children()).count().asExpr('n'),
+				])
+				.dump(),
+		).toThrow(quantifierRefusal('children'));
 		expect(() =>
 			nodeOrm
 				.select('nodes')
@@ -1145,7 +1164,7 @@ describe('Typed quantifiers and callback refs inside nested bodies (#991)', () =
 				])
 				.dump().sql,
 		).toBe(
-			'SELECT users.id, (SELECT count(*) FROM posts AS posts WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts.id = comments_exists_0.post_id AND comments_exists_0.body = $1)) AS n FROM users',
+			'SELECT users.id, (SELECT count(*) FROM posts WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts.id = comments_exists_0.post_id AND comments_exists_0.body = $1)) AS n FROM users',
 		);
 		expect(
 			writingsOrm
@@ -1160,7 +1179,7 @@ describe('Typed quantifiers and callback refs inside nested bodies (#991)', () =
 				])
 				.dump().sql,
 		).toBe(
-			'SELECT users.id, (SELECT count(*) FROM users AS users_sq WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users_sq.id = posts_exists_0.author_id AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.post_id AND comments_exists_1.body = $1))) AS n FROM users',
+			'SELECT users.id, (SELECT count(*) FROM users AS users_1 WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users_1.id = posts_exists_0.author_id AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.post_id AND comments_exists_1.body = $1))) AS n FROM users',
 		);
 		// A two-hop relation path on the same route traverses both hops (C3).
 		expect(
@@ -1174,7 +1193,7 @@ describe('Typed quantifiers and callback refs inside nested bodies (#991)', () =
 				])
 				.dump().sql,
 		).toBe(
-			'SELECT (SELECT count(*) FROM users AS users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.post_id AND comments_exists_1.body = $1))) AS n FROM comments',
+			'SELECT (SELECT count(*) FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.post_id AND comments_exists_1.body = $1))) AS n FROM comments',
 		);
 	});
 

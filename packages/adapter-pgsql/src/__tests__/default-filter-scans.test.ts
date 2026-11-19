@@ -468,16 +468,16 @@ describe('default filters on physical read scans', () => {
 		const filtered = build(orm).dump();
 		const unfiltered = build(orm).withoutDefaultFilters().dump();
 		expect({ sql: filtered.sql, params: filtered.params }).toEqual({
-			sql: 'SELECT (SELECT posts.id FROM posts AS posts WHERE posts."deletedAt" IS NULL) AS "postId" FROM users WHERE users."deletedAt" IS NULL',
+			sql: 'SELECT (SELECT posts.id FROM posts WHERE posts."deletedAt" IS NULL) AS "postId" FROM users WHERE users."deletedAt" IS NULL',
 			params: [],
 		});
 		expect({ sql: unfiltered.sql, params: unfiltered.params }).toEqual({
-			sql: 'SELECT (SELECT posts.id FROM posts AS posts) AS "postId" FROM users',
+			sql: 'SELECT (SELECT posts.id FROM posts) AS "postId" FROM users',
 			params: [],
 		});
 		const view = build(orm.withoutDefaultFilters()).dump();
 		expect({ sql: view.sql, params: view.params }).toEqual({
-			sql: 'SELECT (SELECT posts.id FROM posts AS posts) AS "postId" FROM users',
+			sql: 'SELECT (SELECT posts.id FROM posts) AS "postId" FROM users',
 			params: [],
 		});
 	});
@@ -725,10 +725,10 @@ it('keeps expression scan filters after duplicate root projections are removed',
 			.select('users')
 			.columns(['id', 'id', subquery('posts').select('id').asExpr('postId')]);
 	expect(build(orm).dump().sql).toBe(
-		'SELECT users.id, (SELECT posts.id FROM posts AS posts WHERE posts."deletedAt" IS NULL) AS "postId" FROM users WHERE users."deletedAt" IS NULL',
+		'SELECT users.id, (SELECT posts.id FROM posts WHERE posts."deletedAt" IS NULL) AS "postId" FROM users WHERE users."deletedAt" IS NULL',
 	);
 	expect(build(orm).withoutDefaultFilters().dump().sql).toBe(
-		'SELECT users.id, (SELECT posts.id FROM posts AS posts) AS "postId" FROM users',
+		'SELECT users.id, (SELECT posts.id FROM posts) AS "postId" FROM users',
 	);
 });
 
@@ -742,15 +742,15 @@ it('keeps a separate resolved predicate for each scan of a reused expression que
 	expect(
 		new Set(
 			planned.execution?.expressionSubqueries?.map(
-				(entry) => entry.body.range.id,
+				(entry) => entry.select.execution.rootRange.id,
 			),
 		).size,
 	).toBe(2);
 	expect(build(orm).dump().sql).toBe(
-		'SELECT (SELECT posts.id FROM posts AS posts WHERE posts."deletedAt" IS NULL) AS "postOne", (SELECT posts_1.id FROM posts AS posts_1 WHERE posts_1."deletedAt" IS NULL) AS "postTwo" FROM users WHERE users."deletedAt" IS NULL',
+		'SELECT (SELECT posts.id FROM posts WHERE posts."deletedAt" IS NULL) AS "postOne", (SELECT posts_1.id FROM posts AS posts_1 WHERE posts_1."deletedAt" IS NULL) AS "postTwo" FROM users WHERE users."deletedAt" IS NULL',
 	);
 	expect(build(orm).withoutDefaultFilters().dump().sql).toBe(
-		'SELECT (SELECT posts.id FROM posts AS posts) AS "postOne", (SELECT posts.id FROM posts AS posts) AS "postTwo" FROM users',
+		'SELECT (SELECT posts.id FROM posts) AS "postOne", (SELECT posts_1.id FROM posts AS posts_1) AS "postTwo" FROM users',
 	);
 });
 
@@ -954,7 +954,7 @@ describe('selectExpression bodies and nested issued policies', () => {
 		expect(
 			outer.select('users').columns(['id', nestedPolicyBody()]).dump().sql,
 		).toBe(
-			'SELECT users.id, (SELECT count(*) FROM users AS users_sq WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL)) AS n FROM users',
+			'SELECT users.id, (SELECT count(*) FROM users AS users_1 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL)) AS n FROM users',
 		);
 	});
 
@@ -974,7 +974,7 @@ describe('selectExpression bodies and nested issued policies', () => {
 			},
 		} as unknown as Parameters<typeof outer.selectExpression>[0];
 		expect(outer.selectExpression(projecting).sql).toBe(
-			'SELECT (SELECT (SELECT count(*) FROM users AS users_sq WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL)) AS n FROM users LIMIT 1)',
+			'SELECT (SELECT (SELECT count(*) FROM users AS users_1 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL)) AS n FROM users LIMIT 1)',
 		);
 	});
 
@@ -997,7 +997,7 @@ describe('selectExpression bodies and nested issued policies', () => {
 					])
 					.dump().sql,
 			).toBe(
-				"SELECT (SELECT count(*) FROM users AS users_sq WHERE date_part('epoch', make_interval(secs => (SELECT count(*) FROM users AS users_sq_1 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL)))) > $1) AS m FROM users",
+				"SELECT (SELECT count(*) FROM users AS users_1 WHERE date_part('epoch', make_interval(secs => (SELECT count(*) FROM users AS users_2 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL)))) > $1) AS m FROM users",
 			);
 		});
 
@@ -1010,7 +1010,7 @@ describe('selectExpression bodies and nested issued policies', () => {
 					])
 					.dump().sql,
 			).toBe(
-				'SELECT make_interval(secs => (SELECT count(*) FROM users AS users_sq WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL))) AS iv FROM users',
+				'SELECT make_interval(secs => (SELECT count(*) FROM users AS users_1 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL))) AS iv FROM users',
 			);
 		});
 
@@ -1026,12 +1026,12 @@ describe('selectExpression bodies and nested issued policies', () => {
 					])
 					.dump().sql,
 			).toBe(
-				'SELECT make_interval(secs => (SELECT count(*) FROM posts AS posts WHERE posts.deleted_at IS NULL)) AS iv FROM users',
+				'SELECT make_interval(secs => (SELECT count(*) FROM posts WHERE posts.deleted_at IS NULL)) AS iv FROM users',
 			);
 		});
 	});
 
-	it('refuses an aggregate FILTER in a scalar body the resolved route plans', () => {
+	it('compiles an aggregate FILTER in a scalar body the resolved route plans', () => {
 		const scalar = new SubqueryExpression({
 			type: 'select',
 			from: 'posts',
@@ -1041,9 +1041,11 @@ describe('selectExpression bodies and nested issued policies', () => {
 				aggregates: [{ function: 'count', field: '*', filter: eq('score', 1) }],
 			},
 		} as never).asExpr('n');
-		expect(() => outer.select('users').columns([scalar]).dump()).toThrow(
-			'scalar subquery with an aggregate FILTER is not supported — it would silently change which rows match; restructure the query or use a CTE.',
-		);
+		const dumped = outer.select('users').columns([scalar]).dump();
+		expect({ sql: dumped.sql, params: dumped.params }).toEqual({
+			sql: 'SELECT (SELECT count(*) FILTER (WHERE posts.score = $1) FROM posts WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL)) AS n FROM users',
+			params: [1],
+		});
 	});
 
 	it('compiles an aggregate FILTER in an EXISTS body, where only existence counts', () => {
@@ -1157,8 +1159,8 @@ describe('selectExpression bodies and nested issued policies', () => {
 		);
 	const nestedPolicyWhere = () => rawExists(issuedPosts());
 
-	it('refuses a nested-policy body with an expression SELECT', () => {
-		expect(() =>
+	it('compiles a nested-policy body with an expression SELECT', () => {
+		expect(
 			projectNested({
 				type: 'select',
 				from: 'users',
@@ -1169,13 +1171,14 @@ describe('selectExpression bodies and nested issued policies', () => {
 				},
 				limit: 1,
 			}),
-		).toThrow(
-			'scalar subquery with expressions SELECT (not supported in scalar subquery) is not supported — it would silently change which rows match; restructure the query or use a CTE.',
-		);
+		).toMatchObject({
+			sql: 'SELECT (SELECT lower(name) AS l FROM users AS users_1 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL) LIMIT 1) AS v FROM users',
+			parameters: [],
+		});
 	});
 
-	it('refuses a nested-policy body with GROUP BY and HAVING', () => {
-		expect(() =>
+	it('compiles a nested-policy body with GROUP BY and HAVING', () => {
+		expect(
 			projectNested({
 				type: 'select',
 				from: 'users',
@@ -1185,9 +1188,10 @@ describe('selectExpression bodies and nested issued policies', () => {
 				having: { kind: 'comparison', field: 'id', operator: 'gt', value: 0 },
 				limit: 1,
 			}),
-		).toThrow(
-			'scalar subquery with GROUP BY, HAVING is not supported — it would silently change which rows match; restructure the query or use a CTE.',
-		);
+		).toMatchObject({
+			sql: 'SELECT (SELECT users_1.id FROM users AS users_1 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL) GROUP BY users_1.id HAVING users_1.id > $1 LIMIT 1) AS v FROM users',
+			parameters: [0],
+		});
 	});
 });
 
