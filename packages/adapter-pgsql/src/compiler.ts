@@ -1,7 +1,8 @@
-import {
-	compileResolvedCondition,
-	compileResolvedSubqueryBody,
-} from './resolved-condition-compiler.js';
+import { renumberParamRefsInAst } from './param-renumber.js';
+import { compileResolvedCondition } from './resolved-condition-compiler.js';
+
+export { renumberParamRefsInAst };
+
 /**
  * PlanReport Compiler
  *
@@ -57,6 +58,7 @@ import {
 	type BindingNameRegistry,
 	declaredRelationBindingFor,
 	hasBindingName,
+	localSourcePredicate,
 	type QueryScope,
 	queryScope,
 	relationBinding,
@@ -93,6 +95,7 @@ import type {
 	CompilerState as HandlerCompilerState,
 	Decision as HandlerDecision,
 	JoinExprNode,
+	NestedSelectCompiler,
 	SelectStmtNode,
 } from './handlers/types.js';
 import {
@@ -437,16 +440,15 @@ export interface SimplifiedPlanReport {
 	}[];
 	readonly expressionSubqueries?: readonly {
 		readonly expression: ExpressionIntent;
-		readonly body: Extract<
-			import('@dbsp/types').ResolvedSubqueryBody,
-			{ use: 'scalar' }
-		>;
+		readonly select: import('@dbsp/types').ResolvedNestedSelect;
 	}[];
 	readonly rawHaving?: WhereIntent;
 	readonly directConditions?: boolean;
 	/** Set when the report carries core's execution: FILTER and NQL CASE conditions read the resolved nodes. */
 	readonly resolvedExecution?: boolean;
 	readonly enclosingRanges?: HandlerCompilerContext['enclosingRanges'];
+	/** A nested select: the emitted qualifier of each enclosing root range, by its core alias. */
+	readonly enclosingQualifiers?: ReadonlyMap<string, string>;
 	readonly rootAlias?: string;
 	readonly rootTable: string;
 	readonly decisions: readonly PlanDecision[];
@@ -478,44 +480,6 @@ export interface CompiledResult {
 // ============================================================================
 // AST Utilities
 // ============================================================================
-
-/**
- * Walk a PostgreSQL AST Node tree and renumber all ParamRef.number values
- * by adding `offset` to each. Used to merge inner subquery parameters into
- * the outer query's parameter sequence without $N collisions.
- *
- * @param node - Root AST node (any pgsql Node object or array)
- * @param offset - Value to add to every ParamRef.number found
- * @returns A new node tree with renumbered ParamRefs (original is not mutated)
- */
-export function renumberParamRefsInAst(node: unknown, offset: number): Node {
-	if (offset === 0) return node as Node;
-	return renumberNode(node, offset) as Node;
-}
-
-function renumberNode(value: unknown, offset: number): unknown {
-	if (value === null || value === undefined) return value;
-	if (Array.isArray(value)) {
-		return value.map((item) => renumberNode(item, offset));
-	}
-	if (typeof value !== 'object') return value;
-	const obj = value as Record<string, unknown>;
-	// ParamRef node: { ParamRef: { number: N } }
-	if (
-		'ParamRef' in obj &&
-		obj.ParamRef !== null &&
-		typeof obj.ParamRef === 'object'
-	) {
-		const pr = obj.ParamRef as Record<string, unknown>;
-		return { ParamRef: { ...pr, number: (pr.number as number) + offset } };
-	}
-	// Recursively walk all object properties
-	const result: Record<string, unknown> = {};
-	for (const key of Object.keys(obj)) {
-		result[key] = renumberNode(obj[key], offset);
-	}
-	return result;
-}
 
 /**
  * Largest `ParamRef.number` in an AST subtree (0 if none). Used to verify a
@@ -564,6 +528,10 @@ export interface CompilerOptions {
 	readonly bindingNames?: BindingNameRegistry;
 	readonly scope?: QueryScope;
 	readonly relationTargetProjections?: RelationTargetProjectionRegistry;
+	/** Compiles a scalar subquery body that core resolved as a nested select. */
+	readonly compileNestedSelect?: NestedSelectCompiler;
+	/** The compiler of a query-local-source body: bodies below it keep its route. */
+	readonly localSubtree?: boolean;
 }
 
 export class PlanCompiler {
@@ -579,6 +547,8 @@ export class PlanCompiler {
 	private readonly relationTargetProjections:
 		| RelationTargetProjectionRegistry
 		| undefined;
+	private readonly nestedSelectCompiler: NestedSelectCompiler | undefined;
+	private readonly localSubtree: boolean;
 	/** Mutable state shared with extracted condition/value compilation functions */
 	private state: HandlerCompilerState = {
 		parameters: [],
@@ -589,6 +559,8 @@ export class PlanCompiler {
 	};
 	/** Track root table for EXISTS FK correlation */
 	private currentRootTable = '';
+	/** The emitted alias of the root range when it differs from its table (a nested body). */
+	private currentRootAlias: string | undefined;
 	/** Pending JOINs registered by filter/include strategies (flushed in compileSelect) */
 	private pendingJoins: Array<{
 		type: 'JOIN' | 'LEFT JOIN';
@@ -642,6 +614,8 @@ export class PlanCompiler {
 		this.bindingNames = options.bindingNames;
 		this.scope = options.scope;
 		this.relationTargetProjections = options.relationTargetProjections;
+		this.nestedSelectCompiler = options.compileNestedSelect;
+		this.localSubtree = options.localSubtree === true;
 	}
 
 	private childCompilerOptions(
@@ -668,6 +642,10 @@ export class PlanCompiler {
 			...(this.relationTargetProjections !== undefined && {
 				relationTargetProjections: this.relationTargetProjections,
 			}),
+			...(this.nestedSelectCompiler !== undefined && {
+				compileNestedSelect: this.nestedSelectCompiler,
+			}),
+			...(this.localSubtree && { localSubtree: true }),
 			...overrides,
 		};
 	}
@@ -692,7 +670,10 @@ export class PlanCompiler {
 		) {
 			bindings.push(
 				relationBinding({
-					qualifier: this.tableIdentifier(this.currentRootTable),
+					qualifier:
+						this.currentRootAlias !== undefined
+							? queryLocal(this.currentRootAlias)
+							: this.tableIdentifier(this.currentRootTable),
 					kind: 'declared-table',
 					logicalTable: this.currentRootTable,
 				}),
@@ -1247,6 +1228,7 @@ export class PlanCompiler {
 			joins: [],
 		};
 		this.currentRootTable = plan.rootTable;
+		this.currentRootAlias = plan.rootAlias;
 		this.pendingJoins = [];
 		this.rawJoins = [];
 		this.keylessJoinProjections.clear();
@@ -1386,6 +1368,10 @@ export class PlanCompiler {
 					outerAlias: identifierText(plan.enclosingRanges[0][0].qualifier),
 				}),
 			}),
+			...(plan.enclosingQualifiers && {
+				enclosingQualifiers: plan.enclosingQualifiers,
+			}),
+			...(plan.rootAlias && { rootRangeAlias: plan.rootAlias }),
 			...(plan.resolvedExecution && { resolvedExecution: true }),
 			...(plan.directConditions && {
 				compileCaseCondition: (
@@ -1428,6 +1414,9 @@ export class PlanCompiler {
 					]),
 				),
 			}),
+			...(this.nestedSelectCompiler !== undefined && {
+				compileNestedSelect: this.nestedSelectCompiler,
+			}),
 			compileSubquery: (
 				query: QueryIntent,
 				paramOffset: number,
@@ -1469,6 +1458,11 @@ export class PlanCompiler {
 		return hasBindingName(this.scope ?? this.bindingNames, queryLocal(table))
 			? undefined
 			: (plan.schema ?? this.schema);
+	}
+
+	/** A FROM name bound in this query to a local source (an NQL binding, a CTE or a BatchValues range). */
+	private isQueryLocalSource(name: string): boolean {
+		return localSourcePredicate(this.bindingNames, this.scope)(name);
 	}
 
 	private isNqlBindingRoot(plan: SimplifiedPlanReport): boolean {
@@ -1949,16 +1943,28 @@ export class PlanCompiler {
 			(entry) => expression !== undefined && entry.expression === expression,
 		);
 		if (resolved) {
-			const state = this.createHandlerState();
-			state.parameters = [];
-			state.paramIndex = paramOffset;
-			const ast = compileResolvedSubqueryBody(
-				resolved.body,
-				parentContext ?? this.createHandlerContext(parentPlan),
-				state,
-			);
-			return { ast, parameters: state.parameters };
+			const parent = parentContext ?? this.createHandlerContext(parentPlan);
+			if (!this.nestedSelectCompiler)
+				throw new Error(
+					'An expression subquery reached the adapter without its nested select.',
+				);
+			const compiled = this.nestedSelectCompiler(resolved.select, parent);
+			return {
+				ast: renumberParamRefsInAst(compiled.ast, paramOffset),
+				parameters: compiled.parameters,
+			};
 		}
+		// With a model, core resolves every body except one on a query-local
+		// source and the bodies below it, which keep this compiler's route.
+		if (
+			this.model !== undefined &&
+			parentPlan.directConditions &&
+			!this.localSubtree &&
+			!this.isQueryLocalSource(query.from)
+		)
+			throw new Error(
+				'An expression subquery reached the adapter without its nested select.',
+			);
 		if (!parentPlan.directConditions) {
 			assertNoSelectExpressionCorrelation(query);
 			const innerCompiler = new PlanCompiler(this.childCompilerOptions());
@@ -1986,7 +1992,9 @@ export class PlanCompiler {
 			const suffix = i === 0 ? '_sq' : `_sq_${i}`;
 			rootAlias = `${truncateIdentifier(query.from, 63 - suffix.length)}${suffix}`;
 		}
-		const innerCompiler = new PlanCompiler(this.childCompilerOptions());
+		const innerCompiler = new PlanCompiler(
+			this.childCompilerOptions({ localSubtree: true }),
+		);
 		const innerPlan: SimplifiedPlanReport = {
 			rootTable: query.from,
 			decisions: intentToDecisions(query, query.from, {
@@ -2982,12 +2990,17 @@ export class PlanCompiler {
 		table: string | undefined,
 	): Node {
 		const dot = column.lastIndexOf('.');
+		// A nested body's root is emitted under its own alias.
+		const root = (qualifier: string): string =>
+			qualifier === this.currentRootTable && this.currentRootAlias !== undefined
+				? this.currentRootAlias
+				: qualifier;
 		if (dot !== -1) {
 			const relation = column.slice(0, dot);
 			if (relation === this.currentRootTable) {
 				return expressionQualifiedColumnRef(
 					column.slice(dot + 1),
-					relation,
+					root(relation),
 					this.handlerCtx(),
 				);
 			}
@@ -3003,7 +3016,7 @@ export class PlanCompiler {
 		}
 		return table === undefined
 			? expressionColumnRef(column, this.handlerCtx())
-			: expressionQualifiedColumnRef(column, table, this.handlerCtx());
+			: expressionQualifiedColumnRef(column, root(table), this.handlerCtx());
 	}
 
 	/**

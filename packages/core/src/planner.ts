@@ -33,6 +33,8 @@ import type {
 	RecursivePlanOptions,
 	RecursivePlanReport,
 	ResolvedIncludeStrategy,
+	ResolvedNestedSelect,
+	ResolvedRange,
 } from '@dbsp/types';
 import { resolveJsonAggOrderKey, toColumnList } from '@dbsp/types';
 import {
@@ -280,6 +282,65 @@ export function plan(
 	model: ModelIR,
 	options: PlanOptions = {},
 ): PlanReport {
+	return planInScope(intent, model, options, {});
+}
+
+/** Where a query is planned: the local sources it can see, and for a nested body its enclosing query. */
+export interface PlanScope {
+	/** Whether a FROM name is a query-local source (an NQL binding or a CTE), which wins over a model table. */
+	readonly isLocalSource?: ((name: string) => boolean) | undefined;
+	/** A scalar subquery body: ranges are allocated by the enclosing query's allocator. */
+	readonly nested?: {
+		readonly allocator: RangeAllocator;
+		readonly enclosing: readonly (readonly ResolvedRange[])[];
+		/** The names written for ranges of each enclosing scope (an include key), aligned with `enclosing`. */
+		readonly qualifiers: readonly ReadonlyMap<string, ResolvedRange>[];
+		readonly entryDepth: number;
+	};
+}
+
+/**
+ * The warning sinks of the queries being planned, innermost last. A body's
+ * report hands its warnings (its own, then its bodies') to the query that
+ * encloses it, in the order the resolver plans the bodies: WHERE, then SELECT,
+ * ORDER BY and HAVING, each in authored order.
+ */
+const bodyWarningSinks: PlanWarning[][] = [];
+
+/**
+ * Plan a scalar subquery body with the root planner, inside its enclosing
+ * query: one allocator, the enclosing ranges in scope.
+ */
+export function planNestedSelect(
+	intent: QueryIntent,
+	model: ModelIR,
+	defaultFilters: PlanOptions['defaultFilters'],
+	scope: PlanScope & { readonly nested: NonNullable<PlanScope['nested']> },
+): ResolvedNestedSelect {
+	const report = planInScope(
+		intent,
+		model,
+		defaultFilters ? { defaultFilters } : {},
+		scope,
+	);
+	bodyWarningSinks.at(-1)?.push(...report.warnings);
+	if (!report.execution)
+		throw new Error('Internal error: a planned body has no execution.');
+	return {
+		execution: report.execution,
+		intent: report.executableIntent ?? report.intent,
+		decisions: report.decisions,
+		enclosing: scope.nested.enclosing,
+	};
+}
+
+/** plan() with the local sources visible to the query and, for a body, its enclosing query. */
+export function planInScope(
+	intent: QueryIntent,
+	model: ModelIR,
+	options: PlanOptions,
+	scope: PlanScope,
+): PlanReport {
 	assertNoPathRefInQueryBodies(intent);
 	const startTime = performance.now();
 
@@ -439,15 +500,21 @@ export function plan(
 				isAmbiguous: false,
 			});
 
-	const resolution = resolveReportIncludes(
-		plannedIntent,
-		state.decisions,
-		model,
-		{
+	// Bodies are planned while this query resolves; their warnings follow its own.
+	const bodyWarnings: PlanWarning[] = [];
+	bodyWarningSinks.push(bodyWarnings);
+	let resolution: ReturnType<typeof resolveReportIncludes>;
+	try {
+		resolution = resolveReportIncludes(plannedIntent, state.decisions, model, {
 			whereReservedNames: opts.whereReservedNames,
 			defaultFilters: opts.defaultFilters,
-		},
-	);
+			isLocalSource: scope.isLocalSource,
+			...(scope.nested && { nested: scope.nested }),
+		});
+	} finally {
+		bodyWarningSinks.pop();
+	}
+	state.warnings.push(...bodyWarnings);
 	const report: PlanReport = {
 		rootTable: intent.from,
 		execution: resolution.execution,
@@ -465,7 +532,8 @@ export function plan(
 		metadata,
 	};
 
-	return markPlannedReport(report);
+	// A body's execution is snapshotted once, inside its enclosing report.
+	return scope.nested ? report : markPlannedReport(report);
 }
 
 // ============================================================================

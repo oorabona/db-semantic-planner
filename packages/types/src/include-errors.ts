@@ -21,3 +21,26 @@ export class AmbiguousIncludeError extends Error {
 		this.includePath = includePath;
 	}
 }
+
+/**
+ * A construct that is meaningful in its position but whose code path does not
+ * exist yet (ADR 0010). The class builds the message; `issue` names the open
+ * issue that tracks the missing path.
+ */
+export class NotYetSupportedError extends Error {
+	readonly construct: string;
+	readonly position: string;
+	readonly issue: number;
+
+	constructor(construct: string, position: string, issue: number) {
+		if (!Number.isInteger(issue) || issue <= 0)
+			throw new TypeError(
+				'NotYetSupportedError requires the positive integer number of an open issue.',
+			);
+		super(`${construct} in a ${position} is not supported yet (#${issue}).`);
+		this.name = 'NotYetSupportedError';
+		this.construct = construct;
+		this.position = position;
+		this.issue = issue;
+	}
+}

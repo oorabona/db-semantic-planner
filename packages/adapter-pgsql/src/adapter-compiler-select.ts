@@ -71,7 +71,11 @@ import {
 	resolveRelationTarget,
 } from './relation-target-projection.js';
 import { compileResolvedCondition } from './resolved-condition-compiler.js';
-import { queryLocal, resolveDeclaredIdentifier } from './sql-identifier.js';
+import {
+	identifierText,
+	queryLocal,
+	resolveDeclaredIdentifier,
+} from './sql-identifier.js';
 import { stableJson } from './transition/stable-json.js';
 
 /** Exact source/key duplicates have one SQL projection, including at the root. */
@@ -1059,6 +1063,7 @@ export function compileSelectEnvelope<T = unknown>(
 	plan: PlanReport,
 	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
+	nested?: NestedSelectScope,
 ): ProjectionEnvelope<T> {
 	// schemaName precedence (options > adapter ctor) is resolved in PgAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const schemaName = deps.schemaName;
@@ -1112,6 +1117,7 @@ export function compileSelectEnvelope<T = unknown>(
 		...(resolvedModelForCompiler != null && {
 			model: resolvedModelForCompiler,
 		}),
+		compileNestedSelect: nestedSelectCompiler(options, deps),
 	};
 
 	const expressionConditions = plan.execution?.expressionConditions?.map(
@@ -1322,6 +1328,11 @@ export function compileSelectEnvelope<T = unknown>(
 				),
 			}),
 			...(execIntent.having && { rawHaving: execIntent.having }),
+			...(nested?.rootAlias !== undefined && { rootAlias: nested.rootAlias }),
+			...(nested && {
+				enclosingRanges: nested.enclosingRanges,
+				enclosingQualifiers: nested.enclosingQualifiers,
+			}),
 		};
 		if (resolvedWhere)
 			simplifiedPlan = {
@@ -1340,6 +1351,8 @@ export function compileSelectEnvelope<T = unknown>(
 	}
 
 	const result = compilePlan(simplifiedPlan, compilerOptions);
+	if (nested)
+		assertScalarBodyArity(result.ast, plan.rootTable, resolvedModelForCompiler);
 	const baseEnv = fromAstProjection<T>({
 		sql: result.sql,
 		parameters: result.parameters,
@@ -1395,7 +1408,7 @@ function payloadsByNodeId(
 	return result;
 }
 
-/** Rebind frozen resolved bodies to authored expression objects by their planning path. */
+/** Rebind resolved nested selects to authored expression objects by their planning path. */
 function bindExpressionSubqueries(
 	intent: QueryIntent,
 	entries: NonNullable<SelectExecution['expressionSubqueries']>,
@@ -1407,9 +1420,140 @@ function bindExpressionSubqueries(
 			throw new Error(`Missing expression subquery at ${entry.intentPath}`);
 		return {
 			expression: node as import('@dbsp/types').ExpressionIntent,
-			body: entry.body,
+			select: entry.select,
 		};
 	});
+}
+
+/** How a nested select sits in its enclosing statement. */
+export interface NestedSelectScope {
+	/** Set when core's alias for the body differs from its table name. */
+	readonly rootAlias?: string;
+	/** The enclosing queries' ranges, innermost first. */
+	readonly enclosingRanges: NonNullable<
+		CompilerContext['enclosingRanges']
+	> /** The emitted qualifier of each enclosing root range, by its core alias. */;
+	readonly enclosingQualifiers: ReadonlyMap<string, string>;
+}
+
+/**
+ * Compile core's nested select of a scalar subquery body with the root select
+ * compiler, in the enclosing context: its alias, the enclosing ranges, the
+ * same dependencies. Its parameters are numbered from $1.
+ */
+export function nestedSelectCompiler(
+	options: CompileOptions | undefined,
+	deps: AdapterCompilerDeps,
+): NonNullable<CompilerContext['compileNestedSelect']> {
+	return (select, parent) => {
+		const range = select.execution.rootRange;
+		// In a nested select, an outerRef names a range by its core alias; a root
+		// whose alias is its table name is emitted under its table identifier.
+		const enclosingQualifiers = new Map(parent.enclosingQualifiers ?? []);
+		const parentRoot = parent.rootRangeAlias ?? parent.rootTable;
+		enclosingQualifiers.set(
+			parentRoot,
+			parent.currentAlias !== undefined && parent.currentAlias !== parentRoot
+				? parent.currentAlias
+				: identifierText(
+						declaredRelationBindingFor(parent.scope, parent.rootTable)
+							?.qualifier ?? queryLocal(parentRoot),
+					),
+		);
+		// The body's own root, which a condition body inside it may correlate to.
+		enclosingQualifiers.set(
+			range.alias,
+			range.alias !== range.table
+				? range.alias
+				: identifierText(
+						resolveDeclaredIdentifier(
+							deps.declaredNames,
+							deps.dbCasing ?? 'preserve',
+							{ kind: 'table', table: range.table },
+						),
+					),
+		);
+		// Core binds every outerRef of the body itself (WHERE, and each HAVING,
+		// CASE WHEN or FILTER condition that holds one). These scopes, core's,
+		// serve a body below it that keeps the adapter's route (a query-local
+		// source); a binding the parent already established is reused.
+		const known = [
+			...(parent.queryRanges ?? []),
+			...(parent.enclosingRanges ?? []).flat(),
+			...(parent.scope?.bindings.values() ?? []),
+		];
+		const enclosingRanges = select.enclosing.map((scope) =>
+			scope.map((enclosingRange) => {
+				const emitted =
+					enclosingQualifiers.get(enclosingRange.alias) ?? enclosingRange.alias;
+				return (
+					known.find(
+						(binding) => identifierText(binding.qualifier) === emitted,
+					) ??
+					relationBinding({
+						qualifier: queryLocal(emitted),
+						kind: 'declared-table',
+						logicalTable: enclosingRange.table,
+					})
+				);
+			}),
+		);
+		const envelope = compileSelectEnvelope(
+			markPlannedReport({
+				rootTable: select.intent.from,
+				decisions: select.decisions,
+				warnings: [],
+				ctes: [],
+				intent: select.intent,
+				execution: select.execution,
+				metadata: {
+					planningTimeMs: 0,
+					relationsAnalyzed: 0,
+					isAmbiguous: false,
+				},
+			}),
+			options,
+			deps,
+			{
+				...(range.alias !== range.table && { rootAlias: range.alias }),
+				enclosingRanges,
+				enclosingQualifiers,
+			},
+		);
+		if (envelope.ast === undefined)
+			throw new Error('A nested select produced no AST.');
+		return { ast: envelope.ast, parameters: envelope.parameters };
+	};
+}
+
+/**
+ * A scalar subquery yields one value: the target list the nested select
+ * emits holds one column. A star stands for every column of the body's table
+ * in the model (a body has no join); existsWrap emits one EXISTS target.
+ */
+function assertScalarBodyArity(
+	ast: Node,
+	table: string,
+	model: ModelIR | undefined,
+): void {
+	const targets =
+		(ast as { SelectStmt?: { targetList?: readonly unknown[] } }).SelectStmt
+			?.targetList ?? [];
+	const star = model?.getTable(table)?.columns.length ?? 1;
+	const columns = targets.reduce<number>((n, target) => {
+		const fields = (
+			target as { ResTarget?: { val?: { ColumnRef?: { fields?: unknown } } } }
+		).ResTarget?.val?.ColumnRef?.fields;
+		const last = Array.isArray(fields) ? fields.at(-1) : undefined;
+		return (
+			n +
+			(last !== null && typeof last === 'object' && 'A_Star' in last ? star : 1)
+		);
+	}, 0);
+	if (columns !== 1)
+		throw new Error(
+			`scalar subquery body projects ${columns} columns; a scalar subquery yields one value.`,
+		);
 }
 
 function planningNodeAtPath(intent: unknown, path: string): unknown {

@@ -54,7 +54,7 @@ for (const [name, predicate, tail] of [
 	[
 		'expression',
 		fn('abs', body.asExpr('value')).gt(0),
-		'abs((SELECT "fooBar_sq".id FROM foo_bar AS "fooBar_sq")) > $1',
+		'abs((SELECT "fooBar_1".id FROM foo_bar AS "fooBar_1")) > $1',
 	],
 ] as const) {
 	it(`${name} FROM resolves the physical table beneath an outer alias`, () => {

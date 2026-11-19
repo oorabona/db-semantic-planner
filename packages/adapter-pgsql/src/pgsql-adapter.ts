@@ -1,6 +1,7 @@
 import {
 	copyDefaultFilters,
 	getRelationalReadPlan,
+	planInScope,
 	resolveReportIncludes,
 	validateRecursiveSetOperation,
 } from '@dbsp/core/internal';
@@ -108,6 +109,7 @@ import {
 	type BindingNameRegistry,
 	emittedBindName,
 	hasBindingName,
+	localSourcePredicate,
 	type QueryScope,
 	relationBindingFor,
 } from './binding-registry.js';
@@ -2243,10 +2245,12 @@ export function createNqlBindingSelectPlan(
 	query: QueryIntent,
 	model: ModelIR | undefined,
 	defaultFilters?: CompileOptions['defaultFilters'],
+	isLocalSource?: (name: string) => boolean,
 ): PlanReport {
 	const resolution = resolveReportIncludes(query, [], model, {
 		...(defaultFilters && { defaultFilters }),
 		skipRootDefaultFilter: true,
+		isLocalSource,
 	});
 	return markPlannedReport({
 		rootTable: query.from,
@@ -3161,6 +3165,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 				bindingProjections,
 			);
 			const queryFromBinding = hasBindingName(bindingNames, bundle.query.from);
+			const isLocalSource = localSourcePredicate(bindingNames, deps.scope);
 			const scanFilters = options?.defaultFilters
 				? copyDefaultFilters(
 						options.defaultFilters,
@@ -3174,14 +3179,20 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 							bundle.query as QueryIntent,
 							deps.model,
 							scanFilters,
+							isLocalSource,
 						)
-					: planFn(bundle.query, this.requireNqlCompileModel(options), {
-							...(scanFilters && {
-								defaultFilters: scanFilters,
-							}),
-							dialectCapabilities:
-								options?.dialectCapabilities ?? this.dialectCapabilities,
-						}));
+					: planInScope(
+							bundle.query,
+							this.requireNqlCompileModel(options),
+							{
+								...(scanFilters && {
+									defaultFilters: scanFilters,
+								}),
+								dialectCapabilities:
+									options?.dialectCapabilities ?? this.dialectCapabilities,
+							},
+							{ isLocalSource },
+						));
 			const compiled = compileSelectEnvelope<T>(planReport, options, deps);
 			const registeredSource = getNqlBindingProjection(
 				bindingProjections,
@@ -3854,18 +3865,29 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 				bindingProjections,
 			);
 			const queryFromBinding = hasBindingName(bindingNames, query.from);
+			const isLocalSource = localSourcePredicate(bindingNames, deps.scope);
 			const issuedPlan = getRelationalReadPlan(query, queryFromBinding);
 			const planReport =
 				issuedPlan ??
 				(queryFromBinding
-					? createNqlBindingSelectPlan(query, model, options?.defaultFilters)
-					: planFn(query, model, {
-							...(options?.defaultFilters && {
-								defaultFilters: options.defaultFilters,
-							}),
-							dialectCapabilities:
-								options?.dialectCapabilities ?? this.dialectCapabilities,
-						}));
+					? createNqlBindingSelectPlan(
+							query,
+							model,
+							options?.defaultFilters,
+							isLocalSource,
+						)
+					: planInScope(
+							query,
+							model,
+							{
+								...(options?.defaultFilters && {
+									defaultFilters: options.defaultFilters,
+								}),
+								dialectCapabilities:
+									options?.dialectCapabilities ?? this.dialectCapabilities,
+							},
+							{ isLocalSource },
+						));
 			const compiled = compileSelectEnvelope(planReport, leafOptions, deps);
 			const registeredSource = getNqlBindingProjection(
 				bindingProjections,

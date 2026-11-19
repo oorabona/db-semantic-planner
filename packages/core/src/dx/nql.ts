@@ -69,7 +69,7 @@ import type {
 } from '../intent-ast.js';
 import type { ModelIR, RelationIR } from '../model-ir.js';
 import type { PlanDecision, PlanReport } from '../planner.js';
-import { plan as executePlan } from '../planner.js';
+import { plan as executePlan, planInScope } from '../planner.js';
 import { ExecutionError } from './errors.js';
 import type {
 	HookErrorHandler,
@@ -742,6 +742,7 @@ export function createBindingFinalPlan(
 			defaultFilters: queryLocalDefaultFilters(bundle, defaultFilters),
 		}),
 		skipRootDefaultFilter: true,
+		isLocalSource: localSources(bundle),
 	});
 	return markPlannedReport({
 		rootTable: intent.from,
@@ -816,6 +817,11 @@ function createNqlStatementBundle(
 	};
 }
 
+/** A binding of the bundle wins over a model table of the same name. */
+function localSources(bundle: CompiledNqlQuery): (name: string) => boolean {
+	return (name) => bundle.bindings?.has(name) ?? false;
+}
+
 /** Binding bodies retain physical filters; their consumers see derived ranges. */
 function queryLocalDefaultFilters(
 	bundle: CompiledNqlQuery,
@@ -840,15 +846,20 @@ export function compileNqlRead<T = unknown>(
 				adapter?.dialectCapabilities,
 				options?.defaultFilters,
 			)
-		: executePlan(bundle.query, model, {
-				...(options?.defaultFilters && {
-					defaultFilters: queryLocalDefaultFilters(
-						bundle,
-						options.defaultFilters,
-					),
-				}),
-				...(adapter && { dialectCapabilities: adapter.dialectCapabilities }),
-			});
+		: planInScope(
+				bundle.query,
+				model,
+				{
+					...(options?.defaultFilters && {
+						defaultFilters: queryLocalDefaultFilters(
+							bundle,
+							options.defaultFilters,
+						),
+					}),
+					...(adapter && { dialectCapabilities: adapter.dialectCapabilities }),
+				},
+				{ isLocalSource: localSources(bundle) },
+			);
 	const finalStep = createNqlProgramSteps({
 		kind: 'query',
 		bundle,
@@ -1694,17 +1705,22 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		if (compiled.kind === 'unplannedRead') {
 			throw new Error(UNPLANNED_NQL_READ_PLAN_ERROR);
 		}
-		return executePlan(compiled.intent, this.model, {
-			...(this.defaultFilters && {
-				defaultFilters: queryLocalDefaultFilters(
-					compiled.bundle,
-					this.defaultFilters,
-				),
-			}),
-			...(this.adapter && {
-				dialectCapabilities: this.adapter.dialectCapabilities,
-			}),
-		});
+		return planInScope(
+			compiled.intent,
+			this.model,
+			{
+				...(this.defaultFilters && {
+					defaultFilters: queryLocalDefaultFilters(
+						compiled.bundle,
+						this.defaultFilters,
+					),
+				}),
+				...(this.adapter && {
+					dialectCapabilities: this.adapter.dialectCapabilities,
+				}),
+			},
+			{ isLocalSource: localSources(compiled.bundle) },
+		);
 	}
 
 	plan(): PlanReport {

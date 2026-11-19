@@ -95,6 +95,8 @@ export {
 } from './path-ref-scan.js';
 export {
 	normalizeRecursiveIncludeOptions,
+	type PlanScope,
+	planInScope,
 	type RecursivePlanReport,
 	validateIncludeInput,
 	validateIncludeOptions,

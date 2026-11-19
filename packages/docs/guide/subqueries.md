@@ -70,14 +70,14 @@ orm.select('symbols')
       .asExpr('callCount'),
   ])
   .dump();
-// SQL: SELECT "id", "name",
-//   (SELECT COUNT(*) FROM "calls" AS "calls") AS "callCount"
-// FROM "symbols"
+// SQL: SELECT symbols.id, symbols.name,
+//   (SELECT count(*) FROM calls) AS "callCount"
+// FROM symbols
 ```
 
 `.asExpr('alias')` wraps the `SubqueryExpression` as an `ExpressionSpec` for use in `.columns([...])`. Source: `packages/core/src/dx/subquery-builder.ts:175`.
 
-SELECT-expression subqueries, including those nested in `op(...)`, support `outerRef()` in their WHERE body. Unqualified references bind the immediately enclosing query; qualified references search enclosing queries nearest first: in each query, a written include key wins, then an exact emitted qualifier, otherwise the logical table must have exactly one range. Ambiguous logical tables are refused. A FROM-less `compileSelectExpression()` can correlate nested subqueries to their enclosing subquery, but has no outer table of its own. An `outerRef()` (qualified or unqualified) in its immediate subquery body is refused with `outerRef() requires an enclosing query range.`; it never binds that subquery's own range.
+SELECT-expression subqueries, including those nested in `op(...)`, support `outerRef()` in their WHERE and HAVING. Unqualified references bind the immediately enclosing query; qualified references search enclosing queries nearest first: in each query, a written include key wins, then an exact emitted qualifier, otherwise the logical table must have exactly one range. Ambiguous logical tables are refused. A FROM-less `compileSelectExpression()` can correlate nested subqueries to their enclosing subquery, but has no outer table of its own. An `outerRef()` (qualified or unqualified) in its immediate subquery body is refused with `outerRef() requires an enclosing query range.`; it never binds that subquery's own range.
 
 Aggregate methods available on `SubqueryBuilder`:
 
@@ -180,6 +180,22 @@ A `SubqueryBuilder` or `SubqueryExpression` has no `.all()` or `.execute()` meth
 
 ## Planning refusals
 
-Bodies reached from the root WHERE carry their own resolved ranges and share the query's allocator. Unsupported options refuse at `plan()` with the existing compilation message. `rawExists()` / `rawNotExists()` reject ORDER BY and LIMIT; scalar-comparison bodies retain supported field ordering and LIMIT. Legacy direct scalar bodies outside this route retain their ORDER BY/LIMIT refusals. IN bodies require one named projected column and reject aggregate SELECT, GROUP BY, HAVING, OFFSET, DISTINCT ON, locks and other unsupported structural modifiers. Scalar subqueries used as expressions keep their supported projection, ordering and limit options.
+Bodies reached from the root WHERE carry their own resolved ranges and share the query's allocator. Unsupported options refuse at `plan()` with the existing compilation message. `rawExists()` / `rawNotExists()` reject ORDER BY and LIMIT; scalar-comparison bodies retain supported field ordering and LIMIT. Legacy direct scalar bodies outside this route retain their ORDER BY/LIMIT refusals. IN bodies require one named projected column and reject aggregate SELECT, GROUP BY, HAVING, OFFSET, DISTINCT ON, locks and other unsupported structural modifiers.
+
+### Scalar subqueries used as expressions
+
+With a model, a scalar subquery used as a value — in `.columns()`, `.orderBy()`, a HAVING operand, a WHERE expression, or inside `fn`, `op`, CASE or FILTER — is planned as a nested select by the same resolver as a root query, inside its enclosing query:
+
+- Its GROUP BY, HAVING, DISTINCT, DISTINCT ON, ORDER BY, LIMIT, OFFSET, expression projections and lock compile as they do at the root, and its SQL is the root SQL of the same query apart from its alias and the `outerRef()` correlation.
+- Its default filter applies once, first in its WHERE, as at the root. A body built with its own policy (`buildSubqueryIntent()`, `withoutDefaultFilters()`) keeps it; in a mutation WHERE, a body without its own policy is not filtered.
+- Its alias is its table name when no range of the statement uses that name, otherwise `<table>_1`, `<table>_2`… (cut to 63 bytes).
+- Its plan warnings, raw SQL included, follow the enclosing query's own warnings in that query's `PlanReport.warnings`. A body in a mutation WHERE or in a recursive `start.where` has no such report, so its warnings are not surfaced.
+- A body that projects more than one column is refused: `scalar subquery body projects <n> columns; a scalar subquery yields one value.` The count reads the columns the body's SQL selects: a star, which an absent or empty projection selects, counts as every column of the body's table; duplicate columns count once.
+- An `include()` that hydrates nested objects is refused: `include('<relation>') in a scalar subquery body hydrates nested objects; a scalar subquery yields one value.`
+- A flat include (#1030), a `batchValuesSource` (#1031) and a join (#1039) are not supported yet: they throw `NotYetSupportedError`, whose `issue` field names the issue.
+- A body whose FROM names an NQL binding or a CTE keeps the adapter's route, with every body below it. Such a subtree that scans a table with a default filter, or carries a builder policy, throws `NotYetSupportedError` (#1040).
+- Inside a body planned as a nested select, such a body in a column, ORDER BY or HAVING expression throws `NotYetSupportedError` when it, or a body below it, holds a qualified `outerRef()`: `a qualified outerRef() in a local-source subquery body is not supported yet (#1040).` An unqualified `outerRef()` there binds the immediately enclosing query. In a WHERE, or in a condition holding an `outerRef()` of its own or naming a HAVING aggregate alias, core binds both forms.
+
+Without a model, the adapter compiles a scalar subquery body from its intent, and the rules above do not apply.
 
 Compilation follows [Authored intent and execution authority](./observability.md#authored-intent-and-execution-authority).

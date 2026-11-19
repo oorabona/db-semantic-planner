@@ -1,5 +1,6 @@
 import {
 	getRelationalReadPlan,
+	planInScope,
 	resolveReportIncludes,
 } from '@dbsp/core/internal';
 import { markPlannedReport } from '@dbsp/types/internal';
@@ -20,7 +21,6 @@ import { compileResolvedCondition } from './resolved-condition-compiler.js';
  * @internal
  */
 
-import { plan as planFn } from '@dbsp/core';
 import type {
 	CompiledQuery,
 	CompileOptions,
@@ -37,7 +37,10 @@ import type {
 } from '@dbsp/types';
 import type { Node, SelectStmt } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
-import { compileSelectEnvelope } from './adapter-compiler-select.js';
+import {
+	compileSelectEnvelope,
+	nestedSelectCompiler,
+} from './adapter-compiler-select.js';
 import {
 	binaryExpr,
 	funcCall,
@@ -48,6 +51,7 @@ import {
 import {
 	emittedBindName,
 	hasBindingName,
+	localSourcePredicate,
 	relationBinding,
 	withBindingName,
 	withRelationBinding,
@@ -108,10 +112,12 @@ export function createPlanReportForQuery(
 	query: QueryIntent,
 	model: ModelIR | undefined,
 	defaultFilters?: CompileOptions['defaultFilters'],
+	isLocalSource?: (name: string) => boolean,
 ): PlanReport {
 	const resolution = resolveReportIncludes(query, [], model, {
 		...(defaultFilters && { defaultFilters }),
 		skipRootDefaultFilter: true,
+		isLocalSource,
 	});
 	return markPlannedReport({
 		rootTable: query.from,
@@ -138,23 +144,39 @@ function createPlanReportForCteQuery(
 ): PlanReport {
 	const queryLocalSource =
 		hasRegisteredSource || hasBindingName(deps.bindingNames, query.from);
+	const isLocalSource = localSourcePredicate(deps.bindingNames, deps.scope);
 	const issued = getRelationalReadPlan(query, queryLocalSource);
 	if (issued) return issued;
 	if (queryLocalSource) {
-		return createPlanReportForQuery(query, deps.model, deps.defaultFilters);
+		return createPlanReportForQuery(
+			query,
+			deps.model,
+			deps.defaultFilters,
+			isLocalSource,
+		);
 	}
 	if (
 		deps.model === undefined ||
 		deps.model.getTable(query.from) === undefined
 	) {
-		return createPlanReportForQuery(query, deps.model, deps.defaultFilters);
+		return createPlanReportForQuery(
+			query,
+			deps.model,
+			deps.defaultFilters,
+			isLocalSource,
+		);
 	}
-	return planFn(query, deps.model, {
-		...(deps.defaultFilters && { defaultFilters: deps.defaultFilters }),
-		...(deps.dialectCapabilities !== undefined && {
-			dialectCapabilities: deps.dialectCapabilities,
-		}),
-	});
+	return planInScope(
+		query,
+		deps.model,
+		{
+			...(deps.defaultFilters && { defaultFilters: deps.defaultFilters }),
+			...(deps.dialectCapabilities !== undefined && {
+				dialectCapabilities: deps.dialectCapabilities,
+			}),
+		},
+		{ isLocalSource },
+	);
 }
 
 function dbOutputKey(name: string): string {
@@ -375,7 +397,7 @@ function rehomeQueryEnvelope(
 export function compileRecursive<T = unknown>(
 	report: RecursivePlanReport,
 	model: ModelIR,
-	_options: CompileOptions | undefined,
+	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery<T> {
 	// schemaName precedence (options > adapter ctor) is resolved in PgAdapter.buildCompileDeps; deps.schemaName is authoritative here
@@ -466,6 +488,7 @@ export function compileRecursive<T = unknown>(
 			maxRecursiveDepth: intent.maxDepth,
 			compileCustomFnFilter: buildCustomFnFilter,
 			createWhereDispatcher: () => createWhereDispatcher(compileWhereIntent),
+			compileNestedSelect: nestedSelectCompiler(options, deps),
 		} as CompilerContext;
 
 		// Get columns to select
@@ -574,6 +597,7 @@ export function compileRecursive<T = unknown>(
 			maxRecursiveDepth: intent.maxDepth,
 			compileCustomFnFilter: buildCustomFnFilter,
 			createWhereDispatcher: () => createWhereDispatcher(compileWhereIntent),
+			compileNestedSelect: nestedSelectCompiler(options, deps),
 		} as CompilerContext;
 
 		const startSelect = intent.start.select ?? [];

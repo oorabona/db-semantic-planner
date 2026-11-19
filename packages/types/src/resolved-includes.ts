@@ -174,14 +174,27 @@ export interface SelectExecution {
 	}[];
 	readonly expressionSubqueries?: readonly {
 		readonly intentPath: string;
-		readonly body: Extract<
-			import('./resolved-conditions.js').ResolvedSubqueryBody,
-			{ use: 'scalar' }
-		>;
+		readonly select: ResolvedNestedSelect;
 	}[];
 	readonly where?: ResolvedCondition;
 	readonly rootRange: ResolvedRange;
 	/** Ordered joins: each ON sees the root, every join at a lower index, and itself. */
 	readonly joins: readonly ResolvedJoin[];
 	readonly includes: readonly ResolvedIncludeNode[];
+}
+/**
+ * A query nested in an expression position (a scalar subquery body), resolved
+ * by the root resolver with the enclosing query's ranges in scope. The adapter
+ * compiles it with the root select compiler.
+ */
+export interface ResolvedNestedSelect {
+	readonly execution: SelectExecution;
+	/** The intent the adapter compiles, with per-occurrence copies. */
+	readonly intent: import('./intent-ast.js').QueryIntent;
+	readonly decisions: readonly import('./planner.js').PlanDecision[];
+	/**
+	 * The enclosing queries' ranges, innermost first, as core bound the body: an
+	 * unqualified outerRef() names the first range of the first scope.
+	 */
+	readonly enclosing: readonly (readonly ResolvedRange[])[];
 }

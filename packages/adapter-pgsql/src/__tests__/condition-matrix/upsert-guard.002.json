@@ -698,7 +698,7 @@
 			"position": "upsert-guard",
 			"kind": "expression-scalar-subquery",
 			"shape": "leaf",
-			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = $3 WHERE (SELECT posts.score FROM posts AS posts WHERE posts.score = $4 ORDER BY posts.score DESC LIMIT 1) > $5",
+			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = $3 WHERE (SELECT posts.score FROM posts WHERE posts.score = $4 ORDER BY posts.score DESC LIMIT 1) > $5",
 			"params": [1, 43, 47, 59, 67],
 			"error": null
 		},
@@ -706,7 +706,7 @@
 			"position": "upsert-guard",
 			"kind": "expression-scalar-subquery",
 			"shape": "and",
-			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = $3 WHERE (SELECT posts.score FROM posts AS posts WHERE posts.score = $4 ORDER BY posts.score DESC LIMIT 1) > $5 AND users.score = $6",
+			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = $3 WHERE (SELECT posts.score FROM posts WHERE posts.score = $4 ORDER BY posts.score DESC LIMIT 1) > $5 AND users.score = $6",
 			"params": [1, 43, 47, 59, 67, 13],
 			"error": null
 		},
@@ -714,7 +714,7 @@
 			"position": "upsert-guard",
 			"kind": "expression-scalar-subquery",
 			"shape": "or",
-			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = $3 WHERE (SELECT posts.score FROM posts AS posts WHERE posts.score = $4 ORDER BY posts.score DESC LIMIT 1) > $5 OR users.score = $6",
+			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = $3 WHERE (SELECT posts.score FROM posts WHERE posts.score = $4 ORDER BY posts.score DESC LIMIT 1) > $5 OR users.score = $6",
 			"params": [1, 43, 47, 59, 67, 13],
 			"error": null
 		},
@@ -722,7 +722,7 @@
 			"position": "upsert-guard",
 			"kind": "expression-scalar-subquery",
 			"shape": "not",
-			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = $3 WHERE NOT ((SELECT posts.score FROM posts AS posts WHERE posts.score = $4 ORDER BY posts.score DESC LIMIT 1) > $5)",
+			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = $3 WHERE NOT ((SELECT posts.score FROM posts WHERE posts.score = $4 ORDER BY posts.score DESC LIMIT 1) > $5)",
 			"params": [1, 43, 47, 59, 67],
 			"error": null
 		},
@@ -730,7 +730,7 @@
 			"position": "upsert-guard",
 			"kind": "expression-scalar-subquery",
 			"shape": "two-level",
-			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = $3 WHERE users.score = $4 AND (NOT ((SELECT posts.score FROM posts AS posts WHERE posts.score = $5 ORDER BY posts.score DESC LIMIT 1) > $6) OR users.score = $7)",
+			"sql": "INSERT INTO users (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = $3 WHERE users.score = $4 AND (NOT ((SELECT posts.score FROM posts WHERE posts.score = $5 ORDER BY posts.score DESC LIMIT 1) > $6) OR users.score = $7)",
 			"params": [1, 43, 47, 13, 59, 67, 17],
 			"error": null
 		},

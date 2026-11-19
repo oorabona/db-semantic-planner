@@ -188,6 +188,15 @@ export function buildCustomFnFilter(
 			deriveFkColumnName: ctx.deriveFkColumnName,
 		}),
 		compileExpressionSubquery: ctx.compileSubquery,
+		...(ctx.compileNestedSelect !== undefined && {
+			compileNestedSelect: ctx.compileNestedSelect,
+		}),
+		...(ctx.enclosingQualifiers !== undefined && {
+			enclosingQualifiers: ctx.enclosingQualifiers,
+		}),
+		...(ctx.rootRangeAlias !== undefined && {
+			rootRangeAlias: ctx.rootRangeAlias,
+		}),
 		paramState: state,
 		...(ctx.model !== undefined && { model: ctx.model }),
 		...(ctx.declaredNames !== undefined && {

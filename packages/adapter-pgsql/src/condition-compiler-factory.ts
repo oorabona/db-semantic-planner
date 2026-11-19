@@ -327,6 +327,15 @@ export function createConditionCompiler(
 			defaultPkColumnName: ctx.defaultPkColumnName,
 			deriveFkColumnName: ctx.deriveFkColumnName,
 			compileSubquery: ctx.compileExpressionSubquery,
+			...(ctx.compileNestedSelect !== undefined && {
+				compileNestedSelect: ctx.compileNestedSelect,
+			}),
+			...(ctx.enclosingQualifiers !== undefined && {
+				enclosingQualifiers: ctx.enclosingQualifiers,
+			}),
+			...(ctx.rootRangeAlias !== undefined && {
+				rootRangeAlias: ctx.rootRangeAlias,
+			}),
 			...(ctx.resolvedConditions && {
 				resolvedConditions: ctx.resolvedConditions,
 			}),

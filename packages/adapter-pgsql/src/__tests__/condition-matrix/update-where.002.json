@@ -678,7 +678,7 @@
 			"position": "update-where",
 			"kind": "expression-scalar-subquery",
 			"shape": "leaf",
-			"sql": "UPDATE users SET score = $1 WHERE (SELECT posts.score FROM posts AS posts WHERE posts.score = $2 ORDER BY posts.score DESC LIMIT 1) > $3",
+			"sql": "UPDATE users SET score = $1 WHERE (SELECT posts.score FROM posts WHERE posts.score = $2 ORDER BY posts.score DESC LIMIT 1) > $3",
 			"params": [41, 59, 67],
 			"error": null
 		},
@@ -686,7 +686,7 @@
 			"position": "update-where",
 			"kind": "expression-scalar-subquery",
 			"shape": "and",
-			"sql": "UPDATE users SET score = $1 WHERE (SELECT posts.score FROM posts AS posts WHERE posts.score = $2 ORDER BY posts.score DESC LIMIT 1) > $3 AND users.score = $4",
+			"sql": "UPDATE users SET score = $1 WHERE (SELECT posts.score FROM posts WHERE posts.score = $2 ORDER BY posts.score DESC LIMIT 1) > $3 AND users.score = $4",
 			"params": [41, 59, 67, 13],
 			"error": null
 		},
@@ -694,7 +694,7 @@
 			"position": "update-where",
 			"kind": "expression-scalar-subquery",
 			"shape": "or",
-			"sql": "UPDATE users SET score = $1 WHERE (SELECT posts.score FROM posts AS posts WHERE posts.score = $2 ORDER BY posts.score DESC LIMIT 1) > $3 OR users.score = $4",
+			"sql": "UPDATE users SET score = $1 WHERE (SELECT posts.score FROM posts WHERE posts.score = $2 ORDER BY posts.score DESC LIMIT 1) > $3 OR users.score = $4",
 			"params": [41, 59, 67, 13],
 			"error": null
 		},
@@ -702,7 +702,7 @@
 			"position": "update-where",
 			"kind": "expression-scalar-subquery",
 			"shape": "not",
-			"sql": "UPDATE users SET score = $1 WHERE NOT ((SELECT posts.score FROM posts AS posts WHERE posts.score = $2 ORDER BY posts.score DESC LIMIT 1) > $3)",
+			"sql": "UPDATE users SET score = $1 WHERE NOT ((SELECT posts.score FROM posts WHERE posts.score = $2 ORDER BY posts.score DESC LIMIT 1) > $3)",
 			"params": [41, 59, 67],
 			"error": null
 		},
@@ -710,7 +710,7 @@
 			"position": "update-where",
 			"kind": "expression-scalar-subquery",
 			"shape": "two-level",
-			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT ((SELECT posts.score FROM posts AS posts WHERE posts.score = $3 ORDER BY posts.score DESC LIMIT 1) > $4) OR users.score = $5)",
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT ((SELECT posts.score FROM posts WHERE posts.score = $3 ORDER BY posts.score DESC LIMIT 1) > $4) OR users.score = $5)",
 			"params": [41, 13, 59, 67, 17],
 			"error": null
 		},

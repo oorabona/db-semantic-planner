@@ -761,7 +761,7 @@ describe('start.where resolves through core (#891 slice 4)', () => {
 		} as WhereIntent);
 		expect(result.sql).toBe(
 			sql(
-				'(SELECT posts.score FROM posts AS posts WHERE posts.score = $1 AND posts."deletedAt" IS NULL ORDER BY posts.score DESC LIMIT 1) > $2',
+				'(SELECT posts.score FROM posts WHERE posts."deletedAt" IS NULL AND posts.score = $1 ORDER BY posts.score DESC LIMIT 1) > $2',
 				true,
 				true,
 			),

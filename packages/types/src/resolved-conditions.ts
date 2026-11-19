@@ -49,6 +49,12 @@ export type ResolvedExpression =
 	  }
 	| {
 			readonly kind: 'subquery';
+			/** A body on a model table, with a model: the root resolver's nested select. */
+			readonly select: import('./resolved-includes.js').ResolvedNestedSelect;
+	  }
+	| {
+			readonly kind: 'subquery';
+			/** A body on a query-local source, or resolved without a model. */
 			readonly body: Extract<ResolvedSubqueryBody, { use: 'scalar' }>;
 	  }
 	| {

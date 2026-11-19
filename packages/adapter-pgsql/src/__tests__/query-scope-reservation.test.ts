@@ -55,7 +55,7 @@ for (const nested of [false, true]) {
 				.asExpr('n');
 			const expr = nested ? op('+', sub, literal(1)) : sub;
 			const innerSql =
-				'(SELECT count(*) FROM calls AS calls WHERE calls."symbolId" = symbols.id)';
+				'(SELECT count(*) FROM calls WHERE calls."symbolId" = symbols.id)';
 			const result =
 				entry === 'compileSelectExpression'
 					? createPgCompileOnlyAdapter({
@@ -128,6 +128,6 @@ it('preserves exact SQL for distinct qualifiers and an uncorrelated SELECT expre
 		.join('symbols', { as: 's', on: eq('files.id', ref('s.id')) })
 		.dump();
 	expect(result.sql).toBe(
-		'SELECT uses.id, (SELECT count(*) FROM calls AS calls) AS "callCount" FROM uses JOIN files AS files ON uses.file_id = files.id JOIN symbols AS s ON files.id = s.id',
+		'SELECT uses.id, (SELECT count(*) FROM calls) AS "callCount" FROM uses JOIN files AS files ON uses.file_id = files.id JOIN symbols AS s ON files.id = s.id',
 	);
 });

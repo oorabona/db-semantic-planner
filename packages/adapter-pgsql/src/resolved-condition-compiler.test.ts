@@ -1,4 +1,3 @@
-import { compilePlan } from '@dbsp/adapter-pgsql/internal';
 import {
 	and,
 	any,
@@ -26,7 +25,6 @@ import {
 	compileCondition,
 } from './condition-compiler.js';
 import { type CompilerContext, createCompilerState } from './handlers/types.js';
-import { intentToDecisions } from './intent-to-decisions.js';
 import { createPgCompileOnlyAdapter } from './pgsql-adapter.js';
 import { deparse } from './pgsql-deparser.js';
 import { compileResolvedCondition } from './resolved-condition-compiler.js';
@@ -110,37 +108,15 @@ describe('typed primitive and body dual compilation', () => {
 });
 
 it('dual compilation retains expression-body aggregate projection aliases', () => {
-	const allocator = new RangeAllocator();
-	const root = allocator.allocate('users', 'users');
-	allocator.reserve(root.alias);
+	// The body is a nested select compiled by the root select compiler; the
+	// legacy route no longer compiles it, so the root compile is the reference.
 	const authored = fn('abs', subquery('users').count().asExpr('n')).gt(7);
-	const resolved = resolveSelectWhere(
-		authored,
-		root,
-		[root],
-		allocator,
-		db.model,
-	)!;
-	const query = { type: 'select' as const, from: 'users' };
-	const decisions = intentToDecisions(query, 'users', {
-		omitRootWhere: true,
-		directConditions: true,
-	});
-	const legacy = compilePlan({
-		rootTable: 'users',
-		decisions,
-		directConditions: true,
-		rawWhere: authored,
-	});
-	const typed = compilePlan({
-		rootTable: 'users',
-		decisions,
-		directConditions: true,
-		resolvedWhere: resolved,
-	});
-	expect({ sql: typed.sql, params: typed.parameters }).toEqual({
-		sql: legacy.sql,
-		params: legacy.parameters,
+	const compiled = createPgCompileOnlyAdapter({ model: db.model }).compile(
+		plan({ type: 'select', from: 'users', where: authored }, db.model),
+	);
+	expect({ sql: compiled.sql, params: compiled.parameters }).toEqual({
+		sql: 'SELECT users.* FROM users WHERE abs((SELECT count(*) FROM users AS users_1)) > $1',
+		params: [7],
 	});
 });
 
@@ -171,7 +147,7 @@ it.each(['first', 'last'] as const)(
 			model: db.model,
 		});
 		expect(result.sql).toBe(
-			`SELECT users.* FROM users WHERE (SELECT users_sq.id FROM users AS users_sq ORDER BY users_sq.name ASC NULLS ${nulls.toUpperCase()} LIMIT 1) > $1`,
+			`SELECT users.* FROM users WHERE (SELECT users_1.id FROM users AS users_1 ORDER BY users_1.name ASC NULLS ${nulls.toUpperCase()} LIMIT 1) > $1`,
 		);
 		expect(result.parameters).toEqual([0]);
 	},

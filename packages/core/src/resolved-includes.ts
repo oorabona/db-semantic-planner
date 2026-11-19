@@ -3,6 +3,7 @@ import {
 	type IncludeIntent,
 	isParamIntent,
 	type ModelIR,
+	NotYetSupportedError,
 	type PlanDecision,
 	type QueryIntent,
 	RangeAllocator,
@@ -16,22 +17,75 @@ import {
 import {
 	belongsToManyJoinIncludeRefusal,
 	getTrustedNqlRelationFilterFields,
+	isFieldRef,
 	resolveDeclaredRelationKeys,
 	resolveDeclaredRelationPath,
 	resolveIncludeRelationName,
 } from '@dbsp/types/internal';
 import { singularize } from './conventions.js';
 import { getDefaultFilter } from './default-filter-map.js';
-import { findDefaultFilterScan } from './dx/default-filter-refusals.js';
 import { InvalidOperationError } from './dx/errors.js';
 import { relationJoinHops } from './dx/relation-join-path.js';
 import { isBoundPayload } from './intent-payload.js';
-import { containsRelationalReadPolicy } from './relational-read-plans.js';
 import {
 	type HavingAggregate,
 	resolveConditionContext,
 	resolveScanDefaultFilter,
 } from './resolved-conditions.js';
+import { classifyScalarBody, nextSelectBody } from './scalar-body.js';
+
+/** An outerRef() operand: a SubqueryRefIntent or an outer FieldRef. */
+function isOuterRef(value: unknown): boolean {
+	if (!value || typeof value !== 'object') return false;
+	const node = value as Record<string, unknown>;
+	return (
+		(node.kind === 'ref' && node.outer === true) ||
+		(isFieldRef(node) && node.scope === 'outer')
+	);
+}
+
+/** A condition holding an outerRef() outside any nested query body. */
+function holdsOuterRef(value: unknown): boolean {
+	if (!value || typeof value !== 'object' || isParamIntent(value)) return false;
+	if (Array.isArray(value)) return value.some(holdsOuterRef);
+	if (isOuterRef(value)) return true;
+	const node = value as Record<string, unknown>;
+	if (node.kind === 'literal' || node.kind === 'param') return false;
+	if (absorbsBody(node) || (node.kind === 'subquery' && node.query))
+		return false;
+	// A compared value is a bound payload unless it is an outerRef().
+	return dataEntries(node).some(
+		([key, child]) =>
+			isOuterRef(child) ||
+			(!isBoundPayload(node, key, child) && holdsOuterRef(child)),
+	);
+}
+
+/** A qualified outerRef() anywhere below, nested query bodies included. */
+function holdsQualifiedOuterRef(
+	value: unknown,
+	seen = new Set<object>(),
+): boolean {
+	if (!value || typeof value !== 'object' || isParamIntent(value)) return false;
+	if (seen.has(value)) return false;
+	seen.add(value);
+	if (Array.isArray(value))
+		return value.some((item) => holdsQualifiedOuterRef(item, seen));
+	if (isOuterRef(value)) {
+		const ref = value as { column?: unknown; alias?: unknown };
+		return (
+			Boolean(ref.alias) ||
+			(typeof ref.column === 'string' && ref.column.includes('.'))
+		);
+	}
+	const node = value as Record<string, unknown>;
+	if (node.kind === 'literal' || node.kind === 'param') return false;
+	return dataEntries(node).some(
+		([key, child]) =>
+			(isOuterRef(child) || !isBoundPayload(node, key, child)) &&
+			holdsQualifiedOuterRef(child, seen),
+	);
+}
 
 /** Own enumerable data properties; accessors are never invoked. */
 function dataEntries(value: object): [string, unknown][] {
@@ -335,6 +389,16 @@ export function resolveReportIncludes(
 		whereReservedNames?: readonly string[];
 		defaultPk?: string;
 		deriveFk?: (table: string, pk: string) => string;
+		/** Whether a FROM name is a visible query-local source (an NQL binding or a CTE). */
+		isLocalSource?: ((name: string) => boolean) | undefined;
+		/** A scalar subquery body: the enclosing query's allocator and ranges. */
+		nested?: {
+			readonly allocator: RangeAllocator;
+			readonly enclosing: readonly (readonly ResolvedRange[])[];
+			/** The names written for ranges of each enclosing scope, aligned with `enclosing`. */
+			readonly qualifiers: readonly ReadonlyMap<string, ResolvedRange>[];
+			readonly entryDepth: number;
+		};
 	} = {},
 ): { readonly execution: SelectExecution; readonly intent: QueryIntent } {
 	assertSupportedIncludeWhere(
@@ -345,9 +409,25 @@ export function resolveReportIncludes(
 				.map((d) => [d.context.intentPath!, d.choice]),
 		),
 	);
-	const allocator = new RangeAllocator();
-	const rootRange = allocator.bind(intent.from, intent.from);
+	const nested = options.nested;
+	const allocator = nested?.allocator ?? new RangeAllocator();
+	// A body's range is generated in its own SQL scope, after every enclosing
+	// alias and every earlier body alias was reserved.
+	const body = nested && nextSelectBody(allocator, intent.from);
+	const rootRange = body
+		? allocator.allocate(intent.from, body.alias, body.scope)
+		: allocator.bind(intent.from, intent.from);
 	allocator.reserve(rootRange.alias);
+	const enclosing = nested?.enclosing ?? [];
+	// Every resolution in a body reads the enclosing scopes core bound it in,
+	// with the names written in them: core alone binds the body's outerRefs.
+	const scopeMode = {
+		...(nested && {
+			entryDepth: nested.entryDepth,
+			outerQualifiers: nested.qualifiers,
+		}),
+		...(options.isLocalSource && { isLocalSource: options.isLocalSource }),
+	};
 	const rootDefaultFilter =
 		options.skipRootDefaultFilter || intent.batchValuesSource
 			? undefined
@@ -831,12 +911,18 @@ export function resolveReportIncludes(
 		intent.where,
 		rootRange,
 		[rootRange, ...joins.map((j) => j.range)],
-		[],
+		enclosing,
 		allocator,
 		model,
 		joins.length + includeRanges.length,
 		includeRanges,
-		{ defaultFilters: options.defaultFilters, rootDefaultFilter },
+		{
+			defaultFilters: options.defaultFilters,
+			rootDefaultFilter,
+			...scopeMode,
+			// A body's root was allocated and reserved above; it has no join or include.
+			...(nested && { rootScopeReserved: true }),
+		},
 	);
 	const rootFilterIntent = getDefaultFilter(
 		options.defaultFilters,
@@ -926,40 +1012,52 @@ export function resolveReportIncludes(
 			throw new Error(
 				`Default filter for table '${rootRange.table}' is not supported at expression.pseudoColumn.`,
 			);
-		// Issued bodies own their policy even when the enclosing map is empty.
-		// Preserve legacy lowering for bodies without an issuing builder.
+		// With a model, every body is a nested select, except one on a visible
+		// query-local source, which keeps the adapter's route with its subtree.
 		if (node.kind === 'subquery' && node.query) {
 			const query = node.query as QueryIntent;
+			if (!model) return;
 			if (
-				!model ||
-				(!containsRelationalReadPolicy(query) &&
-					!findDefaultFilterScan(
-						query,
-						model,
-						options.defaultFilters,
-						intentPath,
-					))
-			)
+				classifyScalarBody(
+					query,
+					model,
+					options.defaultFilters,
+					options.isLocalSource,
+				) === 'local'
+			) {
+				// Below a nested select, the adapter's route for a local body does
+				// not see the names written in enclosing scopes: a qualified
+				// outerRef() there is not realised yet.
+				if (nested && holdsQualifiedOuterRef(query))
+					throw new NotYetSupportedError(
+						'a qualified outerRef()',
+						'local-source subquery body',
+						1040,
+					);
+				inspected.delete(value);
 				return;
+			}
 			const resolved = resolveConditionContext(
 				{ kind: 'expression', expr: { kind: 'subquery', query } },
 				rootRange,
 				visible,
-				[],
+				enclosing,
 				allocator,
 				model,
 				0,
 				[],
-				{ defaultFilters: options.defaultFilters },
+				{ defaultFilters: options.defaultFilters, ...scopeMode },
 			);
 			if (
-				resolved?.kind === 'expression' &&
-				resolved.expression.kind === 'subquery'
+				resolved?.kind !== 'expression' ||
+				resolved.expression.kind !== 'subquery' ||
+				!('select' in resolved.expression)
 			)
-				expressionSubqueries.push({
-					intentPath,
-					body: resolved.expression.body,
-				});
+				throw new Error(`Missing nested select at ${intentPath}`);
+			expressionSubqueries.push({
+				intentPath,
+				select: resolved.expression.select,
+			});
 			inspected.delete(value);
 			return;
 		}
@@ -978,19 +1076,24 @@ export function resolveReportIncludes(
 			condition &&
 			((relationSensitive && model) ||
 				(inHaving && namesAlias(node)) ||
+				// In a body, every condition correlated by outerRef() (HAVING,
+				// CASE WHEN, FILTER, in any clause) is bound by core, the one
+				// resolver that holds the enclosing scopes and their written names.
+				(nested !== undefined && holdsOuterRef(node)) ||
 				invisibleQualifier(node, inHaving))
 		) {
 			const resolved = resolveConditionContext(
 				node as unknown as WhereIntent,
 				rootRange,
 				visible,
-				[],
+				enclosing,
 				allocator,
 				model,
 				expressionAliases.count,
 				[],
 				{
 					defaultFilters: options.defaultFilters,
+					...scopeMode,
 					label: condition,
 					aliasState: expressionAliases,
 					...(inHaving && { havingAliases }),

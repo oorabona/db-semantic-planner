@@ -363,7 +363,7 @@ it('binds expression-valued scalar subqueries at the root (#891 step 4c decision
 		})
 		.dump();
 	expect(result.sql).toBe(
-		'SELECT users.* FROM users WHERE (SELECT posts.score FROM posts AS posts) > $1',
+		'SELECT users.* FROM users WHERE (SELECT posts.score FROM posts) > $1',
 	);
 	expect(result.params).toEqual([0]);
 });
@@ -1487,7 +1487,7 @@ u | select id, case when name = 'x' then 1 else 0 end as flag`.dump() as {
 		);
 	});
 
-	it('AC19 an expressions-select scalar operand of a resolved condition gets the resolver refusal', () => {
+	it('AC19 an expressions-select scalar operand of a resolved condition compiles as a nested select (#1007)', () => {
 		const expr = () =>
 			new ExpressionRef({
 				kind: 'subquery',
@@ -1500,18 +1500,15 @@ u | select id, case when name = 'x' then 1 else 0 end as flag`.dump() as {
 					},
 				},
 			} as never);
-		const refusal =
-			'scalar subquery with expressions SELECT (not supported in scalar subquery) is not supported — it would silently change which rows match; restructure the query or use a CTE.';
-		for (const o of [plain, filtered]) {
-			expect(() =>
+		const filterSql = (o: typeof plain, field: string) =>
+			sql(
 				o
 					.select('users')
-					.columns([
-						fn('count', star()).filter(eq('users.score', expr())).as('n'),
-					])
+					.columns([fn('count', star()).filter(eq(field, expr())).as('n')])
 					.dump(),
-			).toThrow(refusal);
-			expect(() =>
+			);
+		const caseSql = (o: typeof plain) =>
+			sql(
 				o
 					.select('users')
 					.columns([
@@ -1520,26 +1517,40 @@ u | select id, case when name = 'x' then 1 else 0 end as flag`.dump() as {
 							.as('f'),
 					])
 					.dump(),
-			).toThrow(refusal);
-		}
-		// An undotted comparison is not resolved: it keeps main's output (#1007).
-		expect(
-			sql(
-				plain
-					.select('users')
-					.columns([fn('count', star()).filter(eq('score', expr())).as('n')])
-					.dump(),
-			),
-		).toEqual({
-			sql: 'SELECT count(*) FILTER (WHERE users.score = (SELECT max(score) FROM posts AS posts)) AS n FROM users',
-			params: [],
-		});
-		expect(() =>
-			filtered
-				.select('users')
-				.columns([fn('count', star()).filter(eq('score', expr())).as('n')])
-				.dump(),
-		).toThrow(refusal);
+			);
+		expect([
+			filterSql(plain, 'users.score'),
+			caseSql(plain),
+			filterSql(plain, 'score'),
+			filterSql(filtered, 'users.score'),
+			caseSql(filtered),
+			filterSql(filtered, 'score'),
+		]).toEqual([
+			{
+				sql: 'SELECT count(*) FILTER (WHERE users.score = (SELECT max(score) FROM posts)) AS n FROM users',
+				params: [],
+			},
+			{
+				sql: 'SELECT CASE WHEN users.score = (SELECT max(score) FROM posts) THEN 1 ELSE 0 END AS f FROM users',
+				params: [],
+			},
+			{
+				sql: 'SELECT count(*) FILTER (WHERE users.score = (SELECT max(score) FROM posts)) AS n FROM users',
+				params: [],
+			},
+			{
+				sql: 'SELECT count(*) FILTER (WHERE users.score = (SELECT max(score) FROM posts WHERE posts."deletedAt" IS NULL)) AS n FROM users',
+				params: [],
+			},
+			{
+				sql: 'SELECT CASE WHEN users.score = (SELECT max(score) FROM posts WHERE posts."deletedAt" IS NULL) THEN 1 ELSE 0 END AS f FROM users',
+				params: [],
+			},
+			{
+				sql: 'SELECT count(*) FILTER (WHERE users.score = (SELECT max(score) FROM posts WHERE posts."deletedAt" IS NULL)) AS n FROM users',
+				params: [],
+			},
+		]);
 	});
 
 	it('R1 a qualifier naming no visible range and no relation is refused in CASE WHEN and FILTER', () => {
