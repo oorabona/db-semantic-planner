@@ -1,5 +1,25 @@
 # Changelog
 
+## [7.3.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v7.2.0...adapter-pgsql-v7.3.0) (2026-11-19)
+
+
+### Features
+
+* **core:** Resolve scalar subquery bodies as nested selects ([#1041](https://github.com/oorabona/db-semantic-planner/issues/1041)) ([5af94ed](https://github.com/oorabona/db-semantic-planner/commit/5af94ed7e558c9dc2069a42508367fe222c32263))
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** Resolve batchSet guards and insert/upsert-from WHERE through core ([#1023](https://github.com/oorabona/db-semantic-planner/issues/1023)) ([d41cfeb](https://github.com/oorabona/db-semantic-planner/commit/d41cfeb07cb0d551a8df053f7b882ce9e663a59f))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/core bumped to 6.3.0
+    * @dbsp/types bumped to 6.3.0
+
 ## [7.2.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v7.1.3...adapter-pgsql-v7.2.0) (2026-11-19)
 
 
