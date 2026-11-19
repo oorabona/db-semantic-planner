@@ -59,25 +59,20 @@ function absorbsBody(node: Record<string, unknown>): boolean {
 	);
 }
 
-/** Copy one object or array: prototype, descriptors writable and configurable, accessors kept. */
+/**
+ * Copy one object or array: same prototype (a copied array is an array), own
+ * data descriptors given their copied value and made writable and configurable,
+ * accessors kept without being invoked; an array's length follows its source.
+ */
 function copyNode(
 	value: object,
 	child: (key: string, value: unknown) => unknown,
 ): object {
-	if (Array.isArray(value)) {
-		const copy: unknown[] = value.map((item, index) =>
-			child(String(index), item),
-		);
-		for (const key of Reflect.ownKeys(value)) {
-			if (key === 'length' || (typeof key === 'string' && /^\d+$/.test(key)))
-				continue;
-			const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
-			Object.defineProperty(copy, key, { ...descriptor, configurable: true });
-		}
-		return copy;
-	}
-	const copy = Object.create(Object.getPrototypeOf(value)) as object;
+	const copy: object = Array.isArray(value)
+		? new Array<unknown>(value.length)
+		: (Object.create(Object.getPrototypeOf(value)) as object);
 	for (const key of Reflect.ownKeys(value)) {
+		if (Array.isArray(value) && key === 'length') continue;
 		const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
 		Object.defineProperty(
 			copy,
@@ -197,7 +192,14 @@ function havingAggregateAliases(
 		for (const aggregate of select.aggregates) add(aggregate.as, aggregate);
 	else if (select?.type === 'expressions')
 		for (const column of select.columns)
-			if (column.kind === 'aggregate' && column.field) add(column.as, column);
+			// A column aggregate compiled as a SELECT aggregate: with a field, or a
+			// field-less count (count(*)); a field-less call with extra arguments is not.
+			if (
+				column.kind === 'aggregate' &&
+				(column.field ||
+					(column.function === 'count' && !column.extraArgs?.length))
+			)
+				add(column.as, column);
 	return aliases;
 }
 
@@ -221,7 +223,7 @@ function conditionRefs(node: Record<string, unknown>): string[] {
 			walk(intent);
 			return;
 		}
-		if (typeof item.kind !== 'string' || item.kind === 'literal') return;
+		if (item.kind === 'literal' || item.kind === 'param') return;
 		if (
 			(item.kind === 'ref' && item.outer !== true) ||
 			item.kind === 'column' ||
@@ -987,6 +989,12 @@ export function resolveReportIncludes(
 			if (!resolved)
 				throw new Error(`Missing resolved condition at ${intentPath}`);
 			expressionConditions.push({ intentPath, condition: resolved });
+			inspected.delete(value);
+			return;
+		}
+		// A body left unresolved (no model) stays the adapter's: HAVING's aliases and
+		// the outer ranges do not reach into it.
+		if (absorbsBody(node)) {
 			inspected.delete(value);
 			return;
 		}

@@ -610,14 +610,24 @@ function compileResolvedConditionUnchecked(
 				'ANY array operator is',
 			);
 			const type = leftType(tree.left, ctx, state);
+			// Without a physical type, the model's abstract type sets the array base;
+			// for an aggregate, the base is the aggregate's result over that type.
+			const modelBase = (operand: ResolvedColumnOperand): string | undefined =>
+				mapModelIRTypeToPgBase(metadata(operand, ctx, state)?.type ?? '');
+			const base = type
+				? undefined
+				: tree.left.kind !== 'aggregate'
+					? modelBase(tree.left)
+					: aggregateResultPgType(
+							tree.left.function,
+							tree.left.column ? modelBase(tree.left.column) : undefined,
+						);
 			return compileAny(
 				left(tree.left),
 				Array.isArray(tree.values.value) ? tree.values.value : [],
 				state,
 				type,
-				type || tree.left.kind === 'aggregate'
-					? undefined
-					: mapModelIRTypeToPgBase(metadata(tree.left, ctx, state)?.type ?? ''),
+				base,
 			);
 		}
 		case 'in': {
@@ -637,6 +647,10 @@ function compileResolvedConditionUnchecked(
 				return tree.negated ? notExpr(node) : node;
 			}
 			const values = tree.operand.parameter.value;
+			// An empty list is a constant: no operand is compiled, so an aggregate's
+			// FILTER binds no parameter.
+			if (Array.isArray(values) && values.length === 0)
+				return booleanConstNode(tree.negated);
 			if (!Array.isArray(values))
 				throw new Error(
 					`[in handler] Received a non-array value for operator '${tree.negated ? 'notIn' : 'in'}' on column '${tree.left.kind === 'aggregate' ? tree.left.function : tree.left.column}'. This is a compiler bug: expected a scalar array but received ${values == null ? String(values) : typeof values}. File a bug report.`,

@@ -892,6 +892,16 @@ describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
 				sql: 'SELECT users.id, count(*) FILTER (WHERE users.score = $1) AS n FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.score = $2) = ANY (CAST($3 AS bigint[]))',
 				params: [1, 1, [1, 2]],
 			});
+			// An empty list is a constant: the aggregate's FILTER binds nothing.
+			expect(
+				users()
+					.columns(['id', filteredCount()])
+					.having(inArray('n', []))
+					.dump(),
+			).toMatchObject({
+				sql: 'SELECT users.id, count(*) FILTER (WHERE users.score = $1) AS n FROM users GROUP BY users.id HAVING false',
+				params: [1],
+			});
 		});
 
 		it('AC3c an expression operand naming an alias compiles to that aggregate', () => {
@@ -917,6 +927,18 @@ describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
 			).toMatchObject({
 				sql: 'SELECT users.id, count(users.id) AS n, sum(users.score) AS s FROM users GROUP BY users.id HAVING count(users.id) > sum(users.score)',
 				params: [],
+			});
+			// In a CASE THEN result, even when the alias is spelled like a column.
+			expect(
+				users()
+					.count('id', 'score')
+					.having(
+						caseWhen(eq('id', 1), exprRef('score')).else(literal(0)).gt(2),
+					)
+					.dump(),
+			).toMatchObject({
+				sql: 'SELECT users.id, count(users.id) AS score FROM users GROUP BY users.id HAVING CASE WHEN users.id = $1 THEN count(users.id) ELSE 0 END > $2',
+				params: [1, 2],
 			});
 		});
 
@@ -968,7 +990,35 @@ describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
 			}
 		});
 
+		it('AC3b ANY on a sum alias casts to the aggregate result type', () => {
+			expect(
+				users()
+					.sum('score', 'n')
+					.having(any('n', [1]))
+					.dump(),
+			).toMatchObject({
+				sql: 'SELECT users.id, sum(users.score) AS n FROM users GROUP BY users.id HAVING sum(users.score) = ANY (CAST($1 AS bigint[]))',
+				params: [[1]],
+			});
+		});
+
 		it('AC3b a field-less count alias is count(*)', () => {
+			expect(
+				users()
+					.columns([
+						'id',
+						new ExpressionRef({
+							kind: 'aggregate',
+							function: 'count',
+							as: 'n',
+						} as unknown as ConstructorParameters<typeof ExpressionRef>[0]),
+					])
+					.having(gt('n', 1))
+					.dump(),
+			).toMatchObject({
+				sql: 'SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) > CAST($1 AS bigint)',
+				params: [1],
+			});
 			expect(
 				users().count({ as: 'n' }).having(gt('n', 1)).dump(),
 			).toMatchObject({
@@ -1060,6 +1110,22 @@ describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
 					literal(0),
 				);
 			expect(() => users().having(kase().eq(1)).dump()).toThrow(refusal);
+			// A FILTER under that CASE names itself, the CASE absorbed or not.
+			const filtered = () =>
+				caseWhen(
+					fn('count', star())
+						.filter(eq('id', exprRef('nope.id')))
+						.gt(1),
+					literal(1),
+				).else(literal(0));
+			const filterRefusal =
+				"FILTER qualifier 'nope' is not visible in this query.";
+			expect(() => users().having(filtered().eq(1)).dump()).toThrow(
+				filterRefusal,
+			);
+			expect(() => users().having(eq('users.id', filtered())).dump()).toThrow(
+				filterRefusal,
+			);
 			expect(() => users().having(eq('users.id', kase())).dump()).toThrow(
 				refusal,
 			);
@@ -1095,7 +1161,8 @@ describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
 	});
 
 	describe('a shared condition compiles per occurrence (#1005)', () => {
-		const users = () => plain.select('users');
+		let active: typeof plain = plain;
+		const users = () => active.select('users');
 		const title = () => eq('posts.title', 'x');
 		/** Same SQL and parameters whether one object fills both positions or two do. */
 		const samePerOccurrence = (
@@ -1105,21 +1172,27 @@ describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
 			) => {
 				dump(): { sql: string; params: readonly unknown[] };
 			},
-			expected: string,
+			expected: () => string,
 		) => {
-			const shared = title();
-			const one = build(shared, shared).dump();
-			const two = build(title(), title()).dump();
-			expect(one).toMatchObject({ sql: expected, params: ['x', 'x'] });
-			expect(two).toMatchObject({ sql: expected, params: ['x', 'x'] });
+			// Both ORMs: the default filter adds its condition inside each EXISTS.
+			for (const [, o] of orms) {
+				active = o;
+				const shared = title();
+				const one = build(shared, shared).dump();
+				const two = build(title(), title()).dump();
+				expect(one).toMatchObject({ sql: expected(), params: ['x', 'x'] });
+				expect(two).toMatchObject({ sql: expected(), params: ['x', 'x'] });
+			}
+			active = plain;
 		};
 		const at = (index: number, param: number) =>
-			`EXISTS (SELECT 1 FROM posts AS posts_exists_${index} WHERE users.id = posts_exists_${index}."authorId" AND posts_exists_${index}.title = $${param})`;
+			`EXISTS (SELECT 1 FROM posts AS posts_exists_${index} WHERE users.id = posts_exists_${index}."authorId"${active === filtered ? ` AND posts_exists_${index}."deletedAt" IS NULL` : ''} AND posts_exists_${index}.title = $${param})`;
 
 		it('AC7 WHERE and HAVING', () => {
 			samePerOccurrence(
 				(a, b) => users().where(a).groupBy(['id']).having(b),
-				`SELECT users.* FROM users WHERE ${at(0, 1)} GROUP BY users.id HAVING ${at(1, 2)}`,
+				() =>
+					`SELECT users.* FROM users WHERE ${at(0, 1)} GROUP BY users.id HAVING ${at(1, 2)}`,
 			);
 		});
 
@@ -1130,7 +1203,8 @@ describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
 						.groupBy(['id'])
 						.columns(['id', fn('count', star()).filter(a).as('n')])
 						.having(b),
-				`SELECT users.id, count(*) FILTER (WHERE ${at(0, 1)}) AS n FROM users GROUP BY users.id HAVING ${at(1, 2)}`,
+				() =>
+					`SELECT users.id, count(*) FILTER (WHERE ${at(0, 1)}) AS n FROM users GROUP BY users.id HAVING ${at(1, 2)}`,
 			);
 		});
 
@@ -1141,7 +1215,8 @@ describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
 						.groupBy(['id'])
 						.having(a)
 						.orderBy(caseWhen(b, literal(1)).else(literal(0))),
-				`SELECT users.* FROM users GROUP BY users.id HAVING ${at(1, 1)} ORDER BY CASE WHEN ${at(0, 2)} THEN 1 ELSE 0 END ASC`,
+				() =>
+					`SELECT users.* FROM users GROUP BY users.id HAVING ${at(1, 1)} ORDER BY CASE WHEN ${at(0, 2)} THEN 1 ELSE 0 END ASC`,
 			);
 		});
 
@@ -1150,7 +1225,8 @@ describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
 			expect(Object.isFrozen(kase(title()).intent)).toBe(true);
 			samePerOccurrence(
 				(a, b) => users().groupBy(['id']).having(a).orderBy(kase(b)),
-				`SELECT users.* FROM users GROUP BY users.id HAVING ${at(1, 1)} ORDER BY CASE WHEN ${at(0, 2)} THEN 1 ELSE 0 END ASC`,
+				() =>
+					`SELECT users.* FROM users GROUP BY users.id HAVING ${at(1, 1)} ORDER BY CASE WHEN ${at(0, 2)} THEN 1 ELSE 0 END ASC`,
 			);
 		});
 
@@ -1164,7 +1240,8 @@ describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
 							caseWhen(a, literal(1)).else(literal(0)).as('f'),
 							fn('count', star()).filter(b).as('n'),
 						]),
-				`SELECT users.id, CASE WHEN ${at(0, 1)} THEN 1 ELSE 0 END AS f, count(*) FILTER (WHERE ${at(1, 2)}) AS n FROM users GROUP BY users.id`,
+				() =>
+					`SELECT users.id, CASE WHEN ${at(0, 1)} THEN 1 ELSE 0 END AS f, count(*) FILTER (WHERE ${at(1, 2)}) AS n FROM users GROUP BY users.id`,
 			);
 		});
 
@@ -1342,6 +1419,29 @@ describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
 		expect(() =>
 			joined().groupBy(['id']).count('id', 'n').having(invisible()).dump(),
 		).toThrow("HAVING qualifier 'nope' is not visible in this query.");
+		// An invisible qualifier in a CASE THEN result is refused too.
+		const thenInvisible = () =>
+			caseWhen(eq('id', 1), exprRef('users.score')).else(literal(0));
+		expect(() =>
+			posts().groupBy(['id']).having(thenInvisible().gt(2)).dump(),
+		).toThrow("HAVING qualifier 'users' is not visible in this query.");
+		expect(() =>
+			posts()
+				.columns([
+					'id',
+					caseWhen(eq('id', thenInvisible()), literal(1))
+						.else(literal(0))
+						.as('c'),
+				])
+				.dump(),
+		).toThrow("CASE WHEN qualifier 'users' is not visible in this query.");
+		expect(() =>
+			posts()
+				.columns([
+					fn('count', star()).filter(eq('id', thenInvisible())).as('n'),
+				])
+				.dump(),
+		).toThrow("FILTER qualifier 'users' is not visible in this query.");
 		const joins =
 			'FROM posts JOIN users AS author ON posts."authorId" = author.id JOIN users AS editor ON posts."editorId" = editor.id';
 		const editor = () => eq('title', exprRef('editor.name'));

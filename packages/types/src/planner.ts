@@ -215,10 +215,10 @@ export interface PlanReport {
 	readonly intent: QueryIntent;
 
 	/**
-	 * The intent the adapter should compile (post-optimization, e.g. IN→EXISTS rewrite).
-	 * When the planner rewrites the WHERE clause (e.g. IN-subquery → EXISTS), this field
-	 * carries the optimized form so the adapter compiles the correct SQL.
-	 * Falls back to `intent` when absent (no optimization applied).
+	 * The intent the adapter compiles: the optimized WHERE when the planner rewrote it
+	 * (e.g. IN-subquery → EXISTS), and a distinct copy of each condition object that
+	 * occurs more than once outside `where`, so each occurrence compiles on its own.
+	 * Falls back to `intent` when absent (neither applied).
 	 * `intent` always stays the original submitted intent — never mutated by the planner.
 	 */
 	readonly executableIntent?: QueryIntent;

@@ -121,9 +121,9 @@ export function resolveConditionContext(
 	const currentLabel = (): string => labels[labels.length - 1]!;
 	let filterDepth = 0;
 	const within = <T>(position: 'CASE WHEN' | 'FILTER', run: () => T): T => {
-		// Below HAVING a nested CASE WHEN or FILTER names itself; inside a CASE WHEN
-		// or FILTER the enclosing condition root keeps its label.
-		const relabel = nestedLabels && currentLabel() === 'HAVING';
+		// A resolution entered from HAVING names its innermost CASE WHEN or FILTER;
+		// one entered from a CASE WHEN or FILTER root keeps that root's label.
+		const relabel = label === 'HAVING';
 		if (position === 'FILTER') filterDepth++;
 		if (relabel) labels.push(position);
 		try {
