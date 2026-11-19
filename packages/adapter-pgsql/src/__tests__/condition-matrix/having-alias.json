@@ -422,7 +422,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"error": "HAVING alias 'n' names an aggregate; a like condition does not apply to it."
 		},
 		{
 			"position": "having-alias",
@@ -430,7 +430,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"error": "HAVING alias 'n' names an aggregate; a like condition does not apply to it."
 		},
 		{
 			"position": "having-alias",
@@ -438,7 +438,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"error": "HAVING alias 'n' names an aggregate; a like condition does not apply to it."
 		},
 		{
 			"position": "having-alias",
@@ -446,7 +446,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"error": "HAVING alias 'n' names an aggregate; a like condition does not apply to it."
 		},
 		{
 			"position": "having-alias",
@@ -454,7 +454,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"error": "HAVING alias 'n' names an aggregate; a like condition does not apply to it."
 		},
 		{
 			"position": "having-alias",
@@ -462,7 +462,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"error": "HAVING alias 'n' names an aggregate; a like condition does not apply to it."
 		},
 		{
 			"position": "having-alias",
@@ -470,7 +470,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"error": "HAVING alias 'n' names an aggregate; a like condition does not apply to it."
 		},
 		{
 			"position": "having-alias",
@@ -478,7 +478,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"error": "HAVING alias 'n' names an aggregate; a like condition does not apply to it."
 		},
 		{
 			"position": "having-alias",
@@ -486,7 +486,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"error": "HAVING alias 'n' names an aggregate; a like condition does not apply to it."
 		},
 		{
 			"position": "having-alias",
@@ -494,7 +494,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"error": "HAVING alias 'n' names an aggregate; a like condition does not apply to it."
 		},
 		{
 			"position": "having-alias",
@@ -502,7 +502,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"error": "HAVING alias 'n' names an aggregate; a like condition does not apply to it."
 		},
 		{
 			"position": "having-alias",
@@ -510,7 +510,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"error": "HAVING alias 'n' names an aggregate; a like condition does not apply to it."
 		},
 		{
 			"position": "having-alias",
@@ -518,7 +518,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"error": "HAVING alias 'n' names an aggregate; a like condition does not apply to it."
 		},
 		{
 			"position": "having-alias",
@@ -526,7 +526,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"error": "HAVING alias 'n' names an aggregate; a like condition does not apply to it."
 		},
 		{
 			"position": "having-alias",
@@ -534,47 +534,47 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"error": "HAVING alias 'n' names an aggregate; a like condition does not apply to it."
 		},
 		{
 			"position": "having-alias",
 			"kind": "in-values",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = ANY (CAST($1 AS bigint[]))",
+			"params": [[3, 5]],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "in-values",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = ANY (CAST($1 AS bigint[])) AND count(*) = CAST($2 AS bigint)",
+			"params": [[3, 5], 13],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "in-values",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = ANY (CAST($1 AS bigint[])) OR count(*) = CAST($2 AS bigint)",
+			"params": [[3, 5], 13],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "in-values",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (count(*) = ANY (CAST($1 AS bigint[])))",
+			"params": [[3, 5]],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "in-values",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (count(*) = ANY (CAST($2 AS bigint[]))) OR count(*) = CAST($3 AS bigint))",
+			"params": [13, [3, 5], 17],
+			"error": null
 		},
 		{
 			"position": "having-alias",
@@ -620,161 +620,161 @@
 			"position": "having-alias",
 			"kind": "any",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = ANY (CAST($1 AS bigint[]))",
+			"params": [[3, 5]],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "any",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = ANY (CAST($1 AS bigint[])) AND count(*) = CAST($2 AS bigint)",
+			"params": [[3, 5], 13],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "any",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = ANY (CAST($1 AS bigint[])) OR count(*) = CAST($2 AS bigint)",
+			"params": [[3, 5], 13],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "any",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (count(*) = ANY (CAST($1 AS bigint[])))",
+			"params": [[3, 5]],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "any",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (count(*) = ANY (CAST($2 AS bigint[]))) OR count(*) = CAST($3 AS bigint))",
+			"params": [13, [3, 5], 17],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "any-empty",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = ANY (CAST($1 AS bigint[]))",
+			"params": [[]],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "any-empty",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = ANY (CAST($1 AS bigint[])) AND count(*) = CAST($2 AS bigint)",
+			"params": [[], 13],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "any-empty",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = ANY (CAST($1 AS bigint[])) OR count(*) = CAST($2 AS bigint)",
+			"params": [[], 13],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "any-empty",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (count(*) = ANY (CAST($1 AS bigint[])))",
+			"params": [[]],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "any-empty",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (count(*) = ANY (CAST($2 AS bigint[]))) OR count(*) = CAST($3 AS bigint))",
+			"params": [13, [], 17],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "isNull",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) IS NULL",
+			"params": [],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "isNull",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) IS NULL AND count(*) = CAST($1 AS bigint)",
+			"params": [13],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "isNull",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) IS NULL OR count(*) = CAST($1 AS bigint)",
+			"params": [13],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "isNull",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (count(*) IS NULL)",
+			"params": [],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "isNull",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (count(*) IS NULL) OR count(*) = CAST($2 AS bigint))",
+			"params": [13, 17],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "isNotNull",
 			"shape": "leaf",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) IS NOT NULL",
+			"params": [],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "isNotNull",
 			"shape": "and",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) IS NOT NULL AND count(*) = CAST($1 AS bigint)",
+			"params": [13],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "isNotNull",
 			"shape": "or",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) IS NOT NULL OR count(*) = CAST($1 AS bigint)",
+			"params": [13],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "isNotNull",
 			"shape": "not",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING NOT (count(*) IS NOT NULL)",
+			"params": [],
+			"error": null
 		},
 		{
 			"position": "having-alias",
 			"kind": "isNotNull",
 			"shape": "two-level",
-			"sql": null,
-			"params": null,
-			"error": "Declared column 'users.*' is absent from the physical model."
+			"sql": "SELECT users.id, count(*) AS n FROM users GROUP BY users.id HAVING count(*) = CAST($1 AS bigint) AND (NOT (count(*) IS NOT NULL) OR count(*) = CAST($2 AS bigint))",
+			"params": [13, 17],
+			"error": null
 		},
 		{
 			"position": "having-alias",

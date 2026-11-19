@@ -423,7 +423,7 @@ describe('a relation-path ColumnRef in a mutation WHERE body (#991)', () => {
 				),
 			).toThrow(
 				new Error(
-					"ColumnRef 'parent.name' follows a relation; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1005).",
+					"ColumnRef 'parent.name' follows a relation; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1014).",
 				),
 			);
 		},
@@ -433,7 +433,7 @@ describe('a relation-path ColumnRef in a mutation WHERE body (#991)', () => {
 describe('typed relation refs in mutation guard bodies (#991)', () => {
 	const relationRefusal = (relation: string) =>
 		new Error(
-			`RelationRef '${relation}' follows a relation from its table; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1005).`,
+			`RelationRef '${relation}' follows a relation from its table; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1014).`,
 		);
 	const writingsDb = schema({
 		users: { id: { type: 'integer', primaryKey: true }, email: 'text' },
@@ -498,7 +498,7 @@ describe('typed relation refs in mutation guard bodies (#991)', () => {
 				),
 			).toThrow(
 				new Error(
-					"ColumnRef 'writings.published' follows a relation; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1005).",
+					"ColumnRef 'writings.published' follows a relation; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1014).",
 				),
 			);
 		},

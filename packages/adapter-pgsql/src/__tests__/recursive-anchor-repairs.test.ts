@@ -1202,7 +1202,7 @@ describe('a relation-path ColumnRef in a recursive start.where (#991)', () => {
 			planRecursive(walk(exists('parent', { where: L() })), nodeDb.model),
 		).toThrow(
 			new Error(
-				"ColumnRef 'parent.label' follows a relation; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1005).",
+				"ColumnRef 'parent.label' follows a relation; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1014).",
 			),
 		);
 	});

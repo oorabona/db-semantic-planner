@@ -268,10 +268,12 @@ export type {
 // Shared utility types
 
 export type {
+	ResolvedAggregateOperand,
 	ResolvedCast,
 	ResolvedColumnOperand,
 	ResolvedCondition,
 	ResolvedExpression,
+	ResolvedLeftOperand,
 	ResolvedOrder,
 	ResolvedParameter,
 	ResolvedProjection,

@@ -1130,10 +1130,11 @@ export function compileSelectEnvelope<T = unknown>(
 	// Note: For unit tests with mock plans (no intent), fall back to plan.decisions directly.
 	//
 	// execIntent: the intent the adapter should compile from.
-	// When the planner ran the IN→EXISTS optimization, plan.executableIntent holds the
-	// rewritten WHERE (EXISTS form); plan.intent retains the original submitted intent
-	// (observable via dump()). All SQL-generation paths below use execIntent so that
-	// compiled SQL matches plan.decisions (which were built from the optimized WHERE).
+	// plan.executableIntent holds the rewritten WHERE (EXISTS form) when the planner ran
+	// the IN→EXISTS optimization, and a distinct copy of each repeated condition
+	// occurrence that core resolved; plan.intent retains the original submitted
+	// intent (observable via dump()). All SQL-generation paths below use execIntent so
+	// that compiled SQL matches plan.decisions and core's per-occurrence resolutions.
 	const execIntent = deduplicateRootProjection(
 		plan.executableIntent ?? plan.intent,
 	);

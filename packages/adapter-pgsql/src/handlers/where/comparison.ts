@@ -109,9 +109,21 @@ function resolveHavingAggregatePgType(
 	column: string,
 	ctx: CompilerContext,
 ): string | undefined {
+	return aggregateResultPgType(
+		functionName,
+		functionName.toLowerCase() === 'count'
+			? undefined
+			: resolveColumnPgType(column, ctx),
+	);
+}
+
+/** The result type of an aggregate over an argument of the given type, when known. */
+export function aggregateResultPgType(
+	functionName: string,
+	argumentType: string | undefined,
+): string | undefined {
 	const aggregate = functionName.toLowerCase();
 	if (aggregate === 'count') return 'bigint';
-	const argumentType = resolveColumnPgType(column, ctx);
 	if (aggregate === 'min' || aggregate === 'max') return argumentType;
 	if (argumentType === undefined) return undefined;
 	const normalized = argumentType.toLowerCase().replace(/\s+/g, ' ').trim();
