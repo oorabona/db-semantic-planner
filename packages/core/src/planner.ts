@@ -298,6 +298,14 @@ export interface PlanScope {
 }
 
 /**
+ * The warning sinks of the queries being planned, innermost last. A body's
+ * report hands its warnings (its own, then its bodies') to the query that
+ * encloses it, in the order the resolver plans the bodies: WHERE, then SELECT,
+ * ORDER BY and HAVING, each in authored order.
+ */
+const bodyWarningSinks: PlanWarning[][] = [];
+
+/**
  * Plan a scalar subquery body with the root planner, inside its enclosing
  * query: one allocator, the enclosing ranges in scope.
  */
@@ -313,8 +321,11 @@ export function planNestedSelect(
 		defaultFilters ? { defaultFilters } : {},
 		scope,
 	);
+	bodyWarningSinks.at(-1)?.push(...report.warnings);
+	if (!report.execution)
+		throw new Error('Internal error: a planned body has no execution.');
 	return {
-		execution: report.execution!,
+		execution: report.execution,
 		intent: report.executableIntent ?? report.intent,
 		decisions: report.decisions,
 	};
@@ -486,17 +497,21 @@ export function planInScope(
 				isAmbiguous: false,
 			});
 
-	const resolution = resolveReportIncludes(
-		plannedIntent,
-		state.decisions,
-		model,
-		{
+	// Bodies are planned while this query resolves; their warnings follow its own.
+	const bodyWarnings: PlanWarning[] = [];
+	bodyWarningSinks.push(bodyWarnings);
+	let resolution: ReturnType<typeof resolveReportIncludes>;
+	try {
+		resolution = resolveReportIncludes(plannedIntent, state.decisions, model, {
 			whereReservedNames: opts.whereReservedNames,
 			defaultFilters: opts.defaultFilters,
 			isLocalSource: scope.isLocalSource,
 			...(scope.nested && { nested: scope.nested }),
-		},
-	);
+		});
+	} finally {
+		bodyWarningSinks.pop();
+	}
+	state.warnings.push(...bodyWarnings);
 	const report: PlanReport = {
 		rootTable: intent.from,
 		execution: resolution.execution,

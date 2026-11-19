@@ -29,6 +29,7 @@ import {
 	plan,
 	planRecursive,
 	type QueryIntent,
+	raw,
 	ref,
 	SubqueryExpression,
 	schema,
@@ -981,6 +982,43 @@ describe('scalar subquery bodies compile every clause through core (#891 slice 5
 			);
 		});
 	});
+
+	it.each(configs)(
+		'nested body warnings follow the enclosing query warnings (%s)',
+		(_name, o) => {
+			const rawWarning = (sql: string, alias: string) => ({
+				code: 'RAW_SQL_USAGE',
+				message: `Raw SQL expression detected: "${sql}" (alias: ${alias})`,
+				suggestion:
+					'Raw SQL bypasses type safety and SQL injection protection. Ensure the SQL is safe and consider using built-in expression helpers instead.',
+			});
+			// The first body has a raw column and, in its WHERE, a body of its own
+			// with a raw column: a body's warnings come before its bodies' warnings.
+			const inner = body(
+				o
+					.select('comments')
+					.where(eq('post_id', outerRef('id')))
+					.columns([raw('count(*)', 'c')]),
+			);
+			const first = body(
+				correlated(o)
+					.columns([raw('max(score)', 'm')])
+					.where(fn('abs', inner.asExpr('k')).gt(0))
+					.limit(1),
+			);
+			const second = body(correlated(o).columns([raw('min(score)', 'x')]));
+			const planned = o
+				.select('users')
+				.columns([raw('1', 'one'), first.asExpr('v'), second.asExpr('w')])
+				.plan();
+			expect(planned.warnings).toEqual([
+				rawWarning('1', 'one'),
+				rawWarning('max(score)', 'm'),
+				rawWarning('count(*)', 'c'),
+				rawWarning('min(score)', 'x'),
+			]);
+		},
+	);
 
 	it.each(configs)('AC7 astix (%s)', (name, o) => {
 		const d = o
