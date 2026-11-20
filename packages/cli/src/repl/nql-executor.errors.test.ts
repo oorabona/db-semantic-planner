@@ -206,6 +206,18 @@ describe('compileNqlToSql — set operations', () => {
 		expect(result.intent.table).toBe('users');
 	});
 
+	it('AC6 cli-entry: compiles a union through adapter.compileSetOperation and keeps a $-constant', async () => {
+		const result = await compileNqlToSql(
+			"users | where active = true | select name | union (users | where name = 'x' | select 'Price: $1' as name)",
+			model,
+		);
+
+		expect(result.sql).toBe(
+			"SELECT users.name FROM users WHERE users.active = $1 UNION SELECT 'Price: $1' AS name FROM users WHERE users.name = $2",
+		);
+		expect(result.params).toEqual([true, 'x']);
+	});
+
 	it('set operation has no planReport', async () => {
 		const result = await compileNqlToSql(
 			'users | select name | union (users | select name)',

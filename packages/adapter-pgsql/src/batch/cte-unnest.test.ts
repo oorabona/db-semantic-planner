@@ -13,8 +13,10 @@ import {
 	createOrm,
 	eq,
 	exprRef,
+	fn,
 	InvalidOperationError,
 	isNull,
+	literal,
 	NotYetSupportedError,
 	type QueryIntent,
 	ref,
@@ -129,6 +131,48 @@ describe('SC-14: CTE with unnest + WITH ORDINALITY index', () => {
 		expect(result.sql).toContain('ordinality');
 		expect(result.sql).toContain('1');
 		expect(result.sql).toContain('idx');
+	});
+});
+
+describe('SC-14c: an unnest CTE after a parameterised CTE (ADR 0012)', () => {
+	it('AC9 unnest-cte-after-cte: numbers the unnest after the earlier CTE and keeps the outer constant', () => {
+		const adapter = createPgCompileOnlyAdapter();
+		const orm = createOrm({ model: batchSchema.model, adapter }) as any;
+
+		const compiled = adapter.compileCteQuery(
+			{
+				kind: 'cteQuery',
+				ctes: [
+					{
+						kind: 'simpleCte',
+						name: 'active_symbols',
+						query: orm
+							.select('symbols')
+							.where(eq('active', true))
+							.buildIntent(),
+					},
+					{
+						kind: 'unnestCte',
+						name: 'lookups',
+						columns: { callee_id: [1, 2] },
+					},
+				],
+				query: orm
+					.select('calls')
+					.columns([
+						'id',
+						fn('concat', literal('Price: $1'), exprRef('kind')).as('label'),
+					])
+					.where(eq('kind', 'call'))
+					.buildIntent(),
+			},
+			{ model: batchSchema.model },
+		);
+
+		expect(compiled.sql).toBe(
+			"WITH active_symbols AS (SELECT symbols.* FROM symbols WHERE symbols.active = $1), lookups AS (SELECT t.callee_id AS callee_id FROM unnest(CAST($2 AS int4[])) AS t(callee_id)) SELECT calls.id, concat('Price: $1', kind) AS label FROM calls WHERE calls.kind = $3",
+		);
+		expect(compiled.parameters).toEqual([true, [1, 2], 'call']);
 	});
 });
 

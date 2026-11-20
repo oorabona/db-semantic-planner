@@ -1,19 +1,30 @@
 /**
- * Tests for compileSetOperation — recursive set operation compilation
- * with correct parameter renumbering.
+ * Tests for adapter.compileSetOperation — a set operation compiles into one
+ * tree, its right operand's parameters shifted in the tree (ADR 0012).
  */
 
-import { plan, type QueryIntent, ref, schema } from '@dbsp/core';
+import {
+	createOrm,
+	eq,
+	exprRef,
+	fn,
+	literal,
+	nqlRaw,
+	type QueryIntent,
+	ref,
+	schema,
+} from '@dbsp/core';
 import { compile } from '@dbsp/nql';
-import type { CompiledNqlQuery, SetOperationIntent } from '@dbsp/types';
-import { describe, expect, it } from 'vitest';
+import type {
+	CompiledNqlQuery,
+	CompiledQuery,
+	Dump,
+	SetOperationIntent,
+} from '@dbsp/types';
+import { describe, expect, it, vi } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
-import {
-	compileSetOperation,
-	createLeafCompileFn,
-	type LeafCompileFn,
-} from '../set-operation.js';
+import { builtShape, parsedShape } from './statement-shape.js';
 
 // ---------------------------------------------------------------------------
 // Test schema: departments → employees (1:N)
@@ -36,16 +47,8 @@ const testSchema = schema({
 	},
 });
 
-// ---------------------------------------------------------------------------
-// Helper: create a leaf compile function for testing
-// ---------------------------------------------------------------------------
-function makeCompileFn(): LeafCompileFn {
-	const adapter = createPgCompileOnlyAdapter();
-	return createLeafCompileFn(adapter, testSchema.model, plan);
-}
-
 /**
- * NQL → SQL via compileSetOperation (full pipeline).
+ * NQL → SQL via adapter.compileSetOperation (full pipeline).
  */
 function setOpToSQL(nql: string): {
 	sql: string;
@@ -59,8 +62,10 @@ function setOpToSQL(nql: string): {
 	}
 
 	if (compiled.ast?.setOperation) {
-		const compileFn = makeCompileFn();
-		return compileSetOperation(compiled.ast.setOperation, compileFn);
+		return createPgCompileOnlyAdapter().compileSetOperation(
+			compiled.ast.setOperation,
+			testSchema.model,
+		);
 	}
 	throw new Error('NQL compilation produced no set operation');
 }
@@ -165,9 +170,9 @@ describe('compileSetOperation', () => {
 				'employees | select name | union (departments | select name)',
 			);
 			const normalized = normalizeSQL(result.sql);
-			expect(normalized).toMatch(/^\(.+\) union \(.+\)$/);
-			expect(normalized).toContain('employees');
-			expect(normalized).toContain('departments');
+			expect(normalized).toBe(
+				'select employees.name from employees union select departments.name from departments',
+			);
 			expect(result.parameters).toEqual([]);
 		});
 
@@ -240,7 +245,7 @@ describe('compileSetOperation', () => {
 				const result = boundSetOpBundleToSQL(op, 'tenant_set');
 				const normalized = normalizeSQL(result.sql);
 
-				expect(normalized).toContain('with "active_employees" as (');
+				expect(normalized).toContain('with active_employees as (');
 				expect(normalized).toContain('from tenant_set.employees');
 				expect(normalized).toContain('from active_employees as');
 				expect(normalized).not.toContain('from tenant_set.active_employees');
@@ -255,7 +260,7 @@ describe('compileSetOperation', () => {
 employee_names | select name | ${op} (departments | select name)`,
 				);
 
-				expect(result.sql).toContain('with "employee_names" as (');
+				expect(result.sql).toContain('with employee_names as (');
 				expect(result.sql).toContain('from employee_names');
 				expect(result.parameters).toEqual([]);
 			});
@@ -266,7 +271,7 @@ employee_names | select name | ${op} (departments | select name)`,
 departments | select name | ${op} (employee_names | select name)`,
 				);
 
-				expect(result.sql).toContain('with "employee_names" as (');
+				expect(result.sql).toContain('with employee_names as (');
 				expect(result.sql).toContain('from employee_names');
 				expect(result.parameters).toEqual([]);
 			});
@@ -279,8 +284,8 @@ employee_names | select name | bind projected_names
 departments | select name | union projected_names`,
 			);
 
-			expect(result.sql).toContain('with "employee_names" as (');
-			expect(result.sql).toContain('"projected_names" as (select');
+			expect(result.sql).toContain('with employee_names as (');
+			expect(result.sql).toContain('projected_names as (select');
 			expect(result.sql).toContain('from employee_names');
 			expect(result.parameters).toEqual([]);
 		});
@@ -291,7 +296,7 @@ departments | select name | union projected_names`,
 departments | select name | union (employee_names | select name | except (departments | select name))`,
 			);
 
-			expect(result.sql).toContain('with "employee_names" as (');
+			expect(result.sql).toContain('with employee_names as (');
 			expect(result.sql).toContain('union');
 			expect(result.sql).toContain('except');
 			expect(result.sql).toContain('from employee_names');
@@ -329,10 +334,9 @@ departments | select name | union (employee_names | select name | except (depart
 		});
 	});
 
-	describe('with createLeafCompileFn', () => {
-		it('creates a working compile function', () => {
+	describe('through adapter.compileSetOperation', () => {
+		it('compiles a manually built set operation', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const compileFn = createLeafCompileFn(adapter, testSchema.model, plan);
 
 			// Manually build a simple set operation intent
 			const leftQuery: QueryIntent = {
@@ -353,12 +357,9 @@ departments | select name | union (employee_names | select name | except (depart
 				right: rightQuery,
 			};
 
-			const result = compileSetOperation(setOp, compileFn);
-			// Verify structure: parenthesized left UNION parenthesized right
-			const normalized = normalizeSQL(result.sql);
-			expect(normalized).toContain('union');
-			expect(normalized).toMatch(
-				/^\(select .+ from .+\) union \(select .+ from .+\)$/,
+			const result = adapter.compileSetOperation(setOp, testSchema.model);
+			expect(result.sql).toBe(
+				'SELECT employees.name FROM employees UNION SELECT departments.name FROM departments',
 			);
 			expect(result.parameters).toEqual([]);
 			expect(result.columnMetadata?.size).toBe(0);
@@ -372,7 +373,6 @@ departments | select name | union (employee_names | select name | except (depart
 				},
 			});
 			const adapter = createPgCompileOnlyAdapter();
-			const compileFn = createLeafCompileFn(adapter, jsSchema.model, plan);
 			const setOp: SetOperationIntent = {
 				kind: 'setOperation',
 				op: 'union',
@@ -389,14 +389,13 @@ departments | select name | union (employee_names | select name | except (depart
 				},
 			};
 
-			expect(() => compileSetOperation(setOp, compileFn)).toThrow(
+			expect(() => adapter.compileSetOperation(setOp, jsSchema.model)).toThrow(
 				'`js` read type is not yet supported through set operations; use a plain select (tracking: #352)',
 			);
 		});
 
 		it('works with nested set operations built manually', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const compileFn = createLeafCompileFn(adapter, testSchema.model, plan);
 
 			const queryA: QueryIntent = {
 				type: 'select',
@@ -457,7 +456,7 @@ departments | select name | union (employee_names | select name | except (depart
 				},
 			};
 
-			const result = compileSetOperation(nested, compileFn);
+			const result = adapter.compileSetOperation(nested, testSchema.model);
 			// A has 1 param ($1=50000), B has 1 param → $2=30000, C has 0 params
 			expect(result.parameters).toEqual([50000, 30000]);
 			expect(result.sql).toContain('EXCEPT');
@@ -468,7 +467,6 @@ departments | select name | union (employee_names | select name | except (depart
 	describe('edge cases', () => {
 		it('handles INTERSECT ALL', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const compileFn = createLeafCompileFn(adapter, testSchema.model, plan);
 
 			const setOp: SetOperationIntent = {
 				kind: 'setOperation',
@@ -486,13 +484,12 @@ departments | select name | union (employee_names | select name | except (depart
 				},
 			};
 
-			const result = compileSetOperation(setOp, compileFn);
+			const result = adapter.compileSetOperation(setOp, testSchema.model);
 			expect(normalizeSQL(result.sql)).toContain('intersect all');
 		});
 
 		it('handles EXCEPT ALL', () => {
 			const adapter = createPgCompileOnlyAdapter();
-			const compileFn = createLeafCompileFn(adapter, testSchema.model, plan);
 
 			const setOp: SetOperationIntent = {
 				kind: 'setOperation',
@@ -510,8 +507,250 @@ departments | select name | union (employee_names | select name | except (depart
 				},
 			};
 
-			const result = compileSetOperation(setOp, compileFn);
+			const result = adapter.compileSetOperation(setOp, testSchema.model);
 			expect(normalizeSQL(result.sql)).toContain('except all');
 		});
+	});
+});
+
+// ---------------------------------------------------------------------------
+// One tree per set operation (ADR 0012)
+// ---------------------------------------------------------------------------
+const itemSchema = schema({
+	items: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		cost$1: { type: 'string', nullable: true },
+	},
+});
+
+/** An ORM whose adapter records the CompiledQuery each set operation returns. */
+function recordingOrm() {
+	const adapter = createPgCompileOnlyAdapter();
+	const compileSetOperation = vi.spyOn(adapter, 'compileSetOperation');
+	const compileBundle = vi.spyOn(adapter, 'compile');
+	const orm = createOrm({ schema: itemSchema, adapter });
+	const lastCompiled = (): CompiledQuery => {
+		const spy = [compileSetOperation, compileBundle].find(
+			(candidate) => candidate.mock.results.length > 0,
+		);
+		const result = spy?.mock.results.at(-1);
+		if (result?.type !== 'return') throw new Error('nothing was compiled');
+		return result.value as CompiledQuery;
+	};
+	return { orm, lastCompiled };
+}
+
+function nqlSetOperation(text: string): {
+	sql: string;
+	params: readonly unknown[];
+	built: CompiledQuery;
+} {
+	const { orm, lastCompiled } = recordingOrm();
+	const dump = orm.nql`${nqlRaw(text)}`.dump() as Dump;
+	return { sql: dump.sql, params: dump.params, built: lastCompiled() };
+}
+
+const plainOperand = { sort: false, limit: false, offset: false, lock: false };
+
+describe('one tree per set operation (ADR 0012)', () => {
+	it('AC1 set-op-constant: keeps a $-constant and a $-column on the right side and shifts its parameter', () => {
+		const { orm } = recordingOrm();
+		const left = orm
+			.select('items')
+			.columns(['id', 'name'])
+			.where(eq('name', 'a'));
+		const right = orm
+			.select('items')
+			.columns([
+				'id',
+				fn('concat', literal('Price: $1'), exprRef('cost$1')).as('name'),
+			])
+			.where(eq('cost$1', 'b'));
+
+		const dump = left.union(right).dump();
+
+		expect(dump.sql).toBe(
+			'SELECT items.id, items.name FROM items WHERE items.name = $1 UNION SELECT items.id, concat(\'Price: $1\', "cost$1") AS name FROM items WHERE items."cost$1" = $2',
+		);
+		expect(dump.params).toEqual(['a', 'b']);
+	});
+
+	it('AC1b union-intersect-grouping: q1.union(q2).intersect(q3) parses with INTERSECT at the root over the UNION', () => {
+		const { orm, lastCompiled } = recordingOrm();
+		const q = (name: string) =>
+			orm.select('items').columns(['id']).where(eq('name', name));
+
+		const dump = q('a').union(q('b')).intersect(q('c')).dump();
+
+		expect(dump.sql).toBe(
+			'(SELECT items.id FROM items WHERE items.name = $1 UNION SELECT items.id FROM items WHERE items.name = $2) INTERSECT SELECT items.id FROM items WHERE items.name = $3',
+		);
+		expect(dump.params).toEqual(['a', 'b', 'c']);
+		const expected = {
+			op: 'SETOP_INTERSECT',
+			all: false,
+			larg: {
+				op: 'SETOP_UNION',
+				all: false,
+				larg: plainOperand,
+				rarg: plainOperand,
+			},
+			rarg: plainOperand,
+		};
+		expect(parsedShape(dump.sql)).toEqual(expected);
+		expect(builtShape(lastCompiled())).toEqual(expected);
+	});
+
+	it('AC1b union-all-nested-grouping: A UNION ALL (B UNION C) keeps its grouping', () => {
+		const { sql, params, built } = nqlSetOperation(
+			"items | where name = 'a' | select id | union all (items | where name = 'b' | select id | union (items | where name = 'c' | select id))",
+		);
+
+		expect(sql).toBe(
+			'SELECT items.id FROM items WHERE items.name = $1 UNION ALL (SELECT items.id FROM items WHERE items.name = $2 UNION SELECT items.id FROM items WHERE items.name = $3)',
+		);
+		expect(params).toEqual(['a', 'b', 'c']);
+		const expected = {
+			op: 'SETOP_UNION',
+			all: true,
+			larg: plainOperand,
+			rarg: {
+				op: 'SETOP_UNION',
+				all: false,
+				larg: plainOperand,
+				rarg: plainOperand,
+			},
+		};
+		expect(parsedShape(sql)).toEqual(expected);
+		expect(builtShape(built)).toEqual(expected);
+	});
+
+	it('AC1c left-order-by: an ORDER BY stays on the left operand', () => {
+		const { sql, built } = nqlSetOperation(
+			'items | select id | order by id | union (items | select id)',
+		);
+
+		expect(sql).toBe(
+			'(SELECT items.id FROM items ORDER BY items.id ASC) UNION SELECT items.id FROM items',
+		);
+		const expected = {
+			op: 'SETOP_UNION',
+			all: false,
+			larg: { ...plainOperand, sort: true },
+			rarg: plainOperand,
+		};
+		expect(parsedShape(sql)).toEqual(expected);
+		expect(builtShape(built)).toEqual(expected);
+	});
+
+	it('AC1c right-offset: an OFFSET stays on the right operand', () => {
+		const { sql, built } = nqlSetOperation(
+			'items | select id | union (items | select id | offset 1)',
+		);
+
+		expect(sql).toBe(
+			'SELECT items.id FROM items UNION (SELECT items.id FROM items OFFSET 1)',
+		);
+		const expected = {
+			op: 'SETOP_UNION',
+			all: false,
+			larg: plainOperand,
+			rarg: { ...plainOperand, offset: true },
+		};
+		expect(parsedShape(sql)).toEqual(expected);
+		expect(builtShape(built)).toEqual(expected);
+	});
+
+	it('AC1c left-limit-valid: a left operand with LIMIT is valid SQL with the limit on it', () => {
+		const { sql, built } = nqlSetOperation(
+			'items | select id | limit 2 | union (items | select id)',
+		);
+
+		expect(sql).toBe(
+			'(SELECT items.id FROM items LIMIT 2) UNION SELECT items.id FROM items',
+		);
+		const expected = {
+			op: 'SETOP_UNION',
+			all: false,
+			larg: { ...plainOperand, limit: true },
+			rarg: plainOperand,
+		};
+		expect(parsedShape(sql)).toEqual(expected);
+		expect(builtShape(built)).toEqual(expected);
+	});
+
+	it('AC1c right-limit: a right operand LIMIT stays on that operand', () => {
+		const { sql, built } = nqlSetOperation(
+			'items | select id | union (items | select id | limit 1)',
+		);
+
+		expect(sql).toBe(
+			'SELECT items.id FROM items UNION (SELECT items.id FROM items LIMIT 1)',
+		);
+		const expected = {
+			op: 'SETOP_UNION',
+			all: false,
+			larg: plainOperand,
+			rarg: { ...plainOperand, limit: true },
+		};
+		expect(parsedShape(sql)).toEqual(expected);
+		expect(builtShape(built)).toEqual(expected);
+	});
+
+	it.each([
+		[
+			'items | select id | except (items | select id | intersect (items | select id))',
+			'SELECT items.id FROM items EXCEPT (SELECT items.id FROM items INTERSECT SELECT items.id FROM items)',
+			'SETOP_EXCEPT',
+			'SETOP_INTERSECT',
+		],
+		[
+			'items | select id | intersect (items | select id | except (items | select id))',
+			'SELECT items.id FROM items INTERSECT (SELECT items.id FROM items EXCEPT SELECT items.id FROM items)',
+			'SETOP_INTERSECT',
+			'SETOP_EXCEPT',
+		],
+	])(
+		'AC1c composed-except-intersect: %s keeps its right operand grouped',
+		(text, expectedSql, rootOp, rightOp) => {
+			const { sql, built } = nqlSetOperation(text);
+
+			expect(sql).toBe(expectedSql);
+			const expected = {
+				op: rootOp,
+				all: false,
+				larg: plainOperand,
+				rarg: {
+					op: rightOp,
+					all: false,
+					larg: plainOperand,
+					rarg: plainOperand,
+				},
+			};
+			expect(parsedShape(sql)).toEqual(expected);
+			expect(builtShape(built)).toEqual(expected);
+		},
+	);
+
+	it('AC9 with-on-setop-root: a binding CTE is emitted as the WITH of the set-operation root', () => {
+		const result = boundSetOpBundleToSQL('union', 'tenant_set');
+
+		expect(result.sql).toBe(
+			'WITH active_employees AS (SELECT employees.id FROM tenant_set.employees WHERE employees.active = $1) SELECT employees.id FROM tenant_set.employees WHERE employees.id = ANY (SELECT active_employees_subq_0.id FROM active_employees AS active_employees_subq_0) UNION SELECT departments.id FROM tenant_set.departments',
+		);
+		expect(result.parameters).toEqual([true]);
+		const expected = {
+			op: 'SETOP_UNION',
+			all: false,
+			larg: plainOperand,
+			rarg: plainOperand,
+			with: {
+				recursive: false,
+				ctes: [{ name: 'active_employees', columns: [] }],
+			},
+		};
+		expect(parsedShape(result.sql)).toEqual(expected);
+		expect(builtShape(result as CompiledQuery)).toEqual(expected);
 	});
 });

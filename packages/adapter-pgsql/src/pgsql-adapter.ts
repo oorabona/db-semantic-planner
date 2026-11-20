@@ -70,7 +70,6 @@ import { convertBigintJsReadValue } from '@dbsp/types';
 import {
 	assertCompiledQuery,
 	projectionlessCompiledQuery,
-	rebuildCompiledQuery,
 } from '@dbsp/types/adapter-sdk';
 import type { ConnectionAvailability } from '@dbsp/types/internal';
 import {
@@ -78,6 +77,7 @@ import {
 	isNqlBindingRef,
 	markPlannedReport,
 } from '@dbsp/types/internal';
+import type { Node, SelectStmt } from '@pgsql/types';
 import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import {
@@ -104,7 +104,7 @@ import {
 	defaultFkDerivation,
 	type FkColumnDerivation,
 } from './assert-field.js';
-import { selectStmt } from './ast-helpers.js';
+import { selectStmt, stringNode } from './ast-helpers.js';
 import {
 	type BindingNameRegistry,
 	emittedBindName,
@@ -128,7 +128,6 @@ import {
 	generateCreateIndexSQL,
 	generateDropIndexSQL,
 } from './ddl/index-operations.js';
-import { quoteIdent } from './ddl/phases/utils.js';
 import { generateDDL as generateDDLStatements } from './ddl/public-api.js';
 import {
 	generateAlterColumnSQL,
@@ -148,6 +147,7 @@ import {
 	type IntrospectionOptions,
 	introspectWithExecutor as introspectDb,
 } from './introspection.js';
+import { createParamRef } from './param-ref.js';
 import type { PgPhysicalModel } from './physical-model/index.js';
 import { getPostgresqlCapabilitiesTargetVersion } from './postgresql-capabilities.js';
 import {
@@ -164,14 +164,13 @@ import {
 	type ProjectNamedFieldsExpression,
 	type ProjectNamedFieldsSelection,
 	preserveOneToOne,
-	preserveOutputKeyMap,
 	projectNamedFields,
 } from './projection-envelope.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
 import { queryScopeForBindingProjections } from './relation-target-projection.js';
 import {
 	compileSetOperationEnvelope as compileSetOperationEnvelopeImpl,
-	type LeafCompileFn,
+	type SetOperationLeafCompiler,
 } from './set-operation.js';
 import {
 	catalogName,
@@ -180,6 +179,13 @@ import {
 	identifierText,
 	queryLocal,
 } from './sql-identifier.js';
+import {
+	commonTableExpression,
+	requireStatementAst,
+	setOperationStatement,
+	shiftParameters,
+	withLeadingCtes,
+} from './statement-ast.js';
 import { generateCursorName } from './streaming/cursor.js';
 import {
 	type PgsqlTransactionTimeoutParameter,
@@ -1561,13 +1567,6 @@ function raise(error: unknown): never {
 	throw error;
 }
 
-function renumberSqlParams(sql: string, offset: number): string {
-	if (offset === 0) return sql;
-	return sql.replace(/\$(\d+)/g, (_match, num) => {
-		return `$${Number.parseInt(num, 10) + offset}`;
-	});
-}
-
 /** PostgreSQL returns identifiers truncated to its 63-byte identifier limit. */
 function pgReturnedIdentifier(identifier: string): string {
 	let result = '';
@@ -1579,22 +1578,6 @@ function pgReturnedIdentifier(identifier: string): string {
 		byteLength += width;
 	}
 	return result;
-}
-
-function prefixNqlBindingCtes(
-	bindingCtes: readonly string[],
-	sql: string,
-): string {
-	if (bindingCtes.length === 0) return sql;
-	const withMatch = /^(WITH\s+RECURSIVE\s+|WITH\s+)/i.exec(sql);
-	if (!withMatch) {
-		return `WITH ${bindingCtes.join(', ')} ${sql}`;
-	}
-	const [prefix] = withMatch;
-	const withKeyword = /^WITH\s+RECURSIVE\s+/i.test(prefix)
-		? 'WITH RECURSIVE'
-		: 'WITH';
-	return `${withKeyword} ${bindingCtes.join(', ')}, ${sql.slice(prefix.length)}`;
 }
 
 function isCompiledNqlQuery(
@@ -2015,9 +1998,71 @@ function resolveRuntimeBindingCteColumnTypes(
 	});
 }
 
+type RuntimeBindingCte = { cte: Node; parameters: readonly unknown[] };
+
+/** A cast to a validated PostgreSQL type text, emitted verbatim. */
+function runtimeBindingCast(arg: Node, pgType: string): Node {
+	return {
+		TypeCast: { arg, typeName: { names: [stringNode(pgType)], typemod: -1 } },
+	};
+}
+
+/**
+ * The runtime binding's CTE: `name (columns) AS (anchor [UNION ALL VALUES
+ * rows])`. Each row cell is a `ParamRef` numbered after `parameterOffset`,
+ * the parameters of the CTEs before it, cast when its type is known.
+ */
+function runtimeBindingCteNode(
+	name: string,
+	binding: NqlRuntimeBinding,
+	parameterOffset: number,
+	cteName: string,
+	cteColumns: readonly string[],
+	anchor: SelectStmt,
+	rowTypes: readonly (string | undefined)[],
+): RuntimeBindingCte {
+	const header = { columns: cteColumns };
+	if (binding.rows.length === 0) {
+		return {
+			cte: commonTableExpression(cteName, { SelectStmt: anchor }, header),
+			parameters: [],
+		};
+	}
+	assertRuntimeBindingValuesParameterCount(name, binding, parameterOffset);
+	const parameters: unknown[] = [];
+	let nextParam = parameterOffset + 1;
+	const valuesLists: Node[] = binding.rows.map((row) => ({
+		List: {
+			items: binding.columns.map((column, columnIndex) => {
+				parameters.push(row[column]);
+				const paramRef = createParamRef(nextParam++);
+				const pgType = rowTypes[columnIndex];
+				return pgType === undefined
+					? paramRef
+					: runtimeBindingCast(paramRef, pgType);
+			}),
+		},
+	}));
+	return {
+		cte: commonTableExpression(
+			cteName,
+			setOperationStatement(
+				'union',
+				true,
+				{ SelectStmt: anchor },
+				{ SelectStmt: { valuesLists } },
+			),
+			header,
+		),
+		parameters,
+	};
+}
+
+const falseConstant: Node = { A_Const: { boolval: { boolval: false } } };
+
 /**
  * Compile a runtime-binding CTE anchored on a SYNTHETIC typed NULL row
- * (`SELECT CAST(NULL AS <t>) AS "<col>", ... WHERE false`) rather than the
+ * (`SELECT NULL::<t> AS "<col>", ... WHERE false`) rather than the
  * source table. Used when the binding carries per-column type info
  * (#213) — the source-table anchor cannot be reused because aliased/typed
  * output column names may not exist as physical columns on any one table.
@@ -2027,9 +2072,9 @@ function compileTypedNqlRuntimeBindingCte(
 	binding: NqlRuntimeBinding,
 	parameterOffset: number,
 	cteName: string,
-	columnSql: string,
+	cteColumns: readonly string[],
 	targetSchema: string | undefined,
-): { cte: string; parameters: readonly unknown[] } {
+): RuntimeBindingCte {
 	const pgTypes = resolveRuntimeBindingCteColumnTypes(
 		name,
 		binding,
@@ -2040,7 +2085,7 @@ function compileTypedNqlRuntimeBindingCte(
 		binding,
 		parameterOffset,
 		cteName,
-		columnSql,
+		cteColumns,
 		pgTypes,
 	);
 }
@@ -2050,43 +2095,35 @@ function compileNqlRuntimeBindingCteWithPgTypes(
 	binding: NqlRuntimeBinding,
 	parameterOffset: number,
 	cteName: string,
-	columnSql: string,
+	cteColumns: readonly string[],
 	pgTypes: readonly (string | undefined)[],
-): { cte: string; parameters: readonly unknown[] } {
-	const anchorColumns = binding.columns
-		.map((column, columnIndex) => {
-			const columnAlias = quoteIdent(column, 'column');
+): RuntimeBindingCte {
+	const nullConstant: Node = { A_Const: { isnull: true } };
+	const anchor: SelectStmt = {
+		targetList: binding.columns.map((column, columnIndex) => {
+			validateIdentifier(column, 'column');
 			const pgType = pgTypes[columnIndex];
-			return pgType === undefined
-				? `NULL AS ${columnAlias}`
-				: `CAST(NULL AS ${pgType}) AS ${columnAlias}`;
-		})
-		.join(', ');
-	const sourceAnchorSql = `SELECT ${anchorColumns} WHERE false`;
-	if (binding.rows.length === 0) {
-		return {
-			cte: `${cteName} (${columnSql}) as (${sourceAnchorSql})`,
-			parameters: [],
-		};
-	}
-	assertRuntimeBindingValuesParameterCount(name, binding, parameterOffset);
-	const parameters: unknown[] = [];
-	let nextParam = parameterOffset + 1;
-	const valuesSql = binding.rows
-		.map((row) => {
-			const placeholders = binding.columns.map((column, columnIndex) => {
-				parameters.push(row[column]);
-				const paramRef = `$${nextParam++}`;
-				const pgType = pgTypes[columnIndex];
-				return pgType === undefined ? paramRef : `${paramRef}::${pgType}`;
-			});
-			return `(${placeholders.join(', ')})`;
-		})
-		.join(', ');
-	return {
-		cte: `${cteName} (${columnSql}) as (${sourceAnchorSql} UNION ALL VALUES ${valuesSql})`,
-		parameters,
+			return {
+				ResTarget: {
+					name: column,
+					val:
+						pgType === undefined
+							? nullConstant
+							: runtimeBindingCast(nullConstant, pgType),
+				},
+			};
+		}),
+		whereClause: falseConstant,
 	};
+	return runtimeBindingCteNode(
+		name,
+		binding,
+		parameterOffset,
+		cteName,
+		cteColumns,
+		anchor,
+		pgTypes,
+	);
 }
 
 function compileNqlRuntimeBindingCte(
@@ -2098,7 +2135,7 @@ function compileNqlRuntimeBindingCte(
 	schemaName: string | undefined,
 	model: ModelIR | undefined,
 	returningItems?: readonly MutationReturningItem[],
-): { cte: string; parameters: readonly unknown[] } {
+): RuntimeBindingCte {
 	const sourceBinding =
 		sourceTable === undefined
 			? undefined
@@ -2145,7 +2182,8 @@ function compileNqlRuntimeBindingCte(
 			`NQL runtime binding '${name}' cannot be materialized without projected columns.`,
 		);
 	}
-	const cteName = quoteIdent(emittedBindName(queryLocal(name)), 'alias');
+	const cteName = emittedBindName(queryLocal(name));
+	validateIdentifier(cteName, 'alias');
 	// A binding CTE's header is its query-local output schema, not a projection
 	// of the source table. Keep aliases and aggregate labels verbatim even when
 	// their source happens to be a declared model column.
@@ -2155,9 +2193,7 @@ function compileNqlRuntimeBindingCte(
 			`NQL runtime binding '${name}' emits duplicate column names after PostgreSQL returned-label truncation.`,
 		);
 	}
-	const columnSql = emittedColumnNames
-		.map((column) => quoteIdent(column, 'column'))
-		.join(', ');
+	for (const column of emittedColumnNames) validateIdentifier(column, 'column');
 
 	// #213: a binding carrying per-column type info (currently: snapshotted
 	// read-bindings) anchors on a synthetic typed NULL row instead of the
@@ -2170,7 +2206,7 @@ function compileNqlRuntimeBindingCte(
 			binding,
 			parameterOffset,
 			cteName,
-			columnSql,
+			emittedColumnNames,
 			schemaName,
 		);
 	}
@@ -2186,7 +2222,7 @@ function compileNqlRuntimeBindingCte(
 			binding,
 			parameterOffset,
 			cteName,
-			columnSql,
+			emittedColumnNames,
 			declaredOutputPgTypes,
 		);
 	}
@@ -2196,49 +2232,59 @@ function compileNqlRuntimeBindingCte(
 			`NQL runtime binding '${name}' cannot materialize a typed relation because its source table is unavailable.`,
 		);
 	}
-	const projectedColumns = binding.columns
-		.map((column) => quoteIdent(sourcePhysicalColumnFor(column), 'column'))
-		.join(', ');
-	const sourceAnchorSql = `SELECT ${projectedColumns} FROM ${
-		sourceBinding === undefined && schemaName
-			? `${quoteIdent(schemaName, 'schema')}.`
-			: ''
-	}${quoteIdent(
+	if (sourceBinding === undefined && schemaName) {
+		validateIdentifier(schemaName, 'schema');
+	}
+	const anchorTable =
 		sourceBinding === undefined
 			? identifierText(declaredTable(requireDeclaredNames(deps), sourceTable))
-			: sourceTable,
-		'table',
-	)} WHERE false`;
-	if (binding.rows.length === 0) {
-		return {
-			cte: `${cteName} (${columnSql}) as (${sourceAnchorSql})`,
-			parameters: [],
-		};
-	}
-	assertRuntimeBindingValuesParameterCount(name, binding, parameterOffset);
-
-	const columnTypes = resolveRuntimeBindingColumnTypes(
-		name,
-		{ ...binding, columns: binding.columns.map(sourceColumnFor) },
-		model,
-		sourceTable,
-		schemaName,
-	);
-	const parameters: unknown[] = [];
-	let nextParam = parameterOffset + 1;
-	const valuesSql = binding.rows
-		.map((row) => {
-			const placeholders = binding.columns.map((column, columnIndex) => {
-				parameters.push(row[column]);
-				return `$${nextParam++}::${columnTypes[columnIndex]}`;
-			});
-			return `(${placeholders.join(', ')})`;
-		})
-		.join(', ');
-	return {
-		cte: `${cteName} (${columnSql}) as (${sourceAnchorSql} UNION ALL VALUES ${valuesSql})`,
-		parameters,
+			: sourceTable;
+	validateIdentifier(anchorTable, 'table');
+	const anchor: SelectStmt = {
+		targetList: binding.columns.map((column) => {
+			const sourceColumn = sourcePhysicalColumnFor(column);
+			validateIdentifier(sourceColumn, 'column');
+			return {
+				ResTarget: {
+					val: { ColumnRef: { fields: [stringNode(sourceColumn)] } },
+				},
+			};
+		}),
+		fromClause: [
+			{
+				RangeVar: {
+					...(sourceBinding === undefined &&
+						schemaName && { schemaname: schemaName }),
+					relname: anchorTable,
+					inh: true,
+					relpersistence: 'p',
+				},
+			},
+		],
+		whereClause: falseConstant,
 	};
+	if (binding.rows.length > 0) {
+		assertRuntimeBindingValuesParameterCount(name, binding, parameterOffset);
+	}
+	const columnTypes =
+		binding.rows.length === 0
+			? []
+			: resolveRuntimeBindingColumnTypes(
+					name,
+					{ ...binding, columns: binding.columns.map(sourceColumnFor) },
+					model,
+					sourceTable,
+					schemaName,
+				);
+	return runtimeBindingCteNode(
+		name,
+		binding,
+		parameterOffset,
+		cteName,
+		emittedColumnNames,
+		anchor,
+		columnTypes,
+	);
 }
 
 export function createNqlBindingSelectPlan(
@@ -2445,6 +2491,7 @@ function projectNqlBindingQueryEnvelope<T = unknown>(
 	sql: string,
 	parameters: readonly unknown[],
 	hydrationPlan: PlanReport | undefined,
+	ast: Node | undefined,
 ): ProjectionEnvelope<T> {
 	const shape = buildNqlBindingProjectionShape(source, query.select);
 
@@ -2452,6 +2499,7 @@ function projectNqlBindingQueryEnvelope<T = unknown>(
 		return preserveOneToOne(source, {
 			sql,
 			parameters,
+			...(ast !== undefined ? { ast } : {}),
 			...(hydrationPlan !== undefined ? { hydrationPlan } : {}),
 			preserveHydrationPlan: false,
 		});
@@ -2459,6 +2507,7 @@ function projectNqlBindingQueryEnvelope<T = unknown>(
 	return projectNamedFields(source, {
 		sql,
 		parameters,
+		...(ast !== undefined ? { ast } : {}),
 		selections: shape.selections,
 		expressions: shape.expressions,
 		...(hydrationPlan !== undefined ? { hydrationPlan } : {}),
@@ -3205,6 +3254,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 						compiled.sql,
 						compiled.parameters,
 						compiled.hydrationPlan,
+						compiled.ast,
 					)
 				: compiled;
 		}
@@ -3256,7 +3306,9 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 		bundle: CompiledNqlQuery,
 		options?: CompileOptions,
 	): CompiledQuery<T> {
-		const ctes: string[] = [];
+		// Binding CTEs and the final statement form one tree (ADR 0012): each
+		// binding body compiled from $1 is shifted after the bindings before it.
+		const ctes: Node[] = [];
 		const parameters: unknown[] = [];
 		const deps = this.buildCompileDeps(options);
 		const bindingNamesInOrder = removeShadowedNqlBindingNames(
@@ -3327,7 +3379,8 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 					`NQL binding '${name}' has no query intent or runtime rows to materialize.`,
 				);
 			}
-			const cteName = quoteIdent(emittedBindName(queryLocal(name)), 'alias');
+			const cteName = emittedBindName(queryLocal(name));
+			validateIdentifier(cteName, 'alias');
 			const bindingBundle: CompiledNqlQuery = bundle.mutationBindings?.has(name)
 				? { mutation: bundle.mutationBindings.get(name)! }
 				: { query: queryIntent };
@@ -3373,7 +3426,13 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 						})
 					: compiled;
 			ctes.push(
-				`${cteName} as (${renumberSqlParams(compiled.sql, parameters.length)})`,
+				commonTableExpression(
+					cteName,
+					shiftParameters(
+						requireStatementAst(compiled, `NQL binding '${name}'`),
+						parameters.length,
+					),
+				),
 			);
 			parameters.push(...compiled.parameters);
 			bindingProjections.set(name, bindingProjection);
@@ -3395,20 +3454,27 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 			bindingNames,
 			bindingProjections,
 		);
-		const compiled = finalizeEnvelope<T>(compiledEnvelope);
 		if (ctes.length === 0) {
-			return guardCompiledQuery(compiled, 'NQL bundle');
+			return guardCompiledQuery(
+				finalizeEnvelope<T>(compiledEnvelope),
+				'NQL bundle',
+			);
 		}
 
+		// The final statement's own WITH, if any, keeps its CTEs after the bindings.
+		const ast = withLeadingCtes(
+			shiftParameters(
+				requireStatementAst(compiledEnvelope, 'the final NQL statement'),
+				parameters.length,
+			),
+			ctes,
+		);
 		return guardCompiledQuery(
-			preserveOutputKeyMap(
-				compiled,
-				rebuildCompiledQuery(compiled, {
-					sql: prefixNqlBindingCtes(
-						ctes,
-						renumberSqlParams(compiled.sql, parameters.length),
-					),
-					parameters: [...parameters, ...compiled.parameters],
+			finalizeEnvelope<T>(
+				preserveOneToOne<T>(compiledEnvelope, {
+					sql: deparseQuoted(ast),
+					parameters: [...parameters, ...compiledEnvelope.parameters],
+					ast,
 				}),
 			),
 			'NQL bundle',
@@ -3854,7 +3920,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 		bindingProjections?: NqlBindingProjectionRegistry,
 	): CompiledQuery<T> {
 		validateRecursiveSetOperation(intent, model, this.dialectCapabilities);
-		const compileFn: LeafCompileFn = (query) => {
+		const compileFn: SetOperationLeafCompiler = (query) => {
 			const leafOptions: CompileOptions & { model: ModelIR } = {
 				...options,
 				model,
@@ -3900,6 +3966,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 						compiled.sql,
 						compiled.parameters,
 						compiled.hydrationPlan,
+						compiled.ast,
 					)
 				: compiled;
 		};

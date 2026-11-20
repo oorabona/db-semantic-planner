@@ -94,7 +94,7 @@ describe('NQL-WITH: SC-03 — CTE used in WHERE IN subquery (SQL)', () => {
 		const sql = ws(compiled.sql);
 		// Should start with WITH recent AS (
 		expect(sql).toMatch(/^WITH/);
-		expect(sql).toContain('"recent" AS');
+		expect(sql).toContain('WITH recent AS (');
 		expect(sql).toContain('FROM orders');
 		expect(sql).toContain('FROM products');
 	});
@@ -206,7 +206,7 @@ describe('NQL-WITH: SC-10 — Full SQL compilation', () => {
 
 		// Verify WITH clause structure (adapter runs without schema, so no double-quoting of identifiers)
 		expect(sql).toMatch(/^WITH/);
-		expect(sql).toContain('"active" AS');
+		expect(sql).toContain('WITH active AS (');
 		expect(sql).toContain('SELECT products.id, products.name FROM products');
 		expect(sql).toContain('WHERE products.active = $1');
 		expect(sql).toContain('SELECT orders.* FROM orders');

@@ -291,6 +291,11 @@ const PG_RESERVED = new Set([
 	'exists',
 	// SQL standard function keywords that pgsql-deparser quotes in FuncCall context
 	'coalesce',
+	// type_func_name keywords: refused as table, CTE and column names
+	'authorization',
+	'binary',
+	'collation',
+	'concurrently',
 ]);
 
 function quoteIdent(name: string): string {
@@ -891,7 +896,7 @@ function deparseCommonTableExpr(node: CommonTableExpr): string {
 	const rec = node as unknown as Record<string, unknown>;
 	const cteName = String(rec.ctename ?? '');
 	const ctequery = rec.ctequery as Node | undefined;
-	const cteCols = rec.cte_cols as Node[] | undefined;
+	const cteCols = node.aliascolnames;
 	const cycleClause = rec.cycle_clause as CTECycleClause | undefined;
 
 	let result = `${quoteIdent(cteName)} AS `;
@@ -918,7 +923,13 @@ function deparseCommonTableExpr(node: CommonTableExpr): string {
 }
 
 function deparseWithClause(node: WithClause): string {
-	const recursive = node.recursive ? 'WITH RECURSIVE ' : 'WITH ';
+	const anyRecursiveCte = (node.ctes ?? []).some(
+		(cte) =>
+			(cte as { CommonTableExpr?: CommonTableExpr }).CommonTableExpr
+				?.cterecursive === true,
+	);
+	const recursive =
+		node.recursive || anyRecursiveCte ? 'WITH RECURSIVE ' : 'WITH ';
 	const ctes = (node.ctes ?? []).map(nodeToStr).join(', ');
 	return `${recursive}${ctes}`;
 }
@@ -947,6 +958,28 @@ function deparseCTECycleClause(node: CTECycleClause): string {
 // SelectStmt
 // ---------------------------------------------------------------------------
 
+/**
+ * A set-operation operand is parenthesised when it is itself a set operation
+ * or carries a clause that would otherwise bind to the enclosing operation.
+ * No re-association: `A UNION ALL (B UNION C)` keeps its grouping.
+ */
+function setOperandNeedsParentheses(node: SelectStmt): boolean {
+	const op = (node as { op?: string }).op;
+	return (
+		(op !== undefined && op !== 'SETOP_NONE') ||
+		(node.sortClause?.length ?? 0) > 0 ||
+		Boolean(node.limitCount) ||
+		Boolean(node.limitOffset) ||
+		(node.lockingClause?.length ?? 0) > 0 ||
+		Boolean(node.withClause)
+	);
+}
+
+function deparseSetOperand(node: SelectStmt): string {
+	const sql = deparseSelectStmt(node);
+	return setOperandNeedsParentheses(node) ? `(${sql})` : sql;
+}
+
 function deparseSelectStmt(node: SelectStmt): string {
 	const rec = node as unknown as Record<string, unknown>;
 	const op = rec.op as string | undefined;
@@ -956,8 +989,8 @@ function deparseSelectStmt(node: SelectStmt): string {
 		const larg = rec.larg as SelectStmt | undefined;
 		const rarg = rec.rarg as SelectStmt | undefined;
 		const all = rec.all as boolean | undefined;
-		const left = larg ? deparseSelectStmt(larg) : '';
-		const right = rarg ? deparseSelectStmt(rarg) : '';
+		const left = larg ? deparseSetOperand(larg) : '';
+		const right = rarg ? deparseSetOperand(rarg) : '';
 		let setOp: string;
 		switch (op) {
 			case 'SETOP_UNION':
@@ -972,7 +1005,9 @@ function deparseSelectStmt(node: SelectStmt): string {
 			default:
 				setOp = op;
 		}
-		return `${left} ${setOp} ${right}`;
+		const setWith = rec.withClause as WithClause | undefined;
+		const body = `${left} ${setOp} ${right}`;
+		return setWith ? `${deparseWithClause(setWith)} ${body}` : body;
 	}
 
 	// VALUES clause
@@ -1065,7 +1100,9 @@ function deparseSelectStmt(node: SelectStmt): string {
 // ---------------------------------------------------------------------------
 
 function deparseInsertStmt(node: InsertStmt): string {
-	const parts: string[] = ['INSERT INTO'];
+	const parts: string[] = node.withClause
+		? [deparseWithClause(node.withClause), 'INSERT INTO']
+		: ['INSERT INTO'];
 
 	if (node.relation) {
 		parts.push(deparseRangeVar(node.relation));
@@ -1118,7 +1155,9 @@ function deparseInsertStmt(node: InsertStmt): string {
 // ---------------------------------------------------------------------------
 
 function deparseUpdateStmt(node: UpdateStmt): string {
-	const parts: string[] = ['UPDATE'];
+	const parts: string[] = node.withClause
+		? [deparseWithClause(node.withClause), 'UPDATE']
+		: ['UPDATE'];
 
 	if (node.relation) {
 		parts.push(deparseRangeVar(node.relation));
@@ -1156,7 +1195,9 @@ function deparseUpdateStmt(node: UpdateStmt): string {
 // ---------------------------------------------------------------------------
 
 function deparseDeleteStmt(node: DeleteStmt): string {
-	const parts: string[] = ['DELETE FROM'];
+	const parts: string[] = node.withClause
+		? [deparseWithClause(node.withClause), 'DELETE FROM']
+		: ['DELETE FROM'];
 
 	if (node.relation) {
 		parts.push(deparseRangeVar(node.relation));

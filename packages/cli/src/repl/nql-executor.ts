@@ -197,11 +197,7 @@ export async function compileNqlToSql(
 	// Lazy-load adapter to avoid loading pgsql-parser at module init time
 	// pgsql-parser has issues with ESM dynamic requires, so we defer its import
 	// until it's actually needed (CLI-PGSQL-LAZY-LOAD)
-	const {
-		createPgCompileOnlyAdapter,
-		compileSetOperation,
-		createLeafCompileFn,
-	} = await import('@dbsp/adapter-pgsql');
+	const { createPgCompileOnlyAdapter } = await import('@dbsp/adapter-pgsql');
 
 	// Create compile-only adapter for SQL generation (no DB connection needed)
 	const adapter = createPgCompileOnlyAdapter({
@@ -287,8 +283,7 @@ export async function compileNqlToSql(
 	}
 
 	if (compiled.setOperation) {
-		const compileFn = createLeafCompileFn(adapter, model, plan);
-		const result = compileSetOperation(compiled.setOperation, compileFn);
+		const result = adapter.compileSetOperation(compiled.setOperation, model);
 
 		return {
 			sql: result.sql,

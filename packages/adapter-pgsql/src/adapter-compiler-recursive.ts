@@ -61,7 +61,7 @@ import { inferPgArrayType, stripArraySuffix } from './compiler-utils.js';
 import { deparseQuoted } from './deparse.js';
 import type { CompilerContext } from './handlers/index.js';
 import { createCompilerState } from './handlers/index.js';
-import { createTypeCastParamRef } from './param-ref.js';
+import { createParamRef, createTypeCastParamRef } from './param-ref.js';
 import {
 	dropPositionalUnion,
 	finalizeEnvelope,
@@ -82,6 +82,13 @@ import {
 	queryScopeForBindingProjections,
 } from './relation-target-projection.js';
 import { queryLocal, resolveDeclaredIdentifier } from './sql-identifier.js';
+import {
+	commonTableExpression,
+	requireStatementAst,
+	setOperationStatement,
+	shiftParameters,
+	withLeadingCtes,
+} from './statement-ast.js';
 import { validateIdentifier } from './validate.js';
 
 type CteProjectionRegistry = ReadonlyMap<string, ProjectionEnvelope>;
@@ -325,12 +332,14 @@ function projectCteQueryEnvelope<T = unknown>(
 	sql: string,
 	parameters: readonly unknown[],
 	hydrationPlan: PlanReport | undefined,
+	ast: Node | undefined,
 ): ProjectionEnvelope<T> {
 	const shape = buildCteProjectionShape(source, query.select);
 	if (shape.preserveOneToOne) {
 		return preserveOneToOne<T>(source, {
 			sql,
 			parameters,
+			...(ast !== undefined ? { ast } : {}),
 			...(hydrationPlan !== undefined ? { hydrationPlan } : {}),
 			preserveHydrationPlan: false,
 		});
@@ -338,6 +347,7 @@ function projectCteQueryEnvelope<T = unknown>(
 	return projectNamedFields<T>(source, {
 		sql,
 		parameters,
+		...(ast !== undefined ? { ast } : {}),
 		selections: shape.selections,
 		expressions: shape.expressions,
 		...(hydrationPlan !== undefined ? { hydrationPlan } : {}),
@@ -364,6 +374,7 @@ function compileQueryEnvelope(
 			compiled.sql,
 			compiled.parameters,
 			compiled.hydrationPlan,
+			compiled.ast,
 		);
 	}
 	return compiled;
@@ -375,6 +386,7 @@ function rehomeQueryEnvelope(
 	compiled: ProjectionEnvelope,
 	sql: string,
 	parameters: readonly unknown[],
+	ast: Node,
 ): ProjectionEnvelope {
 	return projectCteQueryEnvelope(
 		source,
@@ -382,6 +394,7 @@ function rehomeQueryEnvelope(
 		sql,
 		parameters,
 		compiled.hydrationPlan,
+		ast,
 	);
 }
 
@@ -804,11 +817,12 @@ export function compileRecursive<T = unknown>(
 // ============================================================================
 
 /**
- * Compile a CTE query backed by unnest() arrays (BATCH-001 Block 5).
+ * Compile a CTE query: simple, unnest-backed and raw recursive CTEs, then the
+ * outer query, as one `SelectStmt` with a `WithClause` (ADR 0012).
  *
- * Strategy: compile CTE nodes to SQL fragments, compile outer query
- * independently (parameters starting at $1), then renumber outer params
- * to start after CTE params and prepend WITH clause.
+ * Each CTE body and the outer query are compiled with parameters from $1; each
+ * subtree's `ParamRef` nodes are shifted in the tree by the parameters of the
+ * CTEs before it, and the statement is deparsed once.
  *
  * Extracted body of PgAdapter.compileCteQuery().
  */
@@ -818,14 +832,25 @@ export function compileCteQuery<T = unknown>(
 	deps: AdapterCompilerDeps,
 	initialProjectionByName?: CteProjectionRegistry,
 ): CompiledQuery<T> {
+	return finalizeEnvelope<T>(
+		compileCteQueryEnvelope<T>(intent, options, deps, initialProjectionByName),
+	);
+}
+
+function compileCteQueryEnvelope<T = unknown>(
+	intent: CteQueryIntent,
+	options: CompileOptions | undefined,
+	deps: AdapterCompilerDeps,
+	initialProjectionByName?: CteProjectionRegistry,
+): ProjectionEnvelope<T> {
 	// schemaName precedence (options > adapter ctor) is resolved in PgAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const state = createCompilerState();
 
 	// All parameters accumulated from all CTEs (in declaration order)
 	const allCteParams: unknown[] = [];
 
-	// 1. Build CTE SQL fragments, accumulating parameters
-	const cteSqlFragments: string[] = [];
+	// 1. Build CTE nodes, accumulating parameters
+	const cteNodes: Node[] = [];
 	const cteProjectionByName = new Map<string, ProjectionEnvelope>(
 		initialProjectionByName,
 	);
@@ -843,18 +868,17 @@ export function compileCteQuery<T = unknown>(
 		validateIdentifier(cte.name, 'table');
 		const emittedCteName = emittedBindName(queryLocal(cte.name));
 		if (cte.kind === 'unnestCte') {
-			// Unnest-backed CTE: builds an AST node, deparses it
+			// Unnest-backed CTE: its counter starts after the earlier CTEs' parameters
 			const beforeUnnestParamCount = state.parameters.length;
 			state.paramIndex = allCteParams.length;
 			const node = buildUnnestCte(cte, state);
 			const cteParams = state.parameters.slice(beforeUnnestParamCount);
 			allCteParams.push(...cteParams);
-			const cteSql = deparseQuoted(node);
-			cteSqlFragments.push(cteSql);
+			cteNodes.push(node);
 			cteProjectionByName.set(
 				emittedCteName,
 				fromOutputDescriptors({
-					sql: cteSql,
+					sql: deparseQuoted(node),
 					parameters: cteParams,
 					columns: [
 						...Object.keys(cte.columns),
@@ -863,9 +887,8 @@ export function compileCteQuery<T = unknown>(
 				}),
 			);
 		} else if (cte.kind === 'rawCte') {
-			// Raw WITH RECURSIVE CTE: compile base + step independently
+			// Raw WITH RECURSIVE CTE: base UNION [ALL] step as one tree
 			isRecursive = true;
-			const currentParamOffset = allCteParams.length;
 			const rawCteStepDeps = withBindingProjectionScope(
 				visibleCteDeps,
 				withBindingName(visibleCteDeps.bindingNames, queryLocal(cte.name)),
@@ -881,26 +904,11 @@ export function compileCteQuery<T = unknown>(
 			// Keep positional-UNION result metadata fail-closed even though the
 			// separate binding projection below retains local output labels.
 			finalizeEnvelope(rawCte.projection);
-			const renumberedRawCteSql =
-				currentParamOffset > 0
-					? rawCte.sql.replace(
-							/\$([0-9]+)/g,
-							(_: string, n: string) =>
-								`$${parseInt(n, 10) + currentParamOffset}`,
-						)
-					: rawCte.sql;
+			cteNodes.push(shiftParameters(rawCte.ast, allCteParams.length));
 			allCteParams.push(...rawCte.params);
-			cteSqlFragments.push(renumberedRawCteSql);
-			cteProjectionByName.set(
-				emittedCteName,
-				preserveOneToOne(rawCte.bindingProjection, {
-					sql: renumberedRawCteSql,
-					parameters: rawCte.params,
-					preserveHydrationPlan: false,
-				}),
-			);
+			cteProjectionByName.set(emittedCteName, rawCte.bindingProjection);
 		} else if (cte.kind === 'simpleCte') {
-			// Simple named subquery CTE: compile inner query, wrap in ctename AS (...)
+			// Simple named subquery CTE: ctename AS (inner query tree)
 			const innerCte = cte as SimpleCteIntent;
 			const innerCompiled = compileQueryEnvelope(
 				innerCte.query,
@@ -909,22 +917,20 @@ export function compileCteQuery<T = unknown>(
 				cteProjectionByName,
 			);
 			assertRelationalOutput(innerCompiled.hydrationPlan, 'Relational bodies');
-			// Renumber inner params to follow all previously accumulated CTE params
-			const currentParamOffset = allCteParams.length;
-			const renumberedInnerSql =
-				currentParamOffset > 0
-					? innerCompiled.sql.replace(
-							/\$([0-9]+)/g,
-							(_: string, n: string) =>
-								`$${parseInt(n, 10) + currentParamOffset}`,
-						)
-					: innerCompiled.sql;
+			cteNodes.push(
+				commonTableExpression(
+					emittedCteName,
+					shiftParameters(
+						requireStatementAst(innerCompiled, `CTE '${cte.name}'`),
+						allCteParams.length,
+					),
+				),
+			);
 			allCteParams.push(...innerCompiled.parameters);
-			cteSqlFragments.push(`"${emittedCteName}" AS (${renumberedInnerSql})`);
 			cteProjectionByName.set(
 				emittedCteName,
 				preserveOneToOne(innerCompiled, {
-					sql: renumberedInnerSql,
+					sql: innerCompiled.sql,
 					parameters: innerCompiled.parameters,
 					preserveHydrationPlan: false,
 				}),
@@ -961,38 +967,27 @@ export function compileCteQuery<T = unknown>(
 		},
 	);
 
-	// 3. Renumber outer SQL parameters to follow all CTE parameters.
-	// Safety: the deparser always emits user values as $N parameters, never as inline string
-	// literals — so the /\$([0-9]+)/ regex cannot match user data embedded in quoted strings.
-	const cteParamCount = allCteParams.length;
-	const renumberedOuterSql =
-		cteParamCount > 0
-			? outerCompiled.sql.replace(
-					/\$([0-9]+)/g,
-					(_: string, n: string) => `$${parseInt(n, 10) + cteParamCount}`,
-				)
-			: outerCompiled.sql;
-
-	// 4. Build WITH [RECURSIVE] clause
-	const withClause = cteSqlFragments.join(', ');
-	const withKeyword = isRecursive ? 'WITH RECURSIVE' : 'WITH';
-
-	const sql =
-		withClause.length > 0
-			? `${withKeyword} ${withClause} ${renumberedOuterSql}`
-			: renumberedOuterSql;
+	// 3. Shift the outer query's parameters after the CTEs' and attach the CTEs
+	const ast = withLeadingCtes(
+		shiftParameters(
+			requireStatementAst(outerCompiled, 'the outer query of a CTE query'),
+			allCteParams.length,
+		),
+		cteNodes,
+		isRecursive,
+	);
+	const sql = deparseQuoted(ast);
 	const parameters = [...allCteParams, ...outerCompiled.parameters];
-	const env = outerRegisteredSource
-		? projectCteQueryEnvelope(
-				outerRegisteredSource,
+	return outerRegisteredSource
+		? projectCteQueryEnvelope<T>(
+				outerRegisteredSource as ProjectionEnvelope<T>,
 				intent.query,
 				sql,
 				parameters,
 				outerCompiled.hydrationPlan,
+				ast,
 			)
-		: preserveOneToOne<T>(outerCompiled, { sql, parameters });
-
-	return finalizeEnvelope<T>(env);
+		: preserveOneToOne<T>(outerCompiled, { sql, parameters, ast });
 }
 
 // ============================================================================
@@ -1073,15 +1068,15 @@ function buildUnnestCte(
 }
 
 /**
- * Build a "name AS (base UNION [ALL] step)" SQL fragment for a raw recursive CTE.
+ * Build a `name AS (base UNION [ALL] step)` CTE node for a raw recursive CTE.
  *
  * Strategy:
- *   1. Compile base QueryIntent independently → base SQL + base params
- *   2. Compile step QueryIntent independently → step SQL + step params ($1-relative)
- *   3. Renumber step params to follow base params
- *   4. Return: `"name" AS (baseSql UNION [ALL] renumberedStepSql)` + all params
+ *   1. Compile base QueryIntent independently → base tree + base params
+ *   2. Compile step QueryIntent independently → step tree ($1-relative)
+ *   3. Shift the step's ParamRefs after the base's, in the tree
+ *   4. AND the depth guard into the step's WHERE, read from its tree
  *
- * The outer query params are renumbered separately by compileCteQuery().
+ * The CTE's parameters are numbered from $1; compileCteQuery() shifts them.
  */
 function buildRawCte(
 	cte: RawCteIntent,
@@ -1090,7 +1085,7 @@ function buildRawCte(
 	options: CompileOptions | undefined,
 	registry: CteProjectionRegistry,
 ): {
-	sql: string;
+	ast: Node;
 	params: readonly unknown[];
 	projection: ProjectionEnvelope;
 	bindingProjection: ProjectionEnvelope;
@@ -1129,36 +1124,33 @@ function buildRawCte(
 		scopedStepDeps,
 	);
 
-	// Renumber step params to follow base params.
-	// Safety: the deparser always emits user values as $N parameters, never as inline string
-	// literals — so the /\$([0-9]+)/ regex cannot match user data embedded in quoted strings.
-	// This would only be a risk if the deparser inlined literals like 'Price: $10', which it
-	// does not do. The regex is therefore safe against the SQL it compiles from AST.
-	const baseParamCount = baseCompiled.parameters.length;
-	const renumberedStepSql =
-		baseParamCount > 0
-			? rawStepCompiled.sql.replace(
-					/\$([0-9]+)/g,
-					(_: string, n: string) => `$${parseInt(n, 10) + baseParamCount}`,
-				)
-			: rawStepCompiled.sql;
-
-	// Inject depth guard: WHERE "depthColumn" < $N (or AND-ed with existing WHERE)
+	const baseAst = requireStatementAst(
+		baseCompiled,
+		`the base of recursive CTE '${cte.name}'`,
+	);
+	const shiftedStepAst = shiftParameters(
+		requireStatementAst(
+			rawStepCompiled,
+			`the step of recursive CTE '${cte.name}'`,
+		),
+		baseCompiled.parameters.length,
+	);
 	const allParams: unknown[] = [
 		...baseCompiled.parameters,
 		...rawStepCompiled.parameters,
 	];
-	let finalStepSql = renumberedStepSql;
+	let stepAst = shiftedStepAst;
 	if (cte.maxDepth !== undefined) {
-		const depthCol = `"${(cte.depthColumn ?? 'depth').replace(/"/g, '""')}"`;
-		const depthParamIndex = allParams.length + 1; // next $N
+		// Depth guard: "depthColumn" < $N, ANDed with the step's own WHERE
 		allParams.push(cte.maxDepth);
-		// Detect whether the step SQL already has a WHERE clause
-		const hasWhere = /\bWHERE\b/i.test(finalStepSql);
-		finalStepSql = hasWhere
-			? `${finalStepSql} AND ${depthCol} < $${depthParamIndex}`
-			: `${finalStepSql} WHERE ${depthCol} < $${depthParamIndex}`;
+		stepAst = withDepthGuard(
+			shiftedStepAst,
+			cte.depthColumn ?? 'depth',
+			allParams.length,
+			cte.name,
+		);
 	}
+	const stepSql = deparseQuoted(stepAst);
 	const stepRegisteredSource =
 		stepQuery.from === cte.name
 			? baseCompiled
@@ -1168,20 +1160,24 @@ function buildRawCte(
 				stepRegisteredSource,
 				stepQuery,
 				rawStepCompiled,
-				finalStepSql,
+				stepSql,
 				allParams,
+				stepAst,
 			)
 		: preserveOneToOne(rawStepCompiled, {
-				sql: finalStepSql,
+				sql: stepSql,
 				parameters: allParams,
+				ast: stepAst,
 			});
 
-	const setOp = cte.unionAll ? 'UNION ALL' : 'UNION';
-	const cteName = `"${emittedBindName(queryLocal(cte.name))}"`;
-	const cteSql = `${cteName} AS (${baseCompiled.sql} ${setOp} ${finalStepSql})`;
+	const ast = commonTableExpression(
+		emittedBindName(queryLocal(cte.name)),
+		setOperationStatement('union', cte.unionAll === true, baseAst, stepAst),
+	);
+	const cteSql = deparseQuoted(ast);
 
 	return {
-		sql: cteSql,
+		ast,
 		params: allParams,
 		projection: dropPositionalUnion([baseCompiled, stepCompiled], {
 			sql: cteSql,
@@ -1195,5 +1191,37 @@ function buildRawCte(
 			parameters: allParams,
 			preserveHydrationPlan: false,
 		}),
+	};
+}
+
+/** AND `"depthColumn" < $paramNumber` into a step's WHERE, read from its tree. */
+function withDepthGuard(
+	stepAst: Node,
+	depthColumn: string,
+	paramNumber: number,
+	cteName: string,
+): Node {
+	const step = (stepAst as { SelectStmt?: SelectStmt }).SelectStmt;
+	if (
+		step === undefined ||
+		(step.op !== undefined && step.op !== 'SETOP_NONE')
+	) {
+		throw new Error(
+			`Cannot add the depth guard of recursive CTE '${cteName}': its step is not a plain SELECT.`,
+		);
+	}
+	const guard = binaryExpr(
+		'<',
+		{ ColumnRef: { fields: [stringNode(depthColumn)] } },
+		createParamRef(paramNumber),
+	);
+	return {
+		SelectStmt: {
+			...step,
+			whereClause:
+				step.whereClause !== undefined
+					? andExpr(step.whereClause, guard)
+					: guard,
+		},
 	};
 }

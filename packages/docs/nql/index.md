@@ -1142,7 +1142,7 @@ WHERE EXISTS (
 
 *Schema: iam*
 
-Combine the results of two queries with `union`, `intersect`, `except`, or `union all`. Both sides must select the same columns. Nested relation output is refused for all set operations, including ALL variants; use `| flat` in every branch. A relation whose `includeStrategy` hint is `json_agg` or `cte` cannot be flattened; change that hint or select from the joined table. The right-hand query is wrapped in parentheses.
+Combine the results of two queries with `union`, `intersect`, `except`, or `union all`. Both sides must select the same columns. Nested relation output is refused for all set operations, including ALL variants; use `| flat` in every branch. A relation whose `includeStrategy` hint is `json_agg` or `cte` cannot be flattened; change that hint or select from the joined table. Each operand keeps its own clauses: an operand that is itself a set operation, or that has its own `order by`, `limit` or `offset`, is wrapped in parentheses in the emitted SQL.
 
 ### UNION (Deduplicated)
 
@@ -1706,9 +1706,9 @@ console.log(archivedDrafts.sql);
 console.log(archivedDrafts.parameters);
 ```
 
-A tag program can also contain ordered mutations. A non-final mutation may end with `| bind <name>` when it includes a `| select ...` returning projection. During execution, each mutation runs in source order inside one adapter transaction; each mutation fires its own `beforeMutation` and `afterMutation` hooks. Rows returned by a bound mutation feed later statements as a standard SQL CTE, for example `WITH "created_user" ("id") as (SELECT CAST(NULL AS uuid) AS "id" WHERE false UNION ALL VALUES (...))`. Each column is cast to its type from the model schema, so the CTE stays correctly typed even when zero rows come back. This is not a PostgreSQL writable CTE; NQL executes the mutation first, then materializes its returned rows for subsequent statements.
+A tag program can also contain ordered mutations. A non-final mutation may end with `| bind <name>` when it includes a `| select ...` returning projection. During execution, each mutation runs in source order inside one adapter transaction; each mutation fires its own `beforeMutation` and `afterMutation` hooks. Rows returned by a bound mutation feed later statements as a standard SQL CTE, for example `WITH created_user(id) AS (SELECT NULL::uuid AS id WHERE false UNION ALL VALUES (...))`. Each column is cast to its type from the model schema, so the CTE stays correctly typed even when zero rows come back. This is not a PostgreSQL writable CTE; NQL executes the mutation first, then materializes its returned rows for subsequent statements.
 
-Use `.dump()` to inspect the compile-only statement sequence. Since `.dump()` does not execute the bound mutation, each empty runtime binding is emitted as a typed empty relation such as `WITH "created_user" ("id") as (SELECT CAST(NULL AS uuid) AS "id" WHERE false)`:
+Use `.dump()` to inspect the compile-only statement sequence. Its `sequence` holds each statement apart, with its own SQL and its own `$1…` parameters; the top-level `sql` and parameters are those of the last statement, the one whose result the program returns. Since `.dump()` does not execute the bound mutation, each empty runtime binding is emitted as a typed empty relation such as `WITH created_user(id) AS (SELECT NULL::uuid AS id WHERE false)`:
 
 ```typescript
 const mutationBindingDb = schema({
@@ -1749,13 +1749,13 @@ if (
 
 const updateSql = orderedMutationProgram.sequence[1]?.sql ?? '';
 const finalSql = orderedMutationProgram.sequence[2]?.sql ?? '';
-const emptyUserIdRelation = 'SELECT CAST(NULL AS uuid) AS "id" WHERE false';
-const writableMutationCte = /WITH "(?:created_user|activated_user)"\s+\("id"\)\s+as\s+\(\s*insert/i;
+const emptyUserIdRelation = 'SELECT NULL::uuid AS id WHERE false';
+const writableMutationCte = /(?:created_user|activated_user)\(id\)\s+AS\s+\(\s*insert/i;
 
 if (
-  !updateSql.includes('WITH "created_user" ("id") as (') ||
+  !updateSql.includes('WITH created_user(id) AS (') ||
   !updateSql.includes(emptyUserIdRelation) ||
-  !finalSql.includes('"activated_user" ("id") as (') ||
+  !finalSql.includes('activated_user(id) AS (') ||
   !finalSql.includes(emptyUserIdRelation) ||
   writableMutationCte.test(updateSql) ||
   writableMutationCte.test(finalSql)
@@ -1914,7 +1914,7 @@ pre_count | select total
 };
 
 const snapshotFinalSql = snapshotProgram.sequence?.at(-1)?.sql ?? '';
-if (!snapshotFinalSql.includes('CAST(NULL AS bigint) AS "total"')) {
+if (!snapshotFinalSql.includes('NULL::bigint AS total')) {
   throw new Error('expected the count snapshot binding to compile as a typed empty relation');
 }
 
@@ -1993,7 +1993,7 @@ const bindingFinalFromOrm = createOrm({
 
 const bindingFinalFromDump = bindingFinalFromOrm.nql<unknown>`users | where active = true | select id, username | bind active_users
 active_users | where username like 'a%' | select id, username | order by id | limit 5`.dump() as any;
-const bindingFinalFromSql = 'WITH "active_users" as (SELECT users.id, users.username FROM iam_example.users WHERE users.active = $1) SELECT active_users.id, active_users.username FROM active_users WHERE active_users.username LIKE $2 ORDER BY active_users.id ASC LIMIT 5';
+const bindingFinalFromSql = 'WITH active_users AS (SELECT users.id, users.username FROM iam_example.users WHERE users.active = $1) SELECT active_users.id, active_users.username FROM active_users WHERE active_users.username LIKE $2 ORDER BY active_users.id ASC LIMIT 5';
 const bindingFinalFromParams = bindingFinalFromDump.params ?? bindingFinalFromDump.parameters;
 
 if (bindingFinalFromDump.sql !== bindingFinalFromSql) {
@@ -2007,7 +2007,7 @@ if (JSON.stringify(bindingFinalFromParams) !== JSON.stringify([true, 'a%'])) {
 <details><summary>SQL</summary>
 
 ```sql
-WITH "active_users" as (SELECT users.id, users.username FROM iam_example.users WHERE users.active = $1) SELECT active_users.id, active_users.username FROM active_users WHERE active_users.username LIKE $2 ORDER BY active_users.id ASC LIMIT 5
+WITH active_users AS (SELECT users.id, users.username FROM iam_example.users WHERE users.active = $1) SELECT active_users.id, active_users.username FROM active_users WHERE active_users.username LIKE $2 ORDER BY active_users.id ASC LIMIT 5
 -- params: [true, "a%"]
 ```
 </details>

@@ -135,7 +135,7 @@ describe('DX-040-SURFACE: orm.from() with union()', () => {
 		const q2 = orm.from(users).where(eq(users.active, false));
 		const dump = q1.union(q2).dump();
 		expect(normalizeSQL(dump.sql)).toBe(
-			'(select users.* from users where users.active = $1) union (select users.* from users where users.active = $2)',
+			'select users.* from users where users.active = $1 union select users.* from users where users.active = $2',
 		);
 		expect(dump.params).toEqual([true, false]);
 	});

@@ -167,7 +167,7 @@ describe('own-property filter maps', () => {
 	});
 	it('does not use a prototype property after rebuilding an NQL binding map', () => {
 		expect(orm.nql`posts | select id | bind p\ntoString`.dump().sql).toBe(
-			'WITH "p" as (SELECT posts.id FROM posts WHERE posts."deletedAt" IS NULL) SELECT "toString".* FROM "toString"',
+			'WITH p AS (SELECT posts.id FROM posts WHERE posts."deletedAt" IS NULL) SELECT "toString".* FROM "toString"',
 		);
 	});
 });

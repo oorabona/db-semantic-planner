@@ -22,10 +22,6 @@ import {
 import { compile } from '@dbsp/nql';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../../packages/adapter-pgsql/src/pgsql-adapter.js';
-import {
-	compileSetOperation,
-	createLeafCompileFn,
-} from '../../packages/adapter-pgsql/src/set-operation.js';
 
 const ROOT_DIR = resolve(import.meta.dirname, '../..');
 const DOC_PATH = resolve(ROOT_DIR, 'packages/docs/nql/index.md');
@@ -358,10 +354,9 @@ function compileQuery(
 	// Set operations produce ast.setOperation instead of ast.query
 	if (compiled.ast?.setOperation) {
 		const adapter = createPgCompileOnlyAdapter();
-		const leafCompileFn = createLeafCompileFn(adapter, schemaObj.model, plan);
-		const result = compileSetOperation(
+		const result = adapter.compileSetOperation(
 			compiled.ast.setOperation,
-			leafCompileFn,
+			schemaObj.model,
 		);
 		return { sql: result.sql, params: result.parameters };
 	}

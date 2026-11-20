@@ -7,11 +7,7 @@
  * Reuses @dbsp/core assertion infrastructure (shared with CLI).
  */
 
-import {
-	compileSetOperation,
-	createLeafCompileFn,
-	createPgCompileOnlyAdapter,
-} from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import {
 	type AssertionQueryResult,
 	type AssertionSummary,
@@ -208,8 +204,10 @@ function compileQuery(
 		}
 
 		if (compiled.setOperation) {
-			const compileFn = createLeafCompileFn(adapter, model, plan);
-			const setResult = compileSetOperation(compiled.setOperation, compileFn);
+			const setResult = adapter.compileSetOperation(
+				compiled.setOperation,
+				model,
+			);
 			return {
 				sql: setResult.sql,
 				params: setResult.parameters,

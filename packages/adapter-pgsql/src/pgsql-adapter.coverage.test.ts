@@ -13,7 +13,7 @@ import { plan as nativePlan, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
  * - Adapter capabilities (execution/streaming support)
  */
 
-import { ref, schema } from '@dbsp/core';
+import { and, eq, exprRef, fn, literal, ref, schema } from '@dbsp/core';
 import type { ModelIR, PlanReport } from '@dbsp/types';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import { describe, expect, it } from 'vitest';
@@ -1003,6 +1003,67 @@ describe('PgAdapter - Coverage Tests', () => {
 			};
 			const result = adapter.compileInsertFrom(intent as any);
 			expect(result.sql).toContain('tenant_if');
+		});
+
+		it('AC3 mutation-source: keeps a body $-constant and $-column after a parameterised source CTE (ADR 0012)', () => {
+			const dollarModel = schema({
+				items: {
+					id: { type: 'integer', primaryKey: true },
+					name: 'string',
+					cost$1: { type: 'string', nullable: true },
+				},
+				archive: {
+					id: { type: 'integer', primaryKey: true },
+					name: 'string',
+					cost$1: { type: 'string', nullable: true },
+				},
+			}).model;
+			const adapter = createPgCompileOnlyAdapter({ model: dollarModel });
+
+			const result = adapter.compileInsertFrom(
+				{
+					type: 'insert_from',
+					table: 'archive',
+					source: 'src',
+					sourceQuery: {
+						type: 'select',
+						from: 'items',
+						where: {
+							kind: 'comparison',
+							field: 'name',
+							operator: 'eq',
+							value: 'x',
+						},
+					},
+					where: and(
+						eq('cost$1', 'y'),
+						fn('concat', literal('Price: $1'), exprRef('name')).eq(
+							'Price: $1x',
+						),
+					),
+				},
+				{ model: dollarModel },
+			);
+
+			expect(result.sql).toBe(
+				'WITH src AS (SELECT items.* FROM items WHERE items.name = $1) INSERT INTO archive SELECT * FROM src WHERE src."cost$1" = $2 AND concat(\'Price: $1\', src.name) = $3',
+			);
+			expect(result.parameters).toEqual(['x', 'y', 'Price: $1x']);
+		});
+
+		it('refuses a source CTE name that is not an identifier', () => {
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
+			expect(() =>
+				adapter.compileInsertFrom(
+					{
+						type: 'insert_from',
+						table: 'archive_users',
+						source: 'src x',
+						sourceQuery: { type: 'select', from: 'users' },
+					},
+					{ model: coverageModel },
+				),
+			).toThrow('Invalid alias identifier "src x"');
 		});
 	});
 

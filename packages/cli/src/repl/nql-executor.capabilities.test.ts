@@ -98,7 +98,7 @@ it.each([
 	expect(orm.nql`${nqlRaw(text)}`.dump().sql).toBe(cli.sql);
 	const branch =
 		'SELECT users.id, posts.title AS "posts.title" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId"';
-	expect(cli.sql).toBe(`(${branch}) ${op.toUpperCase()} (${branch})`);
+	expect(cli.sql).toBe(`${branch} ${op.toUpperCase()} ${branch}`);
 	expect(cli.params).toEqual([]);
 });
 
@@ -124,7 +124,7 @@ it.each([
 	],
 	[
 		'posts | select id, author.name | flat | bind enriched\nenriched | select *',
-		'as',
+		'AS',
 	],
 ])('CLI and tag preserve flat body SQL: %s', async (text, keyword) => {
 	const cli = await compileNqlToSql(text!, db.model);
@@ -132,7 +132,7 @@ it.each([
 		model: db.model,
 		adapter: createPgCompileOnlyAdapter({ model: db.model }),
 	});
-	const expected = `WITH "enriched" ${keyword} (SELECT posts.id, author.name AS "author.name" FROM posts JOIN users AS author ON posts."authorId" = author.id) SELECT enriched.* FROM enriched`;
+	const expected = `WITH enriched ${keyword} (SELECT posts.id, author.name AS "author.name" FROM posts JOIN users AS author ON posts."authorId" = author.id) SELECT enriched.* FROM enriched`;
 	expect(cli.sql).toBe(expected);
 	expect(orm.nql`${nqlRaw(text!)}`.dump().sql).toBe(expected);
 	expect(cli.params).toEqual([]);
@@ -177,13 +177,13 @@ function withoutTiming(plan: import('@dbsp/core').PlanReport | undefined) {
 const expectedBindingSql = new Map([
 	[
 		'users',
-		'WITH "u" as (SELECT users.id FROM users WHERE users.active = $1) SELECT users.id FROM users WHERE users.id = ANY (SELECT u_subq_0.id FROM u AS u_subq_0)',
+		'WITH u AS (SELECT users.id FROM users WHERE users.active = $1) SELECT users.id FROM users WHERE users.id = ANY (SELECT u_subq_0.id FROM u AS u_subq_0)',
 	],
 	[
 		'active_users',
-		`WITH "active_users" as (SELECT users.id, users.name FROM users) SELECT active_users.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'title', __t__.title, 'authorId', __t__."authorId") ORDER BY __t__.id ASC NULLS LAST) FROM posts AS __t__ WHERE __t__."authorId" = active_users.id), '[]'::json) AS posts_json FROM active_users`,
+		`WITH active_users AS (SELECT users.id, users.name FROM users) SELECT active_users.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'title', __t__.title, 'authorId', __t__."authorId") ORDER BY __t__.id ASC NULLS LAST) FROM posts AS __t__ WHERE __t__."authorId" = active_users.id), '[]'::json) AS posts_json FROM active_users`,
 	],
-	['u', 'WITH "u" as (SELECT users.id FROM users) SELECT u.* FROM u'],
+	['u', 'WITH u AS (SELECT users.id FROM users) SELECT u.* FROM u'],
 ]);
 
 it.each([

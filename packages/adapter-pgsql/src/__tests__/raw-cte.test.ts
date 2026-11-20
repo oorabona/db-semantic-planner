@@ -5,9 +5,21 @@
  * No DB connection required.
  */
 
-import { createOrm, createRawCteBuilder, eq, ref, schema } from '@dbsp/core';
+import {
+	and,
+	createOrm,
+	createRawCteBuilder,
+	eq,
+	exprRef,
+	fn,
+	literal,
+	ref,
+	schema,
+} from '@dbsp/core';
+import type { Dump } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { builtShape, parsedShape } from './statement-shape.js';
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -102,7 +114,7 @@ describe('FR-8: orm.recursive() — WITH RECURSIVE CTE', () => {
 		});
 
 		expect(ws(result.sql)).toBe(
-			'WITH RECURSIVE "employee_rows" AS (SELECT employees.* FROM employees UNION ALL SELECT employee_rows.* FROM employee_rows) SELECT employee_rows.* FROM employee_rows',
+			'WITH RECURSIVE employee_rows AS (SELECT employees.* FROM employees UNION ALL SELECT employee_rows.* FROM employee_rows) SELECT employee_rows.* FROM employee_rows',
 		);
 	});
 
@@ -127,7 +139,7 @@ describe('FR-8: orm.recursive() — WITH RECURSIVE CTE', () => {
 		});
 
 		expect(ws(result.sql)).toBe(
-			'WITH RECURSIVE "employee_rows" AS (SELECT employees.id, department.name AS "department.name" FROM employees JOIN departments AS department ON employees."departmentId" = department.id UNION ALL SELECT employee_rows.* FROM employee_rows) SELECT employee_rows.* FROM employee_rows',
+			'WITH RECURSIVE employee_rows AS (SELECT employees.id, department.name AS "department.name" FROM employees JOIN departments AS department ON employees."departmentId" = department.id UNION ALL SELECT employee_rows.* FROM employee_rows) SELECT employee_rows.* FROM employee_rows',
 		);
 	});
 
@@ -152,7 +164,7 @@ describe('FR-8: orm.recursive() — WITH RECURSIVE CTE', () => {
 		});
 
 		expect(ws(result.sql)).toBe(
-			'WITH RECURSIVE "employee_rows" AS (SELECT employees.id, employees."departmentId" FROM employees UNION ALL SELECT employees.id, department.id AS "department.id" FROM employees JOIN departments AS department ON employees."departmentId" = department.id) SELECT employee_rows.* FROM employee_rows',
+			'WITH RECURSIVE employee_rows AS (SELECT employees.id, employees."departmentId" FROM employees UNION ALL SELECT employees.id, department.id AS "department.id" FROM employees JOIN departments AS department ON employees."departmentId" = department.id) SELECT employee_rows.* FROM employee_rows',
 		);
 	});
 
@@ -167,7 +179,7 @@ describe('FR-8: orm.recursive() — WITH RECURSIVE CTE', () => {
 		const dump = chain.dump();
 
 		expect(ws(dump.sql)).toEqual(
-			'WITH RECURSIVE "parent_chain" AS (' +
+			'WITH RECURSIVE parent_chain AS (' +
 				'SELECT symbols.* FROM symbols WHERE symbols.id = $1' +
 				' UNION ALL ' +
 				'SELECT parent_chain.* FROM parent_chain' +
@@ -188,7 +200,7 @@ describe('FR-8: orm.recursive() — WITH RECURSIVE CTE', () => {
 			.dump();
 
 		expect(ws(dump.sql)).toEqual(
-			'WITH RECURSIVE "chain" AS (' +
+			'WITH RECURSIVE chain AS (' +
 				'SELECT categories.* FROM tenant_x.categories WHERE categories.id = $1' +
 				' UNION ALL ' +
 				'SELECT chain.* FROM chain' +
@@ -209,7 +221,7 @@ describe('FR-8: orm.recursive() — WITH RECURSIVE CTE', () => {
 			.dump();
 
 		expect(ws(dump.sql)).toEqual(
-			'WITH RECURSIVE "chain" AS (' +
+			'WITH RECURSIVE chain AS (' +
 				'SELECT chain.* FROM tenant_x.chain' +
 				' UNION ALL ' +
 				'SELECT chain.* FROM chain' +
@@ -397,13 +409,35 @@ describe('FR-8: orm.recursive() — WITH RECURSIVE CTE', () => {
 			.dump();
 
 		// base: $1=1 (parent_id), maxDepth: $2=10
-		// step has no WHERE → depth guard becomes: WHERE "depth" < $2
+		// step has no WHERE → depth guard becomes: WHERE depth < $2
 		expect(dump.params).toEqual([1, 10]);
 		expect(ws(dump.sql)).toEqual(
-			'WITH RECURSIVE "chain" AS (' +
+			'WITH RECURSIVE chain AS (' +
 				'SELECT categories.* FROM categories WHERE categories.parent_id = $1' +
 				' UNION ALL ' +
-				'SELECT chain.* FROM chain WHERE "depth" < $2' +
+				'SELECT chain.* FROM chain WHERE depth < $2' +
+				') SELECT chain.* FROM chain',
+		);
+	});
+
+	it('quotes a depth column named binary, a keyword PostgreSQL refuses bare', () => {
+		const orm = buildOrm() as any;
+
+		const dump = orm
+			.recursive('chain', {
+				base: orm.select('categories').where(eq('parent_id', 1)),
+				step: orm.select('chain'),
+				maxDepth: 3,
+				depthColumn: 'binary',
+			})
+			.dump();
+
+		expect(dump.params).toEqual([1, 3]);
+		expect(ws(dump.sql)).toEqual(
+			'WITH RECURSIVE chain AS (' +
+				'SELECT categories.* FROM categories WHERE categories.parent_id = $1' +
+				' UNION ALL ' +
+				'SELECT chain.* FROM chain WHERE "binary" < $2' +
 				') SELECT chain.* FROM chain',
 		);
 	});
@@ -421,9 +455,9 @@ describe('FR-8: orm.recursive() — WITH RECURSIVE CTE', () => {
 			.dump();
 
 		// base: $1=1, step: $2='active', maxDepth: $3=5
-		// step already has WHERE → depth guard becomes: AND "depth" < $3
+		// step already has WHERE → depth guard becomes: AND depth < $3
 		expect(dump.params).toEqual([1, 'active', 5]);
-		expect(ws(dump.sql)).toContain('WHERE chain.name = $2 AND "depth" < $3');
+		expect(ws(dump.sql)).toContain('WHERE chain.name = $2 AND depth < $3');
 	});
 
 	it('T14: maxDepth without depthColumn defaults to "depth"', () => {
@@ -439,6 +473,161 @@ describe('FR-8: orm.recursive() — WITH RECURSIVE CTE', () => {
 			.dump();
 
 		expect(dump.params).toEqual([2, 7]);
-		expect(ws(dump.sql)).toContain('WHERE "depth" < $2');
+		expect(ws(dump.sql)).toContain('WHERE depth < $2');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// One tree per CTE statement (ADR 0012): no `$N` text is renumbered
+// ---------------------------------------------------------------------------
+
+const dollarSchema = schema({
+	items: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		cost$1: { type: 'string', nullable: true },
+	},
+});
+
+function dollarOrm() {
+	const adapter = createPgCompileOnlyAdapter({ model: dollarSchema.model });
+	// Untyped like buildOrm(): a recursive step reads the CTE name, not a model table.
+	const orm = createOrm({ model: dollarSchema.model, adapter }) as any;
+	return { adapter, orm };
+}
+
+/** `concat('Price: $1', <column>) = $N`: a constant holding `$1` in a WHERE. */
+function priceEq(column: string) {
+	return fn('concat', literal('Price: $1'), exprRef(column)).eq('Price: $1x');
+}
+
+describe('CTE composition keeps $-constants and $-identifiers (ADR 0012)', () => {
+	it('AC2 simple-cte: a simple CTE after a parameterised CTE keeps its constant and column', () => {
+		const { orm } = dollarOrm();
+
+		const dump =
+			orm.nql`with a as (items | where name = ${'x'} | select id), b as (items | where "cost$1" = ${'y'} | select id, "cost$1", 'Price: $1' as label) b | select id, label`.dump() as Dump;
+
+		expect(dump.sql).toBe(
+			'WITH a AS (SELECT items.id FROM items WHERE items.name = $1), b AS (SELECT items.id, items."cost$1", \'Price: $1\' AS label FROM items WHERE items."cost$1" = $2) SELECT b.id, b.label FROM b',
+		);
+		expect(dump.params).toEqual(['x', 'y']);
+	});
+
+	it('AC2b recursive-outer: the outer query of orm.recursive keeps its constant and column', () => {
+		const { orm } = dollarOrm();
+
+		const dump = orm
+			.recursive('chain', {
+				base: orm.select('items').where(eq('name', 'root')),
+				step: orm.select('chain').where(eq('name', 'k')),
+			})
+			.where(and(eq('cost$1', 'c'), priceEq('name')))
+			.dump();
+
+		expect(dump.sql).toBe(
+			'WITH RECURSIVE chain AS (SELECT items.* FROM items WHERE items.name = $1 UNION ALL SELECT chain.* FROM chain WHERE chain.name = $2) SELECT chain.* FROM chain WHERE chain."cost$1" = $3 AND concat(\'Price: $1\', chain.name) = $4',
+		);
+		expect(dump.params).toEqual(['root', 'k', 'c', 'Price: $1x']);
+	});
+
+	it('AC2c recursive-step: the step keeps its constant and column beside the depth guard', () => {
+		const { orm } = dollarOrm();
+
+		const filtered = orm
+			.recursive('chain', {
+				base: orm.select('items').where(eq('name', 'root')),
+				step: orm
+					.select('chain')
+					.where(and(eq('cost$1', 'k'), priceEq('name'))),
+				maxDepth: 3,
+			})
+			.dump();
+
+		expect(filtered.sql).toBe(
+			'WITH RECURSIVE chain AS (SELECT items.* FROM items WHERE items.name = $1 UNION ALL SELECT chain.* FROM chain WHERE chain."cost$1" = $2 AND concat(\'Price: $1\', chain.name) = $3 AND depth < $4) SELECT chain.* FROM chain',
+		);
+		expect(filtered.params).toEqual(['root', 'k', 'Price: $1x', 3]);
+	});
+
+	it("AC2c recursive-step: a step with no WHERE and a 'WHERE' constant gets a valid depth guard", () => {
+		const { orm } = dollarOrm();
+
+		const unfiltered = orm
+			.recursive('chain', {
+				base: orm
+					.select('items')
+					.columns(['id', 'name'])
+					.where(eq('name', 'root')),
+				step: orm
+					.select('chain')
+					.columns([
+						'id',
+						fn('concat', literal('a WHERE b $1'), exprRef('name')).as('name'),
+					]),
+				maxDepth: 3,
+			})
+			.dump();
+
+		expect(unfiltered.sql).toBe(
+			"WITH RECURSIVE chain AS (SELECT items.id, items.name FROM items WHERE items.name = $1 UNION ALL SELECT chain.id, concat('a WHERE b $1', name) AS name FROM chain WHERE depth < $2) SELECT chain.* FROM chain",
+		);
+		expect(unfiltered.params).toEqual(['root', 3]);
+		expect(parsedShape(unfiltered.sql)).toEqual({
+			sort: false,
+			limit: false,
+			offset: false,
+			lock: false,
+			with: { recursive: true, ctes: [{ name: 'chain', columns: [] }] },
+		});
+	});
+
+	it('AC2d raw-cte-after-cte: a raw CTE after a parameterised CTE keeps its constant and column', () => {
+		const { adapter, orm } = dollarOrm();
+
+		const compiled = adapter.compileCteQuery(
+			{
+				kind: 'cteQuery',
+				ctes: [
+					{
+						kind: 'simpleCte',
+						name: 'a',
+						query: orm.select('items').where(eq('name', 'x')).buildIntent(),
+					},
+					{
+						kind: 'rawCte',
+						name: 'chain',
+						base: orm.select('items').where(eq('name', 'root')).buildIntent(),
+						step: orm
+							.select('chain')
+							.where(and(eq('cost$1', 'k'), priceEq('name')))
+							.buildIntent(),
+						unionAll: true,
+					},
+				],
+				query: orm.select('chain').buildIntent(),
+			},
+			{ model: dollarSchema.model },
+		);
+
+		expect(compiled.sql).toBe(
+			'WITH RECURSIVE a AS (SELECT items.* FROM items WHERE items.name = $1), chain AS (SELECT items.* FROM items WHERE items.name = $2 UNION ALL SELECT chain.* FROM chain WHERE chain."cost$1" = $3 AND concat(\'Price: $1\', chain.name) = $4) SELECT chain.* FROM chain',
+		);
+		expect(compiled.parameters).toEqual(['x', 'root', 'k', 'Price: $1x']);
+		const expected = {
+			sort: false,
+			limit: false,
+			offset: false,
+			lock: false,
+			with: {
+				recursive: true,
+				ctes: [
+					{ name: 'a', columns: [] },
+					{ name: 'chain', columns: [] },
+				],
+			},
+		};
+		expect(parsedShape(compiled.sql)).toEqual(expected);
+		expect(builtShape(compiled)).toEqual(expected);
 	});
 });

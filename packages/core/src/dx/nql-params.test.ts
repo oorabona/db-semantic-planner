@@ -578,7 +578,7 @@ insert into archivedUsers from active_users`.dump() as MutationDump;
 			(compileInput as CompiledNqlQuery).bindings?.has('active_users'),
 		).toBe(true);
 		expect(compileOptions?.model).toBe(db.model);
-		expect(dump.sql).toMatch(/^WITH "active_users" as \(/);
+		expect(dump.sql).toMatch(/^WITH active_users AS \(/);
 		expect(dump.sql).toContain('INSERT INTO "archivedUsers"');
 		expect(dump.parameters).toEqual([true]);
 	});
@@ -757,6 +757,34 @@ active_users | where name = ${'Ada'} | select id, name`.dump({
 			expect(dump.meta?.compiledAt).toBeInstanceOf(Date);
 		},
 	);
+
+	it('AC10 unplanned-read-dump: a read binding before a union dumps one statement without plan or sequence', () => {
+		const db = createParamTestSchema();
+		const orm = createOrm({
+			schema: db,
+			adapter: createPgCompileOnlyAdapter(),
+		});
+
+		const dump = expectUnplannedReadDump(
+			orm.nql<unknown>`users | where active = ${true} | select id | bind a
+a | select id | union (users | where name = ${'Ada'} | select id)`.dump({
+				queryName: 'bound-union',
+				correlationId: 'corr-1055',
+			}),
+		);
+
+		expect(dump.sql).toBe(
+			'WITH a AS (SELECT users.id FROM users WHERE users.active = $1) SELECT a.id FROM a UNION SELECT users.id FROM users WHERE users.name = $2',
+		);
+		expect(dump.params).toEqual([true, 'Ada']);
+		expect('plan' in dump).toBe(false);
+		expect('sequence' in dump).toBe(false);
+		expect(dump.meta).toMatchObject({
+			queryName: 'bound-union',
+			correlationId: 'corr-1055',
+		});
+		expect(dump.meta?.compiledAt).toBeInstanceOf(Date);
+	});
 
 	it.each([
 		['CTE', cteSource],

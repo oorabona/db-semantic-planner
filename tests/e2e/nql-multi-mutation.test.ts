@@ -44,10 +44,10 @@ update posts set published = ${true} where id in (new_post) | select id`;
 
 		expect(dump.sequence).toHaveLength(2);
 		expect(dump.sequence?.[1]?.sql).toContain(
-			'WITH "new_post" ("id") as (SELECT CAST(NULL AS integer) AS "id" WHERE false)',
+			'WITH new_post(id) AS (SELECT NULL::integer AS id WHERE false)',
 		);
 		expect(dump.sequence?.[1]?.sql).not.toMatch(
-			/WITH "new_post"\s+as\s+\(\s*insert/i,
+			/WITH new_post\s+as\s+\(\s*insert/i,
 		);
 		expect(rows).toEqual([{ id: 9100 }]);
 
@@ -73,9 +73,8 @@ update posts set title = ${'empty binding should not update'} where id in (touch
 
 		expect(dump.sequence).toHaveLength(2);
 		expect(dump.sequence?.[1]?.sql).toContain(
-			'WITH "touched_posts" ("id") as (SELECT CAST(NULL AS integer) AS "id" WHERE false)',
+			'WITH touched_posts(id) AS (SELECT NULL::integer AS id WHERE false)',
 		);
-		expect(dump.sequence?.[1]?.sql).not.toContain('NULL::');
 		expect(dump.sequence?.[1]?.sql).not.toContain('VALUES (NULL)');
 		expect(rows).toEqual([]);
 	});
@@ -312,7 +311,7 @@ b2 | select title`;
 		// always emit — #173) — b2 is chained FROM b1, never re-derived from
 		// the physical `posts` table directly.
 		const b2Step = dump.sequence?.find((step) => step.bindName === 'b2');
-		expect(b2Step?.sql).toContain('"b1"');
+		expect(b2Step?.sql).toContain('WITH b1(');
 
 		const persisted = await sql<{ title: string }>`
 			SELECT title
@@ -345,7 +344,7 @@ update posts set title = ${'noop'} where id = ${9501} | select id`;
 		const rows = await program.all();
 
 		const allSql = (dump.sequence ?? []).map((step) => step.sql).join('\n');
-		expect(allSql).not.toContain('CAST(NULL AS');
+		expect(allSql).not.toContain('NULL::');
 		expect(rows).toEqual([{ id: 9501 }]);
 	});
 

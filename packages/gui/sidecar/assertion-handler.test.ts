@@ -154,6 +154,28 @@ describe('handleRunAssertions', () => {
 			expect(result.summary.passed).toBe(3);
 		});
 
+		it('AC6 gui-entries: compiles a union through adapter.compileSetOperation and keeps a $-constant', async () => {
+			const result = await handleRunAssertions(
+				{
+					connectionId: 'test-conn',
+					dbspContent:
+						"users | where active = true | select name | union (users | where name = 'x' | select 'Price: $1' as name)",
+					assertContent: [
+						'--- query: 0',
+						"sql.equals: SELECT users.name FROM users WHERE users.active = $1 UNION SELECT 'Price: $1' AS name FROM users WHERE users.name = $2",
+						'params.equals: [true, "x"]',
+					].join('\n'),
+					execute: false,
+				},
+				mockGetModel(),
+				mockGetPoolThrows(),
+			);
+
+			expect(result.parseErrors).toEqual([]);
+			expect(result.summary.failed).toBe(0);
+			expect(result.summary.passed).toBe(2);
+		});
+
 		it('aggregates set-operation flags across every leaf', async () => {
 			const result = await handleRunAssertions(
 				{

@@ -35,7 +35,7 @@ import { isParamIntent, RangeAllocator } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import {
-	compileSelect,
+	compileSelectEnvelope,
 	nestedSelectCompiler,
 } from './adapter-compiler-select.js';
 import {
@@ -61,7 +61,6 @@ import {
 	renderColumnDbType,
 	validateDbType,
 } from './db-type.js';
-import { quoteIdent } from './ddl/phases/utils.js';
 import { deparseQuoted } from './deparse.js';
 import {
 	type CompilerContext,
@@ -109,6 +108,13 @@ import {
 	resolveDeclaredIdentifier,
 	type SqlIdentifier,
 } from './sql-identifier.js';
+import {
+	commonTableExpression,
+	requireStatementAst,
+	shiftParameters,
+	withLeadingCtes,
+} from './statement-ast.js';
+import { validateIdentifier } from './validate.js';
 
 export const POSTGRESQL_PARAMETER_LIMIT = 65_535;
 export const HETEROGENEOUS_INSERT_CELL_LIMIT = 2 * POSTGRESQL_PARAMETER_LIMIT;
@@ -161,15 +167,8 @@ function whereIntentAsDecision(where: WhereIntent): Decision {
 	return where as never as Decision;
 }
 
-function renumberSqlParams(sql: string, offset: number): string {
-	if (offset === 0) return sql;
-	return sql.replace(/\$(\d+)/g, (_match, num) => {
-		return `$${Number.parseInt(num, 10) + offset}`;
-	});
-}
-
 type SourceCteFragment = {
-	readonly sql: string;
+	readonly ast: Node;
 	readonly parameters: readonly unknown[];
 };
 
@@ -189,9 +188,9 @@ function compileSourceQueryCte(
 	const sourcePlan = planFn(sourceQuery, model, {
 		dialectCapabilities: deps.dialectCapabilities ?? POSTGRESQL_CAPABILITIES,
 	});
-	const source = compileSelect(sourcePlan, options, deps);
+	const source = compileSelectEnvelope(sourcePlan, options, deps);
 	return {
-		sql: source.sql,
+		ast: requireStatementAst(source, `the source query '${sourceName}'`),
 		parameters: source.parameters,
 	};
 }
@@ -236,12 +235,22 @@ function prependSourceCte(
 	if (sourceCte === undefined) {
 		return finalizeEnvelope(query);
 	}
-	const cteParamCount = sourceCte.parameters.length;
 	const sourceCteName = emittedBindName(queryLocal(sourceName));
+	validateIdentifier(sourceCteName, 'alias');
+	// The source query is a CTE in the mutation's own WITH; the mutation's
+	// parameters follow the source's, shifted in the tree (ADR 0012).
+	const ast = withLeadingCtes(
+		shiftParameters(
+			requireStatementAst(query, `the mutation reading '${sourceName}'`),
+			sourceCte.parameters.length,
+		),
+		[commonTableExpression(sourceCteName, sourceCte.ast)],
+	);
 	return finalizeEnvelope(
 		preserveOneToOne(query, {
-			sql: `WITH ${quoteIdent(sourceCteName, 'alias')} as (${sourceCte.sql}) ${renumberSqlParams(query.sql, cteParamCount)}`,
+			sql: deparseQuoted(ast),
 			parameters: [...sourceCte.parameters, ...query.parameters],
+			ast,
 		}),
 	);
 }

@@ -1516,7 +1516,7 @@ describe('scalar subquery bodies compile every clause through core (#891 slice 5
 				options,
 			);
 			expect({ sql: compiled.sql, params: compiled.parameters }).toEqual({
-				sql: 'WITH "ids" as (SELECT users.id FROM users) INSERT INTO singles SELECT * FROM ids WHERE abs((SELECT count(*) FROM ids AS ids_sq)) > $1',
+				sql: 'WITH ids AS (SELECT users.id FROM users) INSERT INTO singles SELECT * FROM ids WHERE abs((SELECT count(*) FROM ids AS ids_sq)) > $1',
 				params: [0],
 			});
 		});
@@ -1538,7 +1538,7 @@ describe('scalar subquery bodies compile every clause through core (#891 slice 5
 				options,
 			);
 			expect({ sql: compiled.sql, params: compiled.parameters }).toEqual({
-				sql: 'WITH "ids" as (SELECT tags.id, tags.label FROM tags) INSERT INTO tags (id, label) SELECT ids.id AS id, ids.label AS label FROM ids WHERE abs((SELECT count(*) FROM ids AS ids_sq)) > $1 ON CONFLICT (id) DO UPDATE SET label = excluded.label',
+				sql: 'WITH ids AS (SELECT tags.id, tags.label FROM tags) INSERT INTO tags (id, label) SELECT ids.id AS id, ids.label AS label FROM ids WHERE abs((SELECT count(*) FROM ids AS ids_sq)) > $1 ON CONFLICT (id) DO UPDATE SET label = excluded.label',
 				params: [0],
 			});
 		});
@@ -1551,7 +1551,7 @@ describe('scalar subquery bodies compile every clause through core (#891 slice 5
 					where: where(),
 				}),
 			).toEqual({
-				sql: 'WITH "ids" as (SELECT users.id FROM users) UPDATE users SET bonus = $1 WHERE abs((SELECT count(*) FROM ids AS ids_sq)) > $2',
+				sql: 'WITH ids AS (SELECT users.id FROM users) UPDATE users SET bonus = $1 WHERE abs((SELECT count(*) FROM ids AS ids_sq)) > $2',
 				params: [1, 0],
 			});
 		});
@@ -1559,7 +1559,7 @@ describe('scalar subquery bodies compile every clause through core (#891 slice 5
 			expect(
 				bundled(db, { type: 'delete', table: 'users', where: where() }),
 			).toEqual({
-				sql: 'WITH "ids" as (SELECT users.id FROM users) DELETE FROM users WHERE abs((SELECT count(*) FROM ids AS ids_sq)) > $1',
+				sql: 'WITH ids AS (SELECT users.id FROM users) DELETE FROM users WHERE abs((SELECT count(*) FROM ids AS ids_sq)) > $1',
 				params: [0],
 			});
 		});
@@ -1573,7 +1573,7 @@ describe('scalar subquery bodies compile every clause through core (#891 slice 5
 					action: { type: 'doUpdate', set: { bonus: 3 }, where: where() },
 				}),
 			).toEqual({
-				sql: 'WITH "ids" as (SELECT users.id FROM users) INSERT INTO users (id, bonus) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET bonus = $3 WHERE abs((SELECT count(*) FROM ids AS ids_sq)) > $4',
+				sql: 'WITH ids AS (SELECT users.id FROM users) INSERT INTO users (id, bonus) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET bonus = $3 WHERE abs((SELECT count(*) FROM ids AS ids_sq)) > $4',
 				params: [1, 2, 3, 0],
 			});
 		});
