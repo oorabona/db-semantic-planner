@@ -56,14 +56,12 @@ op('<=>', exprRef('embedding'), cast(param([0.1, 0.2]), 'vector'))
 // Arithmetic
 const queryVec = [0.1, 0.2];
 op('-', 1, op('<=>', exprRef('embedding'), cast(param(queryVec), 'vector')))
-// → $1 - (embedding <=> CAST($2 AS vector))
+// → 1 - (embedding <=> CAST($1 AS vector))
 ```
 
-Implicit conversions apply to `left` and `right`:
-- `string` → `exprRef()` (column reference)
-- `number | boolean | readonly unknown[]` → `param()` (bound value)
-
-Use `exprRef()` / `param()` explicitly when a string is a value (not a column name).
+`left` and `right` follow the [argument rule](#argument-rule): a string is a column,
+a finite number or boolean is inlined, an array is bound. Use `literal()` or
+`param()` explicitly when a string is a value (not a column name).
 
 #### Predicate operators in `.where()`
 
@@ -130,10 +128,11 @@ fn('now')                                  // → now()
 fn('paradedb.score', exprRef('id'))            // → paradedb.score(id)
 fn('ST_Distance', exprRef('location'), param(point))  // → "ST_Distance"(location, $1)
 fn('jsonb_array_length', exprRef('tags'))     // → jsonb_array_length(tags)
+fn('round', exprRef('score'), 2)               // → round(score, 2)
 ```
 
-Schema-qualified names like `paradedb.score` are supported. Implicit conversions apply
-to all arguments (same rules as `op()`).
+Schema-qualified names like `paradedb.score` are supported. Every argument follows the
+[argument rule](#argument-rule), as in `op()`.
 
 ### `cast(expr, type)` — type cast
 
@@ -143,7 +142,10 @@ import { cast, param, exprRef } from '@dbsp/core';
 cast(param([0.1, 0.2]), 'vector')   // → CAST($1 AS vector)
 cast(exprRef('score'), 'float4')        // → CAST(score AS float4)
 cast(param('2024-01-01'), 'date')   // → CAST($1 AS date)
+cast('title', 'text')               // → CAST(title AS text)
 ```
+
+The expression follows the [argument rule](#argument-rule): a string is a column.
 
 The type name is validated against an identifier regex — injection is prevented.
 
@@ -204,7 +206,7 @@ array(exprRef('name'), exprRef('kind'))            // → ARRAY[name, kind]
 array(param('a'), param('b'))              // → ARRAY[$1, $2]
 ```
 
-Implicit conversions apply to all items (same rules as `fn()` and `op()`).
+Every item follows the [argument rule](#argument-rule), as in `fn()` and `op()`.
 
 ### COUNT(*)
 
@@ -246,17 +248,36 @@ expr.lte(value)  // expr <= $N
 
 These return a `WhereExpressionIntent` accepted by `.where()`.
 
-## Implicit Conversion Summary
+## Argument Rule
 
-| Input type | Converted to |
-|------------|--------------|
-| `ExpressionRef` | used as-is |
-| `string` | `exprRef(string)` — column reference |
-| `number` | `param(number)` — bound value |
-| `boolean` | `param(boolean)` — bound value |
-| `readonly unknown[]` | `param(array)` — bound value |
+The arguments of `fn()`, `boolFn()`, `op()`, `unary()`, `namedArg()`, `array()`,
+`cast()`, `arrayAgg()` and the results of the two-argument `caseWhen()` all follow
+one rule:
 
-When a string is a value (not a column), use `param()` or `literal()` explicitly.
+| Argument | Becomes |
+|----------|---------|
+| `string` | column reference: `fn('upper', 'title')` → `upper(title)` |
+| finite `number`, `boolean` | inlined constant: `fn('round', exprRef('score'), 2)` → `round(score, 2)` |
+| `bigint` within `Number.MIN_SAFE_INTEGER`..`Number.MAX_SAFE_INTEGER` | inlined constant: `2n` → `2` |
+| `NaN`, `Infinity`, `-Infinity`, a `bigint` outside that range | bound parameter `$N` |
+| array, `Date` | bound parameter `$N`: `op('<=>', 'vector', [0.1, 0.2])` → `vector <=> $1` |
+| `ExpressionRef` (`exprRef()`, `param()`, `literal()`, `fn()` …) | used as is |
+| table `ColumnRef` (`orm.tables.posts.title`) | qualified column: `posts.title` |
+| schema `ref('title')` | column reference |
+| `SubqueryExpression` (`subquery('t').count()`) or its `.asExpr()` | scalar subquery `(SELECT …)` |
+
+Refused, with an error that names the input:
+
+- `null`, `undefined`, a plain object (a hand-built intent included) and a `sql()`
+  marker throw `InvalidOperationError`. Write `literal(null)` for SQL `NULL` and
+  `param(value)` to bind a value;
+- `outerRef()`, a `ColumnRef` reached through a relation or taken from a
+  `some()`/`every()`/`none()` callback, and a query builder (`orm.select(...)`,
+  `subquery('t').select('col')`) throw `NotYetSupportedError`.
+
+The markers decide for themselves: `param(v)` always binds `v` as given,
+`literal(v)` always inlines it, and `exprRef('c')` always references a column.
+When a string is a value (not a column), use `literal()` or `param()`.
 
 ## Use in Query Builder
 
@@ -303,7 +324,8 @@ orm.select('embeddings')
   against a strict identifier regex — SQL injection via operator strings is prevented.
 - `cast()` validates the type name the same way.
 - User data MUST go through `param()` — values are bound as `$N` positional parameters,
-  never interpolated into the SQL string.
+  never interpolated into the SQL string. A finite number or boolean passed directly
+  is inlined as a constant; strings never are.
 - `literal()` is for constants only — never pass user input to `literal()`.
 
 ## PostgreSQL Built-in Helpers

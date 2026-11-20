@@ -898,13 +898,16 @@ employees | select name, \
 
 ```sql
 SELECT employees.name,
-  CASE WHEN employees.salary > $1 THEN $2
-       WHEN employees.salary > $3 THEN $4
-       ELSE $5
+  CASE WHEN employees.salary > $1 THEN 'senior'
+       WHEN employees.salary > $2 THEN 'mid'
+       ELSE 'junior'
   END AS level
 FROM test_strategies.employees
--- params: [80000, "senior", 50000, "mid", "junior"]
+-- params: [80000, 50000]
 ```
+
+A string, number or boolean written in a THEN or ELSE result is inlined as a constant; a
+`${…}` interpolation or `:name` parameter in a result stays a bound parameter.
 </details>
 
 | name  | level  |
