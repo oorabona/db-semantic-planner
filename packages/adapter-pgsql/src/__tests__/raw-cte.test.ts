@@ -509,7 +509,7 @@ describe('CTE composition keeps $-constants and $-identifiers (ADR 0012)', () =>
 		expect(dump.params).toEqual(['root', 'k', 'c', 'Price: $1x']);
 	});
 
-	it('AC2c recursive-step: the step keeps its constant; a step with no WHERE gets a valid depth guard', () => {
+	it('AC2c recursive-step: the step keeps its constant and column beside the depth guard', () => {
 		const { orm } = dollarOrm();
 
 		const filtered = orm
@@ -521,6 +521,16 @@ describe('CTE composition keeps $-constants and $-identifiers (ADR 0012)', () =>
 				maxDepth: 3,
 			})
 			.dump();
+
+		expect(filtered.sql).toBe(
+			'WITH RECURSIVE chain AS (SELECT items.* FROM items WHERE items.name = $1 UNION ALL SELECT chain.* FROM chain WHERE chain."cost$1" = $2 AND concat(\'Price: $1\', chain.name) = $3 AND depth < $4) SELECT chain.* FROM chain',
+		);
+		expect(filtered.params).toEqual(['root', 'k', 'Price: $1x', 3]);
+	});
+
+	it("AC2c recursive-step: a step with no WHERE and a 'WHERE' constant gets a valid depth guard", () => {
+		const { orm } = dollarOrm();
+
 		const unfiltered = orm
 			.recursive('chain', {
 				base: orm
@@ -537,10 +547,6 @@ describe('CTE composition keeps $-constants and $-identifiers (ADR 0012)', () =>
 			})
 			.dump();
 
-		expect(filtered.sql).toBe(
-			'WITH RECURSIVE chain AS (SELECT items.* FROM items WHERE items.name = $1 UNION ALL SELECT chain.* FROM chain WHERE chain."cost$1" = $2 AND concat(\'Price: $1\', chain.name) = $3 AND depth < $4) SELECT chain.* FROM chain',
-		);
-		expect(filtered.params).toEqual(['root', 'k', 'Price: $1x', 3]);
 		expect(unfiltered.sql).toBe(
 			"WITH RECURSIVE chain AS (SELECT items.id, items.name FROM items WHERE items.name = $1 UNION ALL SELECT chain.id, concat('a WHERE b $1', name) AS name FROM chain WHERE depth < $2) SELECT chain.* FROM chain",
 		);
