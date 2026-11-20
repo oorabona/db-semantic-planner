@@ -420,6 +420,28 @@ describe('FR-8: orm.recursive() — WITH RECURSIVE CTE', () => {
 		);
 	});
 
+	it('quotes a depth column named binary, a keyword PostgreSQL refuses bare', () => {
+		const orm = buildOrm() as any;
+
+		const dump = orm
+			.recursive('chain', {
+				base: orm.select('categories').where(eq('parent_id', 1)),
+				step: orm.select('chain'),
+				maxDepth: 3,
+				depthColumn: 'binary',
+			})
+			.dump();
+
+		expect(dump.params).toEqual([1, 3]);
+		expect(ws(dump.sql)).toEqual(
+			'WITH RECURSIVE chain AS (' +
+				'SELECT categories.* FROM categories WHERE categories.parent_id = $1' +
+				' UNION ALL ' +
+				'SELECT chain.* FROM chain WHERE "binary" < $2' +
+				') SELECT chain.* FROM chain',
+		);
+	});
+
 	it('T13: maxDepth AND-ed with existing step WHERE clause', () => {
 		const orm = buildOrm() as any;
 

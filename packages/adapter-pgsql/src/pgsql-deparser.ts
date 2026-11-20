@@ -291,6 +291,11 @@ const PG_RESERVED = new Set([
 	'exists',
 	// SQL standard function keywords that pgsql-deparser quotes in FuncCall context
 	'coalesce',
+	// type_func_name keywords: refused as table, CTE and column names
+	'authorization',
+	'binary',
+	'collation',
+	'concurrently',
 ]);
 
 function quoteIdent(name: string): string {

@@ -1255,6 +1255,21 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect(builtShape(compiled)).toEqual(expected);
 	});
 
+	it.each(['authorization', 'binary', 'collation', 'concurrently'])(
+		'quotes a binding named %s, a keyword PostgreSQL refuses bare',
+		(name) => {
+			const adapter = createPgCompileOnlyAdapter({ dbCasing: 'snake_case' });
+			const compiled = adapter.compile(
+				compileNqlBundle(`items | select id | bind ${name}\nitems | select id`),
+				{ model: testSchema.model },
+			);
+
+			expect(compiled.sql).toBe(
+				`WITH "${name}" AS (SELECT items.id FROM items) SELECT items.id FROM items`,
+			);
+		},
+	);
+
 	it('keeps runtime-binding output aliases query-local under snake_case (#217)', () => {
 		const forgedMutation: UpdateIntent = {
 			type: 'update',
