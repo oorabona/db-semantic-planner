@@ -121,7 +121,7 @@ posts
 		const dump = readNqlDump(query);
 		const rows = await query.all();
 
-		expect(dump.sql).toMatch(/^WITH "recent_posts" as \(/);
+		expect(dump.sql).toMatch(/^WITH recent_posts AS \(/);
 		expect(dump.params).toEqual([3, true]);
 		expect(rows).toEqual([{ id: 1 }, { id: 2 }, { id: 3 }]);
 	});
@@ -217,7 +217,7 @@ recent_posts
 		const dump = readNqlDump(query);
 		const rows = await query.all();
 
-		expect(dump.sql).toMatch(/^WITH "recent_posts" as \(/);
+		expect(dump.sql).toMatch(/^WITH recent_posts AS \(/);
 		expect(dump.sql).toContain(`${SCHEMA}.posts`);
 		expect(dump.sql).toContain('FROM recent_posts');
 		expect(dump.sql).not.toContain(`${SCHEMA}.recent_posts`);
@@ -245,7 +245,7 @@ projected_posts
 		const dump = readNqlDump(query);
 		const rows = await query.all();
 
-		expect(dump.sql).toMatch(/^WITH "projected_posts" as \(/);
+		expect(dump.sql).toMatch(/^WITH projected_posts AS \(/);
 		expect(dump.sql).toContain(`${SCHEMA}.authors`);
 		expect(dump.sql).toContain('FROM projected_posts');
 		expect(dump.sql).not.toContain(`${SCHEMA}.projected_posts`);
@@ -270,7 +270,7 @@ projected_posts
 		const dump = readNqlDump(query);
 		const rows = await query.all();
 
-		expect(dump.sql).toMatch(/^WITH "projected_posts" as \(/);
+		expect(dump.sql).toMatch(/^WITH projected_posts AS \(/);
 		expect(dump.sql).toContain(`FROM ${SCHEMA}.authors AS rc_`);
 		expect(dump.sql).toContain('FROM projected_posts');
 		expect(dump.sql).not.toContain(`${SCHEMA}.projected_posts`);
@@ -296,7 +296,7 @@ projected_posts
 		const dump = readNqlDump(query);
 		const rows = await query.all();
 
-		expect(dump.sql).toMatch(/^WITH "projected_posts" as \(/);
+		expect(dump.sql).toMatch(/^WITH projected_posts AS \(/);
 		expect(dump.sql).toMatch(
 			/FROM .+\.authors AS rc_\d+ JOIN .+\.companies AS rc_\d+_h1 ON rc_\d+_h1\."?id"? = rc_\d+\."?company_?id"?/i,
 		);
@@ -331,7 +331,7 @@ projected_authors
 		const dump = readNqlDump(query);
 		const rows = await query.all();
 
-		expect(dump.sql).toMatch(/^WITH "projected_authors" as \(/);
+		expect(dump.sql).toMatch(/^WITH projected_authors AS \(/);
 		expect(dump.sql).toContain('COALESCE(json_agg');
 		expect(dump.sql).toContain('ORDER BY');
 		expect(dump.sql).toContain('NULLS LAST');
@@ -413,7 +413,7 @@ projected_authors
 		const rows = await query.all();
 
 		expect(dump.sql).toBe(
-			"WITH \"projected_authors\" as (SELECT authors.id, authors.name FROM nql_params_e2e.authors WHERE authors.id = CAST($1 AS integer) OR authors.id = CAST($2 AS integer)) SELECT projected_authors.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'title', __t__.title, 'content', __t__.content, 'authorId', __t__.author_id, 'published', __t__.published, 'createdAt', __t__.created_at) ORDER BY __t__.id ASC NULLS LAST) FROM nql_params_e2e.posts AS __t__ WHERE __t__.author_id = projected_authors.id), '[]'::json) AS author_posts_json FROM projected_authors ORDER BY projected_authors.id ASC",
+			"WITH projected_authors AS (SELECT authors.id, authors.name FROM nql_params_e2e.authors WHERE authors.id = CAST($1 AS integer) OR authors.id = CAST($2 AS integer)) SELECT projected_authors.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'title', __t__.title, 'content', __t__.content, 'authorId', __t__.author_id, 'published', __t__.published, 'createdAt', __t__.created_at) ORDER BY __t__.id ASC NULLS LAST) FROM nql_params_e2e.posts AS __t__ WHERE __t__.author_id = projected_authors.id), '[]'::json) AS author_posts_json FROM projected_authors ORDER BY projected_authors.id ASC",
 		);
 		const alice = rows.find((row) => row.id === 1);
 		expect(alice?.author_posts).toHaveLength(3);
@@ -461,7 +461,7 @@ projected_authors
 		const rows = await query.all();
 
 		expect(dump.sql).toBe(
-			"WITH \"projected_authors\" as (SELECT authors.id, authors.name FROM nql_params_e2e.authors WHERE authors.id = CAST($1 AS integer) OR authors.id = CAST($2 AS integer)) SELECT projected_authors.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'title', __t__.title, 'content', __t__.content, 'authorId', __t__.author_id, 'published', __t__.published, 'createdAt', __t__.created_at) || jsonb_build_object('post_comments', COALESCE((SELECT json_agg(jsonb_build_object('id', __t1__.id, 'postId', __t1__.post_id, 'authorName', __t1__.author_name, 'content', __t1__.content, 'createdAt', __t1__.created_at) ORDER BY __t1__.id ASC NULLS LAST) FROM nql_params_e2e.comments AS __t1__ WHERE __t1__.post_id = __t__.id), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST) FROM nql_params_e2e.posts AS __t__ WHERE __t__.author_id = projected_authors.id), '[]'::json) AS author_posts_json FROM projected_authors",
+			"WITH projected_authors AS (SELECT authors.id, authors.name FROM nql_params_e2e.authors WHERE authors.id = CAST($1 AS integer) OR authors.id = CAST($2 AS integer)) SELECT projected_authors.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'title', __t__.title, 'content', __t__.content, 'authorId', __t__.author_id, 'published', __t__.published, 'createdAt', __t__.created_at) || jsonb_build_object('post_comments', COALESCE((SELECT json_agg(jsonb_build_object('id', __t1__.id, 'postId', __t1__.post_id, 'authorName', __t1__.author_name, 'content', __t1__.content, 'createdAt', __t1__.created_at) ORDER BY __t1__.id ASC NULLS LAST) FROM nql_params_e2e.comments AS __t1__ WHERE __t1__.post_id = __t__.id), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST) FROM nql_params_e2e.posts AS __t__ WHERE __t__.author_id = projected_authors.id), '[]'::json) AS author_posts_json FROM projected_authors",
 		);
 		if (dump.plan === undefined) throw new Error('Expected a query plan');
 		expect(
@@ -541,7 +541,7 @@ authors | where id in (new_author) | select id`;
 
 		expect(dump.sequence).toHaveLength(2);
 		expect(dump.sql).toContain(
-			`WITH "new_author" ("id") as (SELECT CAST(NULL AS integer) AS "id" WHERE false)`,
+			`WITH new_author(id) AS (SELECT NULL::integer AS id WHERE false)`,
 		);
 		expect(rows).toEqual([{ id: authorId }]);
 	});
@@ -615,7 +615,7 @@ update posts set published = ${true} where authorId in (target_author) | select 
 			const dump = mutation.dump();
 			const rows = await mutation.all();
 
-			expect(dump.sql).toMatch(/^WITH "target_author" as \(/);
+			expect(dump.sql).toMatch(/^WITH target_author AS \(/);
 			expect((dump as { parameters: readonly unknown[] }).parameters).toEqual([
 				email,
 				true,
@@ -655,7 +655,7 @@ update posts set published = ${true} where authorId in (target_author) | select 
 		const dump = mutation.dump();
 		const rows = await mutation.all();
 
-		expect(dump.sql).toMatch(/^WITH "target_author" as \(/);
+		expect(dump.sql).toMatch(/^WITH target_author AS \(/);
 		expect(dump.sql).toContain(`${SCHEMA}.authors`);
 		expect(dump.sql).toMatch(new RegExp(`\\bUPDATE\\s+${SCHEMA}\\.posts\\b`));
 		expect(dump.sql).not.toContain(`"${SCHEMA}".target_author`);

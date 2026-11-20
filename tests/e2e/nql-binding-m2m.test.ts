@@ -73,7 +73,7 @@ bt
 		const dump = query.dump();
 		const rows = await query.all();
 
-		expect(dump.sql).toMatch(/^WITH "bp" as \(/);
+		expect(dump.sql).toMatch(/^WITH bp AS \(/);
 		expect(dump.sql).toMatch(
 			new RegExp(
 				`FROM "?${SCHEMA}"?\\."?tags"? AS rc_\\d+ JOIN "?${SCHEMA}"?\\."?post_tags"? AS rc_\\d+`,
