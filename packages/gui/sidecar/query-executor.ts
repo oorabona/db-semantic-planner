@@ -5,11 +5,7 @@
  * executeNQL: compiles NQL → SQL via @dbsp/core + @dbsp/nql, then executes.
  * fetchMore: loads the next page of a paginated result set via OFFSET/LIMIT.
  */
-import {
-	compileSetOperation,
-	createLeafCompileFn,
-	createPgCompileOnlyAdapter,
-} from '@dbsp/adapter-pgsql';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { extractPseudoColumnKeywords, plan } from '@dbsp/core';
 import { compile as compileNql } from '@dbsp/nql';
 import type { Pool } from 'pg';
@@ -288,8 +284,7 @@ export async function handleExecuteNQL(
 		planReport = report;
 		isQuery = true;
 	} else if (compiled.setOperation) {
-		const compileFn = createLeafCompileFn(adapter, model, plan);
-		const setResult = compileSetOperation(compiled.setOperation, compileFn);
+		const setResult = adapter.compileSetOperation(compiled.setOperation, model);
 		sql = setResult.sql;
 		sqlParams = setResult.parameters;
 		isQuery = true;

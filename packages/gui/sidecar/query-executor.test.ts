@@ -301,4 +301,37 @@ describe('query-executor', () => {
 			expect(sql).not.toContain('WHERE');
 		});
 	});
+
+	describe('handleExecuteNQL — set operations (ADR 0012)', () => {
+		it('AC6 gui-entries: compiles a union through adapter.compileSetOperation and paginates it as a read', async () => {
+			const { schema } = await import('@dbsp/core');
+			const model = schema({
+				users: {
+					id: { type: 'integer', primaryKey: true },
+					name: 'string',
+				},
+			}).model;
+			const mod = await import('./query-executor.js');
+			const pool = createMockPool([{ id: 1 }]);
+
+			const result = await mod.handleExecuteNQL(
+				{
+					connectionId: 'c1',
+					nql: "users | select name | limit 2 | union (users | where name = 'x' | select 'Price: $1' as name)",
+					maxRows: 10,
+				},
+				() => pool as never,
+				async () => model,
+			);
+
+			expect(result.sql).toBe(
+				"(SELECT users.name FROM users LIMIT 2) UNION SELECT 'Price: $1' AS name FROM users WHERE users.name = $1",
+			);
+			expect(result.params).toEqual(['x']);
+			expect(pool.query).toHaveBeenCalledWith(
+				`SELECT * FROM (${result.sql}) AS _q LIMIT 11`,
+				['x'],
+			);
+		});
+	});
 });
