@@ -1280,7 +1280,7 @@ describe('compileCteQuery — CTE kind branches', () => {
 			undefined,
 			defaultDeps,
 		);
-		expect(r.sql).toMatch(/^WITH "cte_users" AS/);
+		expect(r.sql).toMatch(/^WITH cte_users AS/);
 	});
 
 	it('simpleCte — does NOT produce WITH RECURSIVE', () => {

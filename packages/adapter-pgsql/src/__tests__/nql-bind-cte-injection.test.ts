@@ -13,6 +13,7 @@ import {
 	type PgAdapterOptions,
 } from '../pgsql-adapter.js';
 import { InvalidIdentifierError } from '../validate.js';
+import { builtShape, parsedShape } from './statement-shape.js';
 
 const testSchema = schema({
 	items: {
@@ -316,7 +317,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		});
 
 		expect(error).toBeUndefined();
-		expect(sql).toContain('WITH "b" ("displayName")');
+		expect(sql).toContain('WITH b("displayName")');
 		expect(sql).toContain('SELECT b."displayName" FROM b');
 		expect(sql).not.toContain('b.display_name');
 	});
@@ -372,7 +373,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		const { error, sql } = tryCompileNqlBundle(bundle);
 
 		expect(error).toBeUndefined();
-		expect(sql).toContain('WITH "ids" as (');
+		expect(sql).toContain('WITH ids AS (');
 	});
 
 	it('lets a local WITH CTE shadow a read binding without emitting duplicate CTE names', () => {
@@ -383,7 +384,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		const { error, sql } = tryCompileNqlBundle(bundle);
 
 		expect(error).toBeUndefined();
-		expect(sql?.match(/"e"\s+as\s+\(/gi)).toHaveLength(1);
+		expect(sql?.match(/\be AS \(/g)).toHaveLength(1);
 		expect(sql).toContain('FROM "archivedItems"');
 	});
 
@@ -397,10 +398,10 @@ describe('NQL bind CTE identifier injection defense', () => {
 		});
 
 		expect(error).toBeUndefined();
-		expect(sql?.match(/"activeItems"\s+as\s+\(/gi)).toHaveLength(1);
-		expect(sql?.match(/"active_items"\s+as\s+\(/gi)).toHaveLength(1);
+		expect(sql?.match(/"activeItems" AS \(/g)).toHaveLength(1);
+		expect(sql?.match(/\bactive_items AS \(/g)).toHaveLength(1);
 		expect(sql).toContain('FROM archived_items');
-		expect(sql).toContain('"activeItems" as (SELECT items.id FROM items)');
+		expect(sql).toContain('"activeItems" AS (SELECT items.id FROM items)');
 	});
 
 	it('emits camelCase read binding declarations and references verbatim', () => {
@@ -413,7 +414,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		});
 
 		expect(error).toBeUndefined();
-		expect(sql).toContain('WITH "activeItems" as (');
+		expect(sql).toContain('WITH "activeItems" AS (');
 		expect(sql).toContain('FROM "activeItems" AS "activeItems_subq_');
 	});
 
@@ -427,7 +428,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		});
 
 		expect(error).toBeUndefined();
-		expect(sql).toContain('WITH "activeItems" as (');
+		expect(sql).toContain('WITH "activeItems" AS (');
 		expect(sql).toContain('FROM "activeItems"');
 	});
 
@@ -439,7 +440,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 
 		const result = adapter.compile(bundle, { model: testSchema.model });
 
-		expect(result.sql).toContain('WITH "recent_items" as (');
+		expect(result.sql).toContain('WITH recent_items AS (');
 		expect(result.sql).toContain('FROM tenant_1.items');
 		expect(result.sql).toContain('FROM recent_items');
 		expect(result.sql).not.toContain('tenant_1.recent_items');
@@ -455,11 +456,11 @@ describe('NQL bind CTE identifier injection defense', () => {
 			}),
 		).toEqual([
 			{
-				sql: 'WITH "recent_items" as (SELECT items.id FROM tenant_1.items) SELECT items.id, (SELECT count(*) AS total FROM recent_items AS recent_items) AS recent_count FROM tenant_1.items',
+				sql: 'WITH recent_items AS (SELECT items.id FROM tenant_1.items) SELECT items.id, (SELECT count(*) AS total FROM recent_items AS recent_items) AS recent_count FROM tenant_1.items',
 				params: [],
 			},
 			{
-				sql: 'WITH "recent_items" as (SELECT items.id FROM tenant_1.items WHERE items.name IS NULL) SELECT items.id, (SELECT count(*) AS total FROM recent_items AS recent_items) AS recent_count FROM tenant_1.items WHERE items.name IS NULL',
+				sql: 'WITH recent_items AS (SELECT items.id FROM tenant_1.items WHERE items.name IS NULL) SELECT items.id, (SELECT count(*) AS total FROM recent_items AS recent_items) AS recent_count FROM tenant_1.items WHERE items.name IS NULL',
 				params: [],
 			},
 		]);
@@ -475,8 +476,8 @@ describe('NQL bind CTE identifier injection defense', () => {
 		});
 
 		expect(error).toBeUndefined();
-		expect(sql).toContain('WITH "fooBar" as (');
-		expect(sql).toContain('"foo_bar" as (');
+		expect(sql).toContain('WITH "fooBar" AS (');
+		expect(sql).toContain('foo_bar AS (');
 	});
 
 	it('allows a read binding to shadow a physical table name', () => {
@@ -487,7 +488,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		const { error, sql } = tryCompileNqlBundle(bundle);
 
 		expect(error).toBeUndefined();
-		expect(sql).toContain('WITH "items" as');
+		expect(sql).toContain('WITH items AS');
 		expect(sql).toContain('FROM items AS items_subq_0');
 		// A scalar body on the shadowing binding reads the binding, not the
 		// model table: its star is not counted against the table (#891 slice 5b, R7).
@@ -505,11 +506,11 @@ describe('NQL bind CTE identifier injection defense', () => {
 			}),
 		).toEqual([
 			{
-				sql: 'WITH "items" as (SELECT items.id FROM items) SELECT (SELECT items.* FROM items AS items) AS v FROM posts',
+				sql: 'WITH items AS (SELECT items.id FROM items) SELECT (SELECT items.* FROM items AS items) AS v FROM posts',
 				params: [],
 			},
 			{
-				sql: 'WITH "items" as (SELECT items.id FROM items) SELECT (SELECT items.* FROM items AS items) AS v FROM posts WHERE posts.title IS NULL',
+				sql: 'WITH items AS (SELECT items.id FROM items) SELECT (SELECT items.* FROM items AS items) AS v FROM posts WHERE posts.title IS NULL',
 				params: [],
 			},
 		]);
@@ -525,7 +526,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		});
 
 		expect(error).toBeUndefined();
-		expect(sql).toContain('WITH "archived_items" as');
+		expect(sql).toContain('WITH archived_items AS');
 		expect(sql).toContain('FROM archived_items AS archived_items_subq_0');
 	});
 
@@ -539,7 +540,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		});
 
 		expect(error).toBeUndefined();
-		expect(sql).toContain('WITH "archivedItems" as');
+		expect(sql).toContain('WITH "archivedItems" AS');
 		expect(sql).toContain('FROM "archivedItems" AS "archivedItems_subq_0"');
 	});
 
@@ -551,7 +552,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		const { error, sql } = tryCompileNqlBundle(bundle);
 
 		expect(error).toBeUndefined();
-		expect(sql).toContain('WITH "items" as');
+		expect(sql).toContain('WITH items AS');
 		expect(sql).toContain('INSERT INTO "archivedItems" SELECT * FROM items');
 	});
 
@@ -565,7 +566,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		});
 
 		expect(error).toBeUndefined();
-		expect(sql).toContain('WITH "archived_items" as');
+		expect(sql).toContain('WITH archived_items AS');
 		expect(sql).toContain('INSERT INTO items SELECT * FROM archived_items');
 	});
 
@@ -577,7 +578,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		const { error, sql } = tryCompileNqlBundle(bundle);
 
 		expect(error).toBeUndefined();
-		expect(sql).toContain('WITH "items" as');
+		expect(sql).toContain('WITH items AS');
 		expect(sql).toContain(
 			'INSERT INTO "archivedItems" (id, name) SELECT items.id AS id, items.name AS name FROM items',
 		);
@@ -593,7 +594,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		});
 
 		expect(error).toBeUndefined();
-		expect(sql).toContain('WITH "archived_items" as');
+		expect(sql).toContain('WITH archived_items AS');
 		expect(sql).toContain(
 			'INSERT INTO items (id, name) SELECT archived_items.id AS id, archived_items.name AS name FROM archived_items',
 		);
@@ -615,9 +616,9 @@ describe('NQL bind CTE identifier injection defense', () => {
 		});
 
 		expect(insert.error).toBeUndefined();
-		expect(insert.sql).toContain('WITH "staged_items" as (');
+		expect(insert.sql).toContain('WITH staged_items AS (');
 		expect(upsert.error).toBeUndefined();
-		expect(upsert.sql).toContain('WITH "staged_items" as (');
+		expect(upsert.sql).toContain('WITH staged_items AS (');
 	});
 
 	it('emits camelCase insert/upsert sourceQuery bindings verbatim', () => {
@@ -636,10 +637,10 @@ describe('NQL bind CTE identifier injection defense', () => {
 		});
 
 		expect(insert.error).toBeUndefined();
-		expect(insert.sql).toContain('WITH "activeItems" as (');
+		expect(insert.sql).toContain('WITH "activeItems" AS (');
 		expect(insert.sql).toContain('FROM "activeItems"');
 		expect(upsert.error).toBeUndefined();
-		expect(upsert.sql).toContain('WITH "activeItems" as (');
+		expect(upsert.sql).toContain('WITH "activeItems" AS (');
 		expect(upsert.sql).toContain('FROM "activeItems"');
 	});
 
@@ -671,8 +672,8 @@ describe('NQL bind CTE identifier injection defense', () => {
 		});
 
 		expect(error).toBeUndefined();
-		expect(sql).toContain('WITH "fooBar" as (');
-		expect(sql).toContain('"foo_bar" as (');
+		expect(sql).toContain('WITH "fooBar" AS (');
+		expect(sql).toContain('foo_bar AS (');
 	});
 
 	it('compiles well-formed direct binding-final bundles without adapter-side output schemas', () => {
@@ -691,7 +692,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		const { error, sql } = tryCompileNqlBundle(bundle);
 
 		expect(error).toBeUndefined();
-		expect(sql).toContain('WITH "ids" as (');
+		expect(sql).toContain('WITH ids AS (');
 		expect(sql).toContain('FROM ids');
 	});
 
@@ -721,10 +722,10 @@ describe('NQL bind CTE identifier injection defense', () => {
 
 		expect(error).toBeUndefined();
 		expect(sql).toContain(
-			'WITH "ids" ("id") as (SELECT "id" FROM "items" WHERE false UNION ALL VALUES ($1::integer), ($2::integer))',
+			'WITH ids(id) AS (SELECT id FROM items WHERE false UNION ALL VALUES (CAST($1 AS integer)), (CAST($2 AS integer)))',
 		);
 		expect(sql).toContain('FROM ids');
-		expect(sql).not.toMatch(/WITH "ids"\s+as\s+\(\s*insert/i);
+		expect(sql).not.toMatch(/WITH ids\s+as\s+\(\s*insert/i);
 		expect(params).toEqual([1, 2]);
 	});
 
@@ -754,7 +755,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 
 		expect(error).toBeUndefined();
 		expect(sql).toContain(
-			'WITH "ids" ("id") as (SELECT "id" FROM "items" WHERE false UNION ALL VALUES ($1::integer), ($2::integer))',
+			'WITH ids(id) AS (SELECT id FROM items WHERE false UNION ALL VALUES (CAST($1 AS integer)), (CAST($2 AS integer)))',
 		);
 		expect(params).toEqual([1, 2]);
 	});
@@ -784,9 +785,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		const { error, params, sql } = tryCompileNqlBundle(bundle);
 
 		expect(error).toBeUndefined();
-		expect(sql).toContain(
-			'WITH "ids" ("id") as (SELECT "id" FROM "items" WHERE false)',
-		);
+		expect(sql).toContain('WITH ids(id) AS (SELECT id FROM items WHERE false)');
 		expect(sql).not.toContain('VALUES');
 		expect(params).toEqual([]);
 	});
@@ -823,7 +822,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 
 		expect(error).toBeUndefined();
 		expect(sql).toContain(
-			'WITH "aliasedIds" ("userId") as (SELECT CAST(NULL AS integer) AS "userId" WHERE false UNION ALL VALUES ($1::integer), ($2::integer))',
+			'WITH "aliasedIds"("userId") AS (SELECT NULL::integer AS "userId" WHERE false UNION ALL VALUES (CAST($1 AS integer)), (CAST($2 AS integer)))',
 		);
 		expect(sql).not.toContain('FROM "items"');
 		expect(params).toEqual([1, 2]);
@@ -857,7 +856,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 
 		expect(error).toBeUndefined();
 		expect(sql).toContain(
-			'WITH "aliasedIds" ("userId") as (SELECT CAST(NULL AS integer) AS "userId" WHERE false)',
+			'WITH "aliasedIds"("userId") AS (SELECT NULL::integer AS "userId" WHERE false)',
 		);
 		expect(sql).not.toContain('VALUES');
 		expect(params).toEqual([]);
@@ -889,7 +888,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 
 		expect(error).toBeUndefined();
 		expect(sql).toContain(
-			'WITH "names" ("label") as (SELECT CAST(NULL AS text) AS "label" WHERE false UNION ALL VALUES ($1::text))',
+			'WITH names(label) AS (SELECT NULL::text AS label WHERE false UNION ALL VALUES (CAST($1 AS text)))',
 		);
 		expect(sql).not.toContain('FROM "items"');
 		expect(params).toEqual(['ok']);
@@ -924,7 +923,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 
 		expect(error).toBeUndefined();
 		expect(sql).toContain(
-			'WITH "rollups" ("label", "total") as (SELECT CAST(NULL AS text) AS "label", NULL AS "total" WHERE false UNION ALL VALUES ($1::text, $2))',
+			'WITH rollups(label, total) AS (SELECT NULL::text AS label, NULL AS total WHERE false UNION ALL VALUES (CAST($1 AS text), $2))',
 		);
 		expect(sql).not.toContain('FROM "items"');
 		expect(params).toEqual(['ok', 3]);
@@ -958,7 +957,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 
 		expect(error).toBeUndefined();
 		expect(sql).toContain(
-			'WITH "counts" ("n") as (SELECT CAST(NULL AS bigint) AS "n" WHERE false UNION ALL VALUES ($1::bigint))',
+			'WITH counts(n) AS (SELECT NULL::bigint AS n WHERE false UNION ALL VALUES (CAST($1 AS bigint)))',
 		);
 		expect(params).toEqual([3]);
 	});
@@ -1032,7 +1031,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect({ error, params, sql }).toEqual({
 			error: undefined,
 			params: ['ok'],
-			sql: 'WITH "names" ("label") as (SELECT CAST(NULL AS varchar) AS "label" WHERE false UNION ALL VALUES ($1::varchar)) SELECT names.label FROM names',
+			sql: 'WITH names(label) AS (SELECT NULL::varchar AS label WHERE false UNION ALL VALUES (CAST($1 AS varchar))) SELECT names.label FROM names',
 		});
 	});
 
@@ -1074,7 +1073,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect({ error, params, sql }).toEqual({
 			error: undefined,
 			params: ['ok'],
-			sql: 'WITH "names" ("label") as (SELECT CAST(NULL AS "shared_types".status) AS "label" WHERE false UNION ALL VALUES ($1::"shared_types".status)) SELECT names.label FROM names',
+			sql: 'WITH names(label) AS (SELECT NULL::"shared_types".status AS label WHERE false UNION ALL VALUES (CAST($1 AS "shared_types".status))) SELECT names.label FROM names',
 		});
 	});
 
@@ -1142,9 +1141,118 @@ describe('NQL bind CTE identifier injection defense', () => {
 
 		expect(error).toBeUndefined();
 		expect(sql).toContain(
-			'WITH "aliased" ("label") as (SELECT "name" FROM "items" WHERE false UNION ALL VALUES ($1::text))',
+			'WITH aliased(label) AS (SELECT name FROM items WHERE false UNION ALL VALUES (CAST($1 AS text)))',
 		);
 		expect(params).toEqual(['ok']);
+	});
+
+	it('AC4c runtime-binding-renamed: a RETURNING renamed to label is the CTE column the final query reads', () => {
+		const aliasedMutation: UpdateIntent = {
+			type: 'update',
+			table: 'items',
+			set: { name: 'unused' },
+			allowAll: true,
+			returning: ['label'],
+			returningItems: [{ source: 'name', output: 'label' }],
+		};
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'aliased',
+				select: { type: 'fields', fields: ['label'] },
+			},
+			runtimeBindings: new Map([
+				['aliased', { columns: ['label'], rows: [{ label: 'ok' }] }],
+			]),
+			mutationBindings: new Map([['aliased', aliasedMutation]]),
+		};
+
+		const { error, params, sql } = tryCompileNqlBundle(bundle);
+
+		expect(error).toBeUndefined();
+		expect(sql).toBe(
+			'WITH aliased(label) AS (SELECT name FROM items WHERE false UNION ALL VALUES (CAST($1 AS text))) SELECT aliased.label FROM aliased',
+		);
+		expect(params).toEqual(['ok']);
+	});
+
+	it('AC4b runtime-binding-typed-path: a source-table runtime binding keeps a $-constant after its VALUES', () => {
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'ids',
+				select: {
+					type: 'expressions',
+					columns: [
+						{ kind: 'column', column: 'id' },
+						{ kind: 'literal', value: 'Price: $1', as: 't' },
+					],
+				},
+			},
+			runtimeBindings: new Map([
+				['ids', { columns: ['id'], rows: [{ id: 1 }, { id: 2 }] }],
+			]),
+			mutationBindings: new Map([['ids', idsMutation]]),
+		};
+
+		const { error, params, sql } = tryCompileNqlBundle(bundle);
+
+		expect(error).toBeUndefined();
+		expect(sql).toBe(
+			"WITH ids(id) AS (SELECT id FROM items WHERE false UNION ALL VALUES (CAST($1 AS integer)), (CAST($2 AS integer))) SELECT ids.id, 'Price: $1' AS t FROM ids",
+		);
+		expect(params).toEqual([1, 2]);
+	});
+
+	it('AC9 with-on-delete: a binding CTE is emitted as the WITH of a DELETE root', () => {
+		const adapter = createPgCompileOnlyAdapter();
+		const compiled = adapter.compile(
+			compileNqlBundle(
+				"items | where id = 7 | select id | bind src\ndelete from archivedItems where id in (src) and name = 'x'",
+			),
+			{ model: testSchema.model },
+		);
+
+		expect(compiled.sql).toBe(
+			'WITH src AS (SELECT items.id FROM items WHERE items.id = $1) DELETE FROM "archivedItems" WHERE "archivedItems".id = ANY (SELECT src_subq_0.id FROM src AS src_subq_0) AND "archivedItems".name = $2',
+		);
+		expect(compiled.parameters).toEqual([7, 'x']);
+		const expected = {
+			statement: 'DeleteStmt',
+			with: { recursive: false, ctes: [{ name: 'src', columns: [] }] },
+		};
+		expect(parsedShape(compiled.sql)).toEqual(expected);
+		expect(builtShape(compiled)).toEqual(expected);
+	});
+
+	it('AC4d nql-with-merge: binding CTEs and the final statement WITH form one WithClause', () => {
+		const adapter = createPgCompileOnlyAdapter({ dbCasing: 'snake_case' });
+		const compiled = adapter.compile(
+			compileNqlBundle(
+				"items | where id = 7 | select id | bind activeItems\nwith active_items as (archivedItems | where name = 'Price: $1' | select id) active_items | select id",
+			),
+			{ model: testSchema.model },
+		);
+
+		expect(compiled.sql).toBe(
+			'WITH "activeItems" AS (SELECT items.id FROM items WHERE items.id = $1), active_items AS (SELECT archived_items.id FROM archived_items WHERE archived_items.name = $2) SELECT active_items.id FROM active_items',
+		);
+		expect(compiled.parameters).toEqual([7, 'Price: $1']);
+		const expected = {
+			sort: false,
+			limit: false,
+			offset: false,
+			lock: false,
+			with: {
+				recursive: false,
+				ctes: [
+					{ name: 'activeItems', columns: [] },
+					{ name: 'active_items', columns: [] },
+				],
+			},
+		};
+		expect(parsedShape(compiled.sql)).toEqual(expected);
+		expect(builtShape(compiled)).toEqual(expected);
 	});
 
 	it('keeps runtime-binding output aliases query-local under snake_case (#217)', () => {
@@ -1206,7 +1314,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 
 		expect(error).toBeUndefined();
 		expect(sql).toContain(
-			'WITH "ids" ("id") as (SELECT "id" FROM "items" WHERE false UNION ALL VALUES ($1::integer), ($2::integer))',
+			'WITH ids(id) AS (SELECT id FROM items WHERE false UNION ALL VALUES (CAST($1 AS integer)), (CAST($2 AS integer)))',
 		);
 		expect(sql).not.toContain('CAST(NULL');
 		expect(params).toEqual([1, 2]);
@@ -1244,7 +1352,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect({ error, params, sql }).toEqual({
 			error: undefined,
 			params: [12.34],
-			sql: 'WITH "ids" ("id") as (SELECT "id" FROM "items" WHERE false UNION ALL VALUES ($1::numeric)) SELECT ids.id FROM ids',
+			sql: 'WITH ids(id) AS (SELECT id FROM items WHERE false UNION ALL VALUES (CAST($1 AS numeric))) SELECT ids.id FROM ids',
 		});
 	});
 
@@ -1288,7 +1396,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect({ error, params, sql }).toEqual({
 			error: undefined,
 			params: ['active'],
-			sql: 'WITH "ids" ("id") as (SELECT "id" FROM "tenantOne"."items" WHERE false UNION ALL VALUES ($1::"tenantOne".status)) SELECT ids.id FROM ids',
+			sql: 'WITH ids(id) AS (SELECT id FROM "tenantOne".items WHERE false UNION ALL VALUES (CAST($1 AS "tenantOne".status))) SELECT ids.id FROM ids',
 		});
 	});
 
@@ -1320,7 +1428,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 
 		expect(error).toBeUndefined();
 		expect(sql).toContain(
-			'WITH "item_rows" ("id", "name") as (SELECT "id", "name" FROM "items" WHERE false UNION ALL VALUES ($1::integer, $2::text))',
+			'WITH item_rows(id, name) AS (SELECT id, name FROM items WHERE false UNION ALL VALUES (CAST($1 AS integer), CAST($2 AS text)))',
 		);
 		expect(params).toEqual([1, 'one']);
 	});
@@ -1350,9 +1458,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		const { error, params, sql } = tryCompileNqlBundle(bundle);
 
 		expect(error).toBeUndefined();
-		expect(sql).toContain(
-			'WITH "ids" ("id") as (SELECT "id" FROM "items" WHERE false)',
-		);
+		expect(sql).toContain('WITH ids(id) AS (SELECT id FROM items WHERE false)');
 		expect(sql).not.toContain('NULL::');
 		expect(sql).not.toContain('VALUES (NULL)');
 		expect(sql).toContain('FROM ids');
@@ -1408,9 +1514,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		}
 
 		expect(error).toBeUndefined();
-		expect(sql).toContain(
-			'WITH "ids" ("id") as (SELECT "id" FROM "items" WHERE false)',
-		);
+		expect(sql).toContain('WITH ids(id) AS (SELECT id FROM items WHERE false)');
 		expect(sql ?? '').not.toContain(payload);
 		expect(sql ?? '').not.toContain('NULL::');
 	});
@@ -1522,7 +1626,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 			);
 
 			expect(error).toBeUndefined();
-			expect(sql).toContain(`$1::${castType}`);
+			expect(sql).toContain(`CAST($1 AS ${castType})`);
 			expect(params).toEqual([value]);
 		},
 	);
@@ -1613,8 +1717,8 @@ describe('orm.nql keeps a scalar body on a binding on the adapter route (#891 sl
 items | select id, (recent_items | select count() as total) as recent_count`;
 		expect(query.dump().sql).toBe(
 			name === 'plain'
-				? 'WITH "recent_items" as (SELECT items.id FROM items) SELECT items.id, (SELECT count(*) AS total FROM recent_items AS recent_items) AS recent_count FROM items'
-				: 'WITH "recent_items" as (SELECT items.id FROM items WHERE items.name IS NULL) SELECT items.id, (SELECT count(*) AS total FROM recent_items AS recent_items) AS recent_count FROM items WHERE items.name IS NULL',
+				? 'WITH recent_items AS (SELECT items.id FROM items) SELECT items.id, (SELECT count(*) AS total FROM recent_items AS recent_items) AS recent_count FROM items'
+				: 'WITH recent_items AS (SELECT items.id FROM items WHERE items.name IS NULL) SELECT items.id, (SELECT count(*) AS total FROM recent_items AS recent_items) AS recent_count FROM items WHERE items.name IS NULL',
 		);
 		expect(query.plan().execution).toBeDefined();
 	});
@@ -1623,8 +1727,8 @@ items | select id, (recent_items | select count() as total) as recent_count`;
 posts | select (items | select *) as v`;
 		expect(query.dump().sql).toBe(
 			name === 'plain'
-				? 'WITH "items" as (SELECT items.id FROM items) SELECT (SELECT items.* FROM items AS items) AS v FROM posts'
-				: 'WITH "items" as (SELECT items.id FROM items WHERE items.name IS NULL) SELECT (SELECT items.* FROM items AS items) AS v FROM posts WHERE posts.title IS NULL',
+				? 'WITH items AS (SELECT items.id FROM items) SELECT (SELECT items.* FROM items AS items) AS v FROM posts'
+				: 'WITH items AS (SELECT items.id FROM items WHERE items.name IS NULL) SELECT (SELECT items.* FROM items AS items) AS v FROM posts WHERE posts.title IS NULL',
 		);
 		expect(query.plan().execution).toBeDefined();
 	});

@@ -874,7 +874,7 @@ describe('#891 slice 5a: batchSet guards and insert/upsert-from WHERE resolve th
 		const adapter = createPgCompileOnlyAdapter({ model: db.model });
 		const orm = createOrm({ schema: db, adapter, suppressDxWarnings: true });
 		const cte =
-			'WITH "subset" as (SELECT "blogPosts".id, "blogPosts".title FROM "blogPosts" WHERE "blogPosts".published = $1)';
+			'WITH subset AS (SELECT "blogPosts".id, "blogPosts".title FROM "blogPosts" WHERE "blogPosts".published = $1)';
 		// A plain column of the binding keeps today's SQL (bound-source-plain-column).
 		expect(
 			orm.nql`blogPosts | where published = false | select id, title | bind subset

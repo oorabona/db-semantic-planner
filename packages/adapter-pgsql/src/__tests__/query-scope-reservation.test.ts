@@ -114,7 +114,7 @@ for (const alias of [undefined, 'draft_posts']) {
 			},
 		});
 		expect(result.sql).toBe(
-			'WITH "draft_posts" as (SELECT posts.id FROM posts WHERE posts.published = $1) SELECT comments.id FROM comments JOIN draft_posts AS draft_posts ON comments."postId" = draft_posts.id',
+			'WITH draft_posts AS (SELECT posts.id FROM posts WHERE posts.published = $1) SELECT comments.id FROM comments JOIN draft_posts AS draft_posts ON comments."postId" = draft_posts.id',
 		);
 		expect(result.parameters).toEqual([false]);
 	});

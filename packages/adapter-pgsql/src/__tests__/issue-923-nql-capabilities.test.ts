@@ -13,7 +13,6 @@ import {
 	createPgAdapter,
 	createPgCompileOnlyAdapter,
 } from '../pgsql-adapter.js';
-import { compileSetOperation } from '../set-operation.js';
 
 const db = schema({
 	files: { id: { type: 'integer', primaryKey: true }, path: 'string' },
@@ -298,27 +297,23 @@ for (const strategy of ['join', 'lateral', 'json_agg', 'cte'] as const) {
 }
 it('refuses left branch before compiling the right subtree', () => {
 	const adapter = createPgCompileOnlyAdapter({ model: db.model });
-	const left = adapter.compile(orm.nql`posts | select id, author.name`.plan(), {
-		model: db.model,
-	});
-	const compile = vi.fn(() => {
-		if (compile.mock.calls.length > 1)
-			throw new Error('right subtree compiled');
-		return left;
-	});
+	const left = orm.nql`posts | select id, author.name`.plan().intent;
+	if (left === undefined) throw new Error('the left operand has no intent');
+	// Compiling this right operand alone fails with its own error, so a
+	// refusal that names the left operand proves the right one never compiled.
+	const right = { type: 'select', from: 'missing_table' } as const;
 	expect(() =>
-		compileSetOperation(
-			{
-				kind: 'setOperation',
-				op: 'union',
-				all: false,
-				left: { type: 'select', from: 'posts' },
-				right: { type: 'select', from: 'posts' },
-			},
-			compile,
+		adapter.compileSetOperation(
+			{ kind: 'setOperation', op: 'union', all: false, left: right, right },
+			db.model,
+		),
+	).toThrow('Unknown table: missing_table');
+	expect(() =>
+		adapter.compileSetOperation(
+			{ kind: 'setOperation', op: 'union', all: false, left, right },
+			db.model,
 		),
 	).toThrow(new Error(refusal));
-	expect(compile).toHaveBeenCalledTimes(1);
 });
 it.each([nestedRead, programRead])(
 	'malformed JSON throws a named read error: %s',

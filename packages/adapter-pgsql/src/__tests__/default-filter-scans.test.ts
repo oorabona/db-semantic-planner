@@ -520,18 +520,18 @@ describe('default filters on unsupported read paths', () => {
 	};
 	it('filters non-root scans in set reads and allows the ORM opt-out', () => {
 		expect(builds.set(orm).dump().sql).toBe(
-			'(SELECT posts.* FROM posts JOIN users AS author ON posts."authorId" = author.id AND author."deletedAt" IS NULL WHERE posts."deletedAt" IS NULL) UNION (SELECT posts.* FROM posts WHERE posts."deletedAt" IS NULL)',
+			'SELECT posts.* FROM posts JOIN users AS author ON posts."authorId" = author.id AND author."deletedAt" IS NULL WHERE posts."deletedAt" IS NULL UNION SELECT posts.* FROM posts WHERE posts."deletedAt" IS NULL',
 		);
 		expect(builds.set(orm.withoutDefaultFilters()).dump().sql).toBe(
-			'(SELECT posts.* FROM posts JOIN users AS author ON posts."authorId" = author.id) UNION (SELECT posts.* FROM posts)',
+			'SELECT posts.* FROM posts JOIN users AS author ON posts."authorId" = author.id UNION SELECT posts.* FROM posts',
 		);
 	});
 	it('filters non-root scans in rawCte reads and allows the ORM opt-out', () => {
 		expect(builds.rawCte(orm).dump().sql).toBe(
-			'WITH RECURSIVE "walk" AS (SELECT users.*, COALESCE((SELECT json_agg(jsonb_build_object(\'id\', __t__.id, \'title\', __t__.title, \'deletedAt\', __t__."deletedAt", \'authorId\', __t__."authorId") ORDER BY __t__.id ASC NULLS LAST) FROM posts AS __t__ WHERE __t__."authorId" = users.id AND __t__."deletedAt" IS NULL), \'[]\'::json) AS authored_json FROM users WHERE users."deletedAt" IS NULL UNION ALL SELECT users.* FROM users WHERE users."deletedAt" IS NULL) SELECT walk.* FROM walk',
+			'WITH RECURSIVE walk AS (SELECT users.*, COALESCE((SELECT json_agg(jsonb_build_object(\'id\', __t__.id, \'title\', __t__.title, \'deletedAt\', __t__."deletedAt", \'authorId\', __t__."authorId") ORDER BY __t__.id ASC NULLS LAST) FROM posts AS __t__ WHERE __t__."authorId" = users.id AND __t__."deletedAt" IS NULL), \'[]\'::json) AS authored_json FROM users WHERE users."deletedAt" IS NULL UNION ALL SELECT users.* FROM users WHERE users."deletedAt" IS NULL) SELECT walk.* FROM walk',
 		);
 		expect(builds.rawCte(orm.withoutDefaultFilters()).dump().sql).toBe(
-			"WITH RECURSIVE \"walk\" AS (SELECT users.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'title', __t__.title, 'deletedAt', __t__.\"deletedAt\", 'authorId', __t__.\"authorId\") ORDER BY __t__.id ASC NULLS LAST) FROM posts AS __t__ WHERE __t__.\"authorId\" = users.id), '[]'::json) AS authored_json FROM users UNION ALL SELECT users.* FROM users) SELECT walk.* FROM walk",
+			"WITH RECURSIVE walk AS (SELECT users.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'title', __t__.title, 'deletedAt', __t__.\"deletedAt\", 'authorId', __t__.\"authorId\") ORDER BY __t__.id ASC NULLS LAST) FROM posts AS __t__ WHERE __t__.\"authorId\" = users.id), '[]'::json) AS authored_json FROM users UNION ALL SELECT users.* FROM users) SELECT walk.* FROM walk",
 		);
 	});
 	it('filters non-root scans in cte reads and allows the ORM opt-out', () => {

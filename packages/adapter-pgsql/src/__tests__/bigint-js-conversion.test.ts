@@ -463,7 +463,7 @@ describe('PgAdapter bigint js result conversion', () => {
 		const compiled = adapter.compile(bundle, { model: conversionSchema.model });
 
 		expect(compiled.sql).toContain(
-			'WITH "e" ("sequence", "label") as (SELECT CAST(NULL AS bigint) AS "sequence", CAST(NULL AS text) AS "label" WHERE false UNION ALL VALUES ($1::bigint, $2::text))',
+			'WITH e(sequence, label) AS (SELECT NULL::bigint AS sequence, NULL::text AS label WHERE false UNION ALL VALUES (CAST($1 AS bigint), CAST($2 AS text)))',
 		);
 		expect(compiled.sql).not.toContain('FROM "events"');
 		expect(compiled.columnMetadata?.get('sequence')).toEqual({

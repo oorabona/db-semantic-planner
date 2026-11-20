@@ -98,6 +98,7 @@ export type ProjectNamedFieldsExpression = {
 export type ProjectNamedFieldsOptions = {
 	readonly sql: string;
 	readonly parameters: readonly unknown[];
+	readonly ast?: Node;
 	readonly selections: readonly ProjectNamedFieldsSelection[];
 	readonly expressions?: readonly ProjectNamedFieldsExpression[];
 	readonly hydrationPlan?: PlanReport;
@@ -107,6 +108,7 @@ export type ProjectNamedFieldsOptions = {
 export type PreserveOneToOneOptions = {
 	readonly sql: string;
 	readonly parameters: readonly unknown[];
+	readonly ast?: Node;
 	readonly hydrationPlan?: PlanReport;
 	readonly preserveHydrationPlan?: boolean;
 };
@@ -114,6 +116,7 @@ export type PreserveOneToOneOptions = {
 export type DropPositionalUnionOptions = {
 	readonly sql: string;
 	readonly parameters: readonly unknown[];
+	readonly ast?: Node;
 	readonly reason: ProjectionDropReason;
 };
 
@@ -131,6 +134,17 @@ type CompiledQueryWithHydrationPlan<T> = CompiledQuery<T> & {
 
 /** Supports source tests while @dbsp/types' checked-in SDK dist is intentionally stale. */
 const projectionOutputMaps = new WeakMap<object, ReadonlyMap<string, string>>();
+
+/**
+ * The statement tree a finalized query was deparsed from. A compile entry that
+ * returns a `CompiledQuery` keeps its tree here, so a composing caller nests
+ * that tree instead of the emitted text (ADR 0012).
+ */
+const compiledStatementAsts = new WeakMap<object, Node>();
+
+export function compiledStatementAst(query: CompiledQuery): Node | undefined {
+	return compiledStatementAsts.get(query);
+}
 
 export function outputKeyMapFor(
 	query: CompiledQuery,
@@ -281,9 +295,11 @@ export function fromCompiledQuery<T = unknown>(
 			),
 		);
 	}
+	const ast = compiledStatementAsts.get(compiled);
 	return makeEnvelope<T>({
 		sql: compiled.sql,
 		parameters: compiled.parameters,
+		...(ast !== undefined ? { ast } : {}),
 		projection: { kind: 'known', outputs },
 		...(compiled.hydrationPlan !== undefined
 			? { hydrationPlan: compiled.hydrationPlan }
@@ -501,6 +517,7 @@ export function projectNamedFields<T = unknown>(
 		return makeEnvelope<T>({
 			sql: options.sql,
 			parameters: options.parameters,
+			...(options.ast !== undefined ? { ast: options.ast } : {}),
 			projection: source.projection,
 			...(hydrationPlan !== undefined ? { hydrationPlan } : {}),
 		});
@@ -532,6 +549,7 @@ export function projectNamedFields<T = unknown>(
 	return makeEnvelope<T>({
 		sql: options.sql,
 		parameters: options.parameters,
+		...(options.ast !== undefined ? { ast: options.ast } : {}),
 		projection: { kind: 'known', outputs },
 		...(hydrationPlan !== undefined ? { hydrationPlan } : {}),
 	});
@@ -565,6 +583,7 @@ export function preserveOneToOne<T = unknown>(
 	return makeEnvelope<T>({
 		sql: options.sql,
 		parameters: options.parameters,
+		...(options.ast !== undefined ? { ast: options.ast } : {}),
 		projection: source.projection,
 		...(hydrationPlan !== undefined ? { hydrationPlan } : {}),
 	});
@@ -577,6 +596,7 @@ export function dropPositionalUnion<T = unknown>(
 	return makeEnvelope<T>({
 		sql: options.sql,
 		parameters: options.parameters,
+		...(options.ast !== undefined ? { ast: options.ast } : {}),
 		projection: {
 			kind: 'dropped',
 			reason: options.reason,
@@ -633,6 +653,7 @@ export function finalizeEnvelope<T = unknown>(
 		if (env.projection.outputKeyMap !== undefined) {
 			projectionOutputMaps.set(compiled, env.projection.outputKeyMap);
 		}
+		if (env.ast !== undefined) compiledStatementAsts.set(compiled, env.ast);
 		return compiled;
 	}
 
@@ -673,6 +694,7 @@ export function finalizeEnvelope<T = unknown>(
 	const compiled: CompiledQueryWithHydrationPlan<T> =
 		compiledQueryFromProjection(fields);
 	projectionOutputMaps.set(compiled, outputKeyMap);
+	if (env.ast !== undefined) compiledStatementAsts.set(compiled, env.ast);
 	return compiled;
 }
 

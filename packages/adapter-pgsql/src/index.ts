@@ -223,12 +223,7 @@ export {
 	redactParams,
 } from './redact-params.js';
 // Set operations (UNION/INTERSECT/EXCEPT)
-export {
-	compileSetOperation,
-	createLeafCompileFn,
-	type LeafCompileFn,
-	type SetOperationResult,
-} from './set-operation.js';
+export type { SetOperationResult } from './set-operation.js';
 // Streaming (cursor-based)
 export {
 	buildCloseCursor,

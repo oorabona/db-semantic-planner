@@ -932,7 +932,7 @@ describe('NQL → SQL compile-only pipeline', () => {
 		});
 
 		expect(normalizeSQL(result.sql)).toBe(
-			'with "ranked" as (select variants.id, variants."productid", variants."pricecents", row_number() over (partition by variants."productid" order by variants."pricecents" desc, variants.id asc) as rn from tenant_42.variants), "top_variants" as (select ranked.id, ranked."productid", ranked."pricecents" from ranked) select ranked.* from ranked where ranked.rn <= $1',
+			'with ranked as (select variants.id, variants."productid", variants."pricecents", row_number() over (partition by variants."productid" order by variants."pricecents" desc, variants.id asc) as rn from tenant_42.variants), top_variants as (select ranked.id, ranked."productid", ranked."pricecents" from ranked) select ranked.* from ranked where ranked.rn <= $1',
 		);
 		expect(result.parameters).toEqual([2]);
 	});
@@ -983,7 +983,7 @@ activeUsers | select postTitle`.dump();
 u | select postTitle`.dump();
 
 		expect(result.sql).toBe(
-			'WITH "t" AS (SELECT posts.title AS "postTitle" FROM posts), "u" AS (SELECT t."postTitle" FROM t) SELECT u."postTitle" FROM u',
+			'WITH t AS (SELECT posts.title AS "postTitle" FROM posts), u AS (SELECT t."postTitle" FROM t) SELECT u."postTitle" FROM u',
 		);
 	});
 
@@ -1537,7 +1537,7 @@ describe('CTE relation planning', () => {
 				'with enriched as (posts | select title, author.name | flat) enriched | select *',
 			),
 		).toBe(
-			'with "enriched" as (select posts.title, author.name as "author.name" from posts join authors as author on posts."authorid" = author.id) select enriched.* from enriched',
+			'with enriched as (select posts.title, author.name as "author.name" from posts join authors as author on posts."authorid" = author.id) select enriched.* from enriched',
 		);
 	});
 
@@ -1558,7 +1558,7 @@ filtered_posts
 			| order by title`.dump();
 
 		expect(normalizeSQL(dump.sql)).toBe(
-			'with "filtered_posts" as (select posts.title, author.name as author_name from tenant_42.posts join tenant_42.authors as author on posts."authorid" = author.id where exists (select 1 from tenant_42.authors as authors_exists_1 where posts."authorid" = authors_exists_1.id and authors_exists_1.name = $1)) select filtered_posts.title, filtered_posts.author_name from filtered_posts order by filtered_posts.title asc',
+			'with filtered_posts as (select posts.title, author.name as author_name from tenant_42.posts join tenant_42.authors as author on posts."authorid" = author.id where exists (select 1 from tenant_42.authors as authors_exists_1 where posts."authorid" = authors_exists_1.id and authors_exists_1.name = $1)) select filtered_posts.title, filtered_posts.author_name from filtered_posts order by filtered_posts.title asc',
 		);
 	});
 
@@ -1568,7 +1568,7 @@ filtered_posts
 				'with seed as (authors | select id) posts | select title, author.name | flat',
 			),
 		).toBe(
-			'with "seed" as (select authors.id from authors) select posts.title, author.name as "author.name" from posts join authors as author on posts."authorid" = author.id',
+			'with seed as (select authors.id from authors) select posts.title, author.name as "author.name" from posts join authors as author on posts."authorid" = author.id',
 		);
 	});
 
@@ -1576,9 +1576,9 @@ filtered_posts
 		const nql =
 			"with authors as (authors | where name = 'Alice Johnson' | select id, name), enriched as (posts | select title, author.name | flat) enriched | select *";
 		const expectedWithoutSchema =
-			'with "authors" as (select authors.id, authors.name from authors where authors.name = $1), "enriched" as (select posts.title, author.name as "author.name" from posts join authors as author on posts."authorid" = author.id) select enriched.* from enriched';
+			'with authors as (select authors.id, authors.name from authors where authors.name = $1), enriched as (select posts.title, author.name as "author.name" from posts join authors as author on posts."authorid" = author.id) select enriched.* from enriched';
 		const expectedWithSchema =
-			'with "authors" as (select authors.id, authors.name from tenant_42.authors where authors.name = $1), "enriched" as (select posts.title, author.name as "author.name" from tenant_42.posts join authors as author on posts."authorid" = author.id) select enriched.* from enriched';
+			'with authors as (select authors.id, authors.name from tenant_42.authors where authors.name = $1), enriched as (select posts.title, author.name as "author.name" from tenant_42.posts join authors as author on posts."authorid" = author.id) select enriched.* from enriched';
 
 		expect(blogCteToSQL(nql)).toBe(expectedWithoutSchema);
 		expect(blogCteToSQL(nql, 'tenant_42')).toBe(expectedWithSchema);
@@ -1591,7 +1591,7 @@ filtered_posts
 		);
 
 		expect(sql).toBe(
-			"with \"authors\" as (select authors.id, authors.name from tenant_42.authors) select posts.title, coalesce((select json_agg(jsonb_build_object('id', __t__.id, 'name', __t__.name) order by __t__.id asc nulls last) from authors as __t__ where __t__.id = posts.\"authorid\"), '[]'::json) as author_json from tenant_42.posts",
+			"with authors as (select authors.id, authors.name from tenant_42.authors) select posts.title, coalesce((select json_agg(jsonb_build_object('id', __t__.id, 'name', __t__.name) order by __t__.id asc nulls last) from authors as __t__ where __t__.id = posts.\"authorid\"), '[]'::json) as author_json from tenant_42.posts",
 		);
 	});
 
@@ -1678,7 +1678,7 @@ filtered_posts
 posts | select title, author.*`.dump();
 		expect(wildcard.sql).toContain('__t__."displayName"');
 		expect(normalizeSQL(wildcard.sql)).toBe(
-			'with "authors" as (select authors.id, authors.name as "displayname" from authors) select posts.title, coalesce((select json_agg(jsonb_build_object(\'id\', __t__.id, \'displayname\', __t__."displayname") order by __t__.id asc nulls last) from authors as __t__ where __t__.id = posts.author_id), \'[]\'::json) as author_json from posts',
+			"with authors as (select authors.id, authors.name as \"displayname\" from authors) select posts.title, coalesce((select json_agg(jsonb_build_object('id', __t__.id, 'displayname', __t__.\"displayname\") order by __t__.id asc nulls last) from authors as __t__ where __t__.id = posts.author_id), '[]'::json) as author_json from posts",
 		);
 
 		expect(() =>
@@ -1692,7 +1692,7 @@ posts | select title, author.displayName | flat`.dump(),
 			orm.nql`with posts as (posts | select id, authorId)
 authors | select name, posts.authorId | flat`.dump();
 		expect(normalizeSQL(logicalRelationKey.sql)).toBe(
-			'with "posts" as (select posts.id, posts.author_id from posts) select authors.name, posts.author_id as "posts.authorid" from authors left join posts as posts on authors.id = posts.author_id',
+			'with posts as (select posts.id, posts.author_id from posts) select authors.name, posts.author_id as "posts.authorid" from authors left join posts as posts on authors.id = posts.author_id',
 		);
 	});
 
@@ -1717,7 +1717,7 @@ authors | select name, posts.title | flat`.dump(),
 		);
 
 		expect(sql).toBe(
-			'with "seed" as (select authors.id from tenant_42.authors) select posts.title, author.name as "author.name" from tenant_42.posts join tenant_42.authors as author on posts."authorid" = author.id',
+			'with seed as (select authors.id from tenant_42.authors) select posts.title, author.name as "author.name" from tenant_42.posts join tenant_42.authors as author on posts."authorid" = author.id',
 		);
 	});
 
@@ -1763,7 +1763,7 @@ authors | select name, posts.title | flat`.dump(),
 		});
 
 		expect(normalizeSQL(result.sql)).toBe(
-			'with "authors" as (select authors.id from authors) select authors.id from authors where authors.id = any (select posts_subq_0."authorid" from posts as posts_subq_0)',
+			'with authors as (select authors.id from authors) select authors.id from authors where authors.id = any (select posts_subq_0."authorid" from posts as posts_subq_0)',
 		);
 	});
 
@@ -1790,7 +1790,7 @@ authors | select name, posts.title | flat`.dump(),
 		});
 
 		expect(normalizeSQL(result.sql)).toBe(
-			'with "scalar" as (select users.id from users) select scalar.id from scalar',
+			'with scalar as (select users.id from users) select scalar.id from scalar',
 		);
 	});
 });
@@ -2570,7 +2570,7 @@ describe('NQL → SQL bind + CTE E2E', () => {
 			mutationSchema.model,
 		);
 		expect(sql).toEqual(
-			'with "subset" as (select posts.id from posts where posts.published = $1) insert into "archivedposts" select * from subset',
+			'with subset as (select posts.id from posts where posts.published = $1) insert into "archivedposts" select * from subset',
 		);
 	});
 
@@ -2649,7 +2649,7 @@ describe('NQL → SQL bind + CTE E2E', () => {
 			'tenant_bound',
 		);
 
-		expect(sql).toContain('with "visible_posts" as (');
+		expect(sql).toContain('with visible_posts as (');
 		expect(sql).toContain('from tenant_bound.posts');
 		expect(sql).toContain('from tenant_bound.comments');
 		expect(sql).toContain('from visible_posts as visible_posts_subq_0');
@@ -2664,7 +2664,7 @@ describe('NQL → SQL bind + CTE E2E', () => {
 			'tenant_bound',
 		);
 
-		expect(sql).toContain('with "draft_posts" as (');
+		expect(sql).toContain('with draft_posts as (');
 		expect(sql).toContain('from tenant_bound.posts');
 		expect(sql).toContain('from draft_posts');
 		expect(sql).not.toContain('from tenant_bound.draft_posts');
@@ -2684,7 +2684,7 @@ describe('NQL → SQL bind + CTE E2E', () => {
 draft_posts | where id in (comments | select postId) | select id`.dump();
 
 		const sql = normalizeSQL(dump.sql);
-		expect(sql).toContain('with "draft_posts" as (');
+		expect(sql).toContain('with draft_posts as (');
 		expect(sql).toContain('from tenant_bound.posts');
 		expect(sql).toContain('from draft_posts');
 		expect(sql).toContain('from tenant_bound.comments');
@@ -2702,7 +2702,7 @@ draft_posts | where id in (comments | select postId) | select id`.dump();
 			'tenant_bound',
 		);
 
-		expect(sql).toContain('with "projected_posts" as (');
+		expect(sql).toContain('with projected_posts as (');
 		expect(sql).toContain('from tenant_bound.posts');
 		expect(sql).toContain('from projected_posts');
 		expect(sql).toContain('from tenant_bound.authors as authors_exists_');
@@ -2720,7 +2720,7 @@ draft_posts | where id in (comments | select postId) | select id`.dump();
 			'tenant_bound',
 		);
 
-		expect(sql).toContain('with "projected_posts" as (');
+		expect(sql).toContain('with projected_posts as (');
 		expect(sql).toContain('from tenant_bound.posts');
 		expect(sql).toContain('from projected_posts');
 		expect(sql).toContain('from tenant_bound.authors as rc_');
@@ -2866,7 +2866,7 @@ draft_posts | where id in (comments | select postId) | select id`.dump();
 		});
 		const sql = normalizeSQL(result.sql);
 
-		expect(sql).toContain('with "draft_posts" as (');
+		expect(sql).toContain('with draft_posts as (');
 		expect(sql).toContain('from tenant_bound.posts');
 		expect(sql).toContain('from tenant_bound.comments');
 		expect(sql).toContain('join draft_posts as draft');
@@ -2882,7 +2882,7 @@ draft_posts | where id in (comments | select postId) | select id`.dump();
 			'tenant_bound',
 		);
 
-		expect(sql).toContain('with "subset" as (');
+		expect(sql).toContain('with subset as (');
 		expect(sql).toContain('from tenant_bound.posts');
 		expect(sql).toContain('insert into tenant_bound."archivedposts"');
 		expect(sql).toContain('from subset');
@@ -2896,7 +2896,7 @@ draft_posts | where id in (comments | select postId) | select id`.dump();
 			'tenant_bound',
 		);
 
-		expect(sql).toContain('with "active_authors" as (');
+		expect(sql).toContain('with active_authors as (');
 		expect(sql).toContain('from tenant_bound.authors');
 		expect(sql).toContain('insert into tenant_bound.authors');
 		expect(sql).toContain('from active_authors');
@@ -2929,7 +2929,7 @@ draft_posts | where id in (comments | select postId) | select id`.dump();
 		});
 		const sql = normalizeSQL(result.sql);
 
-		expect(sql).toContain('with "subset" as (');
+		expect(sql).toContain('with subset as (');
 		expect(sql).toContain('from tenant_direct.posts');
 		expect(sql).toContain('insert into tenant_direct."archivedposts"');
 		expect(sql).toContain('from subset');
@@ -2952,7 +2952,7 @@ draft_posts | where id in (comments | select postId) | select id`.dump();
 		});
 		const sql = normalizeSQL(result.sql);
 
-		expect(sql).toContain('with "active_authors" as (');
+		expect(sql).toContain('with active_authors as (');
 		expect(sql).toContain('from tenant_direct.authors');
 		expect(sql).toContain('insert into tenant_direct.authors');
 		expect(sql).toContain('from active_authors');
@@ -3024,7 +3024,7 @@ draft_posts | where id in (comments | select postId) | select id`.dump();
 		const sql = normalizeSQL(result.sql);
 
 		expect(sql).toBe(
-			'with "subset" as (select posts.id from tenant_bound.posts where posts.published = $1) select subset.id from subset where subset.id > $2',
+			'with subset as (select posts.id from tenant_bound.posts where posts.published = $1) select subset.id from subset where subset.id > $2',
 		);
 		expect(result.parameters).toEqual([false, 1]);
 	});
@@ -3101,7 +3101,7 @@ describe('NQL → SQL upsert-from E2E', () => {
 			mutationSchema.model,
 		);
 		expect(sql).toEqual(
-			'with "active" as (select posts."userid" from posts where posts.published = $1)' +
+			'with active as (select posts."userid" from posts where posts.published = $1)' +
 				' insert into authors (id, name, email, active)' +
 				' select active.id as id, active.name as name, active.email as email, active.active as active from active' +
 				' on conflict (id) do update set name = excluded.name, email = excluded.email, active = excluded.active',

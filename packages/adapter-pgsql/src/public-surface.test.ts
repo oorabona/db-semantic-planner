@@ -145,3 +145,15 @@ it.each([
 	expect(root).not.toHaveProperty(name);
 	expect(internal).toHaveProperty(name);
 });
+
+// ADR 0012: set operations compile from intents through adapter.compileSetOperation.
+it.each(['compileSetOperation', 'createLeafCompileFn'])(
+	'AC6 export-surface: %s is no longer exported',
+	(name) => {
+		expect(root).not.toHaveProperty(name);
+		expect(internal).not.toHaveProperty(name);
+	},
+);
+
+// @ts-expect-error LeafCompileFn composed CompiledQuery callbacks and is removed (ADR 0012).
+export type RemovedLeafCompileFn = import('@dbsp/adapter-pgsql').LeafCompileFn;

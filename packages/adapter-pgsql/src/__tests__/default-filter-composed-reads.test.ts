@@ -92,11 +92,11 @@ describe('default filters in composed reads', () => {
 				.join('parent')
 				.unionAll(o.select('nodes').withoutDefaultFilters());
 		expect(dumped(build(orm))).toEqual({
-			sql: '(SELECT nodes.* FROM nodes JOIN nodes AS parent ON nodes."parentId" = parent.id AND parent.hidden IS NULL WHERE nodes.hidden IS NULL) UNION ALL (SELECT nodes.* FROM nodes)',
+			sql: 'SELECT nodes.* FROM nodes JOIN nodes AS parent ON nodes."parentId" = parent.id AND parent.hidden IS NULL WHERE nodes.hidden IS NULL UNION ALL SELECT nodes.* FROM nodes',
 			params: [],
 		});
 		expect(dumped(build(orm.withoutDefaultFilters()))).toEqual({
-			sql: '(SELECT nodes.* FROM nodes JOIN nodes AS parent ON nodes."parentId" = parent.id) UNION ALL (SELECT nodes.* FROM nodes)',
+			sql: 'SELECT nodes.* FROM nodes JOIN nodes AS parent ON nodes."parentId" = parent.id UNION ALL SELECT nodes.* FROM nodes',
 			params: [],
 		});
 	});
@@ -122,11 +122,11 @@ describe('default filters in composed reads', () => {
 				step: o.select('nodes').join('parent').withoutDefaultFilters(),
 			});
 		expect(dumped(build(orm))).toEqual({
-			sql: 'WITH RECURSIVE "walk" AS (SELECT nodes.* FROM nodes JOIN nodes AS parent ON nodes."parentId" = parent.id AND parent.hidden IS NULL WHERE nodes.hidden IS NULL UNION ALL SELECT nodes.* FROM nodes JOIN nodes AS parent ON nodes."parentId" = parent.id) SELECT walk.* FROM walk',
+			sql: 'WITH RECURSIVE walk AS (SELECT nodes.* FROM nodes JOIN nodes AS parent ON nodes."parentId" = parent.id AND parent.hidden IS NULL WHERE nodes.hidden IS NULL UNION ALL SELECT nodes.* FROM nodes JOIN nodes AS parent ON nodes."parentId" = parent.id) SELECT walk.* FROM walk',
 			params: [],
 		});
 		expect(dumped(build(orm.withoutDefaultFilters()))).toEqual({
-			sql: 'WITH RECURSIVE "walk" AS (SELECT nodes.* FROM nodes JOIN nodes AS parent ON nodes."parentId" = parent.id UNION ALL SELECT nodes.* FROM nodes JOIN nodes AS parent ON nodes."parentId" = parent.id) SELECT walk.* FROM walk',
+			sql: 'WITH RECURSIVE walk AS (SELECT nodes.* FROM nodes JOIN nodes AS parent ON nodes."parentId" = parent.id UNION ALL SELECT nodes.* FROM nodes JOIN nodes AS parent ON nodes."parentId" = parent.id) SELECT walk.* FROM walk',
 			params: [],
 		});
 	});
@@ -192,7 +192,7 @@ describe('default filters in composed reads', () => {
 			.unionAll(orm.select('nodes').withoutDefaultFilters())
 			.except(orm.select('nodes').join('parent'));
 		expect(dumped(query)).toEqual({
-			sql: '((SELECT nodes.* FROM nodes WHERE nodes.hidden IS NULL) UNION ALL (SELECT nodes.* FROM nodes)) EXCEPT (SELECT nodes.* FROM nodes JOIN nodes AS parent ON nodes."parentId" = parent.id AND parent.hidden IS NULL WHERE nodes.hidden IS NULL)',
+			sql: '(SELECT nodes.* FROM nodes WHERE nodes.hidden IS NULL UNION ALL SELECT nodes.* FROM nodes) EXCEPT SELECT nodes.* FROM nodes JOIN nodes AS parent ON nodes."parentId" = parent.id AND parent.hidden IS NULL WHERE nodes.hidden IS NULL',
 			params: [],
 		});
 	});
@@ -208,7 +208,7 @@ describe('default filters in composed reads', () => {
 			),
 		);
 		expect(dumped(build(orm.withoutDefaultFilters()))).toEqual({
-			sql: 'WITH RECURSIVE "nodes" AS (SELECT nodes.* FROM nodes UNION ALL SELECT nodes.* FROM nodes) SELECT nodes.* FROM nodes',
+			sql: 'WITH RECURSIVE nodes AS (SELECT nodes.* FROM nodes UNION ALL SELECT nodes.* FROM nodes) SELECT nodes.* FROM nodes',
 			params: [],
 		});
 	});

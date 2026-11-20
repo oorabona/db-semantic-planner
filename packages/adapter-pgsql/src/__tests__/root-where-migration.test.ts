@@ -833,7 +833,7 @@ describe('mutation WHERE resolves through the root resolver (#891)', () => {
 			const any =
 				'users.id = ANY (SELECT p_subq_0_1."authorId" FROM p AS p_subq_0_1)';
 			const ctes =
-				'WITH "p_subq_0" as (SELECT "blogPosts".id AS x FROM "blogPosts"), "p" as (SELECT "blogPosts"."authorId" FROM "blogPosts")';
+				'WITH p_subq_0 AS (SELECT "blogPosts".id AS x FROM "blogPosts"), p AS (SELECT "blogPosts"."authorId" FROM "blogPosts")';
 			expect(
 				plain.nql`blogPosts | select id as x | bind p_subq_0
 blogPosts | select authorId | bind p
@@ -1424,7 +1424,7 @@ u | select id, case when name = 'x' then 1 else 0 end as flag`.dump() as {
 					}
 				).sql,
 			).toBe(
-				'WITH "u" as (SELECT users.id, users.name FROM users) SELECT u.id, CASE WHEN u.name = $1 THEN 1 ELSE 0 END AS flag FROM u',
+				'WITH u AS (SELECT users.id, users.name FROM users) SELECT u.id, CASE WHEN u.name = $1 THEN 1 ELSE 0 END AS flag FROM u',
 			);
 		}
 	});
