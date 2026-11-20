@@ -3,24 +3,22 @@ import type {
 	ExpressionIntent,
 	WhereIntent,
 } from '@dbsp/types';
+import { coerceReference, type ReferenceLeaf } from './coerce.js';
 import { ExpressionRef } from './expressions.js';
 
-function toResultIntent(
-	value: ExpressionRef | string | number | boolean | null | undefined,
-): ExpressionIntent {
-	if (value instanceof ExpressionRef) {
-		return value.intent;
-	}
-	if (value === null || value === undefined) {
+/**
+ * A CASE result: a reference leaf (a string is a column, a finite number or
+ * boolean is inlined, an array or `Date` is bound, an expression is used as
+ * is), or `null` for SQL `NULL`.
+ */
+export type CaseValue = ReferenceLeaf | null;
+
+function toResultIntent(value: CaseValue, helper: string): ExpressionIntent {
+	if (value === null) {
 		return { kind: 'literal', value: null } satisfies ExpressionIntent;
 	}
-	if (typeof value === 'string') {
-		return { kind: 'ref', column: value } satisfies ExpressionIntent;
-	}
-	return { kind: 'literal', value } satisfies ExpressionIntent;
+	return coerceReference(value, helper);
 }
-
-export type CaseValue = ExpressionRef | string | number | boolean | null;
 
 export class CaseBuilder {
 	private readonly branches: ReadonlyArray<{
@@ -40,7 +38,7 @@ export class CaseBuilder {
 	when(condition: WhereIntent, thenValue: CaseValue): CaseBuilder {
 		return new CaseBuilder([
 			...this.branches,
-			{ condition, result: toResultIntent(thenValue) },
+			{ condition, result: toResultIntent(thenValue, 'caseWhen().when') },
 		]);
 	}
 
@@ -48,7 +46,7 @@ export class CaseBuilder {
 		const intent: CaseExpressionIntent = {
 			kind: 'case',
 			when: this.branches,
-			else: toResultIntent(elseValue),
+			else: toResultIntent(elseValue, 'caseWhen().else'),
 		};
 		return new ExpressionRef(intent as ExpressionIntent);
 	}
@@ -70,5 +68,7 @@ export function caseWhen(
 	condition: WhereIntent,
 	thenValue: CaseValue,
 ): CaseBuilder {
-	return new CaseBuilder([{ condition, result: toResultIntent(thenValue) }]);
+	return new CaseBuilder([
+		{ condition, result: toResultIntent(thenValue, 'caseWhen') },
+	]);
 }

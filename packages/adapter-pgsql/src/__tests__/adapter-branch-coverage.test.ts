@@ -957,7 +957,7 @@ describe('resolveCaseValue', () => {
 		).toMatchObject({ Float: { fval: '3.14' } });
 	});
 
-	it('literal string → ParamRef', () => {
+	it('literal string → string constant', () => {
 		const s = createCompilerState();
 		expect(
 			resolveCaseValue(
@@ -967,10 +967,8 @@ describe('resolveCaseValue', () => {
 				undefined,
 				s,
 			),
-		).toMatchObject({
-			ParamRef: { number: 1 },
-		});
-		expect(s.parameters).toEqual(['active']);
+		).toEqual({ A_Const: { sval: { sval: 'active' } } });
+		expect(s.parameters).toEqual([]);
 	});
 
 	it('column expression → columnRef', () => {

@@ -4,6 +4,7 @@ import {
 	eq,
 	exists,
 	fn,
+	InvalidOperationError,
 	inSubquery,
 	literal,
 	op,
@@ -101,16 +102,17 @@ describe('include where subquery bodies', () => {
 
 describe('include where expression values', () => {
 	const relationCase = () => caseWhen(exists('authored'), 'a').else('b');
-	it('refuses a relation predicate in the measured empty-builder CASE value', () => {
-		// The runtime accepts the measured empty-builder call despite its two-argument declaration.
-		// @ts-expect-error Reproduce the reported JavaScript consumer input.
-		const value = caseWhen().when(exists('authored'), 'a').else('b');
+	it('refuses the measured empty-builder CASE call at construction', () => {
+		// The empty call's first result is undefined, which a CASE result refuses.
 		expect(() =>
-			orm
-				.select('posts')
-				.include('author', { join: 'left', where: eq('name', value) })
-				.plan(),
-		).toThrow(new Error(relationRefusal));
+			// @ts-expect-error Reproduce the reported JavaScript consumer input.
+			caseWhen().when(exists('authored'), 'a').else('b'),
+		).toThrow(
+			new InvalidOperationError(
+				'caseWhen',
+				'undefined is not an expression argument; use literal(null), param(value) or an expression',
+			),
+		);
 	});
 	for (const [name, value] of [
 		['CASE', relationCase],
