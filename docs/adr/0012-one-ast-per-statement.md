@@ -102,8 +102,8 @@ An NQL program that runs several statements, for example a mutation and then a r
 each compiled into its own single AST.
 - `dump()` does not execute anything (`nql-bindings.test.ts:2416`). It shows each statement as compiled for preview,
   with runtime bindings empty (`nql.ts:2105`). It cannot show parameters that only execution produces.
-- Core no longer renumbers `$N` text: the joined display is removed from core. The dump shape is the per-statement
-  form decided below.
+- Core no longer renumbers `$N` text: the joined display is removed from core. The dump keeps each statement apart,
+  as decided below.
 
 ### Scope
 
@@ -120,14 +120,16 @@ rules above guarantee.
 ## Multi-statement NQL program dump (operator decision 2026-11-20)
 
 A program with several statements is several independent SQL statements, so its dump keeps them apart.
-- It returns a dedicated type: `{ statements: readonly { kind, sql, params, bindName? }[] }`. Each entry has its own
-  SQL, with its own `$1…` numbering, and its own parameters. Nothing is joined or renumbered.
-- The `sequence` field already has nearly this shape and becomes this type's official form.
-- The type is distinct from the single-statement `Dump`/`MutationDump`, whose `sql`/`params` (or `parameters`) are not
-  overloaded. A nested array in `params` would be ambiguous with an array-valued parameter (`[[1, 2]]`).
-- A single-statement NQL query keeps today's `Dump` unchanged.
-- The existing test that expects `dump.parameters === ['Alice', true]` for an INSERT-then-UPDATE program
-  (`nql-bindings.test.ts:2420`, `:2440`) moves to the per-statement form.
+- **Per-statement record.** The dump's existing `sequence` field (`DumpSequenceStep[]`, `types/src/adapter.ts:415-430`)
+  holds one entry per statement, each with its own SQL, its own `$1…` numbering, its own `params`, its `kind`
+  (`'query' | 'mutation'`) and its `bindName`. Nothing is joined or renumbered.
+- **Same dump type.** The program dump keeps the `Dump`/`MutationDump` type with its `plan` and `meta`.
+- **Top-level fields.** The top-level `sql` and `params` (`parameters` for a program ending in a mutation) describe the
+  last statement, the one whose result the program returns. They are no longer a renumbered join of all statements.
+- **No nested arrays.** A nested array in `params` would be ambiguous with an array-valued parameter (`[[1, 2]]`).
+- **Single-statement queries.** A single-statement NQL query is unchanged.
+- **Existing test.** The test that expects `dump.parameters === ['Alice', true]` for an INSERT-then-UPDATE program
+  (`nql-bindings.test.ts:2420`, `:2440`) moves to per-statement assertions on `sequence`.
 
 ## Consequences
 
