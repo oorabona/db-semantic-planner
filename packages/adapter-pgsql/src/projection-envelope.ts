@@ -138,7 +138,9 @@ const projectionOutputMaps = new WeakMap<object, ReadonlyMap<string, string>>();
 /**
  * The statement tree a finalized query was deparsed from. A compile entry that
  * returns a `CompiledQuery` keeps its tree here, so a composing caller nests
- * that tree instead of the emitted text (ADR 0012).
+ * that tree instead of the emitted text (ADR 0012). The tree is keyed by the
+ * object's identity: a copy of a `CompiledQuery` (spread, rebuild,
+ * serialisation) carries no tree, and composing it is refused by name.
  */
 const compiledStatementAsts = new WeakMap<object, Node>();
 
