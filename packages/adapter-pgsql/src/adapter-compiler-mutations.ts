@@ -114,6 +114,7 @@ import {
 	shiftParameters,
 	withLeadingCtes,
 } from './statement-ast.js';
+import { validateIdentifier } from './validate.js';
 
 export const POSTGRESQL_PARAMETER_LIMIT = 65_535;
 export const HETEROGENEOUS_INSERT_CELL_LIMIT = 2 * POSTGRESQL_PARAMETER_LIMIT;
@@ -234,6 +235,8 @@ function prependSourceCte(
 	if (sourceCte === undefined) {
 		return finalizeEnvelope(query);
 	}
+	const sourceCteName = emittedBindName(queryLocal(sourceName));
+	validateIdentifier(sourceCteName, 'alias');
 	// The source query is a CTE in the mutation's own WITH; the mutation's
 	// parameters follow the source's, shifted in the tree (ADR 0012).
 	const ast = withLeadingCtes(
@@ -241,12 +244,7 @@ function prependSourceCte(
 			requireStatementAst(query, `the mutation reading '${sourceName}'`),
 			sourceCte.parameters.length,
 		),
-		[
-			commonTableExpression(
-				emittedBindName(queryLocal(sourceName)),
-				sourceCte.ast,
-			),
-		],
+		[commonTableExpression(sourceCteName, sourceCte.ast)],
 	);
 	return finalizeEnvelope(
 		preserveOneToOne(query, {

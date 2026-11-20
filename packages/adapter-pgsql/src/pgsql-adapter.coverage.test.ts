@@ -1050,6 +1050,21 @@ describe('PgAdapter - Coverage Tests', () => {
 			);
 			expect(result.parameters).toEqual(['x', 'y', 'Price: $1x']);
 		});
+
+		it('refuses a source CTE name that is not an identifier', () => {
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
+			expect(() =>
+				adapter.compileInsertFrom(
+					{
+						type: 'insert_from',
+						table: 'archive_users',
+						source: 'src x',
+						sourceQuery: { type: 'select', from: 'users' },
+					},
+					{ model: coverageModel },
+				),
+			).toThrow('Invalid alias identifier "src x"');
+		});
 	});
 
 	describe('compileUpsertFrom', () => {
