@@ -260,7 +260,7 @@ one rule:
 | finite `number`, `boolean` | inlined constant: `fn('round', exprRef('score'), 2)` → `round(score, 2)` |
 | `bigint` within `Number.MIN_SAFE_INTEGER`..`Number.MAX_SAFE_INTEGER` | inlined constant: `2n` → `2` |
 | `NaN`, `Infinity`, `-Infinity`, a `bigint` outside that range | bound parameter `$N` |
-| array, `Date` | bound parameter `$N`: `op('<=>', 'vector', [0.1, 0.2])` → `vector <=> $1` |
+| array, `Date` | bound parameter `$N`, as given: `op('<=>', 'vector', [0.1, 0.2])` → `vector <=> $1`. Like `param()` content, the array's elements and the `Date` are not inspected |
 | `ExpressionRef` (`exprRef()`, `param()`, `literal()`, `fn()` …) | used as is |
 | table `ColumnRef` (`orm.tables.posts.title`) | qualified column: `posts.title` |
 | schema `ref('title')` | column reference |
@@ -270,7 +270,8 @@ Refused, with an error that names the input:
 
 - `null`, `undefined`, a plain object (a hand-built intent included) and a `sql()`
   marker throw `InvalidOperationError`. Write `literal(null)` for SQL `NULL` and
-  `param(value)` to bind a value;
+  `param(value)` to bind a value. A CASE result is the exception for `null`: it
+  becomes SQL `NULL` there;
 - `outerRef()`, a `ColumnRef` reached through a relation or taken from a
   `some()`/`every()`/`none()` callback, and a query builder (`orm.select(...)`,
   `subquery('t').select('col')`) throw `NotYetSupportedError`.
