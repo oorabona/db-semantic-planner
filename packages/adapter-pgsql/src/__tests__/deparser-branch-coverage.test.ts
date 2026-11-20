@@ -660,6 +660,58 @@ describe('deparseSelectStmt: set operations', () => {
 		expect(deparse(node)).toBe('SELECT 1 UNION ALL SELECT 2');
 	});
 
+	it('parenthesises a right operand that carries a locking clause', () => {
+		const node: Node = {
+			SelectStmt: {
+				op: 'SETOP_UNION',
+				all: false,
+				larg: {
+					targetList: [{ ResTarget: { val: { A_Const: { ival: 1 } } } }],
+				},
+				rarg: {
+					targetList: [{ ResTarget: { val: { A_Const: { ival: 2 } } } }],
+					lockingClause: [
+						{
+							LockingClause: {
+								strength: 'LCS_FORUPDATE',
+								waitPolicy: 'LockWaitBlock',
+							},
+						},
+					],
+				},
+			},
+		} as unknown as Node;
+		expect(deparse(node)).toBe('SELECT 1 UNION (SELECT 2 FOR UPDATE)');
+	});
+
+	it('parenthesises a right operand that carries its own WITH', () => {
+		const node: Node = {
+			SelectStmt: {
+				op: 'SETOP_UNION',
+				all: false,
+				larg: {
+					targetList: [{ ResTarget: { val: { A_Const: { ival: 1 } } } }],
+				},
+				rarg: {
+					targetList: [{ ResTarget: { val: { A_Const: { ival: 2 } } } }],
+					withClause: {
+						ctes: [
+							{
+								CommonTableExpr: {
+									ctename: 'x',
+									ctequery: selectStmt(),
+								},
+							},
+						],
+					},
+				},
+			},
+		} as unknown as Node;
+		expect(deparse(node)).toBe(
+			'SELECT 1 UNION (WITH x AS (SELECT 1) SELECT 2)',
+		);
+	});
+
 	it('INTERSECT', () => {
 		const node: Node = {
 			SelectStmt: {
@@ -907,6 +959,27 @@ describe('deparseSelectStmt: individual clauses', () => {
 		const node: Node = {
 			SelectStmt: {
 				withClause: { recursive: true, ctes: [cte] },
+				targetList: [{ ResTarget: { val: aConst({ ival: 1 }) } }],
+			},
+		} as unknown as Node;
+		expect(deparse(node)).toBe('WITH RECURSIVE tree AS (SELECT 1) SELECT 1');
+	});
+
+	it('WITH RECURSIVE when only a CTE is marked recursive', () => {
+		const cte: Node = {
+			CommonTableExpr: {
+				ctename: 'tree',
+				cterecursive: true,
+				ctequery: {
+					SelectStmt: {
+						targetList: [{ ResTarget: { val: aConst({ ival: 1 }) } }],
+					},
+				},
+			},
+		} as Node;
+		const node: Node = {
+			SelectStmt: {
+				withClause: { ctes: [cte] },
 				targetList: [{ ResTarget: { val: aConst({ ival: 1 }) } }],
 			},
 		} as unknown as Node;
