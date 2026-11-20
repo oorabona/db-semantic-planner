@@ -263,6 +263,7 @@ export {
 	type RangeValue,
 	RawCteQueryBuilder,
 	type RecursiveOptions,
+	type ReferenceLeaf,
 	type RelationHints,
 	RelationNotFoundError,
 	type RelationRef,

@@ -18,6 +18,8 @@ export {
 	type CaseValue,
 	caseWhen,
 } from './case-when-builder.js';
+// Expression-constructor leaf rule (ADR 0011)
+export type { ReferenceLeaf } from './coerce.js';
 // CTE Builder (BATCH-001 Block 5)
 export {
 	CteBuilder,
