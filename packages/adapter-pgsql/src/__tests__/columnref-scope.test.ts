@@ -1006,7 +1006,7 @@ describe('Typed quantifiers and callback refs inside nested bodies (#991)', () =
 			position: 'expression argument',
 			issue: 1052,
 			message:
-				'a callback-scoped ColumnRef in a expression argument is not supported yet (#1052).',
+				'a callback-scoped ColumnRef in an expression argument is not supported yet (#1052).',
 		});
 	});
 

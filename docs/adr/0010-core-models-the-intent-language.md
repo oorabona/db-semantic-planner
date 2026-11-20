@@ -101,6 +101,7 @@ execution errors.
    - Its fields are `construct` (for example `'lock'`), `position` (for example `'scalar subquery body'`) and `issue`, a
      number the constructor requires.
    - The class builds the message, never the call site: `<construct> in a <position> is not supported yet (#<issue>).`
+     It writes "an" instead of "a" before a position that starts with a vowel (a, e, i, o, u).
    - A consumer recognises it with `instanceof` or by its `issue` field, without parsing text, at every public entry:
      - an ORM entry point (`orm.select(...)`, a builder's `dump()`, `orm.nql`) throws the `NotYetSupportedError` itself,
        not a generic error built from its message (`packages/core/src/dx/nql.ts:1594` does that today);

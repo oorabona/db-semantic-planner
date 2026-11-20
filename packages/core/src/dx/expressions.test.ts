@@ -810,7 +810,7 @@ describe('expression-constructor leaf refusals (ADR 0011)', () => {
 			construct,
 			position: 'expression argument',
 			issue,
-			message: `${construct} in a expression argument is not supported yet (#${issue}).`,
+			message: `${construct} in an expression argument is not supported yet (#${issue}).`,
 		});
 	}
 
