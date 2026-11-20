@@ -1591,10 +1591,13 @@ describe('deparseCommonTableExpr', () => {
 		const node: Node = {
 			CommonTableExpr: {
 				ctename: 'my_cte',
-				cte_cols: [{ String: { sval: 'id' } }, { String: { sval: 'name' } }],
+				aliascolnames: [
+					{ String: { sval: 'id' } },
+					{ String: { sval: 'name' } },
+				],
 				ctequery: selectStmt(),
 			},
-		} as unknown as Node;
+		} as Node;
 		expect(deparse(node)).toBe('my_cte(id, name) AS (SELECT 1)');
 	});
 
