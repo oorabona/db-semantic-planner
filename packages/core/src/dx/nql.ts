@@ -1369,28 +1369,19 @@ function createNqlProgramSteps(
 	return steps;
 }
 
-function renumberDumpSqlParams(sql: string, offset: number): string {
-	if (offset === 0) return sql;
-	return sql.replace(/\$(\d+)/g, (_match, num) => {
-		return `$${Number.parseInt(num, 10) + offset}`;
-	});
-}
-
-function joinDumpSequenceSql(sequence: readonly DumpSequenceStep[]): string {
-	let parameterOffset = 0;
-	return sequence
-		.map((step) => {
-			const sql = renumberDumpSqlParams(step.sql, parameterOffset);
-			parameterOffset += step.params.length;
-			return sql;
-		})
-		.join(';\n');
-}
-
-function flattenDumpSequenceParams(
+/**
+ * A program's statements run apart, each with its own `$1…` numbering. The
+ * dump's top-level SQL and parameters are the last statement's, the one whose
+ * result the program returns (ADR 0012); `sequence` holds every statement.
+ */
+function lastDumpSequenceStep(
 	sequence: readonly DumpSequenceStep[],
-): readonly unknown[] {
-	return sequence.flatMap((step) => [...step.params]);
+): DumpSequenceStep {
+	const last = sequence.at(-1);
+	if (last === undefined) {
+		throw new Error('NQL program sequence did not contain a final statement.');
+	}
+	return last;
 }
 
 function filterMapByBindingDependencies<T>(
@@ -2207,10 +2198,11 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 					correlationId: meta.correlationId,
 				}),
 			};
+			const lastStatement = lastDumpSequenceStep(sequence);
 			return {
 				plan: planReport,
-				sql: joinDumpSequenceSql(sequence),
-				params: flattenDumpSequenceParams(sequence),
+				sql: lastStatement.sql,
+				params: lastStatement.params,
 				meta: dumpMeta,
 				sequence,
 			};
@@ -2230,9 +2222,10 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			}),
 		};
 
+		const lastStatement = lastDumpSequenceStep(sequence);
 		return {
-			sql: joinDumpSequenceSql(sequence),
-			parameters: flattenDumpSequenceParams(sequence),
+			sql: lastStatement.sql,
+			parameters: lastStatement.params,
 			intent: finalStep.intent,
 			meta: dumpMeta,
 			sequence,

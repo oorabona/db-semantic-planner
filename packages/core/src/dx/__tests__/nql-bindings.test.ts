@@ -361,7 +361,7 @@ posts | where authorId in (touched) | select authorId`.all();
 	]);
 	const finalSql = execute.mock.calls[1]?.[0].sql ?? '';
 	expect(finalSql).toContain(
-		`WITH "touched" ("${expectedCteColumn}") as (SELECT CAST(NULL AS integer) AS "${expectedCteColumn}" WHERE false UNION ALL VALUES ($1::integer))`,
+		`WITH touched("${expectedCteColumn}") AS (SELECT NULL::integer AS "${expectedCteColumn}" WHERE false UNION ALL VALUES (CAST($1 AS integer)))`,
 	);
 	expect(execute.mock.calls[1]?.[0].parameters).toEqual([17]);
 }
@@ -393,7 +393,7 @@ describe('nql`...` bind handling', () => {
 		expect(compile.mock.calls[0]?.[1]).toMatchObject({
 			model: expect.any(Object),
 		});
-		expect(dump.sql).toMatch(/^WITH "active_users" as \(/);
+		expect(dump.sql).toMatch(/^WITH active_users AS \(/);
 		expect(dump.params).toEqual([true]);
 		expect(dump.plan.rootTable).toBe('users');
 	});
@@ -413,7 +413,7 @@ describe('nql`...` bind handling', () => {
 		const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
 		expect(bundle.bindings?.has('active_users')).toBe(true);
 		expect(bundle.query?.from).toBe('active_users');
-		expect(dump.sql).toMatch(/^WITH "active_users" as \(/);
+		expect(dump.sql).toMatch(/^WITH active_users AS \(/);
 		expect(dump.sql).toContain('FROM active_users');
 		expect(dump.params).toEqual([true]);
 		expect(dump.plan.rootTable).toBe('active_users');
@@ -435,7 +435,7 @@ describe('nql`...` bind handling', () => {
 		const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
 		expect(bundle.bindings?.has('recent_posts')).toBe(true);
 		expect(bundle.query?.from).toBe('posts');
-		expect(dump.sql).toMatch(/^WITH "recent_posts" as \(/);
+		expect(dump.sql).toMatch(/^WITH recent_posts AS \(/);
 		expect(dump.params).toEqual([3, true]);
 		expect(dump.plan.rootTable).toBe('posts');
 	});
@@ -477,9 +477,9 @@ users | where id in (active_users) | select id`.all();
 		expect(snapshotSql).toContain('WHERE users.active = $1');
 		expect(mutationSql).not.toContain('active_users');
 		expect(finalSql).toContain(
-			'WITH "active_users" ("id") as (SELECT CAST(NULL AS integer) AS "id" WHERE false UNION ALL VALUES ($1::integer))',
+			'WITH active_users(id) AS (SELECT NULL::integer AS id WHERE false UNION ALL VALUES (CAST($1 AS integer)))',
 		);
-		expect(finalSql).not.toMatch(/"active_users"\s+as\s+\(\s*SELECT/i);
+		expect(finalSql).not.toMatch(/\bactive_users\s+as\s+\(\s*SELECT/i);
 		expect(execute.mock.calls[2]?.[0].parameters).toEqual([1]);
 		expect(compile).toHaveBeenCalledTimes(3);
 	});
@@ -509,12 +509,12 @@ users | where id in (ids) | select id`.all();
 		// empty-anchor CTEs in the final SQL — read-bind CTEs always emit
 		// (#173), and BOTH needed snapshotting here (#213 B2 transitive case).
 		expect(finalSql).toContain(
-			'"created" ("id") as (SELECT CAST(NULL AS integer) AS "id" WHERE false UNION ALL VALUES ($1::integer))',
+			'created(id) AS (SELECT NULL::integer AS id WHERE false UNION ALL VALUES (CAST($1 AS integer)))',
 		);
 		expect(finalSql).toContain(
-			'"ids" ("id") as (SELECT CAST(NULL AS integer) AS "id" WHERE false UNION ALL VALUES ($2::integer))',
+			'ids(id) AS (SELECT NULL::integer AS id WHERE false UNION ALL VALUES (CAST($2 AS integer)))',
 		);
-		expect(finalSql).not.toMatch(/"ids"\s+as\s+\(\s*SELECT\s+"?id"?\s+FROM/i);
+		expect(finalSql).not.toMatch(/\bids\s+as\s+\(\s*SELECT\s+"?id"?\s+FROM/i);
 		expect(execute.mock.calls[3]?.[0].parameters).toEqual([1, 1]);
 		expect(compile).toHaveBeenCalledTimes(4);
 	});
@@ -538,7 +538,7 @@ users | where id in (ids | select userId) | select id as userId`.all();
 		expect(execute).toHaveBeenCalledTimes(3);
 		const finalSql = execute.mock.calls[2]?.[0].sql ?? '';
 		expect(finalSql).toContain(
-			'WITH "ids" ("userId") as (SELECT CAST(NULL AS integer) AS "userId" WHERE false UNION ALL VALUES ($1::integer))',
+			'WITH ids("userId") AS (SELECT NULL::integer AS "userId" WHERE false UNION ALL VALUES (CAST($1 AS integer)))',
 		);
 		expect(finalSql).not.toMatch(
 			/"ids"\s+as\s+\(\s*SELECT\s+"?userId"?\s+FROM/i,
@@ -565,7 +565,7 @@ counts | select n`.all();
 		expect(execute).toHaveBeenCalledTimes(3);
 		const finalSql = execute.mock.calls[2]?.[0].sql ?? '';
 		expect(finalSql).toContain(
-			'WITH "counts" ("n") as (SELECT CAST(NULL AS bigint) AS "n" WHERE false UNION ALL VALUES ($1::bigint))',
+			'WITH counts(n) AS (SELECT NULL::bigint AS n WHERE false UNION ALL VALUES (CAST($1 AS bigint)))',
 		);
 		expect(execute.mock.calls[2]?.[0].parameters).toEqual([3]);
 		expect(compile).toHaveBeenCalledTimes(3);
@@ -605,7 +605,7 @@ missing_users | select id`.all();
 		expect(execute).toHaveBeenCalledTimes(3);
 		const finalSql = execute.mock.calls[2]?.[0].sql ?? '';
 		expect(finalSql).toContain(
-			'WITH "missing_users" ("id") as (SELECT CAST(NULL AS integer) AS "id" WHERE false)',
+			'WITH missing_users(id) AS (SELECT NULL::integer AS id WHERE false)',
 		);
 		expect(finalSql).not.toContain('VALUES');
 		expect(execute.mock.calls[2]?.[0].parameters).toEqual([]);
@@ -632,7 +632,9 @@ ordered_users | select id`.all();
 		const finalSql = execute.mock.calls[2]?.[0].sql ?? '';
 		expect(snapshotSql).toContain('ORDER BY');
 		expect(snapshotSql).toContain('id DESC');
-		expect(finalSql).toContain('UNION ALL VALUES ($1::integer), ($2::integer)');
+		expect(finalSql).toContain(
+			'UNION ALL VALUES (CAST($1 AS integer)), (CAST($2 AS integer))',
+		);
 		expect(execute.mock.calls[2]?.[0].parameters).toEqual([2, 1]);
 	});
 
@@ -659,14 +661,14 @@ inactive_users | select id`.all();
 		const laterMutationSql = execute.mock.calls[2]?.[0].sql ?? '';
 		const finalSql = execute.mock.calls[3]?.[0].sql ?? '';
 		expect(beforeMutationSql).toContain(
-			'WITH "inactive_users" ("id") as (SELECT CAST(NULL AS integer) AS "id" WHERE false UNION ALL VALUES ($1::integer))',
+			'WITH inactive_users(id) AS (SELECT NULL::integer AS id WHERE false UNION ALL VALUES (CAST($1 AS integer)))',
 		);
 		expect(beforeMutationSql).not.toMatch(
 			/"inactive_users"\s+as\s+\(\s*SELECT/i,
 		);
 		expect(laterMutationSql).not.toContain('inactive_users');
 		expect(finalSql).toContain(
-			'WITH "inactive_users" ("id") as (SELECT CAST(NULL AS integer) AS "id" WHERE false UNION ALL VALUES ($1::integer))',
+			'WITH inactive_users(id) AS (SELECT NULL::integer AS id WHERE false UNION ALL VALUES (CAST($1 AS integer)))',
 		);
 		expect(execute.mock.calls[1]?.[0].parameters).toEqual([5, true]);
 		expect(execute.mock.calls[3]?.[0].parameters).toEqual([5]);
@@ -693,7 +695,7 @@ posts | where authorId in (post_authors) | select authorId`.all();
 		expect(execute).toHaveBeenCalledTimes(3);
 		const finalSql = execute.mock.calls[2]?.[0].sql ?? '';
 		expect(finalSql).toContain(
-			'WITH "post_authors" ("authorId") as (SELECT CAST(NULL AS integer) AS "authorId" WHERE false UNION ALL VALUES ($1::integer))',
+			'WITH post_authors("authorId") AS (SELECT NULL::integer AS "authorId" WHERE false UNION ALL VALUES (CAST($1 AS integer)))',
 		);
 		expect(execute.mock.calls[2]?.[0].parameters).toEqual([7]);
 	});
@@ -1089,8 +1091,8 @@ b | select who`.all();
 			// as typed VALUES-CTE snapshots, cast via the SOURCE column `name` (text):
 			const finalCall = execute.mock.calls.at(-1)?.[0];
 			expect(finalCall?.sql).toBe(
-				'WITH "m" ("who") as (SELECT CAST(NULL AS text) AS "who" WHERE false UNION ALL VALUES ($1::text)), ' +
-					'"b" ("who") as (SELECT CAST(NULL AS text) AS "who" WHERE false UNION ALL VALUES ($2::text)) ' +
+				'WITH m(who) AS (SELECT NULL::text AS who WHERE false UNION ALL VALUES (CAST($1 AS text))), ' +
+					'b(who) AS (SELECT NULL::text AS who WHERE false UNION ALL VALUES (CAST($2 AS text))) ' +
 					'SELECT b.who FROM b',
 			);
 			expect(finalCall?.parameters).toEqual(['Alice', 'Alice']);
@@ -1292,7 +1294,7 @@ projected_posts | select id, tags.name`.dump();
 		expect(compile).toHaveBeenCalledOnce();
 		const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
 		expect(bundle.query?.from).toBe('projected_posts');
-		expect(dump.sql).toMatch(/^WITH "projected_posts" as \(/);
+		expect(dump.sql).toMatch(/^WITH projected_posts AS \(/);
 		expect(dump.sql).toMatch(
 			/\(SELECT COALESCE\(json_agg\(rc_\d+\.name ORDER BY CAST\(rc_\d+\.name AS text\) NULLS LAST\), '\[\]'::json\) FROM tags AS rc_\d+ JOIN post_tags AS rc_\d+ ON rc_\d+\.id = rc_\d+\.tag_id WHERE rc_\d+\.post_id = projected_posts\.id\) AS "tags\.name"/i,
 		);
@@ -1358,7 +1360,7 @@ active_users | select *, posts.*`;
 			publicKey: 'posts',
 			path: { hops: [{ pairs: [{ fromColumn: 'id', toColumn: 'userId' }] }] },
 		});
-		expect(dump.sql).toMatch(/^WITH "active_users" as \(/);
+		expect(dump.sql).toMatch(/^WITH active_users AS \(/);
 		expect(dump.sql).toContain('json_agg(jsonb_build_object(');
 		expect(dump.sql).toContain('AS posts_json');
 		expect(dump.sql).toMatch(/WHERE __t__\."userId" = active_users\.id/i);
@@ -1836,34 +1838,71 @@ users | where id in (new_user) | select id`.all();
 		expect(execute).toHaveBeenCalledTimes(2);
 		const finalSql = execute.mock.calls[1]?.[0].sql ?? '';
 		expect(finalSql).toContain(
-			'WITH "new_user" ("id") as (SELECT CAST(NULL AS integer) AS "id" WHERE false UNION ALL VALUES ($1::integer))',
+			'WITH new_user(id) AS (SELECT NULL::integer AS id WHERE false UNION ALL VALUES (CAST($1 AS integer)))',
 		);
-		expect(finalSql).not.toMatch(/WITH "new_user"\s+as\s+\(\s*insert/i);
+		expect(finalSql).not.toMatch(/WITH new_user\s+as\s+\(\s*insert/i);
 		expect(execute.mock.calls[1]?.[0].parameters).toEqual([11]);
 		expect(compile).toHaveBeenCalledTimes(2);
 	});
 
-	it('dump() globally renumbers top-level params for a query-final mutation binding sequence', () => {
+	it('AC4 nql-binding: a read binding keeps a projected $1 constant in the final query', () => {
+		const { nql } = createBindingTag();
+
+		const dump = expectQueryDump(
+			nql`posts | where id = 7 | select id | bind a
+posts | where id = 9 | select '$1' as t`.dump(),
+		);
+
+		expect(dump.sql).toBe(
+			"WITH a AS (SELECT posts.id FROM posts WHERE posts.id = CAST($1 AS integer)) SELECT '$1' AS t FROM posts WHERE posts.id = CAST($2 AS integer)",
+		);
+		expect(dump.params).toEqual([7, 9]);
+	});
+
+	it('AC4 runtime-binding-values: a runtime binding with rows keeps a constant after its VALUES', async () => {
 		const execute = vi.fn<TestExecute>(async () => [{ id: 11 }]);
+		const { nql } = createMutationBindingTag(execute);
+
+		await nql<{
+			id: number;
+		}>`insert into users set name = ${'Alice'} | select id | bind new_user
+users | where id in (new_user) | select id, 'Price: $1' as t`.all();
+
+		expect(execute.mock.calls[1]?.[0].sql).toBe(
+			"WITH new_user(id) AS (SELECT NULL::integer AS id WHERE false UNION ALL VALUES (CAST($1 AS integer))) SELECT users.id, 'Price: $1' AS t FROM users WHERE users.id = ANY (SELECT new_user_subq_0.id FROM new_user AS new_user_subq_0)",
+		);
+		expect(execute.mock.calls[1]?.[0].parameters).toEqual([11]);
+	});
+
+	it('AC5 program-dump-read: dump() keeps each statement apart; top-level sql and params are the last statement', () => {
+		const execute = vi.fn<TestExecute>(async () => [{ id: 7 }]);
 		const { adapter, nql } = createMutationBindingTag(execute);
 
 		const dump = expectQueryDump(
 			nql<{
 				id: number;
-			}>`insert into users set name = ${'Alice'} | select id | bind new_user
-	users | where active = ${true} and id in (new_user) | select id`.dump(),
+			}>`update posts set title = 'new' where id = 7 | select id | bind a
+posts | where title = ${'Price $1'} and id in (a) | select id`.dump(),
 		);
 
 		expect(adapter.execute).not.toHaveBeenCalled();
-		expect(dump.sequence).toHaveLength(2);
-		expect(dump.sequence?.[0]?.sql).toMatch(/\$1\b/);
-		expect(dump.sequence?.[1]?.sql).toMatch(/\$1\b/);
-		expect(dump.params).toEqual(['Alice', true]);
-		const topLevelPlaceholders = Array.from(
-			dump.sql.matchAll(/\$(\d+)/g),
-			(match) => Number(match[1]),
-		);
-		expect(topLevelPlaceholders).toEqual([1, 2]);
+		expect(dump.sequence).toEqual([
+			{
+				kind: 'mutation',
+				bindName: 'a',
+				sql: 'UPDATE posts SET title = $1 WHERE posts.id = CAST($2 AS integer) RETURNING posts.id AS id',
+				params: ['new', 7],
+			},
+			{
+				kind: 'query',
+				sql: 'WITH a(id) AS (SELECT NULL::integer AS id WHERE false) SELECT posts.id FROM posts WHERE posts.title = $1 AND posts.id = ANY (SELECT a_subq_0.id FROM a AS a_subq_0)',
+				params: ['Price $1'],
+			},
+		]);
+		expect(dump.sql).toBe(dump.sequence?.[1]?.sql);
+		expect(dump.params).toEqual(dump.sequence?.[1]?.params);
+		expect(dump.plan).toBeDefined();
+		expect(dump.meta?.compiledAt).toBeInstanceOf(Date);
 	});
 
 	it('executes mutation bindings before a mutation-final statement using typed CTE data-flow', async () => {
@@ -1883,9 +1922,9 @@ update users set active = ${true} where id in (new_user) | select id`.all();
 		expect(execute).toHaveBeenCalledTimes(2);
 		const update = execute.mock.calls[1]?.[0];
 		expect(update.sql).toContain(
-			'WITH "new_user" ("id") as (SELECT CAST(NULL AS integer) AS "id" WHERE false UNION ALL VALUES ($1::integer))',
+			'WITH new_user(id) AS (SELECT NULL::integer AS id WHERE false UNION ALL VALUES (CAST($1 AS integer)))',
 		);
-		expect(update.sql).not.toMatch(/WITH "new_user"\s+as\s+\(\s*insert/i);
+		expect(update.sql).not.toMatch(/WITH new_user\s+as\s+\(\s*insert/i);
 		expect(update.parameters).toEqual([12, true]);
 	});
 
@@ -2125,9 +2164,9 @@ update users set active = ${true} where id in (second_user) | select id`;
 		]);
 		const finalSql = execute.mock.calls[2]?.[0].sql ?? '';
 		expect(finalSql).toContain(
-			'WITH "second_user" ("id") as (SELECT CAST(NULL AS integer) AS "id" WHERE false UNION ALL VALUES ($1::integer))',
+			'WITH second_user(id) AS (SELECT NULL::integer AS id WHERE false UNION ALL VALUES (CAST($1 AS integer)))',
 		);
-		expect(finalSql).not.toContain('"first_user"');
+		expect(finalSql).not.toContain('first_user');
 		expect(execute.mock.calls[2]?.[0].parameters).toEqual([22, true]);
 	});
 
@@ -2150,8 +2189,8 @@ users | where id in (kept_user) | select id`.all();
 		expect(adapter.transaction).toHaveBeenCalledOnce();
 		expect(execute).toHaveBeenCalledTimes(3);
 		const finalSql = execute.mock.calls[2]?.[0].sql ?? '';
-		expect(finalSql).toContain('"kept_user"');
-		expect(finalSql).not.toContain('"unused_users"');
+		expect(finalSql).toContain('kept_user(id) AS (');
+		expect(finalSql).not.toContain('unused_users');
 		expect(execute.mock.calls[2]?.[0].parameters).toEqual([33]);
 	});
 
@@ -2190,11 +2229,11 @@ new_user | select id | bind new_user_ids
 users | where id in (new_user_ids) | select id`.all();
 
 		const finalSql = execute.mock.calls[2]?.[0].sql ?? '';
-		const newUserIndex = finalSql.indexOf('"new_user"');
-		const newUserIdsIndex = finalSql.indexOf('"new_user_ids"');
+		const newUserIndex = finalSql.indexOf('new_user(id) AS (');
+		const newUserIdsIndex = finalSql.indexOf('new_user_ids');
 		expect(newUserIndex).toBeGreaterThanOrEqual(0);
 		expect(newUserIdsIndex).toBeGreaterThan(newUserIndex);
-		expect(finalSql).not.toContain('"unused_user"');
+		expect(finalSql).not.toContain('unused_user');
 		expect(execute.mock.calls[2]?.[0].parameters).toEqual([41]);
 	});
 
@@ -2422,30 +2461,26 @@ new_user | select name`.dump();
 update users set active = ${true} where id in (new_user) | select id`.dump() as MutationDump;
 
 		expect(adapter.execute).not.toHaveBeenCalled();
-		expect(dump.sequence).toHaveLength(2);
-		expect(dump.sequence?.[0]).toMatchObject({
-			kind: 'mutation',
-			bindName: 'new_user',
-		});
-		expect(dump.sequence?.[1]).toMatchObject({ kind: 'mutation' });
-		expect(dump.sequence?.[1]?.sql).toContain('WITH "new_user" ("id") as (');
-		expect(dump.sequence?.[1]?.sql).toContain(
-			'SELECT CAST(NULL AS integer) AS "id" WHERE false',
-		);
-		expect(dump.sequence?.[1]?.sql).not.toContain('NULL::');
-		expect(dump.sequence?.[1]?.sql).not.toContain('VALUES (NULL)');
+		expect(dump.sequence).toEqual([
+			{
+				kind: 'mutation',
+				bindName: 'new_user',
+				sql: 'INSERT INTO users (name) VALUES ($1) RETURNING users.id AS id',
+				params: ['Alice'],
+			},
+			{
+				kind: 'mutation',
+				sql: 'WITH new_user(id) AS (SELECT NULL::integer AS id WHERE false) UPDATE users SET active = $1 WHERE users.id = ANY (SELECT new_user_subq_0.id FROM new_user AS new_user_subq_0) RETURNING users.id AS id',
+				params: [true],
+			},
+		]);
 		expect(dump.sequence?.[1]?.sql).not.toMatch(
-			/WITH "new_user"\s+as\s+\(\s*insert/i,
+			/WITH new_user\s+as\s+\(\s*insert/i,
 		);
-		expect(dump.parameters).toEqual(['Alice', true]);
-		expect(dump.sequence?.[0]?.sql).toMatch(/\$1\b/);
-		expect(dump.sequence?.[1]?.sql).toMatch(/\$1\b/);
-		const topLevelPlaceholders = Array.from(
-			dump.sql.matchAll(/\$(\d+)/g),
-			(match) => Number(match[1]),
-		);
-		expect(topLevelPlaceholders).toEqual([1, 2]);
-		expect(dump.sql).toContain('$2');
+		expect(dump.sql).toBe(dump.sequence?.[1]?.sql);
+		expect(dump.parameters).toEqual([true]);
+		expect(dump.intent).toMatchObject({ type: 'update', table: 'users' });
+		expect(dump.meta?.compiledAt).toBeInstanceOf(Date);
 	});
 
 	it('dump() emits table-derived empty bindings for shorthand schema columns without originalDbType', () => {
@@ -2458,9 +2493,8 @@ posts | where title in (touched) | select title`.dump();
 
 		expect(dump.sequence).toHaveLength(2);
 		expect(dump.sequence?.[1]?.sql).toContain(
-			'WITH "touched" ("title") as (SELECT CAST(NULL AS text) AS "title" WHERE false)',
+			'WITH touched(title) AS (SELECT NULL::text AS title WHERE false)',
 		);
-		expect(dump.sequence?.[1]?.sql).not.toContain('NULL::');
 		expect(dump.sequence?.[1]?.sql).not.toContain('VALUES (NULL)');
 	});
 });
