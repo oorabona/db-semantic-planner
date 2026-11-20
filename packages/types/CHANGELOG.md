@@ -1,5 +1,12 @@
 # Changelog
 
+## [6.4.0](https://github.com/oorabona/db-semantic-planner/compare/types-v6.3.0...types-v6.4.0) (2026-11-20)
+
+
+### Features
+
+* **core:** Coerce expression-constructor arguments through one reference rule ([#1054](https://github.com/oorabona/db-semantic-planner/issues/1054)) ([003bdfa](https://github.com/oorabona/db-semantic-planner/commit/003bdfa8770f7e5aa87fbd490d11f6c9f5a0021e))
+
 ## [6.3.0](https://github.com/oorabona/db-semantic-planner/compare/types-v6.2.0...types-v6.3.0) (2026-11-19)
 
 

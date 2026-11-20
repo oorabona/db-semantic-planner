@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.0.5](https://github.com/oorabona/db-semantic-planner/compare/nql-v2.0.4...nql-v2.0.5) (2026-11-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* **adapter-pgsql:** createLeafCompileFn, LeafCompileFn and the module-level compileSetOperation are removed; use adapter.compileSetOperation(intent, model, options). A multi-statement NQL program dump keeps each statement in sequence, and its top-level sql and params are the last statement's. Composed SQL changes form (parentheses, CTE layout, CAST parameter casts).
+
+### Bug Fixes
+
+* **adapter-pgsql:** Compile each statement into one AST ([#1059](https://github.com/oorabona/db-semantic-planner/issues/1059)) ([704c384](https://github.com/oorabona/db-semantic-planner/commit/704c38430b8727c77b6c0f422351e8aeffcef9ae))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/types bumped to 6.4.0
+
 ## [2.0.4](https://github.com/oorabona/db-semantic-planner/compare/nql-v2.0.3...nql-v2.0.4) (2026-11-19)
 
 
