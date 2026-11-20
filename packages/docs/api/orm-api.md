@@ -914,7 +914,7 @@ const result = q1.union(q2).except(q3).dump();
 
 // Dump for SQL preview
 const dump = q1.union(q2).dump();
-console.log(dump.sql); // (SELECT ...) UNION (SELECT ...)
+console.log(dump.sql); // SELECT ... UNION SELECT ...
 ```
 
 Returns a `SetOperationBuilder` with `.all()`, `.first()`, and `.dump()` methods.

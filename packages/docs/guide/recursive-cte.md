@@ -51,10 +51,10 @@ orm.recursive<TResult>(name: string, options: RecursiveOptions): RawCteQueryBuil
 ### Generated SQL shape
 
 ```sql
-WITH RECURSIVE "name" AS (
+WITH RECURSIVE name AS (
   <base SELECT>
   UNION ALL          -- or UNION when unionAll: false
-  <step SELECT>      -- + WHERE "depth" < $N when maxDepth is set
+  <step SELECT>      -- + WHERE depth < $N when maxDepth is set
 )
 SELECT name.*        -- or projected columns when .columns() is used
 FROM name
@@ -105,7 +105,7 @@ const ancestors = await orm
 Generated SQL:
 
 ```sql
-WITH RECURSIVE "ancestor_chain" AS (
+WITH RECURSIVE ancestor_chain AS (
   SELECT employees.* FROM employees WHERE employees.id = $1
   UNION ALL
   SELECT ancestor_chain.* FROM ancestor_chain
@@ -156,10 +156,10 @@ const subtree = await orm
 Generated SQL:
 
 ```sql
-WITH RECURSIVE "cat_tree" AS (
+WITH RECURSIVE cat_tree AS (
   SELECT categories.* FROM categories WHERE categories.parent_id = $1
   UNION ALL
-  SELECT cat_tree.* FROM cat_tree WHERE "depth" < $2
+  SELECT cat_tree.* FROM cat_tree WHERE depth < $2
 )
 SELECT cat_tree.id, cat_tree.name, cat_tree.parent_id
 FROM cat_tree
@@ -172,7 +172,7 @@ When the step already has a `.where()` clause, the depth guard is AND-ed in:
 
 ```sql
 -- step with existing WHERE + maxDepth:
-SELECT chain.* FROM chain WHERE chain.name = $2 AND "depth" < $3
+SELECT chain.* FROM chain WHERE chain.name = $2 AND depth < $3
 ```
 
 ### 3. Graph walk with UNION (deduplication)
@@ -213,7 +213,7 @@ const reachable = await orm
 Generated SQL uses `UNION` instead of `UNION ALL`:
 
 ```sql
-WITH RECURSIVE "reachable_nodes" AS (
+WITH RECURSIVE reachable_nodes AS (
   SELECT graph_edges.* FROM graph_edges WHERE graph_edges.from_id = $1
   UNION
   SELECT reachable_nodes.* FROM reachable_nodes
@@ -255,7 +255,7 @@ const builder = orm.recursive('parent_chain', {
 });
 
 const { sql, params, intent } = builder.columns(['id', 'name']).dump();
-console.log(sql);    // WITH RECURSIVE "parent_chain" AS (...)
+console.log(sql);    // WITH RECURSIVE parent_chain AS (...)
 console.log(params); // [7, 20]
 ```
 
@@ -271,9 +271,9 @@ console.log(params); // [7, 20]
 ## Gotchas
 
 - **The step query must select from the CTE name, not the original table.** `step: orm.select('parent_chain')` — not `orm.select('employees')`. Selecting from the wrong table produces a plain self-join, not recursion.
-- **`maxDepth` requires a depth-tracking column in your data.** The guard `WHERE "depth" < $N` only works if your base and step queries actually carry and increment a `depth` column. The ORM injects the WHERE clause but does not add the column for you. Without a real depth column the guard references a non-existent column and PostgreSQL will error.
+- **`maxDepth` requires a depth-tracking column in your data.** The guard `WHERE depth < $N` only works if your base and step queries actually carry and increment a `depth` column. The ORM injects the WHERE clause but does not add the column for you. Without a real depth column the guard references a non-existent column and PostgreSQL will error.
 - **`depthColumn` defaults to `'depth'`** — if your depth column has a different name (e.g. `level`), pass `depthColumn: 'level'` or the generated WHERE will be wrong.
-- **Step WHERE and `maxDepth` are AND-ed, not replaced.** If the step query has its own `.where()`, the depth guard is appended as `AND "depth" < $N`. Parameter numbering is adjusted automatically.
+- **Step WHERE and `maxDepth` are AND-ed, not replaced.** If the step query has its own `.where()`, the depth guard is ANDed into that WHERE as `AND depth < $N`. Parameter numbering is adjusted automatically.
 - **Parameter renumbering is automatic.** Base params are `$1…$N`, step params follow as `$N+1…$M`, and maxDepth (if set) comes last. You do not manage numbering manually.
 - **`UNION ALL` (default) does not deduplicate.** For trees this is fine — each path is unique. For graphs where the same node is reachable via multiple paths, use `unionAll: false` to avoid duplicate rows, at the cost of a deduplication pass per iteration.
 - **No adapter = runtime error.** Calling `.dump()` or `.all()` on a builder constructed without an adapter throws `InvalidOperationError`. Always obtain the builder via `orm.recursive()` (which has an adapter bound), not via `createRawCteBuilder()` directly unless you pass an adapter explicitly.

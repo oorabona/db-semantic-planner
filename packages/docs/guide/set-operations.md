@@ -126,7 +126,7 @@ Set operations return a `SetOperationBuilder` which itself exposes all six metho
 ```typescript
 // doctest: skip — illustrative chaining example
 const combined = q1.union(q2).union(q3);
-// SQL: (q1) UNION (q2) UNION (q3)
+// SQL: (q1 UNION q2) UNION q3
 ```
 
 Chaining is left-associative: `(q1 UNION q2) UNION q3`. If you need a different grouping, structure the builders accordingly.
