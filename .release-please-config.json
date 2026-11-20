@@ -8,10 +8,10 @@
 	"plugins": [{ "type": "node-workspace" }, { "type": "sentence-case" }],
 	"packages": {
 		"packages/types": { "package-name": "@dbsp/types" },
-		"packages/nql": { "package-name": "@dbsp/nql" },
+		"packages/nql": { "package-name": "@dbsp/nql", "release-as": "2.0.5" },
 		"packages/core": { "package-name": "@dbsp/core" },
 		"packages/adapter-pgsql": { "package-name": "@dbsp/adapter-pgsql" },
-		"packages/cli": { "package-name": "@dbsp/cli" },
+		"packages/cli": { "package-name": "@dbsp/cli", "release-as": "5.0.7" },
 		"packages/mcp-server": { "package-name": "@dbsp/mcp-server" }
 	}
 }
