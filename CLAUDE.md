@@ -260,7 +260,7 @@ All helpers respect `orm.withSchema()`. See `packages/docs/guide/ddl-provisionin
 | Conditional upsert guard | `.doUpdate(set, exists('relation'))` | `ON CONFLICT ... DO UPDATE ... WHERE EXISTS (...)` |
 | NQL tag mutations | ``orm.nql`insert into t set x = ${v}`.dump()/.run()/.all()`` | `.dump()` compile-only; execution runs mutation hooks; read-only `\| bind` pipelines may feed one final mutation |
 | Param type casting | Automatic `CAST($N AS type)` via ModelIR `originalDbType` | Prevents nullable column type mismatch |
-| CASE expressions | `caseWhen().when(cond, val).when(...).else(val).as(alias)` — in columns + orderBy | `caseWhen<string>().when("status='a'", 'Active').else('Other').as('label')` |
+| CASE expressions | `caseWhen(cond, val).when(cond, val).else(val).as(alias)` — `WhereIntent` conditions; a string result is a column, `literal('x')` an inlined constant; in columns, orderBy and where | `caseWhen(eq('status', 'a'), literal('Active')).else(literal('Other')).as('label')` |
 | Range operators (PostgreSQL) | `rangeOverlaps()`, `rangeContains()`, `rangeContainedBy()` | `rangeOverlaps('period', ['2024-01-01', '2024-01-31'])` — covers `daterange`, `int4range`, `tsrange`, etc. |
 | Guides | **`packages/docs/guide/`** — the docs live there (VitePress), not in `docs/guides/`: `expression-primitives`, `extensions`, `rls-policies`, `case-expressions`, `ddl-provisioning`, `joins`, `recursive-cte`, `batch-values`, `full-text-search`, `schema-versioning`, `result-hydration`, `transactions`, `raw-sql`. Nav lives in `packages/docs/.vitepress/config.ts` — a new page must be wired in there or nobody finds it. | |
 

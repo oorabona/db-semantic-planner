@@ -43,10 +43,10 @@ import type {
 	WhereExpressionIntent,
 	WhereIntent,
 } from '../intent-ast.js';
+import { coerceReference, type ReferenceLeaf } from './coerce.js';
 import { InvalidOperationError } from './errors.js';
 import type { DistinctField } from './filters.js';
 import { isDistinctField as isDistinctFieldValue } from './filters.js';
-import type { ExpressionSpec } from './types.js';
 
 // ============================================================================
 // Validation patterns
@@ -62,32 +62,15 @@ const TYPE_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_ ]*(\[\])?$/;
 // ============================================================================
 
 /**
- * Accepted input types for op() and fn() arguments.
- * - `ExpressionRef` → used as-is
- * - `string` → implicitly converted to ref() (column reference)
- * - `number | boolean | readonly unknown[]` → implicitly converted to param() (bound value)
+ * Accepted input types for fn() arguments: a {@link ReferenceLeaf}, or an
+ * `aggOrderBy()` marker placing an ORDER BY entry inside an aggregate.
  *
- * Use `ref()` / `param()` explicitly for ambiguous cases (e.g., a string that is a value,
- * not a column name → use `literal()` instead).
+ * Every leaf follows the reference rule of `coerceReference`: a string is a
+ * column, a finite number or boolean is inlined, an array or `Date` is bound,
+ * an expression object is used as is. Use `literal()` for a string value and
+ * `param()` to bind a value explicitly.
  */
-/**
- * Accepted input types for op() and fn() arguments.
- * - `ExpressionRef` → used as-is
- * - `string` → implicitly converted to ref() (column reference)
- * - `number | boolean | readonly unknown[]` → implicitly converted to param() (bound value)
- * - `AggOrderByArg` → ORDER BY entry inside an aggregate (fn() only)
- *
- * Use `ref()` / `param()` explicitly for ambiguous cases (e.g., a string that is a value,
- * not a column name → use `literal()` instead).
- */
-export type ExprInput =
-	| ExpressionRef
-	| ExpressionSpec
-	| AggOrderByArg
-	| string
-	| number
-	| boolean
-	| readonly unknown[];
+export type ExprInput = ReferenceLeaf | AggOrderByArg;
 
 export type { PredicateOperator } from '@dbsp/types';
 
@@ -95,29 +78,6 @@ type BinaryPredicateOperator = Exclude<PredicateOperator, 'AND' | 'OR' | 'NOT'>;
 
 type NonPredicateOperator<TOperator extends string> =
 	TOperator extends PredicateOperator ? never : TOperator;
-
-// ============================================================================
-// Internal helpers
-// ============================================================================
-
-function toExpressionIntent(input: ExprInput): ExpressionIntent {
-	// ExpressionRef check first — fastest path for the common case.
-	if (input instanceof ExpressionRef) return input.intent;
-	// Shared brand check also recognizes plain factory wrappers and foreign expressions.
-	if (
-		typeof input === 'object' &&
-		input !== null &&
-		EXPRESSION_BRAND in input &&
-		(input as { [EXPRESSION_BRAND]: unknown })[EXPRESSION_BRAND] === true &&
-		'intent' in input
-	) {
-		return (input as { intent: ExpressionIntent }).intent;
-	}
-	if (typeof input === 'string') {
-		return { kind: 'ref', column: input } satisfies RefExpressionIntent;
-	}
-	return { kind: 'param', value: input } satisfies ParamExpressionIntent;
-}
 
 // ============================================================================
 // ExpressionRef — chainable wrapper around ExpressionIntent
@@ -342,27 +302,30 @@ export function param(value: unknown): ExpressionRef {
 
 /**
  * Type cast — compiles to expr::typeName or CAST(expr AS typeName).
+ * `expr` follows the reference-leaf rule: a string is a column.
  *
  * @example cast(param([0.1, 0.2]), 'vector') → $1::vector
+ * @example cast('title', 'text') → CAST(title AS text)
  * @throws Error if typeName fails validation (injection guard)
  */
-export function cast(expr: ExpressionRef, typeName: string): ExpressionRef {
+export function cast(expr: ReferenceLeaf, typeName: string): ExpressionRef {
 	if (!TYPE_NAME_PATTERN.test(typeName)) {
 		throw new Error(`Invalid type name: ${typeName}`);
 	}
 	return new ExpressionRef({
 		kind: 'cast',
-		expr: expr.intent,
+		expr: coerceReference(expr, 'cast'),
 		typeName,
 	} satisfies CastExpressionIntent);
 }
 
 /**
  * Custom binary operator — left OP right.
- * Implicit conversions: string → ref(), number/boolean/array → param().
+ * Leaves follow the reference rule: string → column, finite number/boolean → inlined constant,
+ * non-finite number/array/Date → bound parameter, expression object → used as is.
  *
  * @example op('<=>', ref('embedding'), cast(param([0.1]), 'vector'))
- * @example op('<=>', 'embedding', [0.1, 0.2])  // implicit conversions
+ * @example op('<=>', 'embedding', [0.1, 0.2])  // column <=> $1
  * @throws Error if operator fails validation (injection guard)
  */
 /** Logical AND / OR — both operands must be predicates. */
@@ -378,20 +341,20 @@ export function op(operator: 'NOT', operand: PredicateRef): WhereOnlyPredicate;
 /** Predicate binary operators accept expression operands. */
 export function op(
 	operator: BinaryPredicateOperator,
-	left: ExprInput,
-	right: ExprInput,
+	left: ReferenceLeaf,
+	right: ReferenceLeaf,
 ): ExpressionPredicateRef;
 
 /** Any non-predicate operator remains an ordinary expression. */
 export function op<TOperator extends string>(
 	operator: NonPredicateOperator<TOperator>,
-	left: ExprInput,
-	right: ExprInput,
+	left: ReferenceLeaf,
+	right: ReferenceLeaf,
 ): ExpressionRef;
 
 export function op(
 	operator: string,
-	...operands: (ExprInput | PredicateRef | undefined)[]
+	...operands: unknown[]
 ): ExpressionRef | WhereOnlyPredicateRef {
 	const [left, right] = operands;
 	if (!operator || !OPERATOR_PATTERN.test(operator)) {
@@ -431,8 +394,8 @@ export function op(
 	const intent = {
 		kind: 'customOp',
 		operator,
-		left: toExpressionIntent(left as ExprInput),
-		right: toExpressionIntent(right as ExprInput),
+		left: coerceReference(left, 'op'),
+		right: coerceReference(right, 'op'),
 	} satisfies CustomOpExpressionIntent;
 
 	if (isPredicateOperator(operator)) {
@@ -501,7 +464,8 @@ function isPredicateOperator(operator: string): operator is PredicateOperator {
 /**
  * Custom function call — name(args...).
  * Supports schema-qualified names (e.g., 'paradedb.score', 'ST_Distance').
- * Implicit conversions: string → ref(), number/boolean/array → param().
+ * Leaves follow the reference rule: string → column, finite number/boolean → inlined constant,
+ * non-finite number/array/Date → bound parameter, expression object → used as is.
  *
  * @example fn('now') → now()
  * @example fn('paradedb.score', ref('id')) → paradedb.score("id")
@@ -510,7 +474,8 @@ function isPredicateOperator(operator: string): operator is PredicateOperator {
 /**
  * Custom function call — name(args...).
  * Supports schema-qualified names (e.g., 'paradedb.score', 'ST_Distance').
- * Implicit conversions: string → ref(), number/boolean/array → param().
+ * Leaves follow the reference rule: string → column, finite number/boolean → inlined constant,
+ * non-finite number/array/Date → bound parameter, expression object → used as is.
  *
  * Pass `aggOrderBy('col', 'asc')` args to add ORDER BY inside aggregates:
  * `fn('array_agg', ref('name'), aggOrderBy('path'))` → array_agg("name" ORDER BY "path" ASC)
@@ -526,12 +491,21 @@ export function fn(
 	name: string,
 	...args: (ExprInput | DistinctField)[]
 ): ExpressionRef {
+	return new ExpressionRef(customFnIntent('fn', name, args));
+}
+
+/** Build a customFn intent; `helper` names the public helper in refusals. */
+function customFnIntent(
+	helper: string,
+	name: string,
+	args: readonly unknown[],
+): CustomFnExpressionIntent {
 	if (!name || !FUNCTION_NAME_PATTERN.test(name)) {
 		throw new Error(`Invalid function name: ${name}`);
 	}
 	// A DistinctField argument (e.g. fn('count', distinct('id'))) marks the call
 	// DISTINCT and is otherwise compiled like any other arg — via its underlying
-	// ref (toExpressionIntent(field)). This routes through the SAME customFn path
+	// ref (coerceReference(field)). This routes through the SAME customFn path
 	// every other fn() call uses (compileExpressionIntent → funcCall(..., { distinct })),
 	// so DISTINCT works in every context (columns/orderBy/having/cast/nested), not just
 	// .columns(). No name whitelist: PostgreSQL validates aggregate-ness at call time.
@@ -546,7 +520,7 @@ export function fn(
 	const orderByArgs: AggOrderByArg[] = [];
 	let distinct = false;
 	for (let i = 0; i < args.length; i++) {
-		const arg = args[i] as ExprInput | DistinctField;
+		const arg = args[i];
 		if (isDistinctField(arg)) {
 			if (i !== 0) {
 				throw new Error(
@@ -578,11 +552,11 @@ export function fn(
 				);
 			}
 			distinct = true;
-			regularArgs.push(toExpressionIntent(field));
+			regularArgs.push(coerceReference(field, helper));
 		} else if (isAggOrderByArg(arg)) {
 			orderByArgs.push(arg);
 		} else {
-			regularArgs.push(toExpressionIntent(arg));
+			regularArgs.push(coerceReference(arg, helper));
 		}
 	}
 	const intent: CustomFnExpressionIntent = {
@@ -592,7 +566,7 @@ export function fn(
 		...(distinct ? { distinct: true } : {}),
 		...(orderByArgs.length > 0 ? { aggOrderBy: orderByArgs } : {}),
 	};
-	return new ExpressionRef(intent);
+	return intent;
 }
 
 /**
@@ -610,9 +584,7 @@ export function boolFn(
 	name: string,
 	...args: (ExprInput | DistinctField)[]
 ): PredicateExpressionRef {
-	return new ExpressionPredicateRef(
-		fn(name, ...args).intent as CustomFnExpressionIntent,
-	);
+	return new ExpressionPredicateRef(customFnIntent('boolFn', name, args));
 }
 
 /**
@@ -643,14 +615,14 @@ export function literal(
  * @example unary('-', ref('score')) → -"score"
  * @throws Error if operator fails validation (injection guard)
  */
-export function unary(operator: string, expr: ExprInput): ExpressionRef {
+export function unary(operator: string, expr: ReferenceLeaf): ExpressionRef {
 	if (!operator || !OPERATOR_PATTERN.test(operator)) {
 		throw new Error(`Invalid operator: ${operator}`);
 	}
 	return new ExpressionRef({
 		kind: 'unary',
 		operator,
-		operand: toExpressionIntent(expr),
+		operand: coerceReference(expr, 'unary'),
 	} satisfies UnaryExpressionIntent);
 }
 
@@ -663,14 +635,14 @@ export function unary(operator: string, expr: ExprInput): ExpressionRef {
  * @example namedArg('query_string', param('hello'))
  *          → query_string => $1
  */
-export function namedArg(name: string, value: ExprInput): ExpressionRef {
+export function namedArg(name: string, value: ReferenceLeaf): ExpressionRef {
 	if (!name || !FUNCTION_NAME_PATTERN.test(name)) {
 		throw new Error(`namedArg: invalid argument name: ${name}`);
 	}
 	return new ExpressionRef({
 		kind: 'namedArg',
 		name,
-		value: toExpressionIntent(value),
+		value: coerceReference(value, 'namedArg'),
 	} satisfies NamedArgExpressionIntent);
 }
 
@@ -685,10 +657,10 @@ export function star(): ExpressionRef {
  * @example array(literal(1), literal(2), literal(3)) → ARRAY[1, 2, 3]
  * @example array(ref('name'), ref('kind')) → ARRAY["name", "kind"]
  */
-export function array(...items: ExprInput[]): ExpressionRef {
+export function array(...items: ReferenceLeaf[]): ExpressionRef {
 	return new ExpressionRef({
 		kind: 'array',
-		elements: items.map(toExpressionIntent),
+		elements: items.map((item) => coerceReference(item, 'array')),
 	} satisfies ArrayExpressionIntent);
 }
 
@@ -715,7 +687,7 @@ function isDistinctField(input: unknown): input is DistinctField {
  * Type guard for AggOrderByArg — distinguishes aggregate ORDER BY markers
  * from regular ExprInput values inside fn() argument lists.
  */
-function isAggOrderByArg(input: ExprInput): input is AggOrderByArg {
+function isAggOrderByArg(input: unknown): input is AggOrderByArg {
 	return (
 		typeof input === 'object' &&
 		input !== null &&
@@ -750,12 +722,12 @@ export function aggOrderBy(
  * @example arrayAgg(distinct('name')) → array_agg(DISTINCT name)
  */
 export function arrayAgg(
-	col: ExpressionRef | string | DistinctField,
+	col: ReferenceLeaf | DistinctField,
 	...rest: AggOrderByArg[]
 ): ExpressionRef {
-	const colExpr: ExpressionRef | DistinctField =
-		typeof col === 'string' ? ref(col) : col;
-	return fn('array_agg', colExpr, ...rest);
+	return new ExpressionRef(
+		customFnIntent('arrayAgg', 'array_agg', [col, ...rest]),
+	);
 }
 
 /**

@@ -19,6 +19,7 @@ import {
 	isNull,
 	like,
 	literal,
+	NotYetSupportedError,
 	neq,
 	none,
 	notExists,
@@ -986,6 +987,27 @@ describe('Typed quantifiers and callback refs inside nested bodies (#991)', () =
 		).toBe(
 			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND nodes_exists_0.id = CASE WHEN nodes_exists_0.label = $1 THEN 1 ELSE 2 END)',
 		);
+	});
+
+	it('R3b callback-scoped-columnref: a callback ColumnRef in fn() is not yet supported (#1052)', () => {
+		let error: unknown;
+		try {
+			some(nodes.children, (child) =>
+				exists('parent', {
+					where: eq('label', fn('upper', child.label!)),
+				}),
+			);
+		} catch (caught) {
+			error = caught;
+		}
+		expect(error).toBeInstanceOf(NotYetSupportedError);
+		expect(error).toMatchObject({
+			construct: 'a callback-scoped ColumnRef',
+			position: 'expression argument',
+			issue: 1052,
+			message:
+				'a callback-scoped ColumnRef in an expression argument is not supported yet (#1052).',
+		});
 	});
 
 	it('AC40 refused-at-construction', () => {

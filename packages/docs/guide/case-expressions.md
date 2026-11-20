@@ -4,138 +4,203 @@ title: CASE Expressions
 
 # How to Use CASE Expressions
 
-The `caseWhen()` builder lets you add conditional logic directly in SELECT columns or ORDER BY clauses without writing raw SQL strings. Use it when you need label mapping, numeric bucketing, or status display logic that belongs in the query rather than in application code.
+The `caseWhen()` builder lets you add conditional logic directly in SELECT columns, ORDER BY clauses or WHERE conditions without writing raw SQL strings. Use it when you need label mapping, numeric bucketing, or status display logic that belongs in the query rather than in application code.
 
 ## When
 
 When you need conditional logic in SELECT columns (e.g. label mapping, status display, bucketing)
-or ORDER BY clauses. The `caseWhen()` builder produces a `CaseExpr` that integrates directly with
-the query builder API via `.as()` for aliasing.
-
-## Two forms of `caseWhen`
-
-There are two separately-exported `caseWhen` symbols in `@dbsp/core`:
-
-| Form | Import source | Signature | When to use |
-|------|---------------|-----------|-------------|
-| **Fluent no-arg builder** | `packages/core/src/dx/functions.ts` | `caseWhen<T>(): CaseBuilder<T>` | All new code — the idiomatic API. Chain `.when(condStr, value)` calls, finalise with `.else(value)`. |
-| **Two-arg lower-level** | `packages/core/src/dx/case-when-builder.ts` | `caseWhen(condition: WhereIntent, thenValue: CaseValue): CaseBuilder` | Internal / advanced use only. Accepts a `WhereIntent` object instead of a raw condition string. Not the public default export from `@dbsp/core`. |
-
-Both are accessible via `import { caseWhen } from '@dbsp/core'` — the public barrel resolves to the **fluent no-arg form**. The two-arg form is available for callers that already have a `WhereIntent` object, but prefer the no-arg builder for readability.
-
-**Recommendation:** Use `caseWhen<T>()` (fluent form) in all application code. The two-arg form is an implementation detail exposed for interoperability.
+or ORDER BY clauses. `caseWhen()` builds an `ExpressionRef`, so the result goes wherever an
+expression does: `.columns([...])` with `.as()` for the alias, `.orderBy(...)`, or `.where(...)`
+through its comparison methods (`.eq()`, `.gt()` …).
 
 ## API
 
 ```typescript
 // doctest: skip — API signature reference (TypeScript function signature, not executable code)
-import { caseWhen, ref } from '@dbsp/core'
+import { caseWhen } from '@dbsp/core'
 
-caseWhen<T>()
-  .when(condition: string, result: T | ColumnRef): CaseBuilder<T>
-  .when(...)                                       // chain additional WHEN clauses
-  .else(result: T | ColumnRef): CaseExpr<T>        // finalizes — ELSE is required
-
-// CaseExpr<T> methods:
-caseExpr.as(alias: string): CaseExpr<T>  // add or override alias (validates identifier)
+caseWhen(condition: WhereIntent, result: CaseValue): CaseBuilder
+  .when(condition: WhereIntent, result: CaseValue): CaseBuilder  // chain additional WHEN clauses
+  .else(result: CaseValue): ExpressionRef                        // CASE … ELSE … END
+  .toExpr(): ExpressionRef                                       // CASE … END, without ELSE
+  .as(alias: string): ExpressionRef                              // CASE … END AS alias, without ELSE
 ```
 
-The condition string passed to `.when()` is a SQL boolean expression using the same syntax as
-WHERE clauses. Result values can be:
+A condition is a `WhereIntent`, built with the filter helpers: `eq()`, `gt()`, `gte()`, `and()`,
+`or()`, `isNull()` and the others. Its values are bound parameters, as in `.where()`.
 
-- **Literals:** strings, numbers, booleans — passed directly (strings single-quoted, numerics/booleans inlined)
-- **Column references:** `ref('columnName')` — compiled to a qualified column reference
+## Results
 
-`.else()` is required to finalize the builder. A `CASE` without an ELSE clause returns `NULL` for
-non-matching rows; to replicate that, use `ref` with a null-typed column or use `literal(null)`.
+A result of `caseWhen(condition, result)`, `.when(condition, result)` or `.else(result)`
+follows the [argument rule](./expression-primitives.md#argument-rule) of the
+expression primitives, with one addition: `null` is SQL `NULL`.
+
+| Result | SQL |
+|--------|-----|
+| `'title'` (a string) | the column `title` |
+| `10`, `true`, `2n` | inlined: `10`, `true`, `2` |
+| `literal('Active')` | inlined: `'Active'`, in the SELECT list, ORDER BY and WHERE alike |
+| `null` | `NULL` |
+| `NaN`, `Infinity`, an array, a `Date` | a bound parameter `$N` |
+| `exprRef()`, `fn()`, `subquery('t').count().asExpr('n')` … | the expression, a subquery as `(SELECT …)` |
+
+`undefined`, a plain object and a `sql()` marker are refused with `InvalidOperationError`.
+
+```typescript
+import { caseWhen, createOrm, eq, literal, schema } from '@dbsp/core';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+
+const caseDb = schema({
+  posts: { id: { type: 'integer', primaryKey: true }, score: 'integer', title: 'text' },
+});
+const caseOrm = createOrm({
+  schema: caseDb,
+  adapter: createPgCompileOnlyAdapter({ model: caseDb.model }),
+});
+
+const { sql, params } = caseOrm
+  .select('posts')
+  .columns([caseWhen(eq('score', 1), literal('A')).else('title').as('label')])
+  .dump();
+// sql:    SELECT CASE WHEN posts.score = $1 THEN 'A' ELSE title END AS label FROM posts
+// params: [1]
+```
 
 ## Examples
 
 ### 1. Simple status label
 
 ```typescript
-import { caseWhen } from '@dbsp/core'
+import { caseWhen, createOrm, eq, literal, schema } from '@dbsp/core';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
-const query = orm.select('posts')
+const db = schema({
+  orders: { id: { type: 'integer', primaryKey: true }, total: 'integer', status: 'text' },
+});
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter({ model: db.model }) });
+
+const { sql, params } = orm
+  .select('orders')
   .columns([
     'id',
     'total',
-    caseWhen<string>()
-      .when("status = 'pending'", 'Awaiting payment')
-      .when("status = 'shipped'", 'In transit')
-      .when("status = 'delivered'", 'Delivered')
-      .else('Unknown')
+    caseWhen(eq('status', 'pending'), literal('Awaiting payment'))
+      .when(eq('status', 'shipped'), literal('In transit'))
+      .when(eq('status', 'delivered'), literal('Delivered'))
+      .else(literal('Unknown'))
       .as('statusLabel'),
   ])
+  .dump();
+// params: ['pending', 'shipped', 'delivered']
 ```
 
 Generated SQL:
 ```sql
-SELECT "orders"."id",
-       "orders"."total",
-       CASE WHEN status = 'pending' THEN 'Awaiting payment'
-            WHEN status = 'shipped' THEN 'In transit'
-            WHEN status = 'delivered' THEN 'Delivered'
+SELECT orders.id, orders.total,
+       CASE WHEN orders.status = $1 THEN 'Awaiting payment'
+            WHEN orders.status = $2 THEN 'In transit'
+            WHEN orders.status = $3 THEN 'Delivered'
             ELSE 'Unknown'
        END AS "statusLabel"
-FROM "orders"
+FROM orders
 ```
 
 ### 2. Numeric bucketing
 
 ```typescript
-import { caseWhen } from '@dbsp/core';
+import { caseWhen, createOrm, gt, literal, schema } from '@dbsp/core';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
-caseWhen<string>()
-  .when('salary > 80000', 'senior')
-  .when('salary > 50000', 'mid')
-  .else('junior')
-  .as('level')
+const db = schema({
+  employees: { id: { type: 'integer', primaryKey: true }, salary: 'integer' },
+});
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter({ model: db.model }) });
+
+const { sql, params } = orm
+  .select('employees')
+  .columns([
+    'id',
+    caseWhen(gt('salary', 80000), literal('senior'))
+      .when(gt('salary', 50000), literal('mid'))
+      .else(literal('junior'))
+      .as('level'),
+  ])
+  .dump();
+// params: [80000, 50000]
 ```
 
-Generated SQL fragment:
+Generated SQL:
 ```sql
-CASE WHEN salary > 80000 THEN 'senior'
-     WHEN salary > 50000 THEN 'mid'
-     ELSE 'junior'
-END AS "level"
+SELECT employees.id,
+       CASE WHEN employees.salary > $1 THEN 'senior'
+            WHEN employees.salary > $2 THEN 'mid'
+            ELSE 'junior'
+       END AS level
+FROM employees
 ```
 
 ### 3. Column reference in THEN/ELSE
 
-```typescript
-import { caseWhen, ref } from '@dbsp/core'
+A plain string result is a column:
 
-// Use a column value as the result
-caseWhen()
-  .when("role = 'admin'", ref('adminName'))
-  .else(ref('displayName'))
-  .as('resolvedName')
+```typescript
+import { caseWhen, createOrm, eq, schema } from '@dbsp/core';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+
+const db = schema({
+  users: {
+    id: { type: 'integer', primaryKey: true },
+    role: 'text',
+    adminName: 'text',
+    displayName: 'text',
+  },
+});
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter({ model: db.model }) });
+
+const { sql, params } = orm
+  .select('users')
+  .columns([
+    'id',
+    caseWhen(eq('role', 'admin'), 'adminName').else('displayName').as('resolvedName'),
+  ])
+  .dump();
+// params: ['admin']
 ```
 
-Generated SQL fragment:
+Generated SQL:
 ```sql
-CASE WHEN role = 'admin' THEN "adminName"
-     ELSE "displayName"
-END AS "resolvedName"
+SELECT users.id,
+       CASE WHEN users.role = $1 THEN "adminName"
+            ELSE "displayName"
+       END AS "resolvedName"
+FROM users
 ```
 
 ### 4. Boolean flag column
 
 ```typescript
-import { caseWhen } from '@dbsp/core';
+import { caseWhen, createOrm, gte, schema } from '@dbsp/core';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
-caseWhen<number>()
-  .when('score >= 90', 1)
-  .else(0)
-  .as('passed')
+const db = schema({
+  users: { id: { type: 'integer', primaryKey: true }, score: 'integer' },
+});
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter({ model: db.model }) });
+
+const { sql, params } = orm
+  .select('users')
+  .columns(['id', caseWhen(gte('score', 90), 1).else(0).as('passed')])
+  .dump();
+// params: [90]
 ```
 
-Generated SQL fragment:
+Generated SQL:
 ```sql
-CASE WHEN score >= 90 THEN 1
-     ELSE 0
-END AS "passed"
+SELECT users.id,
+       CASE WHEN users.score >= $1 THEN 1
+            ELSE 0
+       END AS passed
+FROM users
 ```
 
 Numeric values are inlined directly (not parameterized — see Gotchas).
@@ -143,28 +208,34 @@ Numeric values are inlined directly (not parameterized — see Gotchas).
 ### 5. CASE in ORDER BY
 
 ```typescript
-// Assumes `orm` from `createOrm({ schema: db, adapter })` is in scope.
-import { caseWhen } from '@dbsp/core';
+import { caseWhen, createOrm, eq, schema } from '@dbsp/core';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
-const query = orm.select('users')
+const db = schema({
+  tasks: { id: { type: 'integer', primaryKey: true }, title: 'text', priority: 'text' },
+});
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter({ model: db.model }) });
+
+const { sql, params } = orm
+  .select('tasks')
   .columns(['id', 'title', 'priority'])
-  .orderBy([
-    caseWhen<number>()
-      .when("priority = 'critical'", 1)
-      .when("priority = 'high'", 2)
-      .when("priority = 'medium'", 3)
-      .else(4)
-      .as('priorityRank'),
-  ])
+  .orderBy(
+    caseWhen(eq('priority', 'critical'), 1)
+      .when(eq('priority', 'high'), 2)
+      .when(eq('priority', 'medium'), 3)
+      .else(4),
+  )
+  .dump();
+// params: ['critical', 'high', 'medium']
 ```
 
 Generated SQL:
 ```sql
-SELECT "tasks"."id", "tasks"."title", "tasks"."priority"
-FROM "tasks"
-ORDER BY CASE WHEN priority = 'critical' THEN 1
-              WHEN priority = 'high' THEN 2
-              WHEN priority = 'medium' THEN 3
+SELECT tasks.id, tasks.title, tasks.priority
+FROM tasks
+ORDER BY CASE WHEN tasks.priority = $1 THEN 1
+              WHEN tasks.priority = $2 THEN 2
+              WHEN tasks.priority = $3 THEN 3
               ELSE 4
          END ASC
 ```
@@ -172,42 +243,83 @@ ORDER BY CASE WHEN priority = 'critical' THEN 1
 ### 6. DISTINCT ON + CASE pattern
 
 ```typescript
-// Assumes `orm` from `createOrm({ schema: db, adapter })` is in scope.
-import { caseWhen } from '@dbsp/core';
+import { caseWhen, createOrm, eq, literal, schema } from '@dbsp/core';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
-const query = orm.select('users')
-  .distinctOn(['userId'])
+const db = schema({
+  events: {
+    id: { type: 'integer', primaryKey: true },
+    userId: 'integer',
+    type: 'text',
+    createdAt: 'timestamp',
+  },
+});
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter({ model: db.model }) });
+
+const { sql, params } = orm
+  .select('events')
+  .distinctOn('userId')
   .columns([
     'userId',
-    caseWhen<string>()
-      .when("type = 'login'", 'active')
-      .else('inactive')
+    caseWhen(eq('type', 'login'), literal('active'))
+      .else(literal('inactive'))
       .as('lastEventType'),
   ])
-  .orderBy([{ column: 'userId' }, { column: 'createdAt', direction: 'desc' }])
+  .orderBy('userId')
+  .orderBy('createdAt', 'desc')
+  .dump();
+// params: ['login']
 ```
 
 Generated SQL:
 ```sql
-SELECT DISTINCT ON ("events"."userId")
-       "events"."userId",
-       CASE WHEN type = 'login' THEN 'active'
+SELECT DISTINCT ON ("userId") events."userId",
+       CASE WHEN events.type = $1 THEN 'active'
             ELSE 'inactive'
        END AS "lastEventType"
-FROM "events"
-ORDER BY "events"."userId", "events"."createdAt" DESC
+FROM events
+ORDER BY events."userId" ASC, events."createdAt" DESC
+```
+
+### 7. CASE without ELSE
+
+`.toExpr()` (or `.as(alias)` directly on the builder) ends the CASE without an ELSE, so
+non-matching rows get `NULL`:
+
+```typescript
+import { caseWhen, createOrm, eq, literal, schema } from '@dbsp/core';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+
+const db = schema({
+  users: { id: { type: 'integer', primaryKey: true }, role: 'text' },
+});
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter({ model: db.model }) });
+
+const { sql, params } = orm
+  .select('users')
+  .columns(['id', caseWhen(eq('role', 'admin'), literal('yes')).toExpr().as('isAdmin')])
+  .dump();
+// params: ['admin']
+```
+
+Generated SQL:
+```sql
+SELECT users.id,
+       CASE WHEN users.role = $1 THEN 'yes'
+       END AS "isAdmin"
+FROM users
 ```
 
 ## Key Files
 
-- **Builder + types:** `packages/core/src/dx/functions.ts` — `caseWhen()`, `CaseBuilder<T>`, `CaseExpr<T>`, `CaseWhenClause<T>`
-- **Adapter handler:** `packages/adapter-pgsql/src/handlers/expression/case.ts` — compiles `CaseExpr` intent into SQL fragments
+- **Builder:** `packages/core/src/dx/case-when-builder.ts` — `caseWhen()`, `CaseBuilder`, `CaseValue`
+- **Result rule:** `packages/core/src/dx/coerce.ts` — the argument rule CASE results share with the expression primitives
+- **Lowering:** `packages/adapter-pgsql/src/handlers/expression/case-value.ts` compiles THEN/ELSE results in the SELECT list; `packages/core/src/resolved-conditions.ts` resolves them in a WHERE condition
 
 ## Gotchas
 
-- **Numeric and boolean literals are inlined, not parameterized** — `caseWhen().when('x > 1', 42)` produces `THEN 42`, not `THEN $N`. This is intentional for SQL readability and matches how PostgreSQL handles constant folding, but means the same plan is not cached differently for different constants.
-- **String literals are single-quoted inline** — `.else('Unknown')` produces `ELSE 'Unknown'`, not `ELSE $N`. Single quotes inside the string are escaped as `''` (SQL standard).
-- **Conditions are raw SQL strings** — the condition passed to `.when()` is not parsed or validated. Use the same expression syntax as a WHERE clause but written as a string. Column references in conditions should use unquoted names unless they conflict with PostgreSQL reserved words.
-- **Use `ref('col')` for column references in results** — passing a column name as a plain string to THEN/ELSE treats it as a string literal. Use `ref('columnName')` to reference a column value.
-- **`.else()` is required** — the builder enforces ELSE at the TypeScript level. To produce a CASE without ELSE (implicit NULL), this API does not support it directly; use the lower-level `op()` / `fn()` expression primitives instead.
-- **Alias validation** — `.as(alias)` calls `validateAlias(alias)` internally. Invalid identifiers (e.g. names with spaces or SQL keywords) will throw at build time.
+- **Numeric and boolean results are inlined, not parameterized** — `caseWhen(gt('x', 1), 42)` produces `THEN 42`, not `THEN $N`. An inlined constant keeps its SQL type, where a bound parameter would be sent as text.
+- **A plain string result is a column, not a string** — `caseWhen(eq('role', 'admin'), 'adminName')` reads the column `adminName`. Write `literal('Admin')` for the string `'Admin'`; it is inlined, with single quotes escaped as `''`.
+- **Condition values are bound** — `eq('status', 'pending')` compiles to `status = $1` with `'pending'` in the parameters.
+- **`null` is `NULL`; `undefined` is refused** — a missing result is an error, not an implicit `NULL`. Write `null` or `literal(null)`, or end the CASE with `.toExpr()`.
+- **Aliases are quoted, not validated** — `.as('statusLabel')` emits `AS "statusLabel"`, and an alias with spaces or upper-case letters is emitted quoted.

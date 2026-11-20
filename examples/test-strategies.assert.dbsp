@@ -225,8 +225,8 @@ db.rows.equals: 6
 # ─────────────────────────────────────────
 --- query: 20
 success: true
-sql.equals: SELECT employees.name, CASE WHEN employees.salary > $1 THEN $2 WHEN employees.salary > $3 THEN $4 ELSE $5 END AS level FROM test_strategies.employees
-params.equals: [80000,"senior",50000,"mid","junior"]
+sql.equals: SELECT employees.name, CASE WHEN employees.salary > $1 THEN 'senior' WHEN employees.salary > $2 THEN 'mid' ELSE 'junior' END AS level FROM test_strategies.employees
+params.equals: [80000,50000]
 db.output:
 | name | level |
 | --- | --- |
@@ -345,8 +345,8 @@ db.rows.equals: 5
 # ─────────────────────────────────────────
 --- query: 31
 success: true
-sql.equals: SELECT employees.name, CASE WHEN employees.department_id = $1 THEN $2 WHEN employees.department_id = $3 THEN $4 ELSE $5 END AS dept FROM test_strategies.employees
-params.equals: [1, "Engineering", 2, "Marketing", "Other"]
+sql.equals: SELECT employees.name, CASE WHEN employees.department_id = $1 THEN 'Engineering' WHEN employees.department_id = $2 THEN 'Marketing' ELSE 'Other' END AS dept FROM test_strategies.employees
+params.equals: [1, 2]
 db.output:
 | name | dept |
 | --- | --- |

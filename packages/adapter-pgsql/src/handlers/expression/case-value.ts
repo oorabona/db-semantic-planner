@@ -10,6 +10,7 @@ import {
 	booleanConstNode,
 	nullConstNode,
 	sqlColumnRef,
+	stringConstNode,
 } from '../../ast-helpers.js';
 import { queryLocal } from '../../sql-identifier.js';
 import type { CompilerState } from '../types.js';
@@ -67,6 +68,9 @@ export function resolveCaseValue(
 				return booleanConstNode(expr.value as boolean);
 			if (typeof expr.value === 'number') {
 				return numericLiteralNode(expr.value);
+			}
+			if (typeof expr.value === 'string') {
+				return stringConstNode(expr.value);
 			}
 			return bindParameter(expr.value, state);
 

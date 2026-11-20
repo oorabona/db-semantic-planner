@@ -789,18 +789,6 @@ export function resolveConditionContext(
 		const caseValue = (value: unknown): ResolvedExpression => {
 			if (value == null) return { kind: 'literal', value: null };
 			if (typeof value === 'string') return ref(value);
-			if (
-				value &&
-				typeof value === 'object' &&
-				'kind' in value &&
-				value.kind === 'literal' &&
-				'value' in value
-			) {
-				const literal = value;
-				return typeof literal.value === 'string'
-					? { kind: 'parameter', value: literal.value }
-					: { kind: 'literal', value: literal.value };
-			}
 			return arg(value);
 		};
 		switch (input.kind) {

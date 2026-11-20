@@ -24,7 +24,8 @@ export class AmbiguousIncludeError extends Error {
 
 /**
  * A construct that is meaningful in its position but whose code path does not
- * exist yet (ADR 0010). The class builds the message; `issue` names the open
+ * exist yet (ADR 0010). The class builds the message, choosing "an" before a
+ * position that starts with a vowel and "a" otherwise; `issue` names the open
  * issue that tracks the missing path.
  */
 export class NotYetSupportedError extends Error {
@@ -37,7 +38,10 @@ export class NotYetSupportedError extends Error {
 			throw new TypeError(
 				'NotYetSupportedError requires the positive integer number of an open issue.',
 			);
-		super(`${construct} in a ${position} is not supported yet (#${issue}).`);
+		const article = /^[aeiou]/i.test(position) ? 'an' : 'a';
+		super(
+			`${construct} in ${article} ${position} is not supported yet (#${issue}).`,
+		);
 		this.name = 'NotYetSupportedError';
 		this.construct = construct;
 		this.position = position;

@@ -18,6 +18,7 @@ import {
 	op,
 	param,
 	schema,
+	subquery,
 } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -73,7 +74,7 @@ describe('1. caseWhen() in orderBy() — file affinity pattern', () => {
 });
 
 describe('2. caseWhen() in columns() with .as()', () => {
-	it('produces CASE WHEN active = $1 THEN $2 ELSE $3 END AS status', () => {
+	it("produces CASE WHEN active = $1 THEN 'active' ELSE 'inactive' END AS status", () => {
 		const orm = buildOrm();
 		const status = caseWhen(eq('active', true), literal('active'))
 			.else(literal('inactive'))
@@ -81,10 +82,10 @@ describe('2. caseWhen() in columns() with .as()', () => {
 		const dump = orm.select('symbols').columns(['name', status]).dump();
 		expect(ws(dump.sql)).toEqual(
 			ws(
-				'SELECT symbols.name, CASE WHEN symbols.active = $1 THEN $2 ELSE $3 END AS status FROM symbols',
+				"SELECT symbols.name, CASE WHEN symbols.active = $1 THEN 'active' ELSE 'inactive' END AS status FROM symbols",
 			),
 		);
-		expect(dump.params).toEqual([true, 'active', 'inactive']);
+		expect(dump.params).toEqual([true]);
 	});
 });
 
@@ -99,10 +100,10 @@ describe('3. Multi-branch caseWhen() with 3 WHEN clauses', () => {
 		const dump = orm.select('symbols').columns(['name', grade]).dump();
 		expect(ws(dump.sql)).toEqual(
 			ws(
-				'SELECT symbols.name, CASE WHEN symbols.score >= $1 THEN $2 WHEN symbols.score >= $3 THEN $4 WHEN symbols.score >= $5 THEN $6 ELSE $7 END AS grade FROM symbols',
+				"SELECT symbols.name, CASE WHEN symbols.score >= $1 THEN 'A' WHEN symbols.score >= $2 THEN 'B' WHEN symbols.score >= $3 THEN 'C' ELSE 'D' END AS grade FROM symbols",
 			),
 		);
-		expect(dump.params).toEqual([90, 'A', 70, 'B', 50, 'C', 'D']);
+		expect(dump.params).toEqual([90, 70, 50]);
 	});
 });
 
@@ -134,10 +135,10 @@ describe('5. caseWhen() without ELSE via toExpr()', () => {
 		const dump = orm.select('symbols').columns(['name', label]).dump();
 		expect(ws(dump.sql)).toEqual(
 			ws(
-				'SELECT symbols.name, CASE WHEN symbols.active = $1 THEN $2 END AS label FROM symbols',
+				"SELECT symbols.name, CASE WHEN symbols.active = $1 THEN 'yes' END AS label FROM symbols",
 			),
 		);
-		expect(dump.params).toEqual([true, 'yes']);
+		expect(dump.params).toEqual([true]);
 	});
 });
 
@@ -182,7 +183,7 @@ describe('6. caseWhen() THEN/ELSE expression values', () => {
 		expect(dump.params).toEqual(['module']);
 	});
 
-	it('renders exprRef() ELSE as a column reference with scalar THEN kept bound', () => {
+	it('renders exprRef() ELSE as a column reference with literal() THEN inlined', () => {
 		const orm = buildOrm();
 		const label = caseWhen(eq('kind', 'workspace'), literal('workspace'))
 			.else(exprRef('source'))
@@ -191,10 +192,10 @@ describe('6. caseWhen() THEN/ELSE expression values', () => {
 
 		expect(ws(dump.sql)).toEqual(
 			ws(
-				'SELECT symbols.name, CASE WHEN symbols.kind = $1 THEN $2 ELSE source END AS label FROM symbols',
+				"SELECT symbols.name, CASE WHEN symbols.kind = $1 THEN 'workspace' ELSE source END AS label FROM symbols",
 			),
 		);
-		expect(dump.params).toEqual(['workspace', 'workspace']);
+		expect(dump.params).toEqual(['workspace']);
 	});
 
 	it('renders array() THEN/ELSE as ARRAY[...] instead of binding the intent', () => {
@@ -224,10 +225,10 @@ describe('6. caseWhen() THEN/ELSE expression values', () => {
 
 		expect(ws(dump.sql)).toEqual(
 			ws(
-				'SELECT symbols.name, CASE WHEN symbols.kind = $1 THEN array_agg(name) FILTER (WHERE symbols.name IS NOT NULL) ELSE $2 END AS agg FROM symbols',
+				"SELECT symbols.name, CASE WHEN symbols.kind = $1 THEN array_agg(name) FILTER (WHERE symbols.name IS NOT NULL) ELSE 'none' END AS agg FROM symbols",
 			),
 		);
-		expect(dump.params).toEqual(['module', 'none']);
+		expect(dump.params).toEqual(['module']);
 	});
 
 	it('threads a bound param nested inside a THEN expression', () => {
@@ -243,6 +244,127 @@ describe('6. caseWhen() THEN/ELSE expression values', () => {
 			),
 		);
 		expect(dump.params).toEqual(['file', 'SECRET']);
+	});
+});
+
+describe('8. CASE results follow the reference-leaf rule (ADR 0011)', () => {
+	it('AC3 case-string-column: a string result is a column', () => {
+		const dump = buildOrm()
+			.select('symbols')
+			.columns([caseWhen(eq('score', 1), 'name').else('kind').as('x')])
+			.dump();
+		expect(dump.sql).toBe(
+			'SELECT CASE WHEN symbols.score = $1 THEN name ELSE kind END AS x FROM symbols',
+		);
+		expect(dump.params).toEqual([1]);
+	});
+
+	it('AC3 case-number-inline: a number result is inlined', () => {
+		const dump = buildOrm()
+			.select('symbols')
+			.columns([caseWhen(eq('score', 1), 10).else(0).as('x')])
+			.dump();
+		expect(dump.sql).toBe(
+			'SELECT CASE WHEN symbols.score = $1 THEN 10 ELSE 0 END AS x FROM symbols',
+		);
+		expect(dump.params).toEqual([1]);
+	});
+
+	it('AC3 case-null: a null result is NULL', () => {
+		const dump = buildOrm()
+			.select('symbols')
+			.columns([caseWhen(eq('score', 1), null).else('name').as('x')])
+			.dump();
+		expect(dump.sql).toBe(
+			'SELECT CASE WHEN symbols.score = $1 THEN NULL ELSE name END AS x FROM symbols',
+		);
+		expect(dump.params).toEqual([1]);
+	});
+
+	it("AC3 case-literal-select: literal('A') is inlined in a SELECT-list CASE", () => {
+		const dump = buildOrm()
+			.select('symbols')
+			.columns([
+				caseWhen(eq('score', 1), literal('A')).else(literal('B')).as('x'),
+			])
+			.dump();
+		expect(dump.sql).toBe(
+			"SELECT CASE WHEN symbols.score = $1 THEN 'A' ELSE 'B' END AS x FROM symbols",
+		);
+		expect(dump.params).toEqual([1]);
+	});
+
+	it("AC3 case-literal-where: literal('A') is inlined in a resolved WHERE CASE", () => {
+		const dump = buildOrm()
+			.select('symbols')
+			.where(caseWhen(eq('score', 1), literal('A')).else(literal('B')).eq('A'))
+			.dump();
+		expect(dump.sql).toBe(
+			"SELECT symbols.* FROM symbols WHERE CASE WHEN symbols.score = $1 THEN 'A' ELSE 'B' END = $2",
+		);
+		expect(dump.params).toEqual([1, 'A']);
+	});
+
+	it('AC3 case-asexpr: an asExpr() subquery as a .when() result compiles as a subquery', () => {
+		const dump = buildOrm()
+			.select('symbols')
+			.columns([
+				caseWhen(eq('score', 1), 0)
+					.when(eq('score', 2), subquery('symbols').count().asExpr('n'))
+					.else(1)
+					.as('x'),
+			])
+			.dump();
+		expect(dump.sql).toBe(
+			'SELECT CASE WHEN symbols.score = $1 THEN 0 WHEN symbols.score = $2 THEN (SELECT count(*) FROM symbols AS symbols_1) ELSE 1 END AS x FROM symbols',
+		);
+		expect(dump.params).toEqual([1, 2]);
+	});
+
+	it('AC3 case-nan: a NaN result is bound', () => {
+		const dump = buildOrm()
+			.select('symbols')
+			.columns([caseWhen(eq('score', 1), Number.NaN).else(0).as('x')])
+			.dump();
+		expect(dump.sql).toBe(
+			'SELECT CASE WHEN symbols.score = $1 THEN $2 ELSE 0 END AS x FROM symbols',
+		);
+		expect(dump.params).toEqual([1, Number.NaN]);
+	});
+
+	it('AC3 case-array-date-select: array and Date results are bound in the SELECT list', () => {
+		const date = new Date(0);
+		const dump = buildOrm()
+			.select('symbols')
+			.columns([caseWhen(eq('score', 1), [1, 2]).else(date).as('x')])
+			.dump();
+		expect(dump.sql).toBe(
+			'SELECT CASE WHEN symbols.score = $1 THEN $2 ELSE $3 END AS x FROM symbols',
+		);
+		expect(dump.params).toEqual([1, [1, 2], date]);
+	});
+
+	it('AC3 case-array-date-where: array and Date results are bound in a resolved WHERE', () => {
+		const date = new Date(0);
+		const dump = buildOrm()
+			.select('symbols')
+			.where(caseWhen(eq('score', 1), [1, 2]).else(date).eq(1))
+			.dump();
+		expect(dump.sql).toBe(
+			'SELECT symbols.* FROM symbols WHERE CASE WHEN symbols.score = $1 THEN $2 ELSE $3 END = $4',
+		);
+		expect(dump.params).toEqual([1, [1, 2], date, 1]);
+	});
+
+	it('AC1b bigint-case: a 2n result gives THEN 2', () => {
+		const dump = buildOrm()
+			.select('symbols')
+			.columns([caseWhen(eq('score', 1), 2n).else(0).as('x')])
+			.dump();
+		expect(dump.sql).toBe(
+			'SELECT CASE WHEN symbols.score = $1 THEN 2 ELSE 0 END AS x FROM symbols',
+		);
+		expect(dump.params).toEqual([1]);
 	});
 });
 

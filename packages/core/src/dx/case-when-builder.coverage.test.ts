@@ -2,19 +2,18 @@
 /**
  * @fileoverview Branch coverage for case-when-builder.ts
  *
- * Targets all 8 uncovered branches in toResultIntent():
- * - L7: instanceof ExpressionRef (true/false)
- * - L10: value === null || value === undefined (true/false, both sides of ||)
- * - L13: typeof value === "string" (true/false)
+ * Targets the branches of toResultIntent(): the null normalisation, then
+ * the shared reference-leaf rule (coerceReference) for every other result.
  * And CaseBuilder class methods: when(), else(), as(), toExpr()
  * And full-text-search.ts: textScore() default arg branch
  */
 
 import { describe, expect, it } from 'vitest';
 import { caseWhen } from './case-when-builder.js';
-import { ref } from './expressions.js';
+import { literal, ref } from './expressions.js';
 import { eq } from './filters.js';
 import { textScore } from './full-text-search.js';
+import { subquery } from './subquery-builder.js';
 
 // ============================================================================
 // toResultIntent() branches via caseWhen(condition, thenValue)
@@ -34,14 +33,6 @@ describe('caseWhen() — toResultIntent branches', () => {
 	it('accepts null as thenValue (null/undefined branch)', () => {
 		// null → toResultIntent returns { kind: 'literal', value: null }
 		const expr = caseWhen(eq('status', 'a'), null).else('fallback');
-		const intent = expr.intent;
-		expect(intent.when[0].result.kind).toBe('literal');
-		expect(intent.when[0].result.value).toBeNull();
-	});
-
-	it('accepts undefined as thenValue (undefined branch)', () => {
-		// undefined → toResultIntent returns { kind: 'literal', value: null }
-		const expr = caseWhen(eq('status', 'a'), undefined).else('fallback');
 		const intent = expr.intent;
 		expect(intent.when[0].result.kind).toBe('literal');
 		expect(intent.when[0].result.value).toBeNull();
@@ -83,6 +74,58 @@ describe('caseWhen() — toResultIntent branches', () => {
 		const intent = expr.intent;
 		expect(intent.else.kind).toBe('literal');
 		expect(intent.else.value).toBeNull();
+	});
+});
+
+// ============================================================================
+// CASE results follow the reference-leaf rule (ADR 0011)
+// ============================================================================
+
+describe('caseWhen() — reference-leaf results', () => {
+	it('literal() result keeps its literal intent', () => {
+		const expr = caseWhen(eq('score', 1), literal('A')).else(literal('B'));
+		expect(expr.intent.when[0].result).toEqual({ kind: 'literal', value: 'A' });
+		expect(expr.intent.else).toEqual({ kind: 'literal', value: 'B' });
+	});
+
+	it('an asExpr() subquery in a .when() branch is its subquery intent', () => {
+		const n = subquery('posts').count().asExpr('n');
+		const expr = caseWhen(eq('score', 1), 0).when(eq('score', 2), n).else(1);
+		expect(expr.intent.when[1].result).toEqual({
+			kind: 'subquery',
+			query: {
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'count', field: '*' }],
+				},
+			},
+			as: 'n',
+		});
+	});
+
+	it('a NaN result is a parameter', () => {
+		const expr = caseWhen(eq('score', 1), Number.NaN).else(0);
+		expect(expr.intent.when[0].result).toEqual({
+			kind: 'param',
+			value: Number.NaN,
+		});
+	});
+
+	it('array and Date results are parameters', () => {
+		const date = new Date(0);
+		const expr = caseWhen(eq('score', 1), [1, 2]).else(date);
+		expect(expr.intent.when[0].result).toEqual({
+			kind: 'param',
+			value: [1, 2],
+		});
+		expect(expr.intent.else).toEqual({ kind: 'param', value: date });
+	});
+
+	it('a safe bigint result is an inlined number literal', () => {
+		const expr = caseWhen(eq('score', 1), 2n).else(0);
+		expect(expr.intent.when[0].result).toEqual({ kind: 'literal', value: 2 });
 	});
 });
 

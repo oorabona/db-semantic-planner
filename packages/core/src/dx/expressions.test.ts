@@ -1,4 +1,4 @@
-import { EXPRESSION_BRAND } from '@dbsp/types';
+import { EXPRESSION_BRAND, NotYetSupportedError } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import type {
 	ArrayExpressionIntent,
@@ -13,8 +13,12 @@ import type {
 	UnaryExpressionIntent,
 	WhereExpressionIntent,
 } from '../intent-ast.js';
+import { caseWhen } from './case-when-builder.js';
+import { InvalidOperationError } from './errors.js';
 import {
 	array,
+	arrayAgg,
+	boolFn,
 	cast,
 	ExpressionRef,
 	fn,
@@ -26,7 +30,11 @@ import {
 	star,
 	unary,
 } from './expressions.js';
-import { distinct } from './filters.js';
+import { distinct, eq, sql } from './filters.js';
+import { createOrm } from './orm.js';
+import { schema, ref as schemaRef } from './schema.js';
+import { outerRef, subquery } from './subquery-builder.js';
+import { createMockAdapter } from './test-utils.js';
 
 describe('Expression Primitives', () => {
 	describe('ref()', () => {
@@ -139,10 +147,10 @@ describe('Expression Primitives', () => {
 			});
 		});
 
-		it('should apply implicit conversion: number → param', () => {
+		it('AC1 op-number: a number operand is an inlined literal', () => {
 			const o = op('+', ref('col'), 1);
 			expect((o.intent as CustomOpExpressionIntent).right).toEqual({
-				kind: 'param',
+				kind: 'literal',
 				value: 1,
 			});
 		});
@@ -155,10 +163,10 @@ describe('Expression Primitives', () => {
 			});
 		});
 
-		it('should apply implicit conversion: boolean → param', () => {
+		it('should apply implicit conversion: boolean → inlined literal', () => {
 			const o = op('=', 'active', true);
 			expect((o.intent as CustomOpExpressionIntent).right).toEqual({
-				kind: 'param',
+				kind: 'literal',
 				value: true,
 			});
 		});
@@ -218,10 +226,10 @@ describe('Expression Primitives', () => {
 			});
 		});
 
-		it('should apply implicit conversion on args: number → param', () => {
+		it('should apply implicit conversion on args: number → inlined literal', () => {
 			const f = fn('my_func', 42);
 			expect((f.intent as CustomFnExpressionIntent).args[0]).toEqual({
-				kind: 'param',
+				kind: 'literal',
 				value: 42,
 			});
 		});
@@ -230,7 +238,7 @@ describe('Expression Primitives', () => {
 			const f = fn('my_func', 'col', 42);
 			const args = (f.intent as CustomFnExpressionIntent).args;
 			expect(args[0]).toEqual({ kind: 'ref', column: 'col' });
-			expect(args[1]).toEqual({ kind: 'param', value: 42 });
+			expect(args[1]).toEqual({ kind: 'literal', value: 42 });
 		});
 
 		it('should throw on empty name', () => {
@@ -634,17 +642,17 @@ describe('array()', () => {
 		expect(elements[0]).toEqual({ kind: 'ref', column: 'col' });
 	});
 
-	it('should apply implicit conversion: number → param', () => {
+	it('should apply implicit conversion: number → inlined literal', () => {
 		const a = array(42);
 		const elements = (a.intent as ArrayExpressionIntent).elements;
-		expect(elements[0]).toEqual({ kind: 'param', value: 42 });
+		expect(elements[0]).toEqual({ kind: 'literal', value: 42 });
 	});
 
 	it('should apply implicit conversion for mixed inputs', () => {
 		const a = array('col', 42);
 		const elements = (a.intent as ArrayExpressionIntent).elements;
 		expect(elements[0]).toEqual({ kind: 'ref', column: 'col' });
-		expect(elements[1]).toEqual({ kind: 'param', value: 42 });
+		expect(elements[1]).toEqual({ kind: 'literal', value: 42 });
 	});
 
 	it('should wrap ExpressionRef elements directly', () => {
@@ -673,7 +681,7 @@ describe('array()', () => {
 // toExpressionIntent — duck-type path (factory-branded expression objects)
 // ============================================================================
 
-describe('toExpressionIntent duck-type path', () => {
+describe('coerceReference duck-type path', () => {
 	it('should handle a factory-branded expression object as op() left operand', () => {
 		// Use a factory-created operand.
 		const plainExprSpec = ref('subq_col');
@@ -703,12 +711,11 @@ describe('toExpressionIntent duck-type path', () => {
 		expect(intent.args[0]).toEqual({ kind: 'literal', value: 99 });
 	});
 
-	it('should fall back to param intent when input is a number (non-string primitive)', () => {
-		// Triggers the final fallback: return { kind: 'param', value: input }
-		const result = op('=', ref('score'), 99 as unknown as ExpressionRef);
+	it('should inline a finite number as a literal intent', () => {
+		const result = op('=', ref('score'), 99);
 		const intent =
 			result.intent as import('../intent-ast.js').CustomOpExpressionIntent;
-		expect(intent.right).toEqual({ kind: 'param', value: 99 });
+		expect(intent.right).toEqual({ kind: 'literal', value: 99 });
 	});
 });
 
@@ -761,5 +768,186 @@ describe('ExpressionRef.filter() on non-customFn', () => {
 			kind: 'customFn',
 			filter: condition,
 		});
+	});
+});
+
+// ============================================================================
+// Reference-leaf refusals (ADR 0011, delivery 1)
+// ============================================================================
+
+describe('expression-constructor leaf refusals (ADR 0011)', () => {
+	const leafDb = schema({
+		users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			title: 'text',
+			score: 'integer',
+			user_id: schemaRef('users', { as: 'author' }),
+		},
+	});
+	const orm = createOrm({ schema: leafDb, adapter: createMockAdapter() });
+	const posts = orm.tables.posts;
+	const OBJECT_HINT =
+		'is not an expression argument; use literal(null), param(value) or an expression';
+
+	function thrown(build: () => unknown): unknown {
+		try {
+			build();
+		} catch (error) {
+			return error;
+		}
+		throw new Error('expected a refusal, got none');
+	}
+
+	function expectNotYet(
+		build: () => unknown,
+		construct: string,
+		issue: number,
+	): void {
+		const error = thrown(build);
+		expect(error).toBeInstanceOf(NotYetSupportedError);
+		expect(error).toMatchObject({
+			construct,
+			position: 'expression argument',
+			issue,
+			message: `${construct} in an expression argument is not supported yet (#${issue}).`,
+		});
+	}
+
+	function expectInvalid(build: () => unknown, message: string): void {
+		const error = thrown(build);
+		expect(error).toBeInstanceOf(InvalidOperationError);
+		expect((error as Error).message).toBe(message);
+	}
+
+	it('R1 outerref: outerRef() in fn() is not yet supported (#1029)', () => {
+		expectNotYet(() => fn('abs', outerRef('id') as never), 'outerRef()', 1029);
+	});
+
+	it('R2 relation-columnref: a relation-reached ColumnRef in fn() is not yet supported (#1052)', () => {
+		expectNotYet(
+			() => fn('upper', posts.author.name),
+			'a relation-reached ColumnRef',
+			1052,
+		);
+	});
+
+	it('R3 query-builder: a QueryBuilder in fn() is not yet supported (#1053)', () => {
+		expectNotYet(
+			() => fn('abs', orm.select('posts').count() as never),
+			'a query builder',
+			1053,
+		);
+	});
+
+	it('R3 subquery-builder: a SubqueryBuilder still being built in fn() is not yet supported (#1053)', () => {
+		expectNotYet(
+			() => fn('abs', subquery('posts').select('score') as never),
+			'a query builder',
+			1053,
+		);
+	});
+
+	it('R4 sql-marker: a sql() marker in fn() is refused by name', () => {
+		expectInvalid(
+			() => fn('f', sql('now()') as never),
+			'Invalid fn: sql() is only accepted as an update or upsert value; use literal(), param() or an expression here',
+		);
+	});
+
+	it('R5 null: null in fn() is refused', () => {
+		expectInvalid(
+			() => fn('coalesce', ref('title'), null as never),
+			`Invalid fn: null ${OBJECT_HINT}`,
+		);
+	});
+
+	it('R5 undefined: undefined in fn() is refused', () => {
+		expectInvalid(
+			() => fn('f', undefined as never),
+			`Invalid fn: undefined ${OBJECT_HINT}`,
+		);
+	});
+
+	it('R5 plain-object: a plain object in fn() is refused', () => {
+		expectInvalid(
+			() => fn('f', { a: 1 } as never),
+			`Invalid fn: a plain object ${OBJECT_HINT}`,
+		);
+	});
+
+	it('R7 hand-built-intent: a hand-built intent in fn() is refused as a plain object', () => {
+		expectInvalid(
+			() => fn('f', { kind: 'param', value: 1 } as never),
+			`Invalid fn: a plain object ${OBJECT_HINT}`,
+		);
+	});
+
+	it('R6 op: a plain object operand in op() is refused', () => {
+		expectInvalid(
+			() => op('+', ref('score'), { a: 1 } as never),
+			`Invalid op: a plain object ${OBJECT_HINT}`,
+		);
+	});
+
+	it('R6 boolFn: a sql() marker in boolFn() is refused', () => {
+		expectInvalid(
+			() => boolFn('f', sql('now()') as never),
+			'Invalid boolFn: sql() is only accepted as an update or upsert value; use literal(), param() or an expression here',
+		);
+	});
+
+	it('R6 unary: null in unary() is refused', () => {
+		expectInvalid(
+			() => unary('-', null as never),
+			`Invalid unary: null ${OBJECT_HINT}`,
+		);
+	});
+
+	it('R6 namedArg: a plain object in namedArg() is refused', () => {
+		expectInvalid(
+			() => namedArg('x', { a: 1 } as never),
+			`Invalid namedArg: a plain object ${OBJECT_HINT}`,
+		);
+	});
+
+	it('R6 array: undefined in array() is refused', () => {
+		expectInvalid(
+			() => array(1, undefined as never),
+			`Invalid array: undefined ${OBJECT_HINT}`,
+		);
+	});
+
+	it('R6 cast: null in cast() is an InvalidOperationError, not a TypeError', () => {
+		expectInvalid(
+			() => cast(null as never, 'text'),
+			`Invalid cast: null ${OBJECT_HINT}`,
+		);
+	});
+
+	it('R6 arrayAgg: a plain object in arrayAgg() is refused', () => {
+		expectInvalid(
+			() => arrayAgg({ a: 1 } as never),
+			`Invalid arrayAgg: a plain object ${OBJECT_HINT}`,
+		);
+	});
+
+	it('R6 case-undefined: an undefined CASE result is refused instead of NULL', () => {
+		expectInvalid(
+			() => caseWhen(eq('score', 1), undefined as never),
+			`Invalid caseWhen: undefined ${OBJECT_HINT}`,
+		);
+		expectInvalid(
+			() =>
+				caseWhen(eq('score', 1), 'title').when(
+					eq('score', 2),
+					undefined as never,
+				),
+			`Invalid caseWhen().when: undefined ${OBJECT_HINT}`,
+		);
+		expectInvalid(
+			() => caseWhen(eq('score', 1), 'title').else(undefined as never),
+			`Invalid caseWhen().else: undefined ${OBJECT_HINT}`,
+		);
 	});
 });
