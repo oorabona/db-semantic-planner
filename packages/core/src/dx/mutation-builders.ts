@@ -26,6 +26,7 @@ import type {
 } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
 import { inspectMutationRows } from '../mutation-rows.js';
+import { andWhere } from './builder-utils.js';
 import {
 	ExecutionError,
 	InvalidOperationError,
@@ -845,13 +846,13 @@ export class UpdateBuilder<
 	}
 
 	/**
-	 * Add WHERE condition.
+	 * Add a WHERE condition. Successive calls are combined with AND.
 	 */
 	where(condition: MutationWhereCondition): UpdateBuilder<TRow, TResult> {
 		return new UpdateBuilder<TRow, TResult>({
 			...this.baseOpts,
 			set: this.setData,
-			where: toWhereIntent(condition),
+			where: andWhere(this.whereIntent, toWhereIntent(condition)),
 			allowAll: this.allowAllFlag,
 			returning: this.returningColumns,
 			batchMatchColumns: this.batchMatchColumns,
@@ -1042,12 +1043,12 @@ export class DeleteBuilder<
 	}
 
 	/**
-	 * Add WHERE condition.
+	 * Add a WHERE condition. Successive calls are combined with AND.
 	 */
 	where(condition: MutationWhereCondition): DeleteBuilder<TRow, TResult> {
 		return new DeleteBuilder<TRow, TResult>({
 			...this.baseOpts,
-			where: toWhereIntent(condition),
+			where: andWhere(this.whereIntent, toWhereIntent(condition)),
 			allowAll: this.allowAllFlag,
 			cascade: this.cascadeRelations,
 			returning: this.returningColumns,

@@ -13,11 +13,13 @@
 
 import {
 	and,
+	any,
 	createOrm,
 	eq,
 	exists,
 	gte,
 	inArray,
+	isDistinctFrom,
 	isNotNull,
 	isNull,
 	like,
@@ -353,5 +355,67 @@ describe('11. two exists() on same relation — distinct params (no duplication)
 			.dump();
 
 		expect(dump.params).toEqual([10, 20]);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Successive .where() calls on a mutation combine with AND (#1063)
+// ---------------------------------------------------------------------------
+
+describe('mutation where() calls combine with AND (#1063)', () => {
+	it('UPDATE keeps the first condition when a second where() is added', () => {
+		const orm = buildOrm();
+		const dump = (orm as any)
+			.update('symbols')
+			.set({ exported: true })
+			.where(any('id', [1, 2]))
+			.where(or(isNull('name'), isDistinctFrom('kind', 'fn')))
+			.dump();
+		expect(ws(dump.sql)).toEqual(
+			'UPDATE symbols SET exported = $1 WHERE symbols.id = ANY (CAST($2 AS int4[])) AND (symbols.name IS NULL OR symbols.kind IS DISTINCT FROM $3)',
+		);
+		expect(dump.parameters).toEqual([true, [1, 2], 'fn']);
+	});
+
+	it('UPDATE combines three where() calls', () => {
+		const orm = buildOrm();
+		const dump = (orm as any)
+			.update('symbols')
+			.set({ exported: true })
+			.where(eq('kind', 'a'))
+			.where(gte('complexity', 1))
+			.where(isNotNull('name'))
+			.dump();
+		expect(ws(dump.sql)).toEqual(
+			'UPDATE symbols SET exported = $1 WHERE symbols.kind = $2 AND symbols.complexity >= $3 AND symbols.name IS NOT NULL',
+		);
+		expect(dump.parameters).toEqual([true, 'a', 1]);
+	});
+
+	it('DELETE keeps the first condition when a second where() is added', () => {
+		const orm = buildOrm();
+		const dump = (orm as any)
+			.delete('symbols')
+			.where(eq('kind', 'unused'))
+			.where(gte('complexity', 10))
+			.dump();
+		expect(ws(dump.sql)).toEqual(
+			'DELETE FROM symbols WHERE symbols.kind = $1 AND symbols.complexity >= $2',
+		);
+		expect(dump.parameters).toEqual(['unused', 10]);
+	});
+
+	it('modify(table) keeps the first condition when a second where() is added', () => {
+		const orm = buildOrm();
+		const dump = (orm as any)
+			.modify(orm.tables.symbols)
+			.set({ exported: false })
+			.where(eq('kind', 'private'))
+			.where(lte('start_line', 5))
+			.dump();
+		expect(ws(dump.sql)).toEqual(
+			'UPDATE symbols SET exported = $1 WHERE symbols.kind = $2 AND symbols.start_line <= $3',
+		);
+		expect(dump.parameters).toEqual([false, 'private', 5]);
 	});
 });

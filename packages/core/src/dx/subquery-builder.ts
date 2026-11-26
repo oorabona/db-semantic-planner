@@ -12,6 +12,7 @@ import type {
 	WhereIntent,
 	WhereSubqueryIntent,
 } from '../intent-ast.js';
+import { andWhere } from './builder-utils.js';
 import type { ExpressionSpec } from './types.js';
 
 // ============================================================================
@@ -66,12 +67,12 @@ export class SubqueryBuilder {
 	}
 
 	/**
-	 * Add a WHERE condition to the subquery.
-	 * Can include outerRef() to create correlated subqueries.
+	 * Add a WHERE condition to the subquery. Successive calls are combined with
+	 * AND. Can include outerRef() to create correlated subqueries.
 	 */
 	where(condition: WhereIntent): SubqueryBuilder {
 		const clone = this.clone();
-		clone._where = condition;
+		clone._where = andWhere(this._where, condition);
 		return clone;
 	}
 
