@@ -208,8 +208,18 @@ export class SubqueryBuilder {
  * Result of building a subquery.
  * This can be used as a value in comparison operations.
  */
+/**
+ * Brand of a genuine `SubqueryExpression`. `Symbol.for` keeps it recognised
+ * across copies of the package, and a plain object (a JSON value with a
+ * `_type: 'subquery'` key) never carries it.
+ */
+const SUBQUERY_EXPRESSION_BRAND: unique symbol = Symbol.for(
+	'dbsp:subquery-expression',
+);
+
 export class SubqueryExpression {
 	readonly _type = 'subquery' as const;
+	readonly [SUBQUERY_EXPRESSION_BRAND] = true as const;
 	readonly intent: QueryIntent;
 
 	constructor(intent: QueryIntent) {
@@ -324,8 +334,8 @@ export function outerRef(column: string): SubqueryRefIntent {
 // ============================================================================
 
 /**
- * Check if a value is a SubqueryExpression.
- * Used to detect subqueries in object filter processing.
+ * Check if a value is a SubqueryExpression, by its brand: a plain object with
+ * the same keys is data, not a subquery.
  */
 export function isSubqueryExpression(
 	value: unknown,
@@ -333,7 +343,8 @@ export function isSubqueryExpression(
 	return (
 		typeof value === 'object' &&
 		value !== null &&
-		'_type' in value &&
-		(value as Record<string, unknown>)._type === 'subquery'
+		(value as { [SUBQUERY_EXPRESSION_BRAND]?: unknown })[
+			SUBQUERY_EXPRESSION_BRAND
+		] === true
 	);
 }

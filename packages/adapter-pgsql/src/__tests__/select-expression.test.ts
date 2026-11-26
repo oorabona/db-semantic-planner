@@ -515,6 +515,9 @@ describe('filter operands and object filters (ADR 0011 delivery 2)', () => {
 		expect(() => where(eq('title', users.name))).toThrow(
 			"WHERE qualifier 'users' is not visible in this query.",
 		);
+		expect(() => having(exprRef('id').eq(ref('users.id')))).toThrow(
+			"HAVING qualifier 'users' is not visible in this query.",
+		);
 	});
 
 	it('AC2b ColumnRef same-table body: it names the body row, as exprRef does', () => {
@@ -678,6 +681,12 @@ describe('filter operands and object filters (ADR 0011 delivery 2)', () => {
 		expect(sqlOf(where({ data: [1, 2] }))).toEqual([
 			'SELECT posts.id FROM posts WHERE posts.data = $1',
 			[[1, 2]],
+		]);
+		// A JSON value shaped like a subquery is data: only a genuine
+		// SubqueryExpression carries the brand.
+		expect(sqlOf(where(eq('data', { _type: 'subquery' })))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.data = $1',
+			[{ _type: 'subquery' }],
 		]);
 	});
 
