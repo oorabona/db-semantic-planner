@@ -14,7 +14,8 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import type { Adapter, Dump } from '../adapter.js';
-import { eq } from './filters.js';
+import { ref as exprRef, fn } from './expressions.js';
+import { distinct, eq } from './filters.js';
 import { createHookManager } from './hooks.js';
 import { createOrm } from './orm.js';
 import { ref, schema } from './schema.js';
@@ -696,7 +697,7 @@ describe('Aggregate methods coverage', () => {
 
 		const result = await orm
 			.select('posts')
-			.sum({ kind: 'distinct', field: 'authorId' }, 'total')
+			.sum(distinct('authorId'), 'total')
 			.all();
 
 		expect(result).toBeDefined();
@@ -709,7 +710,7 @@ describe('Aggregate methods coverage', () => {
 
 		const result = await orm
 			.select('posts')
-			.avg({ kind: 'distinct', field: 'authorId' }, 'avg_val')
+			.avg(distinct('authorId'), 'avg_val')
 			.all();
 
 		expect(result).toBeDefined();
@@ -1624,13 +1625,7 @@ describe('columns() expression coverage', () => {
 
 		const result = await orm
 			.select('users')
-			.columns([
-				'id',
-				{
-					__brand: 'expression',
-					intent: { kind: 'raw', sql: 'UPPER(name)', as: 'upper_name' },
-				},
-			])
+			.columns(['id', fn('upper', exprRef('name')).as('upper_name')])
 			.all();
 		expect(result).toBeDefined();
 	});

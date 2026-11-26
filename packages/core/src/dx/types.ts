@@ -1,4 +1,6 @@
 import { EXPRESSION_BRAND } from '@dbsp/types';
+import type { OrderByLeaf } from './coerce.js';
+import type { ColumnRef } from './table-ref.js';
 /**
  * @fileoverview Core DX layer type definitions.
  *
@@ -114,7 +116,7 @@ export interface AggregateOptions {
 	/**
 	 * Field to aggregate (required for SUM, AVG, MIN, MAX; optional for COUNT).
 	 */
-	readonly field?: string;
+	readonly field?: string | ColumnRef<string, string, unknown>;
 	/**
 	 * Alias for the result column.
 	 */
@@ -173,7 +175,7 @@ export type OrderByRecord = Readonly<Record<string, SortDirection>>;
  * ```
  */
 export interface OrderBySpec {
-	readonly column: string;
+	readonly column: OrderByLeaf;
 	readonly direction?: SortDirection;
 	readonly nulls?: NullsPosition;
 }

@@ -9,6 +9,7 @@ import {
 	any,
 	caseWhen,
 	createOrm,
+	distinct,
 	eq,
 	every,
 	exists,
@@ -26,11 +27,13 @@ import {
 	param,
 	rawExists,
 	ref,
+	rowNumber,
 	SubqueryExpression,
 	schema,
 	some,
 	star,
 	subquery,
+	wSum,
 } from '@dbsp/core';
 import type { WhereIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
@@ -1403,6 +1406,92 @@ describe('Typed quantifiers and callback refs inside nested bodies (#991)', () =
 				.dump().sql,
 		).toBe(
 			'SELECT users.* FROM users GROUP BY users.id HAVING users.id = ANY (SELECT posts_subq_0.user_id FROM posts AS posts_subq_0 WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_subq_0.id = comments_exists_1.post_id AND true))',
+		);
+	});
+});
+
+describe('A callback-scoped ColumnRef in an ordering, grouping, aggregate or window position (ADR 0011 delivery 3)', () => {
+	const scopeDb = schema({
+		users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			score: 'integer',
+			user_id: ref('users', { as: 'author', inverse: 'posts' }),
+		},
+	});
+	const scopeOrm = createOrm({
+		schema: scopeDb,
+		adapter: createPgCompileOnlyAdapter({ model: scopeDb.model }),
+		suppressDxWarnings: true,
+	});
+	const captured = (() => {
+		let ref: any;
+		some(scopeOrm.tables.users.posts, (p) => {
+			ref = p;
+			return eq(p.id!, 1);
+		});
+		return ref;
+	})();
+
+	function expect1052(build: () => unknown, position: string): void {
+		let error: unknown;
+		try {
+			build();
+		} catch (caught) {
+			error = caught;
+		}
+		expect(error).toBeInstanceOf(NotYetSupportedError);
+		expect(error).toMatchObject({
+			construct: 'a callback-scoped ColumnRef',
+			position,
+			issue: 1052,
+		});
+	}
+
+	it('R1b orderBy callback ColumnRef: a callback ref is refused as a single ordering and in the list form', () => {
+		expect1052(
+			() => scopeOrm.select('users').orderBy(captured.id).dump(),
+			'ORDER BY',
+		);
+		expect1052(
+			() =>
+				scopeOrm
+					.select('users')
+					.orderBy([{ column: captured.id }])
+					.dump(),
+			'ORDER BY',
+		);
+	});
+
+	it('R1d window and distinct callback ColumnRef: a callback ref is refused in wSum, partitionBy, window orderBy and distinct', () => {
+		expect1052(() => wSum(captured.score), 'window field');
+		expect1052(
+			() => rowNumber().partitionBy(captured.score),
+			'window partition',
+		);
+		expect1052(() => rowNumber().orderBy(captured.score), 'window order');
+		expect1052(() => distinct(captured.score), 'aggregate field');
+	});
+
+	it('R1d ownTable callback ColumnRef: a callback ref of the query table is refused in groupBy and count', () => {
+		expect1052(
+			() => scopeOrm.select('posts').groupBy([captured.score]).dump(),
+			'GROUP BY',
+		);
+		expect1052(
+			() => scopeOrm.select('posts').count(captured.score),
+			'aggregate field',
+		);
+	});
+
+	it('R2b aliased refs keep the scope refusal: an aliased callback ref is refused as a column', () => {
+		expect1052(
+			() =>
+				scopeOrm
+					.select('users')
+					.columns([captured.id.as('post_id')])
+					.dump(),
+			'expression argument',
 		);
 	});
 });

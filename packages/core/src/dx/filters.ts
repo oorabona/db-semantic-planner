@@ -48,6 +48,7 @@ import type {
 } from '../intent-ast.js';
 import { assertCallbackScope } from '../path-ref-scan.js';
 import {
+	coerceColumnName,
 	coerceLikePattern,
 	coerceListElement,
 	coerceReference,
@@ -118,8 +119,13 @@ export interface DistinctField {
  * orm.select('orders').sum(distinct('amount'), 'unique_total').execute();
  * ```
  */
-export function distinct(field: string): DistinctField {
-	return { field, distinct: true };
+export function distinct(
+	field: string | ColumnRef<string, string, unknown>,
+): DistinctField {
+	return {
+		field: coerceColumnName(field, 'distinct', 'aggregate field'),
+		distinct: true,
+	};
 }
 
 /**

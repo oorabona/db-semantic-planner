@@ -24,6 +24,7 @@ import type {
 	WhereIntent,
 } from '../intent-ast.js';
 import type { PlanOptions, PlanReport } from '../planner.js';
+import type { OrderByLeaf } from './coerce.js';
 import type { ExpressionRef, PredicateRef } from './expressions.js';
 import type { DistinctField } from './filters.js';
 import type { WhereFilter } from './object-filter.js';
@@ -34,7 +35,9 @@ import type {
 	PaginateOptions,
 	StreamOptions,
 } from './pagination-types.js';
+import type { RefDefinition } from './schema.js';
 import type { SetOperationBuilder } from './set-operation-builder.js';
+import type { ColumnRef } from './table-ref.js';
 import type {
 	AggregateOptions,
 	AliasedExprColumn,
@@ -155,7 +158,13 @@ export interface QueryBuilder<TResult = unknown> {
 			> as E['__alias']]: E['__value'];
 		}
 	>;
-	columns(columns: readonly ColumnSpec[]): QueryBuilder<TResult>;
+	columns(
+		columns: readonly (
+			| ColumnSpec
+			| ColumnRef<string, string, unknown>
+			| RefDefinition
+		)[],
+	): QueryBuilder<TResult>;
 
 	/**
 	 * Add a COALESCE expression to the select, with full type inference.
@@ -222,7 +231,10 @@ export interface QueryBuilder<TResult = unknown> {
 	 * ```
 	 */
 	count(options?: AggregateOptions): QueryBuilder<TResult>;
-	count(field: string, as?: string): QueryBuilder<TResult>;
+	count(
+		field: string | ColumnRef<string, string, unknown>,
+		as?: string,
+	): QueryBuilder<TResult>;
 	count(field: DistinctField, as?: string): QueryBuilder<TResult>;
 
 	/**
@@ -239,7 +251,10 @@ export interface QueryBuilder<TResult = unknown> {
 	 * orm.select('orders').sum(distinct('amount'), 'unique_total').execute();
 	 * ```
 	 */
-	sum(field: string | DistinctField, as?: string): QueryBuilder<TResult>;
+	sum(
+		field: string | ColumnRef<string, string, unknown> | DistinctField,
+		as?: string,
+	): QueryBuilder<TResult>;
 
 	/**
 	 * Calculate average of a field.
@@ -249,7 +264,10 @@ export interface QueryBuilder<TResult = unknown> {
 	 * @param as - Optional alias for result column
 	 * @returns A new QueryBuilder configured for AVG
 	 */
-	avg(field: string | DistinctField, as?: string): QueryBuilder<TResult>;
+	avg(
+		field: string | ColumnRef<string, string, unknown> | DistinctField,
+		as?: string,
+	): QueryBuilder<TResult>;
 
 	/**
 	 * Find minimum value of a field.
@@ -258,7 +276,10 @@ export interface QueryBuilder<TResult = unknown> {
 	 * @param as - Optional alias for result column
 	 * @returns A new QueryBuilder configured for MIN
 	 */
-	min(field: string, as?: string): QueryBuilder<TResult>;
+	min(
+		field: string | ColumnRef<string, string, unknown>,
+		as?: string,
+	): QueryBuilder<TResult>;
 
 	/**
 	 * Find maximum value of a field.
@@ -267,7 +288,10 @@ export interface QueryBuilder<TResult = unknown> {
 	 * @param as - Optional alias for result column
 	 * @returns A new QueryBuilder configured for MAX
 	 */
-	max(field: string, as?: string): QueryBuilder<TResult>;
+	max(
+		field: string | ColumnRef<string, string, unknown>,
+		as?: string,
+	): QueryBuilder<TResult>;
 
 	/**
 	 * Group results by specified fields.
@@ -285,7 +309,9 @@ export interface QueryBuilder<TResult = unknown> {
 	 *   .execute();
 	 * ```
 	 */
-	groupBy(fields: readonly string[]): QueryBuilder<TResult>;
+	groupBy(
+		fields: readonly (string | ColumnRef<string, string, unknown>)[],
+	): QueryBuilder<TResult>;
 
 	/**
 	 * Filter grouped results based on aggregate values.
@@ -352,7 +378,9 @@ export interface QueryBuilder<TResult = unknown> {
 	 * // SQL: SELECT DISTINCT ON ("user_id", "action") * FROM "logs"
 	 * ```
 	 */
-	distinctOn(...columns: string[]): QueryBuilder<TResult>;
+	distinctOn(
+		...columns: (string | ColumnRef<string, string, unknown>)[]
+	): QueryBuilder<TResult>;
 
 	/**
 	 * Acquire a FOR UPDATE lock on selected rows.
@@ -456,6 +484,15 @@ export interface QueryBuilder<TResult = unknown> {
 	): QueryBuilder<TResult>;
 	orderBy(
 		expr: ExpressionSpec,
+		direction?: SortDirection,
+		options?: { nulls?: import('./types.js').NullsPosition },
+	): QueryBuilder<TResult>;
+	/**
+	 * Order by a `ColumnRef` (kept qualified), a `SubqueryExpression`, a schema
+	 * `ref()` or an output-column position (a positive integer). ADR 0011.
+	 */
+	orderBy(
+		leaf: OrderByLeaf,
 		direction?: SortDirection,
 		options?: { nulls?: import('./types.js').NullsPosition },
 	): QueryBuilder<TResult>;

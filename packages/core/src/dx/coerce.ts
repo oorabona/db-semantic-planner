@@ -196,6 +196,20 @@ export function coerceReference(
 }
 
 /**
+ * A single `orderBy` leaf (ADR 0011, reference position): a column name, an
+ * output-column position, an expression, a `ColumnRef`, a subquery or a schema
+ * `ref()`. Arrays, `Date`s, booleans and `bigint`s do not order rows.
+ */
+export type OrderByLeaf =
+	| string
+	| number
+	| ExpressionRef
+	| ExpressionSpec
+	| ColumnRef<string, string, unknown>
+	| SubqueryExpression
+	| RefDefinition;
+
+/**
  * An expression object accepted in a value position (a filter's right
  * operand, an object-filter value): it is compiled as SQL, never bound.
  */
@@ -305,4 +319,92 @@ export function coerceLikePattern<T>(leaf: T, helper: string): T {
 		return leaf;
 	coerceUncarriedValue(leaf, helper, 'like pattern', 1066);
 	return leaf;
+}
+
+/**
+ * Whether a value is one of the objects the leaf rule recognises (an
+ * expression, a `ColumnRef`, a subquery, a schema `ref()`, an `outerRef()`, a
+ * builder, a `sql()` marker or an unfinished `caseWhen()`), as opposed to a
+ * record or options object a helper reads by its keys.
+ */
+export function isReferenceObject(leaf: unknown): boolean {
+	if (typeof leaf !== 'object' || leaf === null) return false;
+	return (
+		isBrandedExpression(leaf) ||
+		isColumnRef(leaf) ||
+		isSubqueryExpression(leaf) ||
+		REF_BRAND in leaf ||
+		isOuterRef(leaf) ||
+		isQueryBuilder(leaf) ||
+		isSqlRaw(leaf) ||
+		leaf instanceof CaseBuilder
+	);
+}
+
+function notAColumn(helper: string, kind: string): never {
+	throw new InvalidOperationError(
+		helper,
+		`${kind} is not a column; use a column name or a ColumnRef`,
+	);
+}
+
+/**
+ * Coerce a leaf of a position that stores a column name only (GROUP BY,
+ * DISTINCT ON, aggregate and window fields; ADR 0011 reference position).
+ * A string is kept; a `ColumnRef` becomes its qualified name, or its bare
+ * name when it is a column of `ownTable` reached without a relation path.
+ * An expression cannot be carried yet (#1072).
+ *
+ * @param leaf - The argument as the caller passed it
+ * @param helper - The public helper name, used in refusal messages
+ * @param position - The position named in a not-yet refusal
+ * @param ownTable - The query's table, when the compiled SQL qualifies a bare
+ *   field there
+ */
+export function coerceColumnName(
+	leaf: unknown,
+	helper: string,
+	position: string,
+	ownTable?: string,
+): string {
+	if (typeof leaf === 'string') return leaf;
+	if (leaf === null) return notAColumn(helper, 'null');
+	if (leaf === undefined) return notAColumn(helper, 'undefined');
+	if (typeof leaf === 'function') return notAColumn(helper, 'a function');
+	if (typeof leaf === 'symbol') return notAColumn(helper, 'a symbol');
+	if (typeof leaf === 'object' && isColumnRef(leaf)) {
+		if (
+			(leaf as { readonly [CALLBACK_SCOPE]?: object })[CALLBACK_SCOPE] !==
+			undefined
+		)
+			throw new NotYetSupportedError(
+				'a callback-scoped ColumnRef',
+				position,
+				1052,
+			);
+		const name = getColumnName(leaf);
+		if (ownTable !== undefined && !isRelationPathColumn(leaf)) {
+			const prefix = `${ownTable}.`;
+			if (name.startsWith(prefix)) return name.slice(prefix.length);
+		}
+		return name;
+	}
+	if (typeof leaf === 'object' && isSqlRaw(leaf))
+		throw new InvalidOperationError(
+			helper,
+			'sql() is only accepted as an update or upsert value; use literal(), param() or an expression here',
+		);
+	if (leaf instanceof CaseBuilder)
+		throw new InvalidOperationError(helper, UNFINISHED_CASE);
+	if (typeof leaf === 'object') {
+		const kind = expressionKind(leaf);
+		if (kind !== undefined)
+			throw new NotYetSupportedError(kind, position, 1072);
+		if (Array.isArray(leaf))
+			throw new NotYetSupportedError('an array', position, 1072);
+		if (leaf instanceof Date)
+			throw new NotYetSupportedError('a Date', position, 1072);
+		return notAColumn(helper, 'a plain object');
+	}
+	throw new NotYetSupportedError(`a ${typeof leaf}`, position, 1072);
 }
