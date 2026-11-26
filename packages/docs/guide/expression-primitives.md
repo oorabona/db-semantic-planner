@@ -248,6 +248,12 @@ expr.lte(value)  // expr <= $N
 
 These return a `WhereExpressionIntent` accepted by `.where()`.
 
+`value` follows the value rule of the filter helpers' right operand (see
+[Querying: operands](./queries#operands)): a plain value is bound as `$N`, while an
+expression, a table `ColumnRef` or a `SubqueryExpression` is compiled into the SQL.
+The same holds for `eq(expr, value)` and the other comparison helpers, whose left
+operand can be any expression this rule accepts.
+
 ## Argument Rule
 
 The arguments of `fn()`, `boolFn()`, `op()`, `unary()`, `namedArg()`, `array()`,

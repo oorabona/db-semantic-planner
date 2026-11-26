@@ -33,6 +33,7 @@ import type {
 	WhereAnyIntent,
 	WhereComparisonIntent,
 	WhereExistsIntent,
+	WhereExpressionIntent,
 	WhereInIntent,
 	WhereIntent,
 	WhereLikeIntent,
@@ -46,6 +47,14 @@ import type {
 	WhereRelationFilterIntent,
 } from '../intent-ast.js';
 import { assertCallbackScope } from '../path-ref-scan.js';
+import {
+	coerceLikePattern,
+	coerceListElement,
+	coerceReference,
+	coerceValue,
+	type ReferenceLeaf,
+	type ValueExpression,
+} from './coerce.js';
 import { getColumnName, isRelationPathColumn } from './column-utils.js';
 import { InvalidOperationError, validateIdentifier } from './errors.js';
 import type {
@@ -59,6 +68,7 @@ import {
 } from './symbols.js';
 import {
 	type ColumnRef,
+	isColumnRef,
 	RELATION_META,
 	RELATION_PATH,
 	type RelationRef,
@@ -138,31 +148,52 @@ export function isDistinctField(value: unknown): value is DistinctField {
 // Comparison Operators
 // ============================================================================
 
+/**
+ * A left operand that is neither a column name nor a `ColumnRef`: compared
+ * as an expression (ADR 0011, reference position).
+ */
+export type ExpressionLeftOperand = Exclude<
+	ReferenceLeaf,
+	string | ColumnRef<string, string, unknown>
+>;
+
 type ComparisonFilter = {
 	<T extends string, C extends string, V>(
 		field: ColumnRef<T, C, V>,
-		value: V,
+		value: V | ValueExpression,
 	): WhereComparisonIntent;
 	(field: string, value: unknown): WhereComparisonIntent;
+	(field: ExpressionLeftOperand, value: unknown): WhereExpressionIntent;
 };
 
 function createComparisonFilter(
 	operator: ComparisonOperator,
+	helper: string,
 ): ComparisonFilter {
-	return (
-		field: ColumnRef<string, string, unknown> | string,
+	return ((
+		field: unknown,
 		value: unknown,
-	): WhereComparisonIntent =>
-		scoped(
+	): WhereComparisonIntent | WhereExpressionIntent => {
+		if (typeof field !== 'string' && !isColumnRef(field)) {
+			const expr = coerceReference(field, helper);
+			return {
+				kind: 'expression',
+				expr,
+				operator,
+				value: coerceValue(value, helper),
+			};
+		}
+		return scoped(
 			{
 				kind: 'comparison',
 				field: getColumnName(field),
 				operator,
-				value,
+				value: coerceValue(value, helper),
 				...(isRelationPathColumn(field) && { pathRef: true as const }),
 			},
 			field,
 		);
+	}) as ComparisonFilter;
 }
 
 /**
@@ -171,7 +202,7 @@ function createComparisonFilter(
  * @example eq('status', 'active') → status = 'active'
  * @example eq(users.name, 'John') → type-safe with ColumnRef (DX-040)
  */
-export const eq: ComparisonFilter = createComparisonFilter('eq');
+export const eq: ComparisonFilter = createComparisonFilter('eq', 'eq');
 
 /**
  * Not equals comparison: field != value
@@ -179,7 +210,7 @@ export const eq: ComparisonFilter = createComparisonFilter('eq');
  * @example neq('status', 'deleted') → status != 'deleted'
  * @example neq(users.status, 'deleted') → type-safe with ColumnRef (DX-040)
  */
-export const neq: ComparisonFilter = createComparisonFilter('neq');
+export const neq: ComparisonFilter = createComparisonFilter('neq', 'neq');
 
 /**
  * Greater than comparison: field > value
@@ -187,7 +218,7 @@ export const neq: ComparisonFilter = createComparisonFilter('neq');
  * @example gt('age', 18) → age > 18
  * @example gt(users.age, 18) → type-safe with ColumnRef (DX-040)
  */
-export const gt: ComparisonFilter = createComparisonFilter('gt');
+export const gt: ComparisonFilter = createComparisonFilter('gt', 'gt');
 
 /**
  * Greater than or equal comparison: field >= value
@@ -195,7 +226,7 @@ export const gt: ComparisonFilter = createComparisonFilter('gt');
  * @example gte('age', 18) → age >= 18
  * @example gte(users.age, 18) → type-safe with ColumnRef (DX-040)
  */
-export const gte: ComparisonFilter = createComparisonFilter('gte');
+export const gte: ComparisonFilter = createComparisonFilter('gte', 'gte');
 
 /**
  * Less than comparison: field < value
@@ -203,7 +234,7 @@ export const gte: ComparisonFilter = createComparisonFilter('gte');
  * @example lt('price', 100) → price < 100
  * @example lt(products.price, 100) → type-safe with ColumnRef (DX-040)
  */
-export const lt: ComparisonFilter = createComparisonFilter('lt');
+export const lt: ComparisonFilter = createComparisonFilter('lt', 'lt');
 
 /**
  * Less than or equal comparison: field <= value
@@ -211,7 +242,7 @@ export const lt: ComparisonFilter = createComparisonFilter('lt');
  * @example lte('price', 100) → price <= 100
  * @example lte(products.price, 100) → type-safe with ColumnRef (DX-040)
  */
-export const lte: ComparisonFilter = createComparisonFilter('lte');
+export const lte: ComparisonFilter = createComparisonFilter('lte', 'lte');
 
 /**
  * Null-safe inequality: field IS DISTINCT FROM value
@@ -222,8 +253,10 @@ export const lte: ComparisonFilter = createComparisonFilter('lte');
  * @example isDistinctFrom('status', 'active') → status IS DISTINCT FROM 'active'
  * @example isDistinctFrom(users.status, null) → users.status IS DISTINCT FROM NULL
  */
-export const isDistinctFrom: ComparisonFilter =
-	createComparisonFilter('isDistinctFrom');
+export const isDistinctFrom: ComparisonFilter = createComparisonFilter(
+	'isDistinctFrom',
+	'isDistinctFrom',
+);
 
 // ============================================================================
 // String Operators
@@ -262,7 +295,7 @@ export function like(
 	const intent: WhereLikeIntent = {
 		kind: 'like',
 		field: getColumnName(field),
-		pattern,
+		pattern: coerceLikePattern(pattern, 'like'),
 		...(isRelationPathColumn(field) && { pathRef: true as const }),
 	};
 	const withCi =
@@ -300,7 +333,9 @@ export function inArray(
 		{
 			kind: 'in',
 			field: getColumnName(field),
-			values,
+			values: Array.isArray(values)
+				? values.map((v) => coerceListElement(v, 'inArray'))
+				: values,
 			...(isRelationPathColumn(field) && { pathRef: true as const }),
 		},
 		field,
@@ -358,11 +393,31 @@ export function any(
 		{
 			kind: 'any',
 			field: getColumnName(field),
-			values,
+			values: Array.isArray(values)
+				? values.map((v) => unwrapParamElement(coerceListElement(v, 'any')))
+				: values,
 			...(isRelationPathColumn(field) && { pathRef: true as const }),
 		},
 		field,
 	);
+}
+
+/**
+ * `any()` binds its list as given on every route, so a `param(v)` element is
+ * replaced by `v` here (#1011). A plain `{ kind: 'param', value }` object is
+ * data and stays as given.
+ */
+function unwrapParamElement(element: unknown): unknown {
+	if (
+		typeof element === 'object' &&
+		element !== null &&
+		EXPRESSION_BRAND in element &&
+		(element as { readonly intent?: { kind?: unknown } }).intent?.kind ===
+			'param'
+	)
+		return (element as unknown as { readonly intent: { value: unknown } })
+			.intent.value;
+	return element;
 }
 
 // ============================================================================

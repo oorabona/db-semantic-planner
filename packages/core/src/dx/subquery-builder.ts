@@ -25,11 +25,22 @@ import type { ExpressionSpec } from './types.js';
  * @example
  * // Basic scalar subquery
  * query('products')
- *   .where({ price: { $eq: subquery('prices').select('max_price').where({ categoryId: outerRef('categoryId') }) } })
+ *   .where({
+ *     price: {
+ *       $eq: subquery('prices')
+ *         .select('max_price')
+ *         .where(eq('categoryId', outerRef('categoryId')))
+ *         .build(),
+ *     },
+ *   })
  *
  * // With aggregate
  * query('products')
- *   .where({ avgRating: { $gt: subquery('reviews').where({ productId: outerRef('id') }).avg('rating') } })
+ *   .where({
+ *     avgRating: {
+ *       $gt: subquery('reviews').where(eq('productId', outerRef('id'))).avg('rating'),
+ *     },
+ *   })
  */
 export class SubqueryBuilder {
 	private readonly _from: string;
@@ -170,7 +181,7 @@ export class SubqueryBuilder {
 	 * // SELECT id, (SELECT count(*) FROM calls WHERE symbol_id = s.id) AS call_count
 	 * query('symbols').columns([
 	 *   'id',
-	 *   subquery('calls').where({ symbolId: outerRef('id') }).count().asExpr('call_count'),
+	 *   subquery('calls').where(eq('symbolId', outerRef('id'))).count().asExpr('call_count'),
 	 * ])
 	 */
 	asExpr(alias: string): ExpressionSpec {
@@ -269,7 +280,7 @@ export class SubqueryExpression {
  *   price: {
  *     $eq: subquery('products')
  *       .select('price')
- *       .where({ categoryId: outerRef('categoryId') })
+ *       .where(eq('categoryId', outerRef('categoryId')))
  *       .max('price')
  *   }
  * })
@@ -290,7 +301,7 @@ export function subquery(table: string): SubqueryBuilder {
  *
  * @example
  * // Reference parent 'id' column in subquery
- * subquery('reviews').where({ productId: outerRef('id') })
+ * subquery('reviews').where(eq('productId', outerRef('id')))
  */
 export function outerRef(column: string): SubqueryRefIntent {
 	// `outer: true` is the discriminator that distinguishes this genuine

@@ -43,7 +43,7 @@ import type {
 	WhereExpressionIntent,
 	WhereIntent,
 } from '../intent-ast.js';
-import { coerceReference, type ReferenceLeaf } from './coerce.js';
+import { coerceReference, coerceValue, type ReferenceLeaf } from './coerce.js';
 import { InvalidOperationError } from './errors.js';
 import type { DistinctField } from './filters.js';
 import { isDistinctField as isDistinctFieldValue } from './filters.js';
@@ -116,32 +116,62 @@ export class ExpressionRef {
 
 	/** WHERE: expr = value */
 	eq(value: unknown): WhereExpressionIntent {
-		return { kind: 'expression', expr: this.intent, operator: 'eq', value };
+		return {
+			kind: 'expression',
+			expr: this.intent,
+			operator: 'eq',
+			value: coerceValue(value, 'ExpressionRef.eq'),
+		};
 	}
 
 	/** WHERE: expr != value */
 	neq(value: unknown): WhereExpressionIntent {
-		return { kind: 'expression', expr: this.intent, operator: 'neq', value };
+		return {
+			kind: 'expression',
+			expr: this.intent,
+			operator: 'neq',
+			value: coerceValue(value, 'ExpressionRef.neq'),
+		};
 	}
 
 	/** WHERE: expr > value */
 	gt(value: unknown): WhereExpressionIntent {
-		return { kind: 'expression', expr: this.intent, operator: 'gt', value };
+		return {
+			kind: 'expression',
+			expr: this.intent,
+			operator: 'gt',
+			value: coerceValue(value, 'ExpressionRef.gt'),
+		};
 	}
 
 	/** WHERE: expr >= value */
 	gte(value: unknown): WhereExpressionIntent {
-		return { kind: 'expression', expr: this.intent, operator: 'gte', value };
+		return {
+			kind: 'expression',
+			expr: this.intent,
+			operator: 'gte',
+			value: coerceValue(value, 'ExpressionRef.gte'),
+		};
 	}
 
 	/** WHERE: expr < value */
 	lt(value: unknown): WhereExpressionIntent {
-		return { kind: 'expression', expr: this.intent, operator: 'lt', value };
+		return {
+			kind: 'expression',
+			expr: this.intent,
+			operator: 'lt',
+			value: coerceValue(value, 'ExpressionRef.lt'),
+		};
 	}
 
 	/** WHERE: expr <= value */
 	lte(value: unknown): WhereExpressionIntent {
-		return { kind: 'expression', expr: this.intent, operator: 'lte', value };
+		return {
+			kind: 'expression',
+			expr: this.intent,
+			operator: 'lte',
+			value: coerceValue(value, 'ExpressionRef.lte'),
+		};
 	}
 
 	/**

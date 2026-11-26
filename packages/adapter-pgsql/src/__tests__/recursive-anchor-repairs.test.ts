@@ -960,6 +960,12 @@ describe('start.where resolves through core (#891 slice 4)', () => {
 			[3],
 		],
 		['param() wrapper', eq('id', param(3)), '__n.id = $1', [3]],
+		[
+			'any param() elements',
+			any('id', [param(1), param(2)]),
+			'__n.id = ANY (CAST($1 AS int4[]))',
+			[[1, 2]],
+		],
 	] as const) {
 		const key =
 			name === 'eq' || name === 'in' ? 'typed-cast' : 'typed-param-forms';

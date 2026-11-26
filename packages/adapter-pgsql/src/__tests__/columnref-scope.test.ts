@@ -1010,6 +1010,25 @@ describe('Typed quantifiers and callback refs inside nested bodies (#991)', () =
 		});
 	});
 
+	it('R2b callback-scoped ColumnRef right: a callback ColumnRef compared as a value is not yet supported (#1052)', () => {
+		let error: unknown;
+		try {
+			some(nodes.children, (child) =>
+				exists('parent', { where: eq('label', child.label!) }),
+			);
+		} catch (caught) {
+			error = caught;
+		}
+		expect(error).toBeInstanceOf(NotYetSupportedError);
+		expect(error).toMatchObject({
+			construct: 'a callback-scoped ColumnRef',
+			position: 'expression argument',
+			issue: 1052,
+			message:
+				'a callback-scoped ColumnRef in an expression argument is not supported yet (#1052).',
+		});
+	});
+
 	it('AC40 refused-at-construction', () => {
 		let built = false;
 		expect(() => {
