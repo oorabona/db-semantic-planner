@@ -14,8 +14,11 @@ export function andWhere(
 	previous: WhereIntent | undefined,
 	next: WhereIntent,
 ): WhereIntent {
-	return previous === undefined
-		? next
+	if (previous === undefined) return next;
+	// Extend an existing AND instead of nesting it, so a long chain of calls
+	// stays one level deep for the recursive resolvers.
+	return previous.kind === 'and'
+		? { kind: 'and', conditions: [...previous.conditions, next] }
 		: { kind: 'and', conditions: [previous, next] };
 }
 

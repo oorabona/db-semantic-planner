@@ -392,6 +392,20 @@ describe('mutation where() calls combine with AND (#1063)', () => {
 		expect(dump.parameters).toEqual([true, 'a', 1]);
 	});
 
+	it('UPDATE compiles a long chain of where() calls without nesting them', () => {
+		const orm = buildOrm();
+		let builder = (orm as any).update('symbols').set({ exported: true });
+		for (let i = 0; i < 3000; i++)
+			builder = builder.where(gte('complexity', i));
+		const dump = builder.dump();
+		expect(dump.parameters).toHaveLength(3001);
+		expect(
+			ws(dump.sql).startsWith(
+				'UPDATE symbols SET exported = $1 WHERE symbols.complexity >= $2 AND symbols.complexity >= $3 AND',
+			),
+		).toBe(true);
+	});
+
 	it('DELETE keeps the first condition when a second where() is added', () => {
 		const orm = buildOrm();
 		const dump = (orm as any)
