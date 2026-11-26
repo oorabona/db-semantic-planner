@@ -12,6 +12,7 @@ import {
 	eq,
 	exprRef,
 	fn,
+	gt,
 	literal,
 	ref,
 	schema,
@@ -261,6 +262,24 @@ describe('FR-8: orm.recursive() — WITH RECURSIVE CTE', () => {
 		expect(outerSelect).toContain('parent_chain.name');
 		expect(outerSelect).not.toContain('file_id');
 		expect(dump.params).toEqual([42]);
+	});
+
+	it('T3b: successive outer .where() calls combine with AND (#1063)', () => {
+		const orm = buildOrm() as any;
+
+		const dump = orm
+			.recursive('parent_chain', {
+				base: orm.select('symbols').where(eq('id', 42)),
+				step: orm.select('parent_chain'),
+			})
+			.where(eq('file_id', 7))
+			.where(gt('id', 1))
+			.dump();
+
+		expect(ws(dump.sql)).toEqual(
+			'WITH RECURSIVE parent_chain AS (SELECT symbols.* FROM symbols WHERE symbols.id = $1 UNION ALL SELECT parent_chain.* FROM parent_chain) SELECT parent_chain.* FROM parent_chain WHERE parent_chain.file_id = $2 AND parent_chain.id > $3',
+		);
+		expect(dump.params).toEqual([42, 7, 1]);
 	});
 
 	it('T4: outer .orderBy() appended to outer query', () => {

@@ -374,6 +374,24 @@ describe('scalar subquery bodies compile every clause through core (#891 slice 5
 		);
 	const correlated = (o: Orm) =>
 		o.select('posts').where(eq('user_id', outerRef('id')));
+
+	it('successive subquery().where() calls combine with AND, keeping the correlation (#1028)', () => {
+		const d = plain
+			.select('users')
+			.columns([
+				'id',
+				subquery('posts')
+					.where(eq('user_id', outerRef('id')))
+					.where(gt('score', 1))
+					.count()
+					.asExpr('v'),
+			])
+			.dump();
+		expect([normalizeSQL(d.sql), d.params]).toEqual([
+			'select users.id, (select count(*) from posts where posts.user_id = users.id and posts.score > $1) as v from users',
+			[1],
+		]);
+	});
 	const projected = (o: Orm, b: SubqueryExpression) => {
 		const d = o
 			.select('users')

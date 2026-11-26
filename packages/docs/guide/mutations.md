@@ -64,6 +64,8 @@ orm.update('users')
 
 Ordinary scalar `update()` **requires a `.where()` clause**; `batchSet()` uses its required match keys. Omitting `.where()` from an ordinary update throws `UnsafeOperationError` — this is a safety guard against accidental full-table updates.
 
+Successive `.where()` calls on `update()`, `modify()` and `delete()` combine with AND, as on `select()`: `.where(any('id', ids)).where(isNull('checkedAt'))` updates only the listed rows whose `checkedAt` is null.
+
 ### Batch Update
 
 `batchSet(matchKeys, rows)` requires identical enumerable own keys and every match key in every row; a mismatch refuses with the zero-based row index and key. Scalar `.set()` assignments apply to every row, including evaluated `sql` raw expressions.

@@ -28,7 +28,10 @@ import type {
 	WhereIntent,
 } from '@dbsp/types';
 import { executeCompiledQuery } from '../adapter.js';
-import { requireAdapter as requireAdapterUtil } from './builder-utils.js';
+import {
+	andWhere,
+	requireAdapter as requireAdapterUtil,
+} from './builder-utils.js';
 import type { QueryBuilderImpl } from './query-builder.js';
 import type { QueryBuilder } from './query-builder-types.js';
 
@@ -105,10 +108,10 @@ export class RawCteQueryBuilder<TResult = unknown> {
 	}
 
 	/**
-	 * Filter the outer query result.
+	 * Filter the outer query result. Successive calls are combined with AND.
 	 */
 	where(condition: WhereIntent): this {
-		this.outerWhere = condition;
+		this.outerWhere = andWhere(this.outerWhere, condition);
 		return this;
 	}
 

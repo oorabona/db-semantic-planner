@@ -39,7 +39,7 @@ orm.recursive<TResult>(name: string, options: RecursiveOptions): RawCteQueryBuil
 | Method | Description |
 |---|---|
 | `.columns(cols: string[])` | Select specific columns from the CTE in the outer query |
-| `.where(condition)` | Filter rows in the outer query |
+| `.where(condition)` | Filter rows in the outer query; successive calls combine with AND |
 | `.orderBy(column, direction?)` | Order outer results (`'asc'` default) — chainable |
 | `.limit(n)` | Limit outer result set |
 | `.offset(n)` | Skip first N rows in outer result |
