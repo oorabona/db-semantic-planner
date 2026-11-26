@@ -661,6 +661,24 @@ describe('filter operands and object filters (ADR 0011 delivery 2)', () => {
 			'SELECT posts.id FROM posts WHERE posts.score <= $1',
 			[10],
 		]);
+		expect(sqlOf(where(eq('id', 5n)))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.id = $1',
+			[5n],
+		]);
+		const day = new Date('2024-01-01');
+		const byDate = where(eq('title', day));
+		expect(byDate.sql).toBe(
+			'SELECT posts.id FROM posts WHERE posts.title = $1',
+		);
+		expect(byDate.params[0]).toBe(day);
+		expect(sqlOf(where(eq('data', [1, 2])))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.data = $1',
+			[[1, 2]],
+		]);
+		expect(sqlOf(where({ data: [1, 2] }))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.data = $1',
+			[[1, 2]],
+		]);
 	});
 
 	it('AC5b param opaque comparison: param() content is bound as given', () => {

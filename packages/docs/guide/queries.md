@@ -120,9 +120,8 @@ A `ColumnRef` value resolves like `exprRef('table.column')`. Inside a subquery o
 subquery's row, not the outer one: write `outerRef('column')` to compare with the enclosing row. A table the
 query cannot see is refused when the query is planned.
 
-Plain objects shaped like a parameter or a column intent keep the meaning core gives them:
-`{ kind: 'param', value }` binds `value`, and `{ kind: 'ref', column }` names a column. To bind such an object as
-data, wrap it in `param()`.
+A plain object shaped like a parameter, `{ kind: 'param', value }`, binds `value`. To bind such an object as data,
+wrap it in `param()`.
 
 These are refused with an error naming the input: a query builder (`orm.select(...)`,
 `subquery('t').select('col')`; use `.build()`, an aggregate such as `.count()`, or `.asExpr()`), a `sql()` marker,
