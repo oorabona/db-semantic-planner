@@ -114,7 +114,7 @@ The correlation predicate (`author_id = users.id`) is resolved automatically fro
 
 ## Pattern: correlated subqueries with `outerRef()`
 
-`outerRef(column)` creates a reference to a column in the outer query for use in a subquery's WHERE condition:
+`outerRef(column)` creates a reference to a column in the outer query for use in a subquery's WHERE condition. Successive `subquery(...).where()` calls combine with AND, so a correlation set by one call is kept by the next:
 
 ```typescript
 import { schema, createOrm, subquery, outerRef, eq } from '@dbsp/core';
