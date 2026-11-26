@@ -4,6 +4,7 @@
  * Tests for object-to-WhereIntent conversion.
  */
 
+import { NotYetSupportedError } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import type {
 	WhereAndIntent,
@@ -12,13 +13,20 @@ import type {
 	WhereLikeIntent,
 	WhereNullIntent,
 } from '../intent-ast.js';
-import { eq } from './filters.js';
+import { caseWhen } from './case-when-builder.js';
+import { InvalidOperationError } from './errors.js';
+import { ref as exprRef, fn, literal } from './expressions.js';
+import { and, eq, exists, isNull, rawExists, sql } from './filters.js';
 import {
 	type FilterOperators,
 	isWhereIntent,
 	objectToWhereIntent,
 	type WhereFilter,
 } from './object-filter.js';
+import { createOrm } from './orm.js';
+import { ref, schema } from './schema.js';
+import { subquery } from './subquery-builder.js';
+import { createMockAdapter } from './test-utils.js';
 
 describe('DX-012 Block 1: Object Filter Syntax', () => {
 	describe('isWhereIntent()', () => {
@@ -376,5 +384,145 @@ describe('DX-012 Block 1: Object Filter Syntax', () => {
 			const andIntent = result as WhereAndIntent;
 			expect(andIntent.conditions).toHaveLength(2);
 		});
+	});
+});
+
+// ============================================================================
+// Object filters follow the value-leaf rule (ADR 0011, delivery 2)
+// ============================================================================
+
+describe('object filter values and isWhereIntent (ADR 0011 delivery 2)', () => {
+	const filterDb = schema(
+		{
+			users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				title: 'text',
+				score: 'integer',
+				kind: 'text',
+				deletedAt: { type: 'timestamp', nullable: true },
+				user_id: ref('users', { as: 'author' }),
+			},
+		},
+		undefined,
+		{ defaultFilters: { posts: isNull('deletedAt') } },
+	);
+	const orm = createOrm({ schema: filterDb, adapter: createMockAdapter() });
+	const posts = orm.tables.posts;
+	const SQL_MESSAGE =
+		'Invalid where: sql() is only accepted as an update or upsert value; use literal(), param() or an expression here';
+	const UNFINISHED =
+		'Invalid where: caseWhen() is unfinished; complete it with .else(value) before using it as a value';
+	const convert = (filter: unknown) =>
+		objectToWhereIntent(filter as WhereFilter<Record<string, unknown>>);
+
+	function thrown(build: () => unknown): unknown {
+		try {
+			build();
+		} catch (error) {
+			return error;
+		}
+		throw new Error('expected a refusal, got none');
+	}
+
+	function expectNotYet(
+		build: () => unknown,
+		construct: string,
+		position: string,
+		issue: number,
+	): void {
+		const error = thrown(build);
+		expect(error).toBeInstanceOf(NotYetSupportedError);
+		expect(error).toMatchObject({ construct, position, issue });
+	}
+
+	function expectInvalid(build: () => unknown, message: string): void {
+		const error = thrown(build);
+		expect(error).toBeInstanceOf(InvalidOperationError);
+		expect((error as Error).message).toBe(message);
+	}
+
+	it('AC8 kind column filtered: an object over a column named kind is not an intent (#624)', () => {
+		expect(isWhereIntent({ kind: 'function' })).toBe(false);
+		expect(isWhereIntent({ kind: 'comparison' })).toBe(false);
+		expect(isWhereIntent({ kind: 'function', title: 'x' })).toBe(false);
+		expect(convert({ kind: 'function' })).toEqual({
+			kind: 'comparison',
+			field: 'kind',
+			operator: 'eq',
+			value: 'function',
+		});
+	});
+
+	it('AC8 real intents still intents: helper-built intents and default filters are intents', () => {
+		expect(isWhereIntent(eq('title', 'x'))).toBe(true);
+		expect(isWhereIntent(and(eq('title', 'x'), eq('score', 1)))).toBe(true);
+		expect(isWhereIntent(exists('posts'))).toBe(true);
+		expect(isWhereIntent(rawExists(subquery('posts').select('id')))).toBe(true);
+		expect(isWhereIntent(exprRef('score').eq(1))).toBe(true);
+		expect(filterDb.defaultFilters?.posts).toEqual(isNull('deletedAt'));
+	});
+
+	it('R2 object filter direct entry: builders, sql() and relation ColumnRefs are refused', () => {
+		expectNotYet(
+			() => convert({ id: subquery('posts').select('id') }),
+			'a query builder',
+			'expression argument',
+			1053,
+		);
+		expectInvalid(() => convert({ title: sql('now()') }), SQL_MESSAGE);
+		expectNotYet(
+			() => convert({ title: posts.author.name }),
+			'a relation-reached ColumnRef',
+			'expression argument',
+			1052,
+		);
+	});
+
+	it('R2 object filter operator entry: builders, sql() and relation ColumnRefs are refused', () => {
+		expectNotYet(
+			() => convert({ score: { $gt: orm.select('posts').count() } }),
+			'a query builder',
+			'expression argument',
+			1053,
+		);
+		expectInvalid(() => convert({ score: { $gt: sql('now()') } }), SQL_MESSAGE);
+		expectNotYet(
+			() => convert({ score: { $gt: posts.author.name } }),
+			'a relation-reached ColumnRef',
+			'expression argument',
+			1052,
+		);
+	});
+
+	it('R2c unfinished caseWhen: refused in an object filter value', () => {
+		expectInvalid(
+			() => convert({ title: caseWhen(eq('score', 1), literal('a')) }),
+			UNFINISHED,
+		);
+	});
+
+	it('R4 object filter like patterns: not yet supported (#1066)', () => {
+		expectNotYet(
+			() => convert({ title: { $like: fn('lower', exprRef('title')) } }),
+			'an expression',
+			'like pattern',
+			1066,
+		);
+		expectNotYet(
+			() => convert({ title: { $ilike: exprRef('title') } }),
+			'an expression',
+			'like pattern',
+			1066,
+		);
+	});
+
+	it('R3 list expression elements: $in refuses an expression element (#1064)', () => {
+		expectNotYet(
+			() => convert({ id: { $in: [literal(1)] } }),
+			'an expression',
+			'list element',
+			1064,
+		);
 	});
 });

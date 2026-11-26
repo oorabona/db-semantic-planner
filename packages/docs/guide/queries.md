@@ -86,6 +86,73 @@ An empty `or()` matches no row, and an empty `and()` matches every row.
 | `and` | `AND` | `or` | `OR` |
 | `not` | `NOT` | | |
 
+### Operands
+
+The left operand of `eq`, `neq`, `gt`, `gte`, `lt`, `lte` and `isDistinctFrom` is a column name, a
+`ColumnRef`, or any expression the [argument rule](./expression-primitives#argument-rule) accepts. An expression
+is compared as an expression:
+
+```typescript
+import { schema, createOrm, eq, gt, fn, exprRef, subquery } from '@dbsp/core';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+
+const db = schema({ posts: { id: { type: 'integer', primaryKey: true }, title: 'text' } } as const);
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter({ model: db.model }) });
+
+orm.select('posts').where(eq(fn('upper', exprRef('title')), 'X')).dump();
+// WHERE upper(posts.title) = $1
+orm.select('posts').groupBy(['id']).having(gt(subquery('posts').count(), 1)).dump();
+// HAVING (SELECT count(*) FROM posts AS posts_1) > $1
+```
+
+The right operand, and an object filter's value, is a value. Strings, numbers, booleans, `bigint`, arrays,
+`Date` and plain objects are bound as parameters. An expression is compiled into the SQL instead:
+
+| Right operand | Becomes |
+|---|---|
+| `exprRef()`, `fn()`, `literal()`, a `caseWhen(...).else(...)`, an `.asExpr()` spec, schema `ref()` | the expression, inlined |
+| table `ColumnRef` (`orm.tables.posts.title`) | its qualified column, `posts.title` |
+| `SubqueryExpression` (`subquery('t').count()`, `.build()`) | a scalar subquery |
+| `outerRef(col)` inside a subquery body | the column of the enclosing query |
+| `param(v)` | `v`, bound as given |
+
+A `ColumnRef` value resolves like `exprRef('table.column')`. Inside a subquery over its own table it names the
+subquery's row, not the outer one: write `outerRef('column')` to compare with the enclosing row. A table the
+query cannot see is refused when the query is planned.
+
+A plain object shaped like a parameter, `{ kind: 'param', value }`, binds `value`. To bind such an object as data,
+wrap it in `param()`.
+
+These are refused with an error naming the input: a query builder (`orm.select(...)`,
+`subquery('t').select('col')`; use `.build()`, an aggregate such as `.count()`, or `.asExpr()`), a `sql()` marker,
+an unfinished `caseWhen()` without `.else()`, and a `ColumnRef` reached through a relation or taken from a
+`some()`/`every()`/`none()` callback.
+
+Two value positions cannot hold an expression yet and refuse one with `NotYetSupportedError`:
+
+- a `like()` pattern, or `$like`/`$ilike` (#1066). Strings and `param()` are bound;
+- an element of `inArray()`, `any()` or `$in` (#1064). `param(v)` elements bind `v`.
+
+### Object filters and a `kind` column
+
+`where()` reads an object as a condition built by a helper only when its `kind` names a condition kind and it
+carries that kind's member (`field`, `conditions`, `condition`, `relation`, `subquery` or `expr`). An object
+filter over a column named `kind` therefore filters that column:
+
+```typescript
+import { schema, createOrm } from '@dbsp/core';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+
+const db = schema({ symbols: { id: { type: 'integer', primaryKey: true }, kind: 'text' } } as const);
+const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter({ model: db.model }) });
+
+orm.select('symbols').where({ kind: 'function' }).dump();
+// WHERE symbols.kind = $1
+```
+
+A filter that also names that kind's member column (`{ kind: 'comparison', field: 'x' }`) is read as a condition;
+write the operator form instead: `{ kind: { $eq: 'comparison' }, field: 'x' }`.
+
 ---
 
 ## Column Selection

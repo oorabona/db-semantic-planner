@@ -11,11 +11,16 @@
 
 import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { describe, expect, expectTypeOf, it } from 'vitest';
+import type {
+	WhereComparisonIntent,
+	WhereExpressionIntent,
+} from '../../intent-ast.js';
 import { normalizeSQL } from '../../sql-utils.js';
-import { ref as expressionRef, op } from '../expressions.js';
-import { eq, sql } from '../filters.js';
+import { ref as expressionRef, fn, op } from '../expressions.js';
+import { eq, gt, sql } from '../filters.js';
 import { createOrm } from '../orm.js';
 import { ref, schema } from '../schema.js';
+import { outerRef, subquery } from '../subquery-builder.js';
 
 const db = schema({
 	users: {
@@ -405,6 +410,25 @@ describe('DX-040-SURFACE: Type-level safety', () => {
 
 		// @ts-expect-error — id is number (integer), not string
 		eq(users.id, 'not a number');
+	});
+
+	it('AC9 new calls typecheck: expression operands are accepted by the filter helpers (ADR 0011)', () => {
+		const { posts } = orm.tables;
+		gt(subquery('posts').count(), 1);
+		gt(subquery('posts').count().asExpr('n'), 1);
+		eq(fn('upper', expressionRef('title')), 'X');
+		eq(posts.title, posts.title);
+		eq(posts.title, fn('upper', expressionRef('title')));
+		eq(posts.id, outerRef('id'));
+		orm.from(posts).where({ title: posts.title });
+		orm.from(posts).where({ id: { $gt: fn('abs', expressionRef('id')) } });
+	});
+
+	it('AC9 exact return types: a column left gives a comparison, an expression left an expression intent', () => {
+		expectTypeOf(eq('title', 1)).toEqualTypeOf<WhereComparisonIntent>();
+		expectTypeOf(
+			eq(fn('upper', expressionRef('title')), 'X'),
+		).toEqualTypeOf<WhereExpressionIntent>();
 	});
 
 	it('eq() with boolean ColumnRef rejects non-boolean value', () => {

@@ -8,16 +8,24 @@
  */
 
 import {
+	any,
 	array,
 	arrayAgg,
 	boolFn,
+	caseWhen,
 	cast,
 	createOrm,
+	eq,
 	exprRef,
 	fn,
+	gt,
+	inArray,
+	isDistinctFrom,
+	like,
 	literal,
 	namedArg,
 	op,
+	outerRef,
 	param,
 	ref,
 	SubqueryExpression,
@@ -362,5 +370,492 @@ describe('expression-constructor leaves in the SELECT list (ADR 0011)', () => {
 		const dump = select(cast(exprRef('title'), 'text'));
 		expect(dump.sql).toBe('SELECT CAST(title AS text) AS x FROM posts');
 		expect(dump.params).toEqual([]);
+	});
+});
+
+// ============================================================================
+// Filter operands follow the leaf rule (ADR 0011, delivery 2)
+// ============================================================================
+
+describe('filter operands and object filters (ADR 0011 delivery 2)', () => {
+	const filterDb = schema({
+		users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			title: 'text',
+			score: 'integer',
+			kind: 'text',
+			data: 'jsonb',
+			user_id: ref('users', { as: 'author' }),
+		},
+	});
+	const orm = createOrm({
+		schema: filterDb,
+		adapter: createPgCompileOnlyAdapter({ model: filterDb.model }),
+		suppressDxWarnings: true,
+	});
+	const posts = orm.tables.posts;
+	const users = orm.tables.users;
+	const where = (condition: any) =>
+		orm.select('posts').columns(['id']).where(condition).dump();
+	const having = (condition: any) =>
+		orm
+			.select('posts')
+			.columns(['id'])
+			.groupBy(['id', 'score'])
+			.having(condition)
+			.dump();
+	const inCase = (condition: any) =>
+		orm
+			.select('posts')
+			.columns([caseWhen(condition, literal('y')).else(literal('n')).as('r')])
+			.dump();
+	const sqlOf = (dump: { sql: string; params: readonly unknown[] }) => [
+		dump.sql,
+		dump.params,
+	];
+
+	it('AC1 having subquery left: a SubqueryExpression left operand compiles in HAVING (#1033)', () => {
+		const dump = orm
+			.select('posts')
+			.columns(['id'])
+			.groupBy(['id'])
+			.having(gt(subquery('posts').count(), 1))
+			.dump();
+		expect(sqlOf(dump)).toEqual([
+			'SELECT posts.id FROM posts GROUP BY posts.id HAVING (SELECT count(*) FROM posts AS posts_1) > $1',
+			[1],
+		]);
+	});
+
+	it('AC1 fn left: an expression left operand is compared as an expression', () => {
+		expect(sqlOf(where(eq(fn('upper', exprRef('title')), 'X')))).toEqual([
+			'SELECT posts.id FROM posts WHERE upper(posts.title) = $1',
+			['X'],
+		]);
+	});
+
+	it('AC1 asExpr left: a scalar-subquery spec is a left operand', () => {
+		expect(sqlOf(where(gt(subquery('posts').count().asExpr('n'), 1)))).toEqual([
+			'SELECT posts.id FROM posts WHERE (SELECT count(*) FROM posts AS posts_1) > $1',
+			[1],
+		]);
+	});
+
+	it('AC1 number left: a number left operand is an inlined constant', () => {
+		expect(sqlOf(where(eq(5, 1)))).toEqual([
+			'SELECT posts.id FROM posts WHERE 5 = $1',
+			[1],
+		]);
+	});
+
+	it('AC1b string and ColumnRef left: the column path is unchanged', () => {
+		expect(sqlOf(where(eq('title', 1)))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.title = $1',
+			[1],
+		]);
+		expect(sqlOf(where(eq(posts.title, 'x')))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.title = $1',
+			['x'],
+		]);
+		expect(sqlOf(where(eq(users.name, 1 as never)))).toEqual([
+			'SELECT posts.id FROM posts WHERE EXISTS (SELECT 1 FROM users AS users_exists_0 WHERE posts.user_id = users_exists_0.id AND users_exists_0.name = $1)',
+			[1],
+		]);
+	});
+
+	it('AC1c expression left null: eq and isDistinctFrom normalise null; gt refuses it', () => {
+		const upper = () => fn('upper', exprRef('title'));
+		expect(sqlOf(where(eq(upper(), null)))).toEqual([
+			'SELECT posts.id FROM posts WHERE upper(posts.title) IS NULL',
+			[],
+		]);
+		expect(sqlOf(where(isDistinctFrom(upper(), null)))).toEqual([
+			'SELECT posts.id FROM posts WHERE upper(posts.title) IS DISTINCT FROM NULL',
+			[],
+		]);
+		expect(() => where(gt(upper(), null))).toThrow(
+			'Operator > cannot compare with literal null; use isNull/isNotNull',
+		);
+	});
+
+	it.each([
+		['eq', '='],
+		['neq', '<>'],
+		['gt', '>'],
+		['gte', '>='],
+		['lt', '<'],
+		['lte', '<='],
+	] as const)(
+		'AC2x six ExpressionRef methods SQL: %s inlines a ColumnRef value',
+		(method, sqlOp) => {
+			expect(sqlOf(where(exprRef('score')[method](posts.id)))).toEqual([
+				`SELECT posts.id FROM posts WHERE posts.score ${sqlOp} posts.id`,
+				[],
+			]);
+		},
+	);
+
+	it('AC2 ColumnRef right: eq and the object filter inline the column', () => {
+		expect(sqlOf(where(eq('title', posts.title)))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.title = posts.title',
+			[],
+		]);
+		expect(sqlOf(where({ title: posts.title }))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.title = posts.title',
+			[],
+		]);
+		expect(sqlOf(where(exprRef('score').eq(posts.id)))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.score = posts.id',
+			[],
+		]);
+	});
+
+	it('AC2b ColumnRef other table: a table the query cannot see is refused by the planner', () => {
+		expect(() => where(eq('title', users.name))).toThrow(
+			"WHERE qualifier 'users' is not visible in this query.",
+		);
+		expect(() => having(exprRef('id').eq(ref('users.id')))).toThrow(
+			"HAVING qualifier 'users' is not visible in this query.",
+		);
+	});
+
+	it('AC2b ColumnRef same-table body: it names the body row, as exprRef does', () => {
+		const viaColumnRef = orm
+			.select('users')
+			.columns(['id'])
+			.where(
+				gt('id', subquery('posts').where(eq('title', posts.title)).count()),
+			)
+			.dump();
+		const viaExprRef = orm
+			.select('users')
+			.columns(['id'])
+			.where(
+				gt(
+					'id',
+					subquery('posts')
+						.where(eq('title', exprRef('posts.title')))
+						.count(),
+				),
+			)
+			.dump();
+		expect(sqlOf(viaColumnRef)).toEqual([
+			'SELECT users.id FROM users WHERE users.id > (SELECT count(*) FROM posts WHERE posts.title = posts.title)',
+			[],
+		]);
+		expect(sqlOf(viaColumnRef)).toEqual(sqlOf(viaExprRef));
+	});
+
+	it('AC2h expression vs expression having: the right operand is inlined in HAVING', () => {
+		expect(sqlOf(having(exprRef('score').gt(posts.id)))).toEqual([
+			'SELECT posts.id FROM posts GROUP BY posts.id, posts.score HAVING score > posts.id',
+			[],
+		]);
+		expect(
+			sqlOf(having(gt(fn('abs', exprRef('score')), subquery('posts').count()))),
+		).toEqual([
+			'SELECT posts.id FROM posts GROUP BY posts.id, posts.score HAVING abs(score) > (SELECT count(*) FROM posts AS posts_1)',
+			[],
+		]);
+	});
+
+	it('AC2h expression vs expression case: the right operand is inlined in CASE WHEN', () => {
+		expect(sqlOf(inCase(exprRef('score').gt(posts.id)))).toEqual([
+			"SELECT CASE WHEN score > posts.id THEN 'y' ELSE 'n' END AS r FROM posts",
+			[],
+		]);
+		expect(
+			sqlOf(inCase(gt(fn('abs', exprRef('score')), subquery('posts').count()))),
+		).toEqual([
+			"SELECT CASE WHEN abs(score) > (SELECT count(*) FROM posts AS posts_1) THEN 'y' ELSE 'n' END AS r FROM posts",
+			[],
+		]);
+	});
+
+	it('AC2h schema ref right of expression: ref() is the target column in HAVING', () => {
+		expect(sqlOf(having(exprRef('score').gt(ref('posts.id'))))).toEqual([
+			'SELECT posts.id FROM posts GROUP BY posts.id, posts.score HAVING score > posts.id',
+			[],
+		]);
+	});
+
+	it('AC2h outerRef right of expression: a projected subquery over a CTE keeps its correlation', () => {
+		const dump = orm
+			.withCte('chain')
+			.fromUnnest({ id: [1, 2] })
+			.query(
+				orm.select('posts').columns([
+					'id',
+					subquery('chain')
+						.where(exprRef('id').eq(outerRef('id')))
+						.count()
+						.asExpr('n'),
+				]),
+			)
+			.dump();
+		expect(sqlOf(dump)).toEqual([
+			'WITH chain AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT posts.id, (SELECT count(*) FROM chain AS chain WHERE id = posts.id) AS n FROM posts',
+			[[1, 2]],
+		]);
+	});
+
+	it('AC3 SubqueryExpression right: comparisons compile a scalar subquery', () => {
+		expect(sqlOf(where(gt('score', subquery('posts').count())))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.score > (SELECT count(*) FROM posts AS posts_1)',
+			[],
+		]);
+		expect(
+			sqlOf(where(exprRef('score').eq(subquery('posts').count()))),
+		).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.score = (SELECT count(*) FROM posts AS posts_1)',
+			[],
+		]);
+	});
+
+	it('AC3b object filter subquery unchanged: $gt keeps its WhereSubqueryIntent SQL', () => {
+		expect(sqlOf(where({ score: { $gt: subquery('posts').count() } }))).toEqual(
+			[
+				'SELECT posts.id FROM posts WHERE posts.score > (SELECT count(*) FROM posts AS posts_subq_0)',
+				[],
+			],
+		);
+	});
+
+	it('AC4 unchanged value leaves: plain values, markers and null keep their meaning', () => {
+		expect(sqlOf(where(eq('title', 'title')))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.title = $1',
+			['title'],
+		]);
+		expect(sqlOf(where(eq('title', { a: 1 })))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.title = $1',
+			[{ a: 1 }],
+		]);
+		expect(sqlOf(where(eq('title', exprRef('title'))))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.title = posts.title',
+			[],
+		]);
+		expect(sqlOf(where(eq('title', param('x'))))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.title = $1',
+			['x'],
+		]);
+		expect(sqlOf(where(eq('title', literal(5))))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.title = 5',
+			[],
+		]);
+		expect(
+			sqlOf(where(eq('title', subquery('posts').count().asExpr('n')))),
+		).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.title = (SELECT count(*) FROM posts AS posts_1)',
+			[],
+		]);
+		expect(sqlOf(where(eq('title', ref('posts.title'))))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.title = posts.title',
+			[],
+		]);
+		expect(sqlOf(where(eq('title', null)))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.title IS NULL',
+			[],
+		]);
+		expect(() => where(eq('title', undefined))).toThrow(
+			'Right comparison operand is undefined; use isNull or param(...)',
+		);
+		expect(sqlOf(where({ score: { $gte: undefined, $lte: 10 } }))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.score <= $1',
+			[10],
+		]);
+		expect(sqlOf(where(eq('id', 5n)))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.id = $1',
+			[5n],
+		]);
+		const day = new Date('2024-01-01');
+		const byDate = where(eq('title', day));
+		expect(byDate.sql).toBe(
+			'SELECT posts.id FROM posts WHERE posts.title = $1',
+		);
+		expect(byDate.params[0]).toBe(day);
+		expect(sqlOf(where(eq('data', [1, 2])))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.data = $1',
+			[[1, 2]],
+		]);
+		expect(sqlOf(where({ data: [1, 2] }))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.data = $1',
+			[[1, 2]],
+		]);
+		// A JSON value shaped like a subquery is data: only a genuine
+		// SubqueryExpression carries the brand.
+		expect(sqlOf(where(eq('data', { _type: 'subquery' })))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.data = $1',
+			[{ _type: 'subquery' }],
+		]);
+	});
+
+	it('AC5b param opaque comparison: param() content is bound as given', () => {
+		const inner = exprRef('title');
+		const dump = where(eq('title', param(inner)));
+		expect(dump.sql).toBe('SELECT posts.id FROM posts WHERE posts.title = $1');
+		expect(dump.params[0]).toBe(inner);
+	});
+
+	it('AC5b param opaque lists: inArray and any bind param() content as the element', () => {
+		const inner = exprRef('title');
+		const viaIn = where(inArray('id', [param(inner)]));
+		expect(viaIn.sql).toBe(
+			'SELECT posts.id FROM posts WHERE posts.id = ANY ($1)',
+		);
+		expect((viaIn.params[0] as unknown[])[0]).toBe(inner);
+		const viaAny = where(any('id', [param(inner)]));
+		expect(viaAny.sql).toBe(
+			'SELECT posts.id FROM posts WHERE posts.id = ANY (CAST($1 AS int4[]))',
+		);
+		expect((viaAny.params[0] as unknown[])[0]).toBe(inner);
+	});
+
+	it('AC5 like plain patterns: strings, param() and escape keep binding', () => {
+		expect(sqlOf(where(like('title', 'a%')))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.title LIKE $1',
+			['a%'],
+		]);
+		expect(sqlOf(where(like('title', param('x') as never)))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.title LIKE $1',
+			['x'],
+		]);
+		expect(sqlOf(where(like('title', param(null) as never)))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.title LIKE $1',
+			[null],
+		]);
+		expect(sqlOf(where(like('title', 'a\\%', { escape: '\\' })))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.title LIKE $1 ESCAPE $2',
+			['a\\%', '\\'],
+		]);
+		expect(sqlOf(where({ title: { $like: 'a%' } }))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.title LIKE $1',
+			['a%'],
+		]);
+		expect(() => where(like('title', null as never))).toThrow(
+			'Operator like cannot compare with literal null; use isNull/isNotNull',
+		);
+	});
+
+	it('AC6 any param root: param() elements bind their values in a root WHERE (#1011)', () => {
+		expect(sqlOf(where(any('id', [param(1), param(2)])))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.id = ANY (CAST($1 AS int4[]))',
+			[[1, 2]],
+		]);
+	});
+
+	it('AC6 any param having: param() elements bind their values in HAVING', () => {
+		expect(sqlOf(having(any('id', [param(1), param(2)])))).toEqual([
+			'SELECT posts.id FROM posts GROUP BY posts.id, posts.score HAVING posts.id = ANY (CAST($1 AS int4[]))',
+			[[1, 2]],
+		]);
+	});
+
+	it('AC6 any param case: param() elements bind their values in CASE WHEN', () => {
+		expect(sqlOf(inCase(any('id', [param(1), param(2)])))).toEqual([
+			"SELECT CASE WHEN posts.id = ANY (CAST($1 AS int4[])) THEN 'y' ELSE 'n' END AS r FROM posts",
+			[[1, 2]],
+		]);
+	});
+
+	it('AC6 any param mutations: update and delete bind the values', () => {
+		const update = orm
+			.update('posts')
+			.set({ score: 1 })
+			.where(any('id', [param(1), param(2)]))
+			.dump();
+		expect([update.sql, update.parameters]).toEqual([
+			'UPDATE posts SET score = $1 WHERE posts.id = ANY (CAST($2 AS int4[]))',
+			[1, [1, 2]],
+		]);
+		const remove = orm
+			.delete('posts')
+			.where(any('id', [param(1), param(2)]))
+			.dump();
+		expect([remove.sql, remove.parameters]).toEqual([
+			'DELETE FROM posts WHERE posts.id = ANY (CAST($1 AS int4[]))',
+			[[1, 2]],
+		]);
+	});
+
+	it('AC6 any plain and JSON object: plain elements and param-shaped data stay as given', () => {
+		expect(sqlOf(where(any('id', [1, 2])))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.id = ANY (CAST($1 AS int4[]))',
+			[[1, 2]],
+		]);
+		expect(sqlOf(where(any('data', [{ kind: 'param', value: 'x' }])))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.data = ANY (CAST($1 AS jsonb[]))',
+			[[{ kind: 'param', value: 'x' }]],
+		]);
+	});
+
+	it('AC7 inArray and $in elements: param() elements, null and plain lists are unchanged', () => {
+		expect(sqlOf(where(inArray('id', [param(1), 2])))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.id = ANY ($1)',
+			[[1, 2]],
+		]);
+		expect(sqlOf(where(inArray('id', [null])))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.id = ANY ($1)',
+			[[null]],
+		]);
+		expect(sqlOf(where({ id: { $in: [1, 2] } }))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.id = ANY ($1)',
+			[[1, 2]],
+		]);
+	});
+
+	it('AC8 kind column filtered: an object filter over a column named kind filters it (#624)', () => {
+		expect(sqlOf(where({ kind: 'function' }))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.kind = $1',
+			['function'],
+		]);
+		expect(sqlOf(where({ kind: 'comparison' }))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.kind = $1',
+			['comparison'],
+		]);
+		expect(sqlOf(where({ kind: 'function', title: 'x' }))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.kind = $1 AND posts.title = $2',
+			['function', 'x'],
+		]);
+	});
+});
+
+describe('correlated subquery on the right of a comparison (ADR 0011 delivery 2)', () => {
+	const productDb = schema({
+		categories: { id: { type: 'integer', primaryKey: true } },
+		products: {
+			id: { type: 'integer', primaryKey: true },
+			categoryId: ref('categories', { as: 'category' }),
+			price: 'decimal',
+		},
+	});
+	const orm = createOrm({
+		schema: productDb,
+		adapter: createPgCompileOnlyAdapter({ model: productDb.model }),
+		suppressDxWarnings: true,
+	});
+	const average = () =>
+		subquery('products')
+			.where(eq('categoryId', outerRef('categoryId')))
+			.avg('price');
+
+	it('AC3c correlated subquery read: gt compiles the correlated body in a SELECT', () => {
+		const dump = orm.select('products').where(gt('price', average())).dump();
+		expect([dump.sql, dump.params]).toEqual([
+			'SELECT products.* FROM products WHERE products.price > (SELECT avg(products_1.price) FROM products AS products_1 WHERE products_1."categoryId" = products."categoryId")',
+			[],
+		]);
+	});
+
+	it('AC3c correlated subquery update: gt compiles the correlated body in an UPDATE', () => {
+		const dump = orm
+			.update('products')
+			.set({ price: 1 })
+			.where(gt('price', average()))
+			.dump();
+		expect([dump.sql, dump.parameters]).toEqual([
+			'UPDATE products SET price = $1 WHERE products.price > (SELECT avg(products_1.price) FROM products AS products_1 WHERE products_1."categoryId" = products."categoryId")',
+			[1],
+		]);
 	});
 });

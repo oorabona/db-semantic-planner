@@ -1,13 +1,22 @@
 /**
  * @module coerce
- * The one leaf rule shared by the expression constructors (ADR 0011).
+ * The leaf rule shared by the expression constructors and the filter helpers
+ * (ADR 0011).
  *
- * A constructor first recognises its own grammar (names, operators, cast
- * types, `distinct()` and `aggOrderBy()` markers). Every scalar leaf left over
- * goes through {@link coerceReference}, which turns it into an expression
- * intent or refuses it by name. It never binds an expression object, a
- * builder, a `ColumnRef`, an `outerRef()`, a `sql()` marker or a plain object
- * as a parameter value.
+ * A helper first recognises its own grammar (names, operators, cast types,
+ * `distinct()` and `aggOrderBy()` markers). Every scalar leaf left over goes
+ * through one function per position:
+ * - {@link coerceReference} (reference position) turns it into an expression
+ *   intent or refuses it by name;
+ * - {@link coerceValue} (value position) keeps plain values for binding and
+ *   turns the expression objects core cannot read on its own into an
+ *   `ExpressionRef`;
+ * - {@link coerceListElement} and {@link coerceLikePattern} serve the value
+ *   positions that cannot carry an expression yet, and refuse one as not yet
+ *   supported.
+ *
+ * None of them binds an expression object, a builder, a `ColumnRef`, an
+ * `outerRef()` or a `sql()` marker as a parameter value.
  */
 
 import { EXPRESSION_BRAND, NotYetSupportedError, REF_BRAND } from '@dbsp/types';
@@ -17,10 +26,12 @@ import type {
 	ParamExpressionIntent,
 	RefExpressionIntent,
 	SubqueryExpressionIntent,
+	SubqueryRefIntent,
 } from '../intent-ast.js';
+import { CaseBuilder } from './case-when-builder.js';
 import { getColumnName, isRelationPathColumn } from './column-utils.js';
 import { InvalidOperationError } from './errors.js';
-import type { ExpressionRef } from './expressions.js';
+import { ExpressionRef } from './expressions.js';
 import { isSqlRaw } from './filters.js';
 import type { RefDefinition } from './schema.js';
 import {
@@ -182,4 +193,116 @@ export function coerceReference(
 			'sql() is only accepted as an update or upsert value; use literal(), param() or an expression here',
 		);
 	return refuse(helper, 'a plain object');
+}
+
+/**
+ * An expression object accepted in a value position (a filter's right
+ * operand, an object-filter value): it is compiled as SQL, never bound.
+ */
+export type ValueExpression =
+	| ExpressionRef
+	| ExpressionSpec
+	| ColumnRef<string, string, unknown>
+	| SubqueryExpression
+	| RefDefinition
+	| SubqueryRefIntent;
+
+const UNFINISHED_CASE =
+	'caseWhen() is unfinished; complete it with .else(value) before using it as a value';
+
+function isParamExpression(leaf: object): boolean {
+	return (
+		isBrandedExpression(leaf) &&
+		(leaf.intent as { kind?: unknown }).kind === 'param'
+	);
+}
+
+/**
+ * Coerce one scalar leaf in value position (ADR 0011).
+ *
+ * Plain values (strings, numbers, booleans, `bigint`, arrays, `Date`, plain
+ * objects), `null` and `undefined` are returned unchanged: they are bound,
+ * except the intent shapes core reads structurally (`{ kind: 'param', value }`,
+ * `{ kind: 'fieldRef', … }`, `{ kind: 'ref', column }`), which keep their
+ * meaning. Wrap such an object in `param()` to bind it as data.
+ * `ExpressionRef`s, branded specs, schema `ref()` and `outerRef()` are
+ * returned unchanged; core compiles them. A `ColumnRef` and a bare
+ * `SubqueryExpression` become an `ExpressionRef`.
+ *
+ * @param leaf - The value as the caller passed it
+ * @param helper - The public helper name, used in refusal messages
+ * @throws InvalidOperationError for a `sql()` marker or an unfinished
+ *   `caseWhen()`
+ * @throws NotYetSupportedError for a query builder and for a relation-reached
+ *   or callback-scoped `ColumnRef`
+ */
+export function coerceValue(leaf: unknown, helper: string): unknown {
+	if (typeof leaf !== 'object' || leaf === null) return leaf;
+	if (Array.isArray(leaf) || leaf instanceof Date) return leaf;
+	if (isBrandedExpression(leaf) || REF_BRAND in leaf || isOuterRef(leaf))
+		return leaf;
+	if (isColumnRef(leaf) || isSubqueryExpression(leaf) || isQueryBuilder(leaf))
+		return new ExpressionRef(coerceReference(leaf, helper));
+	if (isSqlRaw(leaf)) return coerceReference(leaf, helper);
+	if (leaf instanceof CaseBuilder)
+		throw new InvalidOperationError(helper, UNFINISHED_CASE);
+	return leaf;
+}
+
+function expressionKind(leaf: object): string | undefined {
+	if (isBrandedExpression(leaf)) return 'an expression';
+	if (isColumnRef(leaf)) return 'a ColumnRef';
+	if (isSubqueryExpression(leaf)) return 'a SubqueryExpression';
+	if (REF_BRAND in leaf) return 'ref()';
+	if (isOuterRef(leaf)) return 'outerRef()';
+	if (isQueryBuilder(leaf)) return 'a query builder';
+	return undefined;
+}
+
+function coerceUncarriedValue(
+	leaf: unknown,
+	helper: string,
+	position: string,
+	issue: number,
+): void {
+	if (typeof leaf !== 'object' || leaf === null) return;
+	if (Array.isArray(leaf) || leaf instanceof Date) return;
+	if (isSqlRaw(leaf)) coerceReference(leaf, helper);
+	if (leaf instanceof CaseBuilder)
+		throw new InvalidOperationError(helper, UNFINISHED_CASE);
+	const kind = expressionKind(leaf);
+	if (kind !== undefined) throw new NotYetSupportedError(kind, position, issue);
+}
+
+/**
+ * Check one element of an `inArray`, `any` or `$in` list (ADR 0011, value
+ * position). The list is bound as one array, so it cannot carry an expression
+ * yet (#1064). `param(v)` elements are kept; plain values, `null` and
+ * `undefined` are kept.
+ *
+ * @throws InvalidOperationError for a `sql()` marker or an unfinished
+ *   `caseWhen()`
+ * @throws NotYetSupportedError for any other expression object
+ */
+export function coerceListElement(leaf: unknown, helper: string): unknown {
+	if (typeof leaf === 'object' && leaf !== null && isParamExpression(leaf))
+		return leaf;
+	coerceUncarriedValue(leaf, helper, 'list element', 1064);
+	return leaf;
+}
+
+/**
+ * Check a `like` pattern (ADR 0011, value position). No `like` route can
+ * carry an expression pattern yet (#1066). Plain values and `param()` are
+ * kept.
+ *
+ * @throws InvalidOperationError for a `sql()` marker or an unfinished
+ *   `caseWhen()`
+ * @throws NotYetSupportedError for any other expression object
+ */
+export function coerceLikePattern<T>(leaf: T, helper: string): T {
+	if (typeof leaf === 'object' && leaf !== null && isParamExpression(leaf))
+		return leaf;
+	coerceUncarriedValue(leaf, helper, 'like pattern', 1066);
+	return leaf;
 }

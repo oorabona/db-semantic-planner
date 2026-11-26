@@ -511,8 +511,14 @@ export function createConditionCompiler(
 		);
 		if (nullComparison) return nullComparison;
 
+		const value = exprIntent.value;
+		if (typeof value === 'object' && value !== null) {
+			const rightNode = compileExpressionValue(value, ctx, handlerCtx, true);
+			if (rightNode !== null) return compileComparison(leftNode, rightNode);
+		}
+
 		const idx = ++ctx.paramState.paramIndex;
-		ctx.paramState.parameters.push(unwrapParamIntent(exprIntent.value));
+		ctx.paramState.parameters.push(unwrapParamIntent(value));
 		const rightNode = createParamRef(idx);
 		return compileComparison(leftNode, rightNode);
 	}
@@ -1016,31 +1022,46 @@ export function createConditionCompiler(
 
 		if (v === null || typeof v !== 'object') return null;
 
+		const rightNode = compileExpressionValue(v, ctx, handlerCtx);
+		if (rightNode === null) return null;
+		return compileMappedComparison(cmpIntent.operator)(
+			// buildColumnRef handles dotted field names like 'table.col' by splitting them.
+			buildColumnRef(cmpIntent.field, handlerCtx),
+			rightNode,
+		);
+	}
+
+	/**
+	 * Compile a comparison's right operand when it is an expression rather than
+	 * a value: an `outerRef()` (an outer field reference), an `ExpressionRef`
+	 * or branded spec (its intent), or a schema `ref()` marker (its `target`
+	 * column). Returns null for anything else, which the caller binds.
+	 * `skipParam` leaves a `param()` ExpressionRef to the caller's binding.
+	 */
+	function compileExpressionValue(
+		v: object,
+		ctx: InternalConditionCtx,
+		handlerCtx: CompilerContext,
+		skipParam = false,
+	): Node | null {
 		const rec = v as Record<string, unknown>;
 		if (isOuterRef(v)) {
-			return compileMappedComparison(cmpIntent.operator)(
-				buildColumnRef(cmpIntent.field, handlerCtx),
-				compileValueOrFieldRef(
-					{ kind: 'fieldRef', scope: 'outer', column: rec.column },
-					handlerCtx,
-					ctx.paramState,
-				),
+			return compileValueOrFieldRef(
+				{ kind: 'fieldRef', scope: 'outer', column: rec.column },
+				handlerCtx,
+				ctx.paramState,
 			);
 		}
 
-		// ExpressionRef path: already has a compiled ExpressionIntent — delegate directly.
 		// ExpressionRef implements the `ExpressionSpec` shared expression symbol brand.
 		if (EXPRESSION_BRAND in v && v[EXPRESSION_BRAND] === true) {
-			const compileComparison = compileMappedComparison(cmpIntent.operator);
 			const exprRef = v as unknown as { intent: ExpressionIntent };
-			// buildColumnRef handles dotted field names like 'table.col' by splitting them.
-			const leftNode = buildColumnRef(cmpIntent.field, handlerCtx);
-			const rightNode = compileExpressionIntent(
+			if (skipParam && exprRef.intent.kind === 'param') return null;
+			return compileExpressionIntent(
 				exprRef.intent,
 				handlerCtx,
 				ctx.paramState,
 			);
-			return compileComparison(leftNode, rightNode);
 		}
 
 		// RefDefinition path: the public ref() from @dbsp/core (schema DSL) returns
@@ -1053,17 +1074,12 @@ export function createConditionCompiler(
 			v[REF_BRAND] === 'ref' &&
 			typeof rec.target === 'string'
 		) {
-			const compileComparison = compileMappedComparison(cmpIntent.operator);
-			// buildColumnRef handles dotted field names like 'table.col' by splitting them.
-			const leftNode = buildColumnRef(cmpIntent.field, handlerCtx);
-			// Reuse the existing 'ref' kind handler via RefExpressionIntent.
 			// compileExpressionIntent splits 'table.col' into qualifier + column correctly.
-			const rightNode = compileExpressionIntent(
+			return compileExpressionIntent(
 				{ kind: 'ref', column: rec.target } satisfies RefExpressionIntent,
 				handlerCtx,
 				ctx.paramState,
 			);
-			return compileComparison(leftNode, rightNode);
 		}
 
 		return null;

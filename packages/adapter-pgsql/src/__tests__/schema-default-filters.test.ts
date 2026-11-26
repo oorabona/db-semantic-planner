@@ -90,12 +90,12 @@ it.each([
 		"forbidden subquery in 'in'",
 	],
 	[isNull('missing'), "invalid column 'missing'"],
-	[{ kind: 'mystery' }, "Unsupported predicate kind 'mystery'"],
 	[
 		and(isNull('deletedAt'), { field: 'title' } as unknown as WhereIntent),
 		"Unsupported predicate kind 'undefined'",
 	],
 	...[
+		'mystery',
 		'notExists',
 		'some',
 		'every',
@@ -105,12 +105,9 @@ it.each([
 		'subquery',
 		'expression',
 	].map((kind): [unknown, string] => [
+		// An object that only names a kind is not a condition intent (#624).
 		{ kind },
-		['some', 'every', 'none'].includes(kind)
-			? `Unsupported predicate kind '${kind}'`
-			: kind === 'subquery'
-				? 'Condition requires a column'
-				: `Cannot read properties of undefined (reading '${kind === 'rawNotExists' ? 'groupBy' : kind === 'expression' ? 'kind' : 'length'}')`,
+		"expected a condition intent built with condition helpers, for example isNull('deletedAt')",
 	]),
 	[
 		eq('id', { kind: 'ref', column: 'id', outer: true }),

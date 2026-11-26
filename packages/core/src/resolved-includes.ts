@@ -7,6 +7,7 @@ import {
 	type PlanDecision,
 	type QueryIntent,
 	RangeAllocator,
+	REF_BRAND,
 	type ResolvedIncludeNode,
 	type ResolvedJoin,
 	type ResolvedRange,
@@ -295,6 +296,14 @@ function conditionRefs(node: Record<string, unknown>): string[] {
 		}
 	};
 	const value = dataValue(node, 'value');
+	// A schema ref() marker names its target column.
+	if (
+		value &&
+		typeof value === 'object' &&
+		REF_BRAND in value &&
+		typeof (value as { target?: unknown }).target === 'string'
+	)
+		names.push((value as unknown as { target: string }).target);
 	const intent =
 		value && typeof value === 'object' ? dataValue(value, 'intent') : undefined;
 	if (intent && typeof intent === 'object') walk(intent);

@@ -29,11 +29,14 @@ import type {
 	WhereNullIntent,
 	WhereSubqueryIntent,
 } from '../intent-ast.js';
-import { InvalidOperationError } from './errors.js';
 import {
-	isSubqueryExpression,
-	type SubqueryExpression,
-} from './subquery-builder.js';
+	coerceLikePattern,
+	coerceListElement,
+	coerceValue,
+	type ValueExpression,
+} from './coerce.js';
+import { InvalidOperationError } from './errors.js';
+import { isSubqueryExpression } from './subquery-builder.js';
 
 // ============================================================================
 // Operator Types
@@ -42,21 +45,21 @@ import {
 /**
  * Comparison operators for object filter syntax.
  * Use `$` prefix to distinguish from field names.
- * Values can be literal values or SubqueryExpression for scalar subqueries.
+ * Values can be literal values or expressions (ADR 0011 value position).
  */
 export interface FilterOperators<T = unknown> {
-	/** Equals (explicit) - value or subquery */
-	readonly $eq?: T | SubqueryExpression;
-	/** Not equals - value or subquery */
-	readonly $neq?: T | SubqueryExpression;
-	/** Greater than - value or subquery */
-	readonly $gt?: T | SubqueryExpression;
-	/** Greater than or equal - value or subquery */
-	readonly $gte?: T | SubqueryExpression;
-	/** Less than - value or subquery */
-	readonly $lt?: T | SubqueryExpression;
-	/** Less than or equal - value or subquery */
-	readonly $lte?: T | SubqueryExpression;
+	/** Equals (explicit) - value or expression (subquery, column, ExpressionRef) */
+	readonly $eq?: T | ValueExpression;
+	/** Not equals - value or expression (subquery, column, ExpressionRef) */
+	readonly $neq?: T | ValueExpression;
+	/** Greater than - value or expression (subquery, column, ExpressionRef) */
+	readonly $gt?: T | ValueExpression;
+	/** Greater than or equal - value or expression (subquery, column, ExpressionRef) */
+	readonly $gte?: T | ValueExpression;
+	/** Less than - value or expression (subquery, column, ExpressionRef) */
+	readonly $lt?: T | ValueExpression;
+	/** Less than or equal - value or expression (subquery, column, ExpressionRef) */
+	readonly $lte?: T | ValueExpression;
 	/** In array */
 	readonly $in?: readonly T[];
 	/** LIKE pattern matching */
@@ -74,7 +77,11 @@ export interface FilterOperators<T = unknown> {
  * - null (IS NULL)
  * - Operator object ({ $gt: 18 })
  */
-export type FilterValue<T = unknown> = T | null | FilterOperators<T>;
+export type FilterValue<T = unknown> =
+	| T
+	| null
+	| ValueExpression
+	| FilterOperators<T>;
 
 /**
  * Object filter type for WHERE clause.
@@ -104,15 +111,45 @@ export type WhereFilter<T = Record<string, unknown>> = {
 // ============================================================================
 
 /**
+ * The member that every `WhereIntent` of a kind carries, used to tell an
+ * intent from an object filter over a column named `kind` (#624).
+ */
+const WHERE_INTENT_MEMBER: Readonly<Record<WhereIntent['kind'], string>> = {
+	and: 'conditions',
+	or: 'conditions',
+	not: 'condition',
+	comparison: 'field',
+	like: 'field',
+	in: 'field',
+	any: 'field',
+	null: 'field',
+	range: 'field',
+	subquery: 'field',
+	jsonContains: 'field',
+	jsonExists: 'field',
+	exists: 'relation',
+	notExists: 'relation',
+	relationFilter: 'relation',
+	rawExists: 'subquery',
+	rawNotExists: 'subquery',
+	expression: 'expr',
+};
+
+/**
  * Check if a value is a WhereIntent (not an object filter).
+ *
+ * True only when `kind` is a `WhereIntent` kind and the object owns that
+ * kind's member (`conditions`, `condition`, `field`, `relation`, `subquery`
+ * or `expr`). An object filter over a column named `kind` is therefore not an
+ * intent; one that also names the kind's member column is, and is written in
+ * operator form instead (`{ kind: { $eq: 'comparison' }, field: 'x' }`).
  */
 export function isWhereIntent(value: unknown): value is WhereIntent {
-	return (
-		typeof value === 'object' &&
-		value !== null &&
-		'kind' in value &&
-		typeof (value as Record<string, unknown>).kind === 'string'
-	);
+	if (typeof value !== 'object' || value === null) return false;
+	const kind = (value as { readonly kind?: unknown }).kind;
+	if (typeof kind !== 'string' || !Object.hasOwn(WHERE_INTENT_MEMBER, kind))
+		return false;
+	return Object.hasOwn(value, WHERE_INTENT_MEMBER[kind as WhereIntent['kind']]);
 }
 
 /**
@@ -153,7 +190,7 @@ function convertFieldValue(field: string, value: FilterValue): WhereIntent {
 		kind: 'comparison',
 		field,
 		operator: 'eq',
-		value,
+		value: coerceValue(value, 'where'),
 	} satisfies WhereComparisonIntent;
 }
 
@@ -172,7 +209,7 @@ function createComparisonIntent(
 		kind: 'comparison',
 		field,
 		operator,
-		value,
+		value: coerceValue(value, 'where'),
 	} satisfies WhereComparisonIntent;
 }
 
@@ -220,7 +257,9 @@ function convertOperatorObject(
 		conditions.push({
 			kind: 'in',
 			field,
-			values: ops.$in,
+			values: Array.isArray(ops.$in)
+				? ops.$in.map((v) => coerceListElement(v, 'where'))
+				: ops.$in,
 		} satisfies WhereInIntent);
 	}
 
@@ -229,7 +268,7 @@ function convertOperatorObject(
 		conditions.push({
 			kind: 'like',
 			field,
-			pattern: ops.$like,
+			pattern: coerceLikePattern(ops.$like, 'where'),
 		} satisfies WhereLikeIntent);
 	}
 
@@ -238,7 +277,7 @@ function convertOperatorObject(
 		conditions.push({
 			kind: 'like',
 			field,
-			pattern: ops.$ilike,
+			pattern: coerceLikePattern(ops.$ilike, 'where'),
 			caseInsensitive: true,
 		} satisfies WhereLikeIntent);
 	}

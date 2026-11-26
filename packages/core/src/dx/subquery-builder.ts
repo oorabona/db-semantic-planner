@@ -25,11 +25,22 @@ import type { ExpressionSpec } from './types.js';
  * @example
  * // Basic scalar subquery
  * query('products')
- *   .where({ price: { $eq: subquery('prices').select('max_price').where({ categoryId: outerRef('categoryId') }) } })
+ *   .where({
+ *     price: {
+ *       $eq: subquery('prices')
+ *         .select('max_price')
+ *         .where(eq('categoryId', outerRef('categoryId')))
+ *         .build(),
+ *     },
+ *   })
  *
  * // With aggregate
  * query('products')
- *   .where({ avgRating: { $gt: subquery('reviews').where({ productId: outerRef('id') }).avg('rating') } })
+ *   .where({
+ *     avgRating: {
+ *       $gt: subquery('reviews').where(eq('productId', outerRef('id'))).avg('rating'),
+ *     },
+ *   })
  */
 export class SubqueryBuilder {
 	private readonly _from: string;
@@ -170,7 +181,7 @@ export class SubqueryBuilder {
 	 * // SELECT id, (SELECT count(*) FROM calls WHERE symbol_id = s.id) AS call_count
 	 * query('symbols').columns([
 	 *   'id',
-	 *   subquery('calls').where({ symbolId: outerRef('id') }).count().asExpr('call_count'),
+	 *   subquery('calls').where(eq('symbolId', outerRef('id'))).count().asExpr('call_count'),
 	 * ])
 	 */
 	asExpr(alias: string): ExpressionSpec {
@@ -197,8 +208,18 @@ export class SubqueryBuilder {
  * Result of building a subquery.
  * This can be used as a value in comparison operations.
  */
+/**
+ * Brand of a genuine `SubqueryExpression`. `Symbol.for` keeps it recognised
+ * across copies of the package, and a plain object (a JSON value with a
+ * `_type: 'subquery'` key) never carries it.
+ */
+const SUBQUERY_EXPRESSION_BRAND: unique symbol = Symbol.for(
+	'dbsp:subquery-expression',
+);
+
 export class SubqueryExpression {
 	readonly _type = 'subquery' as const;
+	readonly [SUBQUERY_EXPRESSION_BRAND] = true as const;
 	readonly intent: QueryIntent;
 
 	constructor(intent: QueryIntent) {
@@ -269,7 +290,7 @@ export class SubqueryExpression {
  *   price: {
  *     $eq: subquery('products')
  *       .select('price')
- *       .where({ categoryId: outerRef('categoryId') })
+ *       .where(eq('categoryId', outerRef('categoryId')))
  *       .max('price')
  *   }
  * })
@@ -290,7 +311,7 @@ export function subquery(table: string): SubqueryBuilder {
  *
  * @example
  * // Reference parent 'id' column in subquery
- * subquery('reviews').where({ productId: outerRef('id') })
+ * subquery('reviews').where(eq('productId', outerRef('id')))
  */
 export function outerRef(column: string): SubqueryRefIntent {
 	// `outer: true` is the discriminator that distinguishes this genuine
@@ -313,8 +334,8 @@ export function outerRef(column: string): SubqueryRefIntent {
 // ============================================================================
 
 /**
- * Check if a value is a SubqueryExpression.
- * Used to detect subqueries in object filter processing.
+ * Check if a value is a SubqueryExpression, by its brand: a plain object with
+ * the same keys is data, not a subquery.
  */
 export function isSubqueryExpression(
 	value: unknown,
@@ -322,7 +343,8 @@ export function isSubqueryExpression(
 	return (
 		typeof value === 'object' &&
 		value !== null &&
-		'_type' in value &&
-		(value as Record<string, unknown>)._type === 'subquery'
+		(value as { [SUBQUERY_EXPRESSION_BRAND]?: unknown })[
+			SUBQUERY_EXPRESSION_BRAND
+		] === true
 	);
 }

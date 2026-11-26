@@ -950,4 +950,33 @@ describe('expression-constructor leaf refusals (ADR 0011)', () => {
 			`Invalid caseWhen().else: undefined ${OBJECT_HINT}`,
 		);
 	});
+
+	it.each(['eq', 'neq', 'gt', 'gte', 'lt', 'lte'] as const)(
+		'AC2x six ExpressionRef methods intents: %s stores a ColumnRef value as an ExpressionRef',
+		(method) => {
+			const intent = ref('score')[method](posts.id);
+			expect(intent.value).toBeInstanceOf(ExpressionRef);
+			expect((intent.value as ExpressionRef).intent).toEqual({
+				kind: 'ref',
+				column: 'posts.id',
+			});
+		},
+	);
+
+	it('R2 ExpressionRef method entry: builders, sql() and relation ColumnRefs are refused', () => {
+		expectNotYet(
+			() => ref('score').eq(subquery('posts').select('id')),
+			'a query builder',
+			1053,
+		);
+		expectInvalid(
+			() => ref('score').gt(sql('now()')),
+			'Invalid ExpressionRef.gt: sql() is only accepted as an update or upsert value; use literal(), param() or an expression here',
+		);
+		expectNotYet(
+			() => ref('score').lt(posts.author.name),
+			'a relation-reached ColumnRef',
+			1052,
+		);
+	});
 });

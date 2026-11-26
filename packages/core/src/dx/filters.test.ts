@@ -1,4 +1,4 @@
-import { EXPRESSION_BRAND } from '@dbsp/types';
+import { EXPRESSION_BRAND, NotYetSupportedError } from '@dbsp/types';
 /**
  * DX-003: Filter Helpers Tests
  *
@@ -7,9 +7,13 @@ import { EXPRESSION_BRAND } from '@dbsp/types';
 
 import { describe, expect, it } from 'vitest';
 
+import { caseWhen } from './case-when-builder.js';
+import { InvalidOperationError } from './errors.js';
+import { ref as exprRef, literal } from './expressions.js';
 import type { DistinctField } from './filters.js';
 import {
 	and,
+	any,
 	coalesce,
 	col,
 	distinct,
@@ -37,6 +41,10 @@ import {
 	SQL_RAW_MARKER,
 	sql,
 } from './filters.js';
+import { createOrm } from './orm.js';
+import { ref, schema } from './schema.js';
+import { outerRef, subquery } from './subquery-builder.js';
+import { createMockAdapter } from './test-utils.js';
 
 // ============================================================================
 // Feature 1: Comparison Operators
@@ -823,8 +831,6 @@ describe('relationColumn() helper', () => {
 // DX-040: Type-Safe Filter Tests with ColumnRef
 // ============================================================================
 
-import { ref, schema } from './schema.js';
-
 describe('Type-safe filters with ColumnRef (DX-040)', () => {
 	// Create a test schema with typed tables
 	const testSchema = schema({
@@ -1108,5 +1114,205 @@ describe('sql() — raw SQL set expression', () => {
 			const expr = { [SQL_RAW_MARKER]: true as const, sql: 'now()' };
 			expect(isSqlRaw(expr)).toBe(true);
 		});
+	});
+});
+
+// ============================================================================
+// Filter operand refusals (ADR 0011, delivery 2)
+// ============================================================================
+
+describe('filter operand refusals (ADR 0011 delivery 2)', () => {
+	const filterDb = schema({
+		users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			title: 'text',
+			score: 'integer',
+			user_id: ref('users', { as: 'author' }),
+		},
+	});
+	const orm = createOrm({ schema: filterDb, adapter: createMockAdapter() });
+	const posts = orm.tables.posts;
+	const OBJECT_HINT =
+		'is not an expression argument; use literal(null), param(value) or an expression';
+	const SQL_MESSAGE =
+		'sql() is only accepted as an update or upsert value; use literal(), param() or an expression here';
+	const UNFINISHED =
+		'caseWhen() is unfinished; complete it with .else(value) before using it as a value';
+
+	function thrown(build: () => unknown): unknown {
+		try {
+			build();
+		} catch (error) {
+			return error;
+		}
+		throw new Error('expected a refusal, got none');
+	}
+
+	function expectNotYet(
+		build: () => unknown,
+		construct: string,
+		position: string,
+		issue: number,
+	): void {
+		const error = thrown(build);
+		expect(error).toBeInstanceOf(NotYetSupportedError);
+		const article = /^[aeiou]/i.test(position) ? 'an' : 'a';
+		expect(error).toMatchObject({
+			construct,
+			position,
+			issue,
+			message: `${construct} in ${article} ${position} is not supported yet (#${issue}).`,
+		});
+	}
+
+	function expectInvalid(build: () => unknown, message: string): void {
+		const error = thrown(build);
+		expect(error).toBeInstanceOf(InvalidOperationError);
+		expect((error as Error).message).toBe(message);
+	}
+
+	it('R1 left null undefined object: refused by name', () => {
+		expectInvalid(
+			() => eq(null as never, 1),
+			`Invalid eq: null ${OBJECT_HINT}`,
+		);
+		expectInvalid(
+			() => eq(undefined as never, 1),
+			`Invalid eq: undefined ${OBJECT_HINT}`,
+		);
+		expectInvalid(
+			() => eq({ a: 1 } as never, 1),
+			`Invalid eq: a plain object ${OBJECT_HINT}`,
+		);
+	});
+
+	it('R1 left sql marker: refused by name', () => {
+		expectInvalid(
+			() => eq(sql('now()') as never, 1),
+			`Invalid eq: ${SQL_MESSAGE}`,
+		);
+	});
+
+	it('R1 left outerRef: not yet supported (#1029)', () => {
+		expectNotYet(
+			() => eq(outerRef('id') as never, 1),
+			'outerRef()',
+			'expression argument',
+			1029,
+		);
+	});
+
+	it('R1 left builders: not yet supported (#1053)', () => {
+		expectNotYet(
+			() => eq(orm.select('posts').count() as never, 1),
+			'a query builder',
+			'expression argument',
+			1053,
+		);
+		expectNotYet(
+			() => eq(subquery('posts').select('id') as never, 1),
+			'a query builder',
+			'expression argument',
+			1053,
+		);
+	});
+
+	it('R2 right builders: not yet supported (#1053, #956)', () => {
+		expectNotYet(
+			() => eq('id', subquery('posts').select('id')),
+			'a query builder',
+			'expression argument',
+			1053,
+		);
+		expectNotYet(
+			() => eq('id', orm.select('posts').count()),
+			'a query builder',
+			'expression argument',
+			1053,
+		);
+	});
+
+	it('R2 right sql marker: refused by name', () => {
+		expectInvalid(
+			() => eq('title', sql('now()')),
+			`Invalid eq: ${SQL_MESSAGE}`,
+		);
+	});
+
+	it('R2 right relation ColumnRef: not yet supported (#1052)', () => {
+		expectNotYet(
+			() => eq('title', posts.author.name),
+			'a relation-reached ColumnRef',
+			'expression argument',
+			1052,
+		);
+	});
+
+	it('R2c unfinished caseWhen: refused by name, pointing to .else()', () => {
+		expectInvalid(
+			() => eq('title', caseWhen(eq('score', 1), literal('a'))),
+			`Invalid eq: ${UNFINISHED}`,
+		);
+	});
+
+	it('R4 like expression patterns: not yet supported (#1066)', () => {
+		const cases: readonly [unknown, string][] = [
+			[exprRef('title'), 'an expression'],
+			[posts.title, 'a ColumnRef'],
+			[subquery('posts').max('title'), 'a SubqueryExpression'],
+			[literal('a%'), 'an expression'],
+			[ref('posts.title'), 'ref()'],
+			[orm.select('posts').count(), 'a query builder'],
+		];
+		for (const [pattern, construct] of cases)
+			expectNotYet(
+				() => like('title', pattern as never),
+				construct,
+				'like pattern',
+				1066,
+			);
+	});
+
+	it('R4 like unfinished caseWhen: refused by name, pointing to .else()', () => {
+		expectInvalid(
+			() => like('title', caseWhen(eq('score', 1), literal('a')) as never),
+			`Invalid like: ${UNFINISHED}`,
+		);
+	});
+
+	it('R4 like sql marker: refused by name', () => {
+		expectInvalid(
+			() => like('title', sql('x') as never),
+			`Invalid like: ${SQL_MESSAGE}`,
+		);
+	});
+
+	it('R3 list expression elements: not yet supported (#1064)', () => {
+		expectNotYet(
+			() => inArray('id', [exprRef('id')]),
+			'an expression',
+			'list element',
+			1064,
+		);
+		expectNotYet(
+			() => inArray('id', [posts.id]),
+			'a ColumnRef',
+			'list element',
+			1064,
+		);
+		expectNotYet(
+			() => any('id', [subquery('posts').count()]),
+			'a SubqueryExpression',
+			'list element',
+			1064,
+		);
+	});
+
+	it('R3 list sql marker: refused by name', () => {
+		expectInvalid(
+			() => inArray('id', [sql('1')]),
+			`Invalid inArray: ${SQL_MESSAGE}`,
+		);
 	});
 });

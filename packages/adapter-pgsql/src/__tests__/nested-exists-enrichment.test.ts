@@ -20,6 +20,7 @@ import {
 	createOrm,
 	eq,
 	exists,
+	NotYetSupportedError,
 	or,
 	outerRef,
 	POSTGRESQL_CAPABILITIES,
@@ -634,7 +635,7 @@ describe('scalar-direct guard: limit and orderBy rejected on direct path', () =>
 		);
 	});
 
-	it('decisions-path scalar with LIMIT does not throw (propagation regression)', () => {
+	it('decisions-path scalar with LIMIT is refused as a query builder before planning (ADR 0011)', () => {
 		const orm = buildOrm();
 		const withLimit = {
 			buildIntent: () =>
@@ -649,15 +650,17 @@ describe('scalar-direct guard: limit and orderBy rejected on direct path', () =>
 					limit: 1,
 				}) as any,
 		};
+		// A builder value of a comparison is refused by eq() as not yet
+		// supported (#1053), so the direct-path modifier guard is never reached.
 		expect(() => {
 			(orm as any)
 				.select('users')
 				.where(eq('id', withLimit as any))
 				.dump();
-		}).not.toThrow();
+		}).toThrow(NotYetSupportedError);
 	});
 
-	it('decisions-path scalar with field ORDER BY does not throw (propagation regression)', () => {
+	it('decisions-path scalar with field ORDER BY is refused as a query builder before planning (ADR 0011)', () => {
 		const orm = buildOrm();
 		const withOrder = {
 			buildIntent: () =>
@@ -668,12 +671,14 @@ describe('scalar-direct guard: limit and orderBy rejected on direct path', () =>
 					orderBy: [{ field: 'id', direction: 'asc' as const }],
 				}) as any,
 		};
+		// A builder value of a comparison is refused by eq() as not yet
+		// supported (#1053), so the direct-path modifier guard is never reached.
 		expect(() => {
 			(orm as any)
 				.select('users')
 				.where(eq('id', withOrder as any))
 				.dump();
-		}).not.toThrow();
+		}).toThrow(NotYetSupportedError);
 	});
 });
 
