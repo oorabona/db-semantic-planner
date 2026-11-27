@@ -141,7 +141,6 @@ import {
 	introspectWithExecutor as introspectDb,
 } from './introspection.js';
 import { createParamRef } from './param-ref.js';
-import { compileResolvedExpression } from './resolved-condition-compiler.js';
 import type { PgPhysicalModel } from './physical-model/index.js';
 import { getPostgresqlCapabilitiesTargetVersion } from './postgresql-capabilities.js';
 import {
@@ -162,6 +161,7 @@ import {
 } from './projection-envelope.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
 import { queryScopeForBindingProjections } from './relation-target-projection.js';
+import { compileResolvedExpression } from './resolved-condition-compiler.js';
 import {
 	compileSetOperationEnvelope as compileSetOperationEnvelopeImpl,
 	type SetOperationLeafCompiler,
