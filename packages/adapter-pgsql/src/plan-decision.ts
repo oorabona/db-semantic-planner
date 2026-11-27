@@ -100,9 +100,9 @@ export interface PlanDecision {
 	readonly aggregate?: string;
 	/**
 	 * Apply DISTINCT to a scalar subquery's aggregate (e.g. AVG(DISTINCT price)).
-	 * Deliberately NOT named `distinct` — that field means "this decision's own
-	 * query-level DISTINCT modifier" and `assertNoDroppedDecisionModifiers`
-	 * (subquery-emission.ts) rejects it as unsupported on subquery decisions.
+	 * Deliberately NOT named `distinct`, which would read as the subquery's own
+	 * query-level DISTINCT modifier. This field is scoped to the aggregate
+	 * projection only.
 	 */
 	readonly aggregateDistinct?: boolean;
 	readonly subqueryOperator?: string;
@@ -128,7 +128,7 @@ export interface PlanDecision {
 	/**
 	 * Provenance: the ORIGINAL QueryIntent before lowering.
 	 * Carried through every lowering site (convertIn, convertSubquery,
-	 * normalizeToDecision, dispatchWhere, mapInSubqueryCondition) so that
+	 * normalizeToDecision) so that
 	 * `buildPredicateSubquerySelect` can validate the true caller intent.
 	 *
 	 * Required for IN / scalar / inSubquery / notInSubquery decisions.

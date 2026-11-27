@@ -3,11 +3,6 @@
  * Unit tests for F-005: relation filters compile as EXISTS.
  */
 
-import {
-	compilePlan,
-	type PlanDecision,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
 import { and, createOrm, eq, exists, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -39,45 +34,10 @@ const orm = createOrm({
 });
 
 // ============================================================================
-// Helpers
-// ============================================================================
-
-function compileToSql(plan: SimplifiedPlanReport): {
-	sql: string;
-	parameters: readonly unknown[];
-} {
-	return compilePlan(plan);
-}
-
-// ============================================================================
 // Tests
 // ============================================================================
 
 describe('EXISTS filter compilation (F-005)', () => {
-	describe('belongsTo filter with choice=exists', () => {
-		it('should use derived FK when foreignKey not specified', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'posts',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{
-						type: 'where',
-						operator: 'exists',
-						choice: 'exists',
-						relationType: 'belongsTo',
-						targetTable: 'authors',
-					} satisfies PlanDecision,
-				],
-			};
-
-			const result = compileToSql(plan);
-
-			expect(result.sql).toBe(
-				'SELECT * FROM posts WHERE EXISTS (SELECT 1 FROM authors AS authors_exists_0 WHERE posts.author_id = authors_exists_0.id)',
-			);
-		});
-	});
-
 	describe('multiple EXISTS predicates', () => {
 		it('should compile multiple EXISTS predicates from different filters', () => {
 			const { sql, params } = orm

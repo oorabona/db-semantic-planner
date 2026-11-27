@@ -8,32 +8,10 @@
  * - ResTarget extraction edge cases
  */
 
-import {
-	compilePlan,
-	type PlanDecision,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
 import { createOrm, ref, schema } from '@dbsp/core';
 import { parseSync } from 'pgsql-parser';
 import { describe, expect, it } from 'vitest';
-import { normalizeSQL } from '../ast-helpers.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
-
-function buildJsonAggDecision(
-	overrides: Partial<PlanDecision> = {},
-): PlanDecision {
-	return {
-		type: 'includeStrategy',
-		choice: 'json_agg',
-		relationName: 'posts',
-		targetTable: 'posts',
-		relationType: 'hasMany',
-		foreignKey: 'user_id',
-		parentKey: 'id',
-		orderBy: ['id'],
-		...overrides,
-	};
-}
 
 const rolesDb = schema(
 	{
@@ -115,28 +93,6 @@ function ormFor<
 }
 
 describe('Nested json_agg compilation', () => {
-	it('compiles single-level json_agg include (no children)', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'users',
-			decisions: [buildJsonAggDecision()],
-		};
-
-		const result = compilePlan(plan);
-		const sql = normalizeSQL(result.sql);
-
-		expect(sql).toContain('json_agg');
-		expect(sql).toContain('__t__');
-		expect(sql).toContain('posts');
-		expect(sql).toContain('__t__.user_id = users.id');
-		expect(sql).toContain('order by __t__.id asc nulls last');
-		// Should NOT have jsonb_build_object (no children)
-		expect(sql).not.toContain('jsonb_build_object');
-
-		// Must be valid SQL
-		const parsed = parseSync(result.sql);
-		expect(parsed.stmts).toHaveLength(1);
-	});
-
 	it('compiles two-level nested json_agg (parent → child)', () => {
 		const { sql, params } = ormFor(rolesDb)
 			.select('users')
@@ -200,38 +156,5 @@ describe('Nested json_agg compilation', () => {
 		});
 		// Must be valid SQL
 		expect(parseSync(sql).stmts).toHaveLength(1);
-	});
-
-	it('skips children with missing required fields', () => {
-		// Build child without relationType (omitted, not undefined)
-		const brokenChild: PlanDecision = {
-			type: 'includeStrategy',
-			choice: 'json_agg',
-			relationName: 'orphan',
-			targetTable: 'orphans',
-			foreignKey: 'user_id',
-			parentKey: 'id',
-		};
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'users',
-			decisions: [
-				buildJsonAggDecision({
-					children: [brokenChild],
-				}),
-			],
-		};
-
-		const result = compilePlan(plan);
-		const sql = normalizeSQL(result.sql);
-
-		// Should compile without the broken child
-		expect(sql).toContain('posts');
-		expect(sql).not.toContain('orphans');
-		// Should NOT have jsonb_build_object (child was skipped)
-		expect(sql).not.toContain('jsonb_build_object');
-
-		// Must be valid SQL
-		const parsed = parseSync(result.sql);
-		expect(parsed.stmts).toHaveLength(1);
 	});
 });

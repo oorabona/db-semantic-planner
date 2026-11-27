@@ -309,12 +309,6 @@ function compileJsonAggRecursive(
 			compileResolvedCondition(defaultFilter, innerCtx, state),
 		);
 
-	// Merge pre-compiled filter conditions (from EXISTS propagation via bridge)
-	const compiledFilter = decision._compiledFilterWhere;
-	if (compiledFilter) {
-		whereExpr = andExpr(whereExpr, compiledFilter);
-	}
-
 	// Recursively compile children
 	let childNodes: { key: SqlIdentifier; node: Node }[] | undefined;
 	if (decision.children && decision.children.length > 0) {

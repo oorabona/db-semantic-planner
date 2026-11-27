@@ -68,7 +68,7 @@ describe('resolved include boundary authority', () => {
 			adapter.compile({ ...report, execution, decisions: [] }),
 		).toThrow(
 			new Error(
-				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy',
 			),
 		);
 	});
@@ -108,7 +108,7 @@ describe('resolved include boundary authority', () => {
 			}),
 		).toThrow(
 			new Error(
-				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy',
 			),
 		);
 	});

@@ -500,11 +500,9 @@ export interface Decision {
 	readonly aggregate?: string;
 	/**
 	 * Apply DISTINCT to a scalar subquery's aggregate (e.g. AVG(DISTINCT price)).
-	 * Deliberately NOT named `distinct` — `assertNoDroppedDecisionModifiers`
-	 * (subquery-emission.ts) treats a top-level `distinct === true` on ANY
-	 * subquery decision as an unsupported query-level DISTINCT modifier and
-	 * throws. This field is scoped to the aggregate projection only, so it
-	 * must not collide with that generic guard.
+	 * Deliberately NOT named `distinct`, which would read as the subquery's own
+	 * query-level DISTINCT modifier. This field is scoped to the aggregate
+	 * projection only.
 	 */
 	readonly aggregateDistinct?: boolean;
 	readonly subqueryOperator?: string;
@@ -528,8 +526,6 @@ export interface Decision {
 	// JSON-specific
 	readonly jsonPath?: readonly unknown[];
 	readonly jsonMode?: 'json' | 'text';
-	// Pre-compiled filter from EXISTS propagation (set by compiler, read by json_agg handler)
-	readonly _compiledFilterWhere?: import('@pgsql/types').Node;
 	// Pre-compiled FILTER (WHERE ...) node for aggregate expressions (set by compiler)
 	readonly filterWhere?: import('@pgsql/types').Node;
 	// Custom expression intent for selectCustomExpression, WHERE expression, and ORDER BY expression
@@ -540,7 +536,7 @@ export interface Decision {
 	/**
 	 * Provenance: the ORIGINAL QueryIntent before lowering.
 	 * Set by every lowering site (convertIn, convertSubquery, normalizeToDecision,
-	 * dispatchWhere, mapInSubqueryCondition) so that `buildPredicateSubquerySelect`
+	 * and their mutation-path equivalents) so that `buildPredicateSubquerySelect`
 	 * (subquery-emission.ts) can validate the true caller intent rather than the
 	 * stripped-down lowered decision fields.
 	 *

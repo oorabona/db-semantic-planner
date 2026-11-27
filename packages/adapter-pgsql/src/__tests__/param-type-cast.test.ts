@@ -9,7 +9,6 @@
  * may infer $1 as text instead of integer for nullable columns, causing runtime errors.
  */
 
-import { compilePlan } from '@dbsp/adapter-pgsql/internal';
 import { createOrm, eq, inArray, not } from '@dbsp/core';
 import type { ModelIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
@@ -191,19 +190,6 @@ describe('PARAM-TYPE-CAST: comparison handler emits CAST when originalDbType set
 		});
 	});
 
-	it('does NOT cast when no model is provided (backward compat)', () => {
-		const { sql, parameters } = compilePlan({
-			rootTable: 'items',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{ type: 'where', column: 'id', operator: '=', value: 42 },
-			],
-		});
-		expect(sql).not.toContain('CAST');
-		expect(sql).toContain('$1');
-		expect(parameters).toEqual([42]);
-	});
-
 	it('does NOT cast FieldRef comparisons (column-to-column)', () => {
 		const orm = ormFor('employees', [
 			{ name: 'manager_id', type: 'number', originalDbType: 'integer' },
@@ -346,19 +332,6 @@ describe('PARAM-TYPE-CAST: IN handler emits CAST when originalDbType set', () =>
 			sql: 'SELECT orders.* FROM orders WHERE NOT (orders.state = ANY (CAST($1 AS integer[])))',
 			params: [[0, 9]],
 		});
-	});
-
-	it('does NOT cast IN when no model is provided (backward compat)', () => {
-		const { sql, parameters } = compilePlan({
-			rootTable: 'items',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{ type: 'where', column: 'status', operator: 'in', value: [1, 2, 3] },
-			],
-		});
-		expect(sql).not.toContain('CAST');
-		expect(sql).toContain('$1');
-		expect(parameters).toEqual([[1, 2, 3]]);
 	});
 });
 

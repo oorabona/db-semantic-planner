@@ -109,7 +109,7 @@ describe('#915 / #917 / #927 public include contract', () => {
 				);
 				expect(expected.message).toMatch(/include/i);
 				expect(errorOf(() => adapter.compile(external)).message).toBe(
-					'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+					'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy',
 				);
 			}
 			expect(spy).not.toHaveBeenCalled();
@@ -149,7 +149,7 @@ describe('#915 / #917 / #927 public include contract', () => {
 				});
 				expect(() => adapter.compile({ ...original, intent })).toThrow(
 					new Error(
-						'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+						'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy',
 					),
 				);
 				expect(adapter.compile(ordered).sql).toContain('name DESC');
@@ -193,7 +193,7 @@ describe('#915 / #917 / #927 public include contract', () => {
 			const external: Mutable<PlanReport> = { ...base };
 			external.intent = { ...base.intent!, include: [include] };
 			expect(errorOf(() => adapter.compile(external)).message).toBe(
-				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy',
 			);
 		}
 	});
@@ -217,14 +217,14 @@ describe('#915 / #917 / #927 public include contract', () => {
 			};
 			const expected = errorOf(() => plan(external.intent!, model, caps));
 			expect(errorOf(() => adapter.compile(external)).message).toBe(
-				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy',
 			);
 		}
 		const missing = report();
 		missing.decisions = [];
 		missing.intent = { ...missing.intent, include: [{ relation: 'author' }] };
 		expect(errorOf(() => adapter.compile(missing)).message).toBe(
-			'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy',
 		);
 		missing.intent = {
 			...missing.intent,
@@ -237,12 +237,12 @@ describe('#915 / #917 / #927 public include contract', () => {
 			],
 		};
 		expect(errorOf(() => adapter.compile(missing)).message).toBe(
-			'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy',
 		);
 		const unmodeled = report();
 		unmodeled.decisions = [];
 		expect(errorOf(() => adapter.compile(unmodeled)).message).toBe(
-			'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy',
 		);
 	});
 
@@ -281,7 +281,7 @@ describe('#915 / #917 / #927 public include contract', () => {
 		};
 		expect(errorOf(() => adapter.compile(external))).toHaveProperty(
 			'message',
-			'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy',
 		);
 		expect(
 			errorOf(() => orm.select('posts').include('fooBAr').dump()),
@@ -328,7 +328,7 @@ describe('#915 / #917 / #927 public include contract', () => {
 			include: [{ relation: 'author', include: [{ relation: 'nope' }] }],
 		};
 		expect(errorOf(() => adapter.compile(external)).message).toBe(
-			'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy',
 		);
 	});
 
@@ -416,7 +416,7 @@ describe('#915 / #917 / #927 public include contract', () => {
 				select: { type: 'expressions', columns: [aggregate.intent] },
 			};
 			expect(errorOf(() => adapter.compile(external)).message).toBe(
-				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy',
 			);
 		}
 	});

@@ -420,7 +420,7 @@ export function compileExpressionIntent(
 
 			const caseArgs: Node[] = caseIntent.when.map((branch) => {
 				// dispatch accepts WhereIntent (via normalizeToDecision which handles `kind` field)
-				// Executable queries retain raw conditions; compilePlan keeps its legacy dispatcher.
+				// Planned reads resolve CASE conditions through core; the dispatcher serves the local route.
 				const whenNode = ctx.compileCaseCondition
 					? ctx.compileCaseCondition(branch.condition, ctx, state)
 					: dispatch!(

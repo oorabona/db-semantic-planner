@@ -2,7 +2,7 @@
  * Shared CASE value resolver.
  *
  * Resolves THEN/ELSE values in CASE expressions to AST nodes.
- * Used by both the compiler (compileCaseValue) and the DX handler (resolveCaseValue).
+ * Used by the CASE expression handlers.
  */
 
 import type { Node } from '@pgsql/types';
@@ -19,8 +19,8 @@ import { bindParameter } from './param-value.js';
 
 /**
  * Optional handler for nested CASE expressions.
- * The compiler provides this to delegate back to compileCaseExpression;
- * without it, nested CASE delegates to the shared expression handler.
+ * A caller may supply it to compile a nested CASE itself; without it, nested
+ * CASE delegates to the shared expression handler.
  */
 type NestedCaseHandler = (expr: Record<string, unknown>) => Node;
 type CaseExpressionHandler = (expr: Record<string, unknown>) => Node;

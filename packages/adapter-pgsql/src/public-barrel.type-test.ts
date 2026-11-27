@@ -47,7 +47,43 @@ void executePgTableReaddress;
 
 // @ts-expect-error decision lowering is internal only
 import { compilePlan } from '@dbsp/adapter-pgsql';
-import { compilePlan as internalCompilePlan } from '@dbsp/adapter-pgsql/internal';
 
 void compilePlan;
-void internalCompilePlan;
+
+// The decision compiler and its decision types are not exported from the internal subpath either.
+// biome-ignore format: the expected error must stay on the line after the directive
+// @ts-expect-error decision lowering is not exported from the internal subpath
+export type RemovedInternalBatchValuesJoinDecision = import('@dbsp/adapter-pgsql/internal').BatchValuesJoinDecision;
+// biome-ignore format: the expected error must stay on the line after the directive
+// @ts-expect-error decision lowering is not exported from the internal subpath
+export type RemovedInternalCompiledResult = import('@dbsp/adapter-pgsql/internal').CompiledResult;
+// biome-ignore format: the expected error must stay on the line after the directive
+// @ts-expect-error decision lowering is not exported from the internal subpath
+export type RemovedInternalCompilePlan = typeof import('@dbsp/adapter-pgsql/internal').compilePlan;
+// biome-ignore format: the expected error must stay on the line after the directive
+// @ts-expect-error decision lowering is not exported from the internal subpath
+export type RemovedInternalCompilerOptions = import('@dbsp/adapter-pgsql/internal').CompilerOptions;
+// biome-ignore format: the expected error must stay on the line after the directive
+// @ts-expect-error decision lowering is not exported from the internal subpath
+export type RemovedInternalIsBatchValuesJoinDecision = typeof import('@dbsp/adapter-pgsql/internal').isBatchValuesJoinDecision;
+// biome-ignore format: the expected error must stay on the line after the directive
+// @ts-expect-error decision lowering is not exported from the internal subpath
+export type RemovedInternalIsJoinDecision = typeof import('@dbsp/adapter-pgsql/internal').isJoinDecision;
+// biome-ignore format: the expected error must stay on the line after the directive
+// @ts-expect-error decision lowering is not exported from the internal subpath
+export type RemovedInternalIsPrecompiledJoinDecision = typeof import('@dbsp/adapter-pgsql/internal').isPrecompiledJoinDecision;
+// biome-ignore format: the expected error must stay on the line after the directive
+// @ts-expect-error decision lowering is not exported from the internal subpath
+export type RemovedInternalJoinDecision = import('@dbsp/adapter-pgsql/internal').JoinDecision;
+// biome-ignore format: the expected error must stay on the line after the directive
+// @ts-expect-error decision lowering is not exported from the internal subpath
+export type RemovedInternalPlanCompiler = typeof import('@dbsp/adapter-pgsql/internal').PlanCompiler;
+// biome-ignore format: the expected error must stay on the line after the directive
+// @ts-expect-error decision lowering is not exported from the internal subpath
+export type RemovedInternalPlanDecision = import('@dbsp/adapter-pgsql/internal').PlanDecision;
+// biome-ignore format: the expected error must stay on the line after the directive
+// @ts-expect-error decision lowering is not exported from the internal subpath
+export type RemovedInternalPrecompiledJoinDecision = import('@dbsp/adapter-pgsql/internal').PrecompiledJoinDecision;
+// biome-ignore format: the expected error must stay on the line after the directive
+// @ts-expect-error decision lowering is not exported from the internal subpath
+export type RemovedInternalSimplifiedPlanReport = import('@dbsp/adapter-pgsql/internal').SimplifiedPlanReport;

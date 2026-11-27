@@ -1,80 +1,21 @@
 /**
- * Regression tests: IN-subquery modifier guard on the compilePlan / PlanCompiler path.
+ * Regression tests: IN-subquery body modifier refusals and valid bodies,
+ * through the public select builder with raw WhereIntent bodies (the public
+ * SubqueryBuilder has no groupBy, having, distinct or offset).
  *
- * BACKGROUND
- * ----------
- * The normalizeToDecision guard (handlers/index.ts) fires only when the raw
- * input carries `kind: 'in'` (WhereIntent format).  When a caller constructs a
- * SimplifiedPlanReport directly and sets `decision.operator = 'in'` with a
- * `decision.subquery` that carries forbidden modifiers (GROUP BY, HAVING,
- * OFFSET, DISTINCT, joins, includes, invalid projections), dispatchWhere
- * (compiler.ts ~515) detects the sub, remaps operator to 'inSubquery', and
- * dispatches the already-normalized HandlerDecision — bypassing normalizeToDecision's
- * `case 'in'` branch entirely (normalizeToDecision short-circuits at
- * `input.column !== undefined → return input`).
- *
- * Similarly, mapInSubqueryCondition (compiler.ts ~581) handles nested IN
- * subqueries (an IN inside another subquery's WHERE) via the same build path
- * and must also be guarded.
- *
- * FIX
- * ---
- * assertNoUnsupportedSubqueryModifiers(sub as unknown as QueryIntent, 'IN') is
- * now called in both dispatchWhere and mapInSubqueryCondition before building
- * the HandlerDecision, mirroring the normalizeToDecision and convertIn guards.
- *
- * TEST STRATEGY
- * -------------
- * 1. compilePlan path (dispatchWhere): directly-constructed SimplifiedPlanReport
- *    with operator:'in' + subquery carrying forbidden modifiers → THROWS.
- * 2. Nested IN subquery path (mapInSubqueryCondition): outer IN subquery whose
- *    inner WHERE is itself an 'in' with a sub-subquery carrying forbidden
- *    modifiers → THROWS.
- * 3. Valid plain IN-subquery (select single field / from / optional where) via
- *    compilePlan → compiles correctly (no false positives).
- * 4. Existing mutation-path and decisions-path behavior is not regressed
- *    (verified by the other guard test files).
+ * 1. Forbidden modifiers in an IN-subquery body → NotYetSupportedError.
+ * 2. The same refusals in a nested IN body, including under AND/OR/NOT groups.
+ * 3. Valid plain IN-subquery bodies compile with their exact SQL and params.
  */
 
-import {
-	compilePlan,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
 import { createOrm, schema } from '@dbsp/core';
 import { NotYetSupportedError, type WhereIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { normalizeSQL } from '../ast-helpers.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Build a minimal SimplifiedPlanReport with an IN-subquery WHERE decision.
- * Extra fields on `subqueryOverrides` simulate a directly-constructed plan
- * that carries forbidden modifiers on the subquery object.
- */
-function makePlan(
-	subqueryOverrides: Record<string, unknown>,
-): SimplifiedPlanReport {
-	return {
-		rootTable: 'orders',
-		decisions: [
-			{ type: 'select', column: '*' },
-			{
-				type: 'where',
-				column: 'customer_id',
-				operator: 'in',
-				subquery: {
-					from: 'customers',
-					select: 'id',
-					...subqueryOverrides,
-				} as any,
-			},
-		],
-	};
-}
 
 // ---------------------------------------------------------------------------
 // Public entry: the ORM carries the model and compiles through the adapter
@@ -126,10 +67,10 @@ const inRefusal = (modifier: string) =>
 	new NotYetSupportedError(modifier, 'IN subquery body', 1087);
 
 // ============================================================================
-// 1. compilePlan path (dispatchWhere) — forbidden modifiers → throws
+// 1. IN-subquery body through orm.select().where() — forbidden modifiers → throws
 // ============================================================================
 
-describe('compilePlan: IN-subquery with dropped modifiers → throws (dispatchWhere guard)', () => {
+describe('IN-subquery body with dropped modifiers → throws', () => {
 	it('OFFSET in IN-subquery → throws', () => {
 		expect(() => dumpIn(inBody({ offset: 5 }))).toThrow(inRefusal('OFFSET'));
 	});
@@ -152,42 +93,19 @@ describe('compilePlan: IN-subquery with dropped modifiers → throws (dispatchWh
 			inRefusal('GROUP BY'),
 		);
 	});
-
-	it('subquery in decision.value (alternate shape) with GROUP BY → also throws', () => {
-		// dispatchWhere also checks decision.value when decision.subquery is absent
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'in',
-					value: {
-						from: 'customers',
-						select: 'id',
-						groupBy: ['region'],
-					} as any,
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/GROUP BY in an IN subquery body is not supported yet \(#1087\)/,
-		);
-	});
 });
 
 // ============================================================================
-// 2. Nested IN subquery path (mapInSubqueryCondition) — forbidden modifiers → throws
+// 2. Nested IN subquery body — forbidden modifiers → throws
 // ============================================================================
 
-describe('compilePlan: nested IN-subquery (mapInSubqueryCondition) — forbidden modifiers → throws', () => {
+describe('nested IN-subquery body — forbidden modifiers → throws', () => {
 	/**
 	 * Outer IN: orders.customer_id IN (SELECT id FROM customers WHERE id IN subquery)
-	 * Inner IN subquery carries a forbidden modifier — must be caught by
-	 * mapInSubqueryCondition's guard before producing corrupted SQL.
+	 * Inner IN subquery carries a forbidden modifier — the nested body is refused
+	 * before any SQL is produced.
 	 */
-	it('nested IN subquery with GROUP BY → throws (mapInSubqueryCondition guard)', () => {
+	it('nested IN subquery with GROUP BY → throws', () => {
 		expect(() =>
 			dumpIn(
 				inBody({
@@ -236,10 +154,10 @@ describe('compilePlan: nested IN-subquery (mapInSubqueryCondition) — forbidden
 });
 
 // ============================================================================
-// 3. Valid IN-subquery via compilePlan → compiles correctly (no false positives)
+// 3. Valid IN-subquery bodies → compile correctly (no false positives)
 // ============================================================================
 
-describe('compilePlan: valid IN-subquery still compiles (no false positives)', () => {
+describe('valid IN-subquery body still compiles (no false positives)', () => {
 	it('IN-subquery with inner WHERE → compiles correctly', () => {
 		expect(
 			dumpIn(
@@ -274,24 +192,6 @@ describe('compilePlan: valid IN-subquery still compiles (no false positives)', (
 		});
 	});
 
-	it('NOT IN subquery (plain) → compiles to <> all subquery', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'notIn',
-					subquery: { from: 'blocked', select: 'id' },
-				},
-			],
-		};
-		const result = compilePlan(plan);
-		expect(normalizeSQL(result.sql)).toContain('<> all');
-		expect(normalizeSQL(result.sql)).toContain('blocked');
-	});
-
 	it('valid nested IN (inner subquery plain, no modifiers) → compiles correctly', () => {
 		expect(
 			dumpIn(
@@ -308,320 +208,19 @@ describe('compilePlan: valid IN-subquery still compiles (no false positives)', (
 // 4. Nested IN with subquery in `value` (not `subquery`) — DEFECT 1 guard
 // ============================================================================
 
-describe('compilePlan: nested IN with subquery in pd.value — mapInSubqueryCondition guard', () => {
-	/**
-	 * Outer IN uses `subquery` (normal shape).
-	 * Inner WHERE uses `value` instead of `subquery` to carry the nested subquery
-	 * (the shape the plan-decision-extractor produces).
-	 * The inner value-shape subquery carries GROUP BY — must be caught.
-	 */
-	it('nested IN with value-shape subquery carrying GROUP BY → throws', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'in',
-					subquery: {
-						from: 'customers',
-						select: 'id',
-						where: {
-							type: 'where',
-							column: 'id',
-							operator: 'in',
-							// value-shape: subquery in `value`, not `subquery`
-							value: {
-								from: 'preferred',
-								select: 'customer_id',
-								groupBy: ['tier'],
-							},
-						} as any,
-					} as any,
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/GROUP BY in an IN subquery body is not supported yet \(#1087\)/,
-		);
-	});
-
-	it('nested IN with value-shape subquery carrying HAVING → throws', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'in',
-					subquery: {
-						from: 'customers',
-						select: 'id',
-						where: {
-							type: 'where',
-							column: 'id',
-							operator: 'in',
-							value: {
-								from: 'preferred',
-								select: 'customer_id',
-								having: {
-									kind: 'comparison',
-									field: 'count',
-									operator: 'gt',
-									value: 0,
-								},
-							},
-						} as any,
-					} as any,
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/HAVING in an IN subquery body is not supported yet \(#1087\)/,
-		);
-	});
-
-	it('nested IN with value-shape subquery carrying OFFSET → throws', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'in',
-					subquery: {
-						from: 'customers',
-						select: 'id',
-						where: {
-							type: 'where',
-							column: 'id',
-							operator: 'in',
-							value: {
-								from: 'preferred',
-								select: 'customer_id',
-								offset: 5,
-							},
-						} as any,
-					} as any,
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/OFFSET in an IN subquery body is not supported yet \(#1087\)/,
-		);
-	});
-
-	it('nested IN with value-shape subquery carrying DISTINCT → throws', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'in',
-					subquery: {
-						from: 'customers',
-						select: 'id',
-						where: {
-							type: 'where',
-							column: 'id',
-							operator: 'in',
-							value: {
-								from: 'preferred',
-								select: 'customer_id',
-								distinct: true,
-							},
-						} as any,
-					} as any,
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/DISTINCT in an IN subquery body is not supported yet \(#1087\)/,
-		);
-	});
-
-	it('nested IN with value-shape plain subquery (no modifiers) → compiles as real subquery, NOT bound param', () => {
-		// This is the primary regression test for DEFECT 1:
-		// a value-shape nested IN with a valid plain subquery must compile to
-		// a real IN (SELECT ...) subquery, NOT bind the object as a $n parameter.
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'in',
-					subquery: {
-						from: 'customers',
-						select: 'id',
-						where: {
-							type: 'where',
-							column: 'id',
-							operator: 'in',
-							// value-shape: plain subquery (valid — no forbidden modifiers)
-							value: {
-								from: 'preferred',
-								select: 'customer_id',
-							},
-						} as any,
-					} as any,
-				},
-			],
-		};
-		const result = compilePlan(plan);
-		// Must contain the inner table name (proves the subquery was compiled, not bound)
-		expect(normalizeSQL(result.sql)).toContain('preferred');
-		// The outer IN subquery must be present
-		expect(normalizeSQL(result.sql)).toContain('= any');
-		// No parameter should be a subquery object (the inner subquery must not appear in params)
-		for (const p of result.parameters) {
-			const isSubqueryObject =
-				p !== null &&
-				typeof p === 'object' &&
-				!Array.isArray(p) &&
-				'from' in (p as object);
-			expect(isSubqueryObject).toBe(false);
-		}
-	});
-});
-
 // ============================================================================
 // 5. Typeless { fields: [...] } shape — DEFECT 2 guard
 // ============================================================================
-
-describe('compilePlan: typeless { fields: [...] } select shape — assertNoUnsupportedSubqueryModifiers guard', () => {
-	it('typeless multi-field select { fields: ["id", "region"] } → throws', () => {
-		// Previously: assertNoUnsupportedSubqueryModifiers only checked select.type === 'fields'.
-		// A typeless { fields: ['id', 'region'] } (no `type` property) silently slipped through
-		// and the compiler truncated to fields[0], producing wrong SQL.
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'in',
-					subquery: {
-						from: 'customers',
-						select: { fields: ['id', 'region'] } as any, // typeless, no `type`
-					} as any,
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with multi-field projection \[id, region\].*is not supported/,
-		);
-	});
-
-	it('typeless single-field select { fields: ["id"] } → compiles correctly', () => {
-		// Single-field typeless shape is valid and must not be rejected.
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'in',
-					subquery: {
-						from: 'customers',
-						select: { fields: ['id'] } as any, // typeless, no `type`, single field
-					} as any,
-				},
-			],
-		};
-		const result = compilePlan(plan);
-		expect(normalizeSQL(result.sql)).toContain('= any');
-		expect(normalizeSQL(result.sql)).toContain('customers');
-	});
-
-	it('typeless { fields: undefined } select → throws (undefined fields key present)', () => {
-		// { fields: undefined } has the key present — isSelectWithFields in the compiler
-		// matches it and falls back to '*', producing invalid ANY(*) SQL.
-		// assertNoUnsupportedSubqueryModifiers must catch it.
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'in',
-					subquery: {
-						from: 'customers',
-						select: { fields: undefined } as any,
-					} as any,
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with empty fields list.*is not supported/,
-		);
-	});
-
-	it('typeless { fields: [] } select → throws (empty array)', () => {
-		// Empty array also triggers the '*' fallback — must be rejected.
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'in',
-					subquery: {
-						from: 'customers',
-						select: { fields: [] } as any,
-					} as any,
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with empty fields list.*is not supported/,
-		);
-	});
-
-	it('typeless { fields: ["id"] } select → compiles correctly (single field, no type key)', () => {
-		// A single-field typeless shape must be accepted — it is valid.
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'in',
-					subquery: {
-						from: 'customers',
-						select: { fields: ['id'] } as any,
-					} as any,
-				},
-			],
-		};
-		const result = compilePlan(plan);
-		expect(normalizeSQL(result.sql)).toContain('= any');
-		expect(normalizeSQL(result.sql)).toContain('customers');
-	});
-});
 
 // ============================================================================
 // 6. DEFECT 1 — logical group wrapping in inner WHERE
 // ============================================================================
 
-describe('compilePlan: IN subquery with logical group (whereAnd/whereOr) wrapping child IN — DEFECT 1 recursion guard', () => {
+describe('IN subquery with a logical group (AND/OR/NOT) wrapping a child IN — DEFECT 1 recursion guard', () => {
 	/**
-	 * Outer IN subquery's `where` is a whereAnd group. One child of the group is
-	 * itself an IN-subquery carrying a forbidden modifier (GROUP BY).
-	 * mapInSubqueryCondition must recurse into the group's children and fire the
-	 * guard, rather than letting mapToHandlerDecision silently drop the subquery
-	 * and fall through to the plain-in handler.
+	 * Outer IN subquery's `where` is an AND/OR/NOT group. One child of the group
+	 * is itself an IN-subquery carrying a forbidden modifier; the refusal must
+	 * reach that child rather than the subquery being dropped.
 	 */
 	it('outer IN whose inner WHERE is an AND of eq and in+groupBy → throws', () => {
 		expect(() =>

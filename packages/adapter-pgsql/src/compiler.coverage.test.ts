@@ -20,10 +20,6 @@
  */
 
 import {
-	PlanCompiler,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
-import {
 	and,
 	createOrm,
 	eq,
@@ -36,9 +32,7 @@ import {
 	subquery,
 	wCount,
 } from '@dbsp/core';
-import { markNqlTrustedRelationFilter } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
-import { normalizeSQL } from './ast-helpers.js';
 import { createPgCompileOnlyAdapter } from './pgsql-adapter.js';
 
 function createCompileOrm(
@@ -210,20 +204,6 @@ const hopDb = schema({
 const hopOrm = createCompileOrm(hopDb);
 
 describe('PlanCompiler - Coverage Tests', () => {
-	describe('Schema scoping', () => {
-		it('plan.schema overrides compiler schema', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				schema: 'plan_schema',
-				decisions: [{ type: 'select', column: '*' }],
-			};
-			const compiler = new PlanCompiler({ schema: 'compiler_schema' });
-			const result = compiler.compile(plan);
-			expect(result.sql).toContain('plan_schema');
-			expect(result.sql).not.toContain('compiler_schema');
-		});
-	});
-
 	describe('Lock clauses (FOR UPDATE/SHARE)', () => {
 		it('compiles FOR UPDATE', () => {
 			const { sql, params } = coverageOrm.select('jobs').forUpdate().dump();
@@ -331,97 +311,6 @@ describe('PlanCompiler - Coverage Tests', () => {
 	});
 
 	describe('binding relation columns', () => {
-		function bindingRelationColumnPlan(
-			fields: {
-				readonly relation?: string;
-				readonly relationType?:
-					| 'belongsTo'
-					| 'hasOne'
-					| 'hasMany'
-					| 'belongsToMany'
-					| 'manyToMany';
-				readonly cardinality?: 'one' | 'many';
-				readonly targetTable?: string;
-				readonly sourceColumn?: string | readonly string[];
-				readonly targetColumn?: string | readonly string[];
-				readonly through?: string;
-				readonly throughSourceColumn?: string;
-				readonly throughTargetColumn?: string;
-				readonly selectedColumn?: string;
-				readonly recursive?: {
-					readonly direction: 'up' | 'down';
-					readonly maxDepth: number;
-					readonly selfRefColumn: string;
-					readonly targetKeyColumn: string;
-				};
-			} = {},
-		): SimplifiedPlanReport {
-			const selectedColumn = fields.selectedColumn ?? 'title';
-			const relation = fields.relation ?? 'posts';
-			const sourceColumn = Array.isArray(fields.sourceColumn)
-				? fields.sourceColumn
-				: [fields.sourceColumn ?? 'id'];
-			const targetColumn = Array.isArray(fields.targetColumn)
-				? fields.targetColumn
-				: [fields.targetColumn ?? 'authorId'];
-			const relationColumn = markNqlTrustedRelationFilter(
-				{
-					type: 'selectRelationColumn',
-					relation,
-					column: selectedColumn,
-					alias: `${relation}.${selectedColumn}`,
-				},
-				{
-					relation,
-					targetTable: fields.targetTable ?? 'posts',
-					sourceColumn,
-					targetColumn,
-					hops: [],
-					selectedColumn,
-					...(fields.cardinality !== undefined && {
-						cardinality: fields.cardinality,
-					}),
-					...(fields.relationType !== undefined && {
-						relationType: fields.relationType,
-					}),
-					...(fields.through !== undefined && {
-						through: fields.through,
-					}),
-					...(fields.throughSourceColumn !== undefined && {
-						throughSourceColumn: fields.throughSourceColumn,
-					}),
-					...(fields.throughTargetColumn !== undefined && {
-						throughTargetColumn: fields.throughTargetColumn,
-					}),
-					...(fields.recursive !== undefined && {
-						recursive: fields.recursive,
-					}),
-				},
-			);
-			return {
-				rootTable: 'projected_users',
-				decisions: [relationColumn],
-			};
-		}
-
-		it('rejects trusted recursive binding relation columns when recursive metadata is missing', () => {
-			const compiler = new PlanCompiler();
-
-			expect(() =>
-				compiler.compile(
-					bindingRelationColumnPlan({
-						relation: 'ascendant',
-						cardinality: 'many',
-						relationType: 'hasMany',
-						targetTable: 'categories',
-						sourceColumn: 'parentId',
-						targetColumn: 'id',
-						selectedColumn: 'name',
-					}),
-				),
-			).toThrow(/missing recursive metadata/);
-		});
-
 		it('throws before SQL construction when recursive CTEs are unsupported by the dialect', () => {
 			const orm = createCompileOrm(bindingDb, {}, (adapter) =>
 				withDialect(adapter, { supportsRecursiveCTE: false }),
@@ -464,23 +353,6 @@ projected_posts | select id, tags.name`.dump();
 				sql: 'WITH projected_posts AS (SELECT posts.id FROM posts) SELECT projected_posts.id, (SELECT COALESCE(json_agg(rc_0.name ORDER BY CAST(rc_0.name AS text) NULLS LAST), \'[]\'::json) FROM tags AS rc_0 JOIN post_tags AS rc_1 ON rc_0.id = rc_1.tag_id WHERE rc_1.post_id = projected_posts.id) AS "tags.name" FROM projected_posts',
 				params: [],
 			});
-		});
-
-		it('rejects trusted manyToMany binding relation columns forged as cardinality one', () => {
-			const compiler = new PlanCompiler();
-
-			expect(() =>
-				compiler.compile(
-					bindingRelationColumnPlan({
-						relation: 'tags',
-						cardinality: 'one',
-						relationType: 'manyToMany',
-						targetTable: 'tags',
-						targetColumn: 'id',
-						selectedColumn: 'name',
-					}),
-				),
-			).toThrow(/must use cardinality 'many' with complete junction proof/);
 		});
 
 		it('allocates distinct junction aliases for two manyToMany binding relation columns', () => {
@@ -551,27 +423,6 @@ p | select id, author.company.country.name`.dump(),
 			);
 		});
 
-		it('rejects cardinality-one dotted binding relation columns without resolved hops', () => {
-			const compiler = new PlanCompiler();
-
-			expect(() =>
-				compiler.compileBindingRelationColumnSubquery(
-					{
-						relation: 'author.company',
-						targetTable: 'authors',
-						sourceColumn: ['authorId'],
-						targetColumn: ['id'],
-						hops: [],
-						selectedColumn: 'name',
-						cardinality: 'one',
-						relationType: 'belongsTo',
-					},
-					{ rootTable: 'projected_posts', decisions: [] },
-					undefined,
-				),
-			).toThrow(/dotted but missing resolved hops/);
-		});
-
 		it('throws before SQL construction when hasMany aggregation is unsupported by the dialect', () => {
 			const orm = createCompileOrm(bindingDb, {}, (adapter) =>
 				withDialect(adapter, { supportsJsonAgg: false }),
@@ -585,59 +436,6 @@ u | select id, authored.title`.dump(),
 					'JSON aggregation for NQL binding relation columns is not supported by this adapter',
 				),
 			);
-		});
-
-		it('throws before SQL construction for manyToMany without complete junction proof', () => {
-			const compiler = new PlanCompiler();
-
-			expect(() =>
-				compiler.compile(
-					bindingRelationColumnPlan({
-						cardinality: 'many',
-						relationType: 'manyToMany',
-						targetTable: 'posts;drop',
-					}),
-				),
-			).toThrow(/missing complete junction proof/);
-		});
-
-		it.each([undefined] as const)(
-			'throws before SQL construction for cardinality many with relationType %s',
-			(relationType) => {
-				const compiler = new PlanCompiler();
-
-				expect(() =>
-					compiler.compile(
-						bindingRelationColumnPlan({
-							cardinality: 'many',
-							relationType,
-							targetTable: 'posts;drop',
-						}),
-					),
-				).toThrow(/only hasMany or manyToMany can be aggregated \(ref-#192\)/);
-			},
-		);
-	});
-
-	describe('selectPseudoColumn', () => {
-		it('compiles ancestors pseudo-column', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'categories',
-				decisions: [
-					{
-						type: 'selectPseudoColumn',
-						traversal: 'ancestors',
-						column: 'id',
-						pkColumn: 'id',
-						fkColumn: 'parent_id',
-						alias: 'ancestor_ids',
-					},
-				],
-			};
-			const compiler = new PlanCompiler();
-			const result = compiler.compile(plan);
-			// Should compile via recursive CTE
-			expect(result.sql).toBeDefined();
 		});
 	});
 
@@ -675,31 +473,6 @@ u | select id, authored.title`.dump(),
 	});
 
 	describe('IN/NOT IN subquery', () => {
-		it('compiles NOT IN with subquery in decision.value', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{
-						type: 'where',
-						column: 'id',
-						operator: 'notIn',
-						value: {
-							from: 'blocked_users',
-							select: 'user_id',
-						},
-					},
-				],
-			};
-			const compiler = new PlanCompiler();
-			const result = compiler.compile(plan);
-			const sql = normalizeSQL(result.sql);
-			// PostgreSQL uses <> ALL for NOT IN
-			expect(sql).toContain('<>');
-			expect(sql).toContain('all');
-			expect(sql).toContain('blocked_users');
-		});
-
 		it('compiles IN subquery with WHERE condition', () => {
 			const { sql, params } = subqueryOrm
 				.select('posts')
@@ -831,76 +604,6 @@ u | select id, authored.title`.dump(),
 				params: [],
 			});
 		});
-
-		it('uses default primary key column name', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'posts',
-				decisions: [{ type: 'select', column: '*' }],
-			};
-			const compiler = new PlanCompiler();
-			const result = compiler.compile(plan);
-			// Should compile successfully with default pk='id'
-			expect(result.sql).toBeDefined();
-		});
-
-		it('uses custom primary key column name', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'posts',
-				decisions: [{ type: 'select', column: '*' }],
-			};
-			const compiler = new PlanCompiler({ defaultPkColumnName: 'post_id' });
-			const result = compiler.compile(plan);
-			// Should compile with custom pk
-			expect(result.sql).toBeDefined();
-		});
-	});
-
-	describe('Error cases', () => {
-		it('throws on unsupported query type', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [{ type: 'unsupported_type' }],
-			};
-			const compiler = new PlanCompiler();
-			// Should handle gracefully or throw
-			const result = compiler.compile(plan);
-			expect(result.sql).toBeDefined();
-		});
-
-		it('throws on CASE without conditions', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{
-						type: 'selectExpression',
-						expressionType: 'case',
-						conditions: [],
-						alias: 'status',
-					},
-				],
-			};
-			const compiler = new PlanCompiler();
-			expect(() => compiler.compile(plan)).toThrow(
-				'CASE requires at least one WHEN condition',
-			);
-		});
-	});
-
-	describe('CTE (WITH clause)', () => {
-		it('compiles WITH clause when pendingCtes present', () => {
-			// This branch is triggered by includeStrategy decisions that produce CTEs
-			// For coverage, we need a plan that generates pendingCtes
-			// Since we can't easily mock the include handler, we'll rely on integration tests
-			// for full CTE coverage. This test is a placeholder.
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'categories',
-				decisions: [{ type: 'select', column: '*' }],
-			};
-			const compiler = new PlanCompiler();
-			const result = compiler.compile(plan);
-			// Should compile successfully
-			expect(result.sql).toBeDefined();
-		});
 	});
 
 	describe('Lock basics', () => {
@@ -949,85 +652,6 @@ u | select id, authored.title`.dump(),
 		});
 	});
 
-	describe('selectNqlFunction nested argument dispatch', () => {
-		it('throws a structured error for unknown nested NQL SELECT expression kinds', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{
-						type: 'selectNqlFunction',
-						function: 'round',
-						args: [{ kind: 'syntheticNestedSelectExpression' }],
-						alias: 'r',
-					},
-				],
-			};
-			const compiler = new PlanCompiler();
-
-			expect(() => compiler.compile(plan)).toThrowError(
-				expect.objectContaining({
-					name: 'UnhandledNqlSelectExpressionKindError',
-					code: 'ERR_ADAPTER_UNHANDLED_NQL_SELECT_EXPRESSION_KIND',
-					kind: 'syntheticNestedSelectExpression',
-				}),
-			);
-		});
-	});
-
-	describe('selectFunction with table override', () => {
-		it('skips selectFunction when function name is missing', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'orders',
-				decisions: [
-					{
-						type: 'selectFunction',
-						alias: 'cnt',
-					},
-				],
-			};
-			const compiler = new PlanCompiler();
-			const result = compiler.compile(plan);
-			// Should not throw, just skip the decision
-			expect(result.sql).toBeDefined();
-		});
-	});
-
-	describe('selectWindow with table and schema', () => {
-		it('skips selectWindow when function name is missing', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'sales',
-				decisions: [
-					{
-						type: 'selectWindow',
-						alias: 'rank',
-					},
-				],
-			};
-			const compiler = new PlanCompiler();
-			const result = compiler.compile(plan);
-			// Should not throw, just skip
-			expect(result.sql).toBeDefined();
-		});
-	});
-
-	describe('includeStrategy via handler', () => {
-		it('throws for include without strategy choice', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: 'id' },
-					{
-						type: 'includeStrategy',
-						relation: 'posts',
-						targetTable: 'posts',
-					},
-				],
-			};
-			const compiler = new PlanCompiler();
-			expect(() => compiler.compile(plan)).toThrow(/missing strategy/);
-		});
-	});
-
 	describe('lock with JOINs (scoped locking)', () => {
 		it('scopes lock to root table when rawJoins exist', () => {
 			const { sql, params } = coverageOrm
@@ -1040,25 +664,6 @@ u | select id, authored.title`.dump(),
 				sql: "SELECT users.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'title', __t__.title, 'user_id', __t__.user_id) ORDER BY __t__.id ASC NULLS LAST) FROM posts AS __t__ WHERE __t__.user_id = users.id), '[]'::json) AS posts_json FROM users FOR UPDATE SKIP LOCKED",
 				params: [],
 			});
-		});
-	});
-
-	describe('selectExpression non-case types skip', () => {
-		it('skips selectExpression with unknown expressionType', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{
-						type: 'selectExpression',
-						expressionType: 'unknown_type',
-						alias: 'x',
-					},
-				],
-			};
-			const compiler = new PlanCompiler();
-			const result = compiler.compile(plan);
-			// Should not throw, should default to SELECT *
-			expect(result.sql).toBeDefined();
 		});
 	});
 
@@ -1087,25 +692,6 @@ u | select id, authored.title`.dump(),
 	// ==========================================================================
 
 	describe('IN subquery with where, limit and order by', () => {
-		it('handles NOT IN subquery via value.from pattern', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'orders',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{
-						type: 'where',
-						column: 'user_id',
-						operator: 'notIn',
-						value: { from: 'users', select: 'id' },
-					},
-				],
-			};
-			const compiler = new PlanCompiler();
-			const result = compiler.compile(plan);
-			const sql = normalizeSQL(result.sql);
-			expect(sql).toContain('all');
-		});
-
 		it('handles IN subquery with where + limit + orderBy', () => {
 			const { sql, params } =
 				subqueryOrm.nql`posts | where author_id in (users | where active = true | select id | order by name desc | limit 10)`.dump();
@@ -1132,23 +718,6 @@ u | select id, authored.title`.dump(),
 					'IN subquery with multi-field projection [id, author_id] (IN subquery must project exactly one named column — use a single field) is not supported.',
 				),
 			);
-		});
-	});
-
-	describe('compileIncludeViaHandler — branches', () => {
-		it('throws when include decision has no strategy choice', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'posts',
-				decisions: [
-					{
-						type: 'includeStrategy',
-						relationName: 'author',
-						targetTable: 'users',
-					} as any,
-				],
-			};
-			const compiler = new PlanCompiler();
-			expect(() => compiler.compile(plan)).toThrow('missing strategy choice');
 		});
 	});
 
@@ -1189,37 +758,6 @@ u | select id, authored.title`.dump(),
 				sql: 'INSERT INTO users (name) VALUES ($1)',
 				parameters: ['Alice'],
 			});
-		});
-
-		it('throws for unsupported query type', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [{ type: 'merge' } as any],
-			};
-			const compiler = new PlanCompiler();
-			// 'merge' should become detectQueryType='select' since it's not insert/update/delete
-			// Actually let's test it still compiles (falls back to select)
-			const result = compiler.compile(plan);
-			expect(result.sql).toBeDefined();
-		});
-	});
-
-	describe('compileCaseExpression — branches', () => {
-		it('throws when CASE has no conditions', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{
-						type: 'selectExpression',
-						expressionType: 'case',
-						conditions: [],
-					} as any,
-				],
-			};
-			const compiler = new PlanCompiler();
-			expect(() => compiler.compile(plan)).toThrow(
-				'CASE requires at least one WHEN condition',
-			);
 		});
 	});
 

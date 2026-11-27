@@ -7,7 +7,7 @@ import {
 	schema,
 } from '@dbsp/core';
 import type { PlanReport, QueryIntent } from '@dbsp/types';
-import { isPlannedReport } from '@dbsp/types/internal';
+import { isPlannedReport, markPlannedReport } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from './pgsql-adapter.js';
 
@@ -105,7 +105,7 @@ describe('planned report compilation authority', () => {
 });
 
 const refusal =
-	'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation';
+	'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy';
 describe('external include reports lose registry authority', () => {
 	it.each([
 		'serialized',
@@ -133,7 +133,7 @@ describe('external include reports lose registry authority', () => {
 	it('refuses report-shaped input carrying an NQL query field before lowering', () => {
 		const report = { ...external(), query: { type: 'select', from: 'posts' } };
 		Reflect.deleteProperty(report, 'intent');
-		expect(() => adapter.compile(report)).toThrow(refusal);
+		expect(() => adapter.compile(report)).toThrow(new Error(refusal));
 	});
 	it('compiles the issued report and refuses a forged symbol', () => {
 		expect(adapter.compile(planned()).sql).toContain('posts');
@@ -145,9 +145,44 @@ describe('external include reports lose registry authority', () => {
 	});
 	it('refuses external reports without includes', () => {
 		const report = plan({ type: 'select', from: 'posts' }, model);
-		expect(() => adapter.compile({ ...report })).toThrow(refusal);
+		expect(() => adapter.compile({ ...report })).toThrow(new Error(refusal));
 		const legacy = { ...report };
 		delete legacy.execution;
-		expect(() => adapter.compile(legacy)).toThrow(refusal);
+		expect(() => adapter.compile(legacy)).toThrow(new Error(refusal));
+	});
+	it('refuses a planned-marked report without an intent, directly and as an NQL bundle plan', () => {
+		const withoutIntent = markPlannedReport({
+			rootTable: 'posts',
+			decisions: [],
+		} as unknown as PlanReport);
+		const noIntent = new Error(
+			'A select report without an intent reached the adapter.',
+		);
+		expect(() => adapter.compile(withoutIntent)).toThrow(noIntent);
+		expect(() =>
+			adapter.compile({
+				query: { from: 'posts' },
+				plan: withoutIntent,
+			} as never),
+		).toThrow(noIntent);
+	});
+	it('refuses an unplanned NQL bundle plan before reading its intent', () => {
+		const handWritten = {
+			rootTable: 'posts',
+			decisions: [],
+		} as unknown as PlanReport;
+		expect(() =>
+			adapter.compile({ query: { from: 'posts' }, plan: handWritten } as never),
+		).toThrow(new Error(refusal));
+	});
+	it('refuses an NQL bundle whose plan was not planned by this copy', () => {
+		const handWritten = {
+			rootTable: 'posts',
+			decisions: [],
+			intent: { type: 'select', from: 'posts', where: eq('id', 1) },
+		} as unknown as PlanReport;
+		expect(() =>
+			adapter.compile({ query: { from: 'posts' }, plan: handWritten } as never),
+		).toThrow(new Error(refusal));
 	});
 });

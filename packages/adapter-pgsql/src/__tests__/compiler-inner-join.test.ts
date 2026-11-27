@@ -9,7 +9,6 @@
  * which is semantically equivalent.
  */
 
-import { compilePlan } from '@dbsp/adapter-pgsql/internal';
 import { createOrm, eq, exprRef, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -99,28 +98,5 @@ describe('join decision authority', () => {
 			sql: 'SELECT symbols.*, file_1.id AS "file.id", file_1.path AS "file.path", file_1.id AS __dbsp_presence_file FROM symbols JOIN definitions AS file ON symbols.id = file.id JOIN files AS file_1 ON symbols.file_id = file_1.id',
 			params: [],
 		});
-	});
-});
-
-describe('compilePlan join decision authority', () => {
-	it('resolves relation paths from manual join decisions', () => {
-		const result = compilePlan({
-			rootTable: 'calls',
-			decisions: [
-				{ type: 'select', column: '*', table: 'calls' },
-				{ type: 'where', column: 'caller.name', operator: '=', value: 'Alice' },
-				{
-					type: 'join',
-					targetTable: 'users',
-					relationName: 'caller',
-					alias: 'c',
-					sourceColumn: 'caller_id',
-					targetColumn: 'id',
-				},
-			],
-		});
-		expect(result.sql).toBe(
-			'SELECT calls.* FROM calls JOIN users AS c ON calls.caller_id = c.id WHERE c.name = $1',
-		);
 	});
 });

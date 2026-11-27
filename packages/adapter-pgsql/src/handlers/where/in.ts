@@ -139,7 +139,7 @@ export const inHandler: WhereHandler = {
 		// parameter, not a subquery, or the parameter slot holds `undefined`).
 		//
 		// This backstop catches any current or future unguarded path that bypasses
-		// the dispatchWhere / mapInSubqueryCondition / normalizeToDecision guards.
+		// the normalizeToDecision and lowering-site guards.
 		if (!Array.isArray(value)) {
 			const hint =
 				value !== null &&

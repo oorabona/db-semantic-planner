@@ -1,4 +1,3 @@
-import { compilePlan } from '@dbsp/adapter-pgsql/internal';
 import {
 	and,
 	createOrm,
@@ -228,30 +227,6 @@ describe('FILTER context repair regressions', () => {
 			expect(result.params).toEqual([5]);
 		});
 	}
-	it('configured key authorities reach FILTER correlation', () => {
-		const result = compilePlan(
-			{
-				rootTable: 'users',
-				decisions: [
-					{
-						type: 'selectCustomExpression',
-						alias: 'n',
-						expressionIntent: aggregate(
-							exists('posts', { where: eq('score', 7) }),
-						).intent,
-					},
-				],
-			},
-			{
-				defaultPkColumnName: 'custom_pk',
-				deriveFkColumnName: (table, pk) => `z_${table}_${pk}`,
-			},
-		);
-		expect(result.sql).toBe(
-			'SELECT count(*) FILTER (WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.custom_pk = posts_exists_0.z_users_custom_pk AND posts_exists_0.score = $1)) AS n FROM users',
-		);
-		expect(result.parameters).toEqual([7]);
-	});
 	it('model-backed FILTER retains custom keys through logical nesting', () => {
 		const customColumns = {
 			id: { type: 'integer', primaryKey: true },

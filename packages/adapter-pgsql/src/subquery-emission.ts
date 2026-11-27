@@ -2,34 +2,17 @@
  * Predicate Subquery Emission — single chokepoint for IN/scalar/rawExists subqueries.
  *
  * All predicate-subquery SQL emission on the HANDLER path routes through
- * `buildPredicateSubquerySelect`.  Validation runs at TWO layers:
- *
- * LAYER 1 — sourceIntent (when present):
- *   `assertNoUnsupportedSubqueryModifiers(sourceIntent, use)` validates the
- *   ORIGINAL QueryIntent preserved as `Decision.subqueryIntent` during lowering.
- *   Catches modifiers on lowered (intent-derived) decisions.
- *
- * LAYER 2 — decision fields (always):
- *   `assertNoDroppedDecisionModifiers(decision, use)` validates the Decision's own
- *   fields unconditionally.  This catches directly-constructed compilePlan decisions
- *   (no subqueryIntent) whose extra fields — groupBy, having, offset, distinct,
- *   distinctOn, include, joins — would otherwise be silently emitted or dropped.
- *   `mapToHandlerDecision` (compiler.ts) preserves `include` through the mapper, so
- *   an `include` on a directly-constructed decision WOULD reach SQL emission unless
- *   caught here.
- *
- * The combination is exhaustive: lowered decisions are caught via sourceIntent;
- * directly-constructed decisions are caught via their own fields.
+ * `buildPredicateSubquerySelect`, which validates the ORIGINAL QueryIntent
+ * (`assertNoUnsupportedSubqueryModifiers(sourceIntent, use)`) preserved as
+ * `Decision.subqueryIntent` during lowering.
  *
  * PROVENANCE CONTRACT
  * -------------------
- * Lowering (convertIn / convertSubquery / normalizeToDecision / dispatchWhere /
- * mapInSubqueryCondition) strips modifiers from the source QueryIntent before
- * producing a Decision.  `sourceIntent` is the ORIGINAL QueryIntent carried
- * on `Decision.subqueryIntent` (set at each lowering site) so that validation
- * is always run against the true caller intent, even for:
+ * Lowering (convertIn / convertSubquery / normalizeToDecision) strips modifiers
+ * from the source QueryIntent before producing a Decision. `sourceIntent` is the
+ * ORIGINAL QueryIntent carried on `Decision.subqueryIntent` (set at each lowering
+ * site), so validation always runs against the caller's intent, including:
  *   - whereNot with multiple children
- *   - compilePlan direct-decision path
  *   - UPDATE/DELETE mutation path
  *   - nested-logical incl. whereNot-multi-child
  *
@@ -113,88 +96,6 @@ function isColumnOrderBy(
 }
 
 // ============================================================================
-// Decision-level modifier guard (Layer 2 of the dual validation)
-// ============================================================================
-
-/**
- * Guard: throw a clear error if the Decision carries query modifiers that this
- * compilation path does not faithfully emit, or a projection that would produce
- * wrong SQL (GROUP BY, HAVING, OFFSET, DISTINCT, joins, includes, malformed
- * IN projection).
- *
- * This is LAYER 2 of the dual validation in `buildPredicateSubquerySelect`.  It
- * runs unconditionally, complementing the sourceIntent (Layer 1) check:
- *
- * - Layer 1 catches modifiers on lowered (intent-derived) decisions via sourceIntent.
- * - Layer 2 catches modifiers on directly-constructed compilePlan decisions that have
- *   no `subqueryIntent` but whose own fields carry the forbidden modifiers.
- *
- * `mapToHandlerDecision` preserves `include` through the mapper (compiler.ts ~131),
- * so an `include` on a directly-constructed decision WOULD reach SQL emission unless
- * caught here.
- *
- * @internal
- */
-export function assertNoDroppedDecisionModifiers(
-	decision: Decision,
-	use: SubqueryPredicateUse,
-): void {
-	// Cast through unknown to inspect extra fields not present in the typed interface
-	// (directly-constructed plans may add extra properties via `as any`).
-	const d = decision as unknown as Record<string, unknown>;
-	const unsupported: string[] = [];
-
-	if (Array.isArray(d.groupBy) && (d.groupBy as unknown[]).length > 0)
-		unsupported.push('GROUP BY');
-	if (d.having != null) unsupported.push('HAVING');
-	if (d.offset != null) unsupported.push('OFFSET');
-	if (d.distinct === true) unsupported.push('DISTINCT');
-	// An aggregate DISTINCT modifier is only meaningful on an aggregate. A
-	// decision carrying `aggregateDistinct` with no `aggregate` would silently
-	// drop the modifier at emission (the #247 class of bug) — fail loud instead.
-	if (d.aggregateDistinct === true && d.aggregate == null)
-		unsupported.push('aggregate DISTINCT without an aggregate function');
-	if (Array.isArray(d.distinctOn) && (d.distinctOn as unknown[]).length > 0)
-		unsupported.push('DISTINCT ON');
-	if (Array.isArray(d.include) && (d.include as unknown[]).length > 0)
-		unsupported.push('include (relation hydration)');
-	if (Array.isArray(d.joins) && (d.joins as unknown[]).length > 0)
-		unsupported.push('joins');
-
-	// IN-subquery projection validation at the decision level.
-	// The decision's `selectColumn` is what actually gets emitted.
-	// A selectColumn of '*' (with no aggregate) is invalid inside ANY(...).
-	// Also catch a selectColumn that is not a usable string (e.g. an object
-	// from a malformed fields array whose element was not a string).
-	if (use === 'IN') {
-		const selectColumn = decision.selectColumn;
-		const aggregate = decision.aggregate;
-		if (!aggregate) {
-			if (!selectColumn || selectColumn === '*') {
-				unsupported.push(
-					'missing or wildcard selectColumn (IN subquery must project exactly one named column — use .select("col") or .select(["col"]))',
-				);
-			} else if (typeof selectColumn !== 'string') {
-				// Should not happen after normal lowering, but directly-constructed
-				// decisions can carry arbitrary values.
-				unsupported.push(
-					`non-string selectColumn ${JSON.stringify(selectColumn)} (IN subquery must project exactly one named column)`,
-				);
-			}
-		}
-	}
-
-	if (unsupported.length > 0) {
-		const kind =
-			use === 'IN' ? 'IN' : use === 'rawExists' ? 'rawExists' : 'scalar';
-		throw new Error(
-			`${kind} subquery with ${unsupported.join(', ')} is not supported — ` +
-				'it would silently change which rows match; restructure the query or use a CTE.',
-		);
-	}
-}
-
-// ============================================================================
 // Core builder — handler path chokepoint
 // ============================================================================
 
@@ -205,13 +106,8 @@ export function assertNoDroppedDecisionModifiers(
  * the handler path (IN subquery, scalar subquery, inSubquery/notInSubquery
  * handlers).
  *
- * Dual validation:
- *  1. `assertNoUnsupportedSubqueryModifiers(sourceIntent, use)` — validates the
- *     ORIGINAL QueryIntent (provenance from lowering).  Catches modifiers on
- *     lowered intent-derived decisions.
- *  2. `assertNoDroppedDecisionModifiers(decision, use)` — validates the Decision's
- *     own fields unconditionally.  Catches directly-constructed compilePlan
- *     decisions (no subqueryIntent) that carry forbidden modifiers directly.
+ * Validation: `assertNoUnsupportedSubqueryModifiers(sourceIntent, use)` checks
+ * the ORIGINAL QueryIntent (provenance from lowering).
  * The canonical body is compiled through the one condition compiler, with
  * decision dispatch retained for legacy callers.
  *
@@ -239,15 +135,9 @@ export function buildPredicateSubquerySelect(
 	state: CompilerState,
 	dispatch: WhereDispatcher,
 ): Node {
-	// ---- VALIDATION (dual chokepoint for handler path) ------------------------
-	// Layer 1: validate the ORIGINAL QueryIntent (provenance).
-	// Catches modifiers on lowered intent-derived decisions.
+	// ---- VALIDATION (chokepoint for the handler path) -------------------------
+	// Validate the ORIGINAL QueryIntent (provenance) against the body use.
 	assertNoUnsupportedSubqueryModifiers(sourceIntent, use);
-
-	// Layer 2: validate the Decision's own fields unconditionally.
-	// Catches directly-constructed compilePlan decisions (no subqueryIntent)
-	// whose own fields carry forbidden modifiers or a malformed projection.
-	assertNoDroppedDecisionModifiers(decision, use);
 
 	// Correlation is refused only on the route without the condition callback.
 	// The subquery builder without a parent returns values for the caller to
