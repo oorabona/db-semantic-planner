@@ -460,7 +460,7 @@ export function compileRecursive<T = unknown>(
 							logicalTable: startTable,
 						},
 					),
-					...(deps.model !== undefined && { model: deps.model }),
+					model: deps.model,
 					...(deps.declaredNames !== undefined && {
 						declaredNames: deps.declaredNames,
 					}),

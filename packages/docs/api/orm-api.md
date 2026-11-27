@@ -1474,7 +1474,7 @@ This is transparent — no code changes needed. The adapter resolves types from 
 
 ## 9. Naming Conventions
 
-Compilation requires a model: every `PgAdapter` compilation method, and `compile()` on an NQL bundle, throws `PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.` when neither the adapter nor the compile options carry a `ModelIR`. The ORM and NQL pass their schema's model, so an ORM over `createPgCompileOnlyAdapter()` compiles.
+Compilation requires a model: `compile` (on a planned report or an NQL bundle), `compileSelectExpression`, the mutation compilers and `compileCteQuery` throw `PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.` when neither the adapter nor the compile options carry a `ModelIR` (`compileRecursive` and `compileSetOperation` take the model as an argument). The ORM and NQL pass their schema's model, so an ORM over `createPgCompileOnlyAdapter()` compiles.
 
 Relation keys of a planned read come from the model. Where a compiled plan carries no key of its own, the adapter assumes a primary key named `id` and derives a foreign key column with a `singularize(tableName) + "_" + pkColumn` convention (the `posts` table with PK `id` gives `post_id`). Both conventions are configurable.
 
@@ -1499,7 +1499,7 @@ const adapter = createPgAdapter(pool, {
 | `defaultPkColumnName` | `string` | `'id'` | Primary-key column assumed where a compiled plan carries no key |
 | `deriveFkColumnName` | `(table: string, pk: string) => string` | `singularize(table)_pk` | Derives the FK column where a compiled plan carries no key |
 
-Hand-built `ModelIR` relations use their declared key vectors, falling back only to the referenced table’s declared primary key, when included, joined or used in a relation predicate; traversing such a relation without a declared foreign key column is refused by relation name. Relation guards of UPDATE, DELETE and upsert do not follow this rule yet.
+Hand-built `ModelIR` relations use their declared key vectors, falling back only to the referenced table’s declared primary key, when included, joined or used in a relation predicate; traversing such a relation without a declared foreign key column is refused by relation name.
 
 ### NamingPlugin — Physical Column Names
 
