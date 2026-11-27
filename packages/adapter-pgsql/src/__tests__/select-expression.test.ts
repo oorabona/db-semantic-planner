@@ -969,6 +969,14 @@ describe('ordering, grouping, aggregate and window leaves (ADR 0011 delivery 3)'
 			'SELECT posts.id FROM posts ORDER BY lower(title) DESC NULLS LAST',
 			[],
 		]);
+		expect(
+			sqlOf(
+				q()
+					.columns(['id'])
+					.orderBy([{ column: fn('lower', exprRef('title')) }])
+					.dump(),
+			),
+		).toEqual(['SELECT posts.id FROM posts ORDER BY lower(title) ASC', []]);
 	});
 
 	it('AC4 orderBy unchanged forms: strings, records and expressions keep their SQL', () => {
@@ -1331,6 +1339,17 @@ describe('ordering, grouping, aggregate and window leaves (ADR 0011 delivery 3)'
 			),
 		).toEqual([
 			'SELECT posts.id, row_number() OVER (PARTITION BY author.name) AS w FROM posts JOIN users AS author ON posts.user_id = author.id',
+			[],
+		]);
+		expect(
+			sqlOf(
+				q()
+					.join('author')
+					.columns(['id', rowNumber().orderBy(posts.author.name).as('w')])
+					.dump(),
+			),
+		).toEqual([
+			'SELECT posts.id, row_number() OVER (ORDER BY author.name ASC) AS w FROM posts JOIN users AS author ON posts.user_id = author.id',
 			[],
 		]);
 	});
