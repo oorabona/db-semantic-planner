@@ -37,6 +37,8 @@ const tables = {
 		meta: { type: 'jsonb', nullable: true },
 		created: { type: 'timestamp', nullable: true },
 		data: { type: 'text', dbType: 'bytea', nullable: true },
+		flag: { type: 'boolean', nullable: true },
+		big: { type: 'bigint', nullable: true },
 		user_id: ref('users', { as: 'author' }),
 	},
 } as const;
@@ -294,6 +296,29 @@ describe('ADR 0011 delivery 4: mutation value leaves', () => {
 			sql: 'INSERT INTO posts (id, score) VALUES ($1, (SELECT count(*) FROM users WHERE users.id = (SELECT max(posts_1.user_id) FROM posts AS posts_1 WHERE posts_1.user_id = users.id)))',
 			params: [1],
 		});
+		// Each value has its own allocator: the second row gets posts_1 again.
+		const nested = () =>
+			subquery('users')
+				.where(
+					eq(
+						'id',
+						subquery('posts')
+							.where(eq('user_id', outerRef('users.id')))
+							.max('user_id'),
+					),
+				)
+				.count();
+		const cell =
+			'(SELECT count(*) FROM users WHERE users.id = (SELECT max(posts_1.user_id) FROM posts AS posts_1 WHERE posts_1.user_id = users.id))';
+		expect(
+			insert([
+				{ id: 1, score: nested() },
+				{ id: 2, score: nested() },
+			]),
+		).toEqual({
+			sql: `INSERT INTO posts (id, score) VALUES ($1, ${cell}), ($2, ${cell})`,
+			params: [1, 2],
+		});
 		expect(
 			insert([{ id: 1, score: op('+', literal(1), literal(2)) }, { id: 2 }]),
 		).toEqual({
@@ -460,6 +485,18 @@ describe('ADR 0011 delivery 4: mutation value leaves', () => {
 			);
 			expect(converted.params).toEqual([1, custom, 2, custom]);
 		}
+		const symbolFunction = { a: 1, [Symbol('serialise')]: () => null };
+		const viaSymbol = insert(
+			[
+				{ id: 1, meta: symbolFunction },
+				{ id: 2, meta: symbolFunction },
+			],
+			UNNEST,
+		);
+		expect(viaSymbol.sql).toBe(
+			'INSERT INTO posts (id, meta) VALUES ($1, $2), ($3, $4)',
+		);
+		expect(viaSymbol.params).toEqual([1, symbolFunction, 2, symbolFunction]);
 		let getterCalls = 0;
 		const accessor = Object.defineProperty({}, 'toJSON', {
 			enumerable: false,
@@ -481,6 +518,26 @@ describe('ADR 0011 delivery 4: mutation value leaves', () => {
 		expect(viaAccessor.params[1]).toBe(accessor);
 		expect(viaAccessor.params[3]).toBe(accessor);
 		expect(getterCalls).toBe(0);
+		const d0 = new Date(0);
+		const d1 = new Date(1);
+		expect(
+			insert(
+				[
+					{ id: 1, created: d0, flag: true, big: 5n, title: 'a' },
+					{ id: 2, created: d1, flag: false, big: 6n, title: 'b' },
+				],
+				UNNEST,
+			),
+		).toEqual({
+			sql: 'INSERT INTO posts (id, created, flag, big, title) SELECT unnest(CAST($1 AS int4[])) AS id, unnest(CAST($2 AS timestamptz[])) AS created, unnest(CAST($3 AS bool[])) AS flag, unnest(CAST($4 AS int8[])) AS big, unnest(CAST($5 AS text[])) AS title',
+			params: [
+				[1, 2],
+				[d0, d1],
+				[true, false],
+				[5n, 6n],
+				['a', 'b'],
+			],
+		});
 		expect(
 			insert(
 				[
@@ -535,6 +592,19 @@ describe('ADR 0011 delivery 4: mutation value leaves', () => {
 				.dump(UNNEST).sql,
 		).toBe(
 			'INSERT INTO c (id, ts, j, lts, lj, n, f, d) SELECT unnest(CAST($1 AS int4[])) AS id, unnest(CAST($2 AS timestamp[])) AS ts, unnest(CAST($3 AS json[])) AS j, unnest(CAST($4 AS timestamptz[])) AS lts, unnest(CAST($5 AS jsonb[])) AS lj, unnest(CAST($6 AS int4[])) AS n, unnest(CAST($7 AS float4[])) AS f, unnest(CAST($8 AS float8[])) AS d',
+		);
+		expect(
+			o
+				.upsert('c')
+				.values([
+					{ id: 1, ...row },
+					{ id: 2, ...row },
+				])
+				.onConflict(['id'])
+				.doNothing()
+				.dump(UNNEST).sql,
+		).toBe(
+			'INSERT INTO c (id, ts, j, lts, lj, n, f, d) SELECT unnest(CAST($1 AS int4[])) AS id, unnest(CAST($2 AS timestamp[])) AS ts, unnest(CAST($3 AS json[])) AS j, unnest(CAST($4 AS timestamptz[])) AS lts, unnest(CAST($5 AS jsonb[])) AS lj, unnest(CAST($6 AS int4[])) AS n, unnest(CAST($7 AS float4[])) AS f, unnest(CAST($8 AS float8[])) AS d ON CONFLICT (id) DO NOTHING',
 		);
 	});
 

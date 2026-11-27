@@ -589,8 +589,10 @@ function valueExpressionIntent(leaf: unknown): ExpressionIntent | undefined {
 /**
  * The value preparer of one mutation statement (ADR 0011 delivery 4). Each
  * value goes through core's `coerceValue`; an expression value is resolved
- * against the target table, bound as the root range of one allocator per
- * statement, and returned as a `CompiledMutationValue`; a `sql()` marker in
+ * against the target table, bound as the root range of an allocator of its
+ * own (each value is a separate SQL scope, and a shared allocator would make
+ * alias searches grow with the batch), and returned as a
+ * `CompiledMutationValue`; a `sql()` marker in
  * `values()` is parsed. Plain values, `param()` wrappers and the `sql()`
  * markers of SET positions are returned unchanged.
  */
@@ -599,14 +601,7 @@ function mutationValuePreparer(
 	table: string,
 	operation: 'insert' | 'update' | 'upsert',
 ): (value: unknown, position: MutationValuePosition) => unknown {
-	let scope:
-		| {
-				readonly allocator: RangeAllocator;
-				readonly root: ReturnType<RangeAllocator['bind']>;
-		  }
-		| undefined;
-	const statementScope = () => {
-		if (scope) return scope;
+	const valueScope = () => {
 		const allocator = new RangeAllocator();
 		const root = allocator.bind(table, table);
 		for (const name of [
@@ -615,8 +610,7 @@ function mutationValuePreparer(
 		]) {
 			allocator.reserve(name);
 		}
-		scope = { allocator, root };
-		return scope;
+		return { allocator, root };
 	};
 	const refuseRead = (
 		reference: { readonly column: string } | { readonly relation: string },
@@ -647,7 +641,7 @@ function mutationValuePreparer(
 				operation,
 				'an expression value requires a ModelIR; pass a model to the adapter or to the compile options',
 			);
-		const { allocator, root } = statementScope();
+		const { allocator, root } = valueScope();
 		const resolved = resolveValueExpression(
 			intent,
 			root,
@@ -710,8 +704,9 @@ function carriedByUnnest(cell: unknown): boolean {
 	// parameter, so an object that customises its serialisation (toPostgres,
 	// toJSON, an accessor) is bound as a VALUES cell. Descriptors are read
 	// without invoking a getter.
-	for (const descriptor of Object.values(
-		Object.getOwnPropertyDescriptors(value),
+	const descriptors = Object.getOwnPropertyDescriptors(value);
+	for (const descriptor of Reflect.ownKeys(descriptors).map(
+		(key) => descriptors[key as keyof typeof descriptors] as PropertyDescriptor,
 	))
 		if (
 			descriptor.get !== undefined ||
