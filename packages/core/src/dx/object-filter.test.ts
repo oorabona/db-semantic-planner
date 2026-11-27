@@ -410,7 +410,7 @@ describe('object filter values and isWhereIntent (ADR 0011 delivery 2)', () => {
 	const orm = createOrm({ schema: filterDb, adapter: createMockAdapter() });
 	const posts = orm.tables.posts;
 	const SQL_MESSAGE =
-		'Invalid where: sql() is only accepted as an update or upsert value; use literal(), param() or an expression here';
+		'Invalid where: sql() is only accepted in set(), values(), doUpdate() and batchSet().set(); use literal(), param() or an expression here';
 	const UNFINISHED =
 		'Invalid where: caseWhen() is unfinished; complete it with .else(value) before using it as a value';
 	const convert = (filter: unknown) =>

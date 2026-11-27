@@ -31,6 +31,7 @@ export function inferPgArrayType(
 				readonly physicalName?: string;
 				readonly logicalTable?: string;
 				readonly logicalColumn?: string;
+				readonly arrayBase?: string;
 		  }
 	>,
 	sampleValue?: unknown,
@@ -47,6 +48,8 @@ export function inferPgArrayType(
 				`Mutation column metadata for '${metadata.logicalTable}.${metadata.logicalColumn}' does not match physical '${columnName}'.`,
 			);
 		}
+		if (typeof metadata === 'object' && metadata.arrayBase !== undefined)
+			return `${metadata.arrayBase}[]`;
 		const databaseType =
 			typeof metadata === 'string' ? metadata : metadata.databaseType;
 		const pgBase = mapToPgBaseType(databaseType);

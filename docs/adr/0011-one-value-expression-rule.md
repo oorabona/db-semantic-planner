@@ -134,8 +134,9 @@ Every argument belongs to one of four classes, recorded per argument in the appe
    - `param(v)` always binds v;
    - `literal(v)` always inlines v, a string `literal()` in a CASE result included;
    - `exprRef('c')` always references a column.
-4. **`sql()` raw markers keep their current, limited role.** They stay valid in `set`, `doUpdate` and batch
-   `scalarSet`, and are refused by name in any other leaf instead of being bound as an object (F14).
+4. **`sql()` raw markers keep a limited role.** They are valid in `set`, `doUpdate`, batch `scalarSet` and, from
+   delivery 4, INSERT and UPSERT `values()` cells, and are refused by name in any other leaf instead of being bound
+   as an object (F14). Batch row cells stay opaque.
 
 ### Composite helpers coerce the user's leaf first
 
@@ -187,7 +188,7 @@ until it can. It never binds the leaf as data.
   - a string `literal()` in a CASE result is inlined instead of bound;
   - an object or `ColumnRef` that used to be bound as garbage in a leaf is refused or resolved, depending on its
     kind;
-  - a `sql()` marker outside `set`, `doUpdate` and `scalarSet` is refused instead of bound;
+  - a `sql()` marker outside `set`, `values()`, `doUpdate` and `scalarSet` is refused instead of bound;
   - in a reference position, `null`, `undefined` and plain objects are refused instead of bound;
   - a non-finite number in a CASE result is bound instead of refused (it widens what compiles);
   - an expression passed to `fullTextSearch({ query })` or as a range tuple bound is inlined instead of bound as an

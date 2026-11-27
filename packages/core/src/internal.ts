@@ -50,6 +50,7 @@ export {
 	MYSQL_CAPABILITIES,
 	SQLITE_CAPABILITIES,
 } from './dialects/index.js';
+export { coerceValue } from './dx/coerce.js';
 export {
 	countDistinctRelationPathsByName,
 	deriveRelationPathFromIntentPath,
@@ -107,7 +108,10 @@ export {
 	validateResolvedIncludeStrategy,
 } from './planner.js';
 export { getRelationalReadPlan } from './relational-read-plans.js';
-export { resolveSelectWhere } from './resolved-conditions.js';
+export {
+	resolveSelectWhere,
+	resolveValueExpression,
+} from './resolved-conditions.js';
 export {
 	observeIncludeDecisions,
 	resolveReportIncludes,
