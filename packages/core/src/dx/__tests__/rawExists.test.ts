@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import type { QueryIntent } from '../../intent-ast.js';
-import { eq, rawExists, rawNotExists } from '../filters.js';
-import { subquery } from '../subquery-builder.js';
+import { InvalidOperationError } from '../errors.js';
+import { eq, inSubquery, rawExists, rawNotExists } from '../filters.js';
+import { createOrm } from '../orm.js';
+import { schema } from '../schema.js';
+import { SubqueryExpression, subquery } from '../subquery-builder.js';
+import { createMockAdapter } from '../test-utils.js';
+
+const NOT_A_SUBQUERY =
+	'this builder is not a subquery; use orm.select(...), subquery(table) or a SubqueryExpression';
+const sessionsIntent: QueryIntent = {
+	type: 'select',
+	from: 'sessions',
+	select: { type: 'fields', fields: ['id'] },
+};
 
 describe('rawExists', () => {
 	it('creates WhereRawExistsIntent from SubqueryBuilder', () => {
@@ -26,41 +38,40 @@ describe('rawExists', () => {
 		});
 	});
 
-	it('creates WhereRawExistsIntent from buildIntent() duck-type', () => {
-		const fakeBuilder = {
-			buildIntent(): QueryIntent {
-				return {
-					type: 'select',
-					from: 'sessions',
-					select: { type: 'fields', fields: ['id'] },
-				};
-			},
-		};
-
-		const result = rawExists(fakeBuilder);
-
-		expect(result.kind).toBe('rawExists');
-		expect(result.subquery.from).toBe('sessions');
+	it('takes a SubqueryExpression as its body, unchanged (ADR 0011 delivery 5)', () => {
+		const sq = new SubqueryExpression(sessionsIntent);
+		expect(rawExists(sq).subquery).toBe(sessionsIntent);
 	});
 
-	it('uses buildIntent() when both build and buildIntent are present', () => {
-		// An object that has both — buildIntent() should win (checked first)
-		const fakeBuilder = {
-			buildIntent(): QueryIntent {
-				return {
-					type: 'select',
-					from: 'winner',
-					select: { type: 'fields', fields: ['id'] },
-				};
-			},
-			build() {
-				throw new Error('build() should not be called');
-			},
-		};
+	it('R2 refuses a mutation builder by name (ADR 0011 delivery 5)', () => {
+		const orm = createOrm({
+			schema: schema({ posts: { id: 'integer', title: 'text' } }),
+			adapter: createMockAdapter(),
+		});
+		expect(() =>
+			rawExists(orm.update('posts').set({ title: 'x' }) as never),
+		).toThrow(new InvalidOperationError('rawExists', NOT_A_SUBQUERY));
+	});
 
-		const result = rawExists(fakeBuilder as Parameters<typeof rawExists>[0]);
+	it('R2 inSubquery refuses any other value with the accepted forms', () => {
+		expect(() => inSubquery('id', {} as never)).toThrow(
+			new InvalidOperationError(
+				'inSubquery',
+				'expected orm.select(...), subquery(table) or a SubqueryExpression',
+			),
+		);
+	});
 
-		expect(result.subquery.from).toBe('winner');
+	it('R2 refuses a structural { buildIntent } object by name, never compiling it (ADR 0011 delivery 5)', () => {
+		expect(() =>
+			rawExists({ buildIntent: () => sessionsIntent } as never),
+		).toThrow(new InvalidOperationError('rawExists', NOT_A_SUBQUERY));
+		expect(() =>
+			rawExists({
+				buildIntent: () => sessionsIntent,
+				build: () => sessionsIntent,
+			} as never),
+		).toThrow(new InvalidOperationError('rawExists', NOT_A_SUBQUERY));
 	});
 });
 
@@ -86,21 +97,15 @@ describe('rawNotExists', () => {
 		});
 	});
 
-	it('creates WhereRawNotExistsIntent from buildIntent() duck-type', () => {
-		const fakeBuilder = {
-			buildIntent(): QueryIntent {
-				return {
-					type: 'select',
-					from: 'deleted_records',
-					select: { type: 'fields', fields: ['id'] },
-				};
-			},
-		};
+	it('takes a SubqueryExpression as its body, unchanged (ADR 0011 delivery 5)', () => {
+		const sq = new SubqueryExpression(sessionsIntent);
+		expect(rawNotExists(sq).subquery).toBe(sessionsIntent);
+	});
 
-		const result = rawNotExists(fakeBuilder);
-
-		expect(result.kind).toBe('rawNotExists');
-		expect(result.subquery.from).toBe('deleted_records');
+	it('R2 refuses a structural { buildIntent } object by name (ADR 0011 delivery 5)', () => {
+		expect(() =>
+			rawNotExists({ buildIntent: () => sessionsIntent } as never),
+		).toThrow(new InvalidOperationError('rawNotExists', NOT_A_SUBQUERY));
 	});
 });
 

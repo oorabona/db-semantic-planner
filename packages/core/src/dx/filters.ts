@@ -53,10 +53,12 @@ import {
 	coerceReference,
 	coerceValue,
 	type ReferenceLeaf,
+	toSubqueryExpression,
 	type ValueExpression,
 } from './coerce.js';
 import { getColumnName, isRelationPathColumn } from './column-utils.js';
 import { InvalidOperationError, validateIdentifier } from './errors.js';
+import type { QueryBuilder } from './query-builder-types.js';
 import type {
 	SubqueryBuilder,
 	SubqueryExpression,
@@ -348,10 +350,36 @@ export function inArray(
 }
 
 /**
+ * A subquery argument of `inSubquery`, `rawExists` and `rawNotExists`
+ * (ADR 0011): a select query builder (its body keeps the builder's filter
+ * policy), a `subquery(table)` builder (its body inherits the enclosing
+ * filters) or a `SubqueryExpression`.
+ */
+export type SubqueryArgument =
+	| QueryBuilder<unknown>
+	| SubqueryBuilder
+	| SubqueryExpression;
+
+function subqueryBody(query: unknown, helper: string): QueryIntent {
+	const subquery = toSubqueryExpression(query, helper);
+	if (subquery === undefined)
+		throw new InvalidOperationError(
+			helper,
+			'expected orm.select(...), subquery(table) or a SubqueryExpression',
+		);
+	return subquery.intent;
+}
+
+/**
  * IN subquery: field IN (SELECT ...)
  *
  * Creates a WHERE condition that checks if a field's value exists
- * in the result set of a subquery.
+ * in the result set of a subquery. Accepts a select query builder
+ * (`orm.select(...)`, whose body keeps its own filter policy), a
+ * `subquery(table)` builder or a `SubqueryExpression`; any other builder is
+ * refused.
+ *
+ * @param query - `orm.select(...)`, `subquery(table)` or a `SubqueryExpression`
  *
  * @example
  * // Users who have posts
@@ -362,17 +390,13 @@ export function inArray(
  */
 export function inSubquery(
 	field: ColumnRef<string, string, unknown> | string,
-	query: SubqueryBuilder | SubqueryExpression,
+	query: SubqueryArgument,
 ): WhereInIntent {
-	const expr =
-		'build' in query
-			? (query as SubqueryBuilder).build()
-			: (query as SubqueryExpression);
 	return scoped(
 		{
 			kind: 'in',
 			field: getColumnName(field),
-			subquery: expr.toIntent(),
+			subquery: subqueryBody(query, 'inSubquery'),
 			...(isRelationPathColumn(field) && { pathRef: true as const }),
 		},
 		field,
@@ -607,8 +631,9 @@ export function notExists(
  * EXISTS with an arbitrary subquery (not FK-resolved).
  *
  * Use when the subquery does not follow a declared schema relation.
- * Accepts a SubqueryBuilder (must have `.build()`) or any builder
- * exposing `buildIntent(): QueryIntent` (e.g. QueryBuilder).
+ * Accepts a select query builder (`orm.select(...)`, whose body keeps its own
+ * filter policy), a `subquery(table)` builder or a `SubqueryExpression`; any
+ * other builder is refused.
  *
  * Root SELECT WHERE resolves body ranges and supported options at plan();
  * unsupported modifiers refuse with the existing compilation message.
@@ -616,7 +641,7 @@ export function notExists(
  * CASE WHEN, aggregate FILTER and SELECT-expression subquery WHERE bodies, including
  * expressions nested in `op(...)`.
  *
- * @param subquery - A SubqueryBuilder or any object with buildIntent()
+ * @param sq - `orm.select(...)`, `subquery(table)` or a `SubqueryExpression`
  *
  * @example
  * // EXISTS (SELECT 1 FROM audit_log WHERE audit_log.entity_type = 'login')
@@ -627,24 +652,17 @@ export function notExists(
  * // EXISTS with a full query builder — polymorphic table, no FK to source
  * rawExists(orm.select('sessions').where(and(eq('status', 'active'), gt('expiresAt', new Date()))))
  */
-export function rawExists(
-	sq: SubqueryBuilder | { buildIntent(): QueryIntent },
-): WhereRawExistsIntent {
-	const intent =
-		'buildSubqueryIntent' in sq && typeof sq.buildSubqueryIntent === 'function'
-			? sq.buildSubqueryIntent()
-			: 'buildIntent' in sq
-				? (sq as { buildIntent(): QueryIntent }).buildIntent()
-				: (sq as SubqueryBuilder).build().toIntent();
-	return { kind: 'rawExists', subquery: intent };
+export function rawExists(sq: SubqueryArgument): WhereRawExistsIntent {
+	return { kind: 'rawExists', subquery: subqueryBody(sq, 'rawExists') };
 }
 
 /**
  * NOT EXISTS with an arbitrary subquery (not FK-resolved).
  *
  * Use when the subquery does not follow a declared schema relation.
- * Accepts a SubqueryBuilder (must have `.build()`) or any builder
- * exposing `buildIntent(): QueryIntent` (e.g. QueryBuilder).
+ * Accepts a select query builder (`orm.select(...)`, whose body keeps its own
+ * filter policy), a `subquery(table)` builder or a `SubqueryExpression`; any
+ * other builder is refused.
  *
  * Root SELECT WHERE resolves body ranges and supported options at plan();
  * unsupported modifiers refuse with the existing compilation message.
@@ -652,7 +670,7 @@ export function rawExists(
  * CASE WHEN, aggregate FILTER and SELECT-expression subquery WHERE bodies, including
  * expressions nested in `op(...)`.
  *
- * @param subquery - A SubqueryBuilder or any object with buildIntent()
+ * @param sq - `orm.select(...)`, `subquery(table)` or a `SubqueryExpression`
  *
  * @example
  * // NOT EXISTS (SELECT 1 FROM bans WHERE bans.reason = 'spam')
@@ -665,16 +683,8 @@ export function rawExists(
  *   subquery('bans').select('id').where(eq('userId', outerRef('id')))
  * ))
  */
-export function rawNotExists(
-	sq: SubqueryBuilder | { buildIntent(): QueryIntent },
-): WhereRawNotExistsIntent {
-	const intent =
-		'buildSubqueryIntent' in sq && typeof sq.buildSubqueryIntent === 'function'
-			? sq.buildSubqueryIntent()
-			: 'buildIntent' in sq
-				? (sq as { buildIntent(): QueryIntent }).buildIntent()
-				: (sq as SubqueryBuilder).build().toIntent();
-	return { kind: 'rawNotExists', subquery: intent };
+export function rawNotExists(sq: SubqueryArgument): WhereRawNotExistsIntent {
+	return { kind: 'rawNotExists', subquery: subqueryBody(sq, 'rawNotExists') };
 }
 
 // ============================================================================

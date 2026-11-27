@@ -449,17 +449,33 @@ describe('mutation values (ADR 0011 delivery 4)', () => {
 				.set({ email: unfinished() }),
 		).toThrow(unfinishedMessage('update'));
 
-		const builder = () =>
-			orm.update('users').set({ name: orm.select('users').count() as never });
-		expect(builder).toThrow(NotYetSupportedError);
-		expect(builder).toThrow(
-			'a query builder in an expression argument is not supported yet (#1053).',
+		// A select or subquery(table) builder compiles as a scalar subquery (ADR
+		// 0011 delivery 5); every other builder is refused by name.
+		const union = () =>
+			orm
+				.select('users')
+				.columns(['id'])
+				.union(orm.select('users').columns(['id'])) as never;
+		const notASubquery = (helper: string) =>
+			`Invalid ${helper}: this builder is not a subquery; use orm.select(...), subquery(table) or a SubqueryExpression`;
+		expect(() => orm.update('users').set({ name: union() })).toThrow(
+			notASubquery('update'),
 		);
+		expect(() => orm.insert('users').values({ id: 1, name: union() })).toThrow(
+			notASubquery('insert'),
+		);
+		expect(() =>
+			orm
+				.upsert('users')
+				.values({ id: 1 })
+				.onConflict(['id'])
+				.doUpdate({ name: union() }),
+		).toThrow(notASubquery('upsert'));
 		const relation = () =>
 			orm.update('posts').set({ title: orm.tables.posts?.author.id as never });
 		expect(relation).toThrow(NotYetSupportedError);
 		expect(relation).toThrow(
-			'a relation-reached ColumnRef in an expression argument is not supported yet (#1052).',
+			'a relation-reached ColumnRef in a mutation value is not supported yet (#1052).',
 		);
 	});
 });

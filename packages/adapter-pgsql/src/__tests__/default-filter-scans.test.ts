@@ -1046,16 +1046,14 @@ describe('selectExpression bodies and nested issued policies', () => {
 	});
 
 	it('compiles an aggregate FILTER in an EXISTS body, where only existence counts', () => {
-		const body = {
-			buildIntent: () => ({
-				type: 'select',
-				from: 'posts',
-				select: {
-					type: 'aggregate',
-					aggregates: [{ function: 'count', field: '*', filter: eq('id', 1) }],
-				},
-			}),
-		} as unknown as Parameters<typeof rawExists>[0];
+		const body = new SubqueryExpression({
+			type: 'select',
+			from: 'posts',
+			select: {
+				type: 'aggregate',
+				aggregates: [{ function: 'count', field: '*', filter: eq('id', 1) }],
+			},
+		} as never);
 		expect(filtered.select('users').where(rawExists(body)).dump().sql).toBe(
 			'SELECT users.* FROM users WHERE EXISTS (SELECT count(*) FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL)',
 		);

@@ -22,6 +22,7 @@ import {
 	plan,
 	rawExists,
 	ref,
+	SubqueryExpression,
 	schema,
 	subquery,
 } from '@dbsp/core';
@@ -145,15 +146,13 @@ describe('nested rawExists inside exists() where clause — NOT silently dropped
 describe('nested rawExists modifier guard still applies', () => {
 	it('exists(posts, { where: rawExists(subquery.limit(0)) }) — guard fires for nested rawExists', () => {
 		const orm = buildOrm();
-		// SubqueryBuilder has no .limit(); pass QueryIntent via buildIntent.
-		const limitedSubquery = {
-			buildIntent: () => ({
-				type: 'select' as const,
-				from: 'auditLog',
-				select: { type: 'fields' as const, fields: ['id'] as const },
-				limit: 0,
-			}),
-		};
+		// SubqueryBuilder has no .limit(); pass the QueryIntent as a SubqueryExpression.
+		const limitedSubquery = new SubqueryExpression({
+			type: 'select' as const,
+			from: 'auditLog',
+			select: { type: 'fields' as const, fields: ['id'] as const },
+			limit: 0,
+		});
 		expect(() => {
 			(orm as any)
 				.select('users')
@@ -168,14 +167,12 @@ describe('nested rawExists modifier guard still applies', () => {
 
 	it('exists(posts, { where: rawExists(subquery.groupBy(...)) }) — guard fires for GROUP BY', () => {
 		const orm = buildOrm();
-		const groupedSubquery = {
-			buildIntent: () => ({
-				type: 'select' as const,
-				from: 'auditLog',
-				select: { type: 'fields' as const, fields: ['id'] as const },
-				groupBy: ['action'],
-			}),
-		};
+		const groupedSubquery = new SubqueryExpression({
+			type: 'select' as const,
+			from: 'auditLog',
+			select: { type: 'fields' as const, fields: ['id'] as const },
+			groupBy: ['action'],
+		});
 		expect(() => {
 			(orm as any)
 				.select('users')

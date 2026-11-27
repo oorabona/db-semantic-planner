@@ -2490,3 +2490,147 @@ describe('conditions holding or inside a query-local body keep their route (#891
 		});
 	});
 });
+
+describe('builder leaves keep their filter policy (ADR 0011 delivery 5)', () => {
+	const tables = {
+		users: {
+			id: { type: 'integer', primaryKey: true },
+			name: 'text',
+			deletedAt: { type: 'timestamp', nullable: true },
+		},
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			title: 'text',
+			score: 'integer',
+			deletedAt: { type: 'timestamp', nullable: true },
+			user_id: ref('users', { as: 'author' }),
+		},
+	} as const;
+	const filteredDb = schema(tables, undefined, {
+		defaultFilters: { posts: isNull('deletedAt'), users: isNull('deletedAt') },
+	});
+	const plainDb = schema(tables);
+	const o = createOrm({
+		schema: filteredDb,
+		adapter: createPgCompileOnlyAdapter({ model: filteredDb.model }),
+		suppressDxWarnings: true,
+	});
+	const p = createOrm({
+		schema: plainDb,
+		adapter: createPgCompileOnlyAdapter({ model: plainDb.model }),
+		suppressDxWarnings: true,
+	});
+	const sqlOf = (dump: { sql: string; params: readonly unknown[] }) => [
+		dump.sql,
+		dump.params,
+	];
+	const correlated = (orm: typeof o | typeof p) =>
+		orm
+			.select('posts')
+			.where(eq('user_id', outerRef('id')))
+			.count({ as: 'n' });
+	const own = () => correlated(o);
+	const optout = () => correlated(o.withoutDefaultFilters());
+	const sqb = () =>
+		subquery('posts')
+			.select('id')
+			.where(eq('user_id', outerRef('id')));
+	const OWN =
+		'(SELECT count(*) AS n FROM posts WHERE posts."deletedAt" IS NULL AND posts.user_id = users.id)';
+	const OPT =
+		'(SELECT count(*) AS n FROM posts WHERE posts.user_id = users.id)';
+
+	it('AC1 own builder in op: the body keeps its own filter', () => {
+		expect(
+			sqlOf(
+				o
+					.select('users')
+					.columns(['id', op('+', own(), 1).as('v')])
+					.dump(),
+			),
+		).toEqual([
+			`SELECT users.id, ${OWN} + 1 AS v FROM users WHERE users."deletedAt" IS NULL`,
+			[],
+		]);
+	});
+
+	it('AC1 opt-out builder in op: the body keeps its opt-out (#1035)', () => {
+		expect(
+			sqlOf(
+				o
+					.select('users')
+					.columns(['id', op('+', optout(), 1).as('v')])
+					.dump(),
+			),
+		).toEqual([
+			`SELECT users.id, ${OPT} + 1 AS v FROM users WHERE users."deletedAt" IS NULL`,
+			[],
+		]);
+	});
+
+	it('AC1 subquery builder in op: the body inherits the enclosing filter', () => {
+		expect(
+			sqlOf(
+				o
+					.select('users')
+					.columns(['id', op('+', sqb(), 1).as('v')])
+					.dump(),
+			),
+		).toEqual([
+			'SELECT users.id, (SELECT posts.id FROM posts WHERE posts."deletedAt" IS NULL AND posts.user_id = users.id) + 1 AS v FROM users WHERE users."deletedAt" IS NULL',
+			[],
+		]);
+	});
+
+	it('AC2 own builder under an unfiltered outer: the body keeps its filter', () => {
+		expect(
+			sqlOf(
+				p
+					.select('users')
+					.columns(['id', fn('abs', own()).as('v')])
+					.dump(),
+			),
+		).toEqual([`SELECT users.id, abs(${OWN}) AS v FROM users`, []]);
+	});
+
+	it('AC2 own builder under an opt-out outer: the body keeps its filter', () => {
+		expect(
+			sqlOf(
+				o
+					.withoutDefaultFilters()
+					.select('users')
+					.columns(['id', fn('abs', own()).as('v')])
+					.dump(),
+			),
+		).toEqual([`SELECT users.id, abs(${OWN}) AS v FROM users`, []]);
+	});
+
+	it('AC2 subquery builder under an opt-out outer: the body inherits no filter', () => {
+		expect(
+			sqlOf(
+				o
+					.withoutDefaultFilters()
+					.select('users')
+					.columns(['id', fn('abs', sqb()).as('v')])
+					.dump(),
+			),
+		).toEqual([
+			'SELECT users.id, abs((SELECT posts.id FROM posts WHERE posts.user_id = users.id)) AS v FROM users',
+			[],
+		]);
+	});
+
+	it('AC2 unfiltered issuer under a filtered outer: the body has no filter', () => {
+		expect(
+			sqlOf(
+				o
+					.select('users')
+					.columns(['id', fn('abs', correlated(p)).as('v')])
+					.dump(),
+			),
+		).toEqual([
+			`SELECT users.id, abs(${OPT}) AS v FROM users WHERE users."deletedAt" IS NULL`,
+			[],
+		]);
+	});
+});

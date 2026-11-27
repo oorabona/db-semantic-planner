@@ -26,6 +26,7 @@ import { requireAdapter as requireAdapterUtil } from './builder-utils.js';
 import { InvalidOperationError } from './errors.js';
 import type { QueryBuilderImpl } from './query-builder.js';
 import type { QueryBuilder } from './query-builder-types.js';
+import { NON_SUBQUERY_BUILDER_BRAND } from './symbols.js';
 
 // ============================================================================
 // CteBuilder
@@ -228,3 +229,12 @@ export class CteQueryBuilder<TResult = unknown> {
 		return this.all();
 	}
 }
+
+// ADR 0011: refused by name as a scalar leaf or a subquery, never planned as a
+// body nor bound as a parameter (coerce.ts, toSubqueryExpression).
+Object.defineProperty(CteBuilder.prototype, NON_SUBQUERY_BUILDER_BRAND, {
+	value: true,
+});
+Object.defineProperty(CteQueryBuilder.prototype, NON_SUBQUERY_BUILDER_BRAND, {
+	value: true,
+});

@@ -27,7 +27,6 @@ import type {
 	WhereIntent,
 	WhereLikeIntent,
 	WhereNullIntent,
-	WhereSubqueryIntent,
 } from '../intent-ast.js';
 import {
 	coerceLikePattern,
@@ -36,7 +35,6 @@ import {
 	type ValueExpression,
 } from './coerce.js';
 import { InvalidOperationError } from './errors.js';
-import { isSubqueryExpression } from './subquery-builder.js';
 
 // ============================================================================
 // Operator Types
@@ -195,16 +193,15 @@ function convertFieldValue(field: string, value: FilterValue): WhereIntent {
 }
 
 /**
- * Create a comparison intent (value or subquery).
+ * Create a comparison intent. A subquery value (a `SubqueryExpression` or a
+ * builder) compiles as the matching filter helper (`gt(field, subquery)` …)
+ * does, through the value leaf rule (ADR 0011).
  */
 function createComparisonIntent(
 	field: string,
 	operator: ComparisonOperator,
 	value: unknown,
 ): WhereIntent {
-	if (isSubqueryExpression(value)) {
-		return value.toWhereIntent(field, operator) satisfies WhereSubqueryIntent;
-	}
 	return {
 		kind: 'comparison',
 		field,

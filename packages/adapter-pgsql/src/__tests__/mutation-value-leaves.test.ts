@@ -748,3 +748,100 @@ describe('ADR 0011 delivery 4: mutation value leaves', () => {
 		expect(d.parameters).toEqual(expected);
 	});
 });
+
+describe('builder values keep their filter policy (ADR 0011 delivery 5)', () => {
+	const filteredTables = {
+		users: {
+			id: { type: 'integer', primaryKey: true },
+			name: 'text',
+			deleted_at: { type: 'timestamp', nullable: true },
+		},
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			title: 'text',
+			score: 'integer',
+			user_id: ref('users', { as: 'author' }),
+		},
+	} as const;
+	const filteredDb = schema(filteredTables, undefined, {
+		defaultFilters: { users: isNull('deleted_at') },
+	});
+	const fo = createOrm({
+		schema: filteredDb,
+		adapter: createPgCompileOnlyAdapter({ model: filteredDb.model }),
+		suppressDxWarnings: true,
+	});
+	const correlated = (o: typeof fo) =>
+		o
+			.select('users')
+			.where(eq('id', outerRef('user_id')))
+			.count({ as: 'n' });
+
+	it('a correlated opt-out builder in set() compiles without the filter', () => {
+		expect(
+			dumped(
+				fo
+					.update('posts')
+					.set({ score: correlated(fo.withoutDefaultFilters()) as never })
+					.where(eq('id', 1))
+					.dump(),
+			),
+		).toEqual({
+			sql: 'UPDATE posts SET score = (SELECT count(*) AS n FROM users WHERE users.id = posts.user_id) WHERE posts.id = $1',
+			params: [1],
+		});
+	});
+
+	it('a correlated own builder in set() keeps its filter', () => {
+		expect(
+			dumped(
+				fo
+					.update('posts')
+					.set({ score: correlated(fo) as never })
+					.where(eq('id', 1))
+					.dump(),
+			),
+		).toEqual({
+			sql: 'UPDATE posts SET score = (SELECT count(*) AS n FROM users WHERE users.deleted_at IS NULL AND users.id = posts.user_id) WHERE posts.id = $1',
+			params: [1],
+		});
+	});
+
+	it('an uncorrelated own builder in values() keeps its filter', () => {
+		expect(
+			dumped(
+				fo
+					.insert('posts')
+					.values({
+						id: 1,
+						score: fo.select('users').count({ as: 'n' }) as never,
+					})
+					.dump(),
+			),
+		).toEqual({
+			sql: 'INSERT INTO posts (id, score) VALUES ($1, (SELECT count(*) AS n FROM users WHERE users.deleted_at IS NULL))',
+			params: [1],
+		});
+	});
+
+	it('an opt-out builder in doUpdate() compiles without the filter', () => {
+		expect(
+			dumped(
+				fo
+					.upsert('posts')
+					.values({ id: 1, score: 0 })
+					.onConflict(['id'])
+					.doUpdate({
+						score: fo
+							.withoutDefaultFilters()
+							.select('users')
+							.count({ as: 'n' }) as never,
+					})
+					.dump(),
+			),
+		).toEqual({
+			sql: 'INSERT INTO posts (id, score) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET score = (SELECT count(*) AS n FROM users)',
+			params: [1, 0],
+		});
+	});
+});

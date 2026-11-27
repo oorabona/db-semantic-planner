@@ -17,6 +17,9 @@ differ fundamentally in *where the schema knowledge comes from*.
   does not correlate its target with the parent. Relation predicates inside the
   body still resolve declared keys and model casts. This is the escape hatch for
   polymorphic tables, ad-hoc cross-schema references, and any target table that has no `ref()` declared toward the source.
+  `rawExists()` also takes `orm.select(...)`, whose body keeps its own filter policy (an
+  `orm.withoutDefaultFilters().select(...)` body stays unfiltered), and a `SubqueryExpression`; any other builder is
+  refused.
 
 ## When
 

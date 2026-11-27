@@ -553,9 +553,35 @@ describe('fullTextSearch and textScore leaves (ADR 0011 delivery 6)', () => {
 				issue,
 			]);
 		};
-		notYet(orm.select('posts'), 'a query builder', 1053);
+		expect(
+			run(
+				orm
+					.select('posts')
+					.columns(['id'])
+					.union(orm.select('posts').columns(['id'])),
+			),
+		).toThrow(
+			`Invalid fullTextSearch: this builder is not a subquery; use orm.select(...), subquery(table) or a SubqueryExpression`,
+		);
 		notYet(posts.author.name, 'a relation-reached ColumnRef', 1052);
 		notYet(outerRef('id'), 'outerRef()', 1029);
+	});
+
+	it('RF2b fts query builder: a select builder is a scalar subquery (ADR 0011 delivery 5)', () => {
+		const where = (query: unknown) =>
+			orm
+				.select('posts')
+				.columns(['id'])
+				.where(fullTextSearch({ query, fields: one, tableAlias: 'posts' }))
+				.dump();
+		const one_col = where(orm.select('posts').columns(['title']).limit(1));
+		expect([one_col.sql, one_col.params]).toEqual([
+			"SELECT posts.id FROM posts WHERE posts @@@ paradedb.boolean(should => ARRAY[paradedb.boost(2, paradedb.parse(field => 'title', query_string => (SELECT posts_1.title FROM posts AS posts_1 LIMIT 1)))])",
+			[],
+		]);
+		expect(() => where(orm.select('posts'))).toThrow(
+			'scalar subquery body projects 5 columns; a scalar subquery yields one value.',
+		);
 	});
 
 	it('RF10 textScore refusals: plain values and relation ColumnRefs', () => {

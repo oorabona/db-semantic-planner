@@ -210,10 +210,12 @@ until it can. It never binds the leaf as data.
 3. `orderBy`, `groupBy`, `distinctOn`, aggregates and windows (Q1-Q8, W1-W2): #1032, plus the expressions these
    positions can carry. A position that cannot carry one yet refuses it with a not-yet error.
 4. Mutation values (M1-M8): #1038 and #1048.
-5. Subquery leaves with the three policy states: #1034, and #1035 for a builder passed directly. A builder converted
-   directly keeps its policy. A `QueryIntent` that has already lost its provenance (`new
-   SubqueryExpression(builder.buildIntent())`) carries none, and keeps inheriting the enclosing filters. #1035 stays
-   open for that producer path, which needs its own decision.
+5. Subquery leaves with the three policy states: #1034, #1035 and #1053. A builder converted directly, or through
+   `QueryBuilder.asExpr(alias)`, keeps its policy; `inSubquery`, `rawExists` and `rawNotExists` take the same
+   conversion (#994), and every other builder is refused by name. `new SubqueryExpression(builder.buildIntent())`
+   uses internal methods outside the public `QueryBuilder` type: it carries no policy and is outside the contract,
+   so #1035 closed with the public routes. Object-filter comparison operators compile a subquery as the matching
+   filter helper does, and a scalar comparison body without a projection is refused.
 6. The composite helpers: `fullTextSearch` (T1-T5), the range helpers (R1), `subquery(t)` field arguments (S1),
    `orm.selectExpression` (S5) and the raw CTE builder's `columns`/`orderBy` (S6). Each coerces its user leaves under
    this rule.

@@ -258,7 +258,11 @@ describe('ON planning contract (#891)', () => {
 			kind: 'subquery' as const,
 			field: 'id',
 			operator: 'eq' as const,
-			subquery: { type: 'select' as const, from: 'users' },
+			subquery: {
+				type: 'select' as const,
+				from: 'users',
+				select: { type: 'fields' as const, fields: ['id'] },
+			},
 		};
 		expect
 			.soft(() => orm.select('calls').join('users', { as: 'u', on }).plan())

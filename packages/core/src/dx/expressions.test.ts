@@ -33,7 +33,7 @@ import {
 import { distinct, eq, sql } from './filters.js';
 import { createOrm } from './orm.js';
 import { schema, ref as schemaRef } from './schema.js';
-import { outerRef, subquery } from './subquery-builder.js';
+import { outerRef } from './subquery-builder.js';
 import { createMockAdapter } from './test-utils.js';
 
 describe('Expression Primitives', () => {
@@ -803,14 +803,15 @@ describe('expression-constructor leaf refusals (ADR 0011)', () => {
 		build: () => unknown,
 		construct: string,
 		issue: number,
+		position = 'expression argument',
 	): void {
 		const error = thrown(build);
 		expect(error).toBeInstanceOf(NotYetSupportedError);
 		expect(error).toMatchObject({
 			construct,
-			position: 'expression argument',
+			position,
 			issue,
-			message: `${construct} in an expression argument is not supported yet (#${issue}).`,
+			message: `${construct} in ${position === 'expression argument' ? 'an' : 'a'} ${position} is not supported yet (#${issue}).`,
 		});
 	}
 
@@ -824,6 +825,19 @@ describe('expression-constructor leaf refusals (ADR 0011)', () => {
 		expectNotYet(() => fn('abs', outerRef('id') as never), 'outerRef()', 1029);
 	});
 
+	it('R7 outerRef in CASE and cast: not yet supported (#1029, #1034)', () => {
+		expectNotYet(
+			() => caseWhen(eq('score', 1), outerRef('id') as never),
+			'outerRef()',
+			1029,
+		);
+		expectNotYet(
+			() => cast(outerRef('id') as never, 'text'),
+			'outerRef()',
+			1029,
+		);
+	});
+
 	it('R2 relation-columnref: a relation-reached ColumnRef in fn() is not yet supported (#1052)', () => {
 		expectNotYet(
 			() => fn('upper', posts.author.name),
@@ -832,19 +846,57 @@ describe('expression-constructor leaf refusals (ADR 0011)', () => {
 		);
 	});
 
-	it('R3 query-builder: a QueryBuilder in fn() is not yet supported (#1053)', () => {
-		expectNotYet(
-			() => fn('abs', orm.select('posts').count() as never),
-			'a query builder',
-			1053,
-		);
-	});
+	const NOT_A_SUBQUERY =
+		'this builder is not a subquery; use orm.select(...), subquery(table) or a SubqueryExpression';
+	const bodyIntent = {
+		type: 'select' as const,
+		from: 'posts',
+		select: { type: 'fields' as const, fields: ['id'] },
+	};
 
-	it('R3 subquery-builder: a SubqueryBuilder still being built in fn() is not yet supported (#1053)', () => {
-		expectNotYet(
-			() => fn('abs', subquery('posts').select('score') as never),
-			'a query builder',
-			1053,
+	it.each([
+		['update', () => orm.update('posts').set({ title: 'x' })],
+		['insert', () => orm.insert('posts').values({ id: 1, title: 'x' })],
+		['upsert', () => orm.upsert('posts').values({ id: 1, title: 'x' })],
+		['delete', () => orm.delete('posts').where(eq('id', 1))],
+		[
+			'union',
+			() =>
+				orm
+					.select('posts')
+					.columns(['id'])
+					.union(orm.select('posts').columns(['id'])),
+		],
+		[
+			'recursive',
+			() =>
+				orm.recursive('t', {
+					base: orm.select('posts').columns(['id']),
+					step: orm.select('posts').columns(['id']),
+				}),
+		],
+	] as const)(
+		'R1 non-select builder (%s): refused by name in fn() (ADR 0011 delivery 5)',
+		(_name, builder) => {
+			expectInvalid(
+				() => fn('abs', builder() as never),
+				`Invalid fn: ${NOT_A_SUBQUERY}`,
+			);
+		},
+	);
+
+	it('R3 structural builder objects: refused by name in fn(), never compiled (ADR 0011 delivery 5)', () => {
+		expectInvalid(
+			() => fn('abs', { buildIntent: () => bodyIntent } as never),
+			`Invalid fn: ${NOT_A_SUBQUERY}`,
+		);
+		expectInvalid(
+			() =>
+				fn('abs', {
+					buildIntent: () => bodyIntent,
+					buildSubqueryIntent: () => bodyIntent,
+				} as never),
+			`Invalid fn: ${NOT_A_SUBQUERY}`,
 		);
 	});
 
@@ -963,11 +1015,10 @@ describe('expression-constructor leaf refusals (ADR 0011)', () => {
 		},
 	);
 
-	it('R2 ExpressionRef method entry: builders, sql() and relation ColumnRefs are refused', () => {
-		expectNotYet(
-			() => ref('score').eq(subquery('posts').select('id')),
-			'a query builder',
-			1053,
+	it('R2 ExpressionRef method entry: non-select builders, sql() and relation ColumnRefs are refused', () => {
+		expectInvalid(
+			() => ref('score').eq(orm.update('posts').set({ title: 'x' }) as never),
+			`Invalid ExpressionRef.eq: ${NOT_A_SUBQUERY}`,
 		);
 		expectInvalid(
 			() => ref('score').gt(sql('now()')),
@@ -977,6 +1028,7 @@ describe('expression-constructor leaf refusals (ADR 0011)', () => {
 			() => ref('score').lt(posts.author.name),
 			'a relation-reached ColumnRef',
 			1052,
+			'comparison value',
 		);
 	});
 });

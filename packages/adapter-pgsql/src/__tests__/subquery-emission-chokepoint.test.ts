@@ -380,6 +380,20 @@ describe('PATH G: scalar-direct (handleSubqueryIntent → buildSubqueryFromInten
 			/LIMIT.*not supported/i,
 		);
 	});
+
+	it('a scalar subquery with no projection throws on the direct path (ADR 0011 delivery 5)', () => {
+		const intent = {
+			kind: 'subquery' as const,
+			field: 'total',
+			operator: 'gt' as const,
+			subquery: { type: 'select' as const, from: 'products' },
+		};
+		expect(() => compileWhereIntent(intent as any, makeDirectCtx())).toThrow(
+			// This path runs the 'scalar-direct' validation (the LIMIT case above is
+			// refused only there); its message label reads "scalar".
+			'scalar subquery with no projection (scalar subquery must project exactly one column — select one field or one aggregate) is not supported.',
+		);
+	});
 });
 
 // ============================================================================

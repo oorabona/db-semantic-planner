@@ -120,7 +120,7 @@ export function fullTextSearch({
 			'fullTextSearch',
 			`tableAlias must be the name of a table or alias in the FROM clause; got ${leafKind(tableAlias)}`,
 		);
-	const coerced = coerceValue(query, 'fullTextSearch');
+	const coerced = coerceValue(query, 'fullTextSearch', 'expression argument');
 	const queryParam = isValueExpression(coerced)
 		? new ExpressionRef(coerceReference(coerced, 'fullTextSearch'))
 		: param(coerced);

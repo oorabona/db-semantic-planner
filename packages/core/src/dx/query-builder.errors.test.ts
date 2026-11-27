@@ -622,24 +622,48 @@ describe('ordering, grouping and aggregate leaf refusals (ADR 0011 delivery 3)',
 		);
 	});
 
-	it('R1 orderBy outerRef and builders: not yet supported', () => {
+	const NOT_A_SUBQUERY =
+		'this builder is not a subquery; use orm.select(...), subquery(table) or a SubqueryExpression';
+
+	it('R1 orderBy outerRef: not yet supported', () => {
 		expectNotYet(
 			() => q().orderBy(outerRef('id')),
 			'outerRef()',
 			'expression argument',
 			1029,
 		);
-		expectNotYet(
-			() => q().orderBy(orm.select('posts').count()),
-			'a query builder',
-			'expression argument',
-			1053,
+	});
+
+	it('R1 orderBy non-select builder: refused by name (ADR 0011 delivery 5)', () => {
+		expectInvalid(
+			() => q().orderBy(orm.update('posts').set({ title: 'x' })),
+			`Invalid orderBy: ${NOT_A_SUBQUERY}`,
 		);
+	});
+
+	it('R3 orderBy structural builder object: refused by name, never read as a record (ADR 0011 delivery 5)', () => {
+		expectInvalid(
+			() =>
+				q().orderBy({
+					buildIntent: () => ({ type: 'select', from: 'posts' }),
+				}),
+			`Invalid orderBy: ${NOT_A_SUBQUERY}`,
+		);
+	});
+
+	it('R4 groupBy select builder: still not yet supported (#1072)', () => {
 		expectNotYet(
-			() => q().orderBy(subquery('posts').select('id')),
+			() => q().groupBy([orm.select('posts').count()]),
 			'a query builder',
-			'expression argument',
-			1053,
+			'GROUP BY',
+			1072,
+		);
+	});
+
+	it('R4b groupBy non-select builder: refused by name (ADR 0011 delivery 5)', () => {
+		expectInvalid(
+			() => q().groupBy([orm.update('posts').set({ title: 'x' })]),
+			`Invalid groupBy: ${NOT_A_SUBQUERY}`,
 		);
 	});
 
@@ -657,6 +681,32 @@ describe('ordering, grouping and aggregate leaf refusals (ADR 0011 delivery 3)',
 		);
 	});
 
+	it('R5 columns builder needs a name: a bare builder column is refused (ADR 0011 delivery 5)', () => {
+		const message =
+			'Invalid columns: a subquery column needs a name; use .asExpr(alias)';
+		expectInvalid(
+			() =>
+				q().columns([
+					'id',
+					orm
+						.select('posts')
+						.where(eq('user_id', outerRef('id')))
+						.count({ as: 'n' }),
+				]),
+			message,
+		);
+		expectInvalid(
+			() =>
+				q().columns([
+					'id',
+					subquery('posts')
+						.select('id')
+						.where(eq('user_id', outerRef('id'))),
+				]),
+			message,
+		);
+	});
+
 	it('R2 columns other refusals: the reference-leaf refusals apply', () => {
 		expectInvalid(
 			() => q().columns([null]),
@@ -671,12 +721,6 @@ describe('ordering, grouping and aggregate leaf refusals (ADR 0011 delivery 3)',
 			'outerRef()',
 			'expression argument',
 			1029,
-		);
-		expectNotYet(
-			() => q().columns([subquery('posts').select('id')]),
-			'a query builder',
-			'expression argument',
-			1053,
 		);
 		expectNotYet(
 			() => orm.select('posts').columns([orm.tables.posts.author.name] as any),

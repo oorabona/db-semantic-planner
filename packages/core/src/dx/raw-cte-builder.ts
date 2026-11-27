@@ -46,6 +46,7 @@ import {
 import type { QueryBuilder } from './query-builder-types.js';
 import type { RefDefinition } from './schema.js';
 import { isSubqueryExpression } from './subquery-builder.js';
+import { NON_SUBQUERY_BUILDER_BRAND } from './symbols.js';
 import { type ColumnRef, isColumnRef } from './table-ref.js';
 import type { ColumnSpec } from './types.js';
 
@@ -328,3 +329,11 @@ export function createRawCteBuilder<TResult = unknown>(
 		model,
 	);
 }
+
+// ADR 0011: refused by name as a scalar leaf or a subquery, never planned as a
+// body nor bound as a parameter (coerce.ts, toSubqueryExpression).
+Object.defineProperty(
+	RawCteQueryBuilder.prototype,
+	NON_SUBQUERY_BUILDER_BRAND,
+	{ value: true },
+);

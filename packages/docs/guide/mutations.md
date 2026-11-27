@@ -59,6 +59,7 @@ The values of `set()`, `values()`, `doUpdate()` and `batchSet().set()` follow on
 | `param(v)` | a bound parameter carrying `v`, as given |
 | an expression: `op()`, `fn()`, a finished `caseWhen()`, `literal()`, `exprRef()`, a subquery, a table `ColumnRef`, a schema `ref()` | compiled SQL |
 | `sql('…')` | the parsed raw fragment |
+| a query builder (`orm.select(...)`, `subquery('t').select('col')`) | a scalar subquery that keeps the builder's filter policy, as in [Subqueries](./subqueries#scalar-subqueries-used-as-expressions); any other builder (a set operation, `withCte()`, `orm.recursive()`, `orm.nql`, a mutation builder) is refused |
 
 In `set()`, `doUpdate()` and `batchSet().set()`, an expression reads the target row:
 

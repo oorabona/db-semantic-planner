@@ -75,7 +75,7 @@ orm.select('symbols')
 // FROM symbols
 ```
 
-`.asExpr('alias')` wraps the `SubqueryExpression` as an `ExpressionSpec` for use in `.columns([...])`. Source: `packages/core/src/dx/subquery-builder.ts:175`.
+`.asExpr('alias')` wraps the `SubqueryExpression` as an `ExpressionSpec` for use in `.columns([...])`. Source: `packages/core/src/dx/subquery-builder.ts:175`. An ORM query builder has the same method: `orm.select('calls').where(eq('symbolId', outerRef('id'))).count({ as: 'n' }).asExpr('callCount')` is a named subquery column that keeps that builder's filter policy. A builder in `.columns([...])` without `.asExpr()` is refused, as a bare `SubqueryExpression` is.
 
 SELECT-expression subqueries, including those nested in `op(...)`, support `outerRef()` in their WHERE and HAVING. Unqualified references bind the immediately enclosing query; qualified references search enclosing queries nearest first: in each query, a written include key wins, then an exact emitted qualifier, otherwise the logical table must have exactly one range. Ambiguous logical tables are refused. A FROM-less `compileSelectExpression()` can correlate nested subqueries to their enclosing subquery, but has no outer table of its own. An `outerRef()` (qualified or unqualified) in its immediate subquery body is refused with `outerRef() requires an enclosing query range.`; it never binds that subquery's own range.
 
@@ -198,7 +198,8 @@ Bodies reached from the root WHERE carry their own resolved ranges and share the
 With a model, a scalar subquery used as a value — in `.columns()`, `.orderBy()`, a HAVING operand, a WHERE expression, or inside `fn`, `op`, CASE or FILTER — is planned as a nested select by the same resolver as a root query, inside its enclosing query:
 
 - Its GROUP BY, HAVING, DISTINCT, DISTINCT ON, ORDER BY, LIMIT, OFFSET, expression projections and lock compile as they do at the root, and its SQL is the root SQL of the same query apart from its alias and the `outerRef()` correlation.
-- Its default filter applies once, first in its WHERE, as at the root. A body built with its own policy (`buildSubqueryIntent()`, `withoutDefaultFilters()`) keeps it; in a mutation WHERE, a body without its own policy is not filtered.
+- Its default filter applies once, first in its WHERE, as at the root. A query builder passed directly, or its `.asExpr(alias)`, keeps its own filter policy: `orm.select(...)` carries its ORM's default filters, `orm.withoutDefaultFilters().select(...)` carries none, whatever the enclosing query uses. A `subquery(table)` builder has no policy of its own and reads the filters in force where it is planned; in a mutation WHERE, a body without its own policy is not filtered. The same holds for `inSubquery()`, `rawExists()` and `rawNotExists()`, which take `orm.select(...)`, `subquery(table)` or a `SubqueryExpression` and refuse any other builder.
+- A builder body is compiled under the enclosing query's schema scope, whatever ORM or `withSchema()` context issued it (#1078).
 - Its alias is its table name when no range of the statement uses that name, otherwise `<table>_1`, `<table>_2`… (cut to 63 bytes).
 - Its plan warnings, raw SQL included, follow the enclosing query's own warnings in that query's `PlanReport.warnings`. A body in a mutation WHERE or in a recursive `start.where` has no such report, so its warnings are not surfaced.
 - A body that projects more than one column is refused: `scalar subquery body projects <n> columns; a scalar subquery yields one value.` The count reads the columns the body's SQL selects: a star, which an absent or empty projection selects, counts as every column of the body's table; duplicate columns count once.

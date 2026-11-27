@@ -8,6 +8,7 @@ import {
 	resolveReportIncludes,
 } from '../resolved-includes.js';
 import { assertUnsupportedNqlDefaultFilters } from './default-filter-refusals.js';
+import { NON_SUBQUERY_BUILDER_BRAND } from './symbols.js';
 /**
  * @fileoverview NQL template literal integration for type-safe queries (DX-040 Block 8).
  *
@@ -2411,3 +2412,9 @@ export function extractPseudoColumnKeywords(
 		recursiveKeywords: [...recursiveKeywords],
 	};
 }
+
+// ADR 0011: refused by name as a scalar leaf or a subquery, never planned as a
+// body nor bound as a parameter (coerce.ts, toSubqueryExpression).
+Object.defineProperty(NqlBuilderImpl.prototype, NON_SUBQUERY_BUILDER_BRAND, {
+	value: true,
+});
