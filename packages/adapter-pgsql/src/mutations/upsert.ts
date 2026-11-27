@@ -31,6 +31,7 @@ import { createTypeCastParamRef } from '../param-ref.js';
 import { queryLocal, type SqlIdentifier } from '../sql-identifier.js';
 import {
 	buildReturningExprs,
+	isCompiledMutationValue,
 	type MutationColumnAddress,
 	type MutationColumnMetadata,
 	type MutationTableMetadata,
@@ -427,6 +428,7 @@ export function compileUnnestUpsert(
  * Convert value to a parameter reference.
  */
 function valueToParam(state: CompilerState, value?: unknown): Node {
+	if (isCompiledMutationValue(value)) return value.compile(state);
 	if (value === null) return { A_Const: { isnull: true } };
 	state.parameters.push(unwrapParamIntent(value) ?? null);
 	state.paramIndex++;

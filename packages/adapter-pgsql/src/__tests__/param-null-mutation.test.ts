@@ -1,4 +1,4 @@
-import { createOrm, eq, param, schema } from '@dbsp/core';
+import { createOrm, eq, literal, param, schema, sql } from '@dbsp/core';
 import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it } from 'vitest';
 import { createCompilerState } from '../handlers/types.js';
@@ -44,6 +44,59 @@ describe('explicit null mutation parameters (#891)', () => {
 			'INSERT INTO t (id, j) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET j = excluded.j',
 		);
 		expect(result.parameters).toEqual([1, null]);
+	});
+	it.each([undefined, { batchThreshold: 0 }])(
+		'param() binds a ParamIntent-shaped object unwrapped one level only (%o)',
+		(options) => {
+			// ADR 0011 delivery 4: the inner object is a cell to bind, so the batch takes
+			// VALUES and the object is bound whole.
+			const inner = { kind: 'param', value: 5 };
+			const result = orm
+				.insert('t')
+				.values([
+					{ id: 1, j: param(inner) as never },
+					{ id: 2, j: param(inner) as never },
+				])
+				.dump(options);
+			expect(result.sql).toBe(
+				'INSERT INTO t (id, j) VALUES ($1, $2), ($3, $4)',
+			);
+			expect(result.parameters).toEqual([1, inner, 2, inner]);
+		},
+	);
+	it('param() never reclassifies its content as an expression or SQL', () => {
+		// ADR 0011 delivery 4: a sql() marker inside param() is data (carried by unnest);
+		// a literal() inside param() is a bound object (a class instance takes VALUES).
+		const marker = sql('now()');
+		const rows = [
+			{ id: 1, j: param(marker) as never },
+			{ id: 2, j: param(marker) as never },
+		];
+		const values = orm.insert('t').values(rows).dump();
+		expect(values.sql).toBe('INSERT INTO t (id, j) VALUES ($1, $2), ($3, $4)');
+		expect(values.parameters).toEqual([1, marker, 2, marker]);
+		expect(values.parameters[1]).toBe(marker);
+		const unnest = orm.insert('t').values(rows).dump({ batchThreshold: 0 });
+		expect(unnest.sql).toBe(
+			'INSERT INTO t (id, j) SELECT unnest(CAST($1 AS int4[])) AS id, unnest(CAST($2 AS jsonb[])) AS j',
+		);
+		expect(unnest.parameters).toEqual([
+			[1, 2],
+			[marker, marker],
+		]);
+		const five = literal(5);
+		for (const options of [undefined, { batchThreshold: 0 }]) {
+			const bound = orm
+				.insert('t')
+				.values([
+					{ id: 1, j: param(five) as never },
+					{ id: 2, j: param(five) as never },
+				])
+				.dump(options);
+			expect(bound.sql).toBe('INSERT INTO t (id, j) VALUES ($1, $2), ($3, $4)');
+			expect(bound.parameters[1]).toBe(five);
+			expect(bound.parameters[3]).toBe(five);
+		}
 	});
 	it('upsert preserves bare undefined as NULL through the ORM', () => {
 		const result = orm

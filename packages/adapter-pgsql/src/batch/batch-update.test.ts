@@ -213,6 +213,38 @@ describe('SC-06: mixed scalar + array SET', () => {
 // ---------------------------------------------------------------------------
 // SC-07: Batch update with RETURNING
 // ---------------------------------------------------------------------------
+describe('batchSet keeps its array casts (ADR 0011 delivery 4)', () => {
+	it('batchSet keeps its array casts', () => {
+		// The INSERT/UPSERT cast corrections do not reach batch row cells (class D).
+		const typed = schema({
+			c: {
+				id: { type: 'integer', primaryKey: true },
+				ts: { type: 'timestamp', dbType: 'timestamp', nullable: true },
+				j: { type: 'json', dbType: 'json', nullable: true },
+				n: { type: 'number', nullable: true },
+				f: { type: 'decimal', dbType: 'float(24)', nullable: true },
+				g: { type: 'decimal', dbType: 'float(25)', nullable: true },
+			},
+		});
+		const orm = createOrm({
+			schema: typed,
+			adapter: createPgCompileOnlyAdapter({ model: typed.model }),
+		});
+		const row = { ts: null, j: null, n: null, f: null, g: null };
+		expect(
+			orm
+				.update('c')
+				.batchSet('id', [
+					{ id: 1, ...row },
+					{ id: 2, ...row },
+				])
+				.dump().sql,
+		).toBe(
+			'UPDATE c SET ts = t.ts,j = t.j,n = t.n,f = t.f,g = t.g FROM unnest(CAST($1 AS int4[]), CAST($2 AS timestamptz[]), CAST($3 AS jsonb[]), CAST($4 AS float8[]), CAST($5 AS float8[]), CAST($6 AS float8[])) AS t(id, ts, j, n, f, g) WHERE c.id = t.id',
+		);
+	});
+});
+
 describe('SC-07: batch update with RETURNING', () => {
 	it('appends RETURNING clause', () => {
 		const adapter = createBatchAdapter();

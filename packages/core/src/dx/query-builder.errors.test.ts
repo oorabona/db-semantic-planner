@@ -529,7 +529,7 @@ describe('ordering, grouping and aggregate leaf refusals (ADR 0011 delivery 3)',
 	const OBJECT_HINT =
 		'is not an expression argument; use literal(null), param(value) or an expression';
 	const SQL_MESSAGE =
-		'sql() is only accepted as an update or upsert value; use literal(), param() or an expression here';
+		'sql() is only accepted in set(), values(), doUpdate() and batchSet().set(); use literal(), param() or an expression here';
 
 	function thrown(build: () => unknown): unknown {
 		try {

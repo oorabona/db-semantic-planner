@@ -771,6 +771,22 @@ describe('scalar subquery bodies compile every clause through core (#891 slice 5
 				params: [1, 0],
 			});
 		});
+		it.each(configs)('AC-1 body-policy as a set value (%s)', (_name, o) => {
+			// ADR 0011 delivery 4: a body's own registered policy holds in a SET value too.
+			const issued = issuedBody(correlated(filtered).columns(['id']).limit(1));
+			expect(
+				dumped(
+					o
+						.update('users')
+						.set({ bonus: issued.asExpr('v') as never })
+						.where(eq('id', 1))
+						.dump(),
+				),
+			).toEqual({
+				sql: `UPDATE users SET bonus = (SELECT posts.id FROM posts WHERE ${FILTER}posts.user_id = users.id LIMIT 1) WHERE users.id = $1`,
+				params: [1],
+			});
+		});
 	});
 
 	describe('AC4 body aliases and correlation', () => {

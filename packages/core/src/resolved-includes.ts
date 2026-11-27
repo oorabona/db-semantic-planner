@@ -33,6 +33,7 @@ import {
 	type HavingAggregate,
 	resolveConditionContext,
 	resolveScanDefaultFilter,
+	type UnreadableRange,
 } from './resolved-conditions.js';
 import { classifyScalarBody, nextSelectBody } from './scalar-body.js';
 
@@ -408,6 +409,7 @@ export function resolveReportIncludes(
 			/** The names written for ranges of each enclosing scope, aligned with `enclosing`. */
 			readonly qualifiers: readonly ReadonlyMap<string, ResolvedRange>[];
 			readonly entryDepth: number;
+			readonly unreadableRange?: UnreadableRange;
 		};
 	} = {},
 ): { readonly execution: SelectExecution; readonly intent: QueryIntent } {
@@ -435,6 +437,9 @@ export function resolveReportIncludes(
 		...(nested && {
 			entryDepth: nested.entryDepth,
 			outerQualifiers: nested.qualifiers,
+		}),
+		...(nested?.unreadableRange && {
+			unreadableRange: nested.unreadableRange,
 		}),
 		...(options.isLocalSource && { isLocalSource: options.isLocalSource }),
 	};

@@ -167,6 +167,39 @@ export interface MutationColumnAddress {
 
 export interface MutationColumnMetadata extends MutationColumnAddress {
 	readonly databaseType: string;
+	/**
+	 * The element type of an INSERT/UPSERT `unnest` array cast when it differs
+	 * from what `databaseType` maps to (a physical `timestamp` or `json`, the
+	 * logical `number`, `float(1..24)`).
+	 */
+	readonly arrayBase?: string;
+}
+
+/** Brand of a mutation value already resolved to SQL (an expression or a `sql()` marker). */
+export const COMPILED_MUTATION_VALUE: unique symbol = Symbol(
+	'compiled mutation value',
+);
+
+/**
+ * A mutation value resolved before compilation: it emits its SQL node, and
+ * records its parameters, when the statement reaches it, so parameters keep
+ * statement order.
+ */
+export interface CompiledMutationValue {
+	readonly [COMPILED_MUTATION_VALUE]: true;
+	readonly compile: (state: CompilerState) => Node;
+}
+
+export function isCompiledMutationValue(
+	value: unknown,
+): value is CompiledMutationValue {
+	return (
+		typeof value === 'object' &&
+		value !== null &&
+		(value as { [COMPILED_MUTATION_VALUE]?: unknown })[
+			COMPILED_MUTATION_VALUE
+		] === true
+	);
 }
 
 export interface MutationTableMetadata {
@@ -1030,6 +1063,7 @@ export function valueToNode(
 	dbType?: string,
 	forceParam = false,
 ): Node {
+	if (isCompiledMutationValue(value)) return value.compile(state);
 	const normalizedValue = normalizeParamIntent(value);
 	const isParam = isParamIntent(normalizedValue);
 	const boundValue = unwrapParamIntent(normalizedValue);

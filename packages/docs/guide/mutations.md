@@ -24,7 +24,7 @@ orm.insert('users')
 
 ### Bulk Insert
 
-Pass an array to `.values()` to insert multiple rows in a single statement. Missing enumerable own keys use the column DEFAULT in that row, while explicit `undefined` or `null` uses SQL NULL; heterogeneous inserts always use VALUES. Heterogeneous inserts are limited to 131,070 cells (rows × union columns, twice the PostgreSQL bind limit); split larger batches by shape.
+Pass an array to `.values()` to insert multiple rows in a single statement. Missing enumerable own keys use the column DEFAULT in that row, while explicit `undefined` or `null` uses SQL NULL; heterogeneous inserts always use VALUES, and so does a large batch whose cells a column array cannot carry (see [Large batches](#large-batches)). Heterogeneous inserts are limited to 131,070 cells (rows × union columns, twice the PostgreSQL bind limit); split larger batches by shape.
 
 ```typescript
 orm.insert('users')
@@ -46,6 +46,76 @@ const { sql: newUserSql } = orm.insert('users')
   .dump();
 
 ```
+
+---
+
+## Values
+
+The values of `set()`, `values()`, `doUpdate()` and `batchSet().set()` follow one rule:
+
+| Value | Becomes |
+|-------|---------|
+| string, number, boolean, `bigint`, `Date`, array, plain object | a bound parameter `$N`; `null` and `undefined` keep their handling (two plain-object shapes are reserved, see below) |
+| `param(v)` | a bound parameter carrying `v`, as given |
+| an expression: `op()`, `fn()`, a finished `caseWhen()`, `literal()`, `exprRef()`, a subquery, a table `ColumnRef`, a schema `ref()` | compiled SQL |
+| `sql('…')` | the parsed raw fragment |
+
+In `set()`, `doUpdate()` and `batchSet().set()`, an expression reads the target row:
+
+```typescript
+import { caseWhen, eq, exprRef, fn, gt, literal, op, sql } from '@dbsp/core';
+
+// UPDATE products SET price = products.price * 1.1 WHERE products.sku = $1
+orm.update('products')
+  .set({ price: op('*', exprRef('price'), 1.1) })
+  .where(eq('sku', 'A-1'))
+  .dump();
+
+// INSERT INTO products (sku, price, active) VALUES ($1, $2, $3) ON CONFLICT (sku) DO UPDATE
+//   SET price = excluded.price, active = CASE WHEN products.price > $4 THEN false ELSE true END
+orm.upsert('products')
+  .values({ sku: 'A-1', price: 10, active: true })
+  .onConflict(['sku'])
+  .doUpdate({
+    price: sql('excluded.price'),
+    active: caseWhen(gt('price', 100), literal(false)).else(literal(true)),
+  })
+  .dump();
+
+// INSERT INTO posts (title, published, "createdAt") VALUES ($1, $2, now())
+orm.insert('posts')
+  .values({ title: 'Hello', published: false, createdAt: fn('now') })
+  .dump();
+
+// UPDATE products SET active = t.active,price = products.price * 1.1
+//   FROM unnest(CAST($1 AS text[]), CAST($2 AS bool[])) AS t(sku, active) WHERE products.sku = t.sku
+orm.update('products')
+  .batchSet('sku', [{ sku: 'A-1', active: true }, { sku: 'B-2', active: false }])
+  .set({ price: op('*', exprRef('price'), 1.1) })
+  .dump();
+```
+
+A `values()` row has no column to read: a column reference there (`exprRef('title')`, a `ColumnRef`, a
+column inside `op()` or a `caseWhen()` condition, an `outerRef()` reaching the inserted row) throws
+`InvalidOperationError` (`values() cannot read column 'title'; …`). A subquery that reads only its own tables is
+accepted. The text of a `sql()` marker is not analysed.
+
+`excluded` (the row proposed by an upsert) is not visible to expressions: write `sql('excluded.price')`, or call
+`doUpdate()` without arguments to set every non-conflict column from it.
+
+The content of an array or a plain object is bound as given: a `jsonb` document with a `kind` key stays data, except
+two reserved shapes. `{ kind: 'param', value }` is unwrapped to its `value`, and `{ kind: 'ref', column, outer: true }`
+is read as an `outerRef()` (refused as a value). Wrap such a document in `param()` to bind it whole:
+`set({ meta: param({ kind: 'param', value: 5 }) })`.
+
+### Large batches
+
+Above `batchThreshold` (default 50 rows), an INSERT or UPSERT binds each column as one array and expands it with
+`unnest`. A batch that has a cell such an array cannot carry as one element (an expression, a `sql()` marker, an
+array, an object other than a plain object, `Date` or binary value, or a plain object holding a function or an
+accessor) or a column declared with an array type takes
+VALUES instead, so it stores the same rows. Such a batch compiles every cell in place, so it uses one parameter per
+bound value (an expression may emit none, one or several), and it is refused above 65,535 parameters: split the rows.
 
 ---
 
