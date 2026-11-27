@@ -408,34 +408,68 @@ describe('a relation-path ColumnRef in a mutation WHERE body (#991)', () => {
 		schema: nodeDb,
 		adapter: createPgCompileOnlyAdapter({ model: nodeDb.model }),
 	}).tables;
-	it.each(['compileBatchUpdate', 'compileInsertFrom', 'compileUpsertFrom'])(
-		'AC38 other-mutation-paths-refused %s',
-		(entryPoint) => {
-			const adapter = createPgCompileOnlyAdapter({ model: nodeDb.model });
-			expect(() =>
-				compileMutationWhere(
-					adapter,
-					entryPoint,
-					'nodes',
-					exists('children', {
-						include: { parent: { join: 'inner' } },
-						where: eq(nodes.parent.name, 'x'),
-					}),
-				),
-			).toThrow(
-				new Error(
-					"ColumnRef 'parent.name' follows a relation; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1014).",
-				),
+	// #1014 AC5: the typed path starts at the mutation's root (the root's parent),
+	// while the string 'parent.name' would bind the include named parent.
+	const typedWhere = () =>
+		exists('children', {
+			include: { parent: { join: 'inner' } },
+			where: eq(nodes.parent.name, 'x'),
+		});
+	type Compiler = ReturnType<typeof createPgCompileOnlyAdapter>;
+	it.each([
+		[
+			'AC5 mutation-batch',
+			(adapter: Compiler) =>
+				adapter.compileBatchUpdate({
+					type: 'batchUpdate',
+					table: 'nodes',
+					matchColumns: ['id'],
+					updates: [{ id: 1, name: 'archived' }],
+					where: typedWhere(),
+				} as never),
+			'UPDATE nodes SET name = t.name FROM unnest(CAST($2 AS int4[]), CAST($3 AS text[])) AS t(id, name) WHERE nodes.id = t.id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 JOIN nodes AS parent ON nodes_exists_0.parent_id = parent.id WHERE nodes.id = nodes_exists_0.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes.parent_id = nodes_exists_1.id AND nodes_exists_1.name = $1))',
+			['x', [1], ['archived']],
+		],
+		[
+			'AC5 mutation-insert-from',
+			(adapter: Compiler) =>
+				adapter.compileInsertFrom({
+					type: 'insert_from',
+					table: 'nodes_archive',
+					source: 'nodes',
+					columns: ['id', 'name'],
+					where: typedWhere(),
+				} as never),
+			'INSERT INTO nodes_archive (id, name) SELECT nodes.id AS id, nodes.name AS name FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 JOIN nodes AS parent ON nodes_exists_0.parent_id = parent.id WHERE nodes.id = nodes_exists_0.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes.parent_id = nodes_exists_1.id AND nodes_exists_1.name = $1))',
+			['x'],
+		],
+		[
+			'AC5 mutation-upsert-from',
+			(adapter: Compiler) =>
+				adapter.compileUpsertFrom({
+					type: 'upsert_from',
+					table: 'nodes_archive',
+					source: 'nodes',
+					conflictColumns: ['id'],
+					columns: ['id', 'name'],
+					where: typedWhere(),
+				} as never),
+			'INSERT INTO nodes_archive (id, name) SELECT nodes.id AS id, nodes.name AS name FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 JOIN nodes AS parent ON nodes_exists_0.parent_id = parent.id WHERE nodes.id = nodes_exists_0.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes.parent_id = nodes_exists_1.id AND nodes_exists_1.name = $1)) ON CONFLICT (id) DO UPDATE SET name = excluded.name',
+			['x'],
+		],
+	] as const)(
+		'%s resolves the typed path from the root',
+		(_name, compile, sql, parameters) => {
+			const result = compile(
+				createPgCompileOnlyAdapter({ model: nodeDb.model }),
 			);
+			expect(result.sql).toBe(sql);
+			expect(result.parameters).toEqual(parameters);
 		},
 	);
 });
 
 describe('typed relation refs in mutation guard bodies (#991)', () => {
-	const relationRefusal = (relation: string) =>
-		new Error(
-			`RelationRef '${relation}' follows a relation from its table; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1014).`,
-		);
 	const writingsDb = schema({
 		users: { id: { type: 'integer', primaryKey: true }, email: 'text' },
 		posts: {
@@ -505,16 +539,22 @@ describe('typed relation refs in mutation guard bodies (#991)', () => {
 		},
 	);
 
-	it('AC46 mutation-guard-body-refused', () => {
-		expect(() => batchSet(ambiguousBody())).toThrow(relationRefusal('posts'));
-		expect(() =>
+	// #1014 O1: inside subquery('users') the TableRef users names that body's
+	// root (users_sq), as an unaliased FROM users would in SQL.
+	it('AC46 mutation-guard-subquery-root-wins', () => {
+		expect(batchSet(ambiguousBody())).toBe(
+			'UPDATE users SET name = t.name FROM unnest(CAST($1 AS int4[]), CAST($2 AS text[])) AS t(id, name) WHERE users.id = t.id AND EXISTS (SELECT users_sq.id FROM users AS users_sq WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users_sq.id = posts_exists_0.user_id AND true))',
+		);
+		expect(
 			compileMutationWhere(
 				createPgCompileOnlyAdapter({ model: plainDb.model }),
 				'compileUpsert.action.where',
 				'users',
 				ambiguousBody(),
 			),
-		).toThrow(relationRefusal('posts'));
+		).toBe(
+			'INSERT INTO users (id, name) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET name = $3 WHERE EXISTS (SELECT users_sq.id FROM users AS users_sq WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users_sq.id = posts_exists_0.user_id AND true))',
+		);
 	});
 
 	it('AC46 mutation-guard-unambiguous-body-kept', () => {

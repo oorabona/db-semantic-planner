@@ -1204,15 +1204,19 @@ describe('a relation-path ColumnRef in a recursive start.where (#991)', () => {
 		maxDepth: 2,
 	});
 	const L = () => eq(nodes.parent.label, 'x');
-	it('AC29 nested-positions-refused recursive start.where body', () => {
-		expect(() =>
+	// #1014 AC5: inside start.where's exists('parent') body the typed path binds
+	// that body (the anchor's parent), as at the top level.
+	it('AC5 recursive start.where body resolves the typed path from the anchor', () => {
+		const result = createPgCompileOnlyAdapter().compileRecursive(
 			planRecursive(walk(exists('parent', { where: L() })), nodeDb.model),
-		).toThrow(
-			new Error(
-				"ColumnRef 'parent.label' follows a relation; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1014).",
-			),
+			nodeDb.model,
 		);
+		expect(result.sql).toBe(
+			'WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM nodes AS __n WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE __n.parent_id = nodes_exists_0.id AND nodes_exists_0.label = $1) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN nodes AS __n ON __n.parent_id = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree',
+		);
+		expect(result.parameters).toEqual(['x']);
 	});
+
 	it('AC30 top-level-unchanged recursive start.where', () => {
 		const result = createPgCompileOnlyAdapter().compileRecursive(
 			planRecursive(walk(L()), nodeDb.model),

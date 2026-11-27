@@ -44,7 +44,6 @@ const rootTypeAdditions = [
 	'ReferenceLeaf',
 ];
 const internalAdditions = [
-	'assertNoPathRefInConditionBodies',
 	// The mutation value rule's leaf and resolver (ADR 0011 delivery 4).
 	'coerceValue',
 	'copyDefaultFilters',

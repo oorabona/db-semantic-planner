@@ -45,7 +45,6 @@ import type {
 	WhereRawNotExistsIntent,
 	WhereRelationFilterIntent,
 } from '../intent-ast.js';
-import { assertCallbackScope } from '../path-ref-scan.js';
 import {
 	coerceColumnName,
 	coerceLikePattern,
@@ -56,7 +55,7 @@ import {
 	toSubqueryExpression,
 	type ValueExpression,
 } from './coerce.js';
-import { getColumnName, isRelationPathColumn } from './column-utils.js';
+import { getColumnName, pathOrigin } from './column-utils.js';
 import { InvalidOperationError, validateIdentifier } from './errors.js';
 import type { QueryBuilder } from './query-builder-types.js';
 import type {
@@ -65,6 +64,7 @@ import type {
 } from './subquery-builder.js';
 import {
 	CALLBACK_SCOPE,
+	QUANTIFIER_SCOPE,
 	RELATION_FROM_TABLE,
 	RELATION_REROOT,
 } from './symbols.js';
@@ -196,7 +196,7 @@ function createComparisonFilter(
 				field: getColumnName(field),
 				operator,
 				value: coerceValue(value, helper),
-				...(isRelationPathColumn(field) && { pathRef: true as const }),
+				...pathOrigin(field),
 			},
 			field,
 		);
@@ -303,7 +303,7 @@ export function like(
 		kind: 'like',
 		field: getColumnName(field),
 		pattern: coerceLikePattern(pattern, 'like'),
-		...(isRelationPathColumn(field) && { pathRef: true as const }),
+		...pathOrigin(field),
 	};
 	const withCi =
 		caseInsensitive !== undefined ? { ...intent, caseInsensitive } : intent;
@@ -343,7 +343,7 @@ export function inArray(
 			values: Array.isArray(values)
 				? values.map((v) => coerceListElement(v, 'inArray'))
 				: values,
-			...(isRelationPathColumn(field) && { pathRef: true as const }),
+			...pathOrigin(field),
 		},
 		field,
 	);
@@ -397,7 +397,7 @@ export function inSubquery(
 			kind: 'in',
 			field: getColumnName(field),
 			subquery: subqueryBody(query, 'inSubquery'),
-			...(isRelationPathColumn(field) && { pathRef: true as const }),
+			...pathOrigin(field),
 		},
 		field,
 	);
@@ -425,7 +425,7 @@ export function any(
 			values: Array.isArray(values)
 				? values.map((v) => unwrapParamElement(coerceListElement(v, 'any')))
 				: values,
-			...(isRelationPathColumn(field) && { pathRef: true as const }),
+			...pathOrigin(field),
 		},
 		field,
 	);
@@ -471,7 +471,7 @@ export function isNull(
 			kind: 'null',
 			field: getColumnName(field),
 			operator: 'isNull',
-			...(isRelationPathColumn(field) && { pathRef: true as const }),
+			...pathOrigin(field),
 		},
 		field,
 	);
@@ -495,7 +495,7 @@ export function isNotNull(
 			kind: 'null',
 			field: getColumnName(field),
 			operator: 'isNotNull',
-			...(isRelationPathColumn(field) && { pathRef: true as const }),
+			...pathOrigin(field),
 		},
 		field,
 	);
@@ -728,11 +728,12 @@ function rerootRelation<T extends AnyRelationRef>(rel: T, scope: object): T {
 }
 
 /**
- * Build a quantifier's `relationFilter` (#991). Its callback gets a re-rooted
- * ref carrying a fresh scope token, refused below a body nested in the returned
- * condition; a relation taken from a TableRef marks the intent `pathRef` with
- * its table (`pathTable`), and a relation from an enclosing callback carries
- * that callback's token.
+ * Build a quantifier's `relationFilter`. Its callback gets a re-rooted ref
+ * carrying a fresh scope token, which the intent keeps as its own
+ * (`QUANTIFIER_SCOPE`) so the resolver reads those refs from this occurrence's
+ * range at any depth (#1014); a relation taken from a TableRef marks the intent
+ * `pathRef` with its table (`pathTable`), and a relation from an enclosing
+ * callback carries that callback's token.
  */
 function quantify<TTarget extends string, TTargetType>(
 	mode: 'every' | 'some' | 'none',
@@ -742,24 +743,26 @@ function quantify<TTarget extends string, TTargetType>(
 	const relationName = getRelationName(relation);
 	const scope = {};
 	const where = filter(rerootRelation(relation, scope));
-	assertCallbackScope(where, CALLBACK_SCOPE, scope, mode);
 	const origin = relation as {
 		readonly [RELATION_FROM_TABLE]?: string;
 		readonly [CALLBACK_SCOPE]?: object;
 	};
-	return withCallbackScope(
-		{
-			kind: 'relationFilter',
-			relation: relationName,
-			where,
-			mode,
-			...(typeof origin[RELATION_FROM_TABLE] === 'string' && {
-				pathRef: true as const,
-				pathTable: origin[RELATION_FROM_TABLE],
-			}),
-		},
-		origin[CALLBACK_SCOPE],
-	);
+	const intent: WhereRelationFilterIntent = {
+		kind: 'relationFilter',
+		relation: relationName,
+		where,
+		mode,
+		...(typeof origin[RELATION_FROM_TABLE] === 'string' && {
+			pathRef: true as const,
+			pathTable: origin[RELATION_FROM_TABLE],
+		}),
+	};
+	// The resolver binds the callback's own refs to this occurrence's range.
+	Object.defineProperty(intent, QUANTIFIER_SCOPE, {
+		value: scope,
+		enumerable: false,
+	});
+	return withCallbackScope(intent, origin[CALLBACK_SCOPE]);
 }
 
 /** Carry a typed callback column's scope token onto the intent built from it. */

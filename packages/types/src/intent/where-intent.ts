@@ -58,10 +58,16 @@ export interface WhereComparisonIntent {
 	/**
 	 * Set when `field` came from a typed column ref reached through a relation
 	 * (`orm.tables.nodes.parent.label`, or `c.parent.label` from a quantifier
-	 * callback). Core refuses such a leaf inside a relation predicate, quantifier
-	 * callback or subquery body, where its path would be read from the body's row.
+	 * callback). Inside a relation predicate, quantifier callback or subquery
+	 * body core resolves its path from the range the ref came from (#1014).
 	 */
 	readonly pathRef?: true;
+	/**
+	 * The model name of the table a TableRef-rooted `pathRef` path starts at
+	 * (`nodes` for `orm.tables.nodes.parent.label`); a callback ref carries its
+	 * callback's scope token instead.
+	 */
+	readonly pathTable?: string;
 	readonly operator: ComparisonOperator;
 	readonly value: unknown;
 	/** JSON path extraction before comparison (e.g., data->'key' = 'val') */
@@ -79,10 +85,16 @@ export interface WhereLikeIntent {
 	/**
 	 * Set when `field` came from a typed column ref reached through a relation
 	 * (`orm.tables.nodes.parent.label`, or `c.parent.label` from a quantifier
-	 * callback). Core refuses such a leaf inside a relation predicate, quantifier
-	 * callback or subquery body, where its path would be read from the body's row.
+	 * callback). Inside a relation predicate, quantifier callback or subquery
+	 * body core resolves its path from the range the ref came from (#1014).
 	 */
 	readonly pathRef?: true;
+	/**
+	 * The model name of the table a TableRef-rooted `pathRef` path starts at
+	 * (`nodes` for `orm.tables.nodes.parent.label`); a callback ref carries its
+	 * callback's scope token instead.
+	 */
+	readonly pathTable?: string;
 	readonly pattern: string | ParamIntent;
 	/** Case-insensitive matching */
 	readonly caseInsensitive?: boolean;
@@ -102,10 +114,16 @@ export interface WhereInValueIntent {
 	/**
 	 * Set when `field` came from a typed column ref reached through a relation
 	 * (`orm.tables.nodes.parent.label`, or `c.parent.label` from a quantifier
-	 * callback). Core refuses such a leaf inside a relation predicate, quantifier
-	 * callback or subquery body, where its path would be read from the body's row.
+	 * callback). Inside a relation predicate, quantifier callback or subquery
+	 * body core resolves its path from the range the ref came from (#1014).
 	 */
 	readonly pathRef?: true;
+	/**
+	 * The model name of the table a TableRef-rooted `pathRef` path starts at
+	 * (`nodes` for `orm.tables.nodes.parent.label`); a callback ref carries its
+	 * callback's scope token instead.
+	 */
+	readonly pathTable?: string;
 	readonly values: readonly unknown[];
 	readonly subquery?: never;
 	readonly not?: boolean;
@@ -120,10 +138,16 @@ export interface WhereInSubqueryIntent {
 	/**
 	 * Set when `field` came from a typed column ref reached through a relation
 	 * (`orm.tables.nodes.parent.label`, or `c.parent.label` from a quantifier
-	 * callback). Core refuses such a leaf inside a relation predicate, quantifier
-	 * callback or subquery body, where its path would be read from the body's row.
+	 * callback). Inside a relation predicate, quantifier callback or subquery
+	 * body core resolves its path from the range the ref came from (#1014).
 	 */
 	readonly pathRef?: true;
+	/**
+	 * The model name of the table a TableRef-rooted `pathRef` path starts at
+	 * (`nodes` for `orm.tables.nodes.parent.label`); a callback ref carries its
+	 * callback's scope token instead.
+	 */
+	readonly pathTable?: string;
 	readonly subquery: QueryIntent;
 	readonly values?: never;
 	readonly not?: boolean;
@@ -145,10 +169,16 @@ export interface WhereAnyIntent {
 	/**
 	 * Set when `field` came from a typed column ref reached through a relation
 	 * (`orm.tables.nodes.parent.label`, or `c.parent.label` from a quantifier
-	 * callback). Core refuses such a leaf inside a relation predicate, quantifier
-	 * callback or subquery body, where its path would be read from the body's row.
+	 * callback). Inside a relation predicate, quantifier callback or subquery
+	 * body core resolves its path from the range the ref came from (#1014).
 	 */
 	readonly pathRef?: true;
+	/**
+	 * The model name of the table a TableRef-rooted `pathRef` path starts at
+	 * (`nodes` for `orm.tables.nodes.parent.label`); a callback ref carries its
+	 * callback's scope token instead.
+	 */
+	readonly pathTable?: string;
 	readonly values: readonly unknown[] | ParamIntent;
 }
 
@@ -208,10 +238,16 @@ export interface WhereNullIntent {
 	/**
 	 * Set when `field` came from a typed column ref reached through a relation
 	 * (`orm.tables.nodes.parent.label`, or `c.parent.label` from a quantifier
-	 * callback). Core refuses such a leaf inside a relation predicate, quantifier
-	 * callback or subquery body, where its path would be read from the body's row.
+	 * callback). Inside a relation predicate, quantifier callback or subquery
+	 * body core resolves its path from the range the ref came from (#1014).
 	 */
 	readonly pathRef?: true;
+	/**
+	 * The model name of the table a TableRef-rooted `pathRef` path starts at
+	 * (`nodes` for `orm.tables.nodes.parent.label`); a callback ref carries its
+	 * callback's scope token instead.
+	 */
+	readonly pathTable?: string;
 	readonly operator: NullOperator;
 }
 
@@ -349,9 +385,8 @@ export interface WhereRelationFilterIntent {
 	readonly pathRef?: true;
 	/**
 	 * The model name of the table a `pathRef` quantifier's path starts at. Inside
-	 * a relation predicate, quantifier callback or subquery body, the quantifier
-	 * is accepted only when the body reads the single visible range of this
-	 * table, since its path is read from the body's row.
+	 * a relation predicate, quantifier callback or subquery body, core starts the
+	 * path from that table's range (#1014).
 	 */
 	readonly pathTable?: string;
 	/**

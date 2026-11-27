@@ -131,6 +131,7 @@ export function createColumnRef(
 	columnName: string,
 	relationPath?: readonly string[],
 	scope?: object,
+	fromTable?: string,
 ): object {
 	const columnRef: Record<symbol | string, unknown> = {
 		[TABLE_META]: tableName,
@@ -156,6 +157,8 @@ export function createColumnRef(
 	// an empty path (a re-rooted RelationRef) addresses the relation's own range.
 	if (relationPath !== undefined) {
 		columnRef[RELATION_PATH] = relationPath;
+		if (fromTable !== undefined && relationPath.length > 0)
+			columnRef[RELATION_FROM_TABLE] = fromTable;
 	}
 
 	return withCallbackScope(columnRef, scope);
@@ -293,6 +296,7 @@ export function createRelationRef(
 					prop as string,
 					currentPath,
 					origin.scope,
+					origin.fromTable,
 				);
 			}
 

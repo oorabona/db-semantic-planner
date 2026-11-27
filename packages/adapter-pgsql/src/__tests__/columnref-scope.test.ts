@@ -10,10 +10,12 @@ import {
 	caseWhen,
 	createOrm,
 	distinct,
+	ExpressionRef,
 	eq,
 	every,
 	exists,
 	fn,
+	gt,
 	inArray,
 	inSubquery,
 	isNotNull,
@@ -35,7 +37,6 @@ import {
 	subquery,
 	wSum,
 } from '@dbsp/core';
-import type { WhereIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -298,11 +299,7 @@ describe('ColumnRef in an upsert guard', () => {
 	});
 });
 
-describe('A relation-path ref inside a body is refused (#991)', () => {
-	const refusal = (field: string) =>
-		new Error(
-			`ColumnRef '${field}' follows a relation; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1014).`,
-		);
+describe('A relation-path ref at the top level or as data keeps its #991 reading', () => {
 	const L = () => eq(nodes.parent.label, 'x');
 	const writingsDb = schema({
 		users: { id: { type: 'integer', primaryKey: true }, email: 'text' },
@@ -356,99 +353,6 @@ describe('A relation-path ref inside a body is refused (#991)', () => {
 		suppressDxWarnings: true,
 	});
 	const dataNodes = dataOrm.tables.nodes;
-
-	it.each([
-		['exists', () => exists('parent', { where: L() })],
-		['notExists', () => notExists('parent', { where: L() })],
-	])('AC25 predicate-body-refused %s', (_name, where) => {
-		expect(() => nodeOrm.select('nodes').where(where()).dump()).toThrow(
-			refusal('parent.label'),
-		);
-	});
-
-	it('AC26 cross-table-body-refused in a SELECT and an UPDATE', () => {
-		const body = () =>
-			exists('writings', { where: eq(users.writings.published, true) });
-		expect(() => writingsOrm.select('users').where(body()).dump()).toThrow(
-			refusal('writings.published'),
-		);
-		expect(() =>
-			writingsOrm.update('users').set({ email: 'e' }).where(body()).dump(),
-		).toThrow(refusal('writings.published'));
-	});
-
-	it('AC27 callback-path-refused absolute and from the callback parameter', () => {
-		expect(() =>
-			nodeOrm
-				.select('nodes')
-				.where(some(nodes.children, () => eq(nodes.children.label, 'x')))
-				.dump(),
-		).toThrow(refusal('children.label'));
-		// The callback parameter is typed without its relations (filters.ts).
-		const viaParent = (c: unknown) => eq((c as typeof nodes).parent.label, 'x');
-		expect(() =>
-			nodeOrm.select('nodes').where(some(nodes.children, viaParent)).dump(),
-		).toThrow(refusal('parent.label'));
-		expect(() =>
-			nodeOrm.select('nodes').where(every(nodes.children, viaParent)).dump(),
-		).toThrow(refusal('parent.label'));
-	});
-
-	it.each([
-		['rawExists', () => rawExists(subquery('nodes').select('id').where(L()))],
-		[
-			'inSubquery',
-			() => inSubquery('id', subquery('nodes').select('id').where(L())),
-		],
-	])('AC28 subquery-body-refused %s', (_name, where) => {
-		expect(() => nodeOrm.select('nodes').where(where()).dump()).toThrow(
-			refusal('parent.label'),
-		);
-	});
-
-	it.each([
-		[
-			'FILTER',
-			() =>
-				nodeOrm.select('nodes').columns([
-					fn('count', star())
-						.filter(exists('parent', { where: L() }))
-						.as('n'),
-				]),
-		],
-		[
-			'CASE WHEN',
-			() =>
-				nodeOrm.select('nodes').columns([
-					caseWhen(exists('parent', { where: L() }), literal(1))
-						.else(literal(0))
-						.as('c'),
-				]),
-		],
-		[
-			'HAVING',
-			() =>
-				nodeOrm
-					.select('nodes')
-					.columns(['id'])
-					.groupBy(['id'])
-					.having(exists('parent', { where: L() })),
-		],
-	])('AC29 nested-positions-refused %s', (_name, query) => {
-		expect(() => query().dump()).toThrow(refusal('parent.label'));
-	});
-
-	it('AC29 join-on-body-refused', () => {
-		expect(() =>
-			nodeOrm
-				.select('nodes')
-				.join('nodes', {
-					as: 'n2',
-					on: and(eq('n2.id', 1), exists('parent', { where: L() })),
-				})
-				.dump(),
-		).toThrow(refusal('parent.label'));
-	});
 
 	it('AC30 top-level-unchanged', () => {
 		expect(nodeOrm.select('nodes').where(L()).dump().sql).toBe(
@@ -509,128 +413,6 @@ describe('A relation-path ref inside a body is refused (#991)', () => {
 		).toBe(expected);
 	});
 
-	it('AC33 direct-body-refused in where, projection, orderBy, having and B9', () => {
-		const projected = (body: Record<string, unknown>) =>
-			postsOrm.select('users').columns([
-				new SubqueryExpression({
-					type: 'select',
-					from: 'posts',
-					...body,
-				} as never).asExpr('v'),
-			]);
-		const caseOf = () => caseWhen(P(), literal(1)).else(literal(0)).intent;
-		for (const query of [
-			() =>
-				postsOrm
-					.select('users')
-					.columns([subquery('posts').where(P()).count().asExpr('n')]),
-			() => projected({ select: { type: 'expressions', columns: [caseOf()] } }),
-			() =>
-				projected({
-					select: { type: 'fields', fields: ['id'] },
-					orderBy: [{ expression: caseOf(), direction: 'asc' }],
-					limit: 1,
-				}),
-			() =>
-				projected({
-					select: { type: 'fields', fields: ['id'] },
-					groupBy: ['id'],
-					having: P(),
-				}),
-		])
-			expect(() => query().dump()).toThrow(refusal('posts.published'));
-		expect(() =>
-			nodeOrm
-				.select('nodes')
-				.columns([subquery('nodes').select('id').where(L()).asExpr('v')])
-				.dump(),
-		).toThrow(refusal('parent.label'));
-	});
-
-	it('AC33 aggregate-filter-body-refused', () => {
-		expect(() =>
-			postsOrm
-				.select('users')
-				.columns([
-					new SubqueryExpression({
-						type: 'select',
-						from: 'posts',
-						select: {
-							type: 'aggregate',
-							aggregates: [{ function: 'count', field: '*', filter: P() }],
-						},
-					} as never).asExpr('n'),
-				])
-				.dump(),
-		).toThrow(refusal('posts.published'));
-	});
-
-	it('AC33 having-body-refused', () => {
-		expect(() =>
-			postsOrm
-				.select('users')
-				.columns(['id'])
-				.groupBy(['id'])
-				.having(
-					inSubquery(
-						postsOrm.tables.users.id,
-						subquery('posts').select('author_id').where(P()),
-					),
-				)
-				.dump(),
-		).toThrow(refusal('posts.published'));
-	});
-
-	it.each([
-		['like', () => like(nodes.parent.label, 'a%'), 'parent.label'],
-		['inArray', () => inArray(nodes.parent.label, ['a']), 'parent.label'],
-		['any', () => any(nodes.parent.label, ['a']), 'parent.label'],
-		['isNull', () => isNull(nodes.parent.label), 'parent.label'],
-		['isNotNull', () => isNotNull(nodes.parent.label), 'parent.label'],
-		[
-			'inSubquery',
-			() => inSubquery(nodes.parent.id, subquery('nodes').select('parent_id')),
-			'parent.id',
-		],
-	])('AC34 per-constructor-marker %s', (_name, leaf, field) => {
-		expect(() =>
-			nodeOrm
-				.select('nodes')
-				.where(exists('parent', { where: leaf() }))
-				.dump(),
-		).toThrow(refusal(field));
-	});
-
-	it('AC35 plan-refuses in a resolved body and a directly lowered body', () => {
-		expect(() =>
-			nodeOrm
-				.select('nodes')
-				.where(exists('parent', { where: L() }))
-				.plan(),
-		).toThrow(refusal('parent.label'));
-		expect(() =>
-			postsOrm
-				.select('users')
-				.columns([subquery('posts').where(P()).count().asExpr('n')])
-				.plan(),
-		).toThrow(refusal('posts.published'));
-	});
-
-	it('AC36 rawnotexists-body-refused and scalar-comparison-body-refused', () => {
-		const body = () =>
-			subquery('nodes').select('id').where(L()).build().toIntent();
-		for (const where of [
-			{ kind: 'rawNotExists', subquery: body() },
-			{ kind: 'subquery', field: 'id', operator: 'eq', subquery: body() },
-		])
-			expect(() =>
-				nodeOrm
-					.select('nodes')
-					.where(where as WhereIntent)
-					.dump(),
-			).toThrow(refusal('parent.label'));
-	});
-
 	it('AC36 in-operand-outside-body', () => {
 		const result = writingsOrm
 			.select('users')
@@ -658,6 +440,7 @@ describe('A relation-path ref inside a body is refused (#991)', () => {
 				operator: 'eq',
 				value: 'x',
 				pathRef: true,
+				pathTable: 'nodes',
 			},
 		]);
 		const wrapped = dataOrm
@@ -712,27 +495,9 @@ describe('A relation-path ref inside a body is refused (#991)', () => {
 		);
 		expect(lagged.params).toEqual([1, leaf]);
 	});
-
-	it('AC37 shared-occurrence-refused', () => {
-		const shared = L();
-		expect(() =>
-			nodeOrm
-				.select('nodes')
-				.where(and(shared, exists('parent', { where: shared })))
-				.dump(),
-		).toThrow(refusal('parent.label'));
-	});
 });
 
-describe('Typed quantifiers and callback refs inside nested bodies (#991)', () => {
-	const quantifierRefusal = (relation: string) =>
-		new Error(
-			`RelationRef '${relation}' follows a relation from its table; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1014).`,
-		);
-	const callbackRefusal = (name: string, mode: string) =>
-		new Error(
-			`'${name}' comes from the ${mode}() callback parameter and is used inside a nested relation predicate or subquery body, where it would be read from that body's row (#1014).`,
-		);
+describe('Typed quantifiers and callback refs (#991, #1014)', () => {
 	const quantifiers = { some, every, none } as const;
 	const writingsDb = schema({
 		users: { id: { type: 'integer', primaryKey: true }, email: 'text' },
@@ -796,201 +561,79 @@ describe('Typed quantifiers and callback refs inside nested bodies (#991)', () =
 	const children = (mode: keyof typeof quantifiers = 'some') =>
 		quantifiers[mode](nodes.children, (c) => eq(c.label!, 'x'));
 
-	it('AC39 table-rooted-quantifier-ambiguous-refused CR1a', () => {
-		expect(() =>
-			nodeOrm
-				.select('nodes')
-				.where(
-					some(nodes.children, () =>
-						some(nodes.children, (g) => eq(g.label!, 'x')),
-					),
-				)
-				.dump(),
-		).toThrow(quantifierRefusal('children'));
-	});
-
-	it.each(['some', 'every', 'none'] as const)(
-		'AC39 table-rooted-quantifier-ambiguous-refused CR1b %s',
-		(mode) => {
-			expect(() =>
-				nodeOrm
-					.select('nodes')
-					.where(exists('parent', { where: children(mode) }))
-					.dump(),
-			).toThrow(quantifierRefusal('children'));
-		},
-	);
-
-	it('AC39 ambiguity-in-current-scope-refused', () => {
-		expect(() =>
-			writingsOrm
-				.select('users')
-				.where(
-					exists('writings', {
-						include: {
-							author: { join: 'inner' },
-							edits: { join: 'inner' },
-						},
-						where: replies(),
-					}),
-				)
-				.dump(),
-		).toThrow(quantifierRefusal('replies'));
-	});
-
-	it('AC39 table-rooted-quantifier-other-table-refused', () => {
-		expect(() =>
-			writingsOrm
-				.select('posts')
-				.where(exists('author', { where: replies() }))
-				.dump(),
-		).toThrow(quantifierRefusal('replies'));
-		expect(() =>
-			writingsOrm
-				.select('users')
-				.where(
-					some(users.writings, () =>
-						some(users.writings.replies, (r) => eq(r.body!, 'x')),
-					),
-				)
-				.dump(),
-		).toThrow(quantifierRefusal('writings.replies'));
-	});
-
-	it('AC39 dotted-relation-value-refused', () => {
-		expect(() =>
-			nodeOrm
-				.select('nodes')
-				.where(eq('parent.id', caseWhen(children(), 1).else(2)))
-				.dump(),
-		).toThrow(quantifierRefusal('children'));
-		expect(
-			nodeOrm
-				.select('nodes')
-				.where(eq('id', caseWhen(children(), 1).else(2)))
-				.dump().sql,
-		).toBe(
-			'SELECT nodes.* FROM nodes WHERE nodes.id = CASE WHEN EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND nodes_exists_0.label = $1) THEN 1 ELSE 2 END',
-		);
-	});
-
+	// O2 (#1014): a callback column nested in a body inside its callback binds
+	// the callback's range (the child, nodes_exists_0), for every leaf constructor.
 	it.each([
 		[
-			'H1',
-			() =>
-				some(nodes.children, (c) =>
-					exists('parent', {
-						where: some(c.children as never, (g) => eq(g.label!, 'x')),
-					}),
-				),
+			'like',
+			(c: typeof nodes) => like(c.label!, 'a%'),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_exists_0.parent_id = nodes_exists_1.id AND nodes_exists_0.label LIKE $1))',
+			['a%'],
 		],
-		[
-			'H2',
-			() =>
-				some(nodes.children, (c) =>
-					rawExists(
-						subquery('nodes')
-							.select('id')
-							.where(some(c.children as never, (g) => eq(g.label!, 'x'))),
-					),
-				),
-		],
-		[
-			'H3',
-			() =>
-				some(nodes.children, (c) =>
-					some(c.children as never, () =>
-						some(c.children as never, (h) => eq(h.label!, 'x')),
-					),
-				),
-		],
-		[
-			'H1 with every inside',
-			() =>
-				some(nodes.children, (c) =>
-					exists('parent', {
-						where: every(c.children as never, (g) => eq(g.label!, 'x')),
-					}),
-				),
-		],
-		[
-			'H1 with none inside',
-			() =>
-				some(nodes.children, (c) =>
-					exists('parent', {
-						where: none(c.children as never, (g) => eq(g.label!, 'x')),
-					}),
-				),
-		],
-	])('AC40 callback-ref-nested-refused %s', (_name, build) => {
-		expect(build).toThrow(callbackRefusal('children', 'some'));
-	});
-
-	it.each(['some', 'every', 'none'] as const)(
-		'AC40 callback-ref-nested-refused C1 %s',
-		(mode) => {
-			expect(() =>
-				quantifiers[mode](nodes.children, (c) =>
-					exists('parent', { where: eq(c.label!, 'x') }),
-				),
-			).toThrow(callbackRefusal('label', mode));
-		},
-	);
-
-	it.each([
-		['like', (c: typeof nodes) => like(c.label!, 'a%'), 'label'],
 		[
 			'like case-insensitive',
 			(c: typeof nodes) => like(c.label!, 'x%', true),
-			'label',
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_exists_0.parent_id = nodes_exists_1.id AND nodes_exists_0.label ILIKE $1))',
+			['x%'],
 		],
 		[
 			'like escape',
 			(c: typeof nodes) => like(c.label!, 'x%', { escape: '!' }),
-			'label',
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_exists_0.parent_id = nodes_exists_1.id AND nodes_exists_0.label LIKE $1 ESCAPE $2))',
+			['x%', '!'],
 		],
-		['inArray', (c: typeof nodes) => inArray(c.label!, ['a']), 'label'],
-		['any', (c: typeof nodes) => any(c.label!, ['a']), 'label'],
-		['isNull', (c: typeof nodes) => isNull(c.label!), 'label'],
-		['isNotNull', (c: typeof nodes) => isNotNull(c.label!), 'label'],
+		[
+			'inArray',
+			(c: typeof nodes) => inArray(c.label!, ['a']),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_exists_0.parent_id = nodes_exists_1.id AND nodes_exists_0.label = ANY ($1)))',
+			[['a']],
+		],
+		[
+			'any',
+			(c: typeof nodes) => any(c.label!, ['a']),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_exists_0.parent_id = nodes_exists_1.id AND nodes_exists_0.label = ANY (CAST($1 AS text[]))))',
+			[['a']],
+		],
+		[
+			'isNull',
+			(c: typeof nodes) => isNull(c.label!),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_exists_0.parent_id = nodes_exists_1.id AND nodes_exists_0.label IS NULL))',
+			[],
+		],
+		[
+			'isNotNull',
+			(c: typeof nodes) => isNotNull(c.label!),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_exists_0.parent_id = nodes_exists_1.id AND nodes_exists_0.label IS NOT NULL))',
+			[],
+		],
 		[
 			'inSubquery',
 			(c: typeof nodes) =>
 				inSubquery(c.id!, subquery('nodes').select('parent_id')),
-			'id',
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_exists_0.parent_id = nodes_exists_1.id AND nodes_exists_0.id = ANY (SELECT nodes_subq_2.parent_id FROM nodes AS nodes_subq_2)))',
+			[],
 		],
 		[
 			'aliased',
 			(c: typeof nodes) => eq(c.label!.as('child_label'), 'x'),
-			'label',
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_exists_0.parent_id = nodes_exists_1.id AND nodes_exists_0.label = $1))',
+			['x'],
 		],
-	])('AC40 callback-token-per-constructor %s', (_name, leaf, field) => {
-		expect(() =>
-			some(nodes.children, (c) =>
-				exists('parent', { where: leaf(c as never) }),
-			),
-		).toThrow(callbackRefusal(field, 'some'));
-	});
-
-	it('AC40 dotted-field-value-nested', () => {
-		expect(() =>
-			some(nodes.children, (c) =>
-				eq('parent.id', caseWhen(eq(c.label!, 'x'), 1).else(2)),
-			),
-		).toThrow(callbackRefusal('label', 'some'));
-		expect(
-			nodeOrm
+	] as const)(
+		'AC40 callback-token-per-constructor %s',
+		(_name, leaf, sql, params) => {
+			const dumped = nodeOrm
 				.select('nodes')
 				.where(
 					some(nodes.children, (c) =>
-						eq('id', caseWhen(eq(c.label!, 'x'), 1).else(2)),
+						exists('parent', { where: leaf(c as never) }),
 					),
 				)
-				.dump().sql,
-		).toBe(
-			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND nodes_exists_0.id = CASE WHEN nodes_exists_0.label = $1 THEN 1 ELSE 2 END)',
-		);
-	});
+				.dump();
+			expect(dumped.sql).toBe(sql);
+			expect(dumped.params).toEqual(params);
+		},
+	);
 
 	it('R3b callback-scoped-columnref: a callback ColumnRef in fn() is not yet supported (#1052)', () => {
 		let error: unknown;
@@ -1030,17 +673,6 @@ describe('Typed quantifiers and callback refs inside nested bodies (#991)', () =
 			message:
 				'a callback-scoped ColumnRef in a comparison value is not supported yet (#1052).',
 		});
-	});
-
-	it('AC40 refused-at-construction', () => {
-		let built = false;
-		expect(() => {
-			some(nodes.children, (c) =>
-				exists('parent', { where: eq(c.label!, 'x') }),
-			);
-			built = true;
-		}).toThrow(callbackRefusal('label', 'some'));
-		expect(built).toBe(false);
 	});
 
 	it('AC41 callback-and-top-level-kept', () => {
@@ -1155,49 +787,6 @@ describe('Typed quantifiers and callback refs inside nested bodies (#991)', () =
 		);
 	});
 
-	it('AC45 legacy-route-ambiguous-refused', () => {
-		// A filtered model takes the same route since #891 slice 5b: the body is
-		// a nested select either way, and the refusal holds at its first level.
-		const filteredNodes = createOrm({
-			schema: schema(nodeTables, undefined, {
-				defaultFilters: { nodes: isNull('label') },
-			}),
-			adapter: createPgCompileOnlyAdapter({ model: nodeDb.model }),
-			suppressDxWarnings: true,
-		});
-		expect(() =>
-			filteredNodes
-				.select('nodes')
-				.columns([
-					'id',
-					subquery('nodes').select('id').where(children()).count().asExpr('n'),
-				])
-				.dump(),
-		).toThrow(quantifierRefusal('children'));
-		expect(() =>
-			nodeOrm
-				.select('nodes')
-				.columns([
-					'id',
-					subquery('nodes').select('id').where(children()).count().asExpr('n'),
-				])
-				.dump(),
-		).toThrow(quantifierRefusal('children'));
-		expect(() =>
-			nodeOrm
-				.select('nodes')
-				.columns([
-					'id',
-					subquery('nodes')
-						.select('id')
-						.where(exists('parent', { where: children() }))
-						.count()
-						.asExpr('n'),
-				])
-				.dump(),
-		).toThrow(quantifierRefusal('children'));
-	});
-
 	it('AC45 legacy-route-unambiguous-kept', () => {
 		expect(
 			writingsOrm
@@ -1241,22 +830,6 @@ describe('Typed quantifiers and callback refs inside nested bodies (#991)', () =
 		);
 	});
 
-	it('AC45 legacy-route-other-table-refused', () => {
-		expect(() =>
-			plainOrm
-				.select('posts')
-				.columns([
-					'id',
-					subquery('users')
-						.select('id')
-						.where(some(plainOrm.tables.posts.comments, () => and()))
-						.count()
-						.asExpr('n'),
-				])
-				.dump(),
-		).toThrow(quantifierRefusal('comments'));
-	});
-
 	it('AC11b having-body-quantifier-resolved: a table-rooted quantifier in a dotted HAVING comparison body follows the unambiguous-range rule', () => {
 		expect(
 			plainOrm
@@ -1274,119 +847,6 @@ describe('Typed quantifiers and callback refs inside nested bodies (#991)', () =
 		).toBe(
 			'SELECT users.* FROM users GROUP BY users.id HAVING users.id = ANY (SELECT posts_subq_0.user_id FROM posts AS posts_subq_0 WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_subq_0.id = comments_exists_1.post_id AND true))',
 		);
-	});
-
-	it('AC45 having-exemption-body-refused', () => {
-		expect(() =>
-			nodeOrm
-				.select('nodes')
-				.groupBy(['id'])
-				.having(
-					inSubquery(
-						'nodes.id',
-						subquery('nodes').select('parent_id').where(children()),
-					),
-				)
-				.dump(),
-		).toThrow(quantifierRefusal('children'));
-		// A default filter on the body's table makes inspect resolve the
-		// comparison in its scope, so G7 decides: unambiguous kept, ambiguous
-		// refused.
-		const filteredOrm = createOrm({
-			schema: schema(
-				{
-					users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
-					posts: {
-						id: { type: 'integer', primaryKey: true },
-						user_id: ref('users', { inverse: 'posts' }),
-					},
-					comments: {
-						id: { type: 'integer', primaryKey: true },
-						post_id: ref('posts', { inverse: 'comments' }),
-					},
-				},
-				undefined,
-				{ defaultFilters: { posts: eq('id', 1) } },
-			),
-			adapter: createPgCompileOnlyAdapter({ model: plainDb.model }),
-			suppressDxWarnings: true,
-		});
-		expect(
-			filteredOrm
-				.select('users')
-				.groupBy(['id'])
-				.having(
-					inSubquery(
-						'users.id',
-						subquery('posts')
-							.select('user_id')
-							.where(some(filteredOrm.tables.posts.comments, () => and())),
-					),
-				)
-				.dump().sql,
-		).toBe(
-			'SELECT users.* FROM users GROUP BY users.id HAVING users.id = ANY (SELECT posts_subq_0.user_id FROM posts AS posts_subq_0 WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_subq_0.id = comments_exists_1.post_id AND true) AND posts_subq_0.id = $1)',
-		);
-		const filteredNodeDb = schema(
-			{
-				nodes: {
-					id: { type: 'integer', primaryKey: true },
-					label: 'text',
-					parent_id: ref('nodes', {
-						nullable: true,
-						as: 'parent',
-						inverse: 'children',
-						roles: { parent: 'parent', children: 'children' },
-					}),
-				},
-			},
-			undefined,
-			{ defaultFilters: { nodes: eq('id', 1) } },
-		);
-		const filteredNodes = createOrm({
-			schema: filteredNodeDb,
-			adapter: createPgCompileOnlyAdapter({ model: filteredNodeDb.model }),
-			suppressDxWarnings: true,
-		});
-		expect(() =>
-			filteredNodes
-				.select('nodes')
-				.groupBy(['id'])
-				.having(
-					inSubquery(
-						'nodes.id',
-						subquery('nodes')
-							.select('parent_id')
-							.where(
-								some(filteredNodes.tables.nodes.children, (c) =>
-									eq(c.label!, 'x'),
-								),
-							),
-					),
-				)
-				.dump(),
-		).toThrow(quantifierRefusal('children'));
-		// The same holds for an expression subquery nested in that body.
-		const body = rawExists(
-			plainOrm
-				.select('posts')
-				.columns(['id'])
-				.where(some(plainOrm.tables.posts.comments, () => and())) as never,
-		).subquery;
-		expect(() =>
-			plainOrm
-				.select('users')
-				.groupBy(['id'])
-				.having(
-					inSubquery(
-						'users.id',
-						subquery('posts')
-							.select('user_id')
-							.where(eq('id', new SubqueryExpression(body).asExpr('n'))),
-					),
-				)
-				.dump(),
-		).toThrow(quantifierRefusal('comments'));
 	});
 
 	it('AC45 having-builder-body-kept', () => {
@@ -1494,4 +954,2044 @@ describe('A callback-scoped ColumnRef in an ordering, grouping, aggregate or win
 			'expression argument',
 		);
 	});
+});
+
+/**
+ * #1014: a typed ref inside a body resolves from the range it came from. Each
+ * unit is a call of the spec's case table (`1014-typed-refs-from-origin`, M7)
+ * with its expected SQL and parameters.
+ */
+describe('A typed ref inside a body resolves from its origin range (#1014)', () => {
+	const B = schema(nodeTables);
+	const D = schema({
+		users: { id: { type: 'integer', primaryKey: true }, email: 'text' },
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			published: 'boolean',
+			title: 'text',
+			author_id: ref('users', { as: 'author', inverse: 'writings' }),
+			editor_id: ref('users', { as: 'editor', inverse: 'edits' }),
+		},
+		comments: {
+			id: { type: 'integer', primaryKey: true },
+			body: 'text',
+			post_id: ref('posts', { as: 'post', inverse: 'replies' }),
+		},
+	});
+	const S = schema({
+		posts: { id: { type: 'integer', primaryKey: true }, title: 'text' },
+		comments: {
+			id: { type: 'integer', primaryKey: true },
+			body: 'text',
+			post_id: ref('posts', { as: 'post', inverse: 'replies' }),
+		},
+	});
+	const DF = schema(
+		{
+			users: { id: { type: 'integer', primaryKey: true }, email: 'text' },
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				published: 'boolean',
+				deleted_at: { type: 'timestamp', nullable: true },
+				author_id: ref('users', { as: 'author', inverse: 'writings' }),
+			},
+			comments: { id: { type: 'integer', primaryKey: true }, body: 'text' },
+		},
+		undefined,
+		{ defaultFilters: { posts: isNull('deleted_at') } },
+	);
+	const options = { suppressDxWarnings: true } as const;
+	const b = createOrm({
+		schema: B,
+		adapter: createPgCompileOnlyAdapter({ model: B.model }),
+		...options,
+	});
+	const d = createOrm({
+		schema: D,
+		adapter: createPgCompileOnlyAdapter({ model: D.model }),
+		...options,
+	});
+	const s = createOrm({
+		schema: S,
+		adapter: createPgCompileOnlyAdapter({ model: S.model }),
+		...options,
+	});
+	const df = createOrm({
+		schema: DF,
+		adapter: createPgCompileOnlyAdapter({ model: DF.model }),
+		...options,
+	});
+	// The probes' fixtures are untyped JavaScript; the typed relations are read
+	// through these loosely typed handles.
+	const nodes: any = b.tables.nodes;
+	const users: any = d.tables.users;
+	const posts: any = d.tables.posts;
+	const U: any = df.tables.users;
+	const sTables: any = s.tables;
+	const dTables: any = d.tables;
+	const SE = SubqueryExpression;
+	type Any = any;
+	const L = () => eq(nodes.parent.label, 'x');
+	const q = () => some(posts.replies, (k: Any) => eq(k.body, 'x'));
+	// A callback parameter kept by the callback, then used outside it (O2).
+	let saved: any;
+	let savedRel: any;
+	const sq = some(nodes.children, (k: Any) => {
+		saved = k;
+		savedRel = k;
+		return eq(k.label, 'x');
+	});
+	const local = () =>
+		new SE({
+			type: 'select',
+			from: 'recent',
+			select: { type: 'fields', fields: ['id'] },
+			limit: 1,
+		} as never).asExpr('v');
+	const lb = (where: unknown) =>
+		new SE({
+			type: 'select',
+			from: 'recent',
+			select: { type: 'fields', fields: ['id'] },
+			where,
+			limit: 1,
+		} as never).asExpr('v');
+	const cte = (query: unknown) =>
+		d
+			.withCte('recent')
+			.fromUnnest({ id: [1, 2] })
+			.query(query as never);
+	const aggBody = (filter: unknown) =>
+		new SE({
+			type: 'select',
+			from: 'posts',
+			select: {
+				type: 'aggregate',
+				aggregates: [{ function: 'count', field: '*', filter }],
+			},
+		} as never).asExpr('n');
+	const CASE = () =>
+		caseWhen(eq(users.writings.published, true), literal(1)).else(literal(0));
+	const leaf = L();
+	// R9 asserts O11's message written out, not built by the error class (#1116).
+	const r9Message =
+		'a typed ref resolved from its origin in a typed function argument is not supported yet (#1116).';
+	const expectR9 = (build: () => unknown): void => {
+		let error: unknown;
+		try {
+			dumpOf(build);
+		} catch (caught) {
+			error = caught;
+		}
+		expect(error).toBeInstanceOf(NotYetSupportedError);
+		expect(error).toMatchObject({ issue: 1116, message: r9Message });
+	};
+	type Dumped = { sql: string; params?: unknown; parameters?: unknown };
+	const dumpOf = (build: () => unknown): Dumped => {
+		const built = build() as { dump?: () => Dumped } & Dumped;
+		return typeof built.dump === 'function' ? built.dump() : built;
+	};
+	const expectDump = (
+		build: () => unknown,
+		sql: string,
+		parameters: unknown,
+	): void => {
+		const dumped = dumpOf(build);
+		expect(dumped.sql).toBe(sql);
+		expect(dumped.params ?? dumped.parameters).toEqual(parameters);
+	};
+
+	it('AC1 / exists (A1)', () => {
+		expectDump(
+			() => b.select('nodes').where(exists('parent', { where: L() })),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.parent_id = nodes_exists_0.id AND nodes_exists_0.label = $1)',
+			['x'],
+		);
+	});
+
+	it('AC1 / notExists (A3)', () => {
+		expectDump(
+			() => b.select('nodes').where(notExists('parent', { where: L() })),
+			'SELECT nodes.* FROM nodes WHERE NOT (EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.parent_id = nodes_exists_0.id AND nodes_exists_0.label = $1))',
+			['x'],
+		);
+	});
+
+	it('AC1 / cross-table (A2)', () => {
+		expectDump(
+			() =>
+				d
+					.select('users')
+					.where(
+						exists('writings', { where: eq(users.writings.published, true) }),
+					),
+			'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND posts_exists_0.published = $1)',
+			[true],
+		);
+	});
+
+	it('AC1 / quantifier-body (A4)', () => {
+		expectDump(
+			() =>
+				b
+					.select('nodes')
+					.where(some(nodes.children, () => eq(nodes.children.label, 'x'))),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND nodes_exists_0.label = $1)',
+			['x'],
+		);
+	});
+
+	it('AC1 / every (E8)', () => {
+		expectDump(
+			() =>
+				d
+					.select('users')
+					.where(
+						every(users.writings, () => eq(users.writings.published, true)),
+					),
+			'SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND NOT (posts_exists_0.published = $1)))',
+			[true],
+		);
+	});
+
+	it('AC2 / outer-root (A13)', () => {
+		expectDump(
+			() => b.select('nodes').where(exists('children', { where: L() })),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes.parent_id = nodes_exists_1.id AND nodes_exists_1.label = $1))',
+			['x'],
+		);
+	});
+
+	it('AC2 / single-range-origin (A16)', () => {
+		expectDump(
+			() =>
+				d
+					.select('posts')
+					.where(
+						exists('author', { where: eq(users.writings.published, true) }),
+					),
+			'SELECT posts.* FROM posts WHERE EXISTS (SELECT 1 FROM users AS users_exists_0 WHERE posts.author_id = users_exists_0.id AND EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users_exists_0.id = posts_exists_1.author_id AND posts_exists_1.published = $1))',
+			[true],
+		);
+	});
+
+	it('AC2 / include-not-bound (E13)', () => {
+		expectDump(
+			() =>
+				d.select('users').where(
+					exists('writings', {
+						include: { replies: { join: 'inner' } },
+						where: eq(users.writings.replies.body, 'x'),
+					}),
+				),
+			'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 JOIN comments AS replies ON posts_exists_0.id = replies.post_id WHERE users.id = posts_exists_0.author_id AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.post_id AND comments_exists_1.body = $1))',
+			['x'],
+		);
+	});
+
+	it('AC2 / multi-hop-predicate (E16)', () => {
+		expectDump(
+			() =>
+				d.select('users').where(
+					exists('writings.replies', {
+						where: eq(users.writings.title, 'x'),
+					}),
+				),
+			'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.post_id AND posts_exists_0.title = $1))',
+			['x'],
+		);
+	});
+
+	it('AC3 / two-bound (A14)', () => {
+		expectDump(
+			() =>
+				b.select('nodes').where(
+					exists('parent', {
+						where: exists('parent', {
+							where: eq(nodes.parent.parent.label, 'x'),
+						}),
+					}),
+				),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.parent_id = nodes_exists_0.id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_exists_0.parent_id = nodes_exists_1.id AND nodes_exists_1.label = $1))',
+			['x'],
+		);
+	});
+
+	it('AC3 / bound-then-traversed (A15)', () => {
+		expectDump(
+			() =>
+				d
+					.select('users')
+					.where(
+						exists('writings', { where: eq(users.writings.replies.body, 'x') }),
+					),
+			'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.post_id AND comments_exists_1.body = $1))',
+			['x'],
+		);
+	});
+
+	it('AC4 / rawExists (A5)', () => {
+		expectDump(
+			() =>
+				b
+					.select('nodes')
+					.where(rawExists(subquery('nodes').select('id').where(L()))),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT nodes_sq.id FROM nodes AS nodes_sq WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes_sq.parent_id = nodes_exists_0.id AND nodes_exists_0.label = $1))',
+			['x'],
+		);
+	});
+
+	it('AC4 / inSubquery (A6)', () => {
+		expectDump(
+			() =>
+				b
+					.select('nodes')
+					.where(inSubquery('id', subquery('nodes').select('id').where(L()))),
+			'SELECT nodes.* FROM nodes WHERE nodes.id = ANY (SELECT nodes_subq_0.id FROM nodes AS nodes_subq_0 WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_subq_0.parent_id = nodes_exists_1.id AND nodes_exists_1.label = $1))',
+			['x'],
+		);
+	});
+
+	it('AC4 / scalar (A7)', () => {
+		expectDump(
+			() =>
+				b
+					.select('nodes')
+					.columns([
+						'id',
+						subquery('nodes').select('id').where(L()).count().asExpr('n'),
+					]),
+			'SELECT nodes.id, (SELECT count(*) FROM nodes AS nodes_1 WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes_1.parent_id = nodes_exists_0.id AND nodes_exists_0.label = $1)) AS n FROM nodes',
+			['x'],
+		);
+	});
+
+	it('AC4 / outer-origin (E9)', () => {
+		expectDump(
+			() =>
+				d
+					.select('users')
+					.where(
+						rawExists(
+							subquery('comments')
+								.select('id')
+								.where(eq(users.writings.published, true)),
+						),
+					),
+			'SELECT users.* FROM users WHERE EXISTS (SELECT comments_sq.id FROM comments AS comments_sq WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND posts_exists_0.published = $1))',
+			[true],
+		);
+	});
+
+	it('AC4 / chain-across-queries (E10)', () => {
+		expectDump(
+			() =>
+				d.select('users').where(
+					exists('writings', {
+						where: rawExists(
+							subquery('comments')
+								.select('id')
+								.where(eq(users.writings.title, 'x')),
+						),
+					}),
+				),
+			'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND EXISTS (SELECT comments_sq.id FROM comments AS comments_sq WHERE posts_exists_0.title = $1))',
+			['x'],
+		);
+	});
+
+	it('AC4 / rawNotExists (Q1)', () => {
+		expectDump(
+			() =>
+				b.select('nodes').where({
+					kind: 'rawNotExists',
+					subquery: subquery('nodes')
+						.select('id')
+						.where(L())
+						.build()
+						.toIntent(),
+				}),
+			'SELECT nodes.* FROM nodes WHERE NOT (EXISTS (SELECT nodes_sq.id FROM nodes AS nodes_sq WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes_sq.parent_id = nodes_exists_0.id AND nodes_exists_0.label = $1)))',
+			['x'],
+		);
+	});
+
+	it('AC4 / scalar-comparison (V1)', () => {
+		expectDump(
+			() =>
+				b.select('nodes').where({
+					kind: 'subquery',
+					field: 'id',
+					operator: 'eq',
+					subquery: subquery('nodes')
+						.select('id')
+						.where(L())
+						.build()
+						.toIntent(),
+				}),
+			'SELECT nodes.* FROM nodes WHERE nodes.id = (SELECT nodes_subq_0.id FROM nodes AS nodes_subq_0 WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_subq_0.parent_id = nodes_exists_1.id AND nodes_exists_1.label = $1))',
+			['x'],
+		);
+	});
+
+	it('AC4 / in-rewrite-origin (S1a)', () => {
+		expectDump(
+			() =>
+				b
+					.select('nodes')
+					.where(
+						inSubquery('id', subquery('nodes').select('parent_id').where(L())),
+					),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_exists_0.parent_id = nodes_exists_1.id AND nodes_exists_1.label = $1))',
+			['x'],
+		);
+	});
+
+	it('AC4 / in-rewrite-string-control (S1d)', () => {
+		expectDump(
+			() =>
+				b
+					.select('nodes')
+					.where(
+						inSubquery(
+							'id',
+							subquery('nodes').select('parent_id').where(eq('label', 'x')),
+						),
+					),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND nodes_exists_0.label = $1)',
+			['x'],
+		);
+	});
+
+	it('AC4 / local-where-scalar (W1)', () => {
+		expectDump(
+			() =>
+				cte(d.select('posts').where(eq('id', lb(eq(posts.author.email, 'x'))))),
+			'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT posts.* FROM posts WHERE posts.id = (SELECT recent.id FROM recent AS recent WHERE EXISTS (SELECT 1 FROM users AS users_exists_0 WHERE posts.author_id = users_exists_0.id AND users_exists_0.email = $2) LIMIT 1)',
+			[[1, 2], 'x'],
+		);
+	});
+
+	it('AC4 / local-where-quantifier (W2)', () => {
+		expectDump(
+			() =>
+				cte(
+					d
+						.select('posts')
+						.where(
+							eq('id', lb(some(posts.replies, (k: Any) => eq(k.body, 'x')))),
+						),
+				),
+			'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT posts.* FROM posts WHERE posts.id = (SELECT recent.id FROM recent AS recent WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts.id = comments_exists_0.post_id AND comments_exists_0.body = $2) LIMIT 1)',
+			[[1, 2], 'x'],
+		);
+	});
+
+	it('AC4 / local-where-callback (W3)', () => {
+		expectDump(
+			() =>
+				cte(
+					d
+						.select('users')
+						.where(
+							some(users.writings, (p: Any) => eq('id', lb(eq(p.title, 'x')))),
+						),
+				),
+			'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND posts_exists_0.id = (SELECT recent.id FROM recent AS recent WHERE posts_exists_0.title = $2 LIMIT 1))',
+			[[1, 2], 'x'],
+		);
+	});
+
+	it('AC4 / local-root-core-resolved (Y1)', () => {
+		expectDump(
+			() =>
+				cte(
+					d.select('users').columns([
+						caseWhen(
+							exists('writings', {
+								where: and(
+									gt(lb(eq('id', 1)), 0),
+									eq(users.writings.published, true),
+								),
+							}),
+							literal(1),
+						)
+							.else(literal(0))
+							.as('c'),
+					]),
+				),
+			'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND (SELECT recent.id FROM recent AS recent WHERE recent.id = $2 LIMIT 1) > $3 AND posts_exists_0.published = $4) THEN 1 ELSE 0 END AS c FROM users',
+			[[1, 2], 1, 0, true],
+		);
+	});
+
+	it('AC4 / local-rawExists (E26)', () => {
+		expectDump(
+			() =>
+				d
+					.withCte('recent')
+					.fromUnnest({ id: [1, 2] })
+					.query(
+						d
+							.select('posts')
+							.where(
+								rawExists(
+									subquery('recent')
+										.select('id')
+										.where(eq(posts.author.email, 'x')),
+								),
+							),
+					),
+			'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT posts.* FROM posts WHERE EXISTS (SELECT recent_sq.id FROM recent AS recent_sq WHERE EXISTS (SELECT 1 FROM users AS users_exists_0 WHERE posts.author_id = users_exists_0.id AND users_exists_0.email = $2))',
+			[[1, 2], 'x'],
+		);
+	});
+
+	it('AC5 / FILTER (A8)', () => {
+		expectDump(
+			() =>
+				b.select('nodes').columns([
+					fn('count', star())
+						.filter(exists('parent', { where: L() }))
+						.as('n'),
+				]),
+			'SELECT count(*) FILTER (WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.parent_id = nodes_exists_0.id AND nodes_exists_0.label = $1)) AS n FROM nodes',
+			['x'],
+		);
+	});
+
+	it('AC5 / CASE (A9)', () => {
+		expectDump(
+			() =>
+				b.select('nodes').columns([
+					caseWhen(exists('parent', { where: L() }), literal(1))
+						.else(literal(0))
+						.as('c'),
+				]),
+			'SELECT CASE WHEN EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.parent_id = nodes_exists_0.id AND nodes_exists_0.label = $1) THEN 1 ELSE 0 END AS c FROM nodes',
+			['x'],
+		);
+	});
+
+	it('AC5 / HAVING (A10)', () => {
+		expectDump(
+			() =>
+				b
+					.select('nodes')
+					.groupBy(['id'])
+					.having(exists('parent', { where: L() })),
+			'SELECT nodes.* FROM nodes GROUP BY nodes.id HAVING EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.parent_id = nodes_exists_0.id AND nodes_exists_0.label = $1)',
+			['x'],
+		);
+	});
+
+	it('AC5 / join-on (E14)', () => {
+		expectDump(
+			() =>
+				b.select('nodes').join('nodes', {
+					as: 'n2',
+					on: and(eq('n2.id', 1), exists('parent', { where: L() })),
+				}),
+			'SELECT nodes.* FROM nodes JOIN nodes AS n2 ON n2.id = $1 AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.parent_id = nodes_exists_0.id AND nodes_exists_0.label = $2)',
+			[1, 'x'],
+		);
+	});
+
+	it('AC5 / body-orderBy (E28)', () => {
+		expectDump(
+			() =>
+				b.select('nodes').columns([
+					'id',
+					new SubqueryExpression({
+						type: 'select',
+						from: 'nodes',
+						select: { type: 'fields', fields: ['id'] },
+						orderBy: [
+							{
+								expression:
+									caseWhen(eq(nodes.parent.label, 'x'), literal(1)).else(
+										literal(0),
+									).intent ??
+									caseWhen(eq(nodes.parent.label, 'x'), literal(1)).else(
+										literal(0),
+									),
+								direction: 'asc',
+							},
+						],
+						limit: 1,
+					}).asExpr('v'),
+				]),
+			'SELECT nodes.id, (SELECT nodes_1.id FROM nodes AS nodes_1 ORDER BY CASE WHEN EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes_1.parent_id = nodes_exists_0.id AND nodes_exists_0.label = $1) THEN 1 ELSE 0 END ASC LIMIT 1) AS v FROM nodes',
+			['x'],
+		);
+	});
+
+	it('AC5 / body-aggregate-filter-inner-ref (G3)', () => {
+		expectDump(
+			() =>
+				d.select('users').columns(['id', aggBody(eq(posts.author.email, 'x'))]),
+			'SELECT users.id, (SELECT count(*) FILTER (WHERE EXISTS (SELECT 1 FROM users AS users_exists_0 WHERE posts.author_id = users_exists_0.id AND users_exists_0.email = $1)) FROM posts) AS n FROM users',
+			['x'],
+		);
+	});
+
+	it('AC5 / body-aggregate-filter-inner-quantifier (G4)', () => {
+		expectDump(
+			() =>
+				d
+					.select('users')
+					.columns([
+						'id',
+						aggBody(some(posts.replies, (r: Any) => eq(r.body, 'x'))),
+					]),
+			'SELECT users.id, (SELECT count(*) FILTER (WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts.id = comments_exists_0.post_id AND comments_exists_0.body = $1)) FROM posts) AS n FROM users',
+			['x'],
+		);
+	});
+
+	it('AC5 / body-call-inner-column (S2b)', () => {
+		expectDump(
+			() =>
+				d.select('users').columns([
+					'id',
+					d
+						.select('posts')
+						.columns([
+							fn(
+								'count',
+								caseWhen(eq('published', true), literal(1)).else(literal(null)),
+							).as('n'),
+						])
+						.asExpr('n'),
+				]),
+			'SELECT users.id, (SELECT count(CASE WHEN posts.published = $1 THEN 1 ELSE NULL END) AS n FROM posts) AS n FROM users',
+			[true],
+		);
+	});
+
+	it('AC5 / body-call-inner-typed (X4)', () => {
+		expectDump(
+			() =>
+				d.select('users').columns([
+					'id',
+					d
+						.select('posts')
+						.columns([
+							fn(
+								'count',
+								caseWhen(eq(posts.author.email, 'x'), literal(1)).else(
+									literal(null),
+								),
+							).as('n'),
+						])
+						.asExpr('n'),
+				]),
+			'SELECT users.id, (SELECT count(CASE WHEN EXISTS (SELECT 1 FROM users AS users_exists_0 WHERE posts.author_id = users_exists_0.id AND users_exists_0.email = $1) THEN 1 ELSE NULL END) AS n FROM posts) AS n FROM users',
+			['x'],
+		);
+	});
+
+	it('AC5 / update (A11)', () => {
+		expectDump(
+			() =>
+				d
+					.update('users')
+					.set({ email: 'e' })
+					.where(
+						exists('writings', { where: eq(users.writings.published, true) }),
+					),
+			'UPDATE users SET email = $1 WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND posts_exists_0.published = $2)',
+			['e', true],
+		);
+	});
+
+	it('AC5 / delete (A12)', () => {
+		expectDump(
+			() =>
+				d
+					.delete('users')
+					.where(
+						exists('writings', { where: eq(users.writings.published, true) }),
+					),
+			'DELETE FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND posts_exists_0.published = $1)',
+			[true],
+		);
+	});
+
+	it('AC5 / batchSet (E23)', () => {
+		expectDump(
+			() =>
+				d
+					.update('users')
+					.batchSet('id', [{ id: 1, email: 'a' }])
+					.where(
+						exists('writings', { where: eq(users.writings.published, true) }),
+					),
+			'UPDATE users SET email = t.email FROM unnest(CAST($2 AS int4[]), CAST($3 AS text[])) AS t(id, email) WHERE users.id = t.id AND EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND posts_exists_0.published = $1)',
+			[true, [1], ['a']],
+		);
+	});
+
+	it('AC5 / upsert-guard (E24)', () => {
+		expectDump(
+			() =>
+				d
+					.upsert('users')
+					.values({ id: 1, email: 'a' })
+					.onConflict(['id'])
+					.doUpdate(
+						{ email: 'b' },
+						exists('writings', { where: eq(users.writings.published, true) }),
+					),
+			'INSERT INTO users (id, email) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET email = $3 WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND posts_exists_0.published = $4)',
+			[1, 'a', 'b', true],
+		);
+	});
+
+	it('AC6 / some (B1)', () => {
+		expectDump(
+			() =>
+				b
+					.select('nodes')
+					.where(some(nodes.children, (k: Any) => eq(k.parent.label, 'x'))),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_exists_0.parent_id = nodes_exists_1.id AND nodes_exists_1.label = $1))',
+			['x'],
+		);
+	});
+
+	it('AC6 / every (B2)', () => {
+		expectDump(
+			() =>
+				b
+					.select('nodes')
+					.where(every(nodes.children, (k: Any) => eq(k.parent.label, 'x'))),
+			'SELECT nodes.* FROM nodes WHERE NOT (EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND NOT (EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_exists_0.parent_id = nodes_exists_1.id AND nodes_exists_1.label = $1))))',
+			['x'],
+		);
+	});
+
+	it('AC6 / none (Q2)', () => {
+		expectDump(
+			() =>
+				b
+					.select('nodes')
+					.where(none(nodes.children, (k: Any) => eq(k.parent.label, 'x'))),
+			'SELECT nodes.* FROM nodes WHERE NOT (EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_exists_0.parent_id = nodes_exists_1.id AND nodes_exists_1.label = $1)))',
+			['x'],
+		);
+	});
+
+	it('AC6 / nested-bound (B4)', () => {
+		expectDump(
+			() =>
+				b
+					.select('nodes')
+					.where(
+						some(nodes.children, (k: Any) =>
+							exists('parent', { where: eq(k.parent.label, 'x') }),
+						),
+					),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_exists_0.parent_id = nodes_exists_1.id AND nodes_exists_1.label = $1))',
+			['x'],
+		);
+	});
+
+	it('AC7 / in-exists (D1)', () => {
+		expectDump(
+			() =>
+				b
+					.select('nodes')
+					.where(
+						some(nodes.children, (k: Any) =>
+							exists('parent', { where: eq(k.label, 'x') }),
+						),
+					),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_exists_0.parent_id = nodes_exists_1.id AND nodes_exists_0.label = $1))',
+			['x'],
+		);
+	});
+
+	it('AC7 / in-quantifier (D2)', () => {
+		expectDump(
+			() =>
+				b
+					.select('nodes')
+					.where(
+						some(nodes.children, (k: Any) =>
+							some(k.children, () => eq(k.label, 'x')),
+						),
+					),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_exists_0.id = nodes_exists_1.parent_id AND nodes_exists_0.label = $1))',
+			['x'],
+		);
+	});
+
+	it('AC7 / in-notExists (Q3)', () => {
+		expectDump(
+			() =>
+				b
+					.select('nodes')
+					.where(
+						some(nodes.children, (k: Any) =>
+							notExists('parent', { where: eq(k.label, 'x') }),
+						),
+					),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND NOT (EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_exists_0.parent_id = nodes_exists_1.id AND nodes_exists_0.label = $1)))',
+			['x'],
+		);
+	});
+
+	it('AC7 / in-operand (S1e)', () => {
+		expectDump(
+			() =>
+				b.select('nodes').where(
+					some(nodes.children, (k: Any) =>
+						exists('parent', {
+							where: inSubquery(
+								k.id,
+								subquery('nodes').select('parent_id').where(eq('label', 'x')),
+							),
+						}),
+					),
+				),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_exists_0.parent_id = nodes_exists_1.id AND nodes_exists_0.id = ANY (SELECT nodes_subq_2.parent_id FROM nodes AS nodes_subq_2 WHERE nodes_subq_2.label = $1)))',
+			['x'],
+		);
+	});
+
+	it('AC7 / in-operand-scalar-body (S1g)', () => {
+		expectDump(
+			() =>
+				d.select('users').where(
+					some(users.writings, (p: Any) =>
+						gt(
+							d
+								.select('users')
+								.where(inSubquery(p.id, subquery('posts').select('author_id')))
+								.count()
+								.asExpr('n'),
+							0,
+						),
+					),
+				),
+			'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND (SELECT count(*) FROM users AS users_1 WHERE posts_exists_0.id = ANY (SELECT posts_subq_0.author_id FROM posts AS posts_subq_0)) > $1)',
+			[0],
+		);
+	});
+
+	it('AC7 / cross-table (D3)', () => {
+		expectDump(
+			() =>
+				d
+					.select('users')
+					.where(
+						some(users.writings, (p: Any) =>
+							some(p.replies, () => eq(p.title, 'x')),
+						),
+					),
+			'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.post_id AND posts_exists_0.title = $1))',
+			['x'],
+		);
+	});
+
+	it('AC7 / dotted-value-side (E11b)', () => {
+		expectDump(
+			() =>
+				d
+					.select('users')
+					.where(
+						some(users.writings, (p: Any) =>
+							eq(posts.id, caseWhen(eq(p.published, true), 1).else(2)),
+						),
+					),
+			'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND posts_exists_0.id = CASE WHEN posts_exists_0.published = $1 THEN 1 ELSE 2 END)',
+			[true],
+		);
+	});
+
+	it('AC8 / single-range-kept (C1)', () => {
+		expectDump(
+			() => d.select('users').where(exists('writings', { where: q() })),
+			'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts_exists_0.id = comments_exists_1.post_id AND comments_exists_1.body = $1))',
+			['x'],
+		);
+	});
+
+	it('AC8 / subquery-root (C2)', () => {
+		expectDump(
+			() =>
+				d
+					.select('users')
+					.where(rawExists(subquery('posts').select('id').where(q()))),
+			'SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts_sq.id = comments_exists_0.post_id AND comments_exists_0.body = $1))',
+			['x'],
+		);
+	});
+
+	it('AC8 / outer-root (C3)', () => {
+		expectDump(
+			() => d.select('posts').where(exists('author', { where: q() })),
+			'SELECT posts.* FROM posts WHERE EXISTS (SELECT 1 FROM users AS users_exists_0 WHERE posts.author_id = users_exists_0.id AND EXISTS (SELECT 1 FROM comments AS comments_exists_1 WHERE posts.id = comments_exists_1.post_id AND comments_exists_1.body = $1))',
+			['x'],
+		);
+	});
+
+	it('AC8 / root-wins (C4)', () => {
+		expectDump(
+			() =>
+				b.select('nodes').where(
+					exists('parent', {
+						where: some(nodes.children, (k: Any) => eq(k.label, 'x')),
+					}),
+				),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.parent_id = nodes_exists_0.id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes.id = nodes_exists_1.parent_id AND nodes_exists_1.label = $1))',
+			['x'],
+		);
+	});
+
+	it('AC8 / other-relation (C5)', () => {
+		expectDump(
+			() =>
+				d.select('users').where(
+					exists('writings', {
+						where: some(users.edits, (p: Any) => eq(p.title, 'x')),
+					}),
+				),
+			'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.editor_id AND posts_exists_1.title = $1))',
+			['x'],
+		);
+	});
+
+	it('AC8 / subquery-shadows (E21)', () => {
+		expectDump(
+			() =>
+				b.select('nodes').where(
+					rawExists(
+						subquery('nodes')
+							.select('id')
+							.where(some(nodes.children, (k: Any) => eq(k.label, 'x'))),
+					),
+				),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT nodes_sq.id FROM nodes AS nodes_sq WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes_sq.id = nodes_exists_0.parent_id AND nodes_exists_0.label = $1))',
+			['x'],
+		);
+	});
+
+	it('AC8 / dotted-value-side (E11a)', () => {
+		expectDump(
+			() =>
+				b.select('nodes').where(
+					eq(
+						'parent.id',
+						caseWhen(
+							some(nodes.children, (k: Any) => eq(k.label, 'x')),
+							1,
+						).else(2),
+					),
+				),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.parent_id = nodes_exists_0.id AND nodes_exists_0.id = CASE WHEN EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes.id = nodes_exists_1.parent_id AND nodes_exists_1.label = $1) THEN 1 ELSE 2 END)',
+			['x'],
+		);
+	});
+
+	it('AC8 / having-dotted-body (E12)', () => {
+		expectDump(
+			() =>
+				b
+					.select('nodes')
+					.groupBy(['id'])
+					.having(
+						inSubquery(
+							'nodes.id',
+							subquery('nodes')
+								.select('parent_id')
+								.where(some(nodes.children, (k: Any) => eq(k.label, 'x'))),
+						),
+					),
+			'SELECT nodes.* FROM nodes GROUP BY nodes.id HAVING nodes.id = ANY (SELECT nodes_subq_0.parent_id FROM nodes AS nodes_subq_0 WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_subq_0.id = nodes_exists_1.parent_id AND nodes_exists_1.label = $1))',
+			['x'],
+		);
+	});
+
+	it('AC9 / across-subquery (V2)', () => {
+		expectDump(
+			() =>
+				b.select('nodes').where(
+					some(nodes.children, (k: Any) =>
+						rawExists(
+							subquery('nodes')
+								.select('id')
+								.where(some(k.children, (g: Any) => eq(g.label, 'x'))),
+						),
+					),
+				),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND EXISTS (SELECT nodes_sq.id FROM nodes AS nodes_sq WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_exists_0.id = nodes_exists_1.parent_id AND nodes_exists_1.label = $1)))',
+			['x'],
+		);
+	});
+
+	it('AC9 / in-relation-predicate (D4)', () => {
+		expectDump(
+			() =>
+				b.select('nodes').where(
+					some(nodes.children, (k: Any) =>
+						exists('children', {
+							where: some(k.children, (g: Any) => eq(g.label, 'x')),
+						}),
+					),
+				),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_exists_0.id = nodes_exists_1.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_2 WHERE nodes_exists_0.id = nodes_exists_2.parent_id AND nodes_exists_2.label = $1)))',
+			['x'],
+		);
+	});
+
+	it('AC10 / tableref-leaf-shared (V3)', () => {
+		expectDump(
+			() =>
+				b
+					.select('nodes')
+					.where(
+						and(
+							exists('children', { where: leaf }),
+							rawExists(subquery('nodes').select('id').where(leaf)),
+						),
+					),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes.parent_id = nodes_exists_1.id AND nodes_exists_1.label = $1)) AND EXISTS (SELECT nodes_sq.id FROM nodes AS nodes_sq WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_2 WHERE nodes_sq.parent_id = nodes_exists_2.id AND nodes_exists_2.label = $2))',
+			['x', 'x'],
+		);
+	});
+
+	it('AC10 / shared-quantifier (E20)', () => {
+		expectDump(
+			() => {
+				const shared = some(nodes.children, (k: Any) =>
+					exists('parent', { where: eq(k.label, 'x') }),
+				);
+				return b
+					.select('nodes')
+					.where(and(shared, exists('parent', { where: shared })));
+			},
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_exists_0.parent_id = nodes_exists_1.id AND nodes_exists_0.label = $1)) AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_2 WHERE nodes.parent_id = nodes_exists_2.id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_3 WHERE nodes.id = nodes_exists_3.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_4 WHERE nodes_exists_3.parent_id = nodes_exists_4.id AND nodes_exists_3.label = $2)))',
+			['x', 'x'],
+		);
+	});
+
+	it('AC11 / inverse-spelling (N1)', () => {
+		expectDump(
+			() =>
+				s
+					.select('posts')
+					.where(
+						exists('replies', { where: eq(sTables.posts.comments.body, 'x') }),
+					),
+			'SELECT posts.* FROM posts WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts.id = comments_exists_0.post_id AND comments_exists_0.body = $1)',
+			['x'],
+		);
+	});
+
+	it('AC11 / declared-spelling (N1c)', () => {
+		expectDump(
+			() =>
+				s
+					.select('posts')
+					.where(
+						exists('replies', { where: eq(sTables.posts.replies.body, 'x') }),
+					),
+			'SELECT posts.* FROM posts WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts.id = comments_exists_0.post_id AND comments_exists_0.body = $1)',
+			['x'],
+		);
+	});
+
+	// AC12: every leaf constructor marks a TableRef path with its table, and the
+	// leaf inside exists('parent') binds that predicate's target.
+	const P = () => nodes.parent.label;
+	it.each([
+		[
+			'AC12 / eq',
+			() => eq(P(), 'x'),
+			{
+				kind: 'comparison',
+				field: 'parent.label',
+				operator: 'eq',
+				value: 'x',
+				pathRef: true,
+				pathTable: 'nodes',
+			},
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.parent_id = nodes_exists_0.id AND nodes_exists_0.label = $1)',
+			['x'],
+		],
+		[
+			'AC12 / like',
+			() => like(P(), 'x%'),
+			{
+				kind: 'like',
+				field: 'parent.label',
+				pattern: 'x%',
+				pathRef: true,
+				pathTable: 'nodes',
+			},
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.parent_id = nodes_exists_0.id AND nodes_exists_0.label LIKE $1)',
+			['x%'],
+		],
+		[
+			'AC12 / inArray',
+			() => inArray(P(), ['x', 'y']),
+			{
+				kind: 'in',
+				field: 'parent.label',
+				values: ['x', 'y'],
+				pathRef: true,
+				pathTable: 'nodes',
+			},
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.parent_id = nodes_exists_0.id AND nodes_exists_0.label = ANY ($1))',
+			[['x', 'y']],
+		],
+		[
+			'AC12 / inSubquery',
+			() => inSubquery(P(), subquery('nodes').select('label')),
+			{
+				kind: 'in',
+				field: 'parent.label',
+				subquery: {
+					type: 'select',
+					from: 'nodes',
+					select: { type: 'fields', fields: ['label'] },
+				},
+				pathRef: true,
+				pathTable: 'nodes',
+			},
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.parent_id = nodes_exists_0.id AND nodes_exists_0.label = ANY (SELECT nodes_subq_1.label FROM nodes AS nodes_subq_1))',
+			[],
+		],
+		[
+			'AC12 / any',
+			() => any(P(), ['x']),
+			{
+				kind: 'any',
+				field: 'parent.label',
+				values: ['x'],
+				pathRef: true,
+				pathTable: 'nodes',
+			},
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.parent_id = nodes_exists_0.id AND nodes_exists_0.label = ANY (CAST($1 AS text[])))',
+			[['x']],
+		],
+		[
+			'AC12 / isNull',
+			() => isNull(P()),
+			{
+				kind: 'null',
+				field: 'parent.label',
+				operator: 'isNull',
+				pathRef: true,
+				pathTable: 'nodes',
+			},
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.parent_id = nodes_exists_0.id AND nodes_exists_0.label IS NULL)',
+			[],
+		],
+		[
+			'AC12 / isNotNull',
+			() => isNotNull(P()),
+			{
+				kind: 'null',
+				field: 'parent.label',
+				operator: 'isNotNull',
+				pathRef: true,
+				pathTable: 'nodes',
+			},
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.parent_id = nodes_exists_0.id AND nodes_exists_0.label IS NOT NULL)',
+			[],
+		],
+	] as const)('%s', (_name, build, payload, sql, params) => {
+		expect(build()).toEqual(payload);
+		expectDump(
+			() => b.select('nodes').where(exists('parent', { where: build() })),
+			sql,
+			params,
+		);
+	});
+
+	it('AC12 / chained', () => {
+		expect(eq(users.writings.replies.body, 'x')).toEqual({
+			kind: 'comparison',
+			field: 'writings.replies.body',
+			operator: 'eq',
+			value: 'x',
+			pathRef: true,
+			pathTable: 'users',
+		});
+	});
+
+	it('AC13 / root-where (K1)', () => {
+		expectDump(
+			() => b.select('nodes').where(L()),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.parent_id = nodes_exists_0.id AND nodes_exists_0.label = $1)',
+			['x'],
+		);
+	});
+
+	it('AC13 / join-bound-by-name (T2)', () => {
+		expectDump(
+			() => b.select('nodes').join('parent').where(L()),
+			'SELECT nodes.* FROM nodes JOIN nodes AS parent ON nodes.parent_id = parent.id WHERE parent.label = $1',
+			['x'],
+		);
+	});
+
+	it('AC13 / include-where (T4)', () => {
+		expectDump(
+			() => b.select('nodes').include('parent', { join: 'left', where: L() }),
+			'SELECT nodes.*, parent.id AS "parent.id", parent.label AS "parent.label", parent.parent_id AS "parent.parent_id", parent.id AS __dbsp_presence_parent FROM nodes LEFT JOIN nodes AS parent ON nodes.parent_id = parent.id WHERE parent.label = $1',
+			['x'],
+		);
+	});
+
+	it('AC13 / renamed-join (T5)', () => {
+		expectDump(
+			() =>
+				d
+					.select('users')
+					.join('writings', { as: 'w' })
+					.where(eq(users.writings.published, true)),
+			'SELECT users.* FROM users JOIN posts AS w ON users.id = w.author_id WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_1 WHERE users.id = posts_exists_1.author_id AND posts_exists_1.published = $1)',
+			[true],
+		);
+	});
+
+	it('AC13 / plain-columns K3 (K3)', () => {
+		expectDump(
+			() =>
+				b
+					.select('nodes')
+					.where(exists('parent', { where: eq(nodes.label, 'x') })),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.parent_id = nodes_exists_0.id AND nodes_exists_0.label = $1)',
+			['x'],
+		);
+	});
+
+	it('AC13 / plain-columns K4 (K4)', () => {
+		expectDump(
+			() =>
+				b
+					.select('nodes')
+					.where(some(nodes.children, (k: Any) => eq(k.label, 'x'))),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND nodes_exists_0.label = $1)',
+			['x'],
+		);
+	});
+
+	it('AC13 / local-callback-direct (S3d)', () => {
+		expectDump(
+			() =>
+				b
+					.withCte('recent')
+					.fromUnnest({ id: [1] })
+					.query(
+						b.select('nodes').columns([
+							caseWhen(
+								and(
+									some(nodes.children, (k: Any) => eq(k.label, 'x')),
+									eq('id', local()),
+								),
+								literal(1),
+							)
+								.else(literal(0))
+								.as('c'),
+						]),
+					),
+			'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT CASE WHEN EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND nodes_exists_0.label = $2) AND nodes.id = (SELECT recent.id FROM recent AS recent LIMIT 1) THEN 1 ELSE 0 END AS c FROM nodes',
+			[[1], 'x'],
+		);
+	});
+
+	it('AC13 / callback-in-operand-direct (S1f)', () => {
+		expectDump(
+			() =>
+				b
+					.select('nodes')
+					.where(
+						some(nodes.children, (k: Any) =>
+							inSubquery(
+								k.id,
+								subquery('nodes').select('parent_id').where(eq('label', 'x')),
+							),
+						),
+					),
+			'SELECT nodes.* FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND nodes_exists_0.id = ANY (SELECT nodes_subq_1.parent_id FROM nodes AS nodes_subq_1 WHERE nodes_subq_1.label = $1))',
+			['x'],
+		);
+	});
+
+	it('AC16 / filtered-body (P1)', () => {
+		expectDump(
+			() =>
+				df
+					.select('users')
+					.where(
+						rawExists(
+							df.select('comments').where(eq(U.writings.published, true)),
+						),
+					),
+			'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM comments AS comments_sq WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND posts_exists_0.deleted_at IS NULL AND posts_exists_0.published = $1))',
+			[true],
+		);
+	});
+
+	it('AC16 / unfiltered-body (P2)', () => {
+		expectDump(
+			() =>
+				df
+					.select('users')
+					.where(
+						rawExists(
+							df
+								.select('comments')
+								.withoutDefaultFilters()
+								.where(eq(U.writings.published, true)),
+						),
+					),
+			'SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM comments AS comments_sq WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND posts_exists_0.published = $1))',
+			[true],
+		);
+	});
+
+	it('R1 / leaf (R1b)', () => {
+		expect(() =>
+			dumpOf(() =>
+				d
+					.select('users')
+					.join('writings')
+					.where(exists('edits', { where: eq(posts.author.email, 'x') })),
+			),
+		).toThrow(
+			new Error(
+				"ColumnRef 'author.email' starts at table 'posts', which several ranges in scope read: 'posts_exists_1', 'writings'; use the callback parameter of a quantifier, or write the path from this query's root.",
+			),
+		);
+	});
+
+	it('R1 / quantifier (E2)', () => {
+		expect(() =>
+			dumpOf(() =>
+				d
+					.select('users')
+					.join('writings')
+					.where(exists('edits', { where: q() })),
+			),
+		).toThrow(
+			new Error(
+				"RelationRef 'replies' starts at table 'posts', which several ranges in scope read: 'posts_exists_1', 'writings'; use the callback parameter of a quantifier, or write the path from this query's root.",
+			),
+		);
+	});
+
+	it('R2 / no-range (E3)', () => {
+		expect(() =>
+			dumpOf(() =>
+				d
+					.select('users')
+					.where(
+						exists('writings', { where: eq(dTables.comments.post.title, 'x') }),
+					),
+			),
+		).toThrow(
+			new Error(
+				"ColumnRef 'post.title' starts at table 'comments', which no query in scope reads.",
+			),
+		);
+	});
+
+	it('R3 / leaf-top-level (E1)', () => {
+		expect(() =>
+			dumpOf(() => b.select('nodes').where(and(sq, eq(saved.label, 'y')))),
+		).toThrow(
+			new Error(
+				"ColumnRef 'label' comes from a quantifier callback parameter and is used outside that callback.",
+			),
+		);
+	});
+
+	it('R3 / leaf-in-body (E1b)', () => {
+		expect(() =>
+			dumpOf(() =>
+				b
+					.select('nodes')
+					.where(exists('parent', { where: eq(saved.label, 'y') })),
+			),
+		).toThrow(
+			new Error(
+				"ColumnRef 'label' comes from a quantifier callback parameter and is used outside that callback.",
+			),
+		);
+	});
+
+	it('R3 / quantifier (R3b)', () => {
+		expect(() =>
+			dumpOf(() =>
+				b.select('nodes').where(
+					and(
+						sq,
+						some(savedRel.children, (g: Any) => eq(g.label, 'y')),
+					),
+				),
+			),
+		).toThrow(
+			new Error(
+				"RelationRef 'children' comes from a quantifier callback parameter and is used outside that callback.",
+			),
+		);
+	});
+
+	it('R3b / in-operand (S1c)', () => {
+		expect(() =>
+			dumpOf(() =>
+				b
+					.select('nodes')
+					.where(inSubquery(saved.id, subquery('nodes').select('parent_id'))),
+			),
+		).toThrow(
+			new Error(
+				"ColumnRef 'id' comes from a quantifier callback parameter and is used outside that callback.",
+			),
+		);
+	});
+
+	it('R4 / no-origin (E18)', () => {
+		expect(() =>
+			dumpOf(() =>
+				b.select('nodes').where(
+					exists('parent', {
+						where: {
+							kind: 'comparison',
+							field: 'parent.label',
+							operator: 'eq',
+							value: 'x',
+							pathRef: true,
+						},
+					}),
+				),
+			),
+		).toThrow(
+			new Error(
+				"ColumnRef 'parent.label' follows a relation but carries no origin; build it from orm.tables or a quantifier callback parameter.",
+			),
+		);
+	});
+
+	// R5 / body-leaf: the m1 local forms (a scalar body over a CTE in a
+	// projection, in a CASE condition, in HAVING) keep the refusal (#1040).
+	const localBody = (cond: unknown) =>
+		new SE({
+			type: 'select',
+			from: 'recent',
+			where: cond,
+			select: {
+				type: 'expressions',
+				columns: [
+					{
+						kind: 'case',
+						when: [{ condition: cond, result: { kind: 'literal', value: 1 } }],
+						else: { kind: 'literal', value: 0 },
+						as: 'c',
+					},
+				],
+			},
+			limit: 1,
+		} as never).asExpr('v');
+	const localRefusal = new Error(
+		"ColumnRef 'author.email' follows a relation; in a condition holding a body over a query-local source (an NQL binding or a CTE) it cannot be resolved from its origin yet (#1040).",
+	);
+	it.each([
+		[
+			'L1',
+			() =>
+				cte(
+					d
+						.select('posts')
+						.columns(['id', localBody(eq(posts.author.email, 'x'))]),
+				),
+		],
+		[
+			'L2',
+			() =>
+				cte(
+					d.select('posts').columns([
+						caseWhen(gt(localBody(eq(posts.author.email, 'x')), 0), literal(1))
+							.else(literal(0))
+							.as('c'),
+					]),
+				),
+		],
+		[
+			'L3',
+			() =>
+				cte(
+					d
+						.select('posts')
+						.groupBy(['id'])
+						.having(gt(localBody(eq(posts.author.email, 'x')), 0)),
+				),
+		],
+	])('R5 / body-leaf (%s)', (_name, build) => {
+		expect(() => dumpOf(build)).toThrow(localRefusal);
+	});
+
+	it('R5 / body-leaf E25 (E25)', () => {
+		expect(() =>
+			dumpOf(() =>
+				d
+					.withCte('recent')
+					.fromUnnest({ id: [1, 2] })
+					.query(
+						d.select('posts').columns([
+							'id',
+							new SubqueryExpression({
+								type: 'select',
+								from: 'recent',
+								where: eq(posts.author.email, 'x'),
+								select: {
+									type: 'expressions',
+									columns: [{ kind: 'literal', value: 1, as: 'c' }],
+								},
+								limit: 1,
+							}).asExpr('v'),
+						]),
+					),
+			),
+		).toThrow(
+			new Error(
+				"ColumnRef 'author.email' follows a relation; in a condition holding a body over a query-local source (an NQL binding or a CTE) it cannot be resolved from its origin yet (#1040).",
+			),
+		);
+	});
+
+	it('R5 / root-sibling-leaf (S3b)', () => {
+		expect(() =>
+			dumpOf(() =>
+				b
+					.withCte('recent')
+					.fromUnnest({ id: [1] })
+					.query(
+						b.select('nodes').columns([
+							caseWhen(
+								and(exists('parent', { where: L() }), eq('id', local())),
+								literal(1),
+							)
+								.else(literal(0))
+								.as('c'),
+						]),
+					),
+			),
+		).toThrow(
+			new Error(
+				"ColumnRef 'parent.label' follows a relation; in a condition holding a body over a query-local source (an NQL binding or a CTE) it cannot be resolved from its origin yet (#1040).",
+			),
+		);
+	});
+
+	it('R5 / root-sibling-stray-callback (S3a)', () => {
+		expect(() =>
+			dumpOf(() =>
+				b
+					.withCte('recent')
+					.fromUnnest({ id: [1] })
+					.query(
+						b.select('nodes').columns([
+							caseWhen(and(eq(saved.label, 'x'), eq('id', local())), literal(1))
+								.else(literal(0))
+								.as('c'),
+						]),
+					),
+			),
+		).toThrow(
+			new Error(
+				"'label' comes from a quantifier callback parameter; in a condition holding a body over a query-local source (an NQL binding or a CTE) it is resolved only directly in that callback (#1040).",
+			),
+		);
+	});
+
+	it('R5 / root-sibling-nested-callback (S3c)', () => {
+		expect(() =>
+			dumpOf(() =>
+				b
+					.withCte('recent')
+					.fromUnnest({ id: [1] })
+					.query(
+						b.select('nodes').columns([
+							caseWhen(
+								and(
+									some(nodes.children, (k: Any) =>
+										exists('parent', { where: eq(k.label, 'x') }),
+									),
+									eq('id', local()),
+								),
+								literal(1),
+							)
+								.else(literal(0))
+								.as('c'),
+						]),
+					),
+			),
+		).toThrow(
+			new Error(
+				"'label' comes from a quantifier callback parameter; in a condition holding a body over a query-local source (an NQL binding or a CTE) it is resolved only directly in that callback (#1040).",
+			),
+		);
+	});
+
+	it('R5 / root-reduced-typed (Y2)', () => {
+		expect(() =>
+			dumpOf(() =>
+				cte(
+					d.select('users').columns([
+						caseWhen(
+							and(
+								gt(lb(eq('id', 1)), 0),
+								exists('writings', {
+									where: eq(users.writings.published, true),
+								}),
+							),
+							literal(1),
+						)
+							.else(literal(0))
+							.as('c'),
+					]),
+				),
+			),
+		).toThrow(
+			new Error(
+				"ColumnRef 'writings.published' follows a relation; in a condition holding a body over a query-local source (an NQL binding or a CTE) it cannot be resolved from its origin yet (#1040).",
+			),
+		);
+	});
+
+	it('R5 / case-body-quantifier (W4)', () => {
+		expect(() =>
+			dumpOf(() =>
+				cte(
+					d.select('posts').columns([
+						caseWhen(
+							gt(lb(some(posts.replies, (k: Any) => eq(k.body, 'x'))), 0),
+							literal(1),
+						)
+							.else(literal(0))
+							.as('c'),
+					]),
+				),
+			),
+		).toThrow(
+			new Error(
+				"RelationRef 'replies' follows a relation from its table; inside a body over a query-local source (an NQL binding or a CTE) it cannot be resolved from its origin yet (#1040).",
+			),
+		);
+	});
+
+	it('R7 / projection-filter-leaf (G1)', () => {
+		expect(() =>
+			dumpOf(() =>
+				d
+					.select('users')
+					.columns(['id', aggBody(eq(users.writings.published, true))]),
+			),
+		).toThrow(
+			new Error(
+				"ColumnRef 'writings.published' resolves to a row outside this subquery body; in a function argument or FILTER there, SQL would evaluate the call in the enclosing query if it is an aggregate.",
+			),
+		);
+	});
+
+	it('R7 / projection-filter-quantifier (G2)', () => {
+		expect(() =>
+			dumpOf(() =>
+				d
+					.select('users')
+					.columns([
+						'id',
+						aggBody(some(users.writings, (p: Any) => eq(p.published, true))),
+					]),
+			),
+		).toThrow(
+			new Error(
+				"RelationRef 'writings' resolves to a row outside this subquery body; in a function argument or FILTER there, SQL would evaluate the call in the enclosing query if it is an aggregate.",
+			),
+		);
+	});
+
+	it('R7 / call-argument (S2a)', () => {
+		expect(() =>
+			dumpOf(() =>
+				d.select('users').columns([
+					'id',
+					d
+						.select('posts')
+						.columns([
+							fn(
+								'count',
+								caseWhen(eq(users.writings.published, true), literal(1)).else(
+									literal(null),
+								),
+							).as('n'),
+						])
+						.asExpr('n'),
+				]),
+			),
+		).toThrow(
+			new Error(
+				"ColumnRef 'writings.published' resolves to a row outside this subquery body; in a function argument or FILTER there, SQL would evaluate the call in the enclosing query if it is an aggregate.",
+			),
+		);
+	});
+
+	it('R7 / fn-filter (S2c)', () => {
+		expect(() =>
+			dumpOf(() =>
+				d.select('users').columns([
+					'id',
+					d
+						.select('posts')
+						.columns([
+							fn('count', star())
+								.filter(eq(users.writings.published, true))
+								.as('n'),
+						])
+						.asExpr('n'),
+				]),
+			),
+		).toThrow(
+			new Error(
+				"ColumnRef 'writings.published' resolves to a row outside this subquery body; in a function argument or FILTER there, SQL would evaluate the call in the enclosing query if it is an aggregate.",
+			),
+		);
+	});
+
+	it('R7 / mixed-filter (S2d)', () => {
+		expect(() =>
+			dumpOf(() =>
+				d.select('users').columns([
+					'id',
+					d
+						.select('posts')
+						.columns([
+							fn('count', star())
+								.filter(
+									and(
+										eq('published', true),
+										eq(users.writings.published, true),
+									),
+								)
+								.as('n'),
+						])
+						.asExpr('n'),
+				]),
+			),
+		).toThrow(
+			new Error(
+				"ColumnRef 'writings.published' resolves to a row outside this subquery body; in a function argument or FILTER there, SQL would evaluate the call in the enclosing query if it is an aggregate.",
+			),
+		);
+	});
+
+	it('R7 / aggregate-extra-argument (X2)', () => {
+		expect(() =>
+			dumpOf(() =>
+				d.select('users').columns([
+					'id',
+					d
+						.select('posts')
+						.columns([
+							new ExpressionRef({
+								kind: 'aggregate',
+								function: 'string_agg',
+								field: 'title',
+								extraArgs: [CASE()],
+							}).as('v'),
+						])
+						.asExpr('v'),
+				]),
+			),
+		).toThrow(
+			new Error(
+				"ColumnRef 'writings.published' resolves to a row outside this subquery body; in a function argument or FILTER there, SQL would evaluate the call in the enclosing query if it is an aggregate.",
+			),
+		);
+	});
+
+	it('R7 / callback (S2e)', () => {
+		expect(() =>
+			dumpOf(() =>
+				d.select('users').where(
+					some(users.writings, (p: Any) =>
+						gt(
+							d
+								.select('comments')
+								.columns([
+									fn('count', star()).filter(eq(p.published, true)).as('n'),
+								])
+								.asExpr('n'),
+							0,
+						),
+					),
+				),
+			),
+		).toThrow(
+			new Error(
+				"ColumnRef 'published' resolves to a row outside this subquery body; in a function argument or FILTER there, SQL would evaluate the call in the enclosing query if it is an aggregate.",
+			),
+		);
+	});
+
+	it('R8 / ambiguous-inverse (E4)', () => {
+		expect(() =>
+			dumpOf(() =>
+				d
+					.select('users')
+					.where(
+						exists('writings', { where: eq(users.posts.published, true) }),
+					),
+			),
+		).toThrow(
+			new Error(
+				"exists('posts'): no relation 'posts' is declared on table 'users'. Use rawExists(subquery(...)) for an EXISTS over an undeclared or uncorrelated subquery.",
+			),
+		);
+	});
+
+	it('R9 / body-outer-anchor (X1)', () => {
+		expectR9(() =>
+			d.select('users').columns([
+				'id',
+				d
+					.select('posts')
+					.columns([
+						new ExpressionRef({
+							kind: 'function',
+							name: 'coalesce',
+							args: [CASE()],
+						}).as('v'),
+					])
+					.limit(1)
+					.asExpr('v'),
+			]),
+		);
+	});
+
+	it('R9 / body-inner-anchor (X3)', () => {
+		expectR9(() =>
+			d.select('users').columns([
+				'id',
+				d
+					.select('posts')
+					.columns([
+						new ExpressionRef({
+							kind: 'function',
+							name: 'coalesce',
+							args: [
+								caseWhen(eq(posts.author.email, 'x'), literal(1)).else(
+									literal(0),
+								),
+							],
+						}).as('v'),
+					])
+					.limit(1)
+					.asExpr('v'),
+			]),
+		);
+	});
+
+	it('R9 / statement-body-path (X5)', () => {
+		expectR9(() =>
+			d.select('users').columns([
+				new ExpressionRef({
+					kind: 'function',
+					name: 'coalesce',
+					args: [
+						caseWhen(
+							exists('writings', {
+								where: eq(users.writings.published, true),
+							}),
+							literal(1),
+						).else(literal(0)),
+					],
+				}).as('v'),
+			]),
+		);
+	});
+	it('R6 / value-and-fn (E27)', () => {
+		let error: unknown;
+		try {
+			b.select('nodes').where(
+				some(nodes.children, (k: Any) =>
+					some(nodes.children, (g: Any) => eq(g.label, k.label)),
+				),
+			);
+		} catch (caught) {
+			error = caught;
+		}
+		expect(error).toBeInstanceOf(NotYetSupportedError);
+		expect(error).toMatchObject({
+			issue: 1052,
+			message:
+				'a callback-scoped ColumnRef in a comparison value is not supported yet (#1052).',
+		});
+	});
+
+	// Review regressions: an include's where starts O1 at the statement root, an
+	// intermediate hop is a range of its predicate for O8, a HAVING aggregate's
+	// extra arguments are call arguments, and the plan decides an anchored
+	// quantifier from its origin table.
+	const BI = schema({
+		...nodeTables,
+		items: { id: { type: 'integer', primaryKey: true } },
+	});
+	const bi = createOrm({
+		schema: BI,
+		adapter: createPgCompileOnlyAdapter({ model: BI.model }),
+		...options,
+	});
+	const bn: Any = bi.tables.nodes;
+	it('O1 include-where body starts at the statement root', () => {
+		expectDump(
+			() =>
+				bi.select('nodes').include('parent', {
+					join: 'left',
+					where: rawExists(
+						subquery('items').select('id').where(eq(bn.parent.label, 'x')),
+					),
+				}),
+			'SELECT nodes.*, parent.id AS "parent.id", parent.label AS "parent.label", parent.parent_id AS "parent.parent_id", parent.id AS __dbsp_presence_parent FROM nodes LEFT JOIN nodes AS parent ON nodes.parent_id = parent.id WHERE EXISTS (SELECT items_sq.id FROM items AS items_sq WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes.parent_id = nodes_exists_1.id AND nodes_exists_1.label = $1))',
+			['x'],
+		);
+	});
+	const commentsBody = (filter: unknown) =>
+		d
+			.select('comments')
+			.columns([
+				fn('count', star())
+					.filter(filter as never)
+					.as('n'),
+			])
+			.asExpr('n');
+	it.each([
+		[
+			'leaf in FILTER',
+			() => commentsBody(eq(users.writings.title, 'x')),
+			"ColumnRef 'writings.title'",
+		],
+		[
+			'leaf in a count argument',
+			() =>
+				d
+					.select('comments')
+					.columns([
+						fn(
+							'count',
+							caseWhen(eq(users.writings.title, 'x'), literal(1)).else(
+								literal(null),
+							),
+						).as('n'),
+					])
+					.asExpr('n'),
+			"ColumnRef 'writings.title'",
+		],
+		[
+			'quantifier in FILTER',
+			() =>
+				commentsBody(some(users.writings.replies, (k: Any) => eq(k.body, 'x'))),
+			"RelationRef 'writings.replies'",
+		],
+	])(
+		'O8 an intermediate-hop anchor is outside the body (%s)',
+		(_name, body, written) => {
+			expect(() =>
+				dumpOf(() =>
+					d
+						.select('users')
+						.where(exists('writings.replies', { where: gt(body(), 0) })),
+				),
+			).toThrow(
+				new Error(
+					`${written} resolves to a row outside this subquery body; in a function argument or FILTER there, SQL would evaluate the call in the enclosing query if it is an aggregate.`,
+				),
+			);
+		},
+	);
+	it('O8 a HAVING aggregate extra argument is a call argument', () => {
+		const agg = new ExpressionRef({
+			kind: 'aggregate',
+			function: 'string_agg',
+			field: 'title',
+			extraArgs: [
+				caseWhen(eq(users.writings.published, true), literal(',')).else(
+					literal(';'),
+				),
+			],
+		} as never);
+		expect(() =>
+			dumpOf(() =>
+				d.select('users').columns([
+					d
+						.select('posts')
+						.columns([fn('count', star()).as('n')])
+						.having(eq(agg, 'x'))
+						.asExpr('v'),
+				]),
+			),
+		).toThrow(
+			new Error(
+				"ColumnRef 'writings.published' resolves to a row outside this subquery body; in a function argument or FILTER there, SQL would evaluate the call in the enclosing query if it is an aggregate.",
+			),
+		);
+	});
+	type Planned = {
+		plan?: {
+			warnings: readonly { message: string }[];
+			decisions: readonly {
+				type: string;
+				context: { sourceTable?: string; relation?: string };
+			}[];
+		};
+	};
+	const decided = (build: () => unknown) => {
+		const plan = (dumpOf(build) as unknown as Planned).plan!;
+		return {
+			warnings: plan.warnings.map((w) => w.message),
+			decisions: plan.decisions
+				.filter((x) => x.type === 'filter-strategy')
+				.map((x) => `${x.context.sourceTable}.${x.context.relation}`),
+		};
+	};
+	it.each([
+		[
+			'table-rooted quantifier read from the outer root (C3)',
+			() => d.select('posts').where(exists('author', { where: q() })),
+			['posts.author', 'posts.replies'],
+		],
+		[
+			'table-rooted quantifier read from the statement root (C5)',
+			() =>
+				d.select('users').where(
+					exists('writings', {
+						where: some(users.edits, (p: Any) => eq(p.title, 'x')),
+					}),
+				),
+			['users.writings', 'users.edits'],
+		],
+		[
+			'callback relation in a nested predicate',
+			() =>
+				d.select('users').where(
+					some(users.writings, (p: Any) =>
+						exists('author', {
+							where: some(p.replies, (k: Any) => eq(k.body, 'x')),
+						}),
+					),
+				),
+			['users.writings', 'posts.author', 'posts.replies'],
+		],
+	])(
+		'the plan decides an anchored quantifier from its origin table (%s)',
+		(_name, build, decisions) => {
+			expect(decided(build)).toEqual({ warnings: [], decisions });
+		},
+	);
 });
