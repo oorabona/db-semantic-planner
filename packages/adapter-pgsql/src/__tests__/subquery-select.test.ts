@@ -15,6 +15,7 @@ import {
 	type SimplifiedPlanReport,
 } from '@dbsp/adapter-pgsql/internal';
 import {
+	and,
 	caseWhen,
 	createOrm,
 	eq,
@@ -45,7 +46,7 @@ import {
 	markPlannedReport,
 	type SubqueryExpressionIntent,
 } from '@dbsp/types/internal';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -1908,6 +1909,567 @@ describe('scalar subquery bodies compile every clause through core (#891 slice 5
 				'join',
 				1039,
 			);
+		});
+	});
+});
+
+describe('conditions holding or inside a query-local body keep their route (#891 slice 5c)', () => {
+	const RECENT =
+		'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id))';
+	const usersDb = schema({
+		users: {
+			id: { type: 'integer', primaryKey: true },
+			name: 'text',
+			score: 'integer',
+		},
+	});
+	const usersOrm = createOrm({
+		schema: usersDb,
+		adapter: createPgCompileOnlyAdapter({ model: usersDb.model }),
+	});
+	type Orm = typeof usersOrm;
+	const out = (run: () => { sql: string; params: readonly unknown[] }) => {
+		try {
+			const r = run();
+			return { sql: r.sql, params: r.params };
+		} catch (error) {
+			return { error: (error as Error).message };
+		}
+	};
+	const withRecent = <O extends Orm>(
+		o: O,
+		build: (s: ReturnType<O['select']>) => unknown,
+	) =>
+		o
+			.withCte('recent')
+			.fromUnnest({ id: [1, 2] })
+			.query(build(o.select('users') as ReturnType<O['select']>) as never)
+			.dump();
+	const lit = (value: number) => ({ kind: 'literal', value });
+	const local = (query: object) =>
+		new SubqueryExpression({
+			type: 'select',
+			from: 'recent',
+			...query,
+		} as QueryIntent);
+	const correlated = { where: eq('id', outerRef('id')) };
+	const bodies = {
+		plain: {
+			select: {
+				type: 'aggregate',
+				aggregates: [{ function: 'count', field: '*', as: 'n' }],
+			},
+			...correlated,
+		},
+		case: {
+			select: {
+				type: 'expressions',
+				columns: [
+					{
+						kind: 'case',
+						when: [{ condition: eq('id', 1), result: lit(1) }],
+						else: lit(0),
+						as: 'c',
+					},
+				],
+			},
+			...correlated,
+			limit: 1,
+		},
+		filter: {
+			select: {
+				type: 'aggregate',
+				aggregates: [
+					{ function: 'count', field: '*', as: 'n', filter: gt('id', 1) },
+				],
+			},
+			...correlated,
+		},
+		having: {
+			select: {
+				type: 'aggregate',
+				aggregates: [{ function: 'count', field: '*', as: 'n' }],
+			},
+			...correlated,
+			groupBy: ['id'],
+			having: gt('n', 0),
+		},
+	} as const;
+	afterEach(() => vi.restoreAllMocks());
+
+	it('AC10 local-source-body: CASE, FILTER and HAVING inside a CTE body keep their SQL', () => {
+		const column = (body: object) =>
+			out(() =>
+				withRecent(usersOrm, (s) => s.columns(['id', local(body).asExpr('v')])),
+			);
+		expect(column(bodies.case)).toEqual({
+			sql: `${RECENT} SELECT users.id, (SELECT CASE WHEN recent.id = $2 THEN 1 ELSE 0 END AS c FROM recent AS recent WHERE recent.id = users.id LIMIT 1) AS v FROM users`,
+			params: [[1, 2], 1],
+		});
+		expect(column(bodies.filter)).toEqual({
+			sql: `${RECENT} SELECT users.id, (SELECT count(*) FILTER (WHERE recent.id > $2) AS n FROM recent AS recent WHERE recent.id = users.id) AS v FROM users`,
+			params: [[1, 2], 1],
+		});
+		expect(column(bodies.having)).toEqual({
+			sql: `${RECENT} SELECT users.id, (SELECT count(*) AS n FROM recent AS recent WHERE recent.id = users.id GROUP BY recent.id HAVING count(*) > CAST($2 AS bigint)) AS v FROM users`,
+			params: [[1, 2], 0],
+		});
+	});
+
+	it('AC10 local-in-condition: a condition holding a CTE body keeps its route; WHERE keeps its outcomes', () => {
+		const cond = (body: object) => gt(local(body).asExpr('v'), 0);
+		const at = {
+			WHERE: (b: object) =>
+				out(() =>
+					withRecent(usersOrm, (s) => s.columns(['id']).where(cond(b))),
+				),
+			CASE: (b: object) =>
+				out(() =>
+					withRecent(usersOrm, (s) =>
+						s.columns([
+							'id',
+							caseWhen(cond(b), literal(1)).else(literal(0)).as('f'),
+						]),
+					),
+				),
+			FILTER: (b: object) =>
+				out(() =>
+					withRecent(usersOrm, (s) =>
+						s.columns([fn('count', star()).filter(cond(b)).as('m')]),
+					),
+				),
+			HAVING: (b: object) =>
+				out(() =>
+					withRecent(usersOrm, (s) =>
+						s.columns(['id']).groupBy(['id']).having(cond(b)),
+					),
+				),
+		};
+		const inner = {
+			plain: [
+				'(SELECT count(*) AS n FROM recent AS recent WHERE recent.id = users.id)',
+				[0],
+			],
+			case: [
+				'(SELECT CASE WHEN recent.id = $2 THEN 1 ELSE 0 END AS c FROM recent AS recent WHERE recent.id = users.id LIMIT 1)',
+				[1, 0],
+			],
+			filter: [
+				'(SELECT count(*) FILTER (WHERE recent.id > $2) AS n FROM recent AS recent WHERE recent.id = users.id)',
+				[1, 0],
+			],
+			having: [
+				'(SELECT count(*) AS n FROM recent AS recent WHERE recent.id = users.id GROUP BY recent.id HAVING count(*) > CAST($2 AS bigint))',
+				[0, 0],
+			],
+		} as const;
+		for (const [name, b] of Object.entries(bodies)) {
+			const [sub, values] = inner[name as keyof typeof inner];
+			const n = values.length + 1;
+			expect(at.CASE(b)).toEqual({
+				sql: `${RECENT} SELECT users.id, CASE WHEN ${sub} > $${n} THEN 1 ELSE 0 END AS f FROM users`,
+				params: [[1, 2], ...values],
+			});
+			expect(at.FILTER(b)).toEqual({
+				sql: `${RECENT} SELECT count(*) FILTER (WHERE ${sub} > $${n}) AS m FROM users`,
+				params: [[1, 2], ...values],
+			});
+			expect(at.HAVING(b)).toEqual({
+				sql: `${RECENT} SELECT users.id FROM users GROUP BY users.id HAVING ${sub} > $${n}`,
+				params: [[1, 2], ...values],
+			});
+		}
+		expect(at.WHERE(bodies.plain)).toEqual({
+			sql: `${RECENT} SELECT users.id FROM users WHERE (SELECT count(*) FROM recent AS recent WHERE recent.id = users.id) > $2`,
+			params: [[1, 2], 0],
+		});
+		const refused = (what: string) =>
+			`scalar subquery with ${what} is not supported — it would silently change which rows match; restructure the query or use a CTE.`;
+		expect(at.WHERE(bodies.case)).toEqual({
+			error: refused('expressions SELECT (not supported in scalar subquery)'),
+		});
+		expect(at.WHERE(bodies.filter)).toEqual({
+			error: refused('an aggregate FILTER'),
+		});
+		expect(at.WHERE(bodies.having)).toEqual({
+			error: refused('GROUP BY, HAVING'),
+		});
+	});
+
+	it("AC10 local-in-condition: a root outerRef() or a bare operand beside a CTE body keeps today's SQL", () => {
+		const db = schema({
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'text',
+				score: 'integer',
+			},
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'text',
+				score: 'integer',
+				authorId: ref('users', { as: 'author', inverse: 'posts' }),
+			},
+		});
+		const o = createOrm({
+			schema: db,
+			adapter: createPgCompileOnlyAdapter({ model: db.model }),
+		});
+		const lb = () => gt(local(bodies.plain).asExpr('v'), 0);
+		const q = (build: (s: ReturnType<typeof o.select>) => unknown) =>
+			out(() =>
+				o
+					.withCte('recent')
+					.fromUnnest({ id: [1, 2] })
+					.query(build(o.select('posts').join('author')) as never)
+					.dump(),
+			);
+		const body =
+			'(SELECT count(*) AS n FROM recent AS recent WHERE recent.id = posts.id)';
+		const join =
+			'FROM posts JOIN users AS author ON posts."authorId" = author.id';
+		expect(
+			q((s) =>
+				s.columns([
+					'id',
+					caseWhen(and(lb(), gt('score', outerRef('id'))), literal(1))
+						.else(literal(0))
+						.as('f'),
+				]),
+			),
+		).toEqual({
+			sql: `${RECENT} SELECT posts.id, CASE WHEN ${body} > $2 AND posts.score > posts.id THEN 1 ELSE 0 END AS f ${join}`,
+			params: [[1, 2], 0],
+		});
+		expect(
+			q((s) =>
+				s.columns([
+					'id',
+					caseWhen(and(lb(), fn('length', exprRef('name')).gt(2)), literal(1))
+						.else(literal(0))
+						.as('f'),
+				]),
+			),
+		).toEqual({
+			sql: `${RECENT} SELECT posts.id, CASE WHEN ${body} > $2 AND length(name) > $3 THEN 1 ELSE 0 END AS f ${join}`,
+			params: [[1, 2], 0, 2],
+		});
+		expect(
+			q((s) =>
+				s
+					.columns(['id'])
+					.groupBy(['id'])
+					.having(and(lb(), fn('length', exprRef('name')).gt(2))),
+			),
+		).toEqual({
+			sql: `${RECENT} SELECT posts.id ${join} GROUP BY posts.id HAVING ${body} > $2 AND length(name) > $3`,
+			params: [[1, 2], 0, 2],
+		});
+		expect(
+			q((s) =>
+				s.columns([
+					fn('count', star())
+						.filter(and(lb(), gt('score', outerRef('id'))))
+						.as('m'),
+				]),
+			),
+		).toEqual({
+			sql: `${RECENT} SELECT count(*) FILTER (WHERE ${body} > $2 AND posts.score > posts.id) AS m ${join}`,
+			params: [[1, 2], 0],
+		});
+	});
+
+	it('AC10 cte-named-like-table and alias-trigger-priority', () => {
+		const db = schema({
+			users: { id: { type: 'integer', primaryKey: true }, score: 'integer' },
+			recent: { id: { type: 'integer', primaryKey: true } },
+		});
+		const o = createOrm({
+			schema: db,
+			adapter: createPgCompileOnlyAdapter({ model: db.model }),
+		});
+		const count = () =>
+			new SubqueryExpression({
+				type: 'select',
+				from: 'recent',
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'count', field: '*', as: 'n' }],
+				},
+			} as QueryIntent).asExpr('v');
+		const q = (build: (s: ReturnType<typeof o.select>) => unknown) =>
+			o
+				.withCte('recent')
+				.fromUnnest({ id: [1, 2] })
+				.query(build(o.select('users')) as never);
+		const caseQuery = q((s) =>
+			s.columns([
+				caseWhen(gt(count(), 0), literal(1)).else(literal(0)).as('f'),
+			]),
+		);
+		expect(out(() => caseQuery.dump())).toEqual({
+			sql: `${RECENT} SELECT CASE WHEN (SELECT count(*) AS n FROM recent AS recent) > $2 THEN 1 ELSE 0 END AS f FROM users`,
+			params: [[1, 2], 0],
+		});
+		expect(
+			out(() =>
+				q((s) =>
+					s.columns(['id']).groupBy(['id']).having(gt(count(), 0)),
+				).dump(),
+			),
+		).toEqual({
+			sql: `${RECENT} SELECT users.id FROM users GROUP BY users.id HAVING (SELECT count(*) AS n FROM recent AS recent) > $2`,
+			params: [[1, 2], 0],
+		});
+		expect(
+			out(() =>
+				q((s) =>
+					s
+						.columns(['id'])
+						.count('id', 'n')
+						.groupBy(['id'])
+						.having(eq('n', count())),
+				).dump(),
+			),
+		).toEqual({
+			sql: `${RECENT} SELECT users.id, count(users.id) AS n FROM users GROUP BY users.id HAVING count(users.id) = (SELECT count(*) FROM recent AS recent)`,
+			params: [[1, 2]],
+		});
+	});
+
+	it('AC10 issued-policy and no-trace: an issued disable stays disabled; nothing is allocated twice', () => {
+		const db = schema(
+			{
+				users: {
+					id: { type: 'integer', primaryKey: true },
+					score: 'integer',
+					name: 'text',
+				},
+				posts: {
+					id: { type: 'integer', primaryKey: true },
+					score: 'integer',
+					authorId: ref('users', { as: 'author', inverse: 'posts' }),
+				},
+			},
+			undefined,
+			{ defaultFilters: { users: eq('score', 1) } },
+		);
+		const o = createOrm({
+			schema: db,
+			adapter: createPgCompileOnlyAdapter({ model: db.model }),
+		});
+		const issued = () =>
+			rawExists(
+				o
+					.withoutDefaultFilters()
+					.select('posts')
+					.columns(['id'])
+					.where(
+						gt(
+							subquery('recent')
+								.where(rawExists(subquery('users').select('id')))
+								.count()
+								.asExpr('v'),
+							0,
+						),
+					) as never,
+			);
+		const q = (build: (s: ReturnType<typeof o.select>) => unknown) =>
+			out(() =>
+				o
+					.withCte('recent')
+					.fromUnnest({ id: [1, 2] })
+					.query(build(o.select('users')) as never)
+					.dump(),
+			);
+		const exists =
+			'EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE (SELECT count(*) FROM recent AS recent WHERE EXISTS (SELECT users_sq.id FROM users AS users_sq)) >';
+		const both = () => and(eq('score', 1), issued());
+		expect(
+			q((s) =>
+				s.columns([caseWhen(both(), literal(1)).else(literal(0)).as('f')]),
+			),
+		).toEqual({
+			sql: `${RECENT} SELECT CASE WHEN users.score = $2 AND ${exists} $3) THEN 1 ELSE 0 END AS f FROM users WHERE users.score = $4`,
+			params: [[1, 2], 1, 0, 1],
+		});
+		expect(q((s) => s.columns(['id']).groupBy(['id']).having(both()))).toEqual({
+			sql: `${RECENT} SELECT users.id FROM users WHERE users.score = $2 GROUP BY users.id HAVING users.score = $3 AND ${exists} $4)`,
+			params: [[1, 2], 1, 1, 0],
+		});
+		expect(
+			q((s) => s.columns([fn('count', star()).filter(both()).as('n')])),
+		).toEqual({
+			sql: `${RECENT} SELECT count(*) FILTER (WHERE users.score = $2 AND ${exists} $3)) AS n FROM users WHERE users.score = $4`,
+			params: [[1, 2], 1, 0, 1],
+		});
+	});
+
+	it('AC10 no-trace and order-independent: operand order and a model body before a CTE body change nothing', () => {
+		const db = schema({
+			users: { id: { type: 'integer', primaryKey: true }, score: 'integer' },
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				authorId: ref('users', { as: 'author', inverse: 'posts' }),
+			},
+		});
+		const o = createOrm({
+			schema: db,
+			adapter: createPgCompileOnlyAdapter({ model: db.model }),
+		});
+		const q = (c: WhereIntent) =>
+			out(() =>
+				o
+					.withCte('recent')
+					.fromUnnest({ id: [1, 2] })
+					.query(
+						o
+							.select('users')
+							.columns([
+								caseWhen(c, literal(1)).else(literal(0)).as('f'),
+							]) as never,
+					)
+					.dump(),
+			);
+		const model = () => gt(subquery('posts').count().asExpr('v'), 0);
+		const cte = () => gt(subquery('recent').count().asExpr('v'), 0);
+		const outer = () => gt('score', outerRef('id'));
+		const recent = '(SELECT count(*) FROM recent AS recent)';
+		expect(q(and(model(), cte()))).toEqual({
+			sql: `${RECENT} SELECT CASE WHEN (SELECT count(*) FROM posts) > $2 AND ${recent} > $3 THEN 1 ELSE 0 END AS f FROM users`,
+			params: [[1, 2], 0, 0],
+		});
+		expect(q(and(outer(), cte()))).toEqual({
+			sql: `${RECENT} SELECT CASE WHEN users.score > users.id AND ${recent} > $2 THEN 1 ELSE 0 END AS f FROM users`,
+			params: [[1, 2], 0],
+		});
+		expect(q(and(cte(), outer()))).toEqual({
+			sql: `${RECENT} SELECT CASE WHEN ${recent} > $2 AND users.score > users.id THEN 1 ELSE 0 END AS f FROM users`,
+			params: [[1, 2], 0],
+		});
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const rawBody = gt(
+			new SubqueryExpression({
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'expressions',
+					columns: [{ kind: 'raw', sql: 'count(posts.id)', as: 'n' }],
+				},
+			} as QueryIntent).asExpr('v'),
+			0,
+		);
+		expect(q(and(rawBody, cte()))).toEqual({
+			sql: `${RECENT} SELECT CASE WHEN (SELECT count(posts.id) AS n FROM posts) > $2 AND ${recent} > $3 THEN 1 ELSE 0 END AS f FROM users`,
+			params: [[1, 2], 0, 0],
+		});
+		expect(
+			warn.mock.calls.filter((call) =>
+				String(call[0]).includes('Raw SQL expression used'),
+			),
+		).toHaveLength(1);
+	});
+
+	it('AC10 model-less-cte: a CTE-rooted read over a model-less adapter keeps its route', () => {
+		const o = createOrm({
+			schema: usersDb,
+			adapter: createPgCompileOnlyAdapter(),
+		});
+		const q = (build: (s: ReturnType<typeof o.select>) => unknown) =>
+			out(() =>
+				o
+					.withCte('recent')
+					.fromUnnest({ id: [1, 2] })
+					.query(build(o.select('recent' as 'users')) as never)
+					.dump(),
+			);
+		expect(
+			q((s) =>
+				s.columns([caseWhen(gt('id', 0), literal(1)).else(literal(0)).as('c')]),
+			),
+		).toEqual({
+			sql: `${RECENT} SELECT CASE WHEN recent.id > $2 THEN 1 ELSE 0 END AS c FROM recent`,
+			params: [[1, 2], 0],
+		});
+		expect(
+			q((s) => s.columns(['id']).groupBy(['id']).having(gt('id', 0))),
+		).toEqual({
+			sql: `${RECENT} SELECT recent.id FROM recent GROUP BY recent.id HAVING recent.id > $2`,
+			params: [[1, 2], 0],
+		});
+		expect(
+			q((s) => s.columns([fn('count', star()).filter(gt('id', 0)).as('n')])),
+		).toEqual({
+			sql: `${RECENT} SELECT count(*) FILTER (WHERE recent.id > $2) AS n FROM recent`,
+			params: [[1, 2], 0],
+		});
+	});
+
+	it('AC10 nested-model-body: a model-table body holding a CASE, nested in a CTE body, keeps its SQL', () => {
+		const inner = {
+			type: 'select',
+			from: 'users',
+			select: {
+				type: 'expressions',
+				columns: [
+					{
+						kind: 'case',
+						when: [{ condition: eq('score', 1), result: lit(1) }],
+						else: lit(0),
+						as: 'c',
+					},
+				],
+			},
+			where: eq('id', outerRef('id')),
+			limit: 1,
+		};
+		const body = local({
+			select: {
+				type: 'expressions',
+				columns: [{ kind: 'subquery', query: inner, as: 'w' }],
+			},
+			...correlated,
+			limit: 1,
+		});
+		expect(
+			out(() =>
+				withRecent(usersOrm, (s) => s.columns(['id', body.asExpr('v')])),
+			),
+		).toEqual({
+			sql: `${RECENT} SELECT users.id, (SELECT (SELECT CASE WHEN users_sq.score = $2 THEN 1 ELSE 0 END AS c FROM users AS users_sq WHERE users_sq.id = recent.id LIMIT 1) AS w FROM recent AS recent WHERE recent.id = users.id LIMIT 1) AS v FROM users`,
+			params: [[1, 2], 1],
+		});
+	});
+
+	it('AC8 local-body: an aggregate FILTER in a function argument inside a CTE body is emitted', () => {
+		const body = local({
+			select: {
+				type: 'expressions',
+				columns: [
+					{
+						kind: 'function',
+						name: 'coalesce',
+						args: [
+							{
+								kind: 'aggregate',
+								function: 'count',
+								field: '*',
+								filter: gt('id', 1),
+							},
+							lit(0),
+						],
+						as: 'n',
+					},
+				],
+			},
+			...correlated,
+		});
+		expect(
+			out(() =>
+				withRecent(usersOrm, (s) => s.columns(['id', body.asExpr('v')])),
+			),
+		).toEqual({
+			sql: `${RECENT} SELECT users.id, (SELECT COALESCE(count(*) FILTER (WHERE recent.id > $2), $3) AS n FROM recent AS recent WHERE recent.id = users.id) AS v FROM users`,
+			params: [[1, 2], 1, 0],
 		});
 	});
 });

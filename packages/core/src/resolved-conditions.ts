@@ -130,9 +130,13 @@ export function resolveConditionContext(
 	const currentLabel = (): string => labels[labels.length - 1]!;
 	let filterDepth = 0;
 	const within = <T>(position: 'CASE WHEN' | 'FILTER', run: () => T): T => {
-		// A resolution entered from HAVING names its innermost CASE WHEN or FILTER;
-		// one entered from a CASE WHEN or FILTER root keeps that root's label.
-		const relabel = label === 'HAVING' || mode?.fromHaving === true;
+		// A resolution entered from a HAVING, CASE WHEN or FILTER root names its
+		// innermost CASE WHEN or FILTER; WHERE, ON and start.where keep their label.
+		const relabel =
+			label === 'HAVING' ||
+			label === 'CASE WHEN' ||
+			label === 'FILTER' ||
+			mode?.fromHaving === true;
 		if (position === 'FILTER') filterDepth++;
 		if (relabel) labels.push(position);
 		try {
