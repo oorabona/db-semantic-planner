@@ -302,10 +302,11 @@ with columns or existing relations.
 
 Traversal of a declared many-to-many relation is refused when planning one of the
 query's includes (any strategy, including NQL relation columns and `| flat`) or a
-relation `.join()`; the message contains
-`Relation 'posts.tags': many-to-many traversal is not supported yet (#787).`
-Relation predicates and their includes (`exists(..., { include })`) are refused
-with a message ending in `many-to-many traversal is not supported yet (#787).`
+relation `.join()` with a `NotYetSupportedError` whose `issue` is `787`:
+`many-to-many traversal 'posts.tags' in an include is not supported yet (#787).`
+(`in a join` for `.join()`). Relation predicates and their includes
+(`exists(..., { include })`) throw the same class, for example
+`many-to-many traversal exists('tags') in a WHERE condition is not supported yet (#787).`
 
 ### Schema Options (`dbCasing`)
 
@@ -961,7 +962,7 @@ orm.select('users').include('posts', {
 | Option | Type | Description |
 |--------|------|-------------|
 | `join` | `'inner' \| 'left'` | Join type |
-| `where` | `WhereIntent` | Added to the root WHERE; join includes only, other strategies refuse it (#892) |
+| `where` | `WhereIntent` | Added to the root WHERE; join includes only, other strategies throw `NotYetSupportedError` (#892) |
 | `select` | `SelectSpec` | Select specific columns |
 | `via` | `string` | Disambiguate multiple relations to same table |
 | `recursive` | `boolean` | Enable recursive CTE traversal |
