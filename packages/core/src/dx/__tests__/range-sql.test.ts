@@ -337,69 +337,92 @@ describe('range helper leaves and range values (ADR 0011 delivery 6)', () => {
 		]);
 	});
 
-	it('AC8L legacy route keeps default bounds: CASE, FILTER and HAVING', () => {
-		expect(
-			out(
+	it('AC8L and RF12 CASE, FILTER and HAVING give the constructor form', () => {
+		const positions = [
+			(c: WhereIntent) =>
 				q()
-					.columns([
-						'id',
-						caseWhen(rangeOverlaps('span', RV), literal(1))
-							.else(literal(0))
-							.as('x'),
-					])
+					.columns(['id', caseWhen(c, literal(1)).else(literal(0)).as('x')])
 					.dump(),
-			),
-		).toEqual([
-			'SELECT posts.id, CASE WHEN posts.span && CAST($1 AS int4range) THEN 1 ELSE 0 END AS x FROM posts',
-			['[1,5)'],
-		]);
-		expect(
-			out(
+			(c: WhereIntent) =>
+				q()
+					.orderBy(caseWhen(c, literal(1)).else(literal(0)))
+					.dump(),
+			(c: WhereIntent) =>
 				d6
 					.select('posts')
-					.columns([
-						fn('count', star()).filter(rangeOverlaps('span', RV)).as('n'),
-					])
+					.columns([fn('count', star()).filter(c).as('n')])
 					.dump(),
-			),
-		).toEqual([
-			'SELECT count(*) FILTER (WHERE posts.span && CAST($1 AS int4range)) AS n FROM posts',
-			['[1,5)'],
-		]);
-		expect(
-			out(
+			(c: WhereIntent) =>
 				d6
 					.select('posts')
 					.columns(['status', fn('count', star()).as('n')])
 					.groupBy(['status'])
-					.having(rangeOverlaps('span', RV))
+					.having(c)
 					.dump(),
-			),
-		).toEqual([
-			'SELECT posts.status, count(*) AS n FROM posts GROUP BY posts.status HAVING posts.span && CAST($1 AS int4range)',
-			['[1,5)'],
-		]);
-		expect(
-			out(
-				q()
-					.columns([
-						'id',
-						caseWhen(
-							rangeOverlaps('period', {
-								lower: '2024-01-01',
-								upper: '2024-02-01',
-							}),
-							literal(1),
-						)
-							.else(literal(0))
-							.as('x'),
-					])
-					.dump(),
-			),
-		).toEqual([
-			'SELECT posts.id, CASE WHEN posts.period && CAST($1 AS daterange) THEN 1 ELSE 0 END AS x FROM posts',
-			['[2024-01-01,2024-02-01)'],
-		]);
+		];
+		const sqlAt = [
+			(p: string) =>
+				`SELECT posts.id, CASE WHEN ${p} THEN 1 ELSE 0 END AS x FROM posts`,
+			(p: string) =>
+				`SELECT posts.id FROM posts ORDER BY CASE WHEN ${p} THEN 1 ELSE 0 END ASC`,
+			(p: string) => `SELECT count(*) FILTER (WHERE ${p}) AS n FROM posts`,
+			(p: string) =>
+				`SELECT posts.status, count(*) AS n FROM posts GROUP BY posts.status HAVING ${p}`,
+		];
+		const cases: [WhereIntent, string, unknown[]][] = [
+			[
+				rangeOverlaps('span', RV),
+				"posts.span && int4range($1, $2, '[)')",
+				[1, 5],
+			],
+			[
+				rangeOverlaps('span', { ...RV, bounds: '[]' }),
+				"posts.span && int4range($1, $2, '[]')",
+				[1, 5],
+			],
+			[
+				rangeOverlaps('span', { ...RV, bounds: '()' }),
+				"posts.span && int4range($1, $2, '()')",
+				[1, 5],
+			],
+			[
+				rangeOverlaps('span', { ...RV, bounds: '(]' }),
+				"posts.span && int4range($1, $2, '(]')",
+				[1, 5],
+			],
+			[
+				rangeOverlaps('period', { lower: '2024-01-01', upper: '2024-02-01' }),
+				"posts.period && daterange($1, $2, '[)')",
+				['2024-01-01', '2024-02-01'],
+			],
+			[
+				rangeOverlaps('period', {
+					lower: new Date('2024-01-01T00:00:00Z'),
+					upper: null,
+				}),
+				"posts.period && daterange($1, $2, '[)')",
+				[new Date('2024-01-01T00:00:00Z'), null],
+			],
+			[
+				rangeOverlaps('span', { lower: exprRef('score'), upper: 5 }),
+				"posts.span && int4range(posts.score, $1, '[)')",
+				[5],
+			],
+			[
+				rangeOverlaps('period', { lower: '', upper: '2024-02-01' }),
+				"posts.period && daterange($1, $2, '[)')",
+				['', '2024-02-01'],
+			],
+			[
+				rangeOverlaps('span', { lower: '1,2', upper: 5 }),
+				"posts.span && int4range($1, $2, '[)')",
+				['1,2', 5],
+			],
+		];
+		positions.forEach((at, i) => {
+			for (const [condition, predicate, params] of cases)
+				expect(out(at(condition))).toEqual([sqlAt[i]?.(predicate), params]);
+		});
 	});
 
 	it('AC9 unchanged range forms: scalar, range literal and string tuple', () => {
@@ -927,83 +950,6 @@ describe('range helper refusals (ADR 0011 delivery 6)', () => {
 		);
 	});
 
-	it('RF12 legacy route refusals: what [lower,upper) text cannot express in CASE, FILTER and HAVING', () => {
-		const positions = [
-			(c: WhereIntent) =>
-				q()
-					.columns(['id', caseWhen(c, literal(1)).else(literal(0)).as('x')])
-					.dump(),
-			(c: WhereIntent) =>
-				q()
-					.orderBy(caseWhen(c, literal(1)).else(literal(0)))
-					.dump(),
-			(c: WhereIntent) =>
-				d6
-					.select('posts')
-					.columns([fn('count', star()).filter(c).as('n')])
-					.dump(),
-			(c: WhereIntent) =>
-				d6
-					.select('posts')
-					.columns(['status', fn('count', star()).as('n')])
-					.groupBy(['status'])
-					.having(c)
-					.dump(),
-		];
-		const position = 'CASE, FILTER or HAVING condition';
-		for (const at of positions) {
-			notYet(
-				() => at(rangeOverlaps('span', { ...RV, bounds: '[]' })),
-				"bounds '[]'",
-				position,
-				891,
-			);
-			notYet(
-				() =>
-					at(
-						rangeOverlaps('period', {
-							lower: new Date('2024-01-01T00:00:00Z'),
-							upper: null,
-						}),
-					),
-				'a Date range bound',
-				position,
-				891,
-			);
-			notYet(
-				() => at(rangeOverlaps('span', { lower: exprRef('score'), upper: 5 })),
-				'an expression range bound',
-				position,
-				891,
-			);
-			notYet(
-				() => at(rangeOverlaps('period', { lower: '', upper: '2024-02-01' })),
-				'an empty-string range bound',
-				position,
-				891,
-			);
-			notYet(
-				() => at(rangeOverlaps('span', { lower: '1,2', upper: 5 })),
-				'a range bound with , ( ) [ ] " or \\',
-				position,
-				891,
-			);
-		}
-		expect(
-			q()
-				.columns([
-					'id',
-					caseWhen(
-						rangeOverlaps('period', { lower: null, upper: '2024-02-01' }),
-						literal(1),
-					)
-						.else(literal(0))
-						.as('x'),
-				])
-				.dump().params,
-		).toEqual(['[,2024-02-01)']);
-	});
-
 	it('RF14 unplanned read with a subquery bound: the default-filter walker refuses it', () => {
 		const tables = {
 			users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
@@ -1065,20 +1011,6 @@ describe('range helper refusals (ADR 0011 delivery 6)', () => {
 				`Invalid ${name}: sql() is only accepted as an update or upsert value; use literal(), param() or an expression here`,
 			);
 		}
-	});
-
-	it('RF12 legacy route refuses every non-default bounds form', () => {
-		const at = (c: WhereIntent) =>
-			q()
-				.columns(['id', caseWhen(c, literal(1)).else(literal(0)).as('x')])
-				.dump();
-		for (const bounds of ['()', '(]'] as const)
-			notYet(
-				() => at(rangeOverlaps('span', { ...RV, bounds })),
-				`bounds '${bounds}'`,
-				'CASE, FILTER or HAVING condition',
-				891,
-			);
 	});
 
 	it('RF6 refusal names the field as written and recognises qualified built-in and quoted multirange types', () => {

@@ -82,9 +82,6 @@ compiles to the column's range constructor with its bounds as the third argument
   or a modified type is refused by name; use the tuple form with a `rangeType` there. Any other declared type is
   used as the constructor name, so a custom type that is not a range is rejected by PostgreSQL ("function … does
   not exist").
-- Inside a `caseWhen()` in `columns()`/`orderBy()`, an aggregate `filter()` or a `having()`, a range value is not
-  yet compiled this way: there, `bounds` other than `'[)'`, a `Date`, expression or empty-string bound, and a string
-  bound containing `,` `(` `)` `[` `]` `"` or `\` are refused as not yet supported (#891).
 - In a schema default filter, a bound may only read the filtered table: a subquery or another table's column is
   refused, as it is on the right of `eq`.
 

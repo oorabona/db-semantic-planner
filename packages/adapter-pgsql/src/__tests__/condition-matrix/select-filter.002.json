@@ -20,80 +20,80 @@
 			"position": "select-filter",
 			"kind": "range-overlaps",
 			"shape": "leaf",
-			"sql": "SELECT count(*) FILTER (WHERE users.period && CAST($1 AS daterange)) AS n FROM users",
-			"params": ["[2026-01-01,2026-02-01)"],
+			"sql": "SELECT count(*) FILTER (WHERE users.period && daterange($1, $2, '[)')) AS n FROM users",
+			"params": ["2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "select-filter",
 			"kind": "range-overlaps",
 			"shape": "and",
-			"sql": "SELECT count(*) FILTER (WHERE users.period && CAST($1 AS daterange) AND users.score = $2) AS n FROM users",
-			"params": ["[2026-01-01,2026-02-01)", 13],
+			"sql": "SELECT count(*) FILTER (WHERE users.period && daterange($1, $2, '[)') AND users.score = $3) AS n FROM users",
+			"params": ["2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "select-filter",
 			"kind": "range-overlaps",
 			"shape": "or",
-			"sql": "SELECT count(*) FILTER (WHERE users.period && CAST($1 AS daterange) OR users.score = $2) AS n FROM users",
-			"params": ["[2026-01-01,2026-02-01)", 13],
+			"sql": "SELECT count(*) FILTER (WHERE users.period && daterange($1, $2, '[)') OR users.score = $3) AS n FROM users",
+			"params": ["2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "select-filter",
 			"kind": "range-overlaps",
 			"shape": "not",
-			"sql": "SELECT count(*) FILTER (WHERE NOT (users.period && CAST($1 AS daterange))) AS n FROM users",
-			"params": ["[2026-01-01,2026-02-01)"],
+			"sql": "SELECT count(*) FILTER (WHERE NOT (users.period && daterange($1, $2, '[)'))) AS n FROM users",
+			"params": ["2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "select-filter",
 			"kind": "range-overlaps",
 			"shape": "two-level",
-			"sql": "SELECT count(*) FILTER (WHERE users.score = $1 AND (NOT (users.period && CAST($2 AS daterange)) OR users.score = $3)) AS n FROM users",
-			"params": [13, "[2026-01-01,2026-02-01)", 17],
+			"sql": "SELECT count(*) FILTER (WHERE users.score = $1 AND (NOT (users.period && daterange($2, $3, '[)')) OR users.score = $4)) AS n FROM users",
+			"params": [13, "2026-01-01", "2026-02-01", 17],
 			"error": null
 		},
 		{
 			"position": "select-filter",
 			"kind": "range-contains",
 			"shape": "leaf",
-			"sql": "SELECT count(*) FILTER (WHERE users.period @> CAST($1 AS daterange)) AS n FROM users",
-			"params": ["[2026-01-01,2026-02-01)"],
+			"sql": "SELECT count(*) FILTER (WHERE users.period @> daterange($1, $2, '[)')) AS n FROM users",
+			"params": ["2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "select-filter",
 			"kind": "range-contains",
 			"shape": "and",
-			"sql": "SELECT count(*) FILTER (WHERE users.period @> CAST($1 AS daterange) AND users.score = $2) AS n FROM users",
-			"params": ["[2026-01-01,2026-02-01)", 13],
+			"sql": "SELECT count(*) FILTER (WHERE users.period @> daterange($1, $2, '[)') AND users.score = $3) AS n FROM users",
+			"params": ["2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "select-filter",
 			"kind": "range-contains",
 			"shape": "or",
-			"sql": "SELECT count(*) FILTER (WHERE users.period @> CAST($1 AS daterange) OR users.score = $2) AS n FROM users",
-			"params": ["[2026-01-01,2026-02-01)", 13],
+			"sql": "SELECT count(*) FILTER (WHERE users.period @> daterange($1, $2, '[)') OR users.score = $3) AS n FROM users",
+			"params": ["2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "select-filter",
 			"kind": "range-contains",
 			"shape": "not",
-			"sql": "SELECT count(*) FILTER (WHERE NOT (users.period @> CAST($1 AS daterange))) AS n FROM users",
-			"params": ["[2026-01-01,2026-02-01)"],
+			"sql": "SELECT count(*) FILTER (WHERE NOT (users.period @> daterange($1, $2, '[)'))) AS n FROM users",
+			"params": ["2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "select-filter",
 			"kind": "range-contains",
 			"shape": "two-level",
-			"sql": "SELECT count(*) FILTER (WHERE users.score = $1 AND (NOT (users.period @> CAST($2 AS daterange)) OR users.score = $3)) AS n FROM users",
-			"params": [13, "[2026-01-01,2026-02-01)", 17],
+			"sql": "SELECT count(*) FILTER (WHERE users.score = $1 AND (NOT (users.period @> daterange($2, $3, '[)')) OR users.score = $4)) AS n FROM users",
+			"params": [13, "2026-01-01", "2026-02-01", 17],
 			"error": null
 		},
 		{
@@ -140,40 +140,40 @@
 			"position": "select-filter",
 			"kind": "range-containedBy",
 			"shape": "leaf",
-			"sql": "SELECT count(*) FILTER (WHERE users.period <@ CAST($1 AS daterange)) AS n FROM users",
-			"params": ["[2026-01-01,2026-02-01)"],
+			"sql": "SELECT count(*) FILTER (WHERE users.period <@ daterange($1, $2, '[)')) AS n FROM users",
+			"params": ["2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "select-filter",
 			"kind": "range-containedBy",
 			"shape": "and",
-			"sql": "SELECT count(*) FILTER (WHERE users.period <@ CAST($1 AS daterange) AND users.score = $2) AS n FROM users",
-			"params": ["[2026-01-01,2026-02-01)", 13],
+			"sql": "SELECT count(*) FILTER (WHERE users.period <@ daterange($1, $2, '[)') AND users.score = $3) AS n FROM users",
+			"params": ["2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "select-filter",
 			"kind": "range-containedBy",
 			"shape": "or",
-			"sql": "SELECT count(*) FILTER (WHERE users.period <@ CAST($1 AS daterange) OR users.score = $2) AS n FROM users",
-			"params": ["[2026-01-01,2026-02-01)", 13],
+			"sql": "SELECT count(*) FILTER (WHERE users.period <@ daterange($1, $2, '[)') OR users.score = $3) AS n FROM users",
+			"params": ["2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "select-filter",
 			"kind": "range-containedBy",
 			"shape": "not",
-			"sql": "SELECT count(*) FILTER (WHERE NOT (users.period <@ CAST($1 AS daterange))) AS n FROM users",
-			"params": ["[2026-01-01,2026-02-01)"],
+			"sql": "SELECT count(*) FILTER (WHERE NOT (users.period <@ daterange($1, $2, '[)'))) AS n FROM users",
+			"params": ["2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "select-filter",
 			"kind": "range-containedBy",
 			"shape": "two-level",
-			"sql": "SELECT count(*) FILTER (WHERE users.score = $1 AND (NOT (users.period <@ CAST($2 AS daterange)) OR users.score = $3)) AS n FROM users",
-			"params": [13, "[2026-01-01,2026-02-01)", 17],
+			"sql": "SELECT count(*) FILTER (WHERE users.score = $1 AND (NOT (users.period <@ daterange($2, $3, '[)')) OR users.score = $4)) AS n FROM users",
+			"params": [13, "2026-01-01", "2026-02-01", 17],
 			"error": null
 		},
 		{
