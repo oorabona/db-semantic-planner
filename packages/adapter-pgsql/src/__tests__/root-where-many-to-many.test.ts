@@ -142,6 +142,9 @@ it('types the many-to-many refusal in HAVING, CASE WHEN, FILTER and mutation WHE
 		);
 	expect(() =>
 		orm.select('posts').groupBy(['id']).having(exists('tags')).dump(),
+	).toThrowError(NotYetSupportedError);
+	expect(() =>
+		orm.select('posts').groupBy(['id']).having(exists('tags')).dump(),
 	).toThrowError(refusal('HAVING'));
 	expect(() =>
 		orm

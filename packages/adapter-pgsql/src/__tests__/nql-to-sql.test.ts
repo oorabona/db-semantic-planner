@@ -950,6 +950,9 @@ describe('NQL → SQL compile-only pipeline', () => {
 		);
 		expect(() =>
 			orm.nql`with a as (users | select id | union (users | select id)) a | select id`.dump(),
+		).toThrow(NotYetSupportedError);
+		expect(() =>
+			orm.nql`with a as (users | select id | union (users | select id)) a | select id`.dump(),
 		).toThrow(refusal);
 		// No interpolation hint: the refusal concerns a construct the text spells.
 		expect(() =>

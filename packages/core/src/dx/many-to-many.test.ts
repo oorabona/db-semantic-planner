@@ -345,6 +345,12 @@ it('refuses a default filter crossing a many-to-many relation as not yet', () =>
 			...options(),
 			defaultFilters: { posts: exists('tags') },
 		}),
+	).toThrow(NotYetSupportedError);
+	expect(() =>
+		schema(definition, undefined, {
+			...options(),
+			defaultFilters: { posts: exists('tags') },
+		}),
 	).toThrow(
 		new NotYetSupportedError(
 			"many-to-many traversal exists('tags')",
