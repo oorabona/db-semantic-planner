@@ -533,7 +533,7 @@ describe('fullTextSearch and textScore leaves (ADR 0011 delivery 6)', () => {
 		const run = (query: unknown) => () =>
 			fullTextSearch({ query, fields: one, tableAlias: 'posts' });
 		expect(run(sql('1'))).toThrow(
-			'Invalid fullTextSearch: sql() is only accepted as an update or upsert value; use literal(), param() or an expression here',
+			'Invalid fullTextSearch: sql() is only accepted in set(), values(), doUpdate() and batchSet().set(); use literal(), param() or an expression here',
 		);
 		expect(run(caseWhen(eq('score', 1), literal('a')))).toThrow(
 			'Invalid fullTextSearch: caseWhen() is unfinished; complete it with .else(value) before using it as a value',

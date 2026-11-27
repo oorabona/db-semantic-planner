@@ -1665,7 +1665,7 @@ describe('subquery fields and selectExpression leaves (ADR 0011 delivery 6)', ()
 		expect(() => sel(undefined)).toThrow(refusal('undefined'));
 		expect(() => sel({})).toThrow(refusal('a plain object'));
 		expect(() => sel(sql('1'))).toThrow(
-			'Invalid selectExpression: sql() is only accepted as an update or upsert value; use literal(), param() or an expression here',
+			'Invalid selectExpression: sql() is only accepted in set(), values(), doUpdate() and batchSet().set(); use literal(), param() or an expression here',
 		);
 		notYet(
 			() => sel(orm.select('posts')),

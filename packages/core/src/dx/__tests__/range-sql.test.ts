@@ -817,7 +817,7 @@ describe('range helper refusals (ADR 0011 delivery 6)', () => {
 		]) {
 			invalid(
 				() => bound(sql('1')),
-				'Invalid rangeOverlaps: sql() is only accepted as an update or upsert value; use literal(), param() or an expression here',
+				'Invalid rangeOverlaps: sql() is only accepted in set(), values(), doUpdate() and batchSet().set(); use literal(), param() or an expression here',
 			);
 			invalid(
 				() => bound(unfinished),
@@ -1008,7 +1008,7 @@ describe('range helper refusals (ADR 0011 delivery 6)', () => {
 			);
 			invalid(
 				() => call('span', [sql('1'), 5], 'int4range'),
-				`Invalid ${name}: sql() is only accepted as an update or upsert value; use literal(), param() or an expression here`,
+				`Invalid ${name}: sql() is only accepted in set(), values(), doUpdate() and batchSet().set(); use literal(), param() or an expression here`,
 			);
 		}
 	});
