@@ -554,7 +554,7 @@ describe('ITEM-6: customOp operator injection guard', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: '<=>; DROP TABLE users --',
-				left: { kind: 'ref', column: 'vec' },
+				left: { kind: 'param', value: 'vec' },
 				right: { kind: 'param', value: [0.1, 0.2] },
 			}),
 		).toThrow(/Invalid operator/);
@@ -566,7 +566,7 @@ describe('ITEM-6: customOp operator injection guard', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: '/* injected',
-				left: { kind: 'ref', column: 'a' },
+				left: { kind: 'param', value: 'a' },
 				right: { kind: 'param', value: 1 },
 			}),
 		).toThrow(/Invalid operator/);
@@ -578,7 +578,7 @@ describe('ITEM-6: customOp operator injection guard', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: '<=>',
-				left: { kind: 'ref', column: 'embedding' },
+				left: { kind: 'param', value: 'embedding' },
 				right: { kind: 'param', value: [0.1, 0.2] },
 			}),
 		).not.toThrow();
@@ -590,7 +590,7 @@ describe('ITEM-6: customOp operator injection guard', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: '<->',
-				left: { kind: 'ref', column: 'v' },
+				left: { kind: 'param', value: 'v' },
 				right: { kind: 'param', value: [0.1] },
 			}),
 		).not.toThrow();
@@ -875,7 +875,7 @@ describe('GAP-2: customOp operator strict symbolic allowlist', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: 'OR true OR',
-				left: { kind: 'ref', column: 'active' },
+				left: { kind: 'param', value: 'active' },
 				right: { kind: 'param', value: true },
 			}),
 		).toThrow(/Invalid operator/);
@@ -887,7 +887,7 @@ describe('GAP-2: customOp operator strict symbolic allowlist', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: 'OR',
-				left: { kind: 'ref', column: 'a' },
+				left: { kind: 'param', value: 'a' },
 				right: { kind: 'param', value: 1 },
 			}),
 		).toThrow(/Invalid operator/);
@@ -899,7 +899,7 @@ describe('GAP-2: customOp operator strict symbolic allowlist', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: '; DROP TABLE x --',
-				left: { kind: 'ref', column: 'a' },
+				left: { kind: 'param', value: 'a' },
 				right: { kind: 'param', value: 1 },
 			}),
 		).toThrow(/Invalid operator/);
@@ -911,7 +911,7 @@ describe('GAP-2: customOp operator strict symbolic allowlist', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: '<=> ANY(SELECT',
-				left: { kind: 'ref', column: 'v' },
+				left: { kind: 'param', value: 'v' },
 				right: { kind: 'param', value: [0.1] },
 			}),
 		).toThrow(/Invalid operator/);
@@ -923,7 +923,7 @@ describe('GAP-2: customOp operator strict symbolic allowlist', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: '<=>',
-				left: { kind: 'ref', column: 'embedding' },
+				left: { kind: 'param', value: 'embedding' },
 				right: { kind: 'param', value: [0.1, 0.2] },
 			}),
 		).not.toThrow();
@@ -935,7 +935,7 @@ describe('GAP-2: customOp operator strict symbolic allowlist', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: '<->',
-				left: { kind: 'ref', column: 'v' },
+				left: { kind: 'param', value: 'v' },
 				right: { kind: 'param', value: [0.1] },
 			}),
 		).not.toThrow();
@@ -947,7 +947,7 @@ describe('GAP-2: customOp operator strict symbolic allowlist', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: '@@',
-				left: { kind: 'ref', column: 'body' },
+				left: { kind: 'param', value: 'body' },
 				right: { kind: 'param', value: 'search term' },
 			}),
 		).not.toThrow();
@@ -959,7 +959,7 @@ describe('GAP-2: customOp operator strict symbolic allowlist', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: '@>',
-				left: { kind: 'ref', column: 'period' },
+				left: { kind: 'param', value: 'period' },
 				right: { kind: 'param', value: '[2024-01-01,2024-12-31]' },
 			}),
 		).not.toThrow();
@@ -971,7 +971,7 @@ describe('GAP-2: customOp operator strict symbolic allowlist', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: '~',
-				left: { kind: 'ref', column: 'path' },
+				left: { kind: 'param', value: 'path' },
 				right: { kind: 'param', value: '^/api/' },
 			}),
 		).not.toThrow();
@@ -997,7 +997,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: '--',
-				left: { kind: 'ref', column: 'active' },
+				left: { kind: 'param', value: 'active' },
 				right: { kind: 'param', value: true },
 			}),
 		).toThrow(/must not contain SQL comment sequences/);
@@ -1009,7 +1009,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: '<--',
-				left: { kind: 'ref', column: 'a' },
+				left: { kind: 'param', value: 'a' },
 				right: { kind: 'param', value: 1 },
 			}),
 		).toThrow(/must not contain SQL comment sequences/);
@@ -1021,7 +1021,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: '-->',
-				left: { kind: 'ref', column: 'a' },
+				left: { kind: 'param', value: 'a' },
 				right: { kind: 'param', value: 1 },
 			}),
 		).toThrow(/must not contain SQL comment sequences/);
@@ -1033,7 +1033,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: '/*',
-				left: { kind: 'ref', column: 'a' },
+				left: { kind: 'param', value: 'a' },
 				right: { kind: 'param', value: 1 },
 			}),
 		).toThrow(/must not contain SQL comment sequences/);
@@ -1045,7 +1045,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: '*/',
-				left: { kind: 'ref', column: 'a' },
+				left: { kind: 'param', value: 'a' },
 				right: { kind: 'param', value: 1 },
 			}),
 		).toThrow(/must not contain SQL comment sequences/);
@@ -1057,7 +1057,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: '/**/',
-				left: { kind: 'ref', column: 'a' },
+				left: { kind: 'param', value: 'a' },
 				right: { kind: 'param', value: 1 },
 			}),
 		).toThrow(/must not contain SQL comment sequences/);
@@ -1072,7 +1072,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: '-',
-				left: { kind: 'ref', column: 'a' },
+				left: { kind: 'param', value: 'a' },
 				right: { kind: 'param', value: 1 },
 			}),
 		).not.toThrow();
@@ -1084,7 +1084,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: '*',
-				left: { kind: 'ref', column: 'a' },
+				left: { kind: 'param', value: 'a' },
 				right: { kind: 'param', value: 2 },
 			}),
 		).not.toThrow();
@@ -1096,7 +1096,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: '/',
-				left: { kind: 'ref', column: 'a' },
+				left: { kind: 'param', value: 'a' },
 				right: { kind: 'param', value: 2 },
 			}),
 		).not.toThrow();
@@ -1108,7 +1108,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: '+',
-				left: { kind: 'ref', column: 'a' },
+				left: { kind: 'param', value: 'a' },
 				right: { kind: 'param', value: 1 },
 			}),
 		).not.toThrow();
@@ -1120,7 +1120,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: '<=>',
-				left: { kind: 'ref', column: 'embedding' },
+				left: { kind: 'param', value: 'embedding' },
 				right: { kind: 'param', value: [0.1, 0.2] },
 			}),
 		).not.toThrow();
@@ -1132,7 +1132,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: '<#>',
-				left: { kind: 'ref', column: 'embedding' },
+				left: { kind: 'param', value: 'embedding' },
 				right: { kind: 'param', value: [0.1, 0.2] },
 			}),
 		).not.toThrow();
@@ -1144,7 +1144,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: '=',
-				left: { kind: 'ref', column: 'a' },
+				left: { kind: 'param', value: 'a' },
 				right: { kind: 'param', value: 1 },
 			}),
 		).not.toThrow();
@@ -1156,7 +1156,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: '<>',
-				left: { kind: 'ref', column: 'a' },
+				left: { kind: 'param', value: 'a' },
 				right: { kind: 'param', value: 1 },
 			}),
 		).not.toThrow();
@@ -1168,7 +1168,7 @@ describe('GAP-2b: customOp operator rejects SQL comment sequences', () => {
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: '!=',
-				left: { kind: 'ref', column: 'a' },
+				left: { kind: 'param', value: 'a' },
 				right: { kind: 'param', value: 1 },
 			}),
 		).not.toThrow();
@@ -1190,7 +1190,7 @@ describe('FINDING-1: unary operator injection guard (assertSafeOperator)', () =>
 			adapter.compileSelectExpression({
 				kind: 'unary',
 				operator: 'NOT true OR',
-				operand: { kind: 'ref', column: 'active' },
+				operand: { kind: 'param', value: 'active' },
 			}),
 		).toThrow(/Invalid operator/);
 	});
@@ -1201,7 +1201,7 @@ describe('FINDING-1: unary operator injection guard (assertSafeOperator)', () =>
 			adapter.compileSelectExpression({
 				kind: 'unary',
 				operator: 'NOT true; DROP',
-				operand: { kind: 'ref', column: 'active' },
+				operand: { kind: 'param', value: 'active' },
 			}),
 		).toThrow(/Invalid operator/);
 	});
@@ -1212,7 +1212,7 @@ describe('FINDING-1: unary operator injection guard (assertSafeOperator)', () =>
 			adapter.compileSelectExpression({
 				kind: 'unary',
 				operator: 'NOOP',
-				operand: { kind: 'ref', column: 'x' },
+				operand: { kind: 'param', value: 'x' },
 			}),
 		).toThrow(/Invalid operator/);
 	});
@@ -1225,7 +1225,7 @@ describe('FINDING-1: unary operator injection guard (assertSafeOperator)', () =>
 			adapter.compileSelectExpression({
 				kind: 'unary',
 				operator: '--',
-				operand: { kind: 'ref', column: 'x' },
+				operand: { kind: 'param', value: 'x' },
 			}),
 		).toThrow(/must not contain SQL comment sequences/);
 	});
@@ -1236,7 +1236,7 @@ describe('FINDING-1: unary operator injection guard (assertSafeOperator)', () =>
 			adapter.compileSelectExpression({
 				kind: 'unary',
 				operator: '/*',
-				operand: { kind: 'ref', column: 'x' },
+				operand: { kind: 'param', value: 'x' },
 			}),
 		).toThrow(/must not contain SQL comment sequences/);
 	});
@@ -1249,7 +1249,7 @@ describe('FINDING-1: unary operator injection guard (assertSafeOperator)', () =>
 			adapter.compileSelectExpression({
 				kind: 'unary',
 				operator: 'NOT',
-				operand: { kind: 'ref', column: 'active' },
+				operand: { kind: 'param', value: 'active' },
 			}),
 		).not.toThrow();
 	});
@@ -1260,7 +1260,7 @@ describe('FINDING-1: unary operator injection guard (assertSafeOperator)', () =>
 			adapter.compileSelectExpression({
 				kind: 'unary',
 				operator: 'not',
-				operand: { kind: 'ref', column: 'active' },
+				operand: { kind: 'param', value: 'active' },
 			}),
 		).not.toThrow();
 	});
@@ -1271,7 +1271,7 @@ describe('FINDING-1: unary operator injection guard (assertSafeOperator)', () =>
 			adapter.compileSelectExpression({
 				kind: 'unary',
 				operator: '-',
-				operand: { kind: 'ref', column: 'score' },
+				operand: { kind: 'param', value: 'score' },
 			}),
 		).not.toThrow();
 	});
@@ -1282,7 +1282,7 @@ describe('FINDING-1: unary operator injection guard (assertSafeOperator)', () =>
 			adapter.compileSelectExpression({
 				kind: 'unary',
 				operator: '+',
-				operand: { kind: 'ref', column: 'score' },
+				operand: { kind: 'param', value: 'score' },
 			}),
 		).not.toThrow();
 	});
@@ -1293,7 +1293,7 @@ describe('FINDING-1: unary operator injection guard (assertSafeOperator)', () =>
 			adapter.compileSelectExpression({
 				kind: 'unary',
 				operator: '~',
-				operand: { kind: 'ref', column: 'flags' },
+				operand: { kind: 'param', value: 'flags' },
 			}),
 		).not.toThrow();
 	});
@@ -1435,7 +1435,7 @@ describe('FINDING-1: non-string operator throws (assertSafeOperator typeof guard
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: 42 as unknown as string,
-				left: { kind: 'ref', column: 'a' },
+				left: { kind: 'param', value: 'a' },
 				right: { kind: 'param', value: 1 },
 			}),
 		).toThrow(/expected a string/);
@@ -1447,7 +1447,7 @@ describe('FINDING-1: non-string operator throws (assertSafeOperator typeof guard
 			adapter.compileSelectExpression({
 				kind: 'customOp',
 				operator: { toString: () => '<=>' } as unknown as string,
-				left: { kind: 'ref', column: 'a' },
+				left: { kind: 'param', value: 'a' },
 				right: { kind: 'param', value: 1 },
 			}),
 		).toThrow(/expected a string/);
@@ -1459,7 +1459,7 @@ describe('FINDING-1: non-string operator throws (assertSafeOperator typeof guard
 			adapter.compileSelectExpression({
 				kind: 'unary',
 				operator: 0 as unknown as string,
-				operand: { kind: 'ref', column: 'x' },
+				operand: { kind: 'param', value: 'x' },
 			}),
 		).toThrow(/expected a string/);
 	});
@@ -1545,7 +1545,7 @@ describe('TOCTOU getter-probe: customOp operator snapshot-once', () => {
 				reads += 1;
 				return reads === 1 ? '<=>' : '<=>; DROP TABLE users --';
 			},
-			left: { kind: 'ref' as const, column: 'embedding' },
+			left: { kind: 'param' as const, value: 'embedding' },
 			right: { kind: 'param' as const, value: [0.1, 0.2] },
 		};
 		const { sql } = adapter.compileSelectExpression(intent);
@@ -1565,7 +1565,7 @@ describe('TOCTOU getter-probe: unary operator snapshot-once', () => {
 				reads += 1;
 				return reads === 1 ? 'NOT' : 'NOT true; DROP TABLE users --';
 			},
-			operand: { kind: 'ref' as const, column: 'active' },
+			operand: { kind: 'param' as const, value: 'active' },
 		};
 		const { sql } = adapter.compileSelectExpression(intent);
 		expect(sql).not.toContain('DROP TABLE');

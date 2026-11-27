@@ -2,11 +2,10 @@ import {
 	copyDefaultFilters,
 	getRelationalReadPlan,
 	planInScope,
+	resolveFromlessExpression,
 	resolveReportIncludes,
 	validateRecursiveSetOperation,
 } from '@dbsp/core/internal';
-import { compileWhereIntent } from './condition-compiler.js';
-import { createWhereDispatcher } from './handlers/index.js';
 import { assertRelationalOutput } from './relational-output.js';
 /**
  * PgAdapter - Implements the Adapter interface for PostgreSQL using native pg driver.
@@ -27,7 +26,7 @@ import type {
 	TruncateOptions,
 	VacuumOptions,
 } from '@dbsp/core';
-import { POSTGRESQL_CAPABILITIES, plan as planFn } from '@dbsp/core';
+import { POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 import { inspectMutationRows } from '@dbsp/core/internal';
 import type {
 	Adapter,
@@ -98,6 +97,7 @@ import {
 	assertPlannedReportAuthority,
 	compileSelect,
 	compileSelectEnvelope,
+	nestedSelectCompiler,
 } from './adapter-compiler-select.js';
 import {
 	DEFAULT_PK_COLUMN,
@@ -113,7 +113,6 @@ import {
 	type QueryScope,
 	relationBindingFor,
 } from './binding-registry.js';
-import { buildCustomFnFilter, renumberParamRefsInAst } from './compiler.js';
 import {
 	dbTypeCastTarget,
 	renderColumnDbType,
@@ -135,8 +134,7 @@ import {
 	getCachedPgPhysicalModel,
 } from './declared-name-resolver.js';
 import { deparseQuoted } from './deparse.js';
-import { compileExpressionIntent } from './handlers/expression/custom.js';
-import { createCompilerState } from './handlers/types.js';
+import { type CompilerContext, createCompilerState } from './handlers/types.js';
 import {
 	type IntrospectedModelIR,
 	type IntrospectionOptions,
@@ -163,6 +161,7 @@ import {
 } from './projection-envelope.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
 import { queryScopeForBindingProjections } from './relation-target-projection.js';
+import { compileResolvedExpression } from './resolved-condition-compiler.js';
 import {
 	compileSetOperationEnvelope as compileSetOperationEnvelopeImpl,
 	type SetOperationLeafCompiler,
@@ -193,11 +192,6 @@ import { validateIdentifier } from './validate.js';
 // ============================================================================
 // Internal types
 // ============================================================================
-
-type CompileSubqueryResult = {
-	ast: import('@pgsql/types').Node;
-	parameters: readonly unknown[];
-};
 
 type StreamRowMapper<T> = (rows: Record<string, unknown>[]) => T[];
 
@@ -3587,6 +3581,10 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 	 * Produces: SELECT <expr>
 	 * Example: SELECT nextval('my_seq')
 	 *
+	 * Core resolves the whole expression (`resolveFromlessExpression`): a
+	 * column or relation read outside a subquery body is refused, and each
+	 * body compiles as in a read, with the default filters in force.
+	 *
 	 * @param expr - ExpressionIntent to evaluate
 	 * @returns Compiled SQL and parameters
 	 */
@@ -3596,40 +3594,21 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 	): CompiledQuery<T> {
 		const model = this.requireCompileModel(options);
 		const deps = this.buildCompileDeps(options, model);
-		const schemaName = deps.schemaName;
-		const dialectCapabilities = deps.dialectCapabilities;
+		// Core resolves the whole expression: a FROM-less SELECT has no row, so
+		// every read outside a subquery body is refused there, and each body is
+		// the one a read compiles (default filters, a builder's own policy).
+		const resolved = resolveFromlessExpression(expr, model, {
+			defaultFilters: options?.defaultFilters,
+		});
 		const state = createCompilerState();
 		const ctx = {
-			...(schemaName !== undefined && { schema: schemaName }),
-			...(dialectCapabilities !== undefined && { dialectCapabilities }),
+			...deps,
+			...(deps.schemaName !== undefined && { schema: deps.schemaName }),
 			rootTable: '',
 			maxRecursiveDepth: MAX_DEPTH_LIMIT,
-			compileCustomFnFilter: buildCustomFnFilter,
-			createWhereDispatcher: () => createWhereDispatcher(compileWhereIntent),
-			// A SubqueryExpressionIntent nested inside expr (e.g. op('+',
-			// subquery(...).asExpr(), literal(1))) compiles as the plan core issues
-			// for its query: the default filters apply to its scans, and a builder
-			// nested in its WHERE or projections keeps its policy.
-			compileSubquery(
-				query: import('@dbsp/types').QueryIntent,
-				paramOffset: number,
-			): CompileSubqueryResult {
-				const issued = planFn(query, deps.model, {
-					...(options?.defaultFilters && {
-						defaultFilters: options.defaultFilters,
-					}),
-					...(dialectCapabilities !== undefined && { dialectCapabilities }),
-				});
-				const envelope = compileSelectEnvelope(issued, options, deps);
-				if (envelope.ast === undefined)
-					throw new Error('A planned selectExpression body produced no AST.');
-				return {
-					ast: renumberParamRefsInAst(envelope.ast, paramOffset),
-					parameters: envelope.parameters,
-				};
-			},
-		};
-		const node = compileExpressionIntent(expr, ctx, state);
+			compileNestedSelect: nestedSelectCompiler(options, deps),
+		} as CompilerContext;
+		const node = compileResolvedExpression(resolved, ctx, state);
 		// The expression's alias (`.as()`, `.asExpr()`) names the result column.
 		const alias = (expr as { readonly as?: unknown }).as;
 		const ast = selectStmt({

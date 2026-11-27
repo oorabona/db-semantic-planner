@@ -923,7 +923,8 @@ describe('selectExpression bodies and nested issued policies', () => {
 			),
 		);
 		expect(result.sql).toBe(
-			'SELECT (SELECT count(*) FROM posts WHERE posts.deleted_at IS NULL AND posts.score = $1) + (SELECT count(*) FROM posts WHERE posts.deleted_at IS NULL AND posts.score = $2)',
+			// One allocator for the statement: the second body is aliased (#1002).
+			'SELECT (SELECT count(*) FROM posts WHERE posts.deleted_at IS NULL AND posts.score = $1) + (SELECT count(*) FROM posts AS posts_1 WHERE posts_1.deleted_at IS NULL AND posts_1.score = $2)',
 		);
 		expect(result.parameters).toEqual([1, 2]);
 	});
@@ -1135,7 +1136,9 @@ describe('selectExpression bodies and nested issued policies', () => {
 						.max('score')
 						.asExpr('m'),
 				).sql,
-		).toThrow('outerRef() requires an enclosing query range.');
+		).toThrow(
+			"outerRef qualifier 'users' is not visible in an enclosing query.",
+		);
 	});
 
 	const projectNested = (query: Record<string, unknown>) =>
