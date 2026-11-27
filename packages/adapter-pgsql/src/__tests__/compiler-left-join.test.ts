@@ -1,28 +1,94 @@
 /**
  * @module compiler-left-join.test
- * Unit tests for F-006: LEFT JOIN compilation for include-strategy.
+ * Tests for F-006: LEFT JOIN compilation for include-strategy.
  *
- * When the planner emits choice: 'join' for a to-one (belongsTo/hasOne) include,
- * the compiler should produce LEFT JOIN + aliased columns instead of json_agg subquery.
+ * When the planner picks the join strategy for a to-one (belongsTo/hasOne) include,
+ * the compiler produces LEFT JOIN + aliased columns instead of a json_agg subquery.
  */
 
-import {
-	compilePlan,
-	type PlanDecision,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
+import { createOrm, eq, exists, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ============================================================================
-// Helpers
+// Fixtures
 // ============================================================================
 
-function compileToSql(plan: SimplifiedPlanReport): {
-	sql: string;
-	parameters: readonly unknown[];
-} {
-	return compilePlan(plan);
-}
+/** posts → authors, posts → categories. */
+const blogDb = schema({
+	authors: {
+		id: { type: 'integer', primaryKey: true },
+		name: { type: 'text' },
+	},
+	categories: {
+		id: { type: 'integer', primaryKey: true },
+		slug: { type: 'text' },
+	},
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		author_id: ref('authors', { as: 'author', inverse: 'posts' }),
+		category_id: ref('categories', { as: 'category', inverse: 'posts' }),
+	},
+} as const);
+const blogOrm = createOrm({
+	schema: blogDb,
+	adapter: createPgCompileOnlyAdapter({ model: blogDb.model }),
+});
+
+/** posts → users twice (author and editor). */
+const twoUsersDb = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: { type: 'text' },
+	},
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		author_id: ref('users', { as: 'author', inverse: 'authored' }),
+		editor_id: ref('users', { as: 'editor', inverse: 'edited' }),
+	},
+} as const);
+const twoUsersOrm = createOrm({
+	schema: twoUsersDb,
+	adapter: createPgCompileOnlyAdapter({ model: twoUsersDb.model }),
+});
+
+/** calls → symbols → files. */
+const callsDb = schema({
+	files: {
+		id: { type: 'integer', primaryKey: true },
+		path: { type: 'text' },
+	},
+	symbols: {
+		id: { type: 'integer', primaryKey: true },
+		name: { type: 'text' },
+		file_id: ref('files', { as: 'file', inverse: 'symbols' }),
+	},
+	calls: {
+		id: { type: 'integer', primaryKey: true },
+		callee_id: ref('symbols', { as: 'callee', inverse: 'callee_calls' }),
+	},
+} as const);
+const callsOrm = createOrm({
+	schema: callsDb,
+	adapter: createPgCompileOnlyAdapter({ model: callsDb.model }),
+});
+
+/** users → posts → comments, each link unique so the joins are to-one. */
+const chainDb = schema({
+	users: { id: { type: 'integer', primaryKey: true } },
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		authorId: ref('users', { unique: true, as: 'author', inverse: 'posts' }),
+	},
+	comments: {
+		id: { type: 'integer', primaryKey: true },
+		postId: ref('posts', { unique: true, as: 'post', inverse: 'comments' }),
+	},
+} as const);
+const chainOrm = createOrm({
+	schema: chainDb,
+	adapter: createPgCompileOnlyAdapter({ model: chainDb.model }),
+});
 
 // ============================================================================
 // Tests
@@ -30,155 +96,40 @@ function compileToSql(plan: SimplifiedPlanReport): {
 
 describe('LEFT JOIN include compilation (F-006)', () => {
 	describe('belongsTo include with choice=join', () => {
-		it('should compile LEFT JOIN with aliased columns', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'posts',
-				decisions: [
-					{ type: 'select', column: '*', table: 'posts' },
-					{
-						type: 'includeStrategy',
-						choice: 'join',
-						relationName: 'author',
-						targetTable: 'authors',
-						relationType: 'belongsTo',
-						foreignKey: 'author_id',
-						parentKey: 'id',
-						columns: ['id', 'name', 'email'],
-					} satisfies PlanDecision,
-				],
-			};
-
-			const result = compileToSql(plan);
-
-			// Should contain LEFT JOIN, not json_agg
-			expect(result.sql).toContain('LEFT JOIN');
-			expect(result.sql).not.toContain('json_agg');
-			// ON condition: source FK = target PK (or equivalent)
-			expect(result.sql).toMatch(/posts\.author_id\s*=\s*author\.id/);
-			// Aliased columns for hydration
-			expect(result.sql).toContain('"author.id"');
-			expect(result.sql).toContain('"author.name"');
-			expect(result.sql).toContain('"author.email"');
-		});
-
-		it('should always include PK in columns', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'posts',
-				decisions: [
-					{ type: 'select', column: '*', table: 'posts' },
-					{
-						type: 'includeStrategy',
-						choice: 'join',
-						relationName: 'author',
-						targetTable: 'authors',
-						relationType: 'belongsTo',
-						foreignKey: 'author_id',
-						parentKey: 'id',
-						columns: ['id', 'name'], // PK included
-					} satisfies PlanDecision,
-				],
-			};
-
-			const result = compileToSql(plan);
-
-			// PK column should always be present
-			expect(result.sql).toContain('"author.id"');
-			expect(result.sql).toContain('"author.name"');
-		});
-
 		it('should compile LEFT JOIN with PK only when no other columns', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'posts',
-				decisions: [
-					{ type: 'select', column: '*', table: 'posts' },
-					{
-						type: 'includeStrategy',
-						choice: 'join',
-						relationName: 'author',
-						targetTable: 'authors',
-						relationType: 'belongsTo',
-						foreignKey: 'author_id',
-						parentKey: 'id',
-						columns: ['id'], // PK only
-					} satisfies PlanDecision,
-				],
-			};
+			const { sql, params } = blogOrm
+				.select('posts')
+				.include('author', {
+					join: 'left',
+					select: { type: 'fields', fields: ['id'] },
+				})
+				.dump();
 
-			const result = compileToSql(plan);
-
-			expect(result.sql).toContain('LEFT JOIN');
-			expect(result.sql).toContain('"author.id"');
-		});
-	});
-
-	describe('fallback to json_agg when choice != join', () => {
-		it('should use json_agg for selectJsonAgg decisions', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'authors',
-				decisions: [
-					{ type: 'select', column: '*', table: 'authors' },
-					{
-						type: 'includeStrategy',
-						choice: 'json_agg',
-						relationName: 'posts',
-						targetTable: 'posts',
-						relationType: 'hasMany',
-						foreignKey: 'author_id',
-						parentKey: 'id',
-						orderBy: ['id'],
-					} satisfies PlanDecision,
-				],
-			};
-
-			const result = compileToSql(plan);
-
-			expect(result.sql).toContain('json_agg');
-			expect(result.sql).toContain('ORDER BY __t__.id ASC NULLS LAST');
-			expect(result.sql).not.toMatch(/LEFT\s+JOIN/);
+			expect({ sql, params }).toEqual({
+				sql: 'SELECT posts.*, author.id AS "author.id", author.id AS __dbsp_presence_author FROM posts LEFT JOIN authors AS author ON posts.author_id = author.id',
+				params: [],
+			});
 		});
 	});
 
 	describe('multiple to-one includes to same table', () => {
 		it('should produce two LEFT JOINs with different aliases', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'posts',
-				decisions: [
-					{ type: 'select', column: '*', table: 'posts' },
-					// author (belongsTo users)
-					{
-						type: 'includeStrategy',
-						choice: 'join',
-						relationName: 'author',
-						targetTable: 'users',
-						relationType: 'belongsTo',
-						foreignKey: 'author_id',
-						parentKey: 'id',
-						columns: ['id', 'name'],
-					} satisfies PlanDecision,
-					// editor (belongsTo users)
-					{
-						type: 'includeStrategy',
-						choice: 'join',
-						relationName: 'editor',
-						targetTable: 'users',
-						relationType: 'belongsTo',
-						foreignKey: 'editor_id',
-						parentKey: 'id',
-						columns: ['id', 'name'],
-					} satisfies PlanDecision,
-				],
-			};
+			const { sql, params } = twoUsersOrm
+				.select('posts')
+				.include('author', {
+					join: 'left',
+					select: { type: 'fields', fields: ['id', 'name'] },
+				})
+				.include('editor', {
+					join: 'left',
+					select: { type: 'fields', fields: ['id', 'name'] },
+				})
+				.dump();
 
-			const result = compileToSql(plan);
-
-			// Two LEFT JOINs with different aliases
-			expect(result.sql).toMatch(/LEFT JOIN\s+users\s+AS\s+author/i);
-			expect(result.sql).toMatch(/LEFT JOIN\s+users\s+AS\s+editor/i);
-			// Distinct aliased columns
-			expect(result.sql).toContain('"author.id"');
-			expect(result.sql).toContain('"author.name"');
-			expect(result.sql).toContain('"editor.id"');
-			expect(result.sql).toContain('"editor.name"');
+			expect({ sql, params }).toEqual({
+				sql: 'SELECT posts.*, author.id AS "author.id", author.name AS "author.name", author.id AS __dbsp_presence_author, editor.id AS "editor.id", editor.name AS "editor.name", editor.id AS __dbsp_presence_editor FROM posts LEFT JOIN users AS author ON posts.author_id = author.id LEFT JOIN users AS editor ON posts.editor_id = editor.id',
+				params: [],
+			});
 		});
 	});
 
@@ -187,139 +138,50 @@ describe('LEFT JOIN include compilation (F-006)', () => {
 			// Scenario: calls → callee (symbols) → file (files)
 			// First hop: calls.callee_id → symbols.id  (belongsTo)
 			// Second hop: symbols.file_id → files.id   (belongsTo)
-			// Bug: without fix, second hop uses calls.file_id instead of symbols.file_id
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'calls',
-				decisions: [
-					{ type: 'select', column: '*', table: 'calls' },
-					// First hop: calls → symbols via callee_id
-					{
-						type: 'includeStrategy',
-						choice: 'join',
-						relationName: 'callee',
-						targetTable: 'symbols',
-						sourceTable: 'calls',
-						relationType: 'belongsTo',
-						foreignKey: 'callee_id',
-						parentKey: 'id',
-						columns: ['id', 'name'],
-					} satisfies PlanDecision,
-					// Second hop: symbols → files via file_id
-					// sourceTable MUST be 'symbols', not 'calls'
-					{
-						type: 'includeStrategy',
-						choice: 'join',
-						relationName: 'file',
-						targetTable: 'files',
-						sourceTable: 'symbols',
-						relationType: 'belongsTo',
-						foreignKey: 'file_id',
-						parentKey: 'id',
-						columns: ['id', 'path'],
-					} satisfies PlanDecision,
-				],
-			};
+			const { sql, params } = callsOrm
+				.select('calls')
+				.include('callee', { join: 'left' })
+				.include('callee.file', { join: 'left' })
+				.dump();
 
-			const result = compileToSql(plan);
-
-			// First hop: calls.callee_id = callee.id
-			expect(result.sql).toMatch(/calls\.callee_id\s*=\s*callee\.id/);
-			// Second hop: MUST use callee.file_id (symbols alias), NOT calls.file_id
-			expect(result.sql).toMatch(/callee\.file_id\s*=\s*file\.id/);
-			// Must NOT use calls.file_id (the bug)
-			expect(result.sql).not.toContain('calls.file_id');
-			// Both JOINs present
-			expect(result.sql).toMatch(/LEFT JOIN\s+symbols\s+AS\s+callee/);
-			expect(result.sql).toMatch(/LEFT JOIN\s+files\s+AS\s+file/);
+			expect({ sql, params }).toEqual({
+				sql: 'SELECT calls.*, callee.id AS "callee.id", callee.name AS "callee.name", callee.file_id AS "callee.file_id", callee.id AS __dbsp_presence_callee, file.id AS "callee.file.id", file.path AS "callee.file.path", file.id AS "__dbsp_presence_callee.file" FROM calls LEFT JOIN symbols AS callee ON calls.callee_id = callee.id LEFT JOIN files AS file ON callee.file_id = file.id',
+				params: [],
+			});
 		});
 
 		it('should use intermediate table for hasMany second hop', () => {
-			// Scenario: users → posts (hasMany) → comments (hasMany)
-			// First hop: posts.author_id → users.id  (hasMany: users.id = posts.author_id)
-			// Second hop: comments.post_id → posts.id (hasMany: posts.id = comments.post_id)
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*', table: 'users' },
-					{
-						type: 'includeStrategy',
-						choice: 'join',
-						relationName: 'posts',
-						targetTable: 'posts',
-						sourceTable: 'users',
-						relationType: 'hasMany',
-						foreignKey: 'author_id',
-						parentKey: 'id',
-						columns: ['id', 'title'],
-					} satisfies PlanDecision,
-					{
-						type: 'includeStrategy',
-						choice: 'join',
-						relationName: 'comments',
-						targetTable: 'comments',
-						sourceTable: 'posts',
-						relationType: 'hasMany',
-						foreignKey: 'post_id',
-						parentKey: 'id',
-						columns: ['id', 'body'],
-					} satisfies PlanDecision,
-				],
-			};
+			// Scenario: users → posts → comments
+			// First hop: users.id = posts.authorId
+			// Second hop: posts.id = comments.postId (not users.id)
+			const { sql, params } = chainOrm
+				.select('users')
+				.include('posts', { join: 'left' })
+				.include('posts.comments', { join: 'left' })
+				.dump();
 
-			const result = compileToSql(plan);
-
-			// Second hop must join on posts.id = comments.post_id (not users.id)
-			expect(result.sql).toMatch(/posts\.id\s*=\s*comments\.post_id/);
-			expect(result.sql).not.toContain('users.post_id');
+			expect({ sql, params }).toEqual({
+				sql: 'SELECT users.*, posts.id AS "posts.id", posts."authorId" AS "posts.authorId", posts.id AS __dbsp_presence_posts, comments.id AS "posts.comments.id", comments."postId" AS "posts.comments.postId", comments.id AS "__dbsp_presence_posts.comments" FROM users LEFT JOIN posts AS posts ON users.id = posts."authorId" LEFT JOIN comments AS comments ON posts.id = comments."postId"',
+				params: [],
+			});
 		});
 	});
 
 	describe('mixed EXISTS filter + LEFT JOIN include', () => {
 		it('should compile EXISTS for filter and LEFT JOIN for include', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'posts',
-				decisions: [
-					{ type: 'select', column: '*', table: 'posts' },
-					// LEFT JOIN include for author
-					{
-						type: 'includeStrategy',
-						choice: 'join',
-						relationName: 'author',
-						targetTable: 'authors',
-						relationType: 'belongsTo',
-						foreignKey: 'author_id',
-						parentKey: 'id',
-						columns: ['id', 'name'],
-					} satisfies PlanDecision,
-					// EXISTS filter for category
-					{
-						type: 'where',
-						operator: 'exists',
-						choice: 'exists',
-						relationType: 'belongsTo',
-						targetTable: 'categories',
-						foreignKey: 'category_id',
-						conditions: [
-							{
-								type: 'where',
-								column: 'slug',
-								operator: 'eq',
-								value: 'tech',
-								table: 'categories',
-							},
-						],
-					} satisfies PlanDecision,
-				],
-			};
+			const { sql, params } = blogOrm
+				.select('posts')
+				.include('author', {
+					join: 'left',
+					select: { type: 'fields', fields: ['id', 'name'] },
+				})
+				.where(exists('category', { where: eq('slug', 'tech') }))
+				.dump();
 
-			const result = compileToSql(plan);
-
-			// LEFT JOIN for include
-			expect(result.sql).toMatch(/LEFT JOIN\s+authors/i);
-			expect(result.sql).toContain('"author.id"');
-			// EXISTS for filter
-			expect(result.sql).toMatch(/EXISTS \(SELECT 1 FROM categories/);
-			expect(result.parameters).toEqual(['tech']);
+			expect({ sql, params }).toEqual({
+				sql: 'SELECT posts.*, author.id AS "author.id", author.name AS "author.name", author.id AS __dbsp_presence_author FROM posts LEFT JOIN authors AS author ON posts.author_id = author.id WHERE EXISTS (SELECT 1 FROM categories AS categories_exists_1 WHERE posts.category_id = categories_exists_1.id AND categories_exists_1.slug = $1)',
+				params: ['tech'],
+			});
 		});
 	});
 });

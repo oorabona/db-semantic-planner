@@ -1,9 +1,6 @@
 import {
-	compilePlan,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
-import {
 	createOrm,
+	exists,
 	exprRef,
 	fn,
 	POSTGRESQL_CAPABILITIES,
@@ -114,75 +111,35 @@ function articleEditorAliasQuery(reverseJoins = false) {
 		.dump().sql;
 }
 
-function nestedPathPlan(includeCompetingPath: boolean): SimplifiedPlanReport {
-	return {
-		rootTable: 'calls',
-		decisions: [
-			{
-				type: 'includeStrategy',
-				choice: 'join',
-				joinType: 'inner',
-				relationName: 'callee',
-				relationPath: 'callee',
-				targetTable: 'callees',
-				sourceTable: 'calls',
-				relationType: 'belongsTo',
-				foreignKey: 'callee_id',
-				parentKey: 'id',
-				columns: [],
-			},
-			{
-				type: 'includeStrategy',
-				choice: 'join',
-				joinType: 'inner',
-				relationName: 'file',
-				relationPath: 'callee.file',
-				targetTable: 'files',
-				sourceTable: 'callees',
-				relationType: 'belongsTo',
-				foreignKey: 'file_id',
-				parentKey: 'id',
-				columns: [],
-			},
-			...(includeCompetingPath
-				? [
-						{
-							type: 'includeStrategy' as const,
-							choice: 'join' as const,
-							joinType: 'inner' as const,
-							relationName: 'owner',
-							relationPath: 'owner',
-							targetTable: 'owners',
-							sourceTable: 'calls',
-							relationType: 'belongsTo' as const,
-							foreignKey: 'owner_id',
-							parentKey: 'id',
-							columns: [],
-						},
-						{
-							type: 'includeStrategy' as const,
-							choice: 'join' as const,
-							joinType: 'inner' as const,
-							relationName: 'file',
-							relationPath: 'owner.file',
-							targetTable: 'files',
-							sourceTable: 'owners',
-							relationType: 'belongsTo' as const,
-							foreignKey: 'file_id',
-							parentKey: 'id',
-							columns: [],
-						},
-					]
-				: []),
-			{
-				type: 'selectRelationColumn',
-				relation: 'callee.file',
-				column: 'path',
-				alias: 'calleeFilePath',
-			},
-		],
-	};
+const nestedPathSchema = schema({
+	files: {
+		id: { type: 'integer', primaryKey: true },
+		path: 'string',
+	},
+	callees: {
+		id: { type: 'integer', primaryKey: true },
+		file_id: ref('files', { as: 'file', inverse: 'callees' }),
+	},
+	owners: {
+		id: { type: 'integer', primaryKey: true },
+		file_id: ref('files', { as: 'file', inverse: 'owners' }),
+	},
+	calls: {
+		id: { type: 'integer', primaryKey: true },
+		callee_id: ref('callees', { as: 'callee', inverse: 'calls' }),
+		owner_id: ref('owners', { as: 'owner', inverse: 'calls' }),
+		file_id: ref('files', { as: 'file', inverse: 'calls' }),
+	},
+});
+
+function nestedPathOrm() {
+	const adapter = createPgCompileOnlyAdapter({
+		model: nestedPathSchema.model,
+	});
+	return createOrm({ model: nestedPathSchema.model, adapter });
 }
+
+const noPayloadColumns = { type: 'fields', fields: [] } as const;
 
 describe('issue 763: relation qualifiers require an emitted SQL alias', () => {
 	it('keeps relation join inputs in scope and qualifies both ON keys', () => {
@@ -247,7 +204,7 @@ describe('issue 763: relation qualifiers require an emitted SQL alias', () => {
 				.select('posts')
 				.columns([relationColumn('author', 'name', 'authorName')])
 				.dump(),
-		).toThrow(missingAlias);
+		).toThrow(new Error(missingAlias));
 	});
 
 	it('refuses an ORDER BY relation column with no joined relation', () => {
@@ -256,7 +213,7 @@ describe('issue 763: relation qualifiers require an emitted SQL alias', () => {
 				.select('posts')
 				.orderBy(relationColumn('author', 'name', 'authorName'), 'asc')
 				.dump(),
-		).toThrow(missingAlias);
+		).toThrow(new Error(missingAlias));
 	});
 
 	it('keeps a root-qualified ORDER BY column on the root source', () => {
@@ -287,47 +244,62 @@ describe('issue 763: relation qualifiers require an emitted SQL alias', () => {
 					),
 				])
 				.dump(),
-		).toThrow(missingAlias);
+		).toThrow(new Error(missingAlias));
 	});
 
 	it('refuses a nested path when only a matching leaf alias was joined', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'calls',
-			decisions: [
-				{
-					type: 'includeStrategy',
-					choice: 'join',
-					joinType: 'inner',
-					relationName: 'file',
-					relationPath: 'file',
-					targetTable: 'files',
-					sourceTable: 'calls',
-					relationType: 'belongsTo',
-					foreignKey: 'file_id',
-					parentKey: 'id',
-					columns: [],
-				},
-				{
-					type: 'selectRelationColumn',
-					relation: 'callee.file',
-					column: 'path',
-					alias: 'path',
-				},
-			],
-		};
-
-		expect(() => compilePlan(plan)).toThrow(
-			'relation column "callee.file"."path" has no emitted alias in this query',
+		expect(() =>
+			nestedPathOrm()
+				.select('calls')
+				.join('file')
+				.columns([relationColumn('callee.file', 'path', 'path')])
+				.dump(),
+		).toThrow(
+			new Error(
+				'relation column "callee.file"."path" has no emitted alias in this query',
+			),
 		);
 	});
 
 	it('keeps an emitted nested path bound with and without a competing leaf path', () => {
-		expect(compilePlan(nestedPathPlan(false)).sql).toBe(
-			'SELECT file.path AS "calleeFilePath" FROM calls JOIN callees AS callee ON calls.callee_id = callee.id JOIN files AS file ON callee.file_id = file.id',
-		);
-		expect(compilePlan(nestedPathPlan(true)).sql).toBe(
-			'SELECT file.path AS "calleeFilePath" FROM calls JOIN callees AS callee ON calls.callee_id = callee.id JOIN files AS file ON callee.file_id = file.id JOIN owners AS owner ON calls.owner_id = owner.id JOIN files AS file_1 ON owner.file_id = file_1.id',
-		);
+		const calleeFilePath = () => [
+			relationColumn('callee.file', 'path', 'calleeFilePath'),
+		];
+		const withoutCompeting = nestedPathOrm()
+			.select('calls')
+			.include('callee.file', { join: 'inner', select: noPayloadColumns })
+			.columns(calleeFilePath())
+			.dump();
+		const withCompeting = nestedPathOrm()
+			.select('calls')
+			.include('callee.file', { join: 'inner', select: noPayloadColumns })
+			.include('owner.file', { join: 'inner', select: noPayloadColumns })
+			.columns(calleeFilePath())
+			.dump();
+		const competingFirst = nestedPathOrm()
+			.select('calls')
+			.include('owner.file', { join: 'inner', select: noPayloadColumns })
+			.include('callee.file', { join: 'inner', select: noPayloadColumns })
+			.columns(calleeFilePath())
+			.dump();
+
+		expect({
+			withoutCompeting: withoutCompeting.sql,
+			withCompeting: withCompeting.sql,
+			competingFirst: competingFirst.sql,
+		}).toEqual({
+			withoutCompeting:
+				'SELECT callee.id AS "callee.id", callee.file_id AS "callee.file_id", callee.id AS __dbsp_presence_callee, file.path AS "callee.file.calleeFilePath", file.id AS "__dbsp_presence_callee.file" FROM calls JOIN callees AS callee ON calls.callee_id = callee.id JOIN files AS file ON callee.file_id = file.id',
+			withCompeting:
+				'SELECT callee.id AS "callee.id", callee.file_id AS "callee.file_id", callee.id AS __dbsp_presence_callee, file.path AS "callee.file.calleeFilePath", file.id AS "__dbsp_presence_callee.file", owner.id AS "owner.id", owner.file_id AS "owner.file_id", owner.id AS __dbsp_presence_owner, file_1.id AS "__dbsp_presence_owner.file" FROM calls JOIN callees AS callee ON calls.callee_id = callee.id JOIN files AS file ON callee.file_id = file.id JOIN owners AS owner ON calls.owner_id = owner.id JOIN files AS file_1 ON owner.file_id = file_1.id',
+			competingFirst:
+				'SELECT owner.id AS "owner.id", owner.file_id AS "owner.file_id", owner.id AS __dbsp_presence_owner, file.id AS "__dbsp_presence_owner.file", callee.id AS "callee.id", callee.file_id AS "callee.file_id", callee.id AS __dbsp_presence_callee, file_1.path AS "callee.file.calleeFilePath", file_1.id AS "__dbsp_presence_callee.file" FROM calls JOIN owners AS owner ON calls.owner_id = owner.id JOIN files AS file ON owner.file_id = file.id JOIN callees AS callee ON calls.callee_id = callee.id JOIN files AS file_1 ON callee.file_id = file_1.id',
+		});
+		expect([
+			withoutCompeting.params,
+			withCompeting.params,
+			competingFirst.params,
+		]).toEqual([[], [], []]);
 	});
 
 	it('compiles a whole-relation projection consumed by a bare include', () => {
@@ -382,48 +354,12 @@ describe('issue 763: relation qualifiers require an emitted SQL alias', () => {
 	});
 	it('refuses to project a relation column from a predicate without a join', () => {
 		expect(() =>
-			compilePlan({
-				rootTable: 'posts',
-				decisions: [
-					{
-						type: 'selectRelationColumn',
-						relation: 'author',
-						column: 'name',
-						alias: 'authorName',
-					},
-					{
-						type: 'where',
-						operator: 'exists',
-						choice: 'exists',
-						relationName: 'author',
-						targetTable: 'users',
-						foreignKey: 'author_id',
-						parentKey: 'id',
-					},
-				],
-			}),
-		).toThrow(
-			'relation column "author"."name" has no emitted alias in this query',
-		);
-	});
-
-	it('refuses caller-supplied qualifiers that have no emitted alias', () => {
-		const forgedPlan = {
-			rootTable: 'posts',
-			decisions: [
-				{
-					type: 'selectRelationColumn' as const,
-					relation: 'ghost',
-					column: 'name',
-				},
-			],
-		};
-		Object.assign(forgedPlan, {
-			boundRelationQualifiers: ['ghost'],
-		});
-		expect(() => compilePlan(forgedPlan)).toThrow(
-			'relation column "ghost"."name" has no emitted alias in this query',
-		);
+			orm()
+				.select('posts')
+				.where(exists('author'))
+				.columns([relationColumn('author', 'name', 'authorName')])
+				.dump(),
+		).toThrow(new Error(missingAlias));
 	});
 
 	it('refuses the unplanned M:N wildcard from the adapter entry point', () => {

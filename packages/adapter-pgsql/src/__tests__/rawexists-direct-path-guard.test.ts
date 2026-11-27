@@ -18,10 +18,6 @@
  */
 
 import {
-	compilePlan,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
-import {
 	createOrm,
 	eq,
 	rawExists,
@@ -29,6 +25,7 @@ import {
 	schema,
 	subquery,
 } from '@dbsp/core';
+import { NotYetSupportedError } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
 	buildSubqueryFromIntent,
@@ -246,84 +243,52 @@ describe('rawExists: field-based ORDER BY rejected on direct path', () => {
 });
 
 // ---------------------------------------------------------------------------
-// DEFECT 1: rawExistsHandler.compile path (via compilePlan / SimplifiedPlanReport)
-// bypassed assertNoUnsupportedSubqueryModifiers until the chokepoint guard was
-// added to buildSubqueryFromIntent.
+// DEFECT 1: the rawExists select route bypassed assertNoUnsupportedSubqueryModifiers
+// until the chokepoint guard was added to buildSubqueryFromIntent.
 // ---------------------------------------------------------------------------
 
-describe('DEFECT-1: rawExistsHandler compilePlan path guard (chokepoint in buildSubqueryFromIntent)', () => {
-	function makeRawExistsDecision(extraSubqueryFields: Record<string, unknown>) {
-		return {
-			type: 'where' as const,
-			operator: 'rawExists',
-			expressionIntent: {
-				type: 'select' as const,
-				from: 'files',
-				select: { type: 'fields' as const, fields: ['id'] as const },
-				...extraSubqueryFields,
-			},
-		};
+describe('DEFECT-1: rawExists select route guard (chokepoint in buildSubqueryFromIntent)', () => {
+	const selectOrm = createOrm({
+		model: testSchema.model,
+		adapter: createPgCompileOnlyAdapter({ model: testSchema.model }),
+	});
+
+	function selectWithRawExists(extraSubqueryFields: Record<string, unknown>) {
+		return () =>
+			selectOrm
+				.select('users')
+				.where(
+					rawExists(
+						new SubqueryExpression({
+							type: 'select',
+							from: 'files',
+							select: { type: 'fields', fields: ['id'] },
+							...extraSubqueryFields,
+						}),
+					),
+				)
+				.dump();
 	}
 
-	it('compilePlan with rawExists decision + limit:0 throws — chokepoint guard fires on rawExistsHandler path', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'users',
-			decisions: [makeRawExistsDecision({ limit: 0 })],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/LIMIT.*not supported|not supported.*LIMIT/i,
+	it('select().where(rawExists) with limit:0 throws — chokepoint guard fires on the rawExists select route', () => {
+		expect(selectWithRawExists({ limit: 0 })).toThrow(
+			new NotYetSupportedError('LIMIT', 'rawExists subquery body', 1087),
 		);
 	});
 
-	it('compilePlan with rawExists decision + ORDER BY throws — chokepoint guard fires', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'users',
-			decisions: [
-				makeRawExistsDecision({
-					orderBy: [{ field: 'id', direction: 'asc' as const }],
-				}),
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/ORDER BY.*not supported|not supported.*ORDER BY/i,
+	it('select().where(rawExists) with ORDER BY throws — chokepoint guard fires', () => {
+		expect(
+			selectWithRawExists({
+				orderBy: [{ field: 'id', direction: 'asc' }],
+			}),
+		).toThrow(
+			new NotYetSupportedError('ORDER BY', 'rawExists subquery body', 1087),
 		);
 	});
 
-	it('compilePlan with rawExists decision + GROUP BY throws — chokepoint guard fires', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'users',
-			decisions: [makeRawExistsDecision({ groupBy: ['community_id'] })],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/GROUP BY.*not supported|not supported.*GROUP BY/i,
+	it('select().where(rawExists) with GROUP BY throws — chokepoint guard fires', () => {
+		expect(selectWithRawExists({ groupBy: ['community_id'] })).toThrow(
+			new NotYetSupportedError('GROUP BY', 'rawExists subquery body', 1087),
 		);
-	});
-
-	it('compilePlan with plain rawExists decision (no forbidden modifiers) compiles successfully', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'users',
-			decisions: [makeRawExistsDecision({})],
-		};
-		const result = compilePlan(plan);
-		expect(result.sql).toContain('EXISTS');
-	});
-
-	it('compilePlan with rawExists decision + WHERE only compiles successfully', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'users',
-			decisions: [
-				makeRawExistsDecision({
-					where: {
-						kind: 'comparison',
-						field: 'community_id',
-						operator: 'eq',
-						value: 42,
-					},
-				}),
-			],
-		};
-		const result = compilePlan(plan);
-		expect(result.sql).toContain('EXISTS');
-		expect(result.parameters).toContain(42);
 	});
 });

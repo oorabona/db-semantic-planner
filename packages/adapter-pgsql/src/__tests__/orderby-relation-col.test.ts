@@ -14,23 +14,36 @@ import { EXPRESSION_BRAND } from '@dbsp/types';
  * Fix: added isExpressionSpec() check in orderBy() before the string/array/record branches.
  */
 
-import {
-	compilePlan,
-	type PlanDecision,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
-import { relationColumn } from '@dbsp/core';
+import { createOrm, ref, relationColumn, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ============================================================================
 // Helpers
 // ============================================================================
 
-function compileToSql(plan: SimplifiedPlanReport): {
-	sql: string;
-	parameters: readonly unknown[];
-} {
-	return compilePlan(plan);
+const db = schema({
+	files: {
+		id: { type: 'integer', primaryKey: true },
+		path: 'string',
+	},
+	calls: {
+		id: { type: 'integer', primaryKey: true },
+		caller_file_id: ref('files', { as: 'callerFile', inverse: 'callerCalls' }),
+	},
+});
+const orm = createOrm({
+	model: db.model,
+	adapter: createPgCompileOnlyAdapter({ model: db.model }),
+});
+
+function orderedByCallerFilePath(direction: 'asc' | 'desc') {
+	const { sql, params } = orm
+		.select('calls')
+		.include('callerFile', { join: 'inner' })
+		.orderBy(relationColumn('callerFile', 'path', 'path'), direction)
+		.dump();
+	return { sql, params };
 }
 
 // ============================================================================
@@ -39,122 +52,24 @@ function compileToSql(plan: SimplifiedPlanReport): {
 
 describe('ORDERBY-RELATION-COL: orderBy(relationColumn()) generates correct SQL', () => {
 	it('should produce "callerFile"."path" in ORDER BY, not "__expr"', () => {
-		// Reproduce the exact scenario from the bug report:
-		// orm.select('calls').include('callerFile', { join: 'inner' })
-		//   .orderBy(relationColumn('callerFile', 'path', 'path'), 'asc')
-		const exprSpec = relationColumn('callerFile', 'path', 'path');
-		const expressionIntent = (exprSpec as { intent: unknown }).intent as Record<
-			string,
-			unknown
-		>;
-
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'calls',
-			decisions: [
-				{ type: 'select', column: '*', table: 'calls' },
-				{
-					type: 'includeStrategy',
-					choice: 'join',
-					joinType: 'inner',
-					relationName: 'callerFile',
-					targetTable: 'files',
-					relationType: 'belongsTo',
-					foreignKey: 'caller_file_id',
-					parentKey: 'id',
-					columns: ['id', 'path'],
-				} satisfies PlanDecision,
-				{
-					type: 'orderBy',
-					expressionIntent,
-					direction: 'ASC',
-					table: 'calls',
-				} satisfies PlanDecision,
-			],
-		};
-
-		const result = compileToSql(plan);
-
-		// Must have "callerFile".path in ORDER BY
-		// (pgsql deparser emits unquoted lowercase for simple column identifiers like 'path')
-		expect(result.sql).toContain('"callerFile".path');
-
-		// Must NOT have the literal string "__expr" anywhere
-		expect(result.sql).not.toContain('__expr');
-
-		// ORDER BY must appear in the query
-		expect(result.sql.toLowerCase()).toMatch(/order\s+by/);
+		expect(orderedByCallerFilePath('asc')).toEqual({
+			sql: 'SELECT calls.*, "callerFile".id AS "callerFile.id", "callerFile".path AS "callerFile.path", "callerFile".id AS "__dbsp_presence_callerFile" FROM calls JOIN files AS "callerFile" ON calls.caller_file_id = "callerFile".id ORDER BY "callerFile".path ASC',
+			params: [],
+		});
 	});
 
 	it('should produce ASC direction for relationColumn orderBy', () => {
-		const exprSpec = relationColumn('callerFile', 'path', 'path');
-		const expressionIntent = (exprSpec as { intent: unknown }).intent as Record<
-			string,
-			unknown
-		>;
-
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'calls',
-			decisions: [
-				{ type: 'select', column: '*', table: 'calls' },
-				{
-					type: 'includeStrategy',
-					choice: 'join',
-					joinType: 'inner',
-					relationName: 'callerFile',
-					targetTable: 'files',
-					relationType: 'belongsTo',
-					foreignKey: 'caller_file_id',
-					parentKey: 'id',
-					columns: ['id', 'path'],
-				} satisfies PlanDecision,
-				{
-					type: 'orderBy',
-					expressionIntent,
-					direction: 'ASC',
-					table: 'calls',
-				} satisfies PlanDecision,
-			],
-		};
-
-		const result = compileToSql(plan);
-		// pgsql deparser emits unquoted lowercase for simple column names: "callerFile".path
-		expect(result.sql).toMatch(/"callerFile"\.path\s+ASC/i);
+		expect(orderedByCallerFilePath('asc')).toEqual({
+			sql: 'SELECT calls.*, "callerFile".id AS "callerFile.id", "callerFile".path AS "callerFile.path", "callerFile".id AS "__dbsp_presence_callerFile" FROM calls JOIN files AS "callerFile" ON calls.caller_file_id = "callerFile".id ORDER BY "callerFile".path ASC',
+			params: [],
+		});
 	});
 
 	it('should produce DESC direction when specified', () => {
-		const exprSpec = relationColumn('callerFile', 'path', 'path');
-		const expressionIntent = (exprSpec as { intent: unknown }).intent as Record<
-			string,
-			unknown
-		>;
-
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'calls',
-			decisions: [
-				{ type: 'select', column: '*', table: 'calls' },
-				{
-					type: 'includeStrategy',
-					choice: 'join',
-					joinType: 'inner',
-					relationName: 'callerFile',
-					targetTable: 'files',
-					relationType: 'belongsTo',
-					foreignKey: 'caller_file_id',
-					parentKey: 'id',
-					columns: ['id', 'path'],
-				} satisfies PlanDecision,
-				{
-					type: 'orderBy',
-					expressionIntent,
-					direction: 'DESC',
-					table: 'calls',
-				} satisfies PlanDecision,
-			],
-		};
-
-		const result = compileToSql(plan);
-		// pgsql deparser emits unquoted lowercase for simple column names: "callerFile".path
-		expect(result.sql).toMatch(/"callerFile"\.path\s+DESC/i);
+		expect(orderedByCallerFilePath('desc')).toEqual({
+			sql: 'SELECT calls.*, "callerFile".id AS "callerFile.id", "callerFile".path AS "callerFile.path", "callerFile".id AS "__dbsp_presence_callerFile" FROM calls JOIN files AS "callerFile" ON calls.caller_file_id = "callerFile".id ORDER BY "callerFile".path DESC',
+			params: [],
+		});
 	});
 });
 

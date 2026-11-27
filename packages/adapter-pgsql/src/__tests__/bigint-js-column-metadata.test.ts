@@ -7,6 +7,7 @@ import {
 	createOrm,
 	eq,
 	exprRef,
+	ModelIRImpl,
 	type PlanReport,
 	plan,
 	ref,
@@ -14,10 +15,18 @@ import {
 } from '@dbsp/core';
 import type { RecursivePlanReport } from '@dbsp/core/internal';
 import { compile as compileNql } from '@dbsp/nql';
-import type { CompiledNqlQuery } from '@dbsp/types';
+import type {
+	CompiledNqlQuery,
+	ModelIR,
+	QueryIntent,
+	TableIR,
+} from '@dbsp/types';
 import { NotYetSupportedError } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { buildCompiledColumnProjections } from '../column-metadata.js';
+import {
+	buildCompiledColumnProjections,
+	buildModelColumnProjections,
+} from '../column-metadata.js';
 import { createDeclaredNameResolver } from '../declared-name-resolver.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { createPgPhysicalModel } from '../physical-model/index.js';
@@ -46,7 +55,7 @@ const testSchema = schema({
 	},
 });
 
-function resolverFor(model: typeof testSchema.model) {
+function resolverFor(model: ModelIR) {
 	return createDeclaredNameResolver(
 		createPgPhysicalModel({
 			mode: 'logical',
@@ -60,6 +69,11 @@ function resolverFor(model: typeof testSchema.model) {
 function compile(plan: PlanReport) {
 	const adapter = createPgCompileOnlyAdapter();
 	return adapter.compile(plan, { model: testSchema.model });
+}
+
+function compileCarryingModel(report: PlanReport) {
+	const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
+	return adapter.compile(report);
 }
 
 function compileDecisions(
@@ -150,11 +164,17 @@ function recursiveEventsReport(
 
 describe('bigint js column metadata provenance', () => {
 	it('expands SELECT * from model columns', () => {
-		const compiled = compileDecisions({
-			rootTable: 'events',
-			decisions: [{ type: 'select', column: '*' }],
-		} as unknown as SimplifiedPlanReport);
+		const compiled = compileCarryingModel(
+			plan(
+				{ type: 'select', from: 'events', select: { type: 'all' } },
+				testSchema.model,
+			),
+		);
 
+		expect({ sql: compiled.sql, parameters: compiled.parameters }).toEqual({
+			sql: 'SELECT events.* FROM events',
+			parameters: [],
+		});
 		expect(compiled.columnMetadata?.get('sequence')).toEqual({
 			table: 'events',
 			column: 'sequence',
@@ -174,20 +194,34 @@ describe('bigint js column metadata provenance', () => {
 	});
 
 	it('tracks explicit and aliased plain columns only', () => {
-		const compiled = compileDecisions({
-			rootTable: 'events',
-			decisions: [
-				{ type: 'select', column: 'sequence', alias: 'seq' },
-				{ type: 'select', column: 'safeSequence' },
+		const compiled = compileCarryingModel(
+			plan(
 				{
-					type: 'selectFunction',
-					function: 'count',
-					column: '*',
-					alias: 'total',
-				},
-			],
-		} as unknown as SimplifiedPlanReport);
+					type: 'select',
+					from: 'events',
+					select: {
+						type: 'expressions',
+						columns: [
+							{ kind: 'columnAlias', column: 'sequence', alias: 'seq' },
+							{ kind: 'column', column: 'safeSequence' },
+							{
+								kind: 'function',
+								name: 'count',
+								args: [{ kind: 'star' }],
+								as: 'total',
+							},
+						],
+					},
+					groupBy: ['sequence', 'safeSequence'],
+				} as unknown as QueryIntent,
+				testSchema.model,
+			),
+		);
 
+		expect({ sql: compiled.sql, parameters: compiled.parameters }).toEqual({
+			sql: 'SELECT events.sequence AS seq, events."safeSequence", count(*) AS total FROM events GROUP BY events.sequence, events."safeSequence"',
+			parameters: [],
+		});
 		expect(compiled.columnMetadata?.get('seq')).toEqual({
 			table: 'events',
 			column: 'sequence',
@@ -202,26 +236,23 @@ describe('bigint js column metadata provenance', () => {
 	});
 
 	it('resolves join include output keys through the join alias source table', () => {
-		const compiled = compileDecisions({
-			rootTable: 'events',
-			decisions: [
-				{ type: 'select', column: 'id' },
-				{
-					type: 'includeStrategy',
-					choice: 'join',
-					relation: 'metrics',
-					relationName: 'metrics',
-					targetTable: 'metrics',
-					sourceColumn: ['id'],
-					targetColumn: ['eventId'],
-					columns: ['bigCount'],
-				},
-			],
-		} as unknown as SimplifiedPlanReport);
+		const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
+		const orm = createOrm({ schema: testSchema, adapter });
+		const compiled = adapter.compile(
+			orm
+				.select('metrics')
+				.columns(['id'])
+				.include('event', { join: 'left' })
+				.plan(),
+		);
 
-		expect(compiled.columnMetadata?.get('metrics.bigCount')).toEqual({
-			table: 'metrics',
-			column: 'bigCount',
+		expect({ sql: compiled.sql, parameters: compiled.parameters }).toEqual({
+			sql: 'SELECT metrics.id, event.id AS "event.id", event."userId" AS "event.userId", event.sequence AS "event.sequence", event."safeSequence" AS "event.safeSequence", event."stringSequence" AS "event.stringSequence", event."legacySequence" AS "event.legacySequence", event.id AS __dbsp_presence_event FROM metrics LEFT JOIN events AS event ON metrics."eventId" = event.id',
+			parameters: [],
+		});
+		expect(compiled.columnMetadata?.get('event.sequence')).toEqual({
+			table: 'events',
+			column: 'sequence',
 			js: 'bigint',
 		});
 	});
@@ -329,26 +360,37 @@ describe('bigint js column metadata provenance', () => {
 	});
 
 	it('does not synthesize metadata for forged js on non-bigint columns', () => {
-		const forgedSchema = schema({
-			docs: {
-				id: 'uuid',
-				code: 'uuid',
-			},
-		});
-		const codeColumn = forgedSchema.model
-			.getTable('docs')
-			?.columns.find((column) => column.name === 'code');
-		(codeColumn as { js?: 'bigint' }).js = 'bigint';
-
-		const compiled = compileDecisions(
-			{
-				rootTable: 'docs',
-				decisions: [{ type: 'select', column: 'code' }],
-			} as unknown as SimplifiedPlanReport,
-			forgedSchema.model,
+		const forgedModel = new ModelIRImpl(
+			new Map([
+				[
+					'docs',
+					{
+						name: 'docs',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+							{ name: 'code', type: 'uuid', nullable: false, js: 'bigint' },
+						],
+						foreignKeys: [],
+						indexes: [],
+					} satisfies TableIR,
+				],
+			]),
+			new Map(),
 		);
 
-		expect(compiled.columnMetadata?.has('code') ?? false).toBe(false);
+		const projections = buildModelColumnProjections(
+			'docs',
+			['code'],
+			forgedModel,
+			resolverFor(forgedModel),
+		);
+
+		expect(projections?.get('code')).toEqual({
+			kind: 'modelColumn',
+			logicalKey: 'code',
+			table: 'docs',
+			column: 'code',
+		});
 	});
 
 	it('does not resolve batchValues FROM output through a colliding model table alias', () => {

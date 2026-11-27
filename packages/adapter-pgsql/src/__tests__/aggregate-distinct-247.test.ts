@@ -14,10 +14,6 @@
  */
 
 import {
-	compilePlan,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
-import {
 	arrayAgg,
 	cast,
 	createOrm,
@@ -25,15 +21,15 @@ import {
 	fn,
 	gt,
 	literal,
+	plan,
 	schema,
 	star,
 } from '@dbsp/core';
 import { stringAgg } from '@dbsp/core/internal';
+import type { ExpressionIntent, QueryIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { normalizeSQL } from '../ast-helpers.js';
 import { buildSubqueryFromIntent } from '../compile-where.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
-import { EXPRESSION_HANDLERS } from '../select-expression-handlers.js';
 
 const testSchema = schema({
 	tool_metrics: {
@@ -43,10 +39,55 @@ const testSchema = schema({
 	},
 } as const);
 
+const salesSchema = schema({
+	orders: {
+		id: { type: 'integer', primaryKey: true },
+		total: { type: 'integer' },
+		amount: { type: 'integer' },
+	},
+	products: {
+		id: { type: 'integer', primaryKey: true },
+		price: { type: 'integer' },
+	},
+} as const);
+
+function buildSalesOrm() {
+	const adapter = createPgCompileOnlyAdapter({ model: salesSchema.model });
+	return createOrm({ model: salesSchema.model, adapter });
+}
+
+function compileSalesIntent(intent: QueryIntent) {
+	const adapter = createPgCompileOnlyAdapter({ model: salesSchema.model });
+	const { sql, parameters } = adapter.compile(plan(intent, salesSchema.model));
+	return { sql, params: parameters };
+}
+
+const scalarSubqueryIntent = (aggregate: {
+	readonly function: 'avg' | 'count';
+	readonly field: string;
+	readonly distinct?: boolean;
+}): QueryIntent => ({
+	type: 'select',
+	from: 'orders',
+	where: {
+		kind: 'subquery',
+		field: 'total',
+		operator: 'gt',
+		subquery: {
+			type: 'select',
+			from: 'products',
+			select: { type: 'aggregate', aggregates: [aggregate] },
+		},
+	},
+});
+
 function buildOrm() {
 	const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 	return createOrm({ model: testSchema.model, adapter });
 }
+
+const COUNT_DISTINCT_STAR =
+	'count(DISTINCT *) is not valid SQL — PostgreSQL does not support DISTINCT on a star aggregate; provide a specific column.';
 
 describe('#247 aggregate DISTINCT', () => {
 	it('count(distinct(field)) emits COUNT(DISTINCT ...)', () => {
@@ -192,52 +233,23 @@ describe('#247 aggregate DISTINCT', () => {
 	});
 
 	it('scalar subquery with a distinct aggregate emits AVG(DISTINCT ...) (not silently dropped)', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'total',
-					operator: 'scalarSubquery',
-					subqueryOperator: '>',
-					targetTable: 'products',
-					selectColumn: 'price',
-					aggregate: 'avg',
-					aggregateDistinct: true,
-				},
-			],
-		};
-		const result = compilePlan(plan);
-		expect(normalizeSQL(result.sql)).toBe(
-			normalizeSQL(
-				'SELECT * FROM orders WHERE orders.total > (SELECT avg(DISTINCT products_subq_0.price) FROM products AS products_subq_0)',
-			),
+		const { sql, params } = compileSalesIntent(
+			scalarSubqueryIntent({ function: 'avg', field: 'price', distinct: true }),
 		);
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT orders.* FROM orders WHERE orders.total > (SELECT avg(DISTINCT products_subq_0.price) FROM products AS products_subq_0)',
+			params: [],
+		});
 	});
 
 	it('scalar subquery regression: non-distinct aggregate has no DISTINCT', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'total',
-					operator: 'scalarSubquery',
-					subqueryOperator: '>',
-					targetTable: 'products',
-					selectColumn: 'price',
-					aggregate: 'avg',
-				},
-			],
-		};
-		const result = compilePlan(plan);
-		expect(normalizeSQL(result.sql)).toBe(
-			normalizeSQL(
-				'SELECT * FROM orders WHERE orders.total > (SELECT avg(products_subq_0.price) FROM products AS products_subq_0)',
-			),
+		const { sql, params } = compileSalesIntent(
+			scalarSubqueryIntent({ function: 'avg', field: 'price' }),
 		);
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT orders.* FROM orders WHERE orders.total > (SELECT avg(products_subq_0.price) FROM products AS products_subq_0)',
+			params: [],
+		});
 	});
 
 	it('arrayAgg(distinct(field)) emits ARRAY_AGG(DISTINCT ...) — #247 finding 3', () => {
@@ -279,25 +291,15 @@ describe('#247 aggregate DISTINCT', () => {
 		});
 
 		it('scalar subquery: aggregateDistinct + selectColumn "*" throws (subquery-emission.ts chokepoint)', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'orders',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{
-						type: 'where',
-						column: 'total',
-						operator: 'scalarSubquery',
-						subqueryOperator: '>',
-						targetTable: 'products',
-						selectColumn: '*',
-						aggregate: 'count',
-						aggregateDistinct: true,
-					},
-				],
-			};
-			expect(() => compilePlan(plan)).toThrow(
-				/count\(DISTINCT \*\) is not valid SQL/,
-			);
+			expect(() =>
+				compileSalesIntent(
+					scalarSubqueryIntent({
+						function: 'count',
+						field: '*',
+						distinct: true,
+					}),
+				),
+			).toThrow(new Error(COUNT_DISTINCT_STAR));
 		});
 
 		it('direct compile-where path: aggregate with field "*" and distinct throws (compile-where.ts chokepoint)', () => {
@@ -323,69 +325,66 @@ describe('#247 aggregate DISTINCT', () => {
 		});
 
 		it('expression aggregate lowering: count with no field propagates distinct instead of dropping it (select-expression-handlers.ts chokepoint)', () => {
-			const decisions: SimplifiedPlanReport['decisions'] = [];
-			EXPRESSION_HANDLERS.aggregate!(
-				{ function: 'count', distinct: true },
-				'tool_metrics',
-				decisions as never[],
-				() => {},
-				() => null,
-			);
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'tool_metrics',
-				decisions,
-			};
-			expect(() => compilePlan(plan)).toThrow(
-				/count\(DISTINCT \*\) is not valid SQL/,
-			);
+			expect(() =>
+				compileSalesIntent({
+					type: 'select',
+					from: 'orders',
+					select: {
+						type: 'expressions',
+						columns: [
+							// The shape NQL builds for a field-less aggregate.
+							{
+								kind: 'aggregate',
+								function: 'count',
+								distinct: true,
+							} as unknown as ExpressionIntent,
+						],
+					},
+				}),
+			).toThrow(new Error(COUNT_DISTINCT_STAR));
 		});
 	});
 
 	describe('#247: NQL aggregate DISTINCT — extraArgs and nested-argument paths', () => {
 		it('top-level NQL aggregate with no field but extraArgs propagates distinct (e.g. sum(distinct :p))', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'orders',
-				decisions: [
-					{
-						type: 'selectNqlFunction',
-						function: 'sum',
-						args: ['amount'],
-						distinct: true,
-						alias: 'total',
-					},
-				],
-			};
-			const result = compilePlan(plan);
-			expect(normalizeSQL(result.sql)).toBe(
-				normalizeSQL('SELECT sum(DISTINCT orders.amount) AS total FROM orders'),
-			);
+			const dump = buildSalesOrm()
+				.nql`orders | select sum(distinct amount) as total`.dump();
+			expect({
+				sql: dump.sql,
+				params: 'params' in dump ? dump.params : 'mutation dump',
+			}).toEqual({
+				sql: 'SELECT sum(DISTINCT orders.amount) AS total FROM orders',
+				params: [],
+			});
 		});
 
 		it('nested NQL aggregate arg propagates distinct (e.g. round(sum(distinct amount)))', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'orders',
-				decisions: [
-					{
-						type: 'selectNqlFunction',
-						function: 'round',
-						args: [
-							{
-								kind: 'aggregate',
-								function: 'sum',
-								field: 'amount',
-								distinct: true,
-							},
-						],
-						alias: 'total',
-					},
-				],
-			};
-			const result = compilePlan(plan);
-			expect(normalizeSQL(result.sql)).toBe(
-				normalizeSQL(
-					'SELECT round(sum(DISTINCT orders.amount)) AS total FROM orders',
-				),
-			);
+			const { sql, params } = compileSalesIntent({
+				type: 'select',
+				from: 'orders',
+				select: {
+					type: 'expressions',
+					columns: [
+						{
+							kind: 'function',
+							name: 'round',
+							args: [
+								{
+									kind: 'aggregate',
+									function: 'sum',
+									field: 'amount',
+									distinct: true,
+								},
+							],
+							as: 'total',
+						},
+					],
+				},
+			});
+			expect({ sql, params }).toEqual({
+				sql: 'SELECT round(sum(DISTINCT orders.amount)) AS total FROM orders',
+				params: [],
+			});
 		});
 	});
 

@@ -54,6 +54,7 @@ import {
 	schema,
 	subquery,
 } from '@dbsp/core';
+import type { WhereIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import {
@@ -191,87 +192,35 @@ describe('PATH B: intent scalar path (convertSubquery → scalarSubqueryHandler)
 });
 
 // ============================================================================
-// C. compilePlan decision path — dispatchWhere → inSubqueryHandler
-// ============================================================================
-
-describe('PATH C: compilePlan decision path (dispatchWhere → inSubqueryHandler)', () => {
-	it('GROUP BY in directly-constructed IN-subquery plan throws', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'in',
-					subquery: {
-						from: 'customers',
-						select: 'id',
-						// @ts-expect-error: injecting forbidden modifier for guard test
-						groupBy: ['region'],
-					},
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(/GROUP BY.*not supported/i);
-	});
-
-	it('valid directly-constructed IN-subquery plan compiles correctly', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'in',
-					subquery: {
-						from: 'customers',
-						select: 'id',
-					},
-				},
-			],
-		};
-		const result = compilePlan(plan);
-		expect(normalizeSQL(result.sql)).toMatch(
-			/customer_id\s*=\s*any\s*\(\s*select/i,
-		);
-	});
-});
-
-// ============================================================================
 // D. Nested IN (logical group) — mapInSubqueryCondition → inSubqueryHandler
 // ============================================================================
 
 describe('PATH D: nested IN inside logical group (mapInSubqueryCondition → inSubqueryHandler)', () => {
 	it('GROUP BY in nested IN-subquery inside AND plan throws', () => {
-		const innerSubquery = {
-			from: 'customers',
-			select: 'id',
-			groupBy: ['region'],
-		};
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					operator: 'in',
-					column: 'status',
+		const where = {
+			kind: 'in',
+			field: 'status',
+			subquery: {
+				type: 'select',
+				from: 'customers',
+				select: { type: 'fields', fields: ['region'] },
+				where: {
+					kind: 'in',
+					field: 'id',
 					subquery: {
+						type: 'select',
 						from: 'customers',
-						select: 'region',
-						where: {
-							type: 'where',
-							column: 'customer_id',
-							operator: 'in',
-							subquery: innerSubquery as any,
-						} as any,
+						select: { type: 'fields', fields: ['id'] },
+						groupBy: ['region'],
 					},
 				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(/GROUP BY.*not supported/i);
+			},
+		} as unknown as WhereIntent;
+		const dump = () => buildOrm().select('orders').where(where).dump();
+		expect(dump).toThrow(NotYetSupportedError);
+		expect(dump).toThrow(
+			new NotYetSupportedError('GROUP BY', 'IN subquery body', 1087),
+		);
 	});
 
 	it('valid nested IN-subquery compiles correctly (2-level)', () => {
@@ -475,80 +424,27 @@ describe('CORRECTNESS: whereNot with multiple children in IN-subquery WHERE', ()
 		expect(dump.params[0], 'Param should be false').toBe(false);
 	});
 
-	it('direct compilePlan with whereNot(whereAnd(c1, c2)) inside IN-subquery compiles correctly', () => {
+	it('NOT wrapping an AND of two conditions inside an IN-subquery compiles with both parameters bound', () => {
 		/**
-		 * Directly-constructed SimplifiedPlanReport with a whereNot wrapping a whereAnd
-		 * with two conditions inside an IN-subquery WHERE clause.
-		 *
-		 * Decision structure: whereNot → { conditions: [ whereAnd → { conditions: [c1, c2] } ] }
-		 * Produces SQL: NOT (c1 AND c2) inside the subquery WHERE.
-		 *
-		 * This proves:
-		 * 1. subqueryIntent provenance is correctly carried on the directly-constructed decision
-		 * 2. mapInSubqueryCondition correctly preserves the nested NOT → AND → [c1, c2] structure
-		 * 3. buildPredicateSubquerySelect compiles both conditions and binds both parameters
+		 * A NOT wrapping an AND with two conditions inside an IN-subquery WHERE
+		 * clause produces `NOT (c1 AND c2)` and binds both values, in order.
 		 */
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'inSubquery',
-					targetTable: 'customers',
-					selectColumn: 'id',
-					// Provenance: original QueryIntent for buildPredicateSubquerySelect validation
-					subqueryIntent: {
-						from: 'customers',
-						select: { type: 'fields', fields: ['id'] },
-					} as any,
-					conditions: [
-						{
-							// whereNot wraps a single whereAnd so both conditions compile
-							type: 'whereNot',
-							conditions: [
-								{
-									type: 'whereAnd',
-									conditions: [
-										{
-											type: 'where',
-											column: 'active',
-											operator: '=',
-											value: false,
-											table: 'customers',
-										},
-										{
-											type: 'where',
-											column: 'region',
-											operator: '=',
-											value: 'blocked',
-											table: 'customers',
-										},
-									],
-								},
-							],
-						},
-					],
-				},
-			],
-		};
+		const { sql, params } = buildOrm()
+			.select('orders')
+			.where(
+				inSubquery(
+					'customer_id',
+					subquery('customers')
+						.select('id')
+						.where(not(and(eq('active', false), eq('region', 'blocked')))),
+				),
+			)
+			.dump();
 
-		const result = compilePlan(plan);
-		const sql = normalizeSQL(result.sql);
-
-		// Should compile without throwing
-		expect(sql, 'Should produce IN subquery').toMatch(
-			/customer_id\s*=\s*any\s*\(\s*select/i,
-		);
-
-		// Should contain NOT
-		expect(sql, 'Should contain NOT').toContain('not');
-
-		// Both parameters should be bound: false for active, 'blocked' for region
-		expect(result.parameters).toHaveLength(2);
-		expect(result.parameters).toContain(false);
-		expect(result.parameters).toContain('blocked');
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT orders.* FROM orders WHERE orders.customer_id = ANY (SELECT customers_subq_0.id FROM customers AS customers_subq_0 WHERE NOT (customers_subq_0.active = $1 AND customers_subq_0.region = $2))',
+			params: [false, 'blocked'],
+		});
 	});
 });
 
@@ -854,37 +750,23 @@ describe('DEFECT 2 regression: directly-constructed decision with lowered outerR
 		);
 	});
 
-	it('non-correlated lowered decision (no outer fieldRef) compiles correctly', () => {
-		// A directly-constructed decision with no correlated reference must still
-		// compile — the check must not produce false positives.
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'inSubquery',
-					targetTable: 'customers',
-					selectColumn: 'id',
-					conditions: [
-						{
-							type: 'where',
-							column: 'active',
-							operator: '=',
-							value: true,
-							table: 'customers',
-						},
-					],
-				},
-			],
-		};
+	it('non-correlated IN-subquery body (no outer fieldRef) compiles correctly', () => {
+		// A body with no correlated reference must still compile — the outer
+		// reference check must not produce false positives.
+		const { sql, params } = buildOrm()
+			.select('orders')
+			.where(
+				inSubquery(
+					'customer_id',
+					subquery('customers').select('id').where(eq('active', true)),
+				),
+			)
+			.dump();
 
-		expect(() => compilePlan(plan)).not.toThrow();
-		const result = compilePlan(plan);
-		expect(normalizeSQL(result.sql)).toMatch(
-			/customer_id\s*=\s*any\s*\(\s*select/i,
-		);
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT orders.* FROM orders WHERE orders.customer_id = ANY (SELECT customers_subq_0.id FROM customers AS customers_subq_0 WHERE customers_subq_0.active = $1)',
+			params: [true],
+		});
 	});
 });
 
@@ -909,142 +791,43 @@ describe('DEFECT 3 regression: decision-level guard (assertNoDroppedDecisionModi
 	 * caught here.
 	 */
 
-	it('directly-constructed inSubquery decision with GROUP BY (no subqueryIntent) → throws', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'inSubquery',
-					targetTable: 'customers',
-					selectColumn: 'id',
-					// No subqueryIntent — directly constructed
-					// @ts-expect-error: injecting forbidden modifier for guard test
-					groupBy: ['region'],
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with GROUP BY is not supported/,
+	it('IN-subquery body with OFFSET → throws', () => {
+		const where = {
+			kind: 'in',
+			field: 'customer_id',
+			subquery: {
+				type: 'select',
+				from: 'customers',
+				select: { type: 'fields', fields: ['id'] },
+				offset: 5,
+			},
+		} as unknown as WhereIntent;
+		const dump = () => buildOrm().select('orders').where(where).dump();
+		expect(dump).toThrow(NotYetSupportedError);
+		expect(dump).toThrow(
+			new NotYetSupportedError('OFFSET', 'IN subquery body', 1087),
 		);
 	});
 
-	it('directly-constructed inSubquery decision with HAVING (no subqueryIntent) → throws', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'inSubquery',
-					targetTable: 'customers',
-					selectColumn: 'id',
-					// @ts-expect-error
-					having: {
-						kind: 'comparison',
-						field: 'count',
-						operator: 'gt',
-						value: 0,
-					},
+	it('scalar subquery body with GROUP BY → throws', () => {
+		const where = {
+			kind: 'subquery',
+			field: 'total',
+			operator: 'gt',
+			subquery: {
+				type: 'select',
+				from: 'products',
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'avg', field: 'price' }],
 				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with HAVING is not supported/,
-		);
-	});
-
-	it('directly-constructed inSubquery decision with include (no subqueryIntent) → throws', () => {
-		// include is preserved by mapToHandlerDecision (~131) and WOULD be silently
-		// emitted inside the IN subquery if not caught by the decision-level guard.
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'inSubquery',
-					targetTable: 'customers',
-					selectColumn: 'id',
-					include: [
-						{
-							type: 'includeStrategy',
-							choice: 'join',
-							relation: 'orders',
-						},
-					],
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with include \(relation hydration\) is not supported/,
-		);
-	});
-
-	it('directly-constructed inSubquery decision with OFFSET (no subqueryIntent) → throws', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'inSubquery',
-					targetTable: 'customers',
-					selectColumn: 'id',
-					offset: 5,
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with OFFSET is not supported/,
-		);
-	});
-
-	it('directly-constructed scalarSubquery decision with GROUP BY (no subqueryIntent) → throws', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'total',
-					operator: 'scalarSubquery',
-					subqueryOperator: '>',
-					targetTable: 'products',
-					selectColumn: 'price',
-					// @ts-expect-error
-					groupBy: ['category'],
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/scalar subquery with GROUP BY is not supported/,
-		);
-	});
-
-	it('directly-constructed scalarSubquery decision with DISTINCT (no subqueryIntent) → throws', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'total',
-					operator: 'scalarSubquery',
-					subqueryOperator: '>',
-					targetTable: 'products',
-					selectColumn: 'price',
-					distinct: true,
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/scalar subquery with DISTINCT is not supported/,
+				groupBy: ['id'],
+			},
+		} as unknown as WhereIntent;
+		const dump = () => buildOrm().select('orders').where(where).dump();
+		expect(dump).toThrow(NotYetSupportedError);
+		expect(dump).toThrow(
+			new NotYetSupportedError('GROUP BY', 'scalar subquery body', 1087),
 		);
 	});
 
@@ -1081,26 +864,6 @@ describe('DEFECT 3 regression: decision-level guard (assertNoDroppedDecisionModi
 				.where(inSubquery('customer_id', subquery('customers').select('id')))
 				.dump(),
 		).not.toThrow();
-	});
-
-	it('valid directly-constructed inSubquery decision (no subqueryIntent, named column) still compiles', () => {
-		// A directly-constructed plan with no forbidden modifiers and a valid selectColumn.
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'inSubquery',
-					targetTable: 'customers',
-					selectColumn: 'id',
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).not.toThrow();
-		const result = compilePlan(plan);
-		expect(normalizeSQL(result.sql)).toMatch(/customer_id\s*=\s*any\s*\(/i);
 	});
 });
 

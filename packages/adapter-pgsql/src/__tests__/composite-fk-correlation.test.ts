@@ -1,6 +1,6 @@
-import { compilePlan, type PlanDecision } from '@dbsp/adapter-pgsql/internal';
 import { createOrm, exists, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
+import { buildKeyCorrelation } from '../handlers/where/exists.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const tables = new Map([
@@ -143,19 +143,17 @@ describe('composite FK correlation SQL', () => {
 
 	it('fails closed when source and target correlation widths differ', () => {
 		expect(() =>
-			compilePlan({
-				rootTable: 'orders',
-				decisions: [
-					{ type: 'select', column: '*', table: 'orders' },
-					{
-						type: 'join',
-						targetTable: 'order_items',
-						alias: 'items',
-						sourceColumn: ['order_id'],
-						targetColumn: ['order_id', 'tenant_id'],
-					} satisfies PlanDecision,
-				],
-			}),
-		).toThrow(/Invalid relation correlation/);
+			buildKeyCorrelation(
+				'orders',
+				['order_id'],
+				'items',
+				['order_id', 'tenant_id'],
+				{ rootTable: 'orders', maxRecursiveDepth: 100 },
+			),
+		).toThrow(
+			new Error(
+				'Invalid relation correlation: source columns (1) must match target columns (2) and both must be non-empty.',
+			),
+		);
 	});
 });

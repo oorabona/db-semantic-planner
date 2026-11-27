@@ -1,8 +1,8 @@
-import { compilePlan } from '@dbsp/adapter-pgsql/internal';
 import {
 	and,
 	createOrm,
 	eq,
+	every,
 	exists,
 	inArray,
 	inSubquery,
@@ -245,28 +245,16 @@ for (const declaredPk of [true, false]) {
 }
 
 it('everyHandler negates both conditions and binds both parameters', () => {
-	const result = compilePlan({
-		rootTable: 'users',
-		decisions: [
-			{ type: 'select', column: '*' },
-			{
-				type: 'where',
-				operator: 'every',
-				relation: 'posts',
-				targetTable: 'posts',
-				sourceColumn: 'id',
-				targetColumn: 'authorId',
-				conditions: [
-					{ type: 'where', operator: '=', column: 'id', value: 1 },
-					{ type: 'where', operator: '=', column: 'authorId', value: 2 },
-				],
-			},
-		],
+	const result = orm
+		.select('users')
+		.where(
+			every(orm.tables.users.posts, () => and(eq('id', 1), eq('authorId', 2))),
+		)
+		.dump();
+	expect({ sql: result.sql, params: result.params }).toEqual({
+		sql: 'SELECT users.* FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0."authorId" AND NOT (posts_exists_0.id = $1 AND posts_exists_0."authorId" = $2)))',
+		params: [1, 2],
 	});
-	expect(result.sql).toBe(
-		'SELECT * FROM users WHERE NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0."authorId" AND NOT (posts_exists_0.id = $1 AND posts_exists_0."authorId" = $2)))',
-	);
-	expect(result.parameters).toEqual([1, 2]);
 });
 
 for (const where of [

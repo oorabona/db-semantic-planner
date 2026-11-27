@@ -2,18 +2,40 @@
  * Tests for FILTER (WHERE ...) clause support on fn() custom function expressions.
  *
  * Covers: fn('array_agg', ...).filter(condition) and fn('json_agg', ...).filter(condition)
- * at the ExpressionRef API level, compileExpressionIntent unit level,
- * and the full compilePlan pipeline.
+ * at the ExpressionRef API level and through the ORM pipeline (`dump()`).
  */
 
 import {
-	compilePlan,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
-import { eq, exprRef, fn, isNotNull } from '@dbsp/core';
+	createOrm,
+	type ExpressionRef,
+	eq,
+	exprRef,
+	fn,
+	isNotNull,
+	schema,
+} from '@dbsp/core';
 import type { CustomFnExpressionIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { normalizeSQL } from '../ast-helpers.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
+
+const db = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		active: { type: 'boolean' },
+		name: { type: 'text' },
+		data: { type: 'jsonb' },
+		tag: { type: 'text' },
+	},
+	items: {
+		id: { type: 'integer', primaryKey: true },
+		value: { type: 'integer' },
+		status: { type: 'text' },
+	},
+} as const);
+const orm = createOrm({
+	schema: db,
+	adapter: createPgCompileOnlyAdapter({ model: db.model }),
+});
 
 // ============================================================================
 // Helpers
@@ -23,22 +45,9 @@ function getExprIntent(expr: ReturnType<typeof fn>): CustomFnExpressionIntent {
 	return (expr as unknown as { intent: CustomFnExpressionIntent }).intent;
 }
 
-function compilePlanFromExpr(
-	expr: ReturnType<typeof fn>,
-	alias: string,
-	rootTable = 'users',
-): { sql: string; parameters: readonly unknown[] } {
-	const plan: SimplifiedPlanReport = {
-		rootTable,
-		decisions: [
-			{
-				type: 'selectCustomExpression',
-				expressionIntent: getExprIntent(expr),
-				alias,
-			},
-		],
-	};
-	return compilePlan(plan);
+function compileUsersColumns(columns: readonly (string | ExpressionRef)[]) {
+	const { sql, params } = orm.select('users').columns(columns).dump();
+	return { sql, params };
 }
 
 // ============================================================================
@@ -97,110 +106,78 @@ describe('ExpressionRef.filter()', () => {
 // ============================================================================
 // Additional compiler pipeline tests — filter variants
 // ============================================================================
-// Note: FILTER compilation is handled in compiler.ts (selectCustomExpression branch)
-// to avoid circular deps with the WHERE dispatcher. Testing is done via compilePlan.
 
-describe('compilePlan: fn().filter() — additional variants', () => {
+describe('fn().filter() — additional variants', () => {
 	it('fn() without filter does NOT produce FILTER clause', () => {
-		const expr = fn('array_agg', exprRef('name'));
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'users',
-			decisions: [
-				{
-					type: 'selectCustomExpression',
-					expressionIntent: getExprIntent(expr),
-					alias: 'names',
-				},
-			],
-		};
-		const result = compilePlan(plan);
-		expect(normalizeSQL(result.sql)).not.toContain('filter');
-		expect(result.parameters).toEqual([]);
+		expect(
+			compileUsersColumns([fn('array_agg', exprRef('name')).as('names')]),
+		).toEqual({
+			sql: 'SELECT array_agg(name) AS names FROM users',
+			params: [],
+		});
 	});
 
 	it('schema-qualified fn with filter: my_schema.my_agg(col) FILTER (WHERE ...)', () => {
-		const expr = fn('my_schema.my_agg', exprRef('value')).filter(
-			eq('status', 'active'),
-		);
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'items',
-			decisions: [
-				{
-					type: 'selectCustomExpression',
-					expressionIntent: getExprIntent(expr),
-					alias: 'result',
-				},
-			],
-		};
-		const result = compilePlan(plan);
-		const sql = normalizeSQL(result.sql);
-		expect(sql).toContain('filter (where');
-		expect(result.parameters).toEqual(['active']);
+		const { sql, params } = orm
+			.select('items')
+			.columns([
+				fn('my_schema.my_agg', exprRef('value'))
+					.filter(eq('status', 'active'))
+					.as('result'),
+			])
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT my_schema.my_agg(value) FILTER (WHERE items.status = $1) AS result FROM items',
+			params: ['active'],
+		});
 	});
 });
 
 // ============================================================================
-// Full compilePlan pipeline tests — SQL output via pgsql-deparser
+// Full pipeline tests — SQL output via pgsql-deparser
 // ============================================================================
 
-describe('compilePlan: fn().filter() produces FILTER clause in SQL', () => {
+describe('fn().filter() produces FILTER clause in SQL', () => {
 	it('array_agg(name) FILTER (WHERE active = $1) AS names', () => {
-		const expr = fn('array_agg', exprRef('name'))
-			.filter(eq('active', true))
-			.as('names');
-
-		const result = compilePlanFromExpr(expr, 'names');
-		const sql = normalizeSQL(result.sql);
-
-		expect(sql).toContain('filter (where users.active = $1)');
-		expect(sql).toContain('array_agg');
-		expect(sql).toContain('from users');
-		expect(result.parameters).toEqual([true]);
+		expect(
+			compileUsersColumns([
+				fn('array_agg', exprRef('name')).filter(eq('active', true)).as('names'),
+			]),
+		).toEqual({
+			sql: 'SELECT array_agg(name) FILTER (WHERE users.active = $1) AS names FROM users',
+			params: [true],
+		});
 	});
 
 	it('json_agg(data) FILTER (WHERE data IS NOT NULL) AS items', () => {
-		const expr = fn('json_agg', exprRef('data'))
-			.filter(isNotNull('data'))
-			.as('items');
-
-		const result = compilePlanFromExpr(expr, 'items');
-		const sql = normalizeSQL(result.sql);
-
-		expect(sql).toContain('filter (where');
-		expect(sql).toContain('is not null');
-		expect(sql).toContain('json_agg');
+		expect(
+			compileUsersColumns([
+				fn('json_agg', exprRef('data')).filter(isNotNull('data')).as('items'),
+			]),
+		).toEqual({
+			sql: 'SELECT json_agg(data) FILTER (WHERE users.data IS NOT NULL) AS items FROM users',
+			params: [],
+		});
 	});
 
 	it('fn() without filter produces no FILTER clause', () => {
-		const expr = fn('array_agg', exprRef('name')).as('names');
-
-		const result = compilePlanFromExpr(expr, 'names');
-		const sql = normalizeSQL(result.sql);
-
-		expect(sql).not.toContain('filter');
-		expect(result.parameters).toEqual([]);
+		expect(
+			compileUsersColumns([fn('array_agg', exprRef('name')).as('names')]),
+		).toEqual({
+			sql: 'SELECT array_agg(name) AS names FROM users',
+			params: [],
+		});
 	});
 
 	it('multiple decisions: filter uses correct $N param index', () => {
-		const filterExpr = fn('array_agg', exprRef('tag'))
-			.filter(eq('active', true))
-			.as('tags');
-
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'users',
-			decisions: [
-				{ type: 'select', column: 'id' },
-				{
-					type: 'selectCustomExpression',
-					expressionIntent: getExprIntent(filterExpr),
-					alias: 'tags',
-				},
-			],
-		};
-		const result = compilePlan(plan);
-		const sql = normalizeSQL(result.sql);
-
-		expect(sql).toContain('filter (where');
-		expect(result.parameters).toEqual([true]);
+		expect(
+			compileUsersColumns([
+				'id',
+				fn('array_agg', exprRef('tag')).filter(eq('active', true)).as('tags'),
+			]),
+		).toEqual({
+			sql: 'SELECT users.id, array_agg(tag) FILTER (WHERE users.active = $1) AS tags FROM users',
+			params: [true],
+		});
 	});
 });

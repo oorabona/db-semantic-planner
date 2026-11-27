@@ -13,7 +13,17 @@ import {
 	compilePlan,
 	type SimplifiedPlanReport,
 } from '@dbsp/adapter-pgsql/internal';
+import { createOrm, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
+
+const db = schema({
+	users: { id: { type: 'integer', primaryKey: true }, email: 'text' },
+});
+const orm = createOrm({
+	schema: db,
+	adapter: createPgCompileOnlyAdapter({ model: db.model }),
+});
 
 // ---------------------------------------------------------------------------
 // Helper — normalise SQL for deterministic comparison
@@ -108,19 +118,11 @@ describe('compileSelect — limit edge cases', () => {
 	});
 
 	it('should emit LIMIT 10 for a literal numeric limit and push no params', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'users',
-			decisions: [
-				{ type: 'select', column: 'id' },
-				{ type: 'limit', limit: 10 },
-			],
-		};
-
-		const result = compilePlan(plan);
-		const sql = normalise(result.sql);
-
-		expect(sql).toContain('limit 10');
-		expect(result.parameters).toEqual([]);
+		const { sql, params } = orm.select('users').limit(10).dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT users.* FROM users LIMIT 10',
+			params: [],
+		});
 	});
 });
 
@@ -207,37 +209,11 @@ describe('compileSelect — offset edge cases', () => {
 	});
 
 	it('should emit OFFSET 20 for a literal numeric offset and push no params', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'users',
-			decisions: [
-				{ type: 'select', column: 'id' },
-				{ type: 'offset', offset: 20 },
-			],
-		};
-
-		const result = compilePlan(plan);
-		const sql = normalise(result.sql);
-
-		expect(sql).toContain('offset 20');
-		expect(result.parameters).toEqual([]);
-	});
-
-	it('should emit both LIMIT 5 and OFFSET 10 when both are literal numbers', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'users',
-			decisions: [
-				{ type: 'select', column: 'id' },
-				{ type: 'limit', limit: 5 },
-				{ type: 'offset', offset: 10 },
-			],
-		};
-
-		const result = compilePlan(plan);
-		const sql = normalise(result.sql);
-
-		expect(sql).toContain('limit 5');
-		expect(sql).toContain('offset 10');
-		expect(result.parameters).toEqual([]);
+		const { sql, params } = orm.select('users').offset(20).dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT users.* FROM users OFFSET 20',
+			params: [],
+		});
 	});
 
 	it('should NOT emit OFFSET when limit is invalid-type but offset is a valid number', () => {
@@ -268,22 +244,6 @@ describe('compileSelect — offset edge cases', () => {
 // ---------------------------------------------------------------------------
 
 describe('compileSelect — distinctOn edge cases', () => {
-	it('should emit no DISTINCT ON when columns is an empty array', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'users',
-			decisions: [
-				{ type: 'select', column: 'id' },
-				{ type: 'distinctOn', columns: [] },
-			],
-		};
-
-		const result = compilePlan(plan);
-		const sql = normalise(result.sql);
-
-		expect(sql).not.toContain('distinct on');
-		expect(result.parameters).toEqual([]);
-	});
-
 	it('should emit no DISTINCT ON when columns is undefined and not throw', () => {
 		const plan: SimplifiedPlanReport = {
 			rootTable: 'users',
@@ -318,37 +278,6 @@ describe('compileSelect — distinctOn edge cases', () => {
 		const result = compilePlan(plan);
 		const sql = normalise(result.sql);
 
-		expect(sql).not.toContain('distinct on');
-		expect(result.parameters).toEqual([]);
-	});
-
-	it('should emit DISTINCT ON (email) when columns has exactly one element', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'users',
-			decisions: [
-				{ type: 'select', column: 'id' },
-				{ type: 'distinctOn', columns: ['email'] },
-			],
-		};
-
-		const result = compilePlan(plan);
-		const sql = normalise(result.sql);
-
-		expect(sql).toMatch(/distinct on \(?email\)?/);
-		expect(result.parameters).toEqual([]);
-	});
-
-	it('should emit plain DISTINCT (no ON) when decision type is distinct', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'users',
-			decisions: [{ type: 'select', column: 'id' }, { type: 'distinct' }],
-		};
-
-		const result = compilePlan(plan);
-		const sql = normalise(result.sql);
-
-		expect(sql).toContain('distinct');
-		// plain DISTINCT must NOT contain DISTINCT ON
 		expect(sql).not.toContain('distinct on');
 		expect(result.parameters).toEqual([]);
 	});

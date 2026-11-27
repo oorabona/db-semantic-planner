@@ -25,13 +25,8 @@ import { stringAgg } from '@dbsp/core/internal';
 // ('ref' from @dbsp/core resolves to the schema ref(), not the expression ref())
 const ref = exprRef;
 
-import {
-	compilePlan,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
 import type { AggOrderByArg, CustomFnExpressionIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { normalizeSQL } from '../ast-helpers.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ============================================================================
@@ -40,24 +35,6 @@ import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 function getExprIntent(expr: ReturnType<typeof fn>): CustomFnExpressionIntent {
 	return (expr as unknown as { intent: CustomFnExpressionIntent }).intent;
-}
-
-function compilePlanFromExpr(
-	expr: ReturnType<typeof fn>,
-	alias: string,
-	rootTable = 'users',
-): { sql: string; parameters: readonly unknown[] } {
-	const plan: SimplifiedPlanReport = {
-		rootTable,
-		decisions: [
-			{
-				type: 'selectCustomExpression',
-				expressionIntent: getExprIntent(expr),
-				alias,
-			},
-		],
-	};
-	return compilePlan(plan);
 }
 
 // ============================================================================
@@ -151,147 +128,79 @@ describe('fn() with aggOrderBy — intent building', () => {
 // ============================================================================
 // fn() with aggOrderBy — SQL compilation tests
 //
-// Note on rendering in the compile-only context:
-// - ExpressionRef (ref('name')) args compile to $N parameters in the test context.
-// - String shorthand args ('name') compile to unquoted column names.
-// - ORDER BY fields compile without quotes: path, line etc.
-// - literal(',') compiles to ', ' (with space, SQL string literal style).
+// Rendered through the model-carrying ORM: the full SQL and params are asserted.
 // ============================================================================
 
 describe('fn() with aggOrderBy — SQL output', () => {
-	it('fn("array_agg", ref("name")) without ORDER BY → array_agg(name) — no ORDER BY', () => {
-		const expr = fn('array_agg', ref('name')).as('names');
-		const result = compilePlanFromExpr(expr, 'names');
-		const sql = normalizeSQL(result.sql);
-		expect(sql).toContain('array_agg(name)');
-		expect(sql).not.toContain('order by');
-		expect(result.parameters).toEqual([]);
+	const sqlDb = schema({
+		symbols: {
+			id: { type: 'integer', primaryKey: true },
+			name: 'text',
+			path: 'text',
+			line: 'integer',
+		},
 	});
-
-	it('fn("array_agg", ref("name"), aggOrderBy("path")) → array_agg(name ORDER BY path ASC)', () => {
-		const expr = fn('array_agg', ref('name'), aggOrderBy('path')).as('names');
-		const result = compilePlanFromExpr(expr, 'names');
-		const sql = normalizeSQL(result.sql);
-		expect(sql).toContain('array_agg(name order by path asc)');
-		expect(result.parameters).toEqual([]);
+	const sqlOrm = createOrm({
+		schema: sqlDb,
+		adapter: createPgCompileOnlyAdapter({ model: sqlDb.model }),
 	});
-
-	it('fn("array_agg", ref("name"), aggOrderBy("path", "desc")) → array_agg(name ORDER BY path DESC)', () => {
-		const expr = fn('array_agg', ref('name'), aggOrderBy('path', 'desc')).as(
-			'names',
-		);
-		const result = compilePlanFromExpr(expr, 'names');
-		const sql = normalizeSQL(result.sql);
-		expect(sql).toContain('array_agg(name order by path desc)');
-		expect(result.parameters).toEqual([]);
-	});
+	const names = (expr: ReturnType<typeof fn>) =>
+		sqlOrm
+			.select('symbols')
+			.columns([expr.as('names')])
+			.dump();
 
 	it('fn("string_agg", ref("name"), literal(","), aggOrderBy("name")) → string_agg(name, \', \' ORDER BY name ASC)', () => {
-		const expr = fn(
-			'string_agg',
-			ref('name'),
-			literal(','),
-			aggOrderBy('name'),
-		).as('names');
-		const result = compilePlanFromExpr(expr, 'names');
-		const sql = normalizeSQL(result.sql);
-		// normalizeSQL replaces all commas (including inside string literals) with ', '
-		expect(sql).toContain("string_agg(name, ', ' order by name asc)");
-		expect(result.parameters).toEqual([]);
+		const { sql, params } = names(
+			fn('string_agg', ref('name'), literal(','), aggOrderBy('name')),
+		);
+		expect({ sql, params }).toEqual({
+			sql: "SELECT string_agg(name, ',' ORDER BY name ASC) AS names FROM symbols",
+			params: [],
+		});
 	});
 
 	it('multiple aggOrderBy: fn("array_agg", ..., aggOrderBy("path"), aggOrderBy("line", "desc")) → array_agg(name ORDER BY path ASC, line DESC)', () => {
-		const expr = fn(
-			'array_agg',
-			ref('name'),
-			aggOrderBy('path'),
-			aggOrderBy('line', 'desc'),
-		).as('names');
-		const result = compilePlanFromExpr(expr, 'names');
-		const sql = normalizeSQL(result.sql);
-		expect(sql).toContain('array_agg(name order by path asc, line desc)');
-		expect(result.parameters).toEqual([]);
+		const { sql, params } = names(
+			fn(
+				'array_agg',
+				ref('name'),
+				aggOrderBy('path'),
+				aggOrderBy('line', 'desc'),
+			),
+		);
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT array_agg(name ORDER BY path ASC, line DESC) AS names FROM symbols',
+			params: [],
+		});
 	});
 
-	it('fn without aggOrderBy does not produce ORDER BY inside aggregate', () => {
-		const expr = fn('array_agg', exprRef('name')).as('names');
-		const result = compilePlanFromExpr(expr, 'names');
-		const sql = normalizeSQL(result.sql);
-		expect(sql).not.toContain('order by');
-	});
-});
-
-// ============================================================================
-// arrayAgg() helper — SQL compilation tests
-// ============================================================================
-
-describe('arrayAgg() helper', () => {
-	it('arrayAgg(ref("name")) → array_agg(name) — no ORDER BY', () => {
-		const expr = arrayAgg(ref('name')).as('names');
-		const result = compilePlanFromExpr(expr, 'names');
-		const sql = normalizeSQL(result.sql);
-		expect(sql).toContain('array_agg(name)');
-		expect(sql).not.toContain('order by');
-	});
-
-	it('arrayAgg(ref("name"), aggOrderBy("path")) → array_agg(name ORDER BY path ASC)', () => {
-		const expr = arrayAgg(ref('name'), aggOrderBy('path')).as('names');
-		const result = compilePlanFromExpr(expr, 'names');
-		const sql = normalizeSQL(result.sql);
-		expect(sql).toContain('array_agg(name order by path asc)');
-	});
-
-	it('arrayAgg("name", aggOrderBy("path", "desc")) — string shorthand col → array_agg(name ORDER BY path DESC)', () => {
-		const expr = arrayAgg('name', aggOrderBy('path', 'desc')).as('names');
-		const result = compilePlanFromExpr(expr, 'names');
-		const sql = normalizeSQL(result.sql);
-		expect(sql).toContain('array_agg(name order by path desc)');
-	});
-
-	it('arrayAgg with multiple orderBy entries → array_agg(name ORDER BY path ASC, line DESC)', () => {
-		const expr = arrayAgg(
-			ref('name'),
-			aggOrderBy('path'),
-			aggOrderBy('line', 'desc'),
-		).as('names');
-		const result = compilePlanFromExpr(expr, 'names');
-		const sql = normalizeSQL(result.sql);
-		expect(sql).toContain('array_agg(name order by path asc, line desc)');
-	});
-});
-
-// ============================================================================
-// stringAgg() helper — SQL compilation tests
-// ============================================================================
-
-describe('stringAgg() helper', () => {
 	it('stringAgg(ref("name"), literal(",")) → string_agg(name, \', \') — no ORDER BY', () => {
-		const expr = stringAgg(ref('name'), literal(',')).as('names');
-		const result = compilePlanFromExpr(expr, 'names');
-		const sql = normalizeSQL(result.sql);
-		// normalizeSQL replaces all commas with ', ' including those inside string literals
-		expect(sql).toContain("string_agg(name, ', ')");
-		expect(sql).not.toContain('order by');
+		const { sql, params } = names(stringAgg(ref('name'), literal(',')));
+		expect({ sql, params }).toEqual({
+			sql: "SELECT string_agg(name, ',') AS names FROM symbols",
+			params: [],
+		});
 	});
 
 	it('stringAgg(ref("name"), literal(","), aggOrderBy("name")) → string_agg(name, \', \' ORDER BY name ASC)', () => {
-		const expr = stringAgg(ref('name'), literal(','), aggOrderBy('name')).as(
-			'names',
+		const { sql, params } = names(
+			stringAgg(ref('name'), literal(','), aggOrderBy('name')),
 		);
-		const result = compilePlanFromExpr(expr, 'names');
-		const sql = normalizeSQL(result.sql);
-		// normalizeSQL replaces all commas with ', ' including those inside string literals
-		expect(sql).toContain("string_agg(name, ', ' order by name asc)");
+		expect({ sql, params }).toEqual({
+			sql: "SELECT string_agg(name, ',' ORDER BY name ASC) AS names FROM symbols",
+			params: [],
+		});
 	});
 
 	it("stringAgg with string shorthand for col → string_agg(name, ', ' ORDER BY name DESC)", () => {
-		const expr = stringAgg('name', literal(','), aggOrderBy('name', 'desc')).as(
-			'names',
+		const { sql, params } = names(
+			stringAgg('name', literal(','), aggOrderBy('name', 'desc')),
 		);
-		const result = compilePlanFromExpr(expr, 'names');
-		const sql = normalizeSQL(result.sql);
-		// normalizeSQL replaces all commas with ', ' including those inside string literals
-		expect(sql).toContain("string_agg(name, ', ' order by name desc)");
+		expect({ sql, params }).toEqual({
+			sql: "SELECT string_agg(name, ',' ORDER BY name DESC) AS names FROM symbols",
+			params: [],
+		});
 	});
 });
 

@@ -12,10 +12,11 @@
  * - clearHandlers
  */
 
-import { compilePlan } from '@dbsp/adapter-pgsql/internal';
+import { createOrm, eq, ref, SubqueryExpression, schema } from '@dbsp/core';
 import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it, vi } from 'vitest';
 import { compileWhereIntent } from '../condition-compiler.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 import {
 	clearHandlers,
 	createCompilerState,
@@ -48,35 +49,76 @@ function ensureRegistered() {
 	);
 }
 
+const registryDb = schema({
+	authors: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		authorId: ref('authors', { as: 'author' }),
+	},
+	orders: { id: { type: 'integer', primaryKey: true } },
+});
+const registryOrm = createOrm({
+	schema: registryDb,
+	adapter: createPgCompileOnlyAdapter({ model: registryDb.model }),
+});
+
+/** A public read that initialises the EXPRESSION registry. */
+function readOrderCount() {
+	const { sql, params } = registryOrm
+		.select('orders')
+		.count('*', 'total')
+		.dump();
+	return { sql, params };
+}
+
+/** A public read that initialises the INCLUDE registry. */
+function readPostsWithAuthor() {
+	const { sql, params } = registryOrm.select('posts').include('author').dump();
+	return { sql, params };
+}
+
+/**
+ * A public read whose condition sits inside a query-local body: the one public
+ * route that still reaches the WHERE dispatcher.
+ */
+function readWithQueryLocalCondition() {
+	const { sql, params } = registryOrm
+		.withCte('recent')
+		.fromUnnest({ id: [1, 2] })
+		.query(
+			registryOrm.select('posts').columns([
+				'id',
+				new SubqueryExpression({
+					type: 'select',
+					from: 'recent',
+					where: eq('id', 1),
+					select: { type: 'fields', fields: ['id'] },
+					limit: 1,
+				}).asExpr('v'),
+			]),
+		)
+		.dump();
+	return { sql, params };
+}
+
+const ORDER_COUNT = {
+	sql: 'SELECT count(*) AS total FROM orders',
+	params: [],
+};
+const POSTS_WITH_AUTHOR = {
+	sql: `SELECT posts.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'name', __t__.name) ORDER BY __t__.id ASC NULLS LAST) FROM authors AS __t__ WHERE __t__.id = posts."authorId"), '[]'::json) AS author_json FROM posts`,
+	params: [],
+};
+const QUERY_LOCAL_CONDITION = {
+	sql: 'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT posts.id, (SELECT recent.id FROM recent AS recent WHERE recent.id = $2 LIMIT 1) AS v FROM posts',
+	params: [[1, 2], 1],
+};
+
 function restoreAllHandlerFamilies() {
 	ensureRegistered();
-	compilePlan({
-		rootTable: 'orders',
-		decisions: [
-			{
-				type: 'selectFunction',
-				function: 'count',
-				column: '*',
-				alias: 'total',
-			},
-		],
-	});
-	compilePlan({
-		rootTable: 'posts',
-		decisions: [
-			{ type: 'select', column: '*', table: 'posts' },
-			{
-				type: 'includeStrategy',
-				choice: 'join',
-				relationName: 'author',
-				targetTable: 'authors',
-				relationType: 'belongsTo',
-				foreignKey: 'author_id',
-				parentKey: 'id',
-				columns: ['id', 'name'],
-			},
-		],
-	});
+	readOrderCount();
+	readPostsWithAuthor();
+	readWithQueryLocalCondition();
 	const operators = getRegisteredOperators();
 	expect(operators.where).toContain('=');
 	expect(operators.expression).toContain('count');
@@ -744,53 +786,30 @@ describe('handlers/index - Coverage Tests', () => {
 			expect(getRegistryStats().where).toBeGreaterThan(0);
 		});
 
-		it('re-registers expression handlers through compilePlan after clearing', () => {
-			const plan = {
-				rootTable: 'orders',
-				decisions: [
-					{
-						type: 'selectFunction',
-						function: 'count',
-						column: '*',
-						alias: 'total',
-					},
-				],
-			};
-
+		it('re-registers expression handlers through a public read after clearing', () => {
 			clearHandlers();
 			try {
-				compilePlan(plan);
+				expect(readOrderCount()).toEqual(ORDER_COUNT);
+				expect(getRegistryStats().expression).toBeGreaterThan(0);
 				clearHandlers();
-				expect(() => compilePlan(plan)).not.toThrow();
+				expect(getRegistryStats().expression).toBe(0);
+				expect(readOrderCount()).toEqual(ORDER_COUNT);
+				expect(getRegistryStats().expression).toBeGreaterThan(0);
 			} finally {
 				clearHandlers();
 				restoreAllHandlerFamilies();
 			}
 		});
 
-		it('re-registers include handlers through compilePlan after clearing', () => {
-			const plan = {
-				rootTable: 'posts',
-				decisions: [
-					{ type: 'select', column: '*', table: 'posts' },
-					{
-						type: 'includeStrategy',
-						choice: 'join',
-						relationName: 'author',
-						targetTable: 'authors',
-						relationType: 'belongsTo',
-						foreignKey: 'author_id',
-						parentKey: 'id',
-						columns: ['id', 'name'],
-					},
-				],
-			};
-
+		it('re-registers include handlers through a public read after clearing', () => {
 			clearHandlers();
 			try {
-				compilePlan(plan);
+				expect(readPostsWithAuthor()).toEqual(POSTS_WITH_AUTHOR);
+				expect(getRegistryStats().include).toBeGreaterThan(0);
 				clearHandlers();
-				expect(() => compilePlan(plan)).not.toThrow();
+				expect(getRegistryStats().include).toBe(0);
+				expect(readPostsWithAuthor()).toEqual(POSTS_WITH_AUTHOR);
+				expect(getRegistryStats().include).toBeGreaterThan(0);
 			} finally {
 				clearHandlers();
 				restoreAllHandlerFamilies();
@@ -798,13 +817,6 @@ describe('handlers/index - Coverage Tests', () => {
 		});
 
 		it('rolls back failed WHERE initialization and retries it', () => {
-			const plan = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{ type: 'where', column: 'active', operator: '=', value: true },
-				],
-			};
 			const partiallyRegisteredHandler = {
 				operators: ['__partial_where_registration__'],
 				compile: () => ({}),
@@ -828,11 +840,11 @@ describe('handlers/index - Coverage Tests', () => {
 					failingHandler,
 				] as any);
 
-				expect(() => compilePlan(plan)).toThrow(
-					/simulated WHERE initialization failure/,
+				expect(() => readWithQueryLocalCondition()).toThrow(
+					new Error('simulated WHERE initialization failure'),
 				);
 				expect(getRegisteredOperators()).toEqual(beforeAttempt);
-				expect(() => compilePlan(plan)).not.toThrow();
+				expect(readWithQueryLocalCondition()).toEqual(QUERY_LOCAL_CONDITION);
 			} finally {
 				vi.restoreAllMocks();
 				clearHandlers();
@@ -1259,27 +1271,15 @@ describe('handlers/index - Coverage Tests', () => {
 		});
 
 		it('throws on duplicate EXPRESSION type registration', () => {
-			compilePlan({
-				rootTable: 'orders',
-				decisions: [
-					{
-						type: 'selectFunction',
-						function: 'count',
-						column: '*',
-						alias: 'total',
-					},
-				],
-			});
-			const ops = getRegisteredOperators();
-			if (ops.expression.length > 0) {
-				const handler = {
-					types: [ops.expression[0]],
-					compile: () => ({}),
-				};
-				expect(() => registerExpressionHandler(handler as any)).toThrow(
-					/already registered/,
-				);
-			}
+			readOrderCount();
+			expect(getRegisteredOperators().expression).toContain('count');
+			const handler = {
+				types: ['count'],
+				compile: () => ({}),
+			};
+			expect(() => registerExpressionHandler(handler as any)).toThrow(
+				new Error('EXPRESSION handler already registered for type: count'),
+			);
 		});
 	});
 });

@@ -4,13 +4,13 @@
  * Tests the pgvector wrappers (cosineDistance, rawDistance, l2Distance, innerProduct)
  * using the compile-only adapter with the full intent pipeline.
  *
- * Uses compilePlan directly for precise control over decisions.
+ * Every query goes through a model-carrying ORM and `.dump()`.
  */
 
-import { cast, exprRef, op, param } from '@dbsp/core';
+import { cast, createOrm, exprRef, op, param, schema } from '@dbsp/core';
+import type { WhereComparisonIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { normalizeSQL } from '../../ast-helpers.js';
-import { compilePlan, type SimplifiedPlanReport } from '../../compiler.js';
+import { createPgCompileOnlyAdapter } from '../../pgsql-adapter.js';
 import {
 	cosineDistance,
 	innerProduct,
@@ -19,85 +19,38 @@ import {
 } from '../pgvector.js';
 
 // ---------------------------------------------------------------------------
-// Helper: compile a selectCustomExpression from an ExpressionRef
+// Fixture: a model-carrying ORM over an embeddings table
 // ---------------------------------------------------------------------------
+
+const db = schema({
+	embeddings: {
+		id: { type: 'integer', primaryKey: true },
+		content: 'text',
+		vector: { type: 'text', dbType: 'vector(768)' },
+	},
+	docs: {
+		id: { type: 'integer', primaryKey: true },
+		vec: { type: 'text', dbType: 'vector(2)' },
+	},
+});
+const orm = createOrm({
+	schema: db,
+	adapter: createPgCompileOnlyAdapter({ model: db.model }),
+	suppressDxWarnings: true,
+});
 
 type ExprRef = ReturnType<typeof cosineDistance>;
 
-function compileSelectExpr(
-	expr: ExprRef,
-	alias?: string,
-): { sql: string; parameters: readonly unknown[] } {
-	const plan: SimplifiedPlanReport = {
-		rootTable: 'embeddings',
-		decisions: [
-			{
-				type: 'selectCustomExpression',
-				// ExpressionRef exposes .intent for the underlying ExpressionIntent
-				expressionIntent: expr.intent,
-				alias: alias ?? 'expression',
-			},
-		],
-	};
-	return compilePlan(plan);
-}
-
-// Build a plan with an alias applied directly
-function compileSelectExprWithAlias(
+/** Dump `SELECT <expr> AS <alias> FROM embeddings`. */
+function dumpSelectExpr(
 	expr: ExprRef,
 	alias: string,
-): { sql: string; parameters: readonly unknown[] } {
-	const plan: SimplifiedPlanReport = {
-		rootTable: 'embeddings',
-		decisions: [
-			{
-				type: 'selectCustomExpression',
-				expressionIntent: expr.intent,
-				alias,
-			},
-		],
-	};
-	return compilePlan(plan);
-}
-
-// Build a plan with WHERE expression
-function compileWhereExpr(whereIntent: Record<string, unknown>): {
-	sql: string;
-	parameters: readonly unknown[];
-} {
-	const plan: SimplifiedPlanReport = {
-		rootTable: 'embeddings',
-		decisions: [
-			{ type: 'select', column: '*' },
-			{
-				type: 'where',
-				operator: 'expression',
-				expressionIntent: whereIntent,
-				value: 0.5,
-				subqueryOperator: '>=',
-			},
-		],
-	};
-	return compilePlan(plan);
-}
-
-// Build a plan with ORDER BY expression
-function compileOrderByExpr(
-	expressionIntent: unknown,
-	direction: 'ASC' | 'DESC' = 'ASC',
-): { sql: string; parameters: readonly unknown[] } {
-	const plan: SimplifiedPlanReport = {
-		rootTable: 'embeddings',
-		decisions: [
-			{ type: 'select', column: '*' },
-			{
-				type: 'orderBy',
-				expressionIntent,
-				direction,
-			},
-		],
-	};
-	return compilePlan(plan);
+): { sql: string; params: readonly unknown[] } {
+	const { sql, params } = orm
+		.select('embeddings')
+		.columns([expr.as(alias)])
+		.dump();
+	return { sql, params };
 }
 
 const QV = [0.1, 0.2, 0.3];
@@ -108,27 +61,16 @@ const QV = [0.1, 0.2, 0.3];
 
 describe('cosineDistance', () => {
 	it('produces correct SQL in SELECT with alias', () => {
-		const expr = cosineDistance('vector', QV);
-		const result = compileSelectExprWithAlias(expr, 'score');
-		const sql = normalizeSQL(result.sql);
-
-		// Should contain the <=> operator
-		expect(sql).toContain('<=>');
-		// Should contain the subtraction for 1 - distance
-		expect(sql).toContain('-');
-		// Should contain the vector cast
-		expect(sql.toLowerCase()).toContain('vector');
-		// Should contain the alias
-		expect(sql).toContain('score');
-		// Should bind the query vector as a parameter
-		expect(result.parameters).toHaveLength(1);
-		expect(result.parameters[0]).toEqual(QV);
+		expect(dumpSelectExpr(cosineDistance('vector', QV), 'score')).toEqual({
+			sql: 'SELECT 1 - (vector <=> CAST($1 AS vector)) AS score FROM embeddings',
+			params: [QV],
+		});
 	});
 
 	it('binds exactly one parameter', () => {
-		const expr = cosineDistance('vector', QV);
-		const result = compileSelectExprWithAlias(expr, 'score');
-		expect(result.parameters).toHaveLength(1);
+		expect(
+			dumpSelectExpr(cosineDistance('vector', QV), 'score').params,
+		).toEqual([QV]);
 	});
 });
 
@@ -138,26 +80,21 @@ describe('cosineDistance', () => {
 
 describe('rawDistance', () => {
 	it('produces correct SQL in SELECT', () => {
-		const expr = rawDistance('vector', QV);
-		const result = compileSelectExprWithAlias(expr, 'dist');
-		const sql = normalizeSQL(result.sql);
-
-		expect(sql).toContain('<=>');
-		expect(sql.toLowerCase()).toContain('vector');
-		expect(sql).toContain('dist');
-		expect(result.parameters[0]).toEqual(QV);
+		expect(dumpSelectExpr(rawDistance('vector', QV), 'dist')).toEqual({
+			sql: 'SELECT vector <=> CAST($1 AS vector) AS dist FROM embeddings',
+			params: [QV],
+		});
 	});
 
 	it('produces correct SQL for ORDER BY', () => {
-		const expr = rawDistance('vector', QV);
-		const intent = (expr as unknown as { intent: unknown }).intent;
-		const result = compileOrderByExpr(intent, 'ASC');
-		const sql = normalizeSQL(result.sql);
-
-		expect(sql).toContain('<=>');
-		expect(sql).toContain('order by');
-		expect(sql).toContain('asc');
-		expect(result.parameters[0]).toEqual(QV);
+		const { sql, params } = orm
+			.select('embeddings')
+			.orderBy(rawDistance('vector', QV), 'asc')
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT embeddings.* FROM embeddings ORDER BY vector <=> CAST($1 AS vector) ASC',
+			params: [QV],
+		});
 	});
 });
 
@@ -167,12 +104,10 @@ describe('rawDistance', () => {
 
 describe('l2Distance', () => {
 	it('uses <-> operator', () => {
-		const expr = l2Distance('vector', QV);
-		const result = compileSelectExprWithAlias(expr, 'l2');
-		const sql = normalizeSQL(result.sql);
-
-		expect(sql).toContain('<->');
-		expect(result.parameters[0]).toEqual(QV);
+		expect(dumpSelectExpr(l2Distance('vector', QV), 'l2')).toEqual({
+			sql: 'SELECT vector <-> CAST($1 AS vector) AS l2 FROM embeddings',
+			params: [QV],
+		});
 	});
 });
 
@@ -182,12 +117,10 @@ describe('l2Distance', () => {
 
 describe('innerProduct', () => {
 	it('uses <#> operator', () => {
-		const expr = innerProduct('vector', QV);
-		const result = compileSelectExprWithAlias(expr, 'ip');
-		const sql = normalizeSQL(result.sql);
-
-		expect(sql).toContain('<#>');
-		expect(result.parameters[0]).toEqual(QV);
+		expect(dumpSelectExpr(innerProduct('vector', QV), 'ip')).toEqual({
+			sql: 'SELECT vector <#> CAST($1 AS vector) AS ip FROM embeddings',
+			params: [QV],
+		});
 	});
 });
 
@@ -197,19 +130,14 @@ describe('innerProduct', () => {
 
 describe('WHERE with expression comparison', () => {
 	it('compiles cosineDistance.gte() as WHERE clause', () => {
-		// Build expression intent directly from ExpressionRef
-		const expr = cosineDistance('vector', QV);
-		const whereIntent = (expr as unknown as { intent: unknown }).intent;
-		const result = compileWhereExpr(whereIntent as Record<string, unknown>);
-		const sql = normalizeSQL(result.sql);
-
-		expect(sql).toContain('where');
-		expect(sql).toContain('<=>');
-		expect(sql).toContain('>=');
-		// params: [QV, 0.5]
-		expect(result.parameters).toHaveLength(2);
-		expect(result.parameters[0]).toEqual(QV);
-		expect(result.parameters[1]).toBe(0.5);
+		const { sql, params } = orm
+			.select('embeddings')
+			.where(cosineDistance('vector', QV).gte(0.5))
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT embeddings.* FROM embeddings WHERE (1 - (embeddings.vector <=> CAST($1 AS vector))) >= $2',
+			params: [QV, 0.5],
+		});
 	});
 });
 
@@ -219,25 +147,25 @@ describe('WHERE with expression comparison', () => {
 
 describe('ORDER BY with expression', () => {
 	it('compiles rawDistance in ORDER BY ASC', () => {
-		const expr = rawDistance('vector', QV);
-		const intent = (expr as unknown as { intent: unknown }).intent;
-		const result = compileOrderByExpr(intent, 'ASC');
-		const sql = normalizeSQL(result.sql);
-
-		expect(sql).toContain('order by');
-		expect(sql).toContain('<=>');
-		expect(sql).toContain('asc');
-		expect(result.parameters[0]).toEqual(QV);
+		const { sql, params } = orm
+			.select('embeddings')
+			.orderBy(rawDistance('vector', QV), 'asc')
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT embeddings.* FROM embeddings ORDER BY vector <=> CAST($1 AS vector) ASC',
+			params: [QV],
+		});
 	});
 
 	it('compiles l2Distance in ORDER BY ASC', () => {
-		const expr = l2Distance('vector', QV);
-		const intent = (expr as unknown as { intent: unknown }).intent;
-		const result = compileOrderByExpr(intent, 'ASC');
-		const sql = normalizeSQL(result.sql);
-
-		expect(sql).toContain('<->');
-		expect(sql).toContain('order by');
+		const { sql, params } = orm
+			.select('embeddings')
+			.orderBy(l2Distance('vector', QV), 'asc')
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT embeddings.* FROM embeddings ORDER BY vector <-> CAST($1 AS vector) ASC',
+			params: [QV],
+		});
 	});
 });
 
@@ -248,46 +176,17 @@ describe('ORDER BY with expression', () => {
 describe('full integration', () => {
 	it('compiles SELECT + ORDER BY + LIMIT for ANN search', () => {
 		const qv = [0.1, 0.2, 0.3];
-		const distExpr = rawDistance('vector', qv);
-		const distIntent = (distExpr as unknown as { intent: unknown }).intent;
-
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'embeddings',
-			decisions: [
-				{ type: 'select', column: 'id' },
-				{ type: 'select', column: 'content' },
-				{
-					type: 'selectCustomExpression',
-					expressionIntent: (
-						cosineDistance('vector', qv) as unknown as {
-							intent: unknown;
-						}
-					).intent,
-					alias: 'score',
-				},
-				{
-					type: 'orderBy',
-					expressionIntent: distIntent,
-					direction: 'ASC',
-				},
-				{ type: 'limit', limit: 10 },
-			],
-		};
-
-		const result = compilePlan(plan);
-		const sql = normalizeSQL(result.sql);
-
-		expect(sql).toContain('select');
-		expect(sql).toContain('id');
-		expect(sql).toContain('content');
-		expect(sql).toContain('<=>');
-		expect(sql).toContain('score');
-		expect(sql).toContain('order by');
-		expect(sql).toContain('limit');
+		const { sql, params } = orm
+			.select('embeddings')
+			.columns(['id', 'content', cosineDistance('vector', qv).as('score')])
+			.orderBy(rawDistance('vector', qv), 'asc')
+			.limit(10)
+			.dump();
 		// Two params: one for cosineDistance SELECT, one for rawDistance ORDER BY
-		expect(result.parameters).toHaveLength(2);
-		expect(result.parameters[0]).toEqual(qv);
-		expect(result.parameters[1]).toEqual(qv);
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT embeddings.id, embeddings.content, 1 - (vector <=> CAST($1 AS vector)) AS score FROM embeddings ORDER BY vector <=> CAST($2 AS vector) ASC LIMIT 10',
+			params: [qv, qv],
+		});
 	});
 });
 
@@ -297,26 +196,25 @@ describe('full integration', () => {
 
 describe('column-vs-column', () => {
 	it('op(<=> ref ref) produces no params', () => {
-		const expr = op('<=>', exprRef('e1.vector'), exprRef('e2.vector'));
-		const intent = (expr as unknown as { intent: unknown }).intent;
-
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'embeddings',
-			decisions: [
-				{
-					type: 'selectCustomExpression',
-					expressionIntent: intent,
-					alias: 'dist',
-				},
-			],
+		const selfJoinOn: WhereComparisonIntent = {
+			kind: 'comparison',
+			field: 'embeddings.id',
+			operator: 'lt',
+			value: { kind: 'fieldRef', column: 'id', scope: 'outer' },
 		};
-		const result = compilePlan(plan);
-		const sql = normalizeSQL(result.sql);
-
-		expect(sql).toContain('<=>');
-		expect(sql).toContain('e1');
-		expect(sql).toContain('e2');
-		expect(result.parameters).toHaveLength(0);
+		const { sql, params } = orm
+			.select('embeddings')
+			.join('embeddings', { on: selfJoinOn, as: 'e2', type: 'inner' })
+			.columns([
+				op('<=>', exprRef('embeddings.vector'), exprRef('e2.vector')).as(
+					'dist',
+				),
+			])
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT embeddings.vector <=> e2.vector AS dist FROM embeddings JOIN embeddings AS e2 ON embeddings.id < e2.id',
+			params: [],
+		});
 	});
 });
 
@@ -328,24 +226,13 @@ describe('raw expression composition', () => {
 	it('op/ref/cast/param composes correctly', () => {
 		const qv = [0.5, 0.6];
 		// op('<=>', exprRef('vec'), cast(param(qv), 'vector'))
-		const expr = op('<=>', exprRef('vec'), cast(param(qv), 'vector'));
-		const intent = (expr as unknown as { intent: unknown }).intent;
-
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'docs',
-			decisions: [
-				{
-					type: 'selectCustomExpression',
-					expressionIntent: intent,
-					alias: 'd',
-				},
-			],
-		};
-		const result = compilePlan(plan);
-		const sql = normalizeSQL(result.sql);
-
-		expect(sql).toContain('<=>');
-		expect(sql.toLowerCase()).toContain('vector');
-		expect(result.parameters[0]).toEqual(qv);
+		const { sql, params } = orm
+			.select('docs')
+			.columns([op('<=>', exprRef('vec'), cast(param(qv), 'vector')).as('d')])
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT vec <=> CAST($1 AS vector) AS d FROM docs',
+			params: [qv],
+		});
 	});
 });

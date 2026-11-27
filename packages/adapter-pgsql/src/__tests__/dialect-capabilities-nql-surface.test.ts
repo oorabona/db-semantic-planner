@@ -1,125 +1,115 @@
 import {
-	type CompilerOptions,
-	compilePlan,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
-import { POSTGRESQL_CAPABILITIES, plan as planQuery, schema } from '@dbsp/core';
+	any,
+	inArray,
+	POSTGRESQL_CAPABILITIES,
+	plan as planQuery,
+	schema,
+} from '@dbsp/core';
 import {
 	DUCKDB_CAPABILITIES,
 	MSSQL_CAPABILITIES,
 	MYSQL_CAPABILITIES,
 	SQLITE_CAPABILITIES,
 } from '@dbsp/core/internal';
-import type { DialectCapabilities } from '@dbsp/types';
+import type { DialectCapabilities, QueryIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { normalizeSQL } from '../ast-helpers.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
+
+const db = schema({
+	audit_log: {
+		id: { type: 'integer', primaryKey: true },
+		details: 'jsonb',
+	},
+	room_bookings: {
+		id: { type: 'integer', primaryKey: true },
+		booking_period: 'daterange',
+	},
+	users: { id: { type: 'integer', primaryKey: true } },
+	jobs: { id: { type: 'integer', primaryKey: true } },
+} as const);
+const adapter = createPgCompileOnlyAdapter({ model: db.model });
 
 function caps(overrides: Partial<DialectCapabilities>): DialectCapabilities {
 	return { ...POSTGRESQL_CAPABILITIES, ...overrides };
 }
 
-function compile(
-	plan: SimplifiedPlanReport,
-	dialectCapabilities?: DialectCapabilities,
-): string {
-	return normalizeSQL(compileResult(plan, dialectCapabilities).sql);
-}
-
 function compileResult(
-	plan: SimplifiedPlanReport,
+	intent: QueryIntent,
 	dialectCapabilities?: DialectCapabilities,
 ) {
-	const options: CompilerOptions | undefined =
-		dialectCapabilities === undefined ? undefined : { dialectCapabilities };
-	return compilePlan(plan, options);
+	const { sql, parameters } = adapter.compile(
+		planQuery(intent, db.model),
+		dialectCapabilities === undefined ? undefined : { dialectCapabilities },
+	);
+	return { sql, params: parameters };
 }
 
-const jsonPlan: SimplifiedPlanReport = {
-	rootTable: 'audit_log',
-	decisions: [
-		{
-			type: 'where',
-			column: 'details',
-			operator: 'jsonContains',
-			value: { ip: '10.0.0.1' },
-		},
-	],
+const jsonIntent: QueryIntent = {
+	type: 'select',
+	from: 'audit_log',
+	where: {
+		kind: 'jsonContains',
+		field: 'details',
+		reversed: false,
+		value: { ip: '10.0.0.1' },
+	},
 };
 
-const rangePlan: SimplifiedPlanReport = {
-	rootTable: 'room_bookings',
-	decisions: [
-		{
-			type: 'where',
-			column: 'booking_period',
-			operator: 'overlaps',
-			value: '[2024-01-16,2024-01-20)',
-			dataType: 'daterange',
-		},
-	],
+const rangeIntent: QueryIntent = {
+	type: 'select',
+	from: 'room_bookings',
+	where: {
+		kind: 'range',
+		field: 'booking_period',
+		operator: 'overlaps',
+		value: '[2024-01-16,2024-01-20)',
+	},
 };
 
-const anyPlan: SimplifiedPlanReport = {
-	rootTable: 'users',
-	decisions: [
-		{
-			type: 'where',
-			column: 'id',
-			operator: 'any',
-			values: [1, 2, 3],
-			dataType: 'integer',
-		},
-	],
+const anyIntent: QueryIntent = {
+	type: 'select',
+	from: 'users',
+	where: any('id', [1, 2, 3]),
 };
 
-const inListPlan: SimplifiedPlanReport = {
-	rootTable: 'users',
-	decisions: [
-		{
-			type: 'where',
-			column: 'id',
-			operator: 'in',
-			value: [1, 2, 3],
-		},
-	],
+const inListIntent: QueryIntent = {
+	type: 'select',
+	from: 'users',
+	where: inArray('id', [1, 2, 3]),
 };
 
-const notInListPlan: SimplifiedPlanReport = {
-	rootTable: 'users',
-	decisions: [
-		{
-			type: 'where',
-			column: 'id',
-			operator: 'notIn',
-			value: [1, 2, 3],
-		},
-	],
+const notInListIntent: QueryIntent = {
+	type: 'select',
+	from: 'users',
+	where: { kind: 'in', field: 'id', values: [1, 2, 3], not: true },
 };
 
-const selectJsonPlan: SimplifiedPlanReport = {
-	rootTable: 'audit_log',
-	decisions: [
-		{
-			type: 'selectFunction',
-			function: 'jsonExtract',
-			column: 'details',
-			args: ['k'],
-			jsonMode: 'text',
-			alias: 'k',
-		},
-	],
+const selectJsonIntent: QueryIntent = {
+	type: 'select',
+	from: 'audit_log',
+	select: {
+		type: 'expressions',
+		columns: [
+			{
+				kind: 'jsonExtract',
+				field: 'details',
+				path: ['k'],
+				mode: 'text',
+				as: 'k',
+			},
+		],
+	},
 };
 
-const lockPlan: SimplifiedPlanReport = {
-	rootTable: 'jobs',
-	decisions: [],
+const lockIntent: QueryIntent = {
+	type: 'select',
+	from: 'jobs',
 	lock: { strength: 'forUpdate', waitPolicy: 'block' },
 };
 
-const lockWaitPlan: SimplifiedPlanReport = {
-	rootTable: 'jobs',
-	decisions: [],
+const lockWaitIntent: QueryIntent = {
+	type: 'select',
+	from: 'jobs',
 	lock: { strength: 'forUpdate', waitPolicy: 'skipLocked' },
 };
 
@@ -147,56 +137,50 @@ describe('NQL text surface dialect capability gates', () => {
 
 	it('throws before emitting JSON operators when unsupported', () => {
 		expect(() =>
-			compile(jsonPlan, caps({ supportsJsonOperators: false })),
-		).toThrow('JSON operators are not supported by this adapter');
+			compileResult(jsonIntent, caps({ supportsJsonOperators: false })),
+		).toThrow(new Error('JSON operators are not supported by this adapter'));
 	});
 
 	it('throws before emitting SELECT JSON extraction operators when unsupported', () => {
 		expect(() =>
-			compile(selectJsonPlan, caps({ supportsJsonOperators: false })),
-		).toThrow('JSON operators are not supported by this adapter');
+			compileResult(selectJsonIntent, caps({ supportsJsonOperators: false })),
+		).toThrow(new Error('JSON operators are not supported by this adapter'));
 	});
 
 	it('throws before emitting range operators when unsupported', () => {
 		expect(() =>
-			compile(rangePlan, caps({ supportsRangeTypes: false })),
-		).toThrow('Range operators are not supported by this adapter');
+			compileResult(rangeIntent, caps({ supportsRangeTypes: false })),
+		).toThrow(new Error('Range operators are not supported by this adapter'));
 	});
 
 	it('throws before emitting ANY array operators when arrays are unsupported', () => {
-		expect(() => compile(anyPlan, caps({ supportsArrayType: false }))).toThrow(
-			'ANY array operator is not supported by this adapter',
-		);
+		expect(() =>
+			compileResult(anyIntent, caps({ supportsArrayType: false })),
+		).toThrow(new Error('ANY array operator is not supported by this adapter'));
 	});
 
 	it('falls back to portable parameterized IN lists when arrays are unsupported', () => {
-		const result = compileResult(
-			inListPlan,
-			caps({ supportsArrayType: false }),
-		);
-		const sql = normalizeSQL(result.sql);
-
-		expect(sql).toContain('users.id in ($1, $2, $3)');
-		expect(sql).not.toContain(' any');
-		expect(result.parameters).toEqual([1, 2, 3]);
+		expect(
+			compileResult(inListIntent, caps({ supportsArrayType: false })),
+		).toEqual({
+			sql: 'SELECT users.* FROM users WHERE users.id IN ($1, $2, $3)',
+			params: [1, 2, 3],
+		});
 	});
 
 	it('falls back to portable parameterized NOT IN lists when arrays are unsupported', () => {
-		const result = compileResult(
-			notInListPlan,
-			caps({ supportsArrayType: false }),
-		);
-		const sql = normalizeSQL(result.sql);
-
-		expect(sql).toContain('users.id not in ($1, $2, $3)');
-		expect(sql).not.toContain(' any');
-		expect(result.parameters).toEqual([1, 2, 3]);
+		expect(
+			compileResult(notInListIntent, caps({ supportsArrayType: false })),
+		).toEqual({
+			sql: 'SELECT users.* FROM users WHERE users.id NOT IN ($1, $2, $3)',
+			params: [1, 2, 3],
+		});
 	});
 
 	it('throws before emitting row-level locks when unsupported', () => {
 		expect(() =>
-			compile(lockPlan, caps({ supportsRowLevelLocks: false })),
-		).toThrow('Row-level locks are not supported by this adapter');
+			compileResult(lockIntent, caps({ supportsRowLevelLocks: false })),
+		).toThrow(new Error('Row-level locks are not supported by this adapter'));
 	});
 
 	it('throws for non-Postgres lock queries because they declare no row locks', () => {
@@ -206,48 +190,64 @@ describe('NQL text surface dialect capability gates', () => {
 			SQLITE_CAPABILITIES,
 			DUCKDB_CAPABILITIES,
 		]) {
-			expect(() => compile(lockPlan, dialectCapabilities)).toThrow(
-				'Row-level locks are not supported by this adapter',
+			expect(() => compileResult(lockIntent, dialectCapabilities)).toThrow(
+				new Error('Row-level locks are not supported by this adapter'),
 			);
 		}
 	});
 
 	it('throws before emitting lock wait policies when unsupported', () => {
 		expect(() =>
-			compile(
-				lockWaitPlan,
+			compileResult(
+				lockWaitIntent,
 				caps({
 					supportsRowLevelLocks: true,
 					supportsLockWaitPolicies: false,
 				}),
 			),
-		).toThrow('Lock wait policies are not supported by this adapter');
+		).toThrow(
+			new Error('Lock wait policies are not supported by this adapter'),
+		);
 	});
 
 	it('keeps undefined capabilities backward-compatible', () => {
-		expect(compile(jsonPlan)).toContain('@>');
-		expect(compile(rangePlan)).toContain('&&');
-		expect(compile(anyPlan)).toContain('= any');
-		expect(compile(inListPlan)).toContain('= any');
-		expect(compile(lockWaitPlan)).toContain('for update skip locked');
+		expect(compileResult(jsonIntent)).toEqual({
+			sql: 'SELECT audit_log.* FROM audit_log WHERE audit_log.details @> $1',
+			params: [{ ip: '10.0.0.1' }],
+		});
+		expect(compileResult(rangeIntent)).toEqual({
+			sql: 'SELECT room_bookings.* FROM room_bookings WHERE room_bookings.booking_period && CAST($1 AS daterange)',
+			params: ['[2024-01-16,2024-01-20)'],
+		});
+		expect(compileResult(anyIntent)).toEqual({
+			sql: 'SELECT users.* FROM users WHERE users.id = ANY (CAST($1 AS int4[]))',
+			params: [[1, 2, 3]],
+		});
+		expect(compileResult(inListIntent)).toEqual({
+			sql: 'SELECT users.* FROM users WHERE users.id = ANY ($1)',
+			params: [[1, 2, 3]],
+		});
+		expect(compileResult(lockWaitIntent)).toEqual({
+			sql: 'SELECT jobs.* FROM jobs FOR UPDATE SKIP LOCKED',
+			params: [],
+		});
 	});
 
 	it('keeps PostgreSQL capabilities non-breaking', () => {
-		expect(compile(jsonPlan, POSTGRESQL_CAPABILITIES)).toBe(compile(jsonPlan));
-		expect(compile(rangePlan, POSTGRESQL_CAPABILITIES)).toBe(
-			compile(rangePlan),
-		);
-		expect(compile(anyPlan, POSTGRESQL_CAPABILITIES)).toBe(compile(anyPlan));
-		expect(compile(inListPlan, POSTGRESQL_CAPABILITIES)).toBe(
-			compile(inListPlan),
-		);
-		expect(compile(lockWaitPlan, POSTGRESQL_CAPABILITIES)).toBe(
-			compile(lockWaitPlan),
-		);
+		for (const intent of [
+			jsonIntent,
+			rangeIntent,
+			anyIntent,
+			inListIntent,
+			lockWaitIntent,
+		]) {
+			expect(compileResult(intent, POSTGRESQL_CAPABILITIES)).toEqual(
+				compileResult(intent),
+			);
+		}
 	});
 
 	it('threads adapter compile options into handler capability gates', () => {
-		const adapter = createPgCompileOnlyAdapter();
 		const plan = planQuery(
 			{
 				type: 'select',
@@ -259,13 +259,13 @@ describe('NQL text surface dialect capability gates', () => {
 					value: { ip: '10.0.0.1' },
 				},
 			},
-			schema({ audit_log: { details: 'jsonb' } }).model,
+			db.model,
 		);
 
 		expect(() =>
 			adapter.compile(plan, {
 				dialectCapabilities: caps({ supportsJsonOperators: false }),
 			}),
-		).toThrow('JSON operators are not supported by this adapter');
+		).toThrow(new Error('JSON operators are not supported by this adapter'));
 	});
 });

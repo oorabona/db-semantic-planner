@@ -40,9 +40,11 @@ import {
 	compilePlan,
 	type SimplifiedPlanReport,
 } from '@dbsp/adapter-pgsql/internal';
-import { NotYetSupportedError } from '@dbsp/types';
+import { createOrm, schema } from '@dbsp/core';
+import { NotYetSupportedError, type WhereIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -74,6 +76,55 @@ function makePlan(
 	};
 }
 
+// ---------------------------------------------------------------------------
+// Public entry: the ORM carries the model and compiles through the adapter
+// ---------------------------------------------------------------------------
+
+const db = schema({
+	orders: {
+		id: { type: 'integer', primaryKey: true },
+		customer_id: { type: 'integer' },
+	},
+	customers: {
+		id: { type: 'integer', primaryKey: true },
+		active: { type: 'boolean' },
+		region: { type: 'text' },
+	},
+});
+const orm = createOrm({
+	schema: db,
+	adapter: createPgCompileOnlyAdapter({ model: db.model }),
+});
+
+/** An IN-subquery body over `customers` projecting `id`, plus extra modifiers. */
+function inBody(extra: Record<string, unknown> = {}) {
+	return {
+		type: 'select' as const,
+		from: 'customers',
+		select: { type: 'fields' as const, fields: ['id'] as const },
+		...extra,
+	};
+}
+
+/** `orders.customer_id IN (<body>)` as a WhereIntent, through the public ORM. */
+function dumpIn(body: Record<string, unknown>, not = false) {
+	const where = {
+		kind: 'in' as const,
+		...(not ? { not: true } : {}),
+		field: 'customer_id',
+		subquery: body,
+	} as unknown as WhereIntent;
+	const { sql, params } = orm.select('orders').where(where).dump();
+	return { sql, params };
+}
+
+const groupByRegion = { groupBy: ['region'] };
+const havingIdGtZero = {
+	having: { kind: 'comparison', field: 'id', operator: 'gt', value: 0 },
+};
+const inRefusal = (modifier: string) =>
+	new NotYetSupportedError(modifier, 'IN subquery body', 1087);
+
 // ============================================================================
 // 1. compilePlan path (dispatchWhere) — forbidden modifiers → throws
 // ============================================================================
@@ -96,16 +147,12 @@ describe('compilePlan: IN-subquery with dropped modifiers → throws (dispatchWh
 	});
 
 	it('OFFSET in IN-subquery → throws', () => {
-		const plan = makePlan({ offset: 5 });
-		expect(() => compilePlan(plan)).toThrow(
-			/OFFSET in an IN subquery body is not supported yet \(#1087\)/,
-		);
+		expect(() => dumpIn(inBody({ offset: 5 }))).toThrow(inRefusal('OFFSET'));
 	});
 
 	it('DISTINCT in IN-subquery → throws', () => {
-		const plan = makePlan({ distinct: true });
-		expect(() => compilePlan(plan)).toThrow(
-			/DISTINCT in an IN subquery body is not supported yet \(#1087\)/,
+		expect(() => dumpIn(inBody({ distinct: true }))).toThrow(
+			inRefusal('DISTINCT'),
 		);
 	});
 
@@ -172,29 +219,15 @@ describe('compilePlan: IN-subquery with dropped modifiers → throws (dispatchWh
 	});
 
 	it('the refusal is a NotYetSupportedError', () => {
-		const plan = makePlan({ groupBy: ['region'] });
-		expect(() => compilePlan(plan)).toThrow(NotYetSupportedError);
+		expect(() => dumpIn(inBody(groupByRegion))).toThrow(NotYetSupportedError);
+		expect(() => dumpIn(inBody(groupByRegion))).toThrow(
+			new NotYetSupportedError('GROUP BY', 'IN subquery body', 1087),
+		);
 	});
 
 	it('notIn operator with GROUP BY in subquery → also throws', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'notIn',
-					subquery: {
-						from: 'customers',
-						select: 'id',
-						groupBy: ['region'],
-					} as any,
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/GROUP BY in an IN subquery body is not supported yet \(#1087\)/,
+		expect(() => dumpIn(inBody(groupByRegion), true)).toThrow(
+			inRefusal('GROUP BY'),
 		);
 	});
 
@@ -233,132 +266,50 @@ describe('compilePlan: nested IN-subquery (mapInSubqueryCondition) — forbidden
 	 * mapInSubqueryCondition's guard before producing corrupted SQL.
 	 */
 	it('nested IN subquery with GROUP BY → throws (mapInSubqueryCondition guard)', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'in',
-					subquery: {
-						from: 'customers',
-						select: 'id',
-						// Inner WHERE is itself an IN subquery with a forbidden modifier
-						where: {
-							type: 'where',
-							column: 'id',
-							operator: 'in',
-							subquery: {
-								from: 'preferred',
-								select: 'customer_id',
-								// The forbidden modifier that must be caught
-								groupBy: ['tier'],
-							},
-						} as any,
-					} as any,
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/GROUP BY in an IN subquery body is not supported yet \(#1087\)/,
-		);
+		expect(() =>
+			dumpIn(
+				inBody({
+					where: { kind: 'in', field: 'id', subquery: inBody(groupByRegion) },
+				}),
+			),
+		).toThrow(inRefusal('GROUP BY'));
 	});
 
 	it('nested IN subquery with HAVING → throws', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'in',
-					subquery: {
-						from: 'customers',
-						select: 'id',
-						where: {
-							type: 'where',
-							column: 'id',
-							operator: 'in',
-							subquery: {
-								from: 'preferred',
-								select: 'customer_id',
-								having: {
-									kind: 'comparison',
-									field: 'id',
-									operator: 'gt',
-									value: 0,
-								},
-							},
-						} as any,
-					} as any,
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/HAVING in an IN subquery body is not supported yet \(#1087\)/,
-		);
+		expect(() =>
+			dumpIn(
+				inBody({
+					where: { kind: 'in', field: 'id', subquery: inBody(havingIdGtZero) },
+				}),
+			),
+		).toThrow(inRefusal('HAVING'));
 	});
 
 	it('nested IN subquery with DISTINCT → throws', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'in',
-					subquery: {
-						from: 'customers',
-						select: 'id',
-						where: {
-							type: 'where',
-							column: 'id',
-							operator: 'in',
-							subquery: {
-								from: 'preferred',
-								select: 'customer_id',
-								distinct: true,
-							},
-						} as any,
-					} as any,
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/DISTINCT in an IN subquery body is not supported yet \(#1087\)/,
-		);
+		expect(() =>
+			dumpIn(
+				inBody({
+					where: {
+						kind: 'in',
+						field: 'id',
+						subquery: inBody({ distinct: true }),
+					},
+				}),
+			),
+		).toThrow(inRefusal('DISTINCT'));
 	});
 
 	it('nested IN subquery refusal is a NotYetSupportedError', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'in',
-					subquery: {
-						from: 'customers',
-						select: 'id',
-						where: {
-							type: 'where',
-							column: 'id',
-							operator: 'in',
-							subquery: {
-								from: 'preferred',
-								select: 'customer_id',
-								groupBy: ['tier'],
-							},
-						} as any,
-					} as any,
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(NotYetSupportedError);
+		const nestedGroupBy = () =>
+			dumpIn(
+				inBody({
+					where: { kind: 'in', field: 'id', subquery: inBody(groupByRegion) },
+				}),
+			);
+		expect(nestedGroupBy).toThrow(NotYetSupportedError);
+		expect(nestedGroupBy).toThrow(
+			new NotYetSupportedError('GROUP BY', 'IN subquery body', 1087),
+		);
 	});
 });
 
@@ -375,44 +326,37 @@ describe('compilePlan: valid IN-subquery still compiles (no false positives)', (
 	});
 
 	it('IN-subquery with inner WHERE → compiles correctly', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'in',
-					subquery: {
-						from: 'customers',
-						select: 'id',
-						where: {
-							type: 'where',
-							column: 'active',
-							operator: '=',
-							value: true,
-							table: 'customers',
-						},
+		expect(
+			dumpIn(
+				inBody({
+					where: {
+						kind: 'comparison',
+						field: 'active',
+						operator: 'eq',
+						value: true,
 					},
-				},
-			],
-		};
-		const result = compilePlan(plan);
-		expect(normalizeSQL(result.sql)).toContain('= any');
-		expect(normalizeSQL(result.sql)).toContain('customers');
+				}),
+			),
+		).toEqual({
+			sql: 'SELECT orders.* FROM orders WHERE orders.customer_id = ANY (SELECT customers_subq_0.id FROM customers AS customers_subq_0 WHERE customers_subq_0.active = $1)',
+			params: [true],
+		});
 	});
 
 	it('IN-subquery with LIMIT → compiles correctly (LIMIT is supported)', () => {
-		const plan = makePlan({ limit: 10 });
-		const result = compilePlan(plan);
-		expect(normalizeSQL(result.sql)).toContain('= any');
-		expect(normalizeSQL(result.sql)).toMatch(/limit/i);
+		expect(dumpIn(inBody({ limit: 10 }))).toEqual({
+			sql: 'SELECT orders.* FROM orders WHERE orders.customer_id = ANY (SELECT customers_subq_0.id FROM customers AS customers_subq_0 LIMIT 10)',
+			params: [],
+		});
 	});
 
 	it('IN-subquery with single-field orderBy → compiles correctly (field ORDER BY is supported)', () => {
-		const plan = makePlan({ orderBy: [{ field: 'id', direction: 'asc' }] });
-		const result = compilePlan(plan);
-		expect(normalizeSQL(result.sql)).toContain('= any');
+		expect(
+			dumpIn(inBody({ orderBy: [{ field: 'id', direction: 'asc' }] })),
+		).toEqual({
+			sql: 'SELECT orders.* FROM orders WHERE orders.customer_id = ANY (SELECT customers_subq_0.id FROM customers AS customers_subq_0 ORDER BY customers_subq_0.id ASC)',
+			params: [],
+		});
 	});
 
 	it('NOT IN subquery (plain) → compiles to <> all subquery', () => {
@@ -434,34 +378,14 @@ describe('compilePlan: valid IN-subquery still compiles (no false positives)', (
 	});
 
 	it('valid nested IN (inner subquery plain, no modifiers) → compiles correctly', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'in',
-					subquery: {
-						from: 'customers',
-						select: 'id',
-						where: {
-							type: 'where',
-							column: 'id',
-							operator: 'in',
-							subquery: {
-								from: 'preferred',
-								select: 'customer_id',
-								// No forbidden modifiers — valid
-							},
-						} as any,
-					} as any,
-				},
-			],
-		};
-		const result = compilePlan(plan);
-		expect(normalizeSQL(result.sql)).toContain('= any');
-		expect(normalizeSQL(result.sql)).toContain('preferred');
+		expect(
+			dumpIn(
+				inBody({ where: { kind: 'in', field: 'id', subquery: inBody() } }),
+			),
+		).toEqual({
+			sql: 'SELECT orders.* FROM orders WHERE orders.customer_id = ANY (SELECT customers_subq_0.id FROM customers AS customers_subq_0 WHERE customers_subq_0.id = ANY (SELECT customers_subq_1.id FROM customers AS customers_subq_1))',
+			params: [],
+		});
 	});
 });
 
@@ -806,176 +730,88 @@ describe('compilePlan: IN subquery with logical group (whereAnd/whereOr) wrappin
 	 * guard, rather than letting mapToHandlerDecision silently drop the subquery
 	 * and fall through to the plain-in handler.
 	 */
-	it('outer IN whose inner WHERE is whereAnd( eq, in+groupBy ) → throws', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'in',
-					subquery: {
-						from: 'customers',
-						select: 'id',
-						// inner WHERE is a logical AND group, one child carries GROUP BY
-						where: {
-							type: 'whereAnd',
-							conditions: [
-								{
-									type: 'where',
-									column: 'active',
-									operator: '=',
-									value: true,
-									table: 'customers',
-								},
-								{
-									type: 'where',
-									column: 'id',
-									operator: 'in',
-									subquery: {
-										from: 'preferred',
-										select: 'customer_id',
-										groupBy: ['tier'], // forbidden modifier — must be caught
-									},
-								},
-							],
-						} as any,
-					} as any,
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/GROUP BY in an IN subquery body is not supported yet \(#1087\)/,
-		);
+	it('outer IN whose inner WHERE is an AND of eq and in+groupBy → throws', () => {
+		expect(() =>
+			dumpIn(
+				inBody({
+					where: {
+						kind: 'and',
+						conditions: [
+							{
+								kind: 'comparison',
+								field: 'active',
+								operator: 'eq',
+								value: true,
+							},
+							{ kind: 'in', field: 'id', subquery: inBody(groupByRegion) },
+						],
+					},
+				}),
+			),
+		).toThrow(inRefusal('GROUP BY'));
 	});
 
-	it('outer IN whose inner WHERE is whereOr( eq, in+having ) → throws', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'in',
-					subquery: {
-						from: 'customers',
-						select: 'id',
-						where: {
-							type: 'whereOr',
-							conditions: [
-								{
-									type: 'where',
-									column: 'region',
-									operator: '=',
-									value: 'EU',
-									table: 'customers',
-								},
-								{
-									type: 'where',
-									column: 'id',
-									operator: 'in',
-									subquery: {
-										from: 'preferred',
-										select: 'customer_id',
-										having: {
-											kind: 'comparison',
-											field: 'id',
-											operator: 'gt',
-											value: 0,
-										},
-									},
-								},
-							],
-						} as any,
-					} as any,
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/HAVING in an IN subquery body is not supported yet \(#1087\)/,
-		);
+	it('outer IN whose inner WHERE is an OR of eq and in+having → throws', () => {
+		expect(() =>
+			dumpIn(
+				inBody({
+					where: {
+						kind: 'or',
+						conditions: [
+							{
+								kind: 'comparison',
+								field: 'active',
+								operator: 'eq',
+								value: true,
+							},
+							{ kind: 'in', field: 'id', subquery: inBody(havingIdGtZero) },
+						],
+					},
+				}),
+			),
+		).toThrow(inRefusal('HAVING'));
 	});
 
-	it('outer IN whose inner WHERE is whereAnd( eq, in+plain ) → compiles correctly (no false positive)', () => {
+	it('outer IN whose inner WHERE is an AND of eq and in+plain → compiles correctly (no false positive)', () => {
 		// A logical group whose IN-subquery child is valid (no forbidden modifiers)
 		// must compile without error and produce correct SQL.
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'in',
-					subquery: {
-						from: 'customers',
-						select: 'id',
-						where: {
-							type: 'whereAnd',
-							conditions: [
-								{
-									type: 'where',
-									column: 'active',
-									operator: '=',
-									value: true,
-									table: 'customers',
-								},
-								{
-									type: 'where',
-									column: 'id',
-									operator: 'in',
-									subquery: {
-										from: 'preferred',
-										select: 'customer_id',
-										// No forbidden modifiers — valid plain subquery
-									},
-								},
-							],
-						} as any,
-					} as any,
-				},
-			],
-		};
-		const result = compilePlan(plan);
-		expect(normalizeSQL(result.sql)).toContain('= any');
-		expect(normalizeSQL(result.sql)).toContain('preferred');
+		expect(
+			dumpIn(
+				inBody({
+					where: {
+						kind: 'and',
+						conditions: [
+							{
+								kind: 'comparison',
+								field: 'active',
+								operator: 'eq',
+								value: true,
+							},
+							{ kind: 'in', field: 'id', subquery: inBody() },
+						],
+					},
+				}),
+			),
+		).toEqual({
+			sql: 'SELECT orders.* FROM orders WHERE orders.customer_id = ANY (SELECT customers_subq_0.id FROM customers AS customers_subq_0 WHERE customers_subq_0.active = $1 AND customers_subq_0.id = ANY (SELECT customers_subq_1.id FROM customers AS customers_subq_1))',
+			params: [true],
+		});
 	});
 
-	it('outer IN whose inner WHERE is whereNot wrapping in+distinct → throws', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'in',
-					subquery: {
-						from: 'customers',
-						select: 'id',
-						where: {
-							type: 'whereNot',
-							conditions: [
-								{
-									type: 'where',
-									column: 'id',
-									operator: 'in',
-									subquery: {
-										from: 'preferred',
-										select: 'customer_id',
-										distinct: true, // forbidden
-									},
-								},
-							],
-						} as any,
-					} as any,
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/DISTINCT in an IN subquery body is not supported yet \(#1087\)/,
-		);
+	it('outer IN whose inner WHERE is a NOT wrapping in+distinct → throws', () => {
+		expect(() =>
+			dumpIn(
+				inBody({
+					where: {
+						kind: 'not',
+						condition: {
+							kind: 'in',
+							field: 'id',
+							subquery: inBody({ distinct: true }),
+						},
+					},
+				}),
+			),
+		).toThrow(inRefusal('DISTINCT'));
 	});
 });

@@ -13,9 +13,11 @@ import {
 	type PlanDecision,
 	type SimplifiedPlanReport,
 } from '@dbsp/adapter-pgsql/internal';
+import { createOrm, ref, schema } from '@dbsp/core';
 import { parseSync } from 'pgsql-parser';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 function buildJsonAggDecision(
 	overrides: Partial<PlanDecision> = {},
@@ -31,6 +33,85 @@ function buildJsonAggDecision(
 		orderBy: ['id'],
 		...overrides,
 	};
+}
+
+const rolesDb = schema(
+	{
+		users: { id: { type: 'integer', primaryKey: true } },
+		roles: {
+			role_id: { type: 'integer', primaryKey: true },
+			tenant_id: { type: 'integer', primaryKey: true },
+		},
+		user_roles: {
+			id: { type: 'integer', primaryKey: true },
+			user_id: ref('users', { as: 'user', inverse: 'userRoles' }),
+			role_id: 'integer',
+			tenant_id: 'integer',
+		},
+	},
+	{
+		user_roles: {
+			foreignKeys: [
+				ref('roles', {
+					columns: ['role_id', 'tenant_id'],
+					references: ['role_id', 'tenant_id'],
+					as: 'role',
+					inverse: 'userRoles',
+				}),
+			],
+		},
+	},
+);
+
+const permissionsDb = schema({
+	users: { id: { type: 'integer', primaryKey: true } },
+	roles: { id: { type: 'integer', primaryKey: true } },
+	permissions: {
+		id: { type: 'integer', primaryKey: true },
+		role_id: ref('roles', { as: 'role', inverse: 'permissions' }),
+	},
+	user_roles: {
+		id: { type: 'integer', primaryKey: true },
+		user_id: ref('users', { as: 'user', inverse: 'userRoles' }),
+		role_id: ref('roles', { as: 'role', inverse: 'userRoles' }),
+	},
+});
+
+const chainDb = schema({
+	root: { id: { type: 'integer', primaryKey: true } },
+	a: {
+		id: { type: 'integer', primaryKey: true },
+		root_id: ref('root', { as: 'root', inverse: 'a' }),
+	},
+	b: {
+		id: { type: 'integer', primaryKey: true },
+		a_id: ref('a', { as: 'a', inverse: 'b' }),
+	},
+	c: {
+		id: { type: 'integer', primaryKey: true },
+		b_id: ref('b', { as: 'b', inverse: 'c' }),
+	},
+	d: {
+		id: { type: 'integer', primaryKey: true },
+		c_id: ref('c', { as: 'c', inverse: 'd' }),
+	},
+	e: {
+		id: { type: 'integer', primaryKey: true },
+		d_id: ref('d', { as: 'd', inverse: 'e' }),
+	},
+	f: {
+		id: { type: 'integer', primaryKey: true },
+		e_id: ref('e', { as: 'e', inverse: 'f' }),
+	},
+});
+
+function ormFor<
+	S extends typeof rolesDb | typeof permissionsDb | typeof chainDb,
+>(db: S) {
+	return createOrm({
+		model: db.model,
+		adapter: createPgCompileOnlyAdapter({ model: db.model }),
+	});
 }
 
 describe('Nested json_agg compilation', () => {
@@ -57,144 +138,68 @@ describe('Nested json_agg compilation', () => {
 	});
 
 	it('compiles two-level nested json_agg (parent → child)', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'users',
-			decisions: [
-				buildJsonAggDecision({
-					relationName: 'userRoles',
-					targetTable: 'user_roles',
-					relationType: 'hasMany',
-					foreignKey: 'user_id',
-					parentKey: 'id',
-					children: [
-						buildJsonAggDecision({
-							relationName: 'role',
-							targetTable: 'roles',
-							relationType: 'belongsTo',
-							foreignKey: 'role_id',
-							parentKey: 'id',
-							orderBy: ['role_id', 'tenant_id'],
-						}),
-					],
-				}),
-			],
-		};
+		const { sql, params } = ormFor(rolesDb)
+			.select('users')
+			.withPlanOptions({ defaultIncludeStrategy: 'json_agg' })
+			.include('userRoles', { include: [{ relation: 'role' }] })
+			.dump();
 
-		const result = compilePlan(plan);
-		const sql = normalizeSQL(result.sql);
-
-		// Root level uses __t__
-		expect(sql).toContain('user_roles as __t__');
-		expect(sql).toContain('__t__.user_id = users.id');
-
-		// Nested level uses __t1__
-		expect(sql).toContain('roles as __t1__');
-		expect(sql).toContain('__t1__.id = __t__.role_id');
-		expect(sql).toContain('order by __t__.id asc nulls last');
-		expect(sql).toContain(
-			'order by __t1__.role_id asc nulls last, __t1__.tenant_id asc nulls last',
-		);
-
-		// Must have jsonb_build_object for merging child
-		expect(sql).toContain('jsonb_build_object');
-		expect(sql).toContain("'role'");
-
+		expect({ sql, params }).toEqual({
+			sql: `SELECT users.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'user_id', __t__.user_id, 'role_id', __t__.role_id, 'tenant_id', __t__.tenant_id) || jsonb_build_object('role', COALESCE((SELECT json_agg(jsonb_build_object('role_id', __t1__.role_id, 'tenant_id', __t1__.tenant_id) ORDER BY __t1__.role_id ASC NULLS LAST, __t1__.tenant_id ASC NULLS LAST) FROM roles AS __t1__ WHERE __t1__.role_id = __t__.role_id AND __t1__.tenant_id = __t__.tenant_id), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST) FROM user_roles AS __t__ WHERE __t__.user_id = users.id), '[]'::json) AS "userRoles_json" FROM users`,
+			params: [],
+		});
 		// Must be valid SQL
-		const parsed = parseSync(result.sql);
-		expect(parsed.stmts).toHaveLength(1);
+		expect(parseSync(sql).stmts).toHaveLength(1);
 	});
 
 	it('compiles three-level nested json_agg', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'users',
-			decisions: [
-				buildJsonAggDecision({
-					relationName: 'userRoles',
-					targetTable: 'user_roles',
-					relationType: 'hasMany',
-					foreignKey: 'user_id',
-					parentKey: 'id',
-					children: [
-						buildJsonAggDecision({
-							relationName: 'role',
-							targetTable: 'roles',
-							relationType: 'belongsTo',
-							foreignKey: 'role_id',
-							parentKey: 'id',
-							children: [
-								buildJsonAggDecision({
-									relationName: 'permissions',
-									targetTable: 'permissions',
-									relationType: 'hasMany',
-									foreignKey: 'role_id',
-									parentKey: 'id',
-								}),
-							],
-						}),
-					],
-				}),
-			],
-		};
+		const { sql, params } = ormFor(permissionsDb)
+			.select('users')
+			.withPlanOptions({ defaultIncludeStrategy: 'json_agg' })
+			.include('userRoles', {
+				include: [{ relation: 'role', include: [{ relation: 'permissions' }] }],
+			})
+			.dump();
 
-		const result = compilePlan(plan);
-		const sql = normalizeSQL(result.sql);
-
-		// Depth 0: __t__
-		expect(sql).toContain('user_roles as __t__');
-		// Depth 1: __t1__
-		expect(sql).toContain('roles as __t1__');
-		// Depth 2: __t2__
-		expect(sql).toContain('permissions as __t2__');
-
-		// Correct correlations chain through intermediate tables
-		expect(sql).toContain('__t__.user_id = users.id');
-		expect(sql).toContain('__t1__.id = __t__.role_id');
-		expect(sql).toContain('__t2__.role_id = __t1__.id');
-
+		expect({ sql, params }).toEqual({
+			sql: `SELECT users.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'user_id', __t__.user_id, 'role_id', __t__.role_id) || jsonb_build_object('role', COALESCE((SELECT json_agg(jsonb_build_object('id', __t1__.id) || jsonb_build_object('permissions', COALESCE((SELECT json_agg(jsonb_build_object('id', __t2__.id, 'role_id', __t2__.role_id) ORDER BY __t2__.id ASC NULLS LAST) FROM permissions AS __t2__ WHERE __t2__.role_id = __t1__.id), '[]'::json)) ORDER BY __t1__.id ASC NULLS LAST) FROM roles AS __t1__ WHERE __t1__.id = __t__.role_id), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST) FROM user_roles AS __t__ WHERE __t__.user_id = users.id), '[]'::json) AS "userRoles_json" FROM users`,
+			params: [],
+		});
 		// Must be valid SQL
-		const parsed = parseSync(result.sql);
-		expect(parsed.stmts).toHaveLength(1);
+		expect(parseSync(sql).stmts).toHaveLength(1);
 	});
 
 	it('compiles 6-level deep nesting without stack overflow', () => {
 		// Build a 6-level chain: a → b → c → d → e → f
-		const tables = ['a', 'b', 'c', 'd', 'e', 'f'] as const;
+		const { sql, params } = ormFor(chainDb)
+			.select('root')
+			.withPlanOptions({ defaultIncludeStrategy: 'json_agg' })
+			.include('a', {
+				include: [
+					{
+						relation: 'b',
+						include: [
+							{
+								relation: 'c',
+								include: [
+									{
+										relation: 'd',
+										include: [{ relation: 'e', include: [{ relation: 'f' }] }],
+									},
+								],
+							},
+						],
+					},
+				],
+			})
+			.dump();
 
-		function buildChain(depth: number): PlanDecision {
-			const table = tables[depth] as string;
-			const parent = (tables[depth - 1] as string | undefined) ?? 'root';
-			const child =
-				depth < tables.length - 1 ? buildChain(depth + 1) : undefined;
-			return buildJsonAggDecision({
-				relationName: table,
-				targetTable: table,
-				relationType: 'hasMany',
-				foreignKey: `${parent}_id`,
-				parentKey: 'id',
-				...(child ? { children: [child] } : {}),
-			});
-		}
-
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'root',
-			decisions: [buildChain(0)],
-		};
-
-		// Should not throw (stack safety)
-		const result = compilePlan(plan);
-		const sql = normalizeSQL(result.sql);
-
-		// Verify all 6 depth aliases exist
-		expect(sql).toContain('as __t__'); // depth 0
-		expect(sql).toContain('as __t1__'); // depth 1
-		expect(sql).toContain('as __t2__'); // depth 2
-		expect(sql).toContain('as __t3__'); // depth 3
-		expect(sql).toContain('as __t4__'); // depth 4
-		expect(sql).toContain('as __t5__'); // depth 5
-
+		expect({ sql, params }).toEqual({
+			sql: `SELECT root.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'root_id', __t__.root_id) || jsonb_build_object('b', COALESCE((SELECT json_agg(jsonb_build_object('id', __t1__.id, 'a_id', __t1__.a_id) || jsonb_build_object('c', COALESCE((SELECT json_agg(jsonb_build_object('id', __t2__.id, 'b_id', __t2__.b_id) || jsonb_build_object('d', COALESCE((SELECT json_agg(jsonb_build_object('id', __t3__.id, 'c_id', __t3__.c_id) || jsonb_build_object('e', COALESCE((SELECT json_agg(jsonb_build_object('id', __t4__.id, 'd_id', __t4__.d_id) || jsonb_build_object('f', COALESCE((SELECT json_agg(jsonb_build_object('id', __t5__.id, 'e_id', __t5__.e_id) ORDER BY __t5__.id ASC NULLS LAST) FROM f AS __t5__ WHERE __t5__.e_id = __t4__.id), '[]'::json)) ORDER BY __t4__.id ASC NULLS LAST) FROM e AS __t4__ WHERE __t4__.d_id = __t3__.id), '[]'::json)) ORDER BY __t3__.id ASC NULLS LAST) FROM d AS __t3__ WHERE __t3__.c_id = __t2__.id), '[]'::json)) ORDER BY __t2__.id ASC NULLS LAST) FROM c AS __t2__ WHERE __t2__.b_id = __t1__.id), '[]'::json)) ORDER BY __t1__.id ASC NULLS LAST) FROM b AS __t1__ WHERE __t1__.a_id = __t__.id), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST) FROM a AS __t__ WHERE __t__.root_id = root.id), '[]'::json) AS a_json FROM root`,
+			params: [],
+		});
 		// Must be valid SQL
-		const parsed = parseSync(result.sql);
-		expect(parsed.stmts).toHaveLength(1);
+		expect(parseSync(sql).stmts).toHaveLength(1);
 	});
 
 	it('skips children with missing required fields', () => {
