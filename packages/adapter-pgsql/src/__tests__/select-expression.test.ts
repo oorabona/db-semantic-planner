@@ -16,6 +16,7 @@ import {
 	cast,
 	createOrm,
 	distinct,
+	ExpressionRef,
 	eq,
 	exprRef,
 	fn,
@@ -1031,6 +1032,18 @@ describe('ordering, grouping, aggregate and window leaves (ADR 0011 delivery 3)'
 			'SELECT posts.id, posts.title FROM posts',
 			[],
 		]);
+		// An ExpressionRef stays an expression column, whatever its intent kind.
+		const titleRef = new ExpressionRef({ kind: 'column', column: 'title' });
+		expect(
+			sqlOf(
+				q()
+					.columns([titleRef.as('t')])
+					.dump(),
+			),
+		).toEqual(['SELECT posts.title AS t FROM posts', []]);
+		expect(() =>
+			q().columns([titleRef]).groupBy(['title']).count().dump(),
+		).toThrow(/combine only with string columns\(\)/);
 	});
 
 	it('AC5 columns other-table ColumnRef: an expression column on a joined table', () => {

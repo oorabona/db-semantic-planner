@@ -184,7 +184,7 @@ export interface OrderBySpec {
  * All valid orderBy input types.
  */
 export type OrderByInput =
-	| string // Simple: 'field'
+	| OrderByLeaf // Single: 'field', a ColumnRef, an expression, a position
 	| OrderByRecord // Object: { field: 'desc' }
 	| readonly OrderBySpec[]; // Array: [{ column, direction, nulls }]
 

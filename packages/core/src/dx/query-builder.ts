@@ -239,7 +239,8 @@ export class QueryBuilderImpl<TResult = unknown>
 
 		for (const col of columns as readonly unknown[]) {
 			const entry = columnEntry(col, this.from);
-			if (entry.kind !== 'column') hasExpressions = true;
+			if (isExpressionSpec(col as ColumnSpec) || entry.kind !== 'column')
+				hasExpressions = true;
 			expressionColumns.push(entry);
 		}
 

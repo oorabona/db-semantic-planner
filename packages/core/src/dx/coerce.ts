@@ -192,6 +192,8 @@ export function coerceReference(
 			helper,
 			'sql() is only accepted as an update or upsert value; use literal(), param() or an expression here',
 		);
+	if (leaf instanceof CaseBuilder)
+		throw new InvalidOperationError(helper, UNFINISHED_CASE);
 	return refuse(helper, 'a plain object');
 }
 

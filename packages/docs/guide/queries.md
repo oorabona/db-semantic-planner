@@ -354,8 +354,9 @@ orm.select('posts')
 ```
 
 `groupBy()` fields, `distinctOn()` columns and the field of `count()`, `sum()`, `avg()`, `min()`, `max()` and
-`distinct()` each name a column: a column name or a `ColumnRef`. A `ColumnRef` of the queried table is used as its
-column name, and an alias on it is ignored:
+`distinct()` each name a column: a column name or a `ColumnRef`, and an alias on the ref is ignored. In `groupBy()`
+and the aggregate methods, a `ColumnRef` of the queried table is used as its bare column name; `distinctOn()` and
+`distinct()` keep it qualified:
 
 ```typescript
 import { distinct } from '@dbsp/core';
@@ -370,8 +371,9 @@ orm.select('posts').count(distinct(posts.authorId), 'authors').dump();
 ```
 
 An expression in these positions is refused with a `NotYetSupportedError` (#1072). `null`, `undefined`, a plain
-object and `sql()` are refused with an `InvalidOperationError`. `min()` and `max()` take no `distinct()`, and
-`count({ field, distinct: true })` is refused: write `count(distinct(field))`.
+object and `sql()` are refused with an `InvalidOperationError`, except that `count()` reads a plain object as its
+`{ field?, as? }` options. `min()` and `max()` take no `distinct()`, and `count({ field, distinct: true })` with a
+`ColumnRef` field is refused: write `count(distinct(field))`.
 
 `count()`, `sum()`, `avg()`, `min()` and `max()` throw an `InvalidOperationError` beside an expression
 projection from `.columns()` or `.coalesce()`. Put the aggregate in `.columns()` instead:

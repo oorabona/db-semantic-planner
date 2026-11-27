@@ -608,6 +608,20 @@ describe('ordering, grouping and aggregate leaf refusals (ADR 0011 delivery 3)',
 		);
 	});
 
+	it('R1 unfinished caseWhen in orderBy and columns: refused by name', () => {
+		const unfinished = () => caseWhen(eq('name', 'a'), literal('x'));
+		const message =
+			'caseWhen() is unfinished; complete it with .else(value) before using it as a value';
+		expectInvalid(
+			() => q().orderBy(unfinished()),
+			`Invalid orderBy: ${message}`,
+		);
+		expectInvalid(
+			() => q().columns([unfinished()]),
+			`Invalid columns: ${message}`,
+		);
+	});
+
 	it('R1 orderBy outerRef and builders: not yet supported', () => {
 		expectNotYet(
 			() => q().orderBy(outerRef('id')),
