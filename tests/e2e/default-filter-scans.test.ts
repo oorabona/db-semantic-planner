@@ -1,14 +1,20 @@
 import {
+	caseWhen,
 	createOrm,
 	eq,
 	exists,
+	exprRef,
+	fn,
 	gt,
 	isNull,
+	literal,
 	outerRef,
+	plan,
 	type QueryIntent,
 	ref,
 	SubqueryExpression,
 	schema,
+	star,
 	subquery,
 } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -22,6 +28,21 @@ import {
 } from './testkit/index.js';
 
 const SCHEMA = 'default_filter_scans_e2e';
+const SCHEMA_5C = 'having_case_filter_roots_e2e';
+// Both tables carry a `name` column, so a bare `name` over the join is ambiguous in SQL.
+const roots = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'text',
+		score: 'integer',
+	},
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'text',
+		score: 'integer',
+		authorId: ref('users', { as: 'author', inverse: 'authored' }),
+	},
+});
 const db = schema(
 	{
 		users: {
@@ -42,6 +63,15 @@ const db = schema(
 );
 
 beforeAll(async () => {
+	await dropSchema(SCHEMA_5C);
+	await createSchema(SCHEMA_5C);
+	await execInSchema(
+		SCHEMA_5C,
+		`CREATE TABLE users (id integer PRIMARY KEY, name text, score integer);
+ CREATE TABLE posts (id integer PRIMARY KEY, name text, score integer, author_id integer REFERENCES users(id));
+ INSERT INTO users VALUES (1,'alice',5),(2,'bo',6);
+ INSERT INTO posts VALUES (10,'abc',1,1),(11,'x',2,2);`,
+	);
 	await dropSchema(SCHEMA);
 	await createSchema(SCHEMA);
 	await execInSchema(
@@ -53,6 +83,7 @@ beforeAll(async () => {
 	);
 });
 afterAll(async () => {
+	await dropSchema(SCHEMA_5C);
 	await dropSchema(SCHEMA);
 	await closeTestDb();
 });
@@ -222,5 +253,87 @@ describe('scalar subquery bodies select the rows a hand-written query selects (#
 			{ id: 4, v: null },
 		]);
 		expect(await rowsOf(orm, grouped(orm))).toEqual(expected);
+	});
+});
+
+describe('HAVING, CASE WHEN and FILTER roots select the rows a hand-written query selects (#891 slice 5c)', () => {
+	const rootsOrm = async () =>
+		createOrm({ schema: roots, adapter: await getTestAdapter() }).withSchema(
+			SCHEMA_5C,
+		);
+	const plain = async (rows: readonly object[]) =>
+		rows.map((row) => ({ ...row }));
+	const longName = () => fn('length', exprRef('name')).gt(2);
+
+	it('AC2 e2e-rows: a bare operand column over a join binds the root range', async () => {
+		const orm = await rootsOrm();
+		const joined = () => orm.select('posts').join('author');
+		expect(
+			await plain(
+				await joined()
+					.columns([
+						'id',
+						caseWhen(longName(), literal(1)).else(literal(0)).as('c'),
+					])
+					.orderBy('id')
+					.all(),
+			),
+		).toEqual([
+			{ id: 10, c: 1 },
+			{ id: 11, c: 0 },
+		]);
+		expect(
+			await plain(
+				await joined()
+					.columns([fn('count', star()).filter(longName()).as('n')])
+					.all(),
+			),
+		).toEqual([{ n: '1' }]);
+		expect(
+			await plain(
+				await joined().columns(['id']).groupBy(['id']).having(longName()).all(),
+			),
+		).toEqual([{ id: 10 }]);
+	});
+
+	it('AC8 e2e-rows: an aggregate FILTER inside a function argument counts the filtered rows', async () => {
+		const adapter = await getTestAdapter();
+		const report = plan(
+			{
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'expressions',
+					columns: [
+						{
+							kind: 'function',
+							name: 'coalesce',
+							args: [
+								{
+									kind: 'aggregate',
+									function: 'count',
+									field: '*',
+									filter: eq('score', 1),
+								},
+								{ kind: 'literal', value: 0 },
+							],
+							as: 'n',
+						},
+					],
+				},
+			} as QueryIntent,
+			roots.model,
+		);
+		const compiled = adapter.compile(report, {
+			model: roots.model,
+			schemaName: SCHEMA_5C,
+		});
+		expect(compiled.sql).toBe(
+			`SELECT COALESCE(count(*) FILTER (WHERE posts.score = $1), $2) AS n FROM ${SCHEMA_5C}.posts`,
+		);
+		const rows = (
+			await (await getTestPool()).query(compiled.sql, [...compiled.parameters])
+		).rows;
+		expect(rows).toEqual([{ n: '1' }]);
 	});
 });

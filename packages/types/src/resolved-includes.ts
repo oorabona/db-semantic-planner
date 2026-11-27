@@ -168,6 +168,15 @@ export interface ResolvedJoin {
 	readonly on?: ResolvedCondition;
 }
 export interface SelectExecution {
+	/**
+	 * Every HAVING, CASE WHEN and aggregate FILTER root was inspected with a model: each has an
+	 * `expressionConditions` entry or a `localConditions` entry.
+	 */
+	readonly rootsResolved?: true;
+	/** Condition roots that hold a query-local subquery body; they keep the adapter's local route (#1040). */
+	readonly localConditions?: readonly {
+		readonly intentPath: string;
+	}[];
 	readonly expressionConditions?: readonly {
 		readonly intentPath: string;
 		readonly condition: ResolvedCondition;

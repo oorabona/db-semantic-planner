@@ -64,7 +64,7 @@ describe('#251 fn().filter() in expression positions', () => {
 			.dump();
 
 		expect(dump.sql).toBe(
-			'SELECT tool_metrics.* FROM tool_metrics GROUP BY tool_metrics.team_id HAVING count(id) FILTER (WHERE tool_metrics.total > $1) > $2',
+			'SELECT tool_metrics.* FROM tool_metrics GROUP BY tool_metrics.team_id HAVING count(tool_metrics.id) FILTER (WHERE tool_metrics.total > $1) > $2',
 		);
 		expect(dump.params).toEqual([100, 5]);
 	});
@@ -185,7 +185,7 @@ describe('#251 fn().filter() in expression positions', () => {
 						.as('c'),
 				])
 				.dump(),
-		).toThrow(/could not be compiled/);
+		).toThrow('Condition requires a column');
 	});
 
 	it('fails loud when the filter hook returns undefined for a present filter', () => {

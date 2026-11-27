@@ -130,6 +130,7 @@ import {
 	requireRelationTargetColumns,
 	resolveRelationTarget,
 } from './relation-target-projection.js';
+import { assertConditionRootRecorded } from './resolved-condition-roots.js';
 import {
 	identifierText,
 	queryLocal,
@@ -434,6 +435,10 @@ export interface SimplifiedPlanReport {
 	/** Legacy SELECT-expression / NQL body predicate (HAVING, CASE and FILTER still use it); issued root WHERE uses resolvedWhere. */
 	readonly rawWhere?: WhereIntent;
 	readonly resolvedWhere?: import('@dbsp/types').ResolvedCondition;
+	/** Core recorded every HAVING, CASE WHEN and FILTER root (resolved or local). */
+	readonly rootsResolved?: boolean;
+	/** Condition roots core left to the local route because they hold a query-local body. */
+	readonly localConditions?: readonly WhereIntent[];
 	readonly expressionConditions?: readonly {
 		readonly intent: WhereIntent;
 		readonly condition: import('@dbsp/types').ResolvedCondition;
@@ -1406,6 +1411,10 @@ export class PlanCompiler {
 				aliasColumnAuthorities: this.aliasColumnAuthorities,
 			}),
 			...(this.model != null && { model: this.model }),
+			...(plan.rootsResolved && { rootsResolved: true }),
+			...(plan.localConditions && {
+				localConditions: new Set(plan.localConditions),
+			}),
 			...(plan.expressionConditions && {
 				resolvedConditions: new Map(
 					plan.expressionConditions.map((entry) => [
@@ -2140,13 +2149,31 @@ export class PlanCompiler {
 					if (Array.isArray(record.extraArgs)) {
 						aggregateArgs.push(...record.extraArgs);
 					}
-					return this.compileGenericNqlFunction(
+					const call = this.compileGenericNqlFunction(
 						fn,
 						aggregateArgs,
 						ctx,
 						state,
 						isDistinct,
 					);
+					// The aggregate keeps its FILTER (#1003): resolved by core when the
+					// plan is, otherwise through the route the plan takes.
+					if (record.filter !== undefined) {
+						const filter = this.compilePositionCondition(
+							record.filter as WhereIntent,
+							{ rootTable: ctx.rootTable, decisions: [] },
+							ctx,
+							state,
+							'filter',
+						);
+						return {
+							FuncCall: {
+								...(call as { FuncCall: Record<string, unknown> }).FuncCall,
+								agg_filter: filter,
+							},
+						} as Node;
+					}
+					return call;
 				}
 
 				case 'arithmetic': {
@@ -3159,6 +3186,7 @@ export class PlanCompiler {
 		state: HandlerCompilerState,
 		position: 'having' | 'case-when' | 'filter',
 	): Node {
+		assertConditionRootRecorded(intent, ctx, position);
 		return compileCondition(intent, {
 			...ctx,
 			position,
