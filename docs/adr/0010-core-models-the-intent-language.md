@@ -159,4 +159,5 @@ a defect, whatever the route.
 ## Deliveries
 
 - #891 slice 5b: expression-subquery bodies. Not started; this ADR is its premise.
-- #1027: not-yet refusals raised as `NotYetSupportedError`. Not started.
+- #1027: not-yet refusals raised as `NotYetSupportedError`. Delivered for the refusals worded "not yet" and for
+  `assertNoUnsupportedSubqueryModifiers`; the refusals worded only "not supported" are classified in #1088.

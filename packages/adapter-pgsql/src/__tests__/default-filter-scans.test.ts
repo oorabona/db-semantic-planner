@@ -9,6 +9,8 @@ import {
 	inSubquery,
 	isNull,
 	literal,
+	manyToMany,
+	NotYetSupportedError,
 	namedArg,
 	notExists,
 	op,
@@ -1220,5 +1222,51 @@ describe('dotted fields outside conditions under default filters (#891 slice 3)'
 			'SELECT posts.* FROM posts JOIN users AS author ON posts."authorId" = author.id AND author."deletedAt" IS NULL ORDER BY author.name ASC',
 		);
 		expect(result.params).toEqual([]);
+	});
+});
+
+describe('scan default filters and not-yet refusals', () => {
+	it("rethrows a not-yet refusal from a scan's default filter unchanged", () => {
+		const tagged = schema(
+			{
+				posts: { id: { type: 'integer', primaryKey: true } },
+				tags: { id: { type: 'integer', primaryKey: true } },
+				postTags: { postId: ref('posts'), tagId: ref('tags') },
+			},
+			undefined,
+			{
+				relations: {
+					posts: {
+						tags: manyToMany('tags', {
+							through: 'postTags',
+							inverse: 'posts',
+							sourceForeignKey: ['postId'],
+							targetForeignKey: ['tagId'],
+						}),
+					},
+				},
+			},
+		);
+		expect(() =>
+			createPgCompileOnlyAdapter({
+				model: tagged.model,
+			}).compileSelectExpression(
+				{
+					kind: 'subquery',
+					query: {
+						type: 'select',
+						from: 'posts',
+						select: { type: 'fields', fields: ['id'] },
+					},
+				},
+				{ model: tagged.model, defaultFilters: { posts: exists('tags') } },
+			),
+		).toThrow(
+			new NotYetSupportedError(
+				"many-to-many traversal exists('tags')",
+				'WHERE condition',
+				787,
+			),
+		);
 	});
 });

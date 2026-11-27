@@ -29,6 +29,7 @@ import { NON_SUBQUERY_BUILDER_BRAND } from './symbols.js';
 
 import {
 	type CompiledNqlQuery,
+	isNqlNotYetSupportedError,
 	type NqlCompilerOptions,
 	NqlLexer,
 	compile as nqlCompile,
@@ -38,7 +39,7 @@ import type {
 	NqlBindingRelationFilterMetadata,
 	NqlBindingVirtualRelation,
 } from '@dbsp/types';
-import { resolveJsonAggOrderKey } from '@dbsp/types';
+import { NotYetSupportedError, resolveJsonAggOrderKey } from '@dbsp/types';
 import {
 	explainUnsupportedNqlBindingIncludeHop,
 	getTrustedNqlRelationFilterFields,
@@ -1595,6 +1596,15 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			compilerOptions,
 		);
 		if (!result.success) {
+			// A not-yet refusal reaches the caller as the typed error, without the
+			// interpolation hint: it concerns a construct the text spells.
+			const notYet = result.errors?.find(isNqlNotYetSupportedError);
+			if (notYet)
+				throw new NotYetSupportedError(
+					notYet.construct,
+					notYet.position,
+					notYet.issue,
+				);
 			const errors =
 				result.errors?.map((e) => e.message).join(', ') ?? 'Unknown error';
 			const rawHint = this.hasBoundParams

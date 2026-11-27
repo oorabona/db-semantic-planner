@@ -23,6 +23,7 @@ import {
 	schema,
 	subquery,
 } from '@dbsp/core';
+import { NotYetSupportedError } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -322,9 +323,7 @@ describe('Non-simple subquery: compilation throws for modifiers that would be si
 			plan(queryIntent, testSchema.model, {
 				dialectCapabilities: POSTGRESQL_CAPABILITIES,
 			}),
-		).toThrow(
-			'IN subquery with GROUP BY, HAVING is not supported — it would silently change which rows match; restructure the query or use a CTE.',
-		);
+		).toThrow(new NotYetSupportedError('GROUP BY', 'IN subquery body', 1087));
 	});
 
 	it('IN with offset subquery: compilation throws (filter-broadening guard)', () => {
@@ -345,7 +344,7 @@ describe('Non-simple subquery: compilation throws for modifiers that would be si
 		};
 
 		expect(() => compileIntent(queryIntent, testSchema.model)).toThrow(
-			/IN subquery with OFFSET is not supported/,
+			/OFFSET in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 });

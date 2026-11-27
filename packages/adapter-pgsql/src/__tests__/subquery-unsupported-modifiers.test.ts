@@ -16,9 +16,11 @@ import {
 	POSTGRESQL_CAPABILITIES,
 	plan,
 	type QueryIntent,
+	ref,
 	schema,
 	subquery,
 } from '@dbsp/core';
+import { NotYetSupportedError, type WhereIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { convertWhereCondition } from '../intent-to-decisions.js';
@@ -108,7 +110,7 @@ describe('IN-subquery: unsupported modifiers throw clear error (filter-broadenin
 	it('throws when subquery has GROUP BY', () => {
 		const intent = makeInSubqueryIntent({ groupBy: ['product_id'] });
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
-			/IN subquery with GROUP BY is not supported/,
+			/GROUP BY in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -124,7 +126,7 @@ describe('IN-subquery: unsupported modifiers throw clear error (filter-broadenin
 		});
 		// having is guarded separately; GROUP BY is listed first
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
-			/IN subquery with.*is not supported/,
+			/GROUP BY in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -138,28 +140,28 @@ describe('IN-subquery: unsupported modifiers throw clear error (filter-broadenin
 			},
 		});
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
-			/IN subquery with HAVING is not supported/,
+			/HAVING in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
 	it('throws when subquery has OFFSET', () => {
 		const intent = makeInSubqueryIntent({ offset: 5 });
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
-			/IN subquery with OFFSET is not supported/,
+			/OFFSET in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
 	it('throws when subquery has DISTINCT', () => {
 		const intent = makeInSubqueryIntent({ distinct: true });
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
-			/IN subquery with DISTINCT is not supported/,
+			/DISTINCT in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
 	it('throws when subquery has DISTINCT ON', () => {
 		const intent = makeInSubqueryIntent({ distinctOn: ['product_id'] });
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
-			/IN subquery with DISTINCT ON is not supported/,
+			/DISTINCT ON in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -177,14 +179,14 @@ describe('IN-subquery: unsupported modifiers throw clear error (filter-broadenin
 			},
 		};
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
-			/IN subquery with aggregate SELECT.*is not supported/,
+			/aggregate SELECT in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
-	it('error message mentions restructuring or CTE', () => {
+	it('the refusal is a NotYetSupportedError', () => {
 		const intent = makeInSubqueryIntent({ groupBy: ['product_id'] });
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
-			/restructure the query or use a CTE/,
+			NotYetSupportedError,
 		);
 	});
 });
@@ -197,7 +199,7 @@ describe('scalar subquery: unsupported modifiers throw clear error (filter-broad
 	it('throws when subquery has GROUP BY', () => {
 		const intent = makeScalarSubqueryWhereIntent({ groupBy: ['category'] });
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
-			/scalar subquery with GROUP BY is not supported/,
+			/GROUP BY in a scalar subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -211,35 +213,35 @@ describe('scalar subquery: unsupported modifiers throw clear error (filter-broad
 			},
 		});
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
-			/scalar subquery with HAVING is not supported/,
+			/HAVING in a scalar subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
 	it('throws when subquery has OFFSET', () => {
 		const intent = makeScalarSubqueryWhereIntent({ offset: 10 });
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
-			/scalar subquery with OFFSET is not supported/,
+			/OFFSET in a scalar subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
 	it('throws when subquery has DISTINCT', () => {
 		const intent = makeScalarSubqueryWhereIntent({ distinct: true });
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
-			/scalar subquery with DISTINCT is not supported/,
+			/DISTINCT in a scalar subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
 	it('throws when subquery has DISTINCT ON', () => {
 		const intent = makeScalarSubqueryWhereIntent({ distinctOn: ['category'] });
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
-			/scalar subquery with DISTINCT ON is not supported/,
+			/DISTINCT ON in a scalar subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
-	it('error message mentions restructuring or CTE', () => {
+	it('the refusal is a NotYetSupportedError', () => {
 		const intent = makeScalarSubqueryWhereIntent({ groupBy: ['category'] });
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
-			/restructure the query or use a CTE/,
+			NotYetSupportedError,
 		);
 	});
 });
@@ -330,7 +332,7 @@ describe('NOT IN subquery: unsupported modifiers throw clear error', () => {
 			},
 		};
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
-			/IN subquery with GROUP BY is not supported/,
+			/GROUP BY in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 });
@@ -384,7 +386,7 @@ describe('IN-subquery: non-fields SELECT projection is rejected (gap #1)', () =>
 			},
 		};
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
-			/IN subquery with expressions SELECT.*is not supported/,
+			/expressions SELECT in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -460,7 +462,7 @@ describe('scalar subquery: expressions SELECT rejected (gap #1)', () => {
 			},
 		};
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
-			/scalar subquery with expressions SELECT.*is not supported/,
+			/expressions SELECT in a scalar subquery body is not supported yet \(#1087\)/,
 		);
 	});
 });
@@ -570,14 +572,14 @@ describe('IN/scalar subquery: existsWrap, lock, batchValuesSource throw', () => 
 	it('IN subquery throws when existsWrap is set', () => {
 		const intent = makeInSubqueryIntent({ existsWrap: true });
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
-			/IN subquery with existsWrap is not supported/,
+			/existsWrap in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
 	it('scalar subquery throws when existsWrap is set', () => {
 		const intent = makeScalarSubqueryWhereIntent({ existsWrap: true });
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
-			/scalar subquery with existsWrap is not supported/,
+			/existsWrap in a scalar subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -586,7 +588,7 @@ describe('IN/scalar subquery: existsWrap, lock, batchValuesSource throw', () => 
 			lock: { strength: 'for_update' as const },
 		});
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
-			/IN subquery with lock is not supported/,
+			/lock in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -595,7 +597,7 @@ describe('IN/scalar subquery: existsWrap, lock, batchValuesSource throw', () => 
 			batchValuesSource: { alias: 'v', columns: ['id'], params: [] },
 		});
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
-			/IN subquery with batchValuesSource is not supported/,
+			/batchValuesSource in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 });
@@ -616,7 +618,7 @@ describe('IN/scalar subquery: expression-based orderBy throws', () => {
 			],
 		});
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
-			/IN subquery with orderBy with expression.*is not supported/,
+			/ORDER BY with an expression in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -630,7 +632,7 @@ describe('IN/scalar subquery: expression-based orderBy throws', () => {
 			],
 		});
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
-			/scalar subquery with orderBy with expression.*is not supported/,
+			/ORDER BY with an expression in a scalar subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -828,7 +830,238 @@ describe('rawExists/rawNotExists — fail-loud guard for dropped subquery modifi
 	it('error message identifies the context as rawExists', () => {
 		const intent = makeRawExistsIntent({ limit: 1 });
 		expect(() => convertWhereCondition(intent as any, 'users')).toThrow(
-			/rawExists subquery with LIMIT/,
+			/LIMIT in a rawExists subquery body is not supported yet \(#1087\)/,
 		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Not-yet and semantic classes of condition-body refusals (ADR 0010, #1027)
+// ---------------------------------------------------------------------------
+describe('condition-body refusal classes', () => {
+	const bodySchema = schema({
+		users: { id: { type: 'integer', primaryKey: true }, name: 'string' },
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			authorId: ref('users', { as: 'author', inverse: 'authored' }),
+		},
+	});
+	const orm = createOrm({
+		model: bodySchema.model,
+		adapter: createPgCompileOnlyAdapter({ model: bodySchema.model }),
+	});
+	const body = (extra: Record<string, unknown>) =>
+		({
+			type: 'select',
+			from: 'posts',
+			select: { type: 'fields', fields: ['authorId'] },
+			...extra,
+		}) as unknown as QueryIntent;
+	const inBody = (extra: Record<string, unknown>) =>
+		({ kind: 'in', field: 'id', subquery: body(extra) }) as WhereIntent;
+	const scalarBody = (extra: Record<string, unknown>) =>
+		({
+			kind: 'subquery',
+			field: 'id',
+			operator: 'eq',
+			subquery: body(extra),
+		}) as WhereIntent;
+	const rawBody = (extra: Record<string, unknown>) =>
+		({ kind: 'rawExists', subquery: body(extra) }) as WhereIntent;
+	const dump = (where: WhereIntent) => () =>
+		orm.select('users').where(where).dump();
+	const flat = [{ relation: 'author', strategy: 'flat' }];
+	const hydrating = [{ relation: 'author' }];
+	const join = [
+		{
+			table: 'users',
+			on: { kind: 'comparison', field: 'id', operator: 'eq', value: 1 },
+		},
+	];
+	const batch = { alias: 'v', columns: ['id'], params: [] };
+	const one = (fn: string, field?: string) => ({
+		function: fn,
+		...(field !== undefined && { field }),
+	});
+
+	it('types the not-yet modifiers per body use', () => {
+		for (const [where, construct, position, issue] of [
+			[inBody({ groupBy: ['authorId'] }), 'GROUP BY', 'IN', 1087],
+			[inBody({ having: eq('authorId', 1) }), 'HAVING', 'IN', 1087],
+			[inBody({ distinctOn: ['authorId'] }), 'DISTINCT ON', 'IN', 1087],
+			[inBody({ include: flat }), 'flat include', 'IN', 1087],
+			[inBody({ joins: join }), 'joins', 'IN', 1087],
+			[inBody({ existsWrap: true }), 'existsWrap', 'IN', 1087],
+			[inBody({ lock: { strength: 'for_update' } }), 'lock', 'IN', 1087],
+			[inBody({ batchValuesSource: batch }), 'batchValuesSource', 'IN', 1087],
+			[
+				inBody({
+					orderBy: [
+						{ expression: { kind: 'ref', column: 'id' }, direction: 'asc' },
+					],
+				}),
+				'ORDER BY with an expression',
+				'IN',
+				1087,
+			],
+			[
+				inBody({ select: { type: 'aggregate', aggregates: [one('count')] } }),
+				'aggregate SELECT',
+				'IN',
+				1087,
+			],
+			[
+				inBody({
+					select: {
+						type: 'aggregate',
+						aggregates: [one('count'), one('count')],
+					},
+				}),
+				'aggregate SELECT',
+				'IN',
+				1087,
+			],
+			[
+				inBody({
+					select: {
+						type: 'expressions',
+						columns: [{ kind: 'ref', column: 'authorId' }],
+					},
+				}),
+				'expressions SELECT',
+				'IN',
+				1087,
+			],
+			[
+				inBody({
+					select: {
+						type: 'expressions',
+						columns: [
+							{ kind: 'ref', column: 'authorId' },
+							{ kind: 'ref', column: 'id' },
+						],
+					},
+				}),
+				'expressions SELECT',
+				'IN',
+				1087,
+			],
+			[
+				inBody({
+					existsWrap: true,
+					select: { type: 'fields', fields: ['authorId', 'id'] },
+				}),
+				'existsWrap',
+				'IN',
+				1087,
+			],
+			[
+				inBody({ existsWrap: true, include: hydrating }),
+				'existsWrap',
+				'IN',
+				1087,
+			],
+			[scalarBody({ distinct: true }), 'DISTINCT', 'scalar', 1087],
+			[scalarBody({ joins: join }), 'joins', 'scalar', 1039],
+			[
+				scalarBody({ batchValuesSource: batch }),
+				'batchValuesSource',
+				'scalar',
+				1031,
+			],
+			[scalarBody({ include: flat }), 'flat include', 'scalar', 1030],
+			[
+				scalarBody({
+					select: {
+						type: 'aggregate',
+						aggregates: [one('count'), one('max', 'id')],
+					},
+				}),
+				'aggregate SELECT',
+				'scalar',
+				1087,
+			],
+			[
+				scalarBody({
+					select: {
+						type: 'expressions',
+						columns: [{ kind: 'ref', column: 'authorId' }],
+					},
+				}),
+				'expressions SELECT',
+				'scalar',
+				1087,
+			],
+			[rawBody({ offset: 1, distinct: true }), 'OFFSET', 'rawExists', 1087],
+			[rawBody({ include: hydrating }), 'include', 'rawExists', 1087],
+			[rawBody({ limit: 1 }), 'LIMIT', 'rawExists', 1087],
+			[
+				rawBody({ orderBy: [{ field: 'id', direction: 'asc' }] }),
+				'ORDER BY',
+				'rawExists',
+				1087,
+			],
+		] as const)
+			expect(dump(where), `${construct} in ${position}`).toThrow(
+				new NotYetSupportedError(construct, `${position} subquery body`, issue),
+			);
+		expect(() =>
+			createPgCompileOnlyAdapter().compileUpdate({
+				type: 'update',
+				table: 'users',
+				set: { name: 'x' },
+				where: inBody({ groupBy: ['authorId'] }),
+			}),
+		).toThrow(new NotYetSupportedError('GROUP BY', 'IN subquery body', 1087));
+	});
+
+	it('keeps semantic projection refusals as plain errors', () => {
+		const IN_ONE = 'IN subquery must project exactly one named column';
+		for (const [where, message] of [
+			[
+				inBody({ select: { type: 'fields', fields: ['authorId', 'id'] } }),
+				`IN subquery with multi-field projection [authorId, id] (${IN_ONE} — use a single field) is not supported.`,
+			],
+			[
+				inBody({
+					groupBy: ['authorId'],
+					select: { type: 'fields', fields: ['authorId', 'id'] },
+				}),
+				`IN subquery with multi-field projection [authorId, id] (${IN_ONE} — use a single field) is not supported.`,
+			],
+			[
+				inBody({ include: hydrating }),
+				'IN subquery with include (relation hydration) is not supported.',
+			],
+			[
+				inBody({ include: [...flat, ...hydrating] }),
+				'IN subquery with include (relation hydration) is not supported.',
+			],
+			[
+				inBody({ select: undefined }),
+				`IN subquery with missing select (${IN_ONE}) is not supported.`,
+			],
+			[
+				inBody({ select: { type: 'all' } }),
+				`IN subquery with SELECT * / all (${IN_ONE}) is not supported.`,
+			],
+			[
+				inBody({ select: { type: 'fields', fields: [] } }),
+				`IN subquery with empty fields list (${IN_ONE}) is not supported.`,
+			],
+			[
+				inBody({ select: { type: 'fields', fields: [5] } }),
+				'IN subquery with non-string field element 5 (IN subquery fields must contain a plain column name string) is not supported.',
+			],
+			[
+				scalarBody({ select: { type: 'fields', fields: ['authorId', 'id'] } }),
+				'scalar subquery with multi-field projection [authorId, id] (scalar subquery must project exactly one column — use a single field) is not supported.',
+			],
+			[
+				scalarBody({ include: hydrating }),
+				'scalar subquery with include (relation hydration) is not supported.',
+			],
+		] as const)
+			expect(dump(where), message).toThrow(new Error(message));
 	});
 });

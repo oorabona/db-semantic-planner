@@ -4,7 +4,12 @@
  * Compiles NQL WITH/CTE syntax to CteQueryIntent.
  */
 
-import type { CteQueryIntent, QueryIntent, SimpleCteIntent } from '@dbsp/types';
+import {
+	type CteQueryIntent,
+	NotYetSupportedError,
+	type QueryIntent,
+	type SimpleCteIntent,
+} from '@dbsp/types';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/index.js';
 import type { NqlWithQuery } from '../parser/ast.js';
 import { compileNestedQuery, compileQuery } from './compile-query.js';
@@ -16,7 +21,7 @@ import type { CompileResult, CompilerContext, CompilerFns } from './types.js';
  * Algorithm:
  * 1. Collect CTE names, validate no duplicates.
  * 2. Register CTE names in validator to bypass table existence check.
- * 3. Compile each CTE body to QueryIntent (set ops in CTE body → error).
+ * 3. Compile each CTE body to QueryIntent (a set operation there is not yet supported, #1080).
  * 4. Compile outer query (CTE names are now known tables).
  * 5. Clear CTE names from validator.
  * 6. Return CteQueryIntent.
@@ -46,11 +51,11 @@ export function compileWithQuery(
 		const ctes: SimpleCteIntent[] = [];
 		for (const cte of astNode.ctes) {
 			const bodyResult = compileNestedQuery(cte.query, ctx, fns);
-			// Set operations in CTE body not supported in v1
 			if ('kind' in bodyResult && bodyResult.kind === 'setOperation') {
-				throw new NqlSemanticException(
-					NqlErrorCodes.SEM_UNKNOWN_TABLE,
-					`Set operations (union/intersect/except) in CTE body are not supported yet. Found in CTE '${cte.name}'.`,
+				throw new NotYetSupportedError(
+					`a set operation (CTE '${cte.name}')`,
+					'CTE body',
+					1080,
 				);
 			}
 			ctes.push({
@@ -63,9 +68,10 @@ export function compileWithQuery(
 		// 4. Compile outer query (CTE names are registered as known tables)
 		const outerResult = compileQuery(astNode.query, ctx, fns);
 		if ('kind' in outerResult && outerResult.kind === 'setOperation') {
-			throw new NqlSemanticException(
-				NqlErrorCodes.SEM_UNKNOWN_TABLE,
-				'Set operations in the outer query of a WITH clause are not supported yet.',
+			throw new NotYetSupportedError(
+				'a set operation',
+				'WITH clause outer query',
+				1080,
 			);
 		}
 

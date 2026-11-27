@@ -37,6 +37,7 @@
  */
 
 import { schema } from '@dbsp/core';
+import { NotYetSupportedError } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -99,7 +100,7 @@ describe('UPDATE: IN-subquery with dropped modifiers → throws (fail-closed)', 
 	it('UPDATE with GROUP BY in IN-subquery → throws before compiling', () => {
 		const intent = makeUpdateIntent({ groupBy: ['user_id'] });
 		expect(() => adapter.compileUpdate(intent)).toThrow(
-			/IN subquery with GROUP BY is not supported/,
+			/GROUP BY in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -113,7 +114,7 @@ describe('UPDATE: IN-subquery with dropped modifiers → throws (fail-closed)', 
 			},
 		});
 		expect(() => adapter.compileUpdate(intent)).toThrow(
-			/IN subquery with HAVING is not supported/,
+			/HAVING in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -128,21 +129,21 @@ describe('UPDATE: IN-subquery with dropped modifiers → throws (fail-closed)', 
 			},
 		});
 		expect(() => adapter.compileUpdate(intent)).toThrow(
-			/IN subquery with .* is not supported/,
+			/GROUP BY in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
 	it('UPDATE with OFFSET in IN-subquery → throws', () => {
 		const intent = makeUpdateIntent({ offset: 5 });
 		expect(() => adapter.compileUpdate(intent)).toThrow(
-			/IN subquery with OFFSET is not supported/,
+			/OFFSET in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
 	it('UPDATE with DISTINCT in IN-subquery → throws', () => {
 		const intent = makeUpdateIntent({ distinct: true });
 		expect(() => adapter.compileUpdate(intent)).toThrow(
-			/IN subquery with DISTINCT is not supported/,
+			/DISTINCT in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -169,11 +170,9 @@ describe('UPDATE: IN-subquery with dropped modifiers → throws (fail-closed)', 
 		);
 	});
 
-	it('error message tells caller to restructure or use a CTE', () => {
+	it('the refusal is a NotYetSupportedError', () => {
 		const intent = makeUpdateIntent({ groupBy: ['user_id'] });
-		expect(() => adapter.compileUpdate(intent)).toThrow(
-			/restructure the query or use a CTE/,
-		);
+		expect(() => adapter.compileUpdate(intent)).toThrow(NotYetSupportedError);
 	});
 });
 
@@ -185,7 +184,7 @@ describe('DELETE: IN-subquery with dropped modifiers → throws (fail-closed)', 
 	it('DELETE with GROUP BY in IN-subquery → throws before compiling', () => {
 		const intent = makeDeleteIntent({ groupBy: ['user_id'] });
 		expect(() => adapter.compileDelete(intent)).toThrow(
-			/IN subquery with GROUP BY is not supported/,
+			/GROUP BY in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -199,21 +198,21 @@ describe('DELETE: IN-subquery with dropped modifiers → throws (fail-closed)', 
 			},
 		});
 		expect(() => adapter.compileDelete(intent)).toThrow(
-			/IN subquery with HAVING is not supported/,
+			/HAVING in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
 	it('DELETE with OFFSET in IN-subquery → throws', () => {
 		const intent = makeDeleteIntent({ offset: 10 });
 		expect(() => adapter.compileDelete(intent)).toThrow(
-			/IN subquery with OFFSET is not supported/,
+			/OFFSET in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
 	it('DELETE with DISTINCT in IN-subquery → throws', () => {
 		const intent = makeDeleteIntent({ distinct: true });
 		expect(() => adapter.compileDelete(intent)).toThrow(
-			/IN subquery with DISTINCT is not supported/,
+			/DISTINCT in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -239,11 +238,9 @@ describe('DELETE: IN-subquery with dropped modifiers → throws (fail-closed)', 
 		);
 	});
 
-	it('error message tells caller to restructure or use a CTE', () => {
+	it('the refusal is a NotYetSupportedError', () => {
 		const intent = makeDeleteIntent({ groupBy: ['user_id'] });
-		expect(() => adapter.compileDelete(intent)).toThrow(
-			/restructure the query or use a CTE/,
-		);
+		expect(() => adapter.compileDelete(intent)).toThrow(NotYetSupportedError);
 	});
 });
 

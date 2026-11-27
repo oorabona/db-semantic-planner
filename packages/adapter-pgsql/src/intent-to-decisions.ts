@@ -13,7 +13,7 @@ import type {
 	SelectIntent,
 	WhereIntent,
 } from '@dbsp/types';
-import { isParamIntent } from '@dbsp/types';
+import { isParamIntent, NotYetSupportedError } from '@dbsp/types';
 import {
 	getTrustedNqlRelationFilterFields,
 	type Mutable,
@@ -677,10 +677,10 @@ function convertSubquery(cond: FlatWhereFields): PlanDecision | null {
 	// bind to the inner alias instead of the outer query, producing wrong SQL silently.
 	// Throw here (before emitting the decision) instead of producing broken SQL.
 	if (subquery.where && containsOuterRef(subquery.where)) {
-		throw new Error(
-			'scalar subquery with correlated outerRef() is not yet supported — ' +
-				'use exists("relation", { where: ... }) when a schema relation exists, ' +
-				'or restructure the query to avoid the correlation.',
+		throw new NotYetSupportedError(
+			'a correlated scalar subquery body',
+			'condition compiled outside the planner',
+			891,
 		);
 	}
 
@@ -807,9 +807,10 @@ export function convertWhereCondition(
 			// Correlated subqueries (outerRef inside the inner WHERE) are NOT yet
 			// supported on the rawExists/rawNotExists path.
 			if (sub.where && containsOuterRef(sub.where)) {
-				throw new Error(
-					`${cond.kind}: correlated subqueries (outerRef inside the inner WHERE) are not yet supported. ` +
-						'Workaround: use exists("relation", { where: ... }) when a schema relation exists, or wait for the rawExists correlation pipeline (tracked in TODO).',
+				throw new NotYetSupportedError(
+					`a correlated ${cond.kind}() body`,
+					'condition compiled outside the planner',
+					891,
 				);
 			}
 			return {

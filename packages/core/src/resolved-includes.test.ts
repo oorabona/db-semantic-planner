@@ -1,3 +1,4 @@
+import { NotYetSupportedError } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { ref, schema } from './dx/schema.js';
 import { eq, exists, outerRef, POSTGRESQL_CAPABILITIES } from './index.js';
@@ -62,8 +63,10 @@ describe('include predicate report construction', () => {
 				model,
 			),
 		).toThrow(
-			new Error(
-				'Relation predicates inside an include where are not supported yet at include[1](author).where for strategy join (oorabona/db-semantic-planner#892).',
+			new NotYetSupportedError(
+				'relation predicate exists()',
+				'include where at include[1](author)',
+				892,
 			),
 		);
 	});
@@ -79,8 +82,10 @@ describe('include predicate report construction', () => {
 				model,
 			),
 		).toThrow(
-			new Error(
-				'Include where is not supported for strategy json_agg at include[0](users).where (oorabona/db-semantic-planner#892).',
+			new NotYetSupportedError(
+				'include where',
+				'json_agg include at include[0](users)',
+				892,
 			),
 		);
 	});

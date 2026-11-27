@@ -1,3 +1,4 @@
+import { NotYetSupportedError } from '../include-errors.js';
 import type { ExpressionIntent } from './expression-intent.js';
 import type { QueryIntent } from './query-intent.js';
 import { NQL_SELECT_AGGREGATE_FUNCTIONS } from './select-function-allowlist.js';
@@ -107,6 +108,14 @@ export function dropsJoinIncludeData(intent: QueryIntent | undefined): boolean {
 	);
 }
 
-export function belongsToManyJoinIncludeRefusal(path: string): string {
-	return `Relation '${path}': many-to-many traversal is not supported yet (#787).`;
+/** The not-yet refusal of a many-to-many hop in an include or a relation join (#787). */
+export function belongsToManyTraversalRefusal(
+	path: string,
+	position: 'include' | 'join',
+): NotYetSupportedError {
+	return new NotYetSupportedError(
+		`many-to-many traversal '${path}'`,
+		position,
+		787,
+	);
 }

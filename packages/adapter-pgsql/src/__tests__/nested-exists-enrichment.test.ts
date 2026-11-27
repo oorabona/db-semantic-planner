@@ -244,7 +244,7 @@ describe('rawExists + outerRef on direct compileWhereIntent path', () => {
 		};
 		const ctx = makeRealCtx();
 		expect(() => compileWhereIntent(intent as any, ctx)).toThrow(
-			/correlated subqueries.*not yet supported/i,
+			/a correlated rawExists\(\) body in a condition compiled outside the planner is not supported yet \(#891\)/,
 		);
 	});
 
@@ -265,7 +265,7 @@ describe('rawExists + outerRef on direct compileWhereIntent path', () => {
 		};
 		const ctx = makeRealCtx();
 		expect(() => compileWhereIntent(intent as any, ctx)).toThrow(
-			/correlated subqueries.*not yet supported/i,
+			/a correlated rawNotExists\(\) body in a condition compiled outside the planner is not supported yet \(#891\)/,
 		);
 	});
 
@@ -836,7 +836,7 @@ describe('scalar-direct projection validation on direct compileWhereIntent path'
 			},
 		};
 		expect(() => compileWhereIntent(intent as any, makeScalarCtx())).toThrow(
-			/expressions SELECT.*not supported in scalar subquery/i,
+			/expressions SELECT in a scalar subquery body is not supported yet \(#1087\)/i,
 		);
 	});
 

@@ -5,10 +5,10 @@ import {
 	eq,
 	exists,
 	exprRef,
-	InvalidOperationError,
 	like,
 	ModelIRImpl,
 	manyToMany,
+	NotYetSupportedError,
 	outerRef,
 	ref,
 	relationColumn,
@@ -95,7 +95,11 @@ describe('resolved joins authority', () => {
 		expect
 			.soft(() => o.select('posts').join('tags').plan())
 			.toThrow(
-				"Invalid relation: Relation 'posts.tags': many-to-many traversal is not supported yet (#787).",
+				new NotYetSupportedError(
+					"many-to-many traversal 'posts.tags'",
+					'join',
+					787,
+				),
 			);
 	});
 	it('copied reports with and without joins refuse', () => {
@@ -345,7 +349,7 @@ it('rawExists modifier refusals happen during ON planning', () => {
 		orm.select('calls').join(values, { on }),
 	]) {
 		expect(() => query.plan()).toThrow(
-			'rawExists subquery with LIMIT, ORDER BY is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+			new NotYetSupportedError('LIMIT', 'rawExists subquery body', 1087),
 		);
 	}
 });
@@ -368,15 +372,19 @@ it('table ON sees root, self, every prior alias and its outerRef target', () => 
 	);
 });
 
-it('rawExists preserves the legacy outerRef-only correlation refusal', () => {
+it('rawExists refuses an outerRef-only correlation in ON as not yet', () => {
 	for (const [value, error] of [
 		[
 			outerRef('id'),
-			'rawExists: correlated subqueries (outerRef inside the inner WHERE) are not yet supported. Workaround: use exists("relation", { where: ... }) when a schema relation exists, or wait for the rawExists correlation pipeline (tracked in TODO).',
+			new NotYetSupportedError(
+				'a correlated rawExists() body',
+				'join ON condition',
+				1079,
+			),
 		],
 		[
 			{ kind: 'fieldRef', scope: 'outer', column: 'id' },
-			'Subquery in JOIN ON condition is not supported.',
+			new Error('Subquery in JOIN ON condition is not supported.'),
 		],
 	] as const) {
 		const on = {
@@ -394,7 +402,7 @@ it('rawExists preserves the legacy outerRef-only correlation refusal', () => {
 		};
 		expect(() =>
 			orm.select('calls').join('users', { as: 'u', on }).plan(),
-		).toThrow(new Error(error));
+		).toThrow(error);
 	}
 });
 
@@ -635,9 +643,10 @@ describe('#982: multi-hop relation joins', () => {
 			adapter: createPgCompileOnlyAdapter({ model: m.model }),
 		});
 		expect(() => o.select('postTags').join('post.tags').plan()).toThrow(
-			new InvalidOperationError(
-				'relation',
-				"Relation 'posts.tags': many-to-many traversal is not supported yet (#787).",
+			new NotYetSupportedError(
+				"many-to-many traversal 'posts.tags'",
+				'join',
+				787,
 			),
 		);
 	});

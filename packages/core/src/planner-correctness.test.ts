@@ -13,6 +13,7 @@
  */
 
 import type { IncludeIntent } from '@dbsp/types';
+import { NotYetSupportedError } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
 	createDialectCapabilities,
@@ -721,7 +722,7 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 		};
 
 		expect(() => plan(intent, testSchema.model)).toThrow(
-			'IN subquery with GROUP BY, HAVING is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+			new NotYetSupportedError('GROUP BY', 'IN subquery body', 1087),
 		);
 	});
 
@@ -747,7 +748,7 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 		};
 
 		expect(() => plan(intent, testSchema.model)).toThrow(
-			'IN subquery with HAVING is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+			new NotYetSupportedError('HAVING', 'IN subquery body', 1087),
 		);
 	});
 
@@ -768,7 +769,7 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 		};
 
 		expect(() => plan(intent, testSchema.model)).toThrow(
-			'IN subquery with OFFSET is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+			new NotYetSupportedError('OFFSET', 'IN subquery body', 1087),
 		);
 	});
 
@@ -789,7 +790,7 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 		};
 
 		expect(() => plan(intent, testSchema.model)).toThrow(
-			'IN subquery with DISTINCT ON is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+			new NotYetSupportedError('DISTINCT ON', 'IN subquery body', 1087),
 		);
 	});
 
@@ -812,7 +813,7 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 		};
 
 		expect(() => plan(intent, testSchema.model)).toThrow(
-			'IN subquery with aggregate SELECT (use a scalar subquery comparison instead) is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+			new NotYetSupportedError('aggregate SELECT', 'IN subquery body', 1087),
 		);
 	});
 
@@ -968,7 +969,7 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 		};
 
 		expect(() => plan(intent, testSchema.model)).toThrow(
-			'IN subquery with lock is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+			new NotYetSupportedError('lock', 'IN subquery body', 1087),
 		);
 	});
 
@@ -992,7 +993,7 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 		};
 
 		expect(() => plan(intent, testSchema.model)).toThrow(
-			'IN subquery with existsWrap is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+			new NotYetSupportedError('existsWrap', 'IN subquery body', 1087),
 		);
 	});
 });

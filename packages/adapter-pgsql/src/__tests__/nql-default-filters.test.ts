@@ -415,7 +415,7 @@ const cases = [
 		},
 		unfiltered: {
 			error:
-				"Invalid include: Relation 'posts.tags': many-to-many traversal is not supported yet (#787).",
+				"many-to-many traversal 'posts.tags' in an include is not supported yet (#787).",
 		},
 	},
 	{

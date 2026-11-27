@@ -15,6 +15,7 @@ import {
 import type { RecursivePlanReport } from '@dbsp/core/internal';
 import { compile as compileNql } from '@dbsp/nql';
 import type { CompiledNqlQuery } from '@dbsp/types';
+import { NotYetSupportedError } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { buildCompiledColumnProjections } from '../column-metadata.js';
 import { createDeclaredNameResolver } from '../declared-name-resolver.js';
@@ -678,7 +679,7 @@ describe('bigint js column metadata provenance', () => {
 				{ model: testSchema.model },
 			),
 		).toThrow(
-			'`js` read type is not yet supported through raw recursive CTEs (positional base∪step); use a plain select (tracking: #352)',
+			new NotYetSupportedError('`js` read type', 'raw recursive CTE', 352),
 		);
 	});
 
@@ -727,7 +728,7 @@ describe('bigint js column metadata provenance', () => {
 				{ model: testSchema.model },
 			),
 		).toThrow(
-			'`js` read type is not yet supported through raw recursive CTEs (positional base∪step); use a plain select (tracking: #352)',
+			new NotYetSupportedError('`js` read type', 'raw recursive CTE', 352),
 		);
 	});
 
@@ -741,7 +742,7 @@ describe('bigint js column metadata provenance', () => {
 		});
 
 		expect(() => builder.dump()).toThrow(
-			'`js` read type is not yet supported through raw recursive CTEs (positional base∪step); use a plain select (tracking: #352)',
+			new NotYetSupportedError('`js` read type', 'raw recursive CTE', 352),
 		);
 	});
 
@@ -934,9 +935,7 @@ e | select sequence + 1 as nextSequence`);
 				},
 				testSchema.model,
 			),
-		).toThrow(
-			'`js` read type is not yet supported through set operations; use a plain select (tracking: #352)',
-		);
+		).toThrow(new NotYetSupportedError('`js` read type', 'set operation', 352));
 	});
 
 	it('throws when set operations over an NQL binding would carry bigint js metadata', () => {
@@ -970,7 +969,7 @@ e | select sequence + 1 as nextSequence`);
 		};
 
 		expect(() => adapter.compile(bundle, { model: testSchema.model })).toThrow(
-			'`js` read type is not yet supported through set operations; use a plain select (tracking: #352)',
+			new NotYetSupportedError('`js` read type', 'set operation', 352),
 		);
 	});
 
@@ -1019,7 +1018,7 @@ e | select sequence + 1 as nextSequence`);
 		};
 
 		expect(() => adapter.compile(bundle, { model: testSchema.model })).toThrow(
-			'`js` read type is not yet supported through set operations; use a plain select (tracking: #352)',
+			new NotYetSupportedError('`js` read type', 'set operation', 352),
 		);
 	});
 });

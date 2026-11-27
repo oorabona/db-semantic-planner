@@ -234,8 +234,8 @@ describe('NqlErrorCodes', () => {
 
 	it('contains expected total count of error codes', () => {
 		const allCodes = Object.keys(NqlErrorCodes);
-		// 3 LEX + 4 PARSE + 8 SEM + 3 LIMIT = 18
-		expect(allCodes).toHaveLength(18);
+		// 3 LEX + 4 PARSE + 8 SEM + 3 LIMIT + 1 NOTYET = 19
+		expect(allCodes).toHaveLength(19);
 	});
 
 	it('all values are unique', () => {

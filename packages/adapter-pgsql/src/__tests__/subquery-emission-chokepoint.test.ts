@@ -47,7 +47,9 @@ import {
 	createOrm,
 	eq,
 	inSubquery,
+	NotYetSupportedError,
 	not,
+	outerRef,
 	rawExists,
 	schema,
 	subquery,
@@ -389,7 +391,7 @@ describe('PATH G: scalar-direct (handleSubqueryIntent → buildSubqueryFromInten
 		expect(() => compileWhereIntent(intent as any, makeDirectCtx())).toThrow(
 			// This path runs the 'scalar-direct' validation (the LIMIT case above is
 			// refused only there); its message label reads "scalar".
-			'scalar subquery with no projection (scalar subquery must project exactly one column — select one field or one aggregate) is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+			'scalar subquery with no projection (scalar subquery must project exactly one column — select one field or one aggregate) is not supported.',
 		);
 	});
 });
@@ -769,7 +771,7 @@ describe('DEFECT 2 regression: directly-constructed decision with lowered outerR
 		};
 
 		expect(() => compilePlan(plan)).toThrow(
-			/correlated outerRef.*not yet supported/i,
+			/a correlated scalar subquery body in a condition compiled outside the planner is not supported yet \(#891\)/,
 		);
 	});
 
@@ -804,7 +806,7 @@ describe('DEFECT 2 regression: directly-constructed decision with lowered outerR
 		};
 
 		expect(() => compilePlan(plan)).toThrow(
-			/correlated outerRef.*not yet supported/i,
+			/a correlated IN subquery body in a condition compiled outside the planner is not supported yet \(#891\)/,
 		);
 	});
 
@@ -848,7 +850,7 @@ describe('DEFECT 2 regression: directly-constructed decision with lowered outerR
 		};
 
 		expect(() => compilePlan(plan)).toThrow(
-			/correlated outerRef.*not yet supported/i,
+			/a correlated scalar subquery body in a condition compiled outside the planner is not supported yet \(#891\)/,
 		);
 	});
 
@@ -1207,5 +1209,98 @@ describe('malformed select.fields IN-subquery guard', () => {
 		).not.toThrow();
 		// Also verify intent conversion doesn't throw
 		expect(() => convertWhereCondition(intent as any, 'orders')).not.toThrow();
+	});
+});
+
+// ============================================================================
+// Correlated bodies on the routes outside the planner (#1027, #891)
+// ============================================================================
+
+describe('model-less correlated body refusals', () => {
+	it('types the model-less correlated body refusal', () => {
+		const adapter = createPgCompileOnlyAdapter();
+		const outside = (construct: string) =>
+			new NotYetSupportedError(
+				construct,
+				'condition compiled outside the planner',
+				891,
+			);
+		const users = () =>
+			subquery('audit')
+				.select('userId')
+				.where(eq('userId', outerRef('users.id')));
+		const usersIntent = () => users().build().toIntent();
+		// UPDATE / DELETE WHERE: the IN chokepoint.
+		expect(() =>
+			adapter.compileUpdate({
+				type: 'update',
+				table: 'users',
+				set: { name: 'x' },
+				where: inSubquery('id', users()),
+			}),
+		).toThrow(outside('a correlated IN subquery body'));
+		expect(() =>
+			adapter.compileDelete({
+				type: 'delete',
+				table: 'users',
+				where: inSubquery('id', users()),
+			}),
+		).toThrow(outside('a correlated IN subquery body'));
+		// Batch UPDATE WHERE: the direct condition compiler.
+		for (const [where, construct] of [
+			[rawExists(users()), 'a correlated rawExists() body'],
+			[
+				{ kind: 'rawNotExists' as const, subquery: usersIntent() },
+				'a correlated rawNotExists() body',
+			],
+		] as const)
+			expect(() =>
+				adapter.compileBatchUpdate({
+					type: 'batchUpdate',
+					table: 'users',
+					matchColumns: ['id'],
+					updates: [{ id: 1, name: 'x' }],
+					where,
+				}),
+			).toThrow(outside(construct));
+		// An aggregate FILTER in a model-less expression body: the decision lowering.
+		const posts = () =>
+			subquery('audit')
+				.select('id')
+				.where(eq('id', outerRef('posts.id')));
+		const postsIntent = () => posts().build().toIntent();
+		for (const [filter, construct] of [
+			[
+				{ kind: 'rawExists', subquery: postsIntent() },
+				'a correlated rawExists() body',
+			],
+			[
+				{ kind: 'rawNotExists', subquery: postsIntent() },
+				'a correlated rawNotExists() body',
+			],
+			[
+				{
+					kind: 'subquery',
+					field: 'id',
+					operator: 'eq',
+					subquery: postsIntent(),
+				},
+				'a correlated scalar subquery body',
+			],
+			[inSubquery('id', posts()), 'a correlated IN subquery body'],
+		] as const)
+			expect(() =>
+				adapter.compileSelectExpression({
+					kind: 'subquery',
+					query: {
+						type: 'select',
+						from: 'posts',
+						select: {
+							type: 'aggregate',
+							aggregates: [{ function: 'count', field: '*', filter }],
+						},
+					},
+				} as never),
+			).toThrow(outside(construct));
 	});
 });

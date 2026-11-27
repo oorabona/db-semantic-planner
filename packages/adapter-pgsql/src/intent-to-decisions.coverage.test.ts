@@ -1419,7 +1419,7 @@ describe('intentToDecisions - coverage', () => {
 				},
 			};
 			expect(() => intentToDecisions(intent, 'users')).toThrow(
-				'scalar subquery with no projection (scalar subquery must project exactly one column — select one field or one aggregate) is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+				'scalar subquery with no projection (scalar subquery must project exactly one column — select one field or one aggregate) is not supported.',
 			);
 		});
 	});

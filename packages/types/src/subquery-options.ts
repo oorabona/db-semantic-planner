@@ -1,35 +1,62 @@
+import { NotYetSupportedError } from './include-errors.js';
 import type { QueryIntent } from './intent-ast.js';
 
+/** Open issue of every not-yet condition-body construct (ADR 0010). */
+const CONDITION_BODY_ISSUE = 1087;
+/** A scalar body names the issue the expression scalar body names for the same construct. */
+const SCALAR_BODY_ISSUES: Readonly<Record<string, number>> = {
+	joins: 1039,
+	batchValuesSource: 1031,
+	'flat include': 1030,
+};
+
+/**
+ * Refuse the clauses a condition subquery body (rawExists, IN, scalar
+ * comparison) cannot carry. A construct with no meaning in the body is a
+ * semantic refusal (a plain `Error`); a meaningful one whose path does not
+ * exist yet is a `NotYetSupportedError` naming the first such construct.
+ * Semantic refusals win, except under `existsWrap`, whose output replaces the
+ * whole projection with one boolean. Aggregate and expressions lists are not
+ * counted: their arity is decided where the body is realised.
+ */
 export function assertNoUnsupportedSubqueryModifiers(
 	subquery: QueryIntent,
 	context: 'IN' | 'scalar' | 'scalar-direct' | 'rawExists',
 ): void {
-	const unsupported: string[] = [];
+	const label =
+		context === 'IN' ? 'IN' : context === 'rawExists' ? 'rawExists' : 'scalar';
+	const notYet: string[] = [];
+	const semantic: string[] = [];
 
 	// The resolved root SELECT WHERE body contract refuses unsupported modifiers
 	// at plan(); legacy direct routes (including mutations) refuse at compilation.
-	if (subquery.groupBy && subquery.groupBy.length > 0)
-		unsupported.push('GROUP BY');
-	if (subquery.having) unsupported.push('HAVING');
-	if (subquery.offset != null) unsupported.push('OFFSET');
-	if (subquery.distinct) unsupported.push('DISTINCT');
+	if (subquery.groupBy && subquery.groupBy.length > 0) notYet.push('GROUP BY');
+	if (subquery.having) notYet.push('HAVING');
+	if (subquery.offset != null) notYet.push('OFFSET');
+	if (subquery.distinct) notYet.push('DISTINCT');
 	if (subquery.distinctOn && subquery.distinctOn.length > 0)
-		unsupported.push('DISTINCT ON');
-	if (subquery.include && subquery.include.length > 0)
-		unsupported.push('include (relation hydration)');
-	if (subquery.joins && subquery.joins.length > 0) unsupported.push('joins');
+		notYet.push('DISTINCT ON');
+	if (subquery.include && subquery.include.length > 0) {
+		// An include joins and filters an existence test; in a body compared
+		// with a value, only a flat include (a join) has a reading.
+		if (label === 'rawExists') notYet.push('include');
+		else if (subquery.include.every((include) => include.strategy === 'flat'))
+			notYet.push('flat include');
+		else semantic.push('include (relation hydration)');
+	}
+	if (subquery.joins && subquery.joins.length > 0) notYet.push('joins');
 
 	// Additional structural modifiers that have no path through buildSubqueryFromIntent.
-	if (subquery.existsWrap) unsupported.push('existsWrap');
-	if (subquery.lock) unsupported.push('lock');
-	if (subquery.batchValuesSource) unsupported.push('batchValuesSource');
+	if (subquery.existsWrap) notYet.push('existsWrap');
+	if (subquery.lock) notYet.push('lock');
+	if (subquery.batchValuesSource) notYet.push('batchValuesSource');
 
 	// rawExists and scalar-direct: buildSubqueryFromIntent emits ONLY
 	// SELECT/FROM/WHERE — it does NOT emit sortClause or limitCount.
 	// The resolved root WHERE scalar body contract retains LIMIT and field ORDER BY;
 	// legacy scalar-direct routes cannot emit them.
 	if (context === 'rawExists' || context === 'scalar-direct') {
-		if (subquery.limit != null) unsupported.push('LIMIT');
+		if (subquery.limit != null) notYet.push('LIMIT');
 	}
 
 	// rawExists and scalar-direct: buildSubqueryFromIntent also drops orderBy
@@ -39,7 +66,7 @@ export function assertNoUnsupportedSubqueryModifiers(
 	// legacy scalar-direct routes cannot emit it.
 	if (context === 'rawExists' || context === 'scalar-direct') {
 		if (subquery.orderBy && subquery.orderBy.length > 0) {
-			unsupported.push('ORDER BY');
+			notYet.push('ORDER BY');
 		}
 	} else if (subquery.orderBy && subquery.orderBy.length > 0) {
 		// On the resolved root WHERE / legacy IN routes: only expression-based orderBy is unsupported
@@ -47,10 +74,7 @@ export function assertNoUnsupportedSubqueryModifiers(
 		const hasExpressionSort = subquery.orderBy.some(
 			(o) => !('field' in o) || (o as { field?: unknown }).field == null,
 		);
-		if (hasExpressionSort)
-			unsupported.push(
-				'orderBy with expression (only field-based ORDER BY is supported)',
-			);
+		if (hasExpressionSort) notYet.push('ORDER BY with an expression');
 	}
 
 	// IN-subquery-specific SELECT validation
@@ -61,22 +85,19 @@ export function assertNoUnsupportedSubqueryModifiers(
 		if (!select) {
 			// No select clause — would compile to SELECT * which is invalid inside
 			// an ANY subquery (PostgreSQL requires a single column expression).
-			unsupported.push(
+			semantic.push(
 				'missing select (IN subquery must project exactly one named column)',
 			);
 		} else if (select.type === 'aggregate') {
-			// Aggregate SELECT is silently ignored in the IN path (only fields are
-			// extracted); use a scalar subquery comparison instead.
-			unsupported.push(
-				'aggregate SELECT (use a scalar subquery comparison instead)',
-			);
+			// The IN path extracts fields only; the arity is decided once realised.
+			notYet.push('aggregate SELECT');
 		} else if (select.type === 'expressions') {
 			// SelectWithExpressionsIntent is not emitted by buildScalarSubquery.
-			unsupported.push('expressions SELECT (not supported in IN subquery)');
+			notYet.push('expressions SELECT');
 		} else if (select.type === 'all') {
 			// SELECT * inside ANY(...) is rejected by PostgreSQL (cannot compare
 			// a row value to a scalar lhs).
-			unsupported.push(
+			semantic.push(
 				'SELECT * / all (IN subquery must project exactly one named column)',
 			);
 		} else if (
@@ -103,14 +124,14 @@ export function assertNoUnsupportedSubqueryModifiers(
 			if (!select.fields || select.fields.length === 0) {
 				// undefined, null, or empty fields list falls back to '*' in the
 				// compiler — same problem as 'all'.
-				unsupported.push(
+				semantic.push(
 					'empty fields list (IN subquery must project exactly one named column)',
 				);
 			} else if (select.fields.length > 1) {
 				// Multi-field projection is silently truncated to fields[0] — the
 				// extra columns are dropped without error, producing incorrect SQL
 				// (the IN matches only the first column, silently ignoring the rest).
-				unsupported.push(
+				semantic.push(
 					`multi-field projection [${select.fields.join(', ')}] (IN subquery must project exactly one named column — use a single field)`,
 				);
 			} else if (typeof select.fields[0] !== 'string') {
@@ -120,7 +141,7 @@ export function assertNoUnsupportedSubqueryModifiers(
 				// as a broken column reference or falls back to SELECT *.
 				// Explicitly reject any non-string element so the caller gets a clear
 				// error instead of invalid SQL.
-				unsupported.push(
+				semantic.push(
 					`non-string field element ${JSON.stringify(select.fields[0])} (IN subquery fields must contain a plain column name string)`,
 				);
 			}
@@ -142,15 +163,16 @@ export function assertNoUnsupportedSubqueryModifiers(
 			  }
 			| undefined;
 		if (select === undefined || select.type === 'all') {
-			// A comparison body with no projection would compare against whatever the
-			// lowering projects in its place (the literal 1 on the resolved route).
-			unsupported.push(
+			// A comparison body with no projection has no meaning: it would compare
+			// against whatever the lowering projects in its place (the literal 1 on
+			// the resolved route), so it is a semantic refusal.
+			semantic.push(
 				'no projection (scalar subquery must project exactly one column — select one field or one aggregate)',
 			);
 		} else if (select.type === 'expressions') {
 			// SelectWithExpressionsIntent is not emitted by buildScalarSubquery or
 			// buildSubqueryFromIntent — dropped on both scalar paths.
-			unsupported.push('expressions SELECT (not supported in scalar subquery)');
+			notYet.push('expressions SELECT');
 		} else if (
 			select?.type === 'fields' &&
 			select.fields != null &&
@@ -159,7 +181,7 @@ export function assertNoUnsupportedSubqueryModifiers(
 			// Multi-field projection is silently truncated to fields[0] —
 			// the extra columns are dropped without error, producing incorrect SQL
 			// (the scalar comparison uses only the first column).
-			unsupported.push(
+			semantic.push(
 				`multi-field projection [${select.fields.join(', ')}] (scalar subquery must project exactly one column — use a single field)`,
 			);
 		} else if (
@@ -167,28 +189,24 @@ export function assertNoUnsupportedSubqueryModifiers(
 			select.aggregates != null &&
 			select.aggregates.length > 1
 		) {
-			// DEFECT 3 FIX: a scalar subquery must project exactly ONE column.
-			// The legacy scalar compiler takes only aggregates[0] — extra aggregates are
-			// silently dropped. The direct compile-where path (buildSubqueryFromIntent)
-			// emits ALL aggregates as separate ResTarget nodes, producing a multi-column
-			// scalar subquery that PostgreSQL rejects at runtime.
-			// Reject early on both paths so callers get a clear error.
-			unsupported.push(
-				`multi-aggregate projection (scalar subquery must project exactly one column — use a single aggregate)`,
-			);
+			// The legacy scalar compiler takes only aggregates[0] and the direct
+			// path emits every aggregate, so both refuse the list. Its length is not
+			// the arity (the compiler deduplicates repeated aggregates); the path
+			// that realises the body decides it.
+			notYet.push('aggregate SELECT');
 		}
 	}
 
-	if (unsupported.length > 0) {
-		const label =
-			context === 'IN'
-				? 'IN'
-				: context === 'rawExists'
-					? 'rawExists'
-					: 'scalar';
+	if (semantic.length > 0 && !subquery.existsWrap)
 		throw new Error(
-			`${label} subquery with ${unsupported.join(', ')} is not supported — ` +
-				'it would silently change which rows match; restructure the query or use a CTE.',
+			`${label} subquery with ${semantic.join(', ')} is not supported.`,
 		);
-	}
+	const construct = notYet[0];
+	if (construct !== undefined)
+		throw new NotYetSupportedError(
+			construct,
+			`${label} subquery body`,
+			(label === 'scalar' ? SCALAR_BODY_ISSUES[construct] : undefined) ??
+				CONDITION_BODY_ISSUE,
+		);
 }

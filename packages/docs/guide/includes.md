@@ -54,7 +54,7 @@ Each call is independent. Nested paths (like `posts.comments`) automatically tri
 
 ## Include with Options
 
-An include `where` is accepted only when the include compiles as a join, and it is added to the root `WHERE`. Other strategies refuse it at `plan()`. Unqualified `exprRef()` targets the include range; unqualified `outerRef()` targets its immediate source range, and qualified outer references search ancestor scopes nearest first. Relation predicates (`exists`, `notExists`, `some`, `every`, `none`) anywhere inside it, including nested query bodies, are also refused. See oorabona/db-semantic-planner#892.
+An include `where` is accepted only when the include compiles as a join, and it is added to the root `WHERE`. Other strategies refuse it at `plan()` with a `NotYetSupportedError` naming #892 (`include where in a json_agg include at include[0](posts) is not supported yet (#892).`). Unqualified `exprRef()` targets the include range; unqualified `outerRef()` targets its immediate source range, and qualified outer references search ancestor scopes nearest first. Relation predicates (`exists`, `notExists`, `some`, `every`, `none`) anywhere inside it, including nested query bodies, are also refused with a `NotYetSupportedError` naming #892 (`relation predicate exists() in an include where at include[0](posts) is not supported yet (#892).`). A `rawExists()`, `rawNotExists()`, IN or scalar-comparison body inside it whose `WHERE` holds an `outerRef()` throws a `NotYetSupportedError` naming #1079.
 
 Pass an options object as the second argument to filter, project, or disambiguate the include:
 
@@ -90,7 +90,7 @@ A to-one join include with omitted `select` or `select: { type: 'all' }` returns
 
 A `belongsToMany` include of the query is refused in every strategy, including explicit strategies, hints and defaults. For a `tags` include, `plan()` throws:
 
-> `Invalid include: Relation 'posts.tags': many-to-many traversal is not supported yet (#787).`
+> `many-to-many traversal 'posts.tags' in an include is not supported yet (#787).` It is a `NotYetSupportedError` whose `issue` is `787`.
 
 The provisional refusal applies to the query's includes (any strategy, NQL relation columns and `| flat`), relation `.join()`, relation predicates and the includes of a relation predicate (`exists(..., { include })`).
 
