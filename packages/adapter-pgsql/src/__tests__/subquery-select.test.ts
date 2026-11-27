@@ -2102,13 +2102,14 @@ describe('conditions holding or inside a query-local body keep their route (#891
 		const refused = (what: string) =>
 			`scalar subquery with ${what} is not supported — it would silently change which rows match; restructure the query or use a CTE.`;
 		expect(at.WHERE(bodies.case)).toEqual({
-			error: refused('expressions SELECT (not supported in scalar subquery)'),
+			error:
+				'expressions SELECT in a scalar subquery body is not supported yet (#1087).',
 		});
 		expect(at.WHERE(bodies.filter)).toEqual({
 			error: refused('an aggregate FILTER'),
 		});
 		expect(at.WHERE(bodies.having)).toEqual({
-			error: refused('GROUP BY, HAVING'),
+			error: 'GROUP BY in a scalar subquery body is not supported yet (#1087).',
 		});
 	});
 
