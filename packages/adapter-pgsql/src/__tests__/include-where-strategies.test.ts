@@ -1,4 +1,12 @@
-import { and, createOrm, eq, or, ref, schema } from '@dbsp/core';
+import {
+	and,
+	createOrm,
+	eq,
+	NotYetSupportedError,
+	or,
+	ref,
+	schema,
+} from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -101,7 +109,11 @@ describe('#888 non-join include refusal', () => {
 						.include('posts', { where })
 						.dump(),
 				).toThrow(
-					new RegExp(`strategy ${strategy}.*include\\[0\\]\\(posts\\).*#892`),
+					new NotYetSupportedError(
+						'include where',
+						`${strategy} include at include[0](posts)`,
+						892,
+					),
 				);
 			});
 		}
@@ -119,7 +131,7 @@ describe('#888 non-join include refusal', () => {
 			).toThrow(
 				join
 					? /include\[0\]\(posts\).*include\[0\]\(comments\).*parent strategy join.*child strategy json_agg.*#894/
-					: /strategy json_agg.*include\[0\]\(posts\).*include\[0\]\(comments\).*#892/,
+					: /^include where in a json_agg include at include\[0\]\(posts\)\.include\[0\]\(comments\) is not supported yet \(#892\)\.$/,
 			);
 		});
 	}
@@ -150,7 +162,9 @@ describe('#888 includes without where preserve main SQL', () => {
 it('refuses default include where through compile-only all', async () => {
 	await expect(
 		orm.select('users').include('posts', { where: or() }).all(),
-	).rejects.toThrow(/strategy json_agg.*include\[0\]\(posts\).*#892/);
+	).rejects.toThrow(
+		/^include where in a json_agg include at include\[0\]\(posts\) is not supported yet \(#892\)\.$/,
+	);
 });
 it('refuses public M:N include where', () => {
 	const db = schema({
@@ -174,5 +188,7 @@ it('refuses public M:N include where', () => {
 			.withPlanOptions({ defaultIncludeStrategy: 'json_agg' })
 			.include('posts', { where: eq('published', true) })
 			.dump(),
-	).toThrow(/strategy json_agg.*include\[0\]\(posts\).*#892/);
+	).toThrow(
+		/^include where in a json_agg include at include\[0\]\(posts\) is not supported yet \(#892\)\.$/,
+	);
 });

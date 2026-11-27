@@ -41,7 +41,11 @@
  * @internal
  */
 
-import { isParamIntent, type QueryIntent } from '@dbsp/types';
+import {
+	isParamIntent,
+	NotYetSupportedError,
+	type QueryIntent,
+} from '@dbsp/types';
 import type { Node, SelectStmt } from '@pgsql/types';
 import {
 	integerNode,
@@ -255,10 +259,10 @@ export function buildPredicateSubquerySelect(
 	) {
 		const label =
 			use === 'rawExists' ? 'rawExists' : use === 'IN' ? 'IN' : 'scalar';
-		throw new Error(
-			`${label} subquery with correlated outerRef() is not yet supported — ` +
-				'use exists("relation", { where: ... }) when a schema relation exists, ' +
-				'or restructure the query to avoid the correlation.',
+		throw new NotYetSupportedError(
+			`a correlated ${label} subquery body`,
+			'condition compiled outside the planner',
+			891,
 		);
 	}
 	// ---------------------------------------------------------------------------

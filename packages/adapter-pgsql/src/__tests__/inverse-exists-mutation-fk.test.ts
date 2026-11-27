@@ -784,7 +784,7 @@ describe('#891 slice 5a: batchSet guards and insert/upsert-from WHERE resolve th
 		const adapter = createPgCompileOnlyAdapter({ model });
 		const orm = createOrm({ model, adapter, suppressDxWarnings: true });
 		const refusal =
-			"WHERE exists('roles'): many-to-many traversal is not supported yet (#787).";
+			"many-to-many traversal exists('roles') in a WHERE condition is not supported yet (#787).";
 		expect(() =>
 			orm
 				.update('users')

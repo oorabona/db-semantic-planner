@@ -292,7 +292,7 @@ for (const position of ['raw', 'scalar', 'in'] as const) {
 				[...relations.values()].filter((r) => r.source === source),
 		};
 		expect(() => run(exists('comments'), model)).toThrow(
-			'many-to-many traversal is not supported yet (#787)',
+			/^many-to-many traversal exists\('comments'\) in a [A-Za-z .]+ condition is not supported yet \(#787\)\.$/,
 		);
 	});
 }

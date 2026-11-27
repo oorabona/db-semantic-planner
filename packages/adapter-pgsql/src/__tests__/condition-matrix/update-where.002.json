@@ -600,7 +600,7 @@
 			"shape": "leaf",
 			"sql": null,
 			"params": null,
-			"error": "rawExists subquery with LIMIT, ORDER BY is not supported — it would silently change which rows match; restructure the query or use a CTE."
+			"error": "LIMIT in a rawExists subquery body is not supported yet (#1087)."
 		},
 		{
 			"position": "update-where",
@@ -608,7 +608,7 @@
 			"shape": "and",
 			"sql": null,
 			"params": null,
-			"error": "rawExists subquery with LIMIT, ORDER BY is not supported — it would silently change which rows match; restructure the query or use a CTE."
+			"error": "LIMIT in a rawExists subquery body is not supported yet (#1087)."
 		},
 		{
 			"position": "update-where",
@@ -616,7 +616,7 @@
 			"shape": "or",
 			"sql": null,
 			"params": null,
-			"error": "rawExists subquery with LIMIT, ORDER BY is not supported — it would silently change which rows match; restructure the query or use a CTE."
+			"error": "LIMIT in a rawExists subquery body is not supported yet (#1087)."
 		},
 		{
 			"position": "update-where",
@@ -624,7 +624,7 @@
 			"shape": "not",
 			"sql": null,
 			"params": null,
-			"error": "rawExists subquery with LIMIT, ORDER BY is not supported — it would silently change which rows match; restructure the query or use a CTE."
+			"error": "LIMIT in a rawExists subquery body is not supported yet (#1087)."
 		},
 		{
 			"position": "update-where",
@@ -632,7 +632,7 @@
 			"shape": "two-level",
 			"sql": null,
 			"params": null,
-			"error": "rawExists subquery with LIMIT, ORDER BY is not supported — it would silently change which rows match; restructure the query or use a CTE."
+			"error": "LIMIT in a rawExists subquery body is not supported yet (#1087)."
 		},
 		{
 			"position": "update-where",

@@ -361,15 +361,28 @@ function extractTenantId(req: Request): string {
 
 ### Using the Error Factory
 
-DBSP provides typed errors with error codes for programmatic handling:
+DBSP provides typed errors with error codes for programmatic handling.
+
+A construct that is meaningful in its position but not realised yet throws
+`NotYetSupportedError` (exported by `@dbsp/core` and `@dbsp/types`). Its `construct`,
+`position` and `issue` fields name what is refused, where, and the open issue that
+tracks it; `Errors.isDbspError` returns `false` for it, so test it first. NQL's
+`compile()` reports the same refusal as a failed result whose error has the code
+`ERR-NOTYET-001` and the same three fields (`isNqlNotYetSupportedError` narrows it);
+`orm.nql` throws the `NotYetSupportedError` itself.
 
 ```typescript
-// doctest: skip — requires a real PostgreSQL connection (.all()) and a logger instance; Errors and ErrorCode are exported from @dbsp/core
-import { Errors, ErrorCode } from '@dbsp/core';
+// doctest: skip — requires a real PostgreSQL connection (.all()) and a logger instance; Errors, ErrorCode and NotYetSupportedError are exported from @dbsp/core
+import { Errors, ErrorCode, NotYetSupportedError } from '@dbsp/core';
 
 try {
   const users = await orm.select('users').where(eq('status', 'active')).all();
 } catch (error) {
+  // A construct the planner does not realise yet: error.issue names its issue
+  if (error instanceof NotYetSupportedError) {
+    logger.warn('Not supported yet', { issue: error.issue });
+    throw error;
+  }
   // Check if it's a DBSP error
   if (Errors.isDbspError(error)) {
     switch (error.code) {

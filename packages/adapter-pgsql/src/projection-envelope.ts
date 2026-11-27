@@ -5,7 +5,7 @@ import type {
 	OutputValueShape,
 	PlanReport,
 } from '@dbsp/types';
-import { resolveOutputReadHandling } from '@dbsp/types';
+import { NotYetSupportedError, resolveOutputReadHandling } from '@dbsp/types';
 import { compiledQueryFromProjection } from '@dbsp/types/adapter-sdk';
 import type {
 	CompiledColumnMetadata,
@@ -52,9 +52,7 @@ export type { OutputSource } from '@dbsp/types/internal';
 
 export type ProjectionDropReason =
 	| 'set-operation-positional-merge'
-	| 'raw-recursive-cte-positional-merge'
-	| 'unknown-raw-sql'
-	| 'unsupported-source';
+	| 'raw-recursive-cte-positional-merge';
 
 export type FromAstProjectionOptions = {
 	readonly sql: string;
@@ -317,17 +315,17 @@ function hasConvertibleModelColumn(projection: ProjectionState): boolean {
 	return false;
 }
 
-function droppedProjectionErrorMessage(reason: ProjectionDropReason): string {
-	switch (reason) {
-		case 'set-operation-positional-merge':
-			return '`js` read type is not yet supported through set operations; use a plain select (tracking: #352)';
-		case 'raw-recursive-cte-positional-merge':
-			return '`js` read type is not yet supported through raw recursive CTEs (positional base∪step); use a plain select (tracking: #352)';
-		case 'unknown-raw-sql':
-			return '`js` read type is not yet supported through unknown raw SQL; use a plain select (tracking: #352)';
-		case 'unsupported-source':
-			return '`js` read type is not yet supported through this projection source; use a plain select (tracking: #352)';
-	}
+/** A `js` read type through a positional merge is not realised yet (#352). */
+function droppedProjectionRefusal(
+	reason: ProjectionDropReason,
+): NotYetSupportedError {
+	return new NotYetSupportedError(
+		'`js` read type',
+		reason === 'set-operation-positional-merge'
+			? 'set operation'
+			: 'raw recursive CTE',
+		352,
+	);
 }
 
 function projectedHydrationPlan(
@@ -631,7 +629,7 @@ export function finalizeEnvelope<T = unknown>(
 ): CompiledQuery<T> {
 	if (env.projection.kind === 'dropped') {
 		if (env.projection.hadConvertibleSource) {
-			throw new Error(droppedProjectionErrorMessage(env.projection.reason));
+			throw droppedProjectionRefusal(env.projection.reason);
 		}
 		const fields: {
 			sql: string;

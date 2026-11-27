@@ -10,6 +10,7 @@
  * `decision.subqueryIntent` provenance) before building the SelectStmt.
  */
 
+import { NotYetSupportedError } from '@dbsp/types';
 import type { A_Expr, A_Expr_Kind, Node, SubLink } from '@pgsql/types';
 import { distinctExpr } from '../../ast-helpers.js';
 import { buildPredicateSubquerySelect } from '../../subquery-emission.js';
@@ -158,10 +159,10 @@ function buildScalarSubquery(
 		decision.conditions &&
 		conditionsContainOuterFieldRef(decision.conditions as unknown[])
 	) {
-		throw new Error(
-			'scalar subquery with correlated outerRef() is not yet supported — ' +
-				'use exists("relation", { where: ... }) when a schema relation exists, ' +
-				'or restructure the query to avoid the correlation.',
+		throw new NotYetSupportedError(
+			`a correlated ${use === 'IN' ? 'IN' : 'scalar'} subquery body`,
+			'condition compiled outside the planner',
+			891,
 		);
 	}
 

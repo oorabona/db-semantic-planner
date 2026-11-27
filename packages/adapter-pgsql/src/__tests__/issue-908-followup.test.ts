@@ -2,6 +2,7 @@ import {
 	createOrm,
 	eq,
 	exprRef,
+	NotYetSupportedError,
 	ref,
 	relationColumn,
 	schema,
@@ -98,19 +99,22 @@ it('belongsToMany refuses every planned join include source', () => {
 	(manyModel.relations as Map<string, RelationIR>).set('posts.tags', relation);
 	const manyAdapter = createPgCompileOnlyAdapter({ model: manyModel });
 	const manyOrm = createOrm({ model: manyModel, adapter: manyAdapter });
-	const refusal =
-		"Relation 'posts.tags': many-to-many traversal is not supported yet (#787).";
+	const refusal = new NotYetSupportedError(
+		"many-to-many traversal 'posts.tags'",
+		'include',
+		787,
+	);
 	for (const join of ['left', 'inner'] as const)
 		expect(() =>
 			manyOrm.select('posts').include('tags', { join }).plan(),
-		).toThrow(`Invalid include: ${refusal}`);
+		).toThrow(refusal);
 	expect(() =>
 		manyOrm
 			.select('posts')
 			.withPlanOptions({ defaultIncludeStrategy: 'join' })
 			.include('tags')
 			.plan(),
-	).toThrow(`Invalid include: ${refusal}`);
+	).toThrow(refusal);
 	expect(() => manyOrm.select('posts').include('tags').plan()).toThrow(refusal);
 	// Explicit table joins through the junction remain the manual route.
 	expect(
@@ -125,7 +129,5 @@ it('belongsToMany refuses every planned join include source', () => {
 		params: [],
 	});
 	Object.assign(relation, { includeStrategy: 'join' });
-	expect(() => manyOrm.select('posts').include('tags').plan()).toThrow(
-		`Invalid include: ${refusal}`,
-	);
+	expect(() => manyOrm.select('posts').include('tags').plan()).toThrow(refusal);
 });

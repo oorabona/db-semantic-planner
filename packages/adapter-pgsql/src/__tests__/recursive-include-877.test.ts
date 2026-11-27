@@ -1,4 +1,11 @@
-import { createOrm, eq, plan, ref, schema } from '@dbsp/core';
+import {
+	createOrm,
+	eq,
+	NotYetSupportedError,
+	plan,
+	ref,
+	schema,
+} from '@dbsp/core';
 import type { ModelIR, QueryIntent } from '@dbsp/types';
 import type { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
@@ -750,11 +757,16 @@ it('refuses applicable default filters for NQL recursive pseudo-columns', () => 
 		schema: filtered,
 		adapter: createPgCompileOnlyAdapter({ model: filtered.model }),
 	});
+	const refusal = new NotYetSupportedError(
+		'a default filter on the traversed table',
+		'recursive NQL relation column',
+		1081,
+	);
 	expect(() => instance.nql`nodes | select ancestors.*`.plan()).toThrow(
-		'Recursive include with applicable defaultFilters on traversed nodes is not yet supported (#906).',
+		refusal,
 	);
 	expect(() => instance.nql`nodes | select ancestors.*`.dump()).toThrow(
-		'Recursive include with applicable defaultFilters on traversed nodes is not yet supported (#906).',
+		refusal,
 	);
 });
 it('uses shared shortening for long requested keys and collision-free transport labels', () => {

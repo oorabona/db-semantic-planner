@@ -71,7 +71,7 @@ original keys and values.
 
 A `belongsToMany` include of the query is refused in every strategy, including explicit strategies, hints and defaults. For a `tags` include, `plan()` throws:
 
-> `Invalid include: Relation 'posts.tags': many-to-many traversal is not supported yet (#787).`
+> `many-to-many traversal 'posts.tags' in an include is not supported yet (#787).` It is a `NotYetSupportedError` whose `issue` is `787`.
 
 ## Row Explosion Risk
 

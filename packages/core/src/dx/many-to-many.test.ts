@@ -1,5 +1,7 @@
+import { NotYetSupportedError } from '@dbsp/types';
 import { expect, it } from 'vitest';
 import { plan } from '../planner.js';
+import { exists } from './filters.js';
 import {
 	manyToMany,
 	ref,
@@ -162,7 +164,11 @@ it('refuses every include strategy at planning', () => {
 				{ defaultIncludeStrategy: strategy === 'flat' ? 'auto' : strategy },
 			),
 		).toThrow(
-			"Relation 'posts.tags': many-to-many traversal is not supported yet (#787).",
+			new NotYetSupportedError(
+				"many-to-many traversal 'posts.tags'",
+				'include',
+				787,
+			),
 		);
 });
 it('refuses a relation join at planning', () => {
@@ -177,7 +183,11 @@ it('refuses a relation join at planning', () => {
 			model,
 		),
 	).toThrow(
-		"Relation 'posts.tags': many-to-many traversal is not supported yet (#787).",
+		new NotYetSupportedError(
+			"many-to-many traversal 'posts.tags'",
+			'join',
+			787,
+		),
 	);
 });
 it('retains ordered composite referenced keys on both directions', () => {
@@ -322,6 +332,30 @@ it('names nested include refusals from the query root once', () => {
 			{ defaultIncludeStrategy: 'json_agg' },
 		),
 	).toThrow(
-		"Relation 'authors.posts.tags': many-to-many traversal is not supported yet (#787).",
+		new NotYetSupportedError(
+			"many-to-many traversal 'authors.posts.tags'",
+			'include',
+			787,
+		),
+	);
+});
+it('refuses a default filter crossing a many-to-many relation as not yet', () => {
+	expect(() =>
+		schema(definition, undefined, {
+			...options(),
+			defaultFilters: { posts: exists('tags') },
+		}),
+	).toThrow(NotYetSupportedError);
+	expect(() =>
+		schema(definition, undefined, {
+			...options(),
+			defaultFilters: { posts: exists('tags') },
+		}),
+	).toThrow(
+		new NotYetSupportedError(
+			"many-to-many traversal exists('tags')",
+			'WHERE condition',
+			787,
+		),
 	);
 });

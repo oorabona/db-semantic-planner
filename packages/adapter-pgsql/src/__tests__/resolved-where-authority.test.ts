@@ -14,6 +14,7 @@ import {
 import { resolveSelectWhere } from '@dbsp/core/internal';
 import {
 	type ModelIR,
+	NotYetSupportedError,
 	type PlanReport,
 	type QueryIntent,
 	RangeAllocator,
@@ -235,7 +236,11 @@ describe('resolved root WHERE refusal proofs (#891)', () => {
 				.where(exists('calls'))
 				.plan(),
 		).toThrow(
-			"WHERE exists('calls'): many-to-many traversal is not supported yet (#787).",
+			new NotYetSupportedError(
+				"many-to-many traversal exists('calls')",
+				'WHERE condition',
+				787,
+			),
 		);
 	});
 	it('5: scalar body naming scans at most 8d + 4 names', () => {

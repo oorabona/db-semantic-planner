@@ -1,4 +1,4 @@
-import { RangeAllocator } from '@dbsp/types';
+import { NotYetSupportedError, RangeAllocator } from '@dbsp/types';
 import { copyDefaultFilters, getDefaultFilter } from './default-filter-map.js';
 import { assertUnplannedDefaultFilters } from './dx/default-filter-refusals.js';
 import {
@@ -39,7 +39,7 @@ import type {
 } from '@dbsp/types';
 import { resolveJsonAggOrderKey, toColumnList } from '@dbsp/types';
 import {
-	belongsToManyJoinIncludeRefusal,
+	belongsToManyTraversalRefusal,
 	dropsJoinIncludeData,
 	markPlannedReport,
 	resolveDeclaredRelationKeys,
@@ -1328,11 +1328,9 @@ function processInclude(
 	}
 
 	if (relation.type === 'belongsToMany')
-		throw new InvalidOperationError(
+		throw belongsToManyTraversalRefusal(
+			`${queryIntent?.from ?? sourceTable}.${fullPath}`,
 			'include',
-			belongsToManyJoinIncludeRefusal(
-				`${queryIntent?.from ?? sourceTable}.${fullPath}`,
-			),
 		);
 
 	// Check for circular includes
@@ -2224,8 +2222,10 @@ export function validateRecursiveIncludeStrategy(
 	if (!recursive) return false;
 	validateRecursiveIncludeRelation(include.recursive, relation);
 	if (applicableDefaultFilter)
-		throw new Error(
-			'Recursive include with applicable defaultFilters on traversed nodes is not yet supported (#906).',
+		throw new NotYetSupportedError(
+			'a default filter on the traversed table',
+			'recursive NQL relation column',
+			1081,
 		);
 	if (inSetOperation)
 		throw new Error('Recursive include option set operations is not supported');

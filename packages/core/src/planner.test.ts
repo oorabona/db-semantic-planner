@@ -419,7 +419,7 @@ describe('Semantic Planner', () => {
 			};
 
 			expect(() => plan(intent, q1Schema)).toThrow(
-				'IN subquery with multi-field projection [productId, locale] (IN subquery must project exactly one named column — use a single field) is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+				'IN subquery with multi-field projection [productId, locale] (IN subquery must project exactly one named column — use a single field) is not supported.',
 			);
 		});
 

@@ -633,7 +633,7 @@ SELECT users.*, COALESCE((SELECT json_agg(jsonb_build_object('roleId', __t__.rol
 
 *Schema: blog*
 
-With `posts.tags` declared using `manyToMany()`, `posts | select *, tags.*`, `posts | select id, tags.name` and `| flat` are refused at planning with a message containing `Relation 'posts.tags': many-to-many traversal is not supported yet (#787).` NQL validates the leaf column against `tags`; the declaration does not yet enable traversal. Without the declaration, the query reports an unknown relation.
+With `posts.tags` declared using `manyToMany()`, `posts | select *, tags.*`, `posts | select id, tags.name` and `| flat` are refused at planning with a `NotYetSupportedError`: `many-to-many traversal 'posts.tags' in an include is not supported yet (#787).` NQL validates the leaf column against `tags`; the declaration does not yet enable traversal. Without the declaration, the query reports an unknown relation.
 
 The provisional refusal applies to the query's includes (any strategy, NQL relation columns and `| flat`), relation `.join()`, relation predicates and the includes of a relation predicate.
 
@@ -1318,7 +1318,7 @@ recent_users | select username, createdAt
 
 - CTE names are reserved: they act as table references in the outer query
 - Duplicate CTE names are a semantic error
-- Set operations (`| union`, `| intersect`, `| except`) inside CTE bodies are not supported in v1
+- A set operation (`| union`, `| intersect`, `| except`) as a CTE body or as the outer query of a `with` is not supported yet (#1080): `compile()` reports it with the code `ERR-NOTYET-001` and the fields `construct`, `position` and `issue`, and `orm.nql` throws `NotYetSupportedError`
 - `with` is now a **reserved keyword** — identifiers named `with` require quoting
 
 ## Hierarchy (Recursive CTE)

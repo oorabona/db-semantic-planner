@@ -7,7 +7,11 @@
  * NOT EXISTS checks that no related records exist.
  */
 
-import { type ColumnListInput, toColumnList } from '@dbsp/types';
+import {
+	type ColumnListInput,
+	NotYetSupportedError,
+	toColumnList,
+} from '@dbsp/types';
 import type { Node, SelectStmt, SubLink } from '@pgsql/types';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
 import { andExpr, eqExpr, joinExpr, sqlRangeVar } from '../../ast-helpers.js';
@@ -319,8 +323,10 @@ function buildExistsSubquery(
 				}
 				if (rel) {
 					if (rel.type === 'belongsToMany') {
-						throw new Error(
-							`${(ctx.position ?? 'where').toUpperCase()} include('${joinRelation}'): many-to-many traversal is not supported yet (#787).`,
+						throw new NotYetSupportedError(
+							`many-to-many traversal include('${joinRelation}')`,
+							`${(ctx.position ?? 'where').toUpperCase()} condition`,
+							787,
 						);
 					}
 					joinTargetTable = rel.target;

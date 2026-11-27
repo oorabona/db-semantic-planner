@@ -9,6 +9,7 @@ import {
 	exprRef,
 	fn,
 	literal,
+	NotYetSupportedError,
 	nqlRaw,
 	type QueryIntent,
 	ref,
@@ -389,9 +390,22 @@ departments | select name | union (employee_names | select name | except (depart
 				},
 			};
 
-			expect(() => adapter.compileSetOperation(setOp, jsSchema.model)).toThrow(
-				'`js` read type is not yet supported through set operations; use a plain select (tracking: #352)',
+			const refusal = new NotYetSupportedError(
+				'`js` read type',
+				'set operation',
+				352,
 			);
+			expect(() => adapter.compileSetOperation(setOp, jsSchema.model)).toThrow(
+				refusal,
+			);
+			const jsOrm = createOrm({ schema: jsSchema, adapter });
+			expect(() =>
+				jsOrm
+					.select('events')
+					.columns(['sequence'])
+					.union(jsOrm.select('events').columns(['sequence']))
+					.dump(),
+			).toThrow(refusal);
 		});
 
 		it('works with nested set operations built manually', () => {

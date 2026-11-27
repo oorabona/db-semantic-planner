@@ -77,7 +77,7 @@ const rootRuntime = [
 ];
 // Join include data rules shared by the planner and the adapter (#908).
 const joinIncludeExports = [
-	'belongsToManyJoinIncludeRefusal',
+	'belongsToManyTraversalRefusal',
 	'dropsJoinIncludeData',
 ];
 // The resolved relation path contract (#787, #891 step 5).

@@ -6,7 +6,7 @@ import type {
 } from '@dbsp/types';
 import { resolveOutputReadHandling, toColumnList } from '@dbsp/types';
 import {
-	belongsToManyJoinIncludeRefusal,
+	belongsToManyTraversalRefusal,
 	dropsJoinIncludeData,
 	type Mutable,
 } from '@dbsp/types/internal';
@@ -236,8 +236,13 @@ export function resolveIncludePayloadShapes(
 		const relationType: string | undefined =
 			d.resolvedInclude?.relationType ?? d.relationType;
 		if (strategy === 'join' && relationType === 'belongsToMany')
+			// Internal route (no public entry reaches it): a plain error with the
+			// not-yet refusal's text; see #891.
 			throw new Error(
-				belongsToManyJoinIncludeRefusal(`${d.intentPath ?? path}(${path})`),
+				belongsToManyTraversalRefusal(
+					`${d.intentPath ?? path}(${path})`,
+					'include',
+				).message,
 			);
 		if (
 			strategy === 'join' &&

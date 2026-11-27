@@ -40,6 +40,7 @@ import {
 	compilePlan,
 	type SimplifiedPlanReport,
 } from '@dbsp/adapter-pgsql/internal';
+import { NotYetSupportedError } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 
@@ -81,7 +82,7 @@ describe('compilePlan: IN-subquery with dropped modifiers → throws (dispatchWh
 	it('GROUP BY in IN-subquery → throws before producing SQL', () => {
 		const plan = makePlan({ groupBy: ['region'] });
 		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with GROUP BY is not supported/,
+			/GROUP BY in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -90,28 +91,28 @@ describe('compilePlan: IN-subquery with dropped modifiers → throws (dispatchWh
 			having: { kind: 'comparison', field: 'id', operator: 'gt', value: 0 },
 		});
 		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with HAVING is not supported/,
+			/HAVING in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
 	it('OFFSET in IN-subquery → throws', () => {
 		const plan = makePlan({ offset: 5 });
 		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with OFFSET is not supported/,
+			/OFFSET in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
 	it('DISTINCT in IN-subquery → throws', () => {
 		const plan = makePlan({ distinct: true });
 		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with DISTINCT is not supported/,
+			/DISTINCT in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
 	it('DISTINCT ON in IN-subquery → throws', () => {
 		const plan = makePlan({ distinctOn: ['region'] });
 		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with DISTINCT ON is not supported/,
+			/DISTINCT ON in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -125,7 +126,7 @@ describe('compilePlan: IN-subquery with dropped modifiers → throws (dispatchWh
 			],
 		});
 		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with joins is not supported/,
+			/joins in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -166,15 +167,13 @@ describe('compilePlan: IN-subquery with dropped modifiers → throws (dispatchWh
 			having: { kind: 'comparison', field: 'id', operator: 'gt', value: 0 },
 		});
 		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with .* is not supported/,
+			/GROUP BY in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
-	it('error message tells caller to restructure or use a CTE', () => {
+	it('the refusal is a NotYetSupportedError', () => {
 		const plan = makePlan({ groupBy: ['region'] });
-		expect(() => compilePlan(plan)).toThrow(
-			/restructure the query or use a CTE/,
-		);
+		expect(() => compilePlan(plan)).toThrow(NotYetSupportedError);
 	});
 
 	it('notIn operator with GROUP BY in subquery → also throws', () => {
@@ -195,7 +194,7 @@ describe('compilePlan: IN-subquery with dropped modifiers → throws (dispatchWh
 			],
 		};
 		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with GROUP BY is not supported/,
+			/GROUP BY in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -218,7 +217,7 @@ describe('compilePlan: IN-subquery with dropped modifiers → throws (dispatchWh
 			],
 		};
 		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with GROUP BY is not supported/,
+			/GROUP BY in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 });
@@ -262,7 +261,7 @@ describe('compilePlan: nested IN-subquery (mapInSubqueryCondition) — forbidden
 			],
 		};
 		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with GROUP BY is not supported/,
+			/GROUP BY in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -298,7 +297,7 @@ describe('compilePlan: nested IN-subquery (mapInSubqueryCondition) — forbidden
 			],
 		};
 		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with HAVING is not supported/,
+			/HAVING in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -329,11 +328,11 @@ describe('compilePlan: nested IN-subquery (mapInSubqueryCondition) — forbidden
 			],
 		};
 		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with DISTINCT is not supported/,
+			/DISTINCT in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
-	it('nested IN subquery error message tells caller to restructure or use a CTE', () => {
+	it('nested IN subquery refusal is a NotYetSupportedError', () => {
 		const plan: SimplifiedPlanReport = {
 			rootTable: 'orders',
 			decisions: [
@@ -359,9 +358,7 @@ describe('compilePlan: nested IN-subquery (mapInSubqueryCondition) — forbidden
 				},
 			],
 		};
-		expect(() => compilePlan(plan)).toThrow(
-			/restructure the query or use a CTE/,
-		);
+		expect(() => compilePlan(plan)).toThrow(NotYetSupportedError);
 	});
 });
 
@@ -507,7 +504,7 @@ describe('compilePlan: nested IN with subquery in pd.value — mapInSubqueryCond
 			],
 		};
 		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with GROUP BY is not supported/,
+			/GROUP BY in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -543,7 +540,7 @@ describe('compilePlan: nested IN with subquery in pd.value — mapInSubqueryCond
 			],
 		};
 		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with HAVING is not supported/,
+			/HAVING in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -574,7 +571,7 @@ describe('compilePlan: nested IN with subquery in pd.value — mapInSubqueryCond
 			],
 		};
 		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with OFFSET is not supported/,
+			/OFFSET in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -605,7 +602,7 @@ describe('compilePlan: nested IN with subquery in pd.value — mapInSubqueryCond
 			],
 		};
 		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with DISTINCT is not supported/,
+			/DISTINCT in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -849,7 +846,7 @@ describe('compilePlan: IN subquery with logical group (whereAnd/whereOr) wrappin
 			],
 		};
 		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with GROUP BY is not supported/,
+			/GROUP BY in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -897,7 +894,7 @@ describe('compilePlan: IN subquery with logical group (whereAnd/whereOr) wrappin
 			],
 		};
 		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with HAVING is not supported/,
+			/HAVING in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -978,7 +975,7 @@ describe('compilePlan: IN subquery with logical group (whereAnd/whereOr) wrappin
 			],
 		};
 		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with DISTINCT is not supported/,
+			/DISTINCT in an IN subquery body is not supported yet \(#1087\)/,
 		);
 	});
 });

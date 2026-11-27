@@ -38,6 +38,27 @@ export interface NqlSemanticError extends NqlError {
 	relatedSymbol?: string | undefined;
 }
 
+/**
+ * A construct that is meaningful in its position but whose code path does not
+ * exist yet (ADR 0010): the data form of `NotYetSupportedError`.
+ */
+export interface NqlNotYetSupportedError extends NqlError {
+	code: 'ERR-NOTYET-001';
+	construct: string;
+	position: string;
+	issue: number;
+}
+
+/** Whether a result error is a not-yet refusal carrying its construct, position and issue. */
+export function isNqlNotYetSupportedError(
+	error: NqlError,
+): error is NqlNotYetSupportedError {
+	return (
+		error.code === NqlErrorCodes.NOT_YET_SUPPORTED &&
+		typeof (error as Partial<NqlNotYetSupportedError>).issue === 'number'
+	);
+}
+
 /** Warning (non-fatal issues) */
 export interface NqlWarning {
 	code: string;
@@ -73,6 +94,9 @@ export const NqlErrorCodes = {
 	LIMIT_SUBQUERY_DEPTH: 'ERR-LIMIT-001',
 	LIMIT_CLAUSE_COUNT: 'ERR-LIMIT-002',
 	LIMIT_JOIN_COUNT: 'ERR-LIMIT-003',
+
+	// Not-yet refusals (ADR 0010)
+	NOT_YET_SUPPORTED: 'ERR-NOTYET-001',
 } as const;
 
 /** Create a formatted error message with location */

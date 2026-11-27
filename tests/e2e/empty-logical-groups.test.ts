@@ -96,6 +96,8 @@ describe('#888 empty logical groups with rows', () => {
 		expect(empty).toEqual([]);
 		await expect(
 			orm.select('users').include('authoredPosts', { where: or() }).all(),
-		).rejects.toThrow(/strategy json_agg.*include\[0\]\(authoredPosts\).*#892/);
+		).rejects.toThrow(
+			/^include where in a json_agg include at include\[0\]\(authoredPosts\) is not supported yet \(#892\)\.$/,
+		);
 	});
 });
