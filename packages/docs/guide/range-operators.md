@@ -23,8 +23,8 @@ These map directly onto the PostgreSQL operators `&&`, `@>`, and `<@`, and they 
 ## API
 
 All three helpers share the same shape. Both the tuple form (returns an expression-shaped
-`PredicateExpressionRef` accepted by `.where()`) and the object form (returns a `WhereRangeIntent` for
-the backward-compatible planner path) are supported. Their symbolic operators (`&&`, `@>`,
+`PredicateExpressionRef` accepted by `.where()`) and the object form (returns a `WhereRangeIntent`, see the
+object form below) are supported. Their symbolic operators (`&&`, `@>`,
 `<@`) remain in the narrow predicate operator set; logical compositions made with `op('AND',
 ...)`, `op('OR', ...)`, or `op('NOT', ...)` are WHERE-only and should be passed directly to
 `.where()`.
@@ -55,6 +55,41 @@ Compiles to `"column" @> rangeType($1, $2)`. Use when the *stored* range must en
 ### `rangeContainedBy(column, [lower, upper], rangeType?)`
 
 Compiles to `"column" <@ rangeType($1, $2)`. Use when the test range must enclose the *stored* one.
+
+### Columns and bounds
+
+- The column can be a name, a `ColumnRef` (`orm.tables.bookings.period`) or an expression.
+- Each tuple bound is a value: a plain value (string, number, `Date`, `null`) is bound as a parameter, and pg
+  serialises a `Date` itself. An expression (`exprRef('starts_at')`, `fn(...)`, a `ColumnRef`, a subquery) is
+  compiled in place: `rangeOverlaps('span', [exprRef('score'), 5], 'int4range')` gives
+  `span && int4range(score, $1)`. `param(v)` binds `v`; `literal(v)` inlines it.
+
+### Object form: `{ lower, upper, bounds }`
+
+`rangeOverlaps('period', { lower, upper, bounds })` (and the same for `rangeContains` and `rangeContainedBy`)
+compiles to the column's range constructor with its bounds as the third argument:
+
+```typescript
+// doctest: skip — SQL shape reference
+rangeOverlaps('period', { lower: '2024-06-10', upper: '2024-06-15', bounds: '[]' });
+// period && daterange($1, $2, '[]')
+```
+
+- `bounds` is one of `'[)'` (the default), `'[]'`, `'()'` and `'(]'`; any other value is refused.
+- `lower` and `upper` follow the same value rule as tuple bounds. `null` or `undefined` is an unbounded side.
+  A bound can also be another column (`exprRef('score')`, a schema `ref()`) or, inside a subquery, `outerRef()`.
+- The constructor is named after the column's declared SQL type: a built-in range column (`'daterange'`, …),
+  or the `dbType` it was declared with, a custom range type included (`{ type: 'string', dbType: 'ipspan' }`
+  gives `ipspan($1, $2, '[)')`). A column with no declared range type, a non-range type, a multirange or an
+  array type is refused by name; use the tuple form with a `rangeType` there.
+- Inside a `caseWhen()` in `columns()`/`orderBy()`, an aggregate `filter()` or a `having()`, a range value is not
+  yet compiled this way: there, `bounds` other than `'[)'`, a `Date`, expression or empty-string bound, and a string
+  bound containing `,` `(` `)` `[` `]` `"` or `\` are refused as not yet supported (#891).
+- In a schema default filter, a bound may only read the filtered table: a subquery or another table's column is
+  refused, as it is on the right of `eq`.
+
+`rangeContains` also takes a scalar element (`rangeContains('validity', '2024-06-15')`, cast to the element type)
+or an expression operand (`rangeContains('span', exprRef('score'))` gives `span @> score`).
 
 ---
 

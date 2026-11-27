@@ -1038,20 +1038,24 @@ export function resolveConditionContext(
 			bound: isParamIntent(authored),
 		};
 	};
+	/**
+	 * A `RangeValue` operand (`{ lower, upper, bounds }`), as opposed to a bound
+	 * `param()`, a scalar or a range-literal string. It compiles to a range
+	 * constructor call, never to a text literal (#1047).
+	 */
+	const rangeValueOperand = (
+		value: unknown,
+	): { lower?: unknown; upper?: unknown; bounds?: string } | undefined => {
+		if (value === null || typeof value !== 'object') return undefined;
+		if (isExpression(value) || isParamIntent(authoredParam(value)))
+			return undefined;
+		return 'lower' in value || 'upper' in value
+			? (value as { lower?: unknown; upper?: unknown; bounds?: string })
+			: undefined;
+	};
 	const rangeParameter = (value: unknown): ResolvedParameter => {
 		const authored = parameter(value, 'range');
 		if (authored.bound) return authored;
-		if (
-			value !== null &&
-			typeof value === 'object' &&
-			('lower' in value || 'upper' in value)
-		) {
-			const range = value as { lower?: unknown; upper?: unknown };
-			return {
-				...authored,
-				value: `[${range.lower ?? ''},${range.upper ?? ''})`,
-			};
-		}
 		if (typeof value === 'string' && /^\[.*,.*[)\]]$/.test(value))
 			return authored;
 		return { ...authored, cast: 'range-element' };
@@ -1231,18 +1235,40 @@ export function resolveConditionContext(
 				};
 			case 'null':
 				return { kind: 'null', left: leftOperand(), operator: node.operator };
-			case 'range':
+			case 'range': {
+				const rangeValue =
+					node.operator === 'between'
+						? undefined
+						: rangeValueOperand(node.value);
+				// Each bound follows a comparison's right-operand rule; an absent
+				// side is an unbounded one, bound as null.
+				const bound = (side: unknown): ResolvedRhs =>
+					side === undefined || side === null
+						? parameter(null)
+						: rhs(side, 'none');
 				return {
 					kind: 'range',
 					left: left(),
 					operator: node.operator,
 					value:
-						node.operator === 'between'
-							? parameter(node.value)
-							: mode?.include
-								? { ...rangeParameter(node.value), cast: 'none' }
-								: rangeParameter(node.value),
+						rangeValue !== undefined
+							? {
+									kind: 'rangeConstructor',
+									lower: bound(rangeValue.lower),
+									upper: bound(rangeValue.upper),
+									bounds: (rangeValue.bounds ?? '[)') as
+										| '[)'
+										| '[]'
+										| '()'
+										| '(]',
+								}
+							: node.operator === 'between'
+								? parameter(node.value)
+								: mode?.include
+									? { ...rangeParameter(node.value), cast: 'none' }
+									: rangeParameter(node.value),
 				};
+			}
 			case 'jsonContains':
 				return {
 					kind: 'jsonContains',
@@ -1420,10 +1446,18 @@ export function assertScanDefaultFilter(
 				if (node.operand.kind !== 'values')
 					refuse("forbidden subquery in 'in'");
 				return;
+			case 'range':
+				column(node.left);
+				// A range value's bounds can be expressions: they follow the
+				// right-operand rule of a comparison.
+				if (node.value.kind === 'rangeConstructor') {
+					rhs(node.value.lower);
+					rhs(node.value.upper);
+				}
+				return;
 			case 'like':
 			case 'any':
 			case 'null':
-			case 'range':
 			case 'jsonContains':
 			case 'jsonExists':
 				column(node.left);

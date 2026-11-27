@@ -8,10 +8,15 @@
  * - `rangeContainedBy` — `<@`  (range is contained by another range)
  *
  * Tuple form:   `rangeOverlaps('period', ['2024-01-01', '2024-01-31'])` → ExpressionRef
- *               Compiles to: `"period" && daterange($1, $2)`
+ *               Compiles to: `period && daterange($1, $2)`. Each bound follows
+ *               the value rule (ADR 0011): a plain value is bound, an
+ *               expression is compiled.
  *
- * Object form:  `rangeOverlaps('period', { lower: '2024-01-01', upper: '2024-01-31' })` → WhereRangeIntent
- *               Handled by the planner's range pipeline (backward-compatible path).
+ * Object form:  `rangeOverlaps('period', { lower: '2024-01-01', upper: '2024-01-31', bounds: '[]' })` → WhereRangeIntent
+ *               Compiles to the column's range constructor:
+ *               `period && daterange($1, $2, '[]')`.
+ *
+ * Expression operand: `rangeContains('span', exprRef('score'))` → `span @> score`.
  *
  * @example
  * ```typescript
@@ -24,15 +29,28 @@
  */
 
 import type { RangeOperand, RangeValue } from '@dbsp/types';
+import { NotYetSupportedError } from '@dbsp/types';
 import type { WhereRangeIntent } from '../intent-ast.js';
 import {
-	type ExpressionRef,
+	coerceReference,
+	coerceValue,
+	isValueExpression,
+	leafKind,
+	paramWrapperValue,
+	type ReferenceLeaf,
+	type ValueExpression,
+} from './coerce.js';
+import { getColumnName, isRelationPathColumn } from './column-utils.js';
+import { InvalidOperationError } from './errors.js';
+import {
+	ExpressionRef,
 	fn,
 	op,
 	type PredicateExpressionRef,
 	param,
-	ref,
 } from './expressions.js';
+import { CALLBACK_SCOPE } from './symbols.js';
+import { type ColumnRef, isColumnRef } from './table-ref.js';
 
 export type { RangeOperand, RangeValue } from '@dbsp/types';
 
@@ -56,18 +74,42 @@ export type RangeType =
 	| 'tstzrange'
 	| 'daterange';
 
+type RangeHelper = 'rangeOverlaps' | 'rangeContains' | 'rangeContainedBy';
+type RangeSymbol = '&&' | '@>' | '<@';
+
+const RANGE_BOUNDS = new Set(['[)', '[]', '()', '(]']);
+
 // ============================================================================
 // Internal helpers
 // ============================================================================
 
+/** A value leaf as an expression argument: an expression as is, a plain value bound. */
+function boundArgument(leaf: unknown, helper: RangeHelper): ExpressionRef {
+	const value = coerceValue(leaf, helper);
+	return isValueExpression(value)
+		? new ExpressionRef(coerceReference(value, helper))
+		: param(value);
+}
+
+/** The column of the tuple form and of an expression operand (reference leaf). */
+function referenceColumn(column: unknown, helper: RangeHelper): ExpressionRef {
+	return new ExpressionRef(coerceReference(column, helper));
+}
+
 /**
- * Build the range constructor call: `rangeType(param(lower), param(upper))`
+ * Build the range constructor call: `rangeType(lower, upper)`, each bound a
+ * value leaf.
  */
 function makeRangeFn(
 	range: readonly [unknown, unknown],
 	rangeType: RangeType,
+	helper: RangeHelper,
 ): ExpressionRef {
-	return fn(rangeType, param(range[0]), param(range[1]));
+	return fn(
+		rangeType,
+		boundArgument(range[0], helper),
+		boundArgument(range[1], helper),
+	);
 }
 
 /**
@@ -83,52 +125,169 @@ function assertTupleLength(arr: unknown[]): void {
 	}
 }
 
+/**
+ * The field of a `WhereRangeIntent`: a column name, or a `ColumnRef` reached
+ * without a relation path or a callback scope. The intent carries neither
+ * `pathRef` nor a scope, so those refs and expressions cannot be carried yet.
+ */
+function rangeField(column: unknown): string {
+	if (typeof column === 'string') return column;
+	if (typeof column === 'object' && column !== null && isColumnRef(column)) {
+		if (
+			(column as { readonly [CALLBACK_SCOPE]?: object })[CALLBACK_SCOPE] !==
+			undefined
+		)
+			throw new NotYetSupportedError(
+				'a callback-scoped ColumnRef',
+				'range column',
+				1052,
+			);
+		if (isRelationPathColumn(column))
+			throw new NotYetSupportedError(
+				'a relation-reached ColumnRef',
+				'range column',
+				1052,
+			);
+		return getColumnName(column);
+	}
+	throw new NotYetSupportedError(leafKind(column), 'range column', 1065);
+}
+
+function formatBounds(bounds: unknown): string {
+	return typeof bounds === 'string' ? JSON.stringify(bounds) : String(bounds);
+}
+
+/** A `RangeValue` operand, its bounds checked and its two sides coerced. */
+function rangeValueOperand(
+	value: { lower?: unknown; upper?: unknown; bounds?: unknown },
+	helper: RangeHelper,
+): RangeValue {
+	if (value.bounds !== undefined && !RANGE_BOUNDS.has(value.bounds as string))
+		throw new InvalidOperationError(
+			helper,
+			`bounds must be one of '[)', '[]', '()', '(]'; got ${formatBounds(value.bounds)}`,
+		);
+	const sides = {
+		lower: coerceValue(value.lower, helper),
+		upper: coerceValue(value.upper, helper),
+	};
+	return value.bounds === undefined
+		? sides
+		: { ...sides, bounds: value.bounds as NonNullable<RangeValue['bounds']> };
+}
+
+function isRangeValueShape(
+	value: unknown,
+): value is { lower?: unknown; upper?: unknown; bounds?: unknown } {
+	return (
+		typeof value === 'object' &&
+		value !== null &&
+		!Array.isArray(value) &&
+		!(value instanceof Date) &&
+		('lower' in value || 'upper' in value)
+	);
+}
+
+/**
+ * The object form: a `RangeValue`, a scalar, or an expression operand. An
+ * expression operand compiles to the tuple form's predicate; `param(v)` with a
+ * primitive or `Date` `v` is unwrapped so it gets the plain `v`'s cast.
+ */
+function objectForm(
+	column: unknown,
+	operand: unknown,
+	symbol: RangeSymbol,
+	operator: WhereRangeIntent['operator'],
+	helper: RangeHelper,
+): PredicateExpressionRef | WhereRangeIntent {
+	const coerced = coerceValue(operand, helper);
+	let value: unknown = coerced;
+	if (isValueExpression(coerced)) {
+		const wrapped = paramWrapperValue(coerced);
+		const unwrap =
+			wrapped !== undefined &&
+			(wrapped.value === null ||
+				typeof wrapped.value !== 'object' ||
+				wrapped.value instanceof Date);
+		if (unwrap) value = wrapped.value;
+		else if (wrapped === undefined)
+			return op(
+				symbol,
+				referenceColumn(column, helper),
+				new ExpressionRef(coerceReference(coerced, helper)),
+			);
+	}
+	return {
+		kind: 'range',
+		field: rangeField(column),
+		operator,
+		value: (isRangeValueShape(value)
+			? rangeValueOperand(value, helper)
+			: value) as RangeOperand,
+	};
+}
+
 // ============================================================================
 // rangeOverlaps — &&
 // ============================================================================
 
 /**
- * Range OVERLAPS — tuple API: `"column" && rangeType($1, $2)` (ExpressionRef)
+ * Range OVERLAPS — tuple API: `column && rangeType(lower, upper)` (ExpressionRef)
  *
  * @example rangeOverlaps('period', ['2024-01-01', '2024-01-31'])
- *          → "period" && daterange($1, $2)
+ *          → period && daterange($1, $2)
  * @example rangeOverlaps('span', [1, 100], 'int4range')
- *          → "span" && int4range($1, $2)
+ *          → span && int4range($1, $2)
  */
 export function rangeOverlaps(
-	column: string,
+	column: ReferenceLeaf,
 	range: readonly [unknown, unknown],
 	rangeType?: RangeType,
 ): PredicateExpressionRef;
 
 /**
- * Range OVERLAPS — object API: delegates to WhereRangeIntent (planner path)
+ * Range OVERLAPS — object API: the column's range constructor, honouring
+ * `bounds` (`'[)'` when absent).
  *
- * @example rangeOverlaps('dates', { lower: '2025-01-15', upper: '2025-01-20' })
+ * @example rangeOverlaps('dates', { lower: '2025-01-15', upper: '2025-01-20', bounds: '[]' })
+ *          → dates && daterange($1, $2, '[]')
  */
 export function rangeOverlaps(
-	field: string,
+	field: string | ColumnRef<string, string, unknown>,
 	// #444: PostgreSQL only defines && for two ranges; keep scalar RHS rejected.
 	value: RangeValue,
 ): WhereRangeIntent;
 
+/**
+ * Range OVERLAPS — expression operand: `column && <expression>`. A `param()`
+ * operand is bound with the cast its value gets, as a `WhereRangeIntent`.
+ */
 export function rangeOverlaps(
-	fieldOrColumn: string,
-	valueOrRange: RangeOperand | readonly [unknown, unknown],
+	column: ReferenceLeaf,
+	value: ValueExpression,
+): PredicateExpressionRef | WhereRangeIntent;
+
+export function rangeOverlaps(
+	fieldOrColumn: unknown,
+	valueOrRange: unknown,
 	rangeType: RangeType = 'daterange',
 ): PredicateExpressionRef | WhereRangeIntent {
 	if (Array.isArray(valueOrRange)) {
 		assertTupleLength(valueOrRange);
 		const tuple = valueOrRange as unknown as readonly [unknown, unknown];
-		return op('&&', ref(fieldOrColumn), makeRangeFn(tuple, rangeType));
+		return op(
+			'&&',
+			referenceColumn(fieldOrColumn, 'rangeOverlaps'),
+			makeRangeFn(tuple, rangeType, 'rangeOverlaps'),
+		);
 	}
-	return {
-		kind: 'range',
-		field: fieldOrColumn,
-		operator: 'overlaps',
-		// Cast: non-array branch is RangeOperand (tuple path already returned above)
-		value: valueOrRange as RangeOperand,
-	};
+	return objectForm(
+		fieldOrColumn,
+		valueOrRange,
+		'&&',
+		'overlaps',
+		'rangeOverlaps',
+	);
 }
 
 // ============================================================================
@@ -136,43 +295,58 @@ export function rangeOverlaps(
 // ============================================================================
 
 /**
- * Range CONTAINS — tuple API: `"column" @> rangeType($1, $2)` (ExpressionRef)
+ * Range CONTAINS — tuple API: `column @> rangeType(lower, upper)` (ExpressionRef)
  *
  * @example rangeContains('dateRange', ['2024-06-15', '2024-06-15'])
- *          → "dateRange" @> daterange($1, $2)
+ *          → dateRange @> daterange($1, $2)
  */
 export function rangeContains(
-	column: string,
+	column: ReferenceLeaf,
 	range: readonly [unknown, unknown],
 	rangeType?: RangeType,
 ): PredicateExpressionRef;
 
 /**
- * Range CONTAINS — object API: delegates to WhereRangeIntent (planner path)
+ * Range CONTAINS — object API: a `RangeValue` (the column's range
+ * constructor) or a scalar element.
  *
  * @example rangeContains('date_range', { lower: '2025-01-01', upper: '2025-01-05' })
  */
 export function rangeContains(
-	field: string,
+	field: string | ColumnRef<string, string, unknown>,
 	value: RangeOperand,
 ): WhereRangeIntent;
 
+/**
+ * Range CONTAINS — expression operand: `column @> <expression>`. A `param()`
+ * operand is bound with the cast its value gets, as a `WhereRangeIntent`.
+ */
 export function rangeContains(
-	fieldOrColumn: string,
-	valueOrRange: RangeOperand | readonly [unknown, unknown],
+	column: ReferenceLeaf,
+	value: ValueExpression,
+): PredicateExpressionRef | WhereRangeIntent;
+
+export function rangeContains(
+	fieldOrColumn: unknown,
+	valueOrRange: unknown,
 	rangeType: RangeType = 'daterange',
 ): PredicateExpressionRef | WhereRangeIntent {
 	if (Array.isArray(valueOrRange)) {
 		assertTupleLength(valueOrRange);
 		const tuple = valueOrRange as unknown as readonly [unknown, unknown];
-		return op('@>', ref(fieldOrColumn), makeRangeFn(tuple, rangeType));
+		return op(
+			'@>',
+			referenceColumn(fieldOrColumn, 'rangeContains'),
+			makeRangeFn(tuple, rangeType, 'rangeContains'),
+		);
 	}
-	return {
-		kind: 'range',
-		field: fieldOrColumn,
-		operator: 'contains',
-		value: valueOrRange as RangeOperand,
-	};
+	return objectForm(
+		fieldOrColumn,
+		valueOrRange,
+		'@>',
+		'contains',
+		'rangeContains',
+	);
 }
 
 // ============================================================================
@@ -180,42 +354,58 @@ export function rangeContains(
 // ============================================================================
 
 /**
- * Range CONTAINED BY — tuple API: `"column" <@ rangeType($1, $2)` (ExpressionRef)
+ * Range CONTAINED BY — tuple API: `column <@ rangeType(lower, upper)` (ExpressionRef)
  *
  * @example rangeContainedBy('dateRange', ['2024-01-01', '2024-12-31'])
- *          → "dateRange" <@ daterange($1, $2)
+ *          → dateRange <@ daterange($1, $2)
  */
 export function rangeContainedBy(
-	column: string,
+	column: ReferenceLeaf,
 	range: readonly [unknown, unknown],
 	rangeType?: RangeType,
 ): PredicateExpressionRef;
 
 /**
- * Range CONTAINED BY — object API: delegates to WhereRangeIntent (planner path)
+ * Range CONTAINED BY — object API: the column's range constructor, honouring
+ * `bounds`.
  *
  * @example rangeContainedBy('event_dates', { lower: '2025-01-01', upper: '2025-12-31' })
  */
 export function rangeContainedBy(
-	field: string,
+	field: string | ColumnRef<string, string, unknown>,
 	// #444: scalar containment has the element on the left, not the RHS here.
 	value: RangeValue,
 ): WhereRangeIntent;
 
+/**
+ * Range CONTAINED BY — expression operand: `column <@ <expression>`. A
+ * `param()` operand is bound with the cast its value gets, as a
+ * `WhereRangeIntent`.
+ */
 export function rangeContainedBy(
-	fieldOrColumn: string,
-	valueOrRange: RangeOperand | readonly [unknown, unknown],
+	column: ReferenceLeaf,
+	value: ValueExpression,
+): PredicateExpressionRef | WhereRangeIntent;
+
+export function rangeContainedBy(
+	fieldOrColumn: unknown,
+	valueOrRange: unknown,
 	rangeType: RangeType = 'daterange',
 ): PredicateExpressionRef | WhereRangeIntent {
 	if (Array.isArray(valueOrRange)) {
 		assertTupleLength(valueOrRange);
 		const tuple = valueOrRange as unknown as readonly [unknown, unknown];
-		return op('<@', ref(fieldOrColumn), makeRangeFn(tuple, rangeType));
+		return op(
+			'<@',
+			referenceColumn(fieldOrColumn, 'rangeContainedBy'),
+			makeRangeFn(tuple, rangeType, 'rangeContainedBy'),
+		);
 	}
-	return {
-		kind: 'range',
-		field: fieldOrColumn,
-		operator: 'containedBy',
-		value: valueOrRange as RangeOperand,
-	};
+	return objectForm(
+		fieldOrColumn,
+		valueOrRange,
+		'<@',
+		'containedBy',
+		'rangeContainedBy',
+	);
 }

@@ -14,8 +14,11 @@ import {
 	fn,
 	gt,
 	literal,
+	NotYetSupportedError,
+	op,
 	ref,
 	schema,
+	subquery,
 } from '@dbsp/core';
 import type { Dump } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
@@ -648,5 +651,152 @@ describe('CTE composition keeps $-constants and $-identifiers (ADR 0012)', () =>
 		};
 		expect(parsedShape(compiled.sql)).toEqual(expected);
 		expect(builtShape(compiled)).toEqual(expected);
+	});
+});
+
+// ============================================================================
+// ADR 0011 delivery 6: outer columns() and orderBy() leaves
+// ============================================================================
+
+describe('raw CTE outer columns and orderBy leaves (ADR 0011 delivery 6)', () => {
+	const d6Db = schema({
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			user_id: { type: 'integer' },
+			score: { type: 'integer' },
+		},
+	});
+	const orm = createOrm({
+		schema: d6Db,
+		adapter: createPgCompileOnlyAdapter({ model: d6Db.model }),
+		suppressDxWarnings: true,
+	});
+	const base = orm
+		.select('posts')
+		.columns(['id', 'user_id', 'score'])
+		.where(eq('id', 1));
+	const step = orm.select('posts').columns(['id', 'user_id', 'score']);
+	const rc = () => orm.recursive('tree', { base, step });
+	const head =
+		'WITH RECURSIVE tree AS (SELECT posts.id, posts.user_id, posts.score FROM posts WHERE posts.id = $1 UNION ALL SELECT posts.id, posts.user_id, posts.score FROM posts) ';
+	const out = (dump: { sql: string; params: readonly unknown[] }) => [
+		dump.sql,
+		dump.params,
+	];
+	const notYet = (
+		run: () => unknown,
+		construct: string,
+		position: string,
+		issue: number,
+	) => {
+		let caught: unknown;
+		try {
+			run();
+		} catch (error) {
+			caught = error;
+		}
+		expect(caught).toBeInstanceOf(NotYetSupportedError);
+		const e = caught as NotYetSupportedError;
+		expect([e.construct, e.position, e.issue]).toEqual([
+			construct,
+			position,
+			issue,
+		]);
+	};
+
+	it('AC16 raw CTE expression columns and orderings', () => {
+		expect(
+			out(
+				rc()
+					.columns(['id', fn('abs', exprRef('score')).as('a')])
+					.dump(),
+			),
+		).toEqual([`${head}SELECT tree.id, abs(score) AS a FROM tree`, [1]]);
+		expect(
+			out(
+				rc()
+					.columns([literal(1).as('one')])
+					.dump(),
+			),
+		).toEqual([`${head}SELECT 1 AS one FROM tree`, [1]]);
+		expect(
+			out(
+				rc()
+					.orderBy(fn('abs', exprRef('score')), 'desc')
+					.dump(),
+			),
+		).toEqual([`${head}SELECT tree.* FROM tree ORDER BY abs(score) DESC`, [1]]);
+		expect(out(rc().orderBy(1, 'desc').dump())).toEqual([
+			`${head}SELECT tree.* FROM tree ORDER BY 1 DESC`,
+			[1],
+		]);
+		expect(
+			out(
+				rc()
+					.columns(['id', ref('score')])
+					.dump(),
+			),
+		).toEqual([`${head}SELECT tree.id, score FROM tree`, [1]]);
+		expect(out(rc().columns(['id', 'score']).dump())).toEqual([
+			`${head}SELECT tree.id, tree.score FROM tree`,
+			[1],
+		]);
+		expect(out(rc().orderBy('score', 'desc').dump())).toEqual([
+			`${head}SELECT tree.* FROM tree ORDER BY tree.score DESC`,
+			[1],
+		]);
+	});
+
+	it('RF9 raw CTE refusals: ColumnRefs, null entries, unaliased subqueries and constants, non-position orderings', () => {
+		const posts = orm.tables.posts;
+		const colRef = (helper: string) =>
+			`Invalid ${helper}: a ColumnRef names a model table; the recursive query reads only 'tree', so use a column name or an expression`;
+		expect(() => rc().columns([posts.score])).toThrow(colRef('columns'));
+		expect(() => rc().orderBy(posts.score)).toThrow(colRef('orderBy'));
+		const nullRefusal = (helper: string) =>
+			`Invalid ${helper}: null is not an expression argument; use literal(null), param(value) or an expression`;
+		expect(() => rc().columns(['id', null as never])).toThrow(
+			nullRefusal('columns'),
+		);
+		expect(() => rc().orderBy(null as never)).toThrow(nullRefusal('orderBy'));
+		expect(() => rc().columns([subquery('posts').count() as never])).toThrow(
+			'Invalid columns: a subquery column needs a name; use .asExpr(alias)',
+		);
+		expect(() => rc().columns([5 as never])).toThrow(
+			'Invalid columns: a constant column needs a name; use literal(value).as(alias) or param(value).as(alias)',
+		);
+		for (const [leaf, kind] of [
+			[1.5, 'the number 1.5'],
+			[true, 'a boolean'],
+			[new Date('2024-01-01T00:00:00Z'), 'a Date'],
+		] as const)
+			expect(() => rc().orderBy(leaf as never)).toThrow(
+				`Invalid orderBy: ${kind} does not name a column or an expression to order by`,
+			);
+	});
+
+	it('RF13 raw CTE subquery entries: not yet supported (#1095)', () => {
+		notYet(
+			() => rc().columns(['id', subquery('posts').count().asExpr('n')]),
+			'a subquery',
+			'raw CTE column',
+			1095,
+		);
+		notYet(
+			() =>
+				rc().columns([
+					'id',
+					op('+', exprRef('score'), subquery('posts').count()).as('m'),
+				]),
+			'a subquery',
+			'raw CTE column',
+			1095,
+		);
+		notYet(
+			() => rc().orderBy(subquery('posts').count()),
+			'a subquery',
+			'raw CTE ordering',
+			1095,
+		);
 	});
 });

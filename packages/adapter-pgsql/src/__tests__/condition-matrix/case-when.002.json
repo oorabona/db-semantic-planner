@@ -508,40 +508,40 @@
 			"position": "case-when",
 			"kind": "rawExists-range",
 			"shape": "leaf",
-			"sql": "SELECT CASE WHEN EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($1 AS daterange)) THEN 11 ELSE 22 END AS label FROM users",
-			"params": ["[2026-01-01,2026-02-01)"],
+			"sql": "SELECT CASE WHEN EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && daterange($1, $2, '[)')) THEN 11 ELSE 22 END AS label FROM users",
+			"params": ["2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "rawExists-range",
 			"shape": "and",
-			"sql": "SELECT CASE WHEN EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($1 AS daterange)) AND users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
-			"params": ["[2026-01-01,2026-02-01)", 13],
+			"sql": "SELECT CASE WHEN EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && daterange($1, $2, '[)')) AND users.score = $3 THEN 11 ELSE 22 END AS label FROM users",
+			"params": ["2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "rawExists-range",
 			"shape": "or",
-			"sql": "SELECT CASE WHEN EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($1 AS daterange)) OR users.score = $2 THEN 11 ELSE 22 END AS label FROM users",
-			"params": ["[2026-01-01,2026-02-01)", 13],
+			"sql": "SELECT CASE WHEN EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && daterange($1, $2, '[)')) OR users.score = $3 THEN 11 ELSE 22 END AS label FROM users",
+			"params": ["2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "rawExists-range",
 			"shape": "not",
-			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($1 AS daterange))) THEN 11 ELSE 22 END AS label FROM users",
-			"params": ["[2026-01-01,2026-02-01)"],
+			"sql": "SELECT CASE WHEN NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && daterange($1, $2, '[)'))) THEN 11 ELSE 22 END AS label FROM users",
+			"params": ["2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "case-when",
 			"kind": "rawExists-range",
 			"shape": "two-level",
-			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($2 AS daterange))) OR users.score = $3) THEN 11 ELSE 22 END AS label FROM users",
-			"params": [13, "[2026-01-01,2026-02-01)", 17],
+			"sql": "SELECT CASE WHEN users.score = $1 AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && daterange($2, $3, '[)'))) OR users.score = $4) THEN 11 ELSE 22 END AS label FROM users",
+			"params": [13, "2026-01-01", "2026-02-01", 17],
 			"error": null
 		},
 		{

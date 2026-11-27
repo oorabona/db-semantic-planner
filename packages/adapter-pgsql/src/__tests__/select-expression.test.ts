@@ -22,11 +22,13 @@ import {
 	fn,
 	gt,
 	inArray,
+	inSubquery,
 	isDistinctFrom,
 	lag,
 	lead,
 	like,
 	literal,
+	NotYetSupportedError,
 	namedArg,
 	op,
 	outerRef,
@@ -35,6 +37,7 @@ import {
 	rowNumber,
 	SubqueryExpression,
 	schema,
+	sql,
 	subquery,
 	unary,
 	wAvg,
@@ -1365,5 +1368,288 @@ describe('ordering, grouping, aggregate and window leaves (ADR 0011 delivery 3)'
 			'SELECT posts.id, row_number() OVER (ORDER BY author.name ASC) AS w FROM posts JOIN users AS author ON posts.user_id = author.id',
 			[],
 		]);
+	});
+});
+
+describe('subquery fields and selectExpression leaves (ADR 0011 delivery 6)', () => {
+	const d6Db = schema({
+		users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			title: 'text',
+			status: 'text',
+			score: 'integer',
+			user_id: ref('users', { as: 'author' }),
+		},
+	});
+	const orm = createOrm({
+		schema: d6Db,
+		adapter: createPgCompileOnlyAdapter({ model: d6Db.model }),
+		suppressDxWarnings: true,
+	});
+	const posts = orm.tables.posts;
+	const users = orm.tables.users;
+	const out = (dump: { sql: string; params: readonly unknown[] }) => [
+		dump.sql,
+		dump.params,
+	];
+	const sel = (expr: unknown) => {
+		const r = orm.selectExpression(expr as never);
+		return [r.sql, r.parameters];
+	};
+	const correlated = () =>
+		subquery('posts').where(eq('user_id', outerRef('id')));
+	const column = (sq: { asExpr(alias: string): unknown }, alias = 't') =>
+		orm
+			.select('users')
+			.columns(['id', sq.asExpr(alias) as never])
+			.dump();
+	const notYet = (
+		run: () => unknown,
+		construct: string,
+		position: string,
+		issue: number,
+	) => {
+		let caught: unknown;
+		try {
+			run();
+		} catch (error) {
+			caught = error;
+		}
+		expect(caught).toBeInstanceOf(NotYetSupportedError);
+		const e = caught as NotYetSupportedError;
+		expect([e.construct, e.position, e.issue]).toEqual([
+			construct,
+			position,
+			issue,
+		]);
+	};
+
+	it('AC9 unchanged subquery string forms (astix)', () => {
+		expect(out(column(correlated().select('title')))).toEqual([
+			'SELECT users.id, (SELECT posts.title FROM posts WHERE posts.user_id = users.id) AS t FROM users',
+			[],
+		]);
+		expect(out(column(subquery('posts').count('score'), 'n'))).toEqual([
+			'SELECT users.id, (SELECT count(posts.score) FROM posts) AS n FROM users',
+			[],
+		]);
+		for (const sq of [subquery('posts').count(), subquery('posts').count('*')])
+			expect(out(column(sq, 'n'))).toEqual([
+				'SELECT users.id, (SELECT count(*) FROM posts) AS n FROM users',
+				[],
+			]);
+		for (const fn of ['sum', 'avg', 'min', 'max'] as const)
+			expect(out(column(subquery('posts')[fn]('score'), 'n'))).toEqual([
+				`SELECT users.id, (SELECT ${fn}(posts.score) FROM posts) AS n FROM users`,
+				[],
+			]);
+		expect(
+			out(
+				orm
+					.select('users')
+					.columns(['id'])
+					.where(eq('id', subquery('posts').max('user_id')))
+					.dump(),
+			),
+		).toEqual([
+			'SELECT users.id FROM users WHERE users.id = (SELECT max(posts.user_id) FROM posts)',
+			[],
+		]);
+		expect(
+			out(
+				orm
+					.select('users')
+					.columns(['id'])
+					.where(inSubquery('id', subquery('posts').select('user_id')))
+					.dump(),
+			),
+		).toEqual([
+			'SELECT users.id FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.user_id)',
+			[],
+		]);
+	});
+
+	it('AC12 subquery select ColumnRef and expression', () => {
+		const body = (s: string) =>
+			`SELECT users.id, (SELECT ${s} FROM posts WHERE posts.user_id = users.id) AS t FROM users`;
+		expect(out(column(correlated().select(posts.title)))).toEqual([
+			body('posts.title'),
+			[],
+		]);
+		expect(
+			out(column(correlated().select(fn('lower', exprRef('title'))))),
+		).toEqual([body('lower(title)'), []]);
+		expect(out(column(correlated().select(2)))).toEqual([body('2'), []]);
+		expect(out(column(correlated().select(users.name)))).toEqual([
+			body('users.name'),
+			[],
+		]);
+		expect(out(column(correlated().select(param('x'))))).toEqual([
+			body('$1'),
+			['x'],
+		]);
+	});
+
+	it('AC13 subquery aggregate ColumnRef: the same SQL as the string field', () => {
+		expect(out(column(subquery('posts').count(posts.score), 'n'))).toEqual([
+			'SELECT users.id, (SELECT count(posts.score) FROM posts) AS n FROM users',
+			[],
+		]);
+		for (const fn of ['sum', 'avg', 'min', 'max'] as const)
+			expect(out(column(subquery('posts')[fn](posts.score), 'n'))).toEqual([
+				`SELECT users.id, (SELECT ${fn}(posts.score) FROM posts) AS n FROM users`,
+				[],
+			]);
+		expect(out(column(subquery('posts').count(users.id), 'n'))).toEqual([
+			'SELECT users.id, (SELECT count(users.id) FROM posts) AS n FROM users',
+			[],
+		]);
+		expect(
+			out(
+				orm
+					.select('users')
+					.columns(['id'])
+					.where(eq('id', subquery('posts').max(posts.user_id)))
+					.dump(),
+			),
+		).toEqual([
+			'SELECT users.id FROM users WHERE users.id = (SELECT max(posts.user_id) FROM posts)',
+			[],
+		]);
+	});
+
+	it('AC14 selectExpression leaves: columns, constants, subqueries and expressions', () => {
+		// 'title' and posts.title compile to text PostgreSQL rejects in a FROM-less SELECT (#1002).
+		expect(sel('title')).toEqual(['SELECT title', []]);
+		expect(sel(2)).toEqual(['SELECT 2', []]);
+		expect(sel(true)).toEqual(['SELECT true', []]);
+		expect(sel(3n)).toEqual(['SELECT 3', []]);
+		expect(sel([1, 2])).toEqual(['SELECT $1', [[1, 2]]]);
+		const d = new Date('2024-01-01T00:00:00Z');
+		const dated = sel(d);
+		expect(dated[0]).toBe('SELECT $1');
+		expect((dated[1] as unknown[])[0]).toBe(d);
+		expect(sel(subquery('posts').count())).toEqual([
+			'SELECT (SELECT count(*) FROM posts)',
+			[],
+		]);
+		expect(sel(posts.title)).toEqual(['SELECT posts.title', []]);
+		expect(sel(exprRef('title'))).toEqual(['SELECT title', []]);
+		expect(sel(fn('lower', exprRef('title')))).toEqual([
+			'SELECT lower(title)',
+			[],
+		]);
+		expect(sel(param('x'))).toEqual(['SELECT $1', ['x']]);
+	});
+
+	it('AC15 selectExpression alias: the coerced intent names the result column', () => {
+		expect(sel(fn('now').as('t'))).toEqual(['SELECT now() AS t', []]);
+		expect(sel(literal(1).as('one'))).toEqual(['SELECT 1 AS one', []]);
+		expect(sel(subquery('posts').count().asExpr('n'))).toEqual([
+			'SELECT (SELECT count(*) FROM posts) AS n',
+			[],
+		]);
+		expect(sel(fn('now').as('Bad Alias'))).toEqual([
+			'SELECT now() AS "Bad Alias"',
+			[],
+		]);
+	});
+
+	it('RF7 subquery field refusals', () => {
+		const refusal = (helper: string, kind: string) =>
+			`Invalid ${helper}: ${kind} is not an expression argument; use literal(null), param(value) or an expression`;
+		expect(() => subquery('posts').select(null as never)).toThrow(
+			refusal('select', 'null'),
+		);
+		expect(() => subquery('posts').select(undefined as never)).toThrow(
+			refusal('select', 'undefined'),
+		);
+		expect(() => subquery('posts').select({} as never)).toThrow(
+			refusal('select', 'a plain object'),
+		);
+		expect(() => subquery('posts').count(null as never)).toThrow(
+			'Invalid count: null is not a column; use a column name or a ColumnRef',
+		);
+		notYet(
+			() => subquery('posts').sum(exprRef('score') as never),
+			'an expression',
+			'aggregate field',
+			1072,
+		);
+		notYet(
+			() => subquery('posts').max(fn('abs', exprRef('score')) as never),
+			'an expression',
+			'aggregate field',
+			1072,
+		);
+		notYet(
+			() => subquery('posts').count(outerRef('id') as never),
+			'outerRef()',
+			'aggregate field',
+			1072,
+		);
+		notYet(
+			() => subquery('posts').count(orm.select('posts') as never),
+			'a query builder',
+			'aggregate field',
+			1072,
+		);
+		expect(() => column(subquery('posts').count(posts.author.id), 'n')).toThrow(
+			"Declared column 'author.id' is absent from the physical model.",
+		);
+		notYet(
+			() => subquery('posts').select(orm.select('posts') as never),
+			'a query builder',
+			'expression argument',
+			1053,
+		);
+		expect(() =>
+			orm
+				.select('users')
+				.columns(['id'])
+				.where(inSubquery('id', subquery('posts').select(param(1))))
+				.dump(),
+		).toThrow(
+			'IN subquery with expressions SELECT (not supported in IN subquery) is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+		);
+		const base = orm.select('posts').columns(['id', 'score']);
+		const tree = orm.recursive('tree', { base, step: base });
+		expect(() =>
+			tree.where(eq('id', subquery('tree').select(param(1)).build())).dump(),
+		).toThrow(
+			'scalar subquery with expressions SELECT (not supported in scalar subquery) is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+		);
+		expect(
+			orm
+				.recursive('tree', { base, step: base })
+				.where(eq('id', subquery('tree').select('id').build()))
+				.dump().sql,
+		).toBe(
+			'WITH RECURSIVE tree AS (SELECT posts.id, posts.score FROM posts UNION ALL SELECT posts.id, posts.score FROM posts) SELECT tree.* FROM tree WHERE tree.id = (SELECT tree_sq.id FROM tree AS tree_sq)',
+		);
+	});
+
+	it('RF8 selectExpression refusals', () => {
+		const refusal = (kind: string) =>
+			`Invalid selectExpression: ${kind} is not an expression argument; use literal(null), param(value) or an expression`;
+		expect(() => sel(null)).toThrow(refusal('null'));
+		expect(() => sel(undefined)).toThrow(refusal('undefined'));
+		expect(() => sel({})).toThrow(refusal('a plain object'));
+		expect(() => sel(sql('1'))).toThrow(
+			'Invalid selectExpression: sql() is only accepted as an update or upsert value; use literal(), param() or an expression here',
+		);
+		notYet(
+			() => sel(orm.select('posts')),
+			'a query builder',
+			'expression argument',
+			1053,
+		);
+		notYet(
+			() => sel(outerRef('id')),
+			'outerRef()',
+			'expression argument',
+			1029,
+		);
 	});
 });

@@ -14,6 +14,7 @@ import type { ModelIR } from '../model-ir.js';
 import type { PlanOptions } from '../planner.js';
 import type { BatchValuesOptions, BatchValuesRef } from './batch-values.js';
 import { batchValues } from './batch-values.js';
+import { coerceReference, type ReferenceLeaf } from './coerce.js';
 import { CteBuilder } from './cte-builder.js';
 import {
 	ExecutionError,
@@ -61,7 +62,6 @@ import type {
 } from './table-ddl-types.js';
 import type { InferTableRow, TableRef } from './table-ref.js';
 import type {
-	ExpressionSpec,
 	ListHierarchyOptions,
 	OrmInstance,
 	OrmInstanceInternal,
@@ -1131,17 +1131,20 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 			return batchValues(data, columns, types, opts);
 		},
 
-		selectExpression(expr: ExpressionSpec): SelectExpressionResult {
+		selectExpression(expr: ReferenceLeaf): SelectExpressionResult {
 			if (!adapter) {
 				throw new Error(
 					'selectExpression() requires an adapter. ' +
 						'Pass an adapter when creating the ORM.',
 				);
 			}
-			const compiled = adapter.compileSelectExpression(expr.intent, {
-				model,
-				...(defaultFilters !== undefined && { defaultFilters }),
-			});
+			const compiled = adapter.compileSelectExpression(
+				coerceReference(expr, 'selectExpression'),
+				{
+					model,
+					...(defaultFilters !== undefined && { defaultFilters }),
+				},
+			);
 			return {
 				sql: compiled.sql,
 				parameters: compiled.parameters,

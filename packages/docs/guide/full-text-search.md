@@ -40,9 +40,9 @@ declare const query: string | unknown;
 declare const fields: FullTextSearchField[];
 
 const predicate: PredicateExpressionRef = fullTextSearch({
-  query,             // query string — bound as a $N parameter per field
+  query,             // a value (bound once per field) or an expression (compiled per field)
   fields,            // columns to search
-  tableAlias: 'docs', // table name as it appears in the FROM clause
+  tableAlias: 'docs', // table name or alias as it appears in the FROM clause (a string)
 });
 ```
 
@@ -69,6 +69,11 @@ tableAlias @@@ paradedb.boolean(
 
 Each field gets its own `$N` parameter slot, all bound to the same query value.
 
+`query` follows the value rule: a plain value (string, number, `null`) is bound, `param(v)` binds `v`, and an
+expression is compiled as every field's `query_string`, with no parameter: `exprRef('search_terms')`,
+`fn('lower', ...)`, `literal('shoes')`, a `ColumnRef` or a subquery. `tableAlias` must be a string naming the
+relation; anything else is refused when `fullTextSearch()` is called.
+
 ---
 
 ### `textScore(keyField?)` — import from `@dbsp/core`
@@ -79,7 +84,7 @@ Produces `paradedb.score("keyField")` for use in `.columns()` and `.orderBy()`.
 // doctest: skip — API signature reference (TypeScript function signature, not executable code)
 import { textScore } from '@dbsp/core';
 
-textScore(keyField?: string): ExpressionRef
+textScore(keyField?: string | ColumnRef | ExpressionRef): ExpressionRef
 // keyField defaults to 'id'
 ```
 
@@ -88,6 +93,7 @@ textScore(keyField?: string): ExpressionRef
 ```sql
 paradedb.score(id)          -- textScore()
 paradedb.score(symbol_id)   -- textScore('symbol_id')
+paradedb.score(symbols.id)  -- textScore(orm.tables.symbols.id)
 ```
 
 Binds no parameters — the key field is a column reference, not a value.

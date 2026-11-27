@@ -4,6 +4,7 @@
  * Handles: contains (@>), containedBy (<@), overlaps (&&)
  */
 
+import { NotYetSupportedError } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import { assertDialectCapability } from '../../dialect-capabilities.js';
 import { unwrapParamIntent } from '../../param-intent.js';
@@ -14,7 +15,7 @@ import type {
 	Decision,
 	WhereHandler,
 } from '../types.js';
-import { isRangeValue } from '../types.js';
+import { isRangeValue, type RangeValue } from '../types.js';
 import { buildColumnRef } from './utils.js';
 
 /** Map operator names to PostgreSQL range operators */
@@ -65,6 +66,33 @@ export const rangeHandler: WhereHandler = {
 	},
 };
 
+const LEGACY_RANGE_POSITION = 'CASE, FILTER or HAVING condition';
+
+/**
+ * This route writes a `RangeValue` as the text `[lower,upper)`. It refuses
+ * what that text cannot express until these positions compile through the
+ * resolved route (#891): another `bounds`, a `Date` or expression bound, an
+ * empty string (written as an infinite bound) and range syntax characters.
+ */
+function assertLegacyRangeValue(
+	value: RangeValue & { readonly bounds?: unknown },
+): void {
+	const refuse = (construct: string): never => {
+		throw new NotYetSupportedError(construct, LEGACY_RANGE_POSITION, 891);
+	};
+	const sides = [value.lower, value.upper];
+	if (value.bounds !== undefined && value.bounds !== '[)')
+		refuse(`bounds '${String(value.bounds)}'`);
+	if (sides.some((side) => side instanceof Date)) refuse('a Date range bound');
+	if (sides.some((side) => typeof side === 'object' && side !== null))
+		refuse('an expression range bound');
+	if (sides.some((side) => side === '')) refuse('an empty-string range bound');
+	if (
+		sides.some((side) => typeof side === 'string' && /[,()[\]"\\]/.test(side))
+	)
+		refuse('a range bound with , ( ) [ ] " or \\');
+}
+
 /** Typed range primitive; the wrapper supplies the legacy authored cast policy. */
 export function compileRange(
 	columnNode: Node,
@@ -79,6 +107,7 @@ export function compileRange(
 	if (value !== rawValue) {
 		paramValue = value;
 	} else if (isRangeValue(value)) {
+		assertLegacyRangeValue(value);
 		const lower = value.lower ?? '';
 		const upper = value.upper ?? '';
 		paramValue = `[${lower},${upper})`;

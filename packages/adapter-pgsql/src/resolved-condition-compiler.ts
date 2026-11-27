@@ -32,6 +32,7 @@ import { relationBindingFor } from './binding-registry.js';
 import { mapModelIRTypeToPgBase } from './compiler-utils.js';
 import {
 	dbTypeCastTarget,
+	isPgBuiltInTypeName,
 	renderColumnDbType,
 	validateDbType,
 } from './db-type.js';
@@ -146,7 +147,17 @@ function validateOperators(input: unknown): void {
 		(node.kind === 'subquery' && node.use === 'scalar')
 	)
 		assertComparisonOperator(node.operator as string);
-	if (node.kind === 'range') rangeOp(node.operator as string);
+	if (node.kind === 'range') {
+		rangeOp(node.operator as string);
+		// A range constructor's bounds can be expressions, so they are walked.
+		const value = node.value as
+			| { kind?: unknown; lower?: unknown; upper?: unknown }
+			| undefined;
+		if (value?.kind === 'rangeConstructor') {
+			validateOperators(value.lower);
+			validateOperators(value.upper);
+		}
+	}
 	if (node.kind === 'expression' && node.comparison)
 		assertComparisonOperator(
 			(node.comparison as { operator: string }).operator,
@@ -231,6 +242,90 @@ function columnType(
 	validateDbType(type);
 	return dbTypeCastTarget(type);
 }
+const BUILT_IN_RANGE_TYPES = new Set([
+	'int4range',
+	'int8range',
+	'numrange',
+	'tsrange',
+	'tstzrange',
+	'daterange',
+]);
+
+/**
+ * Split a rendered SQL type name into its identifier parts. A quoted part keeps
+ * its spelling; an unquoted part is folded to lower case, as PostgreSQL folds
+ * it when it reads the same text in a cast.
+ */
+function typeNameParts(type: string): string[] {
+	const parts: string[] = [];
+	let i = 0;
+	while (i < type.length) {
+		if (type[i] === '"') {
+			let part = '';
+			let j = i + 1;
+			while (j < type.length) {
+				if (type[j] === '"') {
+					if (type[j + 1] === '"') {
+						part += '"';
+						j += 2;
+						continue;
+					}
+					break;
+				}
+				part += type[j];
+				j++;
+			}
+			parts.push(part);
+			i = j + 1;
+		} else {
+			const dot = type.indexOf('.', i);
+			const end = dot === -1 ? type.length : dot;
+			parts.push(type.slice(i, end).trim().toLowerCase());
+			i = end;
+		}
+		if (type[i] === '.') i++;
+	}
+	return parts;
+}
+
+/**
+ * The range constructor for a `RangeValue` on this column (#1047): the
+ * column's declared SQL type, named exactly as its cast names it, or one of
+ * the built-in range column types. A column with no range type is refused.
+ */
+function rangeConstructorName(
+	operand: ResolvedColumnOperand,
+	ctx: CompilerContext,
+	state: CompilerState,
+): string[] {
+	const col = metadata(operand, ctx, state);
+	const refuse = (detail: string): never => {
+		throw new Error(
+			`A range value { lower, upper } needs a column declared with a range type; '${operand.column}' ${detail}. Declare the column's range type, or use the tuple form with a rangeType.`,
+		);
+	};
+	if (col?.originalDbType) {
+		const rendered = renderColumnDbType(col, ctx.schema).trim();
+		validateDbType(rendered);
+		const base = typeNameParts(rendered).at(-1) ?? '';
+		if (
+			rendered.endsWith('[]') ||
+			rendered.includes('(') ||
+			base.endsWith('multirange') ||
+			(isPgBuiltInTypeName(rendered) && !BUILT_IN_RANGE_TYPES.has(base))
+		)
+			refuse(`is declared '${rendered}'`);
+		return typeNameParts(dbTypeCastTarget(rendered));
+	}
+	if (col?.type !== undefined && BUILT_IN_RANGE_TYPES.has(col.type))
+		return [col.type];
+	return refuse(
+		col?.type !== undefined
+			? `is declared '${col.type}'`
+			: 'has no declared type',
+	);
+}
+
 /** A column's cast type, or for an aggregate HAVING alias its result type. */
 function leftType(
 	operand: ResolvedLeftOperand,
@@ -690,7 +785,10 @@ function compileResolvedConditionUnchecked(
 		case 'range': {
 			const rangeOperator = rangeOp(tree.operator);
 			if (tree.operator === 'between') {
-				const v = tree.value.value as { lower: unknown; upper: unknown };
+				const v = (tree.value as ResolvedParameter).value as {
+					lower: unknown;
+					upper: unknown;
+				};
 				const lower = compileValue(v.lower, state, undefined, true),
 					upper = compileValue(v.upper, state, undefined, true);
 				return {
@@ -707,12 +805,33 @@ function compileResolvedConditionUnchecked(
 				'supportsRangeTypes',
 				'Range operators are',
 			);
+			const rangeValue = tree.value;
+			if (rangeValue.kind === 'rangeConstructor') {
+				const name = rangeConstructorName(tree.left, ctx, state);
+				// A null bound is a bound parameter (an unbounded side), never NULL text.
+				const bound = (side: ResolvedRhs): Node =>
+					side.kind === 'parameter' && 'cast' in side
+						? parameter(side, ctx, state, undefined, true)
+						: rhs(side, ctx, state);
+				return {
+					A_Expr: {
+						kind: 'AEXPR_OP',
+						name: [{ String: { sval: rangeOperator } }],
+						lexpr: col(tree.left),
+						rexpr: funcCall(name, [
+							bound(rangeValue.lower),
+							bound(rangeValue.upper),
+							stringConstNode(rangeValue.bounds),
+						]),
+					},
+				};
+			}
 			const type = metadata(tree.left, ctx, state)?.type;
 			let castType: string | undefined =
-				tree.value.cast !== 'none' && type?.endsWith('range')
+				rangeValue.cast !== 'none' && type?.endsWith('range')
 					? type
 					: undefined;
-			if (castType && tree.value.cast === 'range-element') {
+			if (castType && rangeValue.cast === 'range-element') {
 				castType = castType.replace(/range$/, '');
 				castType =
 					(
@@ -727,7 +846,7 @@ function compileResolvedConditionUnchecked(
 			return compileRangeParameter(
 				col(tree.left),
 				rangeOperator,
-				tree.value.value,
+				rangeValue.value,
 				state,
 				castType,
 			);

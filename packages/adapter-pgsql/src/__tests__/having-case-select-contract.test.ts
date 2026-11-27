@@ -151,9 +151,9 @@ it('CASE in a subquery body uses the child logical source and emitted alias', ()
 		)
 		.dump();
 	expect(result.sql).toBe(
-		'SELECT symbols.* FROM symbols WHERE EXISTS (SELECT 1 FROM calls AS calls_exists_0 WHERE symbols.id = calls_exists_0."symbolId" AND CASE WHEN calls_exists_0.period && CAST($1 AS tsrange) AND calls_exists_0.score = $2 THEN 1 ELSE 0 END = $3)',
+		`SELECT symbols.* FROM symbols WHERE EXISTS (SELECT 1 FROM calls AS calls_exists_0 WHERE symbols.id = calls_exists_0."symbolId" AND CASE WHEN calls_exists_0.period && tsrange($1, $2, '[)') AND calls_exists_0.score = $3 THEN 1 ELSE 0 END = $4)`,
 	);
-	expect(result.params).toEqual(['[2026-01-01,2026-02-01)', 4, 1]);
+	expect(result.params).toEqual(['2026-01-01', '2026-02-01', 4, 1]);
 });
 it('nested SELECT CASE uses its own source and reserved alias', () => {
 	const condition = rangeOverlaps('period', {

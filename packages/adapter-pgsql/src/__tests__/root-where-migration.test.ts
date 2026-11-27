@@ -115,8 +115,7 @@ for (const [index, wrap] of shapes.entries()) {
 			}),
 			expect.any(Object),
 		);
-		expect(result.sql).toContain('CAST(');
-		expect(result.sql).toContain('AS daterange)');
+		expect(result.sql).toMatch(/daterange\(\$\d+, \$\d+, '\[\)'\)/);
 	});
 }
 it('declared relation keys precede custom authorities and nested relations share aliases and parameters', () => {
@@ -327,7 +326,7 @@ it('dotted fields retain legacy lowering and scalar and ANY bodies keep canonica
 		},
 	};
 	expect(orm.select('users').where(scalar).dump().sql).toContain(
-		'CAST($1 AS daterange)',
+		"daterange($1, $2, '[)')",
 	);
 	const any = orm
 		.select('users')
@@ -339,7 +338,7 @@ it('dotted fields retain legacy lowering and scalar and ANY bodies keep canonica
 		)
 		.dump();
 	expect(any.sql).toContain('= ANY (SELECT');
-	expect(any.sql).toContain('CAST($1 AS daterange)');
+	expect(any.sql).toContain("daterange($1, $2, '[)')");
 });
 it('root context sees manual JOIN aliases allocated before predicate compilation', () => {
 	const spy = vi.spyOn(resolvedConditions, 'compileResolvedCondition');
