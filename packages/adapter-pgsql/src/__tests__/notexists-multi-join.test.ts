@@ -261,25 +261,25 @@ describe('SC-06: declared FK addresses', () => {
 });
 
 describe('SC-06: FK fallback without ModelIR', () => {
-	it('multi-join without ModelIR falls back to convention and still emits JOINs', () => {
+	it('multi-join without ModelIR is refused', () => {
 		const adapter = createPgCompileOnlyAdapter();
 
-		const { sql } = adapter.compileDelete({
-			type: 'delete' as const,
-			table: 'symbols',
-			where: notExists('callee_calls', {
-				include: {
-					calleeFile: { join: 'inner' },
-					calleeProject: { join: 'inner' },
-				},
+		expect(() =>
+			adapter.compileDelete({
+				type: 'delete' as const,
+				table: 'symbols',
+				where: notExists('callee_calls', {
+					include: {
+						calleeFile: { join: 'inner' },
+						calleeProject: { join: 'inner' },
+					},
+				}),
 			}),
-		});
-
-		const normalized = ws(sql);
-		expect(normalized).toMatch(/NOT\s*\(?\s*EXISTS/i);
-		expect(normalized).toMatch(/JOIN/i);
-		const joinMatches = normalized.match(/\bJOIN\b/gi) ?? [];
-		expect(joinMatches.length).toBe(2);
+		).toThrow(
+			new Error(
+				'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.',
+			),
+		);
 	});
 });
 

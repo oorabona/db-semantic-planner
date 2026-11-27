@@ -499,7 +499,7 @@ describe('typed relation refs in mutation guard bodies (#991)', () => {
 				),
 			).toThrow(
 				new Error(
-					"ColumnRef 'writings.published' follows a relation; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1014).",
+					'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.',
 				),
 			);
 		},
@@ -509,7 +509,7 @@ describe('typed relation refs in mutation guard bodies (#991)', () => {
 		expect(() => batchSet(ambiguousBody())).toThrow(relationRefusal('posts'));
 		expect(() =>
 			compileMutationWhere(
-				createPgCompileOnlyAdapter(),
+				createPgCompileOnlyAdapter({ model: plainDb.model }),
 				'compileUpsert.action.where',
 				'users',
 				ambiguousBody(),
@@ -523,7 +523,7 @@ describe('typed relation refs in mutation guard bodies (#991)', () => {
 		);
 		expect(
 			compileMutationWhere(
-				createPgCompileOnlyAdapter(),
+				createPgCompileOnlyAdapter({ model: plainDb.model }),
 				'compileUpsert.action.where',
 				'users',
 				unambiguousBody(),
@@ -539,7 +539,7 @@ describe('typed relation refs in mutation guard bodies (#991)', () => {
 		);
 		expect(
 			compileMutationWhere(
-				createPgCompileOnlyAdapter(),
+				createPgCompileOnlyAdapter({ model: plainDb.model }),
 				'compileUpsert.action.where',
 				'users',
 				topLevel(),
@@ -825,7 +825,7 @@ describe('#891 slice 5a: batchSet guards and insert/upsert-from WHERE resolve th
 		);
 	});
 
-	it('AC6 model-less-unchanged: without a model the three positions keep their route', () => {
+	it('AC6 model-less-refused: without a model the three positions are refused', () => {
 		const adapter = createPgCompileOnlyAdapter();
 		const batch = (where: WhereIntent) =>
 			adapter.compileBatchUpdate({
@@ -835,27 +835,15 @@ describe('#891 slice 5a: batchSet guards and insert/upsert-from WHERE resolve th
 				updates: [{ id: 1, email: 'x' }],
 				where,
 			} as any);
-		const writings =
-			'EXISTS (SELECT 1 FROM writings AS writings_exists_0 WHERE users.id = writings_exists_0.user_id)';
-		expect(batch(exists('writings'))).toMatchObject({
-			sql: `UPDATE users SET email = t.email FROM unnest(CAST($1 AS int4[]), CAST($2 AS text[])) AS t(id, email) WHERE users.id = t.id AND ${writings}`,
-			parameters: [[1], ['x']],
-		});
-		expect(fromSource(adapter, 'insert', exists('writings'))).toMatchObject({
-			sql: `${insertHead} ${writings}`,
-			parameters: [],
-		});
-		expect(fromSource(adapter, 'upsert', exists('writings'))).toMatchObject({
-			sql: `${insertHead} ${writings}${onConflict}`,
-			parameters: [],
-		});
-		const crash = 'No WHERE handler registered for operator: undefined';
-		expect(() => batch(quantifierBody())).toThrow(crash);
-		expect(() => fromSource(adapter, 'insert', quantifierBody())).toThrow(
-			crash,
+		const refusal = new Error(
+			'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.',
 		);
-		expect(() => fromSource(adapter, 'upsert', quantifierBody())).toThrow(
-			crash,
+		expect(() => batch(exists('writings'))).toThrow(refusal);
+		expect(() => fromSource(adapter, 'insert', exists('writings'))).toThrow(
+			refusal,
+		);
+		expect(() => fromSource(adapter, 'upsert', exists('writings'))).toThrow(
+			refusal,
 		);
 	});
 

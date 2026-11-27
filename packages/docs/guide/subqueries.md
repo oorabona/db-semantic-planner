@@ -79,7 +79,7 @@ orm.select('symbols')
 
 SELECT-expression subqueries, including those nested in `op(...)`, support `outerRef()` in their WHERE and HAVING. Unqualified references bind the immediately enclosing query; qualified references search enclosing queries nearest first: in each query, a written include key wins, then an exact emitted qualifier, otherwise the logical table must have exactly one range. Ambiguous logical tables are refused. A FROM-less `compileSelectExpression()` can correlate nested subqueries to their enclosing subquery, but has no outer table of its own. An `outerRef()` (qualified or unqualified) in its immediate subquery body is refused with `outerRef() requires an enclosing query range.`; it never binds that subquery's own range.
 
-In a root query, an `outerRef()` in HAVING, a CASE WHEN condition or an aggregate FILTER has no enclosing range and is refused with `outerRef() requires an enclosing query range.`, as in WHERE, unless that condition sits inside or holds a subquery over a CTE or an NQL binding and no aggregate alias, relation predicate or dotted field in it already makes core resolve it. This holds for reads planned with a model (the ORM, NQL and `plan()`); hand-built `compilePlan` decisions and reads compiled without a model keep their route.
+In a root query, an `outerRef()` in HAVING, a CASE WHEN condition or an aggregate FILTER has no enclosing range and is refused with `outerRef() requires an enclosing query range.`, as in WHERE, unless that condition sits inside or holds a subquery over a CTE or an NQL binding and no aggregate alias, relation predicate or dotted field in it already makes core resolve it. This holds for reads planned with a model (the ORM, NQL and `plan()`).
 
 Aggregate methods available on `SubqueryBuilder`:
 
@@ -207,7 +207,5 @@ With a model, a scalar subquery used as a value — in `.columns()`, `.orderBy()
 - A flat include (#1030), a `batchValuesSource` (#1031) and a join (#1039) are not supported yet: they throw `NotYetSupportedError`, whose `issue` field names the issue. The same three issues apply to a scalar-comparison body in a condition.
 - A body whose FROM names an NQL binding or a CTE keeps the adapter's route, with every body below it. Such a subtree that scans a table with a default filter, or carries a builder policy, throws `NotYetSupportedError` (#1040).
 - Inside a body planned as a nested select, such a body in a column, ORDER BY or HAVING expression throws `NotYetSupportedError` when it, or a body below it, holds a qualified `outerRef()`: `a qualified outerRef() in a local-source subquery body is not supported yet (#1040).` An unqualified `outerRef()` there binds the immediately enclosing query. In a WHERE, or in a condition holding an `outerRef()` of its own or naming a HAVING aggregate alias, core binds both forms.
-
-Without a model, the adapter compiles a scalar subquery body from its intent, and the rules above do not apply.
 
 Compilation follows [Authored intent and execution authority](./observability.md#authored-intent-and-execution-authority).

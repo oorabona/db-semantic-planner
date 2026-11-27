@@ -64,7 +64,7 @@ const minimalSchema = schema({
 
 describe('PgAdapter.compileSelectExpression()', () => {
 	it('compiles nextval() to SELECT nextval(...)', () => {
-		const adapter = createPgCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter({ model: minimalSchema.model });
 		const expr = fn('nextval', literal('my_seq'));
 		const { sql, parameters } = adapter.compileSelectExpression(expr.intent);
 
@@ -73,7 +73,7 @@ describe('PgAdapter.compileSelectExpression()', () => {
 	});
 
 	it('compiles now() to SELECT now()', () => {
-		const adapter = createPgCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter({ model: minimalSchema.model });
 		const expr = fn('now');
 		const { sql, parameters } = adapter.compileSelectExpression(expr.intent);
 
@@ -82,7 +82,7 @@ describe('PgAdapter.compileSelectExpression()', () => {
 	});
 
 	it('compiles parameterized expression: $1 + $2', () => {
-		const adapter = createPgCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter({ model: minimalSchema.model });
 		const expr = op('+', param(1), param(2));
 		const { sql, parameters } = adapter.compileSelectExpression(expr.intent);
 
@@ -91,7 +91,7 @@ describe('PgAdapter.compileSelectExpression()', () => {
 	});
 
 	it('compiles literal integer: SELECT 42', () => {
-		const adapter = createPgCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter({ model: minimalSchema.model });
 		const expr = literal(42);
 		const { sql, parameters } = adapter.compileSelectExpression(expr.intent);
 
@@ -101,7 +101,7 @@ describe('PgAdapter.compileSelectExpression()', () => {
 
 	it('compiles literal string: SELECT $1', () => {
 		// literal('hello') is a SQL string literal — inlined as 'hello'
-		const adapter = createPgCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter({ model: minimalSchema.model });
 		const expr = literal('hello');
 		const { sql, parameters } = adapter.compileSelectExpression(expr.intent);
 
@@ -111,7 +111,7 @@ describe('PgAdapter.compileSelectExpression()', () => {
 	});
 
 	it('compiles nested function call: pg_catalog.version()', () => {
-		const adapter = createPgCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter({ model: minimalSchema.model });
 		const expr = fn('version');
 		const { sql, parameters } = adapter.compileSelectExpression(expr.intent);
 

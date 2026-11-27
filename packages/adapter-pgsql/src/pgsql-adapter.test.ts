@@ -447,7 +447,7 @@ describe('PgAdapter', () => {
 	describe('compile', () => {
 		it('should compile a plan to CompiledQuery', () => {
 			const pool = createMockPool();
-			const adapter = createPgAdapter(pool);
+			const adapter = createPgAdapter(pool, { model: mutationTestModel });
 
 			// Mock plan (simplified)
 			const plan: PlanReport = nativePlan(
@@ -467,6 +467,7 @@ describe('PgAdapter', () => {
 		it('should use schema from adapter options', () => {
 			const pool = createMockPool();
 			const adapter = createPgAdapter(pool, {
+				model: mutationTestModel,
 				schemaName: 'tenant_123',
 			});
 
@@ -484,7 +485,7 @@ describe('PgAdapter', () => {
 
 		it('should use schema from compile options', () => {
 			const pool = createMockPool();
-			const adapter = createPgAdapter(pool);
+			const adapter = createPgAdapter(pool, { model: mutationTestModel });
 
 			const plan: PlanReport = nativePlan(
 				{ type: 'select', from: 'users' },
@@ -2879,7 +2880,7 @@ describe('PgAdapter', () => {
 		});
 
 		it('should compile SELECT in compile-only mode', () => {
-			const adapter = new PgAdapter(undefined, {});
+			const adapter = new PgAdapter(undefined, { model: mutationTestModel });
 			const plan: PlanReport = nativePlan(
 				{
 					type: 'select',
@@ -2968,7 +2969,7 @@ describe('PgAdapter', () => {
 		});
 
 		it('should createDump in compile-only mode', () => {
-			const adapter = new PgAdapter(undefined, {});
+			const adapter = new PgAdapter(undefined, { model: mutationTestModel });
 			const plan: PlanReport = nativePlan(
 				{
 					type: 'select',
@@ -3090,7 +3091,7 @@ describe('PgAdapter', () => {
 			expect(compiled.sql).not.toContain('orders_lat_0.*');
 		});
 
-		it('refuses star expansion over an opaque relation target', () => {
+		it('refuses a relation-column read compiled without a model', () => {
 			const adapter = new PgAdapter(undefined, {});
 			const plan = buildPlanWithRelationColumns(
 				'customers',
@@ -3106,7 +3107,9 @@ describe('PgAdapter', () => {
 			);
 
 			expect(() => adapter.compile(plan)).toThrow(
-				"Include payload 'orders' cannot enumerate wildcard keys for opaque target 'orders'.",
+				new Error(
+					'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.',
+				),
 			);
 		});
 
@@ -3140,7 +3143,7 @@ describe('PgAdapter', () => {
 			);
 		});
 
-		it('refuses missing read authority when no model is provided', () => {
+		it('refuses a relation-column read without a model before its read conversions', () => {
 			const adapter = new PgAdapter(undefined, {});
 			const plan = buildPlanWithRelationColumns(
 				'customers',
@@ -3157,7 +3160,7 @@ describe('PgAdapter', () => {
 
 			expect(() => adapter.compile(plan)).toThrow(
 				new Error(
-					"Include payload 'orders' cannot establish read conversions for column 'anything' without a compile model.",
+					'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.',
 				),
 			);
 		});

@@ -96,17 +96,20 @@ describe('DELETE-NOTEXISTS-ALIAS: relation resolved to real table via ModelIR', 
 		expect(sql).not.toMatch(/NOT.*EXISTS/i);
 	});
 
-	it('falls back to relation name when no ModelIR available', () => {
+	it('refuses a DELETE guard compiled without a model', () => {
 		const adapter = createPgCompileOnlyAdapter();
 
-		const { sql } = adapter.compileDelete({
-			type: 'delete' as const,
-			table: 'embeddings',
-			where: notExists('symbols'),
-		});
-
-		expect(sql).toMatch(/NOT.*EXISTS/i);
-		expect(sql).toMatch(/symbols/i);
+		expect(() =>
+			adapter.compileDelete({
+				type: 'delete' as const,
+				table: 'embeddings',
+				where: notExists('symbols'),
+			}),
+		).toThrow(
+			new Error(
+				'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.',
+			),
+		);
 	});
 
 	it('resolves caller-supplied relation names through the declared model', () => {

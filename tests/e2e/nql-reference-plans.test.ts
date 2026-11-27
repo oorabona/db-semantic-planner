@@ -364,7 +364,9 @@ function compileQuery(
 	// CTE queries (WITH ... AS (...) mainQuery) produce ast.cteQuery
 	if (compiled.ast?.cteQuery) {
 		const adapter = createPgCompileOnlyAdapter();
-		const result = adapter.compileCteQuery(compiled.ast.cteQuery);
+		const result = adapter.compileCteQuery(compiled.ast.cteQuery, {
+			model: schemaObj.model,
+		});
 		return { sql: result.sql, params: result.parameters };
 	}
 

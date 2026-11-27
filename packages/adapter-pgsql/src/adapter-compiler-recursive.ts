@@ -162,10 +162,7 @@ function createPlanReportForCteQuery(
 			isLocalSource,
 		);
 	}
-	if (
-		deps.model === undefined ||
-		deps.model.getTable(query.from) === undefined
-	) {
+	if (deps.model.getTable(query.from) === undefined) {
 		return createPlanReportForQuery(
 			query,
 			deps.model,
@@ -463,7 +460,7 @@ export function compileRecursive<T = unknown>(
 							logicalTable: startTable,
 						},
 					),
-					...(deps.model !== undefined && { model: deps.model }),
+					model: deps.model,
 					...(deps.declaredNames !== undefined && {
 						declaredNames: deps.declaredNames,
 					}),

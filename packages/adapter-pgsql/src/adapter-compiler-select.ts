@@ -1068,7 +1068,7 @@ export function compileSelectEnvelope<T = unknown>(
 	// schemaName precedence (options > adapter ctor) is resolved in PgAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const schemaName = deps.schemaName;
 
-	const resolvedModelForCompiler = options?.model ?? deps.model;
+	const resolvedModelForCompiler = deps.model;
 	if (
 		[plan.intent, plan.executableIntent].some(
 			(intent) =>
@@ -1195,7 +1195,7 @@ export function compileSelectEnvelope<T = unknown>(
 			injectAndValidateRelationColumns(
 				enrichedUnifiedDecisions,
 				relationColumnsMap,
-				options?.model ?? deps.model,
+				deps.model,
 			);
 		}
 
@@ -1315,7 +1315,7 @@ export function compileSelectEnvelope<T = unknown>(
 		// Enrich range operator decisions with dataType from model
 		// (PostgreSQL requires explicit type casts for range parameters).
 		// Use deps.model as fallback so ORM queries through deps also get enriched.
-		const rangeModel = options?.model ?? deps.model;
+		const rangeModel = deps.model;
 		enrichRangeDecisions(allDecisions, rangeModel, plan.rootTable);
 
 		// planForCompilation carries executableIntent as .intent, so
