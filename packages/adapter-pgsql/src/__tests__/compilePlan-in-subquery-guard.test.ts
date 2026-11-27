@@ -130,8 +130,6 @@ const inRefusal = (modifier: string) =>
 // ============================================================================
 
 describe('compilePlan: IN-subquery with dropped modifiers → throws (dispatchWhere guard)', () => {
-
-
 	it('OFFSET in IN-subquery → throws', () => {
 		expect(() => dumpIn(inBody({ offset: 5 }))).toThrow(inRefusal('OFFSET'));
 	});
@@ -141,11 +139,6 @@ describe('compilePlan: IN-subquery with dropped modifiers → throws (dispatchWh
 			inRefusal('DISTINCT'),
 		);
 	});
-
-
-
-
-
 
 	it('the refusal is a NotYetSupportedError', () => {
 		expect(() => dumpIn(inBody(groupByRegion))).toThrow(NotYetSupportedError);
@@ -247,7 +240,6 @@ describe('compilePlan: nested IN-subquery (mapInSubqueryCondition) — forbidden
 // ============================================================================
 
 describe('compilePlan: valid IN-subquery still compiles (no false positives)', () => {
-
 	it('IN-subquery with inner WHERE → compiles correctly', () => {
 		expect(
 			dumpIn(
@@ -549,7 +541,6 @@ describe('compilePlan: typeless { fields: [...] } select shape — assertNoUnsup
 		expect(normalizeSQL(result.sql)).toContain('= any');
 		expect(normalizeSQL(result.sql)).toContain('customers');
 	});
-
 
 	it('typeless { fields: undefined } select → throws (undefined fields key present)', () => {
 		// { fields: undefined } has the key present — isSelectWithFields in the compiler
