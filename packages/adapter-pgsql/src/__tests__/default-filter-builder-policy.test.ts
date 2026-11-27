@@ -12,7 +12,6 @@ import {
 	star,
 } from '@dbsp/core';
 import { rawNotExists } from '@dbsp/core/internal';
-import type { QueryIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -63,12 +62,7 @@ describe('nested builder filter ownership', () => {
 					.select('users')
 					.where(
 						predicate(
-							orm
-								.select('posts')
-								.columns(['id'])
-								.withoutDefaultFilters() as unknown as {
-								buildIntent(): QueryIntent;
-							},
+							orm.select('posts').columns(['id']).withoutDefaultFilters(),
 						),
 					)
 					.dump().sql,
@@ -88,11 +82,7 @@ describe('nested builder filter ownership', () => {
 				for (const innerFiltered of [false, true]) {
 					const inner = orm.select('posts').columns(['id']);
 					const condition = predicate(
-						(innerFiltered
-							? inner
-							: inner.withoutDefaultFilters()) as unknown as {
-							buildIntent(): QueryIntent;
-						},
+						innerFiltered ? inner : inner.withoutDefaultFilters(),
 					);
 					const outer = innerFiltered
 						? orm.withoutDefaultFilters().select('users')
@@ -136,12 +126,7 @@ describe('nested builder filter ownership', () => {
 				.withoutDefaultFilters()
 				.where(
 					rawExists(
-						orm
-							.select('posts')
-							.columns(['id'])
-							.where(exists('comments')) as unknown as {
-							buildIntent(): QueryIntent;
-						},
+						orm.select('posts').columns(['id']).where(exists('comments')),
 					),
 				)
 				.dump().sql,

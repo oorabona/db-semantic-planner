@@ -21,8 +21,11 @@ import {
 	exprRef,
 	fn,
 	gt,
+	gte,
 	inArray,
+	inSubquery,
 	isDistinctFrom,
+	isNull,
 	lag,
 	lead,
 	like,
@@ -31,6 +34,7 @@ import {
 	op,
 	outerRef,
 	param,
+	rawExists,
 	ref,
 	rowNumber,
 	SubqueryExpression,
@@ -43,6 +47,7 @@ import {
 	wMin,
 	wSum,
 } from '@dbsp/core';
+import { rawNotExists } from '@dbsp/core/internal';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -623,13 +628,26 @@ describe('filter operands and object filters (ADR 0011 delivery 2)', () => {
 		]);
 	});
 
-	it('AC3b object filter subquery unchanged: $gt keeps its WhereSubqueryIntent SQL', () => {
+	it('AC4b SubqueryExpression count in $gt: an object-filter operator compiles as gt() (ADR 0011 delivery 5)', () => {
 		expect(sqlOf(where({ score: { $gt: subquery('posts').count() } }))).toEqual(
 			[
-				'SELECT posts.id FROM posts WHERE posts.score > (SELECT count(*) FROM posts AS posts_subq_0)',
+				'SELECT posts.id FROM posts WHERE posts.score > (SELECT count(*) FROM posts AS posts_1)',
 				[],
 			],
 		);
+	});
+
+	it('AC4b SubqueryExpression select in $gte: an object-filter operator compiles as gte() (ADR 0011 delivery 5)', () => {
+		expect(
+			sqlOf(
+				where({
+					score: { $gte: subquery('posts').select('score').build() },
+				}),
+			),
+		).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.score >= (SELECT posts_1.score FROM posts AS posts_1)',
+			[],
+		]);
 	});
 
 	it('AC4 unchanged value leaves: plain values, markers and null keep their meaning', () => {
@@ -1365,5 +1383,430 @@ describe('ordering, grouping, aggregate and window leaves (ADR 0011 delivery 3)'
 			'SELECT posts.id, row_number() OVER (ORDER BY author.name ASC) AS w FROM posts JOIN users AS author ON posts.user_id = author.id',
 			[],
 		]);
+	});
+});
+
+describe('subquery leaves (ADR 0011 delivery 5)', () => {
+	const tables = {
+		users: {
+			id: { type: 'integer', primaryKey: true },
+			name: 'text',
+			deletedAt: { type: 'timestamp', nullable: true },
+		},
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			title: 'text',
+			score: 'integer',
+			deletedAt: { type: 'timestamp', nullable: true },
+			user_id: ref('users', { as: 'author' }),
+		},
+	} as const;
+	const filteredDb = schema(tables, undefined, {
+		defaultFilters: { posts: isNull('deletedAt'), users: isNull('deletedAt') },
+	});
+	const o = createOrm({
+		schema: filteredDb,
+		adapter: createPgCompileOnlyAdapter({ model: filteredDb.model }),
+		suppressDxWarnings: true,
+	});
+	const sqlOf = (dump: { sql: string; params: readonly unknown[] }) => [
+		dump.sql,
+		dump.params,
+	];
+	const optout = () =>
+		o
+			.withoutDefaultFilters()
+			.select('posts')
+			.where(eq('user_id', outerRef('id')))
+			.count({ as: 'n' });
+	const own = () =>
+		o
+			.select('posts')
+			.where(eq('user_id', outerRef('id')))
+			.count({ as: 'n' });
+	const sqb = () =>
+		subquery('posts')
+			.select('id')
+			.where(eq('user_id', outerRef('id')));
+	const OPT =
+		'(SELECT count(*) AS n FROM posts WHERE posts.user_id = users.id)';
+	const OWN =
+		'(SELECT count(*) AS n FROM posts WHERE posts."deletedAt" IS NULL AND posts.user_id = users.id)';
+	const ROOT = 'FROM users WHERE users."deletedAt" IS NULL';
+	const users = () => o.select('users');
+
+	it('AC3 cast: a builder casts as a scalar subquery', () => {
+		expect(
+			sqlOf(
+				users()
+					.columns(['id', cast(optout(), 'text').as('v')])
+					.dump(),
+			),
+		).toEqual([`SELECT users.id, CAST(${OPT} AS text) AS v ${ROOT}`, []]);
+	});
+
+	it('AC3 caseWhen else: a builder as the ELSE result', () => {
+		expect(
+			sqlOf(
+				users()
+					.columns([
+						'id',
+						caseWhen(eq('id', 1), literal(0)).else(optout()).as('v'),
+					])
+					.dump(),
+			),
+		).toEqual([
+			`SELECT users.id, CASE WHEN users.id = $1 THEN 0 ELSE ${OPT} END AS v ${ROOT}`,
+			[1],
+		]);
+	});
+
+	it('AC3 caseWhen when result: a builder as the THEN result', () => {
+		expect(
+			sqlOf(
+				users()
+					.columns(['id', caseWhen(eq('id', 1), optout()).else(0).as('v')])
+					.dump(),
+			),
+		).toEqual([
+			`SELECT users.id, CASE WHEN users.id = $1 THEN ${OPT} ELSE 0 END AS v ${ROOT}`,
+			[1],
+		]);
+	});
+
+	it('AC3 orderBy: a builder orders rows', () => {
+		expect(
+			sqlOf(users().columns(['id']).orderBy(optout(), 'desc').dump()),
+		).toEqual([`SELECT users.id ${ROOT} ORDER BY ${OPT} DESC`, []]);
+	});
+
+	it('AC3 filter left operand: a builder on the left of gt', () => {
+		expect(sqlOf(users().where(gt(optout(), 1)).dump())).toEqual([
+			`SELECT users.* ${ROOT} AND ${OPT} > $1`,
+			[1],
+		]);
+	});
+
+	it('AC3 having: a builder in a HAVING comparison', () => {
+		expect(
+			sqlOf(
+				users().columns(['id']).groupBy(['id']).having(gt(optout(), 0)).dump(),
+			),
+		).toEqual([
+			`SELECT users.id ${ROOT} GROUP BY users.id HAVING ${OPT} > $1`,
+			[0],
+		]);
+	});
+
+	it('AC4 eq right operand: a builder as the comparison value', () => {
+		expect(sqlOf(users().where(eq('id', optout())).dump())).toEqual([
+			`SELECT users.* ${ROOT} AND users.id = ${OPT}`,
+			[],
+		]);
+	});
+
+	it('AC4 object filter direct value: a builder as a field value', () => {
+		expect(sqlOf(users().where({ id: optout() }).dump())).toEqual([
+			`SELECT users.* ${ROOT} AND users.id = ${OPT}`,
+			[],
+		]);
+	});
+
+	it('AC4 object filter operator: $gte compiles as gte()', () => {
+		const expected = [`SELECT users.* ${ROOT} AND users.id >= ${OPT}`, []];
+		expect(
+			sqlOf(
+				users()
+					.where({ id: { $gte: optout() } })
+					.dump(),
+			),
+		).toEqual(expected);
+		expect(sqlOf(users().where(gte('id', optout())).dump())).toEqual(expected);
+	});
+
+	it('AC4 ExpressionRef method: exprRef().eq(builder)', () => {
+		expect(sqlOf(users().where(exprRef('id').eq(optout())).dump())).toEqual([
+			`SELECT users.* ${ROOT} AND users.id = ${OPT}`,
+			[],
+		]);
+	});
+
+	it('AC4 mutation WHERE: a builder in an update WHERE', () => {
+		const dump = o
+			.update('users')
+			.set({ name: 'x' })
+			.where(eq('id', optout()))
+			.dump();
+		expect([dump.sql, dump.parameters]).toEqual([
+			`UPDATE users SET name = $1 WHERE users.id = ${OPT}`,
+			['x'],
+		]);
+	});
+
+	it('AC5 asExpr opt-out: QueryBuilder.asExpr names an unfiltered subquery column', () => {
+		expect(
+			sqlOf(
+				users()
+					.columns(['id', optout().asExpr('v')])
+					.dump(),
+			),
+		).toEqual([`SELECT users.id, ${OPT} AS v ${ROOT}`, []]);
+	});
+
+	it('AC5 asExpr own: QueryBuilder.asExpr keeps the filter', () => {
+		expect(
+			sqlOf(
+				users()
+					.columns(['id', own().asExpr('v')])
+					.dump(),
+			),
+		).toEqual([`SELECT users.id, ${OWN} AS v ${ROOT}`, []]);
+	});
+
+	it('AC6 inSubquery opt-out builder: an IN body without the filter (#994)', () => {
+		expect(
+			sqlOf(
+				users()
+					.where(
+						inSubquery(
+							'id',
+							o.withoutDefaultFilters().select('posts').columns(['user_id']),
+						),
+					)
+					.dump(),
+			),
+		).toEqual([
+			`SELECT users.* ${ROOT} AND users.id = ANY (SELECT posts_subq_0.user_id FROM posts AS posts_subq_0)`,
+			[],
+		]);
+	});
+
+	it('AC6 inSubquery own builder: the IN body keeps the filter (#994)', () => {
+		expect(
+			sqlOf(
+				users()
+					.where(inSubquery('id', o.select('posts').columns(['user_id'])))
+					.dump(),
+			),
+		).toEqual([
+			`SELECT users.* ${ROOT} AND users.id = ANY (SELECT posts_subq_0.user_id FROM posts AS posts_subq_0 WHERE posts_subq_0."deletedAt" IS NULL)`,
+			[],
+		]);
+	});
+
+	it('AC6 inSubquery subquery builder: the EXISTS rewrite is kept', () => {
+		expect(
+			sqlOf(
+				users()
+					.where(inSubquery('id', subquery('posts').select('user_id')))
+					.dump(),
+			),
+		).toEqual([
+			`SELECT users.* ${ROOT} AND EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.user_id AND posts_exists_0."deletedAt" IS NULL)`,
+			[],
+		]);
+	});
+
+	it('AC6 rawExists SubqueryExpression: a SubqueryExpression is an EXISTS body', () => {
+		expect(sqlOf(users().where(rawExists(sqb().build())).dump())).toEqual([
+			`SELECT users.* ${ROOT} AND EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.user_id = users.id AND posts_sq."deletedAt" IS NULL)`,
+			[],
+		]);
+	});
+
+	it('AC6 rawExists own builder unchanged', () => {
+		expect(
+			sqlOf(
+				users()
+					.where(
+						rawExists(o.select('posts').where(eq('user_id', outerRef('id')))),
+					)
+					.dump(),
+			),
+		).toEqual([
+			`SELECT users.* ${ROOT} AND EXISTS (SELECT 1 FROM posts AS posts_sq WHERE posts_sq.user_id = users.id AND posts_sq."deletedAt" IS NULL)`,
+			[],
+		]);
+	});
+
+	it('AC6 rawNotExists SubqueryExpression: a SubqueryExpression is a NOT EXISTS body', () => {
+		expect(sqlOf(users().where(rawNotExists(sqb().build())).dump())).toEqual([
+			`SELECT users.* ${ROOT} AND NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.user_id = users.id AND posts_sq."deletedAt" IS NULL))`,
+			[],
+		]);
+	});
+
+	it('AC6 rawNotExists opt-out builder: the NOT EXISTS body has no filter', () => {
+		expect(
+			sqlOf(
+				users()
+					.where(
+						rawNotExists(
+							o
+								.withoutDefaultFilters()
+								.select('posts')
+								.where(eq('user_id', outerRef('id'))),
+						),
+					)
+					.dump(),
+			),
+		).toEqual([
+			`SELECT users.* ${ROOT} AND NOT (EXISTS (SELECT 1 FROM posts AS posts_sq WHERE posts_sq.user_id = users.id))`,
+			[],
+		]);
+	});
+
+	it('AC7 caseWhen asExpr and SubqueryExpression: a subquery CASE result (#1034)', () => {
+		const expected = [
+			`SELECT users.id, CASE WHEN users.id = $1 THEN (SELECT count(*) FROM posts WHERE posts."deletedAt" IS NULL) ELSE 0 END AS v ${ROOT}`,
+			[1],
+		];
+		expect(
+			sqlOf(
+				users()
+					.columns([
+						'id',
+						caseWhen(eq('id', 1), subquery('posts').count().asExpr('n'))
+							.else(0)
+							.as('v'),
+					])
+					.dump(),
+			),
+		).toEqual(expected);
+		expect(
+			sqlOf(
+				users()
+					.columns([
+						'id',
+						caseWhen(eq('id', 1), subquery('posts').count()).else(0).as('v'),
+					])
+					.dump(),
+			),
+		).toEqual(expected);
+	});
+
+	it('AC7 cast SubqueryExpression and asExpr: a subquery casts (#1034)', () => {
+		const expected = [
+			`SELECT users.id, CAST((SELECT count(*) FROM posts WHERE posts."deletedAt" IS NULL) AS text) AS v ${ROOT}`,
+			[],
+		];
+		expect(
+			sqlOf(
+				users()
+					.columns(['id', cast(subquery('posts').count(), 'text').as('v')])
+					.dump(),
+			),
+		).toEqual(expected);
+		expect(
+			sqlOf(
+				users()
+					.columns([
+						'id',
+						cast(subquery('posts').count().asExpr('n'), 'text').as('v'),
+					])
+					.dump(),
+			),
+		).toEqual(expected);
+	});
+
+	it('AC7 cast param stays opaque', () => {
+		expect(
+			sqlOf(
+				users()
+					.columns(['id', cast(param('7'), 'integer').as('v')])
+					.dump(),
+			),
+		).toEqual([`SELECT users.id, CAST($1 AS integer) AS v ${ROOT}`, ['7']]);
+	});
+
+	const arity = (n: number) =>
+		`scalar subquery body projects ${n} columns; a scalar subquery yields one value.`;
+	const NO_PROJECTION =
+		'scalar subquery with no projection (scalar subquery must project exactly one column — select one field or one aggregate) is not supported — it would silently change which rows match; restructure the query or use a CTE.';
+
+	it('R6 star body refused: a builder without a projection in fn()', () => {
+		expect(() =>
+			users()
+				.columns(['id', fn('abs', o.select('posts')).as('v')])
+				.dump(),
+		).toThrow(arity(5));
+	});
+
+	it('R6 multi-column body refused: a two-column builder in fn()', () => {
+		expect(() =>
+			users()
+				.columns([
+					'id',
+					fn('abs', o.select('posts').columns(['id', 'title'])).as('v'),
+				])
+				.dump(),
+		).toThrow(arity(2));
+	});
+
+	it('R6b star builder in $eq: refused by the arity check', () => {
+		expect(() =>
+			users()
+				.where({ id: { $eq: o.select('posts').limit(1) } })
+				.dump(),
+		).toThrow(arity(5));
+	});
+
+	it('R6b empty columns builder in $eq: refused by the arity check', () => {
+		expect(() =>
+			users()
+				.where({ id: { $eq: o.select('posts').columns([]).limit(1) } })
+				.dump(),
+		).toThrow(arity(5));
+	});
+
+	it('R6b aggregate plus field builder in $eq: refused by the arity check', () => {
+		expect(() =>
+			users()
+				.where({
+					id: { $eq: o.select('posts').columns(['id']).count({ as: 'n' }) },
+				})
+				.dump(),
+		).toThrow(arity(2));
+	});
+
+	it('R6b hand-built SubqueryExpression in $gt: refused by the arity check', () => {
+		expect(() =>
+			users()
+				.where({
+					id: {
+						$gt: new SubqueryExpression({ type: 'select', from: 'posts' }),
+					},
+				})
+				.dump(),
+		).toThrow(arity(5));
+	});
+
+	it('R6c toWhereIntent absent projection: refused (D9)', () => {
+		const sq = new SubqueryExpression({ type: 'select', from: 'posts' });
+		expect(() => users().where(sq.toWhereIntent('id', 'gt')).dump()).toThrow(
+			NO_PROJECTION,
+		);
+	});
+
+	it('R6c toWhereIntent all projection: refused (D9)', () => {
+		const sq = new SubqueryExpression({
+			type: 'select',
+			from: 'posts',
+			select: { type: 'all' },
+		});
+		expect(() => users().where(sq.toWhereIntent('id', 'gt')).dump()).toThrow(
+			NO_PROJECTION,
+		);
+	});
+
+	it('R6c mutation WHERE absent projection: refused (D9)', () => {
+		const sq = new SubqueryExpression({ type: 'select', from: 'posts' });
+		expect(() =>
+			o
+				.update('users')
+				.set({ name: 'x' })
+				.where(sq.toWhereIntent('id', 'eq'))
+				.dump(),
+		).toThrow(NO_PROJECTION);
 	});
 });

@@ -20,7 +20,7 @@ import {
 	createOrm,
 	eq,
 	exists,
-	NotYetSupportedError,
+	InvalidOperationError,
 	or,
 	outerRef,
 	POSTGRESQL_CAPABILITIES,
@@ -635,7 +635,7 @@ describe('scalar-direct guard: limit and orderBy rejected on direct path', () =>
 		);
 	});
 
-	it('decisions-path scalar with LIMIT is refused as a query builder before planning (ADR 0011)', () => {
+	it('a structural { buildIntent } object with LIMIT is refused by name before planning (ADR 0011 delivery 5)', () => {
 		const orm = buildOrm();
 		const withLimit = {
 			buildIntent: () =>
@@ -650,17 +650,22 @@ describe('scalar-direct guard: limit and orderBy rejected on direct path', () =>
 					limit: 1,
 				}) as any,
 		};
-		// A builder value of a comparison is refused by eq() as not yet
-		// supported (#1053), so the direct-path modifier guard is never reached.
+		// An object exposing buildIntent() is not a select builder: eq() refuses
+		// it by name, so the direct-path modifier guard is never reached.
 		expect(() => {
 			(orm as any)
 				.select('users')
 				.where(eq('id', withLimit as any))
 				.dump();
-		}).toThrow(NotYetSupportedError);
+		}).toThrow(
+			new InvalidOperationError(
+				'eq',
+				'this builder is not a subquery; use orm.select(...), subquery(table) or a SubqueryExpression',
+			),
+		);
 	});
 
-	it('decisions-path scalar with field ORDER BY is refused as a query builder before planning (ADR 0011)', () => {
+	it('a structural { buildIntent } object with ORDER BY is refused by name before planning (ADR 0011 delivery 5)', () => {
 		const orm = buildOrm();
 		const withOrder = {
 			buildIntent: () =>
@@ -671,14 +676,19 @@ describe('scalar-direct guard: limit and orderBy rejected on direct path', () =>
 					orderBy: [{ field: 'id', direction: 'asc' as const }],
 				}) as any,
 		};
-		// A builder value of a comparison is refused by eq() as not yet
-		// supported (#1053), so the direct-path modifier guard is never reached.
+		// An object exposing buildIntent() is not a select builder: eq() refuses
+		// it by name, so the direct-path modifier guard is never reached.
 		expect(() => {
 			(orm as any)
 				.select('users')
 				.where(eq('id', withOrder as any))
 				.dump();
-		}).toThrow(NotYetSupportedError);
+		}).toThrow(
+			new InvalidOperationError(
+				'eq',
+				'this builder is not a subquery; use orm.select(...), subquery(table) or a SubqueryExpression',
+			),
+		);
 	});
 });
 

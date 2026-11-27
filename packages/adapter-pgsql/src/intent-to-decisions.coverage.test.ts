@@ -1395,7 +1395,11 @@ describe('intentToDecisions - coverage', () => {
 					kind: 'subquery' as const,
 					field: 'x',
 					operator: 'neq',
-					subquery: { type: 'select' as const, from: 't' },
+					subquery: {
+						type: 'select' as const,
+						from: 't',
+						select: { type: 'fields' as const, fields: ['y'] },
+					},
 				},
 			};
 			const decisions = intentToDecisions(intent, 'users');
@@ -1403,7 +1407,7 @@ describe('intentToDecisions - coverage', () => {
 			expect(where?.subqueryOperator).toBe('!=');
 		});
 
-		it('converts scalar subquery with no select → defaults to *', () => {
+		it('refuses a scalar subquery with no select (ADR 0011 delivery 5)', () => {
 			const intent = {
 				type: 'select' as const,
 				from: 'users',
@@ -1414,9 +1418,9 @@ describe('intentToDecisions - coverage', () => {
 					subquery: { type: 'select' as const, from: 't' },
 				},
 			};
-			const decisions = intentToDecisions(intent, 'users');
-			const where = decisions.find((d) => d.type === 'where');
-			expect(where?.selectColumn).toBe('*');
+			expect(() => intentToDecisions(intent, 'users')).toThrow(
+				'scalar subquery with no projection (scalar subquery must project exactly one column — select one field or one aggregate) is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+			);
 		});
 	});
 

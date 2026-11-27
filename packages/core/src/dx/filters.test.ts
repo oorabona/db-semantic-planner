@@ -1203,33 +1203,78 @@ describe('filter operand refusals (ADR 0011 delivery 2)', () => {
 		);
 	});
 
-	it('R1 left builders: not yet supported (#1053)', () => {
-		expectNotYet(
-			() => eq(orm.select('posts').count() as never, 1),
-			'a query builder',
-			'expression argument',
-			1053,
+	const NOT_A_SUBQUERY =
+		'this builder is not a subquery; use orm.select(...), subquery(table) or a SubqueryExpression';
+	const bodyIntent = {
+		type: 'select' as const,
+		from: 'posts',
+		select: { type: 'fields' as const, fields: ['id'] },
+	};
+
+	it('R1 non-select builder on either side of eq: refused by name (ADR 0011 delivery 5)', () => {
+		const update = () => orm.update('posts').set({ title: 'x' });
+		expectInvalid(
+			() => eq(update() as never, 1),
+			`Invalid eq: ${NOT_A_SUBQUERY}`,
 		);
-		expectNotYet(
-			() => eq(subquery('posts').select('id') as never, 1),
-			'a query builder',
-			'expression argument',
-			1053,
+		expectInvalid(() => eq('id', update()), `Invalid eq: ${NOT_A_SUBQUERY}`);
+	});
+
+	it.each([
+		[
+			'union',
+			() =>
+				orm
+					.select('posts')
+					.columns(['id'])
+					.union(orm.select('posts').columns(['id'])),
+		],
+		['withCte', () => orm.withCte('x')],
+		['nql', () => orm.nql`posts`],
+		[
+			'recursive',
+			() =>
+				orm.recursive('t', {
+					base: orm.select('posts').columns(['id']),
+					step: orm.select('posts').columns(['id']),
+				}),
+		],
+	] as const)(
+		'R1v non-select builder (%s) as a comparison value: refused by name, never bound (ADR 0011 delivery 5)',
+		(_name, builder) => {
+			expectInvalid(() => eq('id', builder()), `Invalid eq: ${NOT_A_SUBQUERY}`);
+		},
+	);
+
+	it('R3 structural builder objects as a comparison value: refused by name (ADR 0011 delivery 5)', () => {
+		expectInvalid(
+			() => eq('id', { buildIntent: () => bodyIntent }),
+			`Invalid eq: ${NOT_A_SUBQUERY}`,
+		);
+		expectInvalid(
+			() => eq('id', { buildSubqueryIntent: () => bodyIntent }),
+			`Invalid eq: ${NOT_A_SUBQUERY}`,
 		);
 	});
 
-	it('R2 right builders: not yet supported (#1053, #956)', () => {
+	it('R4 select builder in a list element: still not yet supported (#1064)', () => {
 		expectNotYet(
-			() => eq('id', subquery('posts').select('id')),
+			() => inArray('id', [orm.select('posts').count()] as never),
 			'a query builder',
-			'expression argument',
-			1053,
+			'list element',
+			1064,
 		);
-		expectNotYet(
-			() => eq('id', orm.select('posts').count()),
-			'a query builder',
-			'expression argument',
-			1053,
+	});
+
+	it('R4b non-select builder in a list element or like pattern: refused by name (ADR 0011 delivery 5)', () => {
+		const update = () => orm.update('posts').set({ title: 'x' });
+		expectInvalid(
+			() => inArray('id', [update()] as never),
+			`Invalid inArray: ${NOT_A_SUBQUERY}`,
+		);
+		expectInvalid(
+			() => like('title', update() as never),
+			`Invalid like: ${NOT_A_SUBQUERY}`,
 		);
 	});
 
@@ -1240,11 +1285,11 @@ describe('filter operand refusals (ADR 0011 delivery 2)', () => {
 		);
 	});
 
-	it('R2 right relation ColumnRef: not yet supported (#1052)', () => {
+	it('R8 right relation ColumnRef: not yet supported, named as a comparison value (#1052, #1068)', () => {
 		expectNotYet(
 			() => eq('title', posts.author.name),
 			'a relation-reached ColumnRef',
-			'expression argument',
+			'comparison value',
 			1052,
 		);
 	});
@@ -1264,6 +1309,7 @@ describe('filter operand refusals (ADR 0011 delivery 2)', () => {
 			[literal('a%'), 'an expression'],
 			[ref('posts.title'), 'ref()'],
 			[orm.select('posts').count(), 'a query builder'],
+			[subquery('posts').select('title'), 'a query builder'],
 		];
 		for (const [pattern, construct] of cases)
 			expectNotYet(

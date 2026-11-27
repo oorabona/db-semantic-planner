@@ -21,7 +21,14 @@ import {
 	compilePlan,
 	type SimplifiedPlanReport,
 } from '@dbsp/adapter-pgsql/internal';
-import { createOrm, eq, rawExists, schema, subquery } from '@dbsp/core';
+import {
+	createOrm,
+	eq,
+	rawExists,
+	SubqueryExpression,
+	schema,
+	subquery,
+} from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import {
 	buildSubqueryFromIntent,
@@ -168,7 +175,7 @@ describe('DEFECT-2: batchSet().where(rawExists with LIMIT) throws (mutation guar
 	it('batchSet with rawExists(limit:0 subquery) throws before executing', () => {
 		const orm = makeOrm();
 
-		// SubqueryBuilder has no .limit(); pass a QueryIntent directly via buildIntent().
+		// SubqueryBuilder has no .limit(); pass the QueryIntent as a SubqueryExpression.
 		// limit:0 should always produce FALSE (EXISTS of empty set). Before the fix,
 		// compileBatchUpdate bypassed the guard and compiled it as unrestricted EXISTS
 		// (always TRUE) — broadening the batch update to ALL rows.
@@ -178,7 +185,7 @@ describe('DEFECT-2: batchSet().where(rawExists with LIMIT) throws (mutation guar
 			select: { type: 'fields' as const, fields: ['id'] as const },
 			limit: 0,
 		};
-		const whereGuard = rawExists({ buildIntent: () => intentWithLimit });
+		const whereGuard = rawExists(new SubqueryExpression(intentWithLimit));
 
 		expect(() =>
 			orm

@@ -40,6 +40,7 @@ import type {
 } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
 import { planRecursive } from '../planner.js';
+import { NON_SUBQUERY_BUILDER_BRAND } from './symbols.js';
 
 // ============================================================================
 // Types
@@ -615,3 +616,11 @@ export function createRecursiveBuilder<TResult = unknown>(
 		planOptions,
 	);
 }
+
+// ADR 0011: refused by name as a scalar leaf or a subquery, never planned as a
+// body nor bound as a parameter (coerce.ts, toSubqueryExpression).
+Object.defineProperty(
+	RecursiveQueryBuilder.prototype,
+	NON_SUBQUERY_BUILDER_BRAND,
+	{ value: true },
+);

@@ -13,7 +13,10 @@
  *   `ExpressionRef`;
  * - {@link coerceListElement} and {@link coerceLikePattern} serve the value
  *   positions that cannot carry an expression yet, and refuse one as not yet
- *   supported.
+ *   supported;
+ * - {@link toSubqueryExpression} turns a select query builder or a
+ *   `subquery(table)` builder into a subquery that keeps the builder's filter
+ *   policy, and refuses every other builder by name.
  *
  * None of them binds an expression object, a builder, a `ColumnRef`, an
  * `outerRef()` or a `sql()` marker as a parameter value.
@@ -24,6 +27,7 @@ import type {
 	ExpressionIntent,
 	LiteralExpressionIntent,
 	ParamExpressionIntent,
+	QueryIntent,
 	RefExpressionIntent,
 	SubqueryExpressionIntent,
 	SubqueryRefIntent,
@@ -33,13 +37,18 @@ import { getColumnName, isRelationPathColumn } from './column-utils.js';
 import { InvalidOperationError } from './errors.js';
 import { ExpressionRef } from './expressions.js';
 import { isSqlRaw } from './filters.js';
+import type { QueryBuilder } from './query-builder-types.js';
 import type { RefDefinition } from './schema.js';
 import {
 	isSubqueryExpression,
 	SubqueryBuilder,
-	type SubqueryExpression,
+	SubqueryExpression,
 } from './subquery-builder.js';
-import { CALLBACK_SCOPE } from './symbols.js';
+import {
+	CALLBACK_SCOPE,
+	NON_SUBQUERY_BUILDER_BRAND,
+	SELECT_BUILDER_BRAND,
+} from './symbols.js';
 import { type ColumnRef, isColumnRef } from './table-ref.js';
 import type { ExpressionSpec } from './types.js';
 
@@ -53,7 +62,9 @@ import type { ExpressionSpec } from './types.js';
  * - a non-finite number, a `bigint` outside that range, an array or a `Date`
  *   is a bound parameter;
  * - an expression object (`ExpressionRef`, `ExpressionSpec`, `ColumnRef`,
- *   `SubqueryExpression`, schema `ref()`) is used as is.
+ *   `SubqueryExpression`, schema `ref()`) is used as is;
+ * - a select query builder (`orm.select(...)`) or a `subquery(table)` builder
+ *   is a scalar subquery that keeps the builder's filter policy.
  *
  * Use `literal()`, `param()` or `exprRef()` to force a position.
  */
@@ -68,9 +79,14 @@ export type ReferenceLeaf =
 	| ExpressionSpec
 	| ColumnRef<string, string, unknown>
 	| SubqueryExpression
-	| RefDefinition;
+	| RefDefinition
+	| QueryBuilder<unknown>
+	| SubqueryBuilder;
 
 const EXPRESSION_ARGUMENT = 'expression argument';
+const COMPARISON_VALUE = 'comparison value';
+const NOT_A_SUBQUERY =
+	'this builder is not a subquery; use orm.select(...), subquery(table) or a SubqueryExpression';
 
 function isBrandedExpression(
 	leaf: object,
@@ -87,8 +103,40 @@ function isOuterRef(leaf: object): boolean {
 	return candidate.kind === 'ref' && candidate.outer === true;
 }
 
-function isQueryBuilder(leaf: object): boolean {
-	if (leaf instanceof SubqueryBuilder) return true;
+function isSelectBuilder(
+	leaf: object,
+): leaf is { buildSubqueryIntent(): QueryIntent } {
+	return (
+		(leaf as { readonly [SELECT_BUILDER_BRAND]?: unknown })[
+			SELECT_BUILDER_BRAND
+		] === true
+	);
+}
+
+/**
+ * Whether a value is a builder that becomes a scalar subquery: a select query
+ * builder or a `subquery(table)` builder.
+ */
+export function isSubqueryLeafBuilder(leaf: unknown): boolean {
+	return (
+		typeof leaf === 'object' &&
+		leaf !== null &&
+		(leaf instanceof SubqueryBuilder || isSelectBuilder(leaf))
+	);
+}
+
+/**
+ * Any other builder: a branded set-operation, CTE, recursive, NQL or mutation
+ * builder, or any other object exposing `buildIntent` or `buildSubqueryIntent`.
+ */
+function isNonSubqueryBuilder(leaf: object): boolean {
+	if (leaf instanceof SubqueryBuilder || isSelectBuilder(leaf)) return false;
+	if (
+		(leaf as { readonly [NON_SUBQUERY_BUILDER_BRAND]?: unknown })[
+			NON_SUBQUERY_BUILDER_BRAND
+		] === true
+	)
+		return true;
 	const candidate = leaf as {
 		buildIntent?: unknown;
 		buildSubqueryIntent?: unknown;
@@ -97,6 +145,34 @@ function isQueryBuilder(leaf: object): boolean {
 		typeof candidate.buildIntent === 'function' ||
 		typeof candidate.buildSubqueryIntent === 'function'
 	);
+}
+
+/**
+ * Convert a subquery-shaped argument to a `SubqueryExpression` (ADR 0011):
+ * - a `SubqueryExpression` is returned unchanged;
+ * - a `subquery(table)` builder is built without a policy of its own, so its
+ *   body inherits the filters in force where it is planned;
+ * - a select query builder issues its body with its own policy: its ORM's
+ *   default filters, or none for `withoutDefaultFilters()` and for an ORM
+ *   without default filters.
+ *
+ * @returns `undefined` when the value is not a builder or a subquery
+ * @throws InvalidOperationError for any other builder (set operation, CTE,
+ *   recursive, NQL, insert, update, upsert, delete) and for an object exposing
+ *   `buildIntent` or `buildSubqueryIntent`
+ */
+export function toSubqueryExpression(
+	leaf: unknown,
+	helper: string,
+): SubqueryExpression | undefined {
+	if (typeof leaf !== 'object' || leaf === null) return undefined;
+	if (isSubqueryExpression(leaf)) return leaf;
+	if (leaf instanceof SubqueryBuilder) return leaf.build();
+	if (isSelectBuilder(leaf))
+		return new SubqueryExpression(leaf.buildSubqueryIntent());
+	if (isNonSubqueryBuilder(leaf))
+		throw new InvalidOperationError(helper, NOT_A_SUBQUERY);
+	return undefined;
 }
 
 function refuse(helper: string, kind: string): never {
@@ -111,14 +187,17 @@ function refuse(helper: string, kind: string): never {
  *
  * @param leaf - The argument as the caller passed it
  * @param helper - The public helper name, used in refusal messages
- * @throws InvalidOperationError for `null`, `undefined`, a `sql()` marker and
- *   any other plain object (a hand-built intent included)
- * @throws NotYetSupportedError for `outerRef()`, a relation-reached or
- *   callback-scoped `ColumnRef`, and a query builder
+ * @param position - The position named in a not-yet refusal
+ * @throws InvalidOperationError for `null`, `undefined`, a `sql()` marker, a
+ *   builder that is not a subquery (see {@link toSubqueryExpression}) and any
+ *   other plain object (a hand-built intent included)
+ * @throws NotYetSupportedError for `outerRef()` and a relation-reached or
+ *   callback-scoped `ColumnRef`
  */
 export function coerceReference(
 	leaf: unknown,
 	helper: string,
+	position: string = EXPRESSION_ARGUMENT,
 ): ExpressionIntent {
 	switch (typeof leaf) {
 		case 'string':
@@ -160,13 +239,13 @@ export function coerceReference(
 		)
 			throw new NotYetSupportedError(
 				'a callback-scoped ColumnRef',
-				EXPRESSION_ARGUMENT,
+				position,
 				1052,
 			);
 		if (isRelationPathColumn(leaf))
 			throw new NotYetSupportedError(
 				'a relation-reached ColumnRef',
-				EXPRESSION_ARGUMENT,
+				position,
 				1052,
 			);
 		return {
@@ -180,13 +259,13 @@ export function coerceReference(
 			column: (leaf as RefDefinition).target,
 		} satisfies RefExpressionIntent;
 	if (isOuterRef(leaf))
-		throw new NotYetSupportedError('outerRef()', EXPRESSION_ARGUMENT, 1029);
-	if (isQueryBuilder(leaf))
-		throw new NotYetSupportedError(
-			'a query builder',
-			EXPRESSION_ARGUMENT,
-			1053,
-		);
+		throw new NotYetSupportedError('outerRef()', position, 1029);
+	const subquery = toSubqueryExpression(leaf, helper);
+	if (subquery !== undefined)
+		return {
+			kind: 'subquery',
+			query: subquery.intent,
+		} satisfies SubqueryExpressionIntent;
 	if (isSqlRaw(leaf))
 		throw new InvalidOperationError(
 			helper,
@@ -209,7 +288,9 @@ export type OrderByLeaf =
 	| ExpressionSpec
 	| ColumnRef<string, string, unknown>
 	| SubqueryExpression
-	| RefDefinition;
+	| RefDefinition
+	| QueryBuilder<unknown>
+	| SubqueryBuilder;
 
 /**
  * An expression object accepted in a value position (a filter's right
@@ -221,7 +302,9 @@ export type ValueExpression =
 	| ColumnRef<string, string, unknown>
 	| SubqueryExpression
 	| RefDefinition
-	| SubqueryRefIntent;
+	| SubqueryRefIntent
+	| QueryBuilder<unknown>
+	| SubqueryBuilder;
 
 const UNFINISHED_CASE =
 	'caseWhen() is unfinished; complete it with .else(value) before using it as a value';
@@ -242,23 +325,36 @@ function isParamExpression(leaf: object): boolean {
  * `{ kind: 'fieldRef', … }`, `{ kind: 'ref', column }`), which keep their
  * meaning. Wrap such an object in `param()` to bind it as data.
  * `ExpressionRef`s, branded specs, schema `ref()` and `outerRef()` are
- * returned unchanged; core compiles them. A `ColumnRef` and a bare
- * `SubqueryExpression` become an `ExpressionRef`.
+ * returned unchanged; core compiles them. A `ColumnRef`, a bare
+ * `SubqueryExpression`, a select query builder and a `subquery(table)` builder
+ * become an `ExpressionRef` (a builder keeps its filter policy, see
+ * {@link toSubqueryExpression}).
  *
  * @param leaf - The value as the caller passed it
  * @param helper - The public helper name, used in refusal messages
- * @throws InvalidOperationError for a `sql()` marker or an unfinished
- *   `caseWhen()`
- * @throws NotYetSupportedError for a query builder and for a relation-reached
- *   or callback-scoped `ColumnRef`
+ * @param position - The position named in a not-yet refusal
+ * @throws InvalidOperationError for a `sql()` marker, an unfinished
+ *   `caseWhen()` and a builder that is not a subquery
+ * @throws NotYetSupportedError for a relation-reached or callback-scoped
+ *   `ColumnRef`
  */
-export function coerceValue(leaf: unknown, helper: string): unknown {
+export function coerceValue(
+	leaf: unknown,
+	helper: string,
+	position: string = COMPARISON_VALUE,
+): unknown {
 	if (typeof leaf !== 'object' || leaf === null) return leaf;
 	if (Array.isArray(leaf) || leaf instanceof Date) return leaf;
 	if (isBrandedExpression(leaf) || REF_BRAND in leaf || isOuterRef(leaf))
 		return leaf;
-	if (isColumnRef(leaf) || isSubqueryExpression(leaf) || isQueryBuilder(leaf))
-		return new ExpressionRef(coerceReference(leaf, helper));
+	if (isColumnRef(leaf))
+		return new ExpressionRef(coerceReference(leaf, helper, position));
+	const subquery = toSubqueryExpression(leaf, helper);
+	if (subquery !== undefined)
+		return new ExpressionRef({
+			kind: 'subquery',
+			query: subquery.intent,
+		} satisfies SubqueryExpressionIntent);
 	if (isSqlRaw(leaf)) return coerceReference(leaf, helper);
 	if (leaf instanceof CaseBuilder)
 		throw new InvalidOperationError(helper, UNFINISHED_CASE);
@@ -271,7 +367,7 @@ function expressionKind(leaf: object): string | undefined {
 	if (isSubqueryExpression(leaf)) return 'a SubqueryExpression';
 	if (REF_BRAND in leaf) return 'ref()';
 	if (isOuterRef(leaf)) return 'outerRef()';
-	if (isQueryBuilder(leaf)) return 'a query builder';
+	if (isSubqueryLeafBuilder(leaf)) return 'a query builder';
 	return undefined;
 }
 
@@ -286,6 +382,8 @@ function coerceUncarriedValue(
 	if (isSqlRaw(leaf)) coerceReference(leaf, helper);
 	if (leaf instanceof CaseBuilder)
 		throw new InvalidOperationError(helper, UNFINISHED_CASE);
+	if (isNonSubqueryBuilder(leaf))
+		throw new InvalidOperationError(helper, NOT_A_SUBQUERY);
 	const kind = expressionKind(leaf);
 	if (kind !== undefined) throw new NotYetSupportedError(kind, position, issue);
 }
@@ -296,9 +394,10 @@ function coerceUncarriedValue(
  * yet (#1064). `param(v)` elements are kept; plain values, `null` and
  * `undefined` are kept.
  *
- * @throws InvalidOperationError for a `sql()` marker or an unfinished
- *   `caseWhen()`
- * @throws NotYetSupportedError for any other expression object
+ * @throws InvalidOperationError for a `sql()` marker, an unfinished
+ *   `caseWhen()` or a builder that is not a subquery
+ * @throws NotYetSupportedError for any other expression object, a query builder
+ *   included
  */
 export function coerceListElement(leaf: unknown, helper: string): unknown {
 	if (typeof leaf === 'object' && leaf !== null && isParamExpression(leaf))
@@ -312,9 +411,10 @@ export function coerceListElement(leaf: unknown, helper: string): unknown {
  * carry an expression pattern yet (#1066). Plain values and `param()` are
  * kept.
  *
- * @throws InvalidOperationError for a `sql()` marker or an unfinished
- *   `caseWhen()`
- * @throws NotYetSupportedError for any other expression object
+ * @throws InvalidOperationError for a `sql()` marker, an unfinished
+ *   `caseWhen()` or a builder that is not a subquery
+ * @throws NotYetSupportedError for any other expression object, a query builder
+ *   included
  */
 export function coerceLikePattern<T>(leaf: T, helper: string): T {
 	if (typeof leaf === 'object' && leaf !== null && isParamExpression(leaf))
@@ -337,7 +437,8 @@ export function isReferenceObject(leaf: unknown): boolean {
 		isSubqueryExpression(leaf) ||
 		REF_BRAND in leaf ||
 		isOuterRef(leaf) ||
-		isQueryBuilder(leaf) ||
+		isSubqueryLeafBuilder(leaf) ||
+		isNonSubqueryBuilder(leaf) ||
 		isSqlRaw(leaf) ||
 		leaf instanceof CaseBuilder
 	);
@@ -398,6 +499,8 @@ export function coerceColumnName(
 		);
 	if (leaf instanceof CaseBuilder)
 		throw new InvalidOperationError(helper, UNFINISHED_CASE);
+	if (typeof leaf === 'object' && isNonSubqueryBuilder(leaf))
+		throw new InvalidOperationError(helper, NOT_A_SUBQUERY);
 	if (typeof leaf === 'object') {
 		const kind = expressionKind(leaf);
 		if (kind !== undefined)

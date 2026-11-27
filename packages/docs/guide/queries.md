@@ -123,10 +123,14 @@ query cannot see is refused when the query is planned.
 A plain object shaped like a parameter, `{ kind: 'param', value }`, binds `value`. To bind such an object as data,
 wrap it in `param()`.
 
-These are refused with an error naming the input: a query builder (`orm.select(...)`,
-`subquery('t').select('col')`; use `.build()`, an aggregate such as `.count()`, or `.asExpr()`), a `sql()` marker,
-an unfinished `caseWhen()` without `.else()`, and a `ColumnRef` reached through a relation or taken from a
-`some()`/`every()`/`none()` callback.
+A query builder (`orm.select(...)`, `subquery('t').select('col')`) is a scalar subquery: `eq('id', builder)`,
+`{ id: builder }` and `{ id: { $gt: builder } }` compare with `(SELECT …)`, the object-filter operators compiling as
+the matching filter helpers do. See [Subqueries](./subqueries#scalar-subqueries-used-as-expressions) for the filter
+policy the subquery keeps.
+
+These are refused with an error naming the input: any other builder (a set operation, `withCte()`,
+`orm.recursive()`, `orm.nql`, a mutation builder), a `sql()` marker, an unfinished `caseWhen()` without `.else()`,
+and a `ColumnRef` reached through a relation or taken from a `some()`/`every()`/`none()` callback.
 
 Two value positions cannot hold an expression yet and refuse one with `NotYetSupportedError`:
 

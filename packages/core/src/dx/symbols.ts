@@ -173,3 +173,22 @@ export function hasSymbolMeta<S extends symbol>(
 ): value is Record<S, unknown> {
 	return typeof value === 'object' && value !== null && sym in value;
 }
+
+/**
+ * Brand of a select query builder (`orm.select()`, `orm.from()`), set on its
+ * prototype. ADR 0011 turns such a builder, passed as a scalar leaf, into a
+ * subquery carrying the builder's filter policy.
+ */
+export const SELECT_BUILDER_BRAND: unique symbol = Symbol.for(
+	'dbsp:select-builder',
+);
+
+/**
+ * Brand of every other builder (set operations, CTE, recursive, NQL, insert,
+ * update, upsert, delete), set on its prototype. Passed as a scalar leaf or as
+ * a subquery, such a builder is refused by name: it is never planned as a
+ * subquery body and never bound as a parameter.
+ */
+export const NON_SUBQUERY_BUILDER_BRAND: unique symbol = Symbol.for(
+	'dbsp:non-subquery-builder',
+);

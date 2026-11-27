@@ -21,6 +21,7 @@ import type {
 } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
 import { ExecutionError } from './errors.js';
+import { NON_SUBQUERY_BUILDER_BRAND } from './symbols.js';
 import type { QueryBuilder } from './types.js';
 
 // ============================================================================
@@ -230,3 +231,11 @@ function readIntent(source: QueryIntentSource): QueryIntent {
 		source.buildRelationalReadIntent?.('set operation') ?? source.buildIntent()
 	);
 }
+
+// ADR 0011: refused by name as a scalar leaf or a subquery, never planned as a
+// body nor bound as a parameter (coerce.ts, toSubqueryExpression).
+Object.defineProperty(
+	SetOperationBuilderImpl.prototype,
+	NON_SUBQUERY_BUILDER_BRAND,
+	{ value: true },
+);

@@ -167,6 +167,28 @@ export interface QueryBuilder<TResult = unknown> {
 	): QueryBuilder<TResult>;
 
 	/**
+	 * Wrap this query as a named scalar subquery for use in `.columns()`
+	 * (ADR 0011). The subquery keeps this builder's filter policy: its ORM's
+	 * default filters, or none after `withoutDefaultFilters()`. The builder
+	 * itself, passed where an expression or a comparison value is expected,
+	 * is the same subquery without a name.
+	 *
+	 * @param alias - Column alias for the result
+	 *
+	 * @example
+	 * ```typescript
+	 * orm.select('users').columns([
+	 *   'id',
+	 *   orm.select('posts')
+	 *     .where(eq('user_id', outerRef('id')))
+	 *     .count({ as: 'n' })
+	 *     .asExpr('postCount'),
+	 * ]);
+	 * ```
+	 */
+	asExpr(alias: string): ExpressionSpec;
+
+	/**
 	 * Add a COALESCE expression to the select, with full type inference.
 	 *
 	 * Returns the first non-null value from the specified fields.

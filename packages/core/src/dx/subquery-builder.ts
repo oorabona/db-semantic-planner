@@ -236,7 +236,6 @@ export class SubqueryExpression {
 
 	/**
 	 * Create a WhereSubqueryIntent for comparison.
-	 * Used internally by object filter syntax.
 	 */
 	toWhereIntent(
 		field: string,

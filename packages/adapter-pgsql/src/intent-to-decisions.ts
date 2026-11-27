@@ -799,7 +799,7 @@ export function convertWhereCondition(
 				// Returning null causes the WHERE filter to be dropped — same as any
 				// other unrecognized kind. Better to fail loudly so the bug surfaces.
 				throw new Error(
-					`${cond.kind}: missing subquery — pass the result of subquery(table).select(...) or a builder with buildIntent()`,
+					`${cond.kind}: missing subquery — pass subquery(table).select(...), orm.select(...) or a SubqueryExpression`,
 				);
 			}
 			// Early validation at lowering time (defense-in-depth before emission chokepoint).

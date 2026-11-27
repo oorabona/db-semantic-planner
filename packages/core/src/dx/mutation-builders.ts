@@ -55,6 +55,7 @@ import {
 	runOnErrorHooks,
 	withReentrancyGuard,
 } from './hooks.js';
+import { NON_SUBQUERY_BUILDER_BRAND } from './symbols.js';
 
 // ============================================================================
 // Types
@@ -1355,3 +1356,11 @@ export class UpsertBuilder<
 		return compileMutationIntent(adapter, intent, options);
 	}
 }
+
+// ADR 0011: refused by name as a scalar leaf or a subquery, never planned as a
+// body nor bound as a parameter (coerce.ts, toSubqueryExpression).
+Object.defineProperty(
+	MutationBuilderBase.prototype,
+	NON_SUBQUERY_BUILDER_BRAND,
+	{ value: true },
+);

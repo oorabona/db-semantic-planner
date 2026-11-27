@@ -463,34 +463,35 @@ describe('object filter values and isWhereIntent (ADR 0011 delivery 2)', () => {
 		expect(filterDb.defaultFilters?.posts).toEqual(isNull('deletedAt'));
 	});
 
-	it('R2 object filter direct entry: builders, sql() and relation ColumnRefs are refused', () => {
-		expectNotYet(
-			() => convert({ id: subquery('posts').select('id') }),
-			'a query builder',
-			'expression argument',
-			1053,
-		);
+	const NOT_A_SUBQUERY =
+		'Invalid where: this builder is not a subquery; use orm.select(...), subquery(table) or a SubqueryExpression';
+	const union = () =>
+		orm
+			.select('posts')
+			.columns(['id'])
+			.union(orm.select('posts').columns(['id']));
+
+	it('R2 object filter direct entry: non-select builders, sql() and relation ColumnRefs are refused', () => {
+		expectInvalid(() => convert({ id: union() as never }), NOT_A_SUBQUERY);
 		expectInvalid(() => convert({ title: sql('now()') }), SQL_MESSAGE);
 		expectNotYet(
 			() => convert({ title: posts.author.name }),
 			'a relation-reached ColumnRef',
-			'expression argument',
+			'comparison value',
 			1052,
 		);
 	});
 
-	it('R2 object filter operator entry: builders, sql() and relation ColumnRefs are refused', () => {
-		expectNotYet(
-			() => convert({ score: { $gt: orm.select('posts').count() } }),
-			'a query builder',
-			'expression argument',
-			1053,
+	it('R2 object filter operator entry: non-select builders, sql() and relation ColumnRefs are refused', () => {
+		expectInvalid(
+			() => convert({ score: { $gt: union() as never } }),
+			NOT_A_SUBQUERY,
 		);
 		expectInvalid(() => convert({ score: { $gt: sql('now()') } }), SQL_MESSAGE);
 		expectNotYet(
 			() => convert({ score: { $gt: posts.author.name } }),
 			'a relation-reached ColumnRef',
-			'expression argument',
+			'comparison value',
 			1052,
 		);
 	});

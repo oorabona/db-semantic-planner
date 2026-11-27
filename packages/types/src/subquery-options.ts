@@ -141,7 +141,13 @@ export function assertNoUnsupportedSubqueryModifiers(
 					aggregates?: readonly unknown[];
 			  }
 			| undefined;
-		if (select?.type === 'expressions') {
+		if (select === undefined || select.type === 'all') {
+			// A comparison body with no projection would compare against whatever the
+			// lowering projects in its place (the literal 1 on the resolved route).
+			unsupported.push(
+				'no projection (scalar subquery must project exactly one column — select one field or one aggregate)',
+			);
+		} else if (select.type === 'expressions') {
 			// SelectWithExpressionsIntent is not emitted by buildScalarSubquery or
 			// buildSubqueryFromIntent — dropped on both scalar paths.
 			unsupported.push('expressions SELECT (not supported in scalar subquery)');

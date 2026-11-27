@@ -1025,10 +1025,10 @@ describe('Typed quantifiers and callback refs inside nested bodies (#991)', () =
 		expect(error).toBeInstanceOf(NotYetSupportedError);
 		expect(error).toMatchObject({
 			construct: 'a callback-scoped ColumnRef',
-			position: 'expression argument',
+			position: 'comparison value',
 			issue: 1052,
 			message:
-				'a callback-scoped ColumnRef in an expression argument is not supported yet (#1052).',
+				'a callback-scoped ColumnRef in a comparison value is not supported yet (#1052).',
 		});
 	});
 

@@ -5,6 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { ExpressionRef } from './expressions.js';
 import { objectToWhereIntent } from './object-filter.js';
 import {
 	isSubqueryExpression,
@@ -395,6 +396,8 @@ describe('isSubqueryExpression', () => {
 // Integration with Object Filter Syntax
 // ============================================================================
 
+// An object-filter operator compiles a subquery as the matching filter helper
+// does: a comparison whose value is the subquery expression (ADR 0011 delivery 5).
 describe('subquery + object filter integration', () => {
 	it('should convert subquery with $eq operator', () => {
 		const expr = subquery('prices')
@@ -411,10 +414,10 @@ describe('subquery + object filter integration', () => {
 		});
 
 		expect(intent).toEqual({
-			kind: 'subquery',
+			kind: 'comparison',
 			field: 'price',
 			operator: 'eq',
-			subquery: expr.intent,
+			value: new ExpressionRef({ kind: 'subquery', query: expr.intent }),
 		});
 	});
 
@@ -433,10 +436,10 @@ describe('subquery + object filter integration', () => {
 		});
 
 		expect(intent).toEqual({
-			kind: 'subquery',
+			kind: 'comparison',
 			field: 'rating',
 			operator: 'gt',
-			subquery: expr.intent,
+			value: new ExpressionRef({ kind: 'subquery', query: expr.intent }),
 		});
 	});
 
@@ -455,10 +458,10 @@ describe('subquery + object filter integration', () => {
 		});
 
 		expect(intent).toEqual({
-			kind: 'subquery',
+			kind: 'comparison',
 			field: 'price',
 			operator: 'lt',
-			subquery: expr.intent,
+			value: new ExpressionRef({ kind: 'subquery', query: expr.intent }),
 		});
 	});
 
@@ -487,10 +490,10 @@ describe('subquery + object filter integration', () => {
 					value: 'active',
 				},
 				{
-					kind: 'subquery',
+					kind: 'comparison',
 					field: 'reviewCount',
 					operator: 'gte',
-					subquery: expr.intent,
+					value: new ExpressionRef({ kind: 'subquery', query: expr.intent }),
 				},
 			],
 		});
@@ -511,10 +514,10 @@ describe('subquery + object filter integration', () => {
 		});
 
 		expect(intent).toEqual({
-			kind: 'subquery',
+			kind: 'comparison',
 			field: 'stock',
 			operator: 'lte',
-			subquery: expr.intent,
+			value: new ExpressionRef({ kind: 'subquery', query: expr.intent }),
 		});
 	});
 
@@ -534,10 +537,10 @@ describe('subquery + object filter integration', () => {
 		});
 
 		expect(intent).toEqual({
-			kind: 'subquery',
+			kind: 'comparison',
 			field: 'price',
 			operator: 'neq',
-			subquery: expr.intent,
+			value: new ExpressionRef({ kind: 'subquery', query: expr.intent }),
 		});
 	});
 });

@@ -34,6 +34,7 @@ import {
 } from './builder-utils.js';
 import type { QueryBuilderImpl } from './query-builder.js';
 import type { QueryBuilder } from './query-builder-types.js';
+import { NON_SUBQUERY_BUILDER_BRAND } from './symbols.js';
 
 /**
  * Options for `orm.recursive()`.
@@ -255,3 +256,11 @@ export function createRawCteBuilder<TResult = unknown>(
 		model,
 	);
 }
+
+// ADR 0011: refused by name as a scalar leaf or a subquery, never planned as a
+// body nor bound as a parameter (coerce.ts, toSubqueryExpression).
+Object.defineProperty(
+	RawCteQueryBuilder.prototype,
+	NON_SUBQUERY_BUILDER_BRAND,
+	{ value: true },
+);

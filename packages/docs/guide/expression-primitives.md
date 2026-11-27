@@ -271,6 +271,7 @@ one rule:
 | table `ColumnRef` (`orm.tables.posts.title`) | qualified column: `posts.title` |
 | schema `ref('title')` | column reference |
 | `SubqueryExpression` (`subquery('t').count()`) or its `.asExpr()` | scalar subquery `(SELECT …)` |
+| query builder (`orm.select(...)`, `subquery('t').select('col')`) | scalar subquery `(SELECT …)`; see [Subqueries](./subqueries#scalar-subqueries-used-as-expressions) for its filter policy |
 
 Refused, with an error that names the input:
 
@@ -278,9 +279,12 @@ Refused, with an error that names the input:
   marker throw `InvalidOperationError`. Write `literal(null)` for SQL `NULL` and
   `param(value)` to bind a value. A CASE result is the exception for `null`: it
   becomes SQL `NULL` there;
-- `outerRef()`, a `ColumnRef` reached through a relation or taken from a
-  `some()`/`every()`/`none()` callback, and a query builder (`orm.select(...)`,
-  `subquery('t').select('col')`) throw `NotYetSupportedError`.
+- any other builder (`union()` and the other set operations, `withCte()`,
+  `orm.recursive()`, `orm.nql`, `insert`, `update`, `upsert`, `delete`) throws
+  `InvalidOperationError`: only `orm.select(...)` and `subquery(table)` become a
+  subquery;
+- `outerRef()` and a `ColumnRef` reached through a relation or taken from a
+  `some()`/`every()`/`none()` callback throw `NotYetSupportedError`.
 
 The markers decide for themselves: `param(v)` always binds `v` as given,
 `literal(v)` always inlines it, and `exprRef('c')` always references a column.

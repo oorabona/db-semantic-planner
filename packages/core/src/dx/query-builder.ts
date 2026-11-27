@@ -32,6 +32,7 @@ import {
 	coerceColumnName,
 	coerceReference,
 	isReferenceObject,
+	isSubqueryLeafBuilder,
 	type OrderByLeaf,
 } from './coerce.js';
 import { isRelationPathColumn } from './column-utils.js';
@@ -97,8 +98,16 @@ import {
 	SetOperationBuilderImpl,
 } from './set-operation-builder.js';
 import * as streamImpl from './stream-impl.js';
-import { isSubqueryExpression } from './subquery-builder.js';
-import { CALLBACK_SCOPE, COLUMN_META, TABLE_META } from './symbols.js';
+import {
+	isSubqueryExpression,
+	SubqueryExpression,
+} from './subquery-builder.js';
+import {
+	CALLBACK_SCOPE,
+	COLUMN_META,
+	SELECT_BUILDER_BRAND,
+	TABLE_META,
+} from './symbols.js';
 import { type ColumnRef, isAliasedColumn, isColumnRef } from './table-ref.js';
 import {
 	type AggregateOptions,
@@ -106,6 +115,7 @@ import {
 	type ColumnSpec,
 	type CursorPaginatedResult,
 	type CursorPaginateOptions,
+	type ExpressionSpec,
 	type IncludeOptionsWithRecursive,
 	isExpressionSpec,
 	type OrderByRecord,
@@ -1265,6 +1275,23 @@ export class QueryBuilderImpl<TResult = unknown>
 		};
 	}
 
+	/**
+	 * Wrap this query as a named scalar subquery for use in `.columns()`. The
+	 * subquery keeps this builder's filter policy: its ORM's default filters, or
+	 * none after `withoutDefaultFilters()`.
+	 *
+	 * @param alias - Column alias for the result
+	 *
+	 * @example
+	 * orm.select('users').columns([
+	 *   'id',
+	 *   orm.select('posts').where(eq('user_id', outerRef('id'))).count({ as: 'n' }).asExpr('postCount'),
+	 * ])
+	 */
+	asExpr(alias: string): ExpressionSpec {
+		return new SubqueryExpression(this.buildSubqueryIntent()).asExpr(alias);
+	}
+
 	/** @internal Raw bodies resolve all scans using their issuing builder's policy. */
 	buildSubqueryIntent(): QueryIntent {
 		return registerRelationalReadPolicy(
@@ -2014,7 +2041,7 @@ function columnEntry(col: unknown, from: string): ExpressionIntent {
 			? ({ ...intent, as: col._alias } as ExpressionIntent)
 			: intent;
 	}
-	if (isSubqueryExpression(col))
+	if (isSubqueryExpression(col) || isSubqueryLeafBuilder(col))
 		throw new InvalidOperationError(
 			'columns',
 			'a subquery column needs a name; use .asExpr(alias)',
@@ -2032,3 +2059,9 @@ function columnEntry(col: unknown, from: string): ExpressionIntent {
 		);
 	return coerceReference(col, 'columns');
 }
+
+// ADR 0011: a select query builder passed as a scalar leaf becomes a subquery
+// that keeps its filter policy (coerce.ts, toSubqueryExpression).
+Object.defineProperty(QueryBuilderImpl.prototype, SELECT_BUILDER_BRAND, {
+	value: true,
+});
