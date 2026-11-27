@@ -85,7 +85,7 @@ const RANGE_BOUNDS = new Set(['[)', '[]', '()', '(]']);
 
 /** A value leaf as an expression argument: an expression as is, a plain value bound. */
 function boundArgument(leaf: unknown, helper: RangeHelper): ExpressionRef {
-	const value = coerceValue(leaf, helper);
+	const value = coerceValue(leaf, helper, 'expression argument');
 	return isValueExpression(value)
 		? new ExpressionRef(coerceReference(value, helper))
 		: param(value);
@@ -168,8 +168,8 @@ function rangeValueOperand(
 			`bounds must be one of '[)', '[]', '()', '(]'; got ${formatBounds(value.bounds)}`,
 		);
 	const sides = {
-		lower: coerceValue(value.lower, helper),
-		upper: coerceValue(value.upper, helper),
+		lower: coerceValue(value.lower, helper, 'expression argument'),
+		upper: coerceValue(value.upper, helper, 'expression argument'),
 	};
 	return value.bounds === undefined
 		? sides
@@ -200,7 +200,7 @@ function objectForm(
 	operator: WhereRangeIntent['operator'],
 	helper: RangeHelper,
 ): PredicateExpressionRef | WhereRangeIntent {
-	const coerced = coerceValue(operand, helper);
+	const coerced = coerceValue(operand, helper, 'expression argument');
 	let value: unknown = coerced;
 	if (isValueExpression(coerced)) {
 		const wrapped = paramWrapperValue(coerced);

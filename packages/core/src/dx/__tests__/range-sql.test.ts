@@ -809,6 +809,27 @@ describe('range helper refusals (ADR 0011 delivery 6)', () => {
 		);
 	});
 
+	it('RF5b range bound builder: a select builder is a scalar subquery (ADR 0011 delivery 5)', () => {
+		const sqlOf = (where: ReturnType<typeof rangeOverlaps>) => {
+			const d = q().where(where).dump();
+			return [d.sql, d.params];
+		};
+		const one = () => d6.select('posts').columns(['score']).limit(1);
+		expect(sqlOf(rangeOverlaps('span', [one(), 5], 'int4range'))).toEqual([
+			'SELECT posts.id FROM posts WHERE posts.span && int4range((SELECT posts_1.score FROM posts AS posts_1 LIMIT 1), $1)',
+			[5],
+		]);
+		expect(sqlOf(rangeOverlaps('span', { lower: one(), upper: 5 }))).toEqual([
+			"SELECT posts.id FROM posts WHERE posts.span && int4range((SELECT posts_1.score FROM posts AS posts_1 LIMIT 1), $1, '[)')",
+			[5],
+		]);
+		expect(() =>
+			sqlOf(rangeOverlaps('span', [d6.select('posts'), 5], 'int4range')),
+		).toThrow(
+			'scalar subquery body projects 7 columns; a scalar subquery yields one value.',
+		);
+	});
+
 	it('RF5 range bound refusals: sql(), unfinished caseWhen, builders, relation refs and outerRef()', () => {
 		const unfinished = caseWhen(eq('score', 1), literal('a'));
 		for (const bound of [
@@ -823,11 +844,15 @@ describe('range helper refusals (ADR 0011 delivery 6)', () => {
 				() => bound(unfinished),
 				'Invalid rangeOverlaps: caseWhen() is unfinished; complete it with .else(value) before using it as a value',
 			);
-			notYet(
-				() => bound(d6.select('posts')),
-				'a query builder',
-				'expression argument',
-				1053,
+			invalid(
+				() =>
+					bound(
+						d6
+							.select('posts')
+							.columns(['id'])
+							.union(d6.select('posts').columns(['id'])),
+					),
+				'Invalid rangeOverlaps: this builder is not a subquery; use orm.select(...), subquery(table) or a SubqueryExpression',
 			);
 			notYet(
 				() => bound(posts.author.name),

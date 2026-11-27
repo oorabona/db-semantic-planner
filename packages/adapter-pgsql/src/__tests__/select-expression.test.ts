@@ -1643,11 +1643,30 @@ describe('subquery fields and selectExpression leaves (ADR 0011 delivery 6)', ()
 		expect(() => column(subquery('posts').count(posts.author.id), 'n')).toThrow(
 			"Declared column 'author.id' is absent from the physical model.",
 		);
-		notYet(
-			() => subquery('posts').select(orm.select('posts') as never),
-			'a query builder',
-			'expression argument',
-			1053,
+		// A select builder is a scalar subquery here (ADR 0011 delivery 5): a star
+		// builder is refused by the arity check at dump, any other builder by name.
+		expect(() =>
+			orm
+				.select('users')
+				.columns([
+					'id',
+					subquery('posts')
+						.select(orm.select('posts') as never)
+						.asExpr('v'),
+				])
+				.dump(),
+		).toThrow(
+			'scalar subquery body projects 5 columns; a scalar subquery yields one value.',
+		);
+		expect(() =>
+			subquery('posts').select(
+				orm
+					.select('posts')
+					.columns(['id'])
+					.union(orm.select('posts').columns(['id'])) as never,
+			),
+		).toThrow(
+			`Invalid select: this builder is not a subquery; use orm.select(...), subquery(table) or a SubqueryExpression`,
 		);
 		expect(() =>
 			orm
@@ -1684,11 +1703,22 @@ describe('subquery fields and selectExpression leaves (ADR 0011 delivery 6)', ()
 		expect(() => sel(sql('1'))).toThrow(
 			'Invalid selectExpression: sql() is only accepted in set(), values(), doUpdate() and batchSet().set(); use literal(), param() or an expression here',
 		);
-		notYet(
-			() => sel(orm.select('posts')),
-			'a query builder',
-			'expression argument',
-			1053,
+		// A select builder is a scalar subquery here (ADR 0011 delivery 5); any
+		// other builder is refused by name. The FROM-less route has no arity check
+		// yet (#1104).
+		expect(sel(orm.select('posts').count({ as: 'n' }))).toEqual([
+			'SELECT (SELECT count(*) AS n FROM posts)',
+			[],
+		]);
+		expect(() =>
+			sel(
+				orm
+					.select('posts')
+					.columns(['id'])
+					.union(orm.select('posts').columns(['id'])),
+			),
+		).toThrow(
+			`Invalid selectExpression: this builder is not a subquery; use orm.select(...), subquery(table) or a SubqueryExpression`,
 		);
 		notYet(
 			() => sel(outerRef('id')),
