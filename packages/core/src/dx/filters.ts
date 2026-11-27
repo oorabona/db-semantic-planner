@@ -375,7 +375,12 @@ function subqueryBody(query: unknown, helper: string): QueryIntent {
  * IN subquery: field IN (SELECT ...)
  *
  * Creates a WHERE condition that checks if a field's value exists
- * in the result set of a subquery.
+ * in the result set of a subquery. Accepts a select query builder
+ * (`orm.select(...)`, whose body keeps its own filter policy), a
+ * `subquery(table)` builder or a `SubqueryExpression`; any other builder is
+ * refused.
+ *
+ * @param query - `orm.select(...)`, `subquery(table)` or a `SubqueryExpression`
  *
  * @example
  * // Users who have posts

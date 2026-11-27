@@ -34,6 +34,7 @@ import {
 	isReferenceObject,
 	isSubqueryLeafBuilder,
 	type OrderByLeaf,
+	toSubqueryExpression,
 } from './coerce.js';
 import { isRelationPathColumn } from './column-utils.js';
 import { assertUnplannedDefaultFilters } from './default-filter-refusals.js';
@@ -100,7 +101,7 @@ import {
 import * as streamImpl from './stream-impl.js';
 import {
 	isSubqueryExpression,
-	SubqueryExpression,
+	type SubqueryExpression,
 } from './subquery-builder.js';
 import {
 	CALLBACK_SCOPE,
@@ -1289,7 +1290,11 @@ export class QueryBuilderImpl<TResult = unknown>
 	 * ])
 	 */
 	asExpr(alias: string): ExpressionSpec {
-		return new SubqueryExpression(this.buildSubqueryIntent()).asExpr(alias);
+		// A select builder always converts: toSubqueryExpression never returns
+		// undefined for it.
+		return (toSubqueryExpression(this, 'asExpr') as SubqueryExpression).asExpr(
+			alias,
+		);
 	}
 
 	/** @internal Raw bodies resolve all scans using their issuing builder's policy. */
