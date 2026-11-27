@@ -335,3 +335,50 @@ describe('query-executor', () => {
 		});
 	});
 });
+
+describe('handleExecuteNQL — mutations', () => {
+	it("compiles NQL mutations with the connection's model", async () => {
+		const { schema } = await import('@dbsp/core');
+		const model = schema({
+			users: { id: { type: 'integer', primaryKey: true }, name: 'string' },
+		}).model;
+		const mod = await import('./query-executor.js');
+		const cases: [string, string, unknown[]][] = [
+			[
+				"insert into users set id = 1, name = 'x'",
+				'INSERT INTO users (id, name) VALUES ($1, $2)',
+				[1, 'x'],
+			],
+			[
+				"update users set name = 'x' where id = 1",
+				'UPDATE users SET name = $1 WHERE users.id = $2',
+				['x', 1],
+			],
+			[
+				'delete from users where id = 1',
+				'DELETE FROM users WHERE users.id = $1',
+				[1],
+			],
+			[
+				"upsert into users on id set id = 1, name = 'x'",
+				'INSERT INTO users (id, name) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET id = $3, name = $4',
+				[1, 'x', 1, 'x'],
+			],
+		];
+		for (const [nql, sql, params] of cases) {
+			const pool = {
+				query: vi.fn().mockResolvedValue({ rows: [], fields: [], rowCount: 1 }),
+			};
+			const result = await mod.handleExecuteNQL(
+				{ connectionId: 'c1', nql, maxRows: 10 },
+				() => pool as never,
+				async () => model,
+			);
+			expect({ sql: result.sql, params: result.params }, nql).toEqual({
+				sql,
+				params,
+			});
+			expect(pool.query, nql).toHaveBeenCalledWith(sql, params);
+		}
+	});
+});

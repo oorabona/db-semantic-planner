@@ -5,6 +5,7 @@ import {
 	exprRef,
 	fn,
 	outerRef,
+	schema,
 	subquery,
 } from '@dbsp/core';
 import type { PlanReport, WhereIntent } from '@dbsp/types';
@@ -13,7 +14,9 @@ import { createPgCompileOnlyAdapter } from './pgsql-adapter.js';
 
 const refusal =
 	'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation';
-const adapter = createPgCompileOnlyAdapter();
+const adapter = createPgCompileOnlyAdapter({
+	model: schema({ posts: { id: { type: 'integer', primaryKey: true } } }).model,
+});
 const relation = exists('posts', { where: eq('id', 1) });
 const plain = eq('id', 1);
 const surfaces = {

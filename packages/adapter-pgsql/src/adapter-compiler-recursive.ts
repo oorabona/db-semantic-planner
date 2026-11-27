@@ -162,10 +162,7 @@ function createPlanReportForCteQuery(
 			isLocalSource,
 		);
 	}
-	if (
-		deps.model === undefined ||
-		deps.model.getTable(query.from) === undefined
-	) {
+	if (deps.model.getTable(query.from) === undefined) {
 		return createPlanReportForQuery(
 			query,
 			deps.model,

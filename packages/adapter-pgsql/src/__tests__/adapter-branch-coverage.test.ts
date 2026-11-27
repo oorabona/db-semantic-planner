@@ -12,6 +12,7 @@
  *  - assert-field.ts              (75% → missing value with/without context)
  */
 
+import { schema } from '@dbsp/core';
 import { supportsTransactions } from '@dbsp/core/internal';
 import type { RecursivePlanReport } from '@dbsp/types';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
@@ -83,7 +84,8 @@ function queryText(input: string | QueryConfig<unknown[]>): string {
 const defaultDeps = {
 	naming: identityNaming,
 	schemaName: undefined,
-	model: undefined,
+	// No declared table: the compiled queries read only query-local names.
+	model: schema({}).model,
 	defaultPk: 'id',
 	deriveFk: (rel: string) => `${rel}_id`,
 };

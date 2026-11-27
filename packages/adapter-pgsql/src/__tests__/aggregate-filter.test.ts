@@ -414,10 +414,9 @@ describe('raw aggregate FILTER resolves through the root resolver (#891 slice 3)
 			aggregates: [{ function: 'count', field: '*', as: 'n', filter }],
 		});
 	const compiled = (report: ReturnType<typeof plan>, model?: unknown) => {
-		const d = createPgCompileOnlyAdapter().compile(
-			report,
-			model === undefined ? undefined : ({ model } as never),
-		);
+		const d = createPgCompileOnlyAdapter().compile(report, {
+			model: (model ?? plainDb.model) as never,
+		});
 		return { sql: d.sql, params: d.parameters };
 	};
 	const counted = (where: string) =>
@@ -537,29 +536,32 @@ describe('raw aggregate FILTER resolves through the root resolver (#891 slice 3)
 			).toEqual({ sql: counted(relationExists(v.on)), params: ['x'] });
 	});
 
-	it('AC13 a model-less selectExpression body keeps its current output', () => {
-		const d = createPgCompileOnlyAdapter().compileSelectExpression({
-			kind: 'subquery',
-			query: {
-				type: 'select',
-				from: 'users',
-				select: {
-					type: 'aggregate',
-					aggregates: [
-						{
-							function: 'count',
-							field: '*',
-							as: 'n',
-							filter: exists('posts', {
-								recursive: { direction: 'down', through: 'posts' },
-							} as never),
-						},
-					],
+	it('AC13 a selectExpression body compiled without a model is refused', () => {
+		const compileBody = () =>
+			createPgCompileOnlyAdapter().compileSelectExpression({
+				kind: 'subquery',
+				query: {
+					type: 'select',
+					from: 'users',
+					select: {
+						type: 'aggregate',
+						aggregates: [
+							{
+								function: 'count',
+								field: '*',
+								as: 'n',
+								filter: exists('posts', {
+									recursive: { direction: 'down', through: 'posts' },
+								} as never),
+							},
+						],
+					},
 				},
-			},
-		} as never);
-		expect(d.sql).toBe(
-			'SELECT (SELECT count(*) FILTER (WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.user_id)) AS n FROM users AS users)',
+			} as never);
+		expect(compileBody).toThrow(
+			new Error(
+				'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.',
+			),
 		);
 	});
 

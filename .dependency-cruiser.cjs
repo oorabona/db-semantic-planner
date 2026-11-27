@@ -29,9 +29,7 @@ const exceptions = {
 		'packages/core/src/dx/predicate-ref.test.ts', // see #450
 		'packages/core/src/dx/typed-query-builder.test.ts', // see #450
 	],
-	'nql-not-adapter': [
-		'packages/nql/tests/nql-with.test.ts', // see #450
-	],
+	'nql-not-adapter': [],
 };
 
 const packages = readdirSync('packages', { withFileTypes: true })

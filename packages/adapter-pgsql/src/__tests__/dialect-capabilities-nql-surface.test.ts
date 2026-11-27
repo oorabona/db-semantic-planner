@@ -247,7 +247,8 @@ describe('NQL text surface dialect capability gates', () => {
 	});
 
 	it('threads adapter compile options into handler capability gates', () => {
-		const adapter = createPgCompileOnlyAdapter();
+		const auditModel = schema({ audit_log: { details: 'jsonb' } }).model;
+		const adapter = createPgCompileOnlyAdapter({ model: auditModel });
 		const plan = planQuery(
 			{
 				type: 'select',
@@ -259,7 +260,7 @@ describe('NQL text surface dialect capability gates', () => {
 					value: { ip: '10.0.0.1' },
 				},
 			},
-			schema({ audit_log: { details: 'jsonb' } }).model,
+			auditModel,
 		);
 
 		expect(() =>

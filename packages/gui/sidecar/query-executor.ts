@@ -293,16 +293,16 @@ export async function handleExecuteNQL(
 		let compiledMutation: { sql: string; parameters: readonly unknown[] };
 		switch (mutation.type) {
 			case 'insert':
-				compiledMutation = adapter.compileInsert(mutation);
+				compiledMutation = adapter.compileInsert(mutation, { model });
 				break;
 			case 'update':
-				compiledMutation = adapter.compileUpdate(mutation);
+				compiledMutation = adapter.compileUpdate(mutation, { model });
 				break;
 			case 'delete':
-				compiledMutation = adapter.compileDelete(mutation);
+				compiledMutation = adapter.compileDelete(mutation, { model });
 				break;
 			case 'upsert':
-				compiledMutation = adapter.compileUpsert(mutation);
+				compiledMutation = adapter.compileUpsert(mutation, { model });
 				break;
 			default:
 				throw new Error(`Unknown mutation type: ${JSON.stringify(mutation)}`);

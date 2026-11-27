@@ -1006,7 +1006,7 @@ describe('condition-body refusal classes', () => {
 				new NotYetSupportedError(construct, `${position} subquery body`, issue),
 			);
 		expect(() =>
-			createPgCompileOnlyAdapter().compileUpdate({
+			createPgCompileOnlyAdapter({ model: bodySchema.model }).compileUpdate({
 				type: 'update',
 				table: 'users',
 				set: { name: 'x' },

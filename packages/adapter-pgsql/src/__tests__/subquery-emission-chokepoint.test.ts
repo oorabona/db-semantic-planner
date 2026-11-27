@@ -47,7 +47,6 @@ import {
 	createOrm,
 	eq,
 	inSubquery,
-	NotYetSupportedError,
 	not,
 	outerRef,
 	rawExists,
@@ -1217,14 +1216,11 @@ describe('malformed select.fields IN-subquery guard', () => {
 // ============================================================================
 
 describe('model-less correlated body refusals', () => {
-	it('types the model-less correlated body refusal', () => {
+	it('refuses every model-less correlated body before its not-yet refusal', () => {
 		const adapter = createPgCompileOnlyAdapter();
-		const outside = (construct: string) =>
-			new NotYetSupportedError(
-				construct,
-				'condition compiled outside the planner',
-				891,
-			);
+		const refusal = new Error(
+			'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.',
+		);
 		const users = () =>
 			subquery('audit')
 				.select('userId')
@@ -1238,14 +1234,14 @@ describe('model-less correlated body refusals', () => {
 				set: { name: 'x' },
 				where: inSubquery('id', users()),
 			}),
-		).toThrow(outside('a correlated IN subquery body'));
+		).toThrow(refusal);
 		expect(() =>
 			adapter.compileDelete({
 				type: 'delete',
 				table: 'users',
 				where: inSubquery('id', users()),
 			}),
-		).toThrow(outside('a correlated IN subquery body'));
+		).toThrow(refusal);
 		// Batch UPDATE WHERE: the direct condition compiler.
 		for (const [where, construct] of [
 			[rawExists(users()), 'a correlated rawExists() body'],
@@ -1262,7 +1258,7 @@ describe('model-less correlated body refusals', () => {
 					updates: [{ id: 1, name: 'x' }],
 					where,
 				}),
-			).toThrow(outside(construct));
+			).toThrow(refusal);
 		// An aggregate FILTER in a model-less expression body: the decision lowering.
 		const posts = () =>
 			subquery('audit')
@@ -1301,6 +1297,6 @@ describe('model-less correlated body refusals', () => {
 						},
 					},
 				} as never),
-			).toThrow(outside(construct));
+			).toThrow(refusal);
 	});
 });

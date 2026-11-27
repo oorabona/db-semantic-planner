@@ -259,10 +259,13 @@ describe('subquery parameter renumbering', () => {
 // ============================================================================
 
 describe('op() with SubqueryExpression.asExpr() as argument', () => {
+	const tModel = schema({
+		t: { id: { type: 'integer', primaryKey: true }, col: 'integer' },
+	}).model;
 	it('uses subquery as left operand of a binary op', () => {
 		// SubqueryExpression.asExpr() returns a plain ExpressionSpec (not ExpressionRef instance).
 		// toExpressionIntent() must duck-type check __expr===true to handle it correctly.
-		const adapter = createPgCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter({ model: tModel });
 		const subExpr = subquery('t').select('col').asExpr('x');
 		const expr = op('+', subExpr, literal(1)).as('next');
 
@@ -276,20 +279,23 @@ describe('op() with SubqueryExpression.asExpr() as argument', () => {
 		expect(normalized).toContain('+ 1');
 	});
 
-	it('compiles a body through the model-less route without a model (#891)', () => {
-		const { sql, parameters } =
+	it('refuses a body compiled without a model', () => {
+		expect(() =>
 			createPgCompileOnlyAdapter().compileSelectExpression(
 				op('+', subquery('t').select('col').asExpr('x'), literal(1)).intent,
-			);
-		expect(sql).toBe('SELECT (SELECT t.col FROM t AS t) + 1');
-		expect(parameters).toEqual([]);
+			),
+		).toThrow(
+			new Error(
+				'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.',
+			),
+		);
 	});
 
 	it('toExpressionIntent does not treat ExpressionSpec as a param value', () => {
 		// If the bug is present, toExpressionIntent would wrap the ExpressionSpec
 		// object in { kind: 'param', value: exprSpec }, and the adapter would
 		// produce a placeholder like $1 instead of a subquery expression.
-		const adapter = createPgCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter({ model: tModel });
 		const subExpr = subquery('t').select('col').asExpr('x');
 		const expr = op('+', subExpr, literal(1));
 
@@ -304,7 +310,7 @@ describe('op() with SubqueryExpression.asExpr() as argument', () => {
 	});
 
 	it('uses subquery as right operand of a binary op', () => {
-		const adapter = createPgCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter({ model: tModel });
 		const subExpr = subquery('t').count().asExpr('cnt');
 		const expr = op('-', literal(100), subExpr).as('remaining');
 

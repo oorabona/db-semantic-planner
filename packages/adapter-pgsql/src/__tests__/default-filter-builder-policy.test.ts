@@ -140,7 +140,7 @@ describe('own-property filter maps', () => {
 	it('does not use a prototype property as a direct scan filter', () => {
 		// Compile options can enter without schema's normalized map.
 		expect(
-			createPgCompileOnlyAdapter().compile(
+			createPgCompileOnlyAdapter({ model: db.model }).compile(
 				plan({ type: 'select', from: 'toString' }, db.model, {
 					defaultFilters: { posts: isNull('deletedAt') },
 				}),

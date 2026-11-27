@@ -182,14 +182,16 @@ for (const strategy of ['json_agg', 'lateral', 'join'] as const)
 			});
 		});
 	}
-it('refuses an opaque wildcard before SQL', () => {
+it('refuses a wildcard include compiled without a model before SQL', () => {
 	const report = plan(
 		{ type: 'select', from: 'roots', include: [{ relation: 'authors' }] },
 		model,
 		{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
 	);
 	expect(() => createPgCompileOnlyAdapter().compile(report)).toThrow(
-		"cannot enumerate wildcard keys for opaque target 'authors'",
+		new Error(
+			'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.',
+		),
 	);
 });
 it('refuses a root scalar alias owned by an include', () => {

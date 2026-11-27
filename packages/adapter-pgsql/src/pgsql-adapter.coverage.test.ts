@@ -13,12 +13,29 @@ import { plan as nativePlan, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
  * - Adapter capabilities (execution/streaming support)
  */
 
-import { and, eq, exprRef, fn, literal, ref, schema } from '@dbsp/core';
+import {
+	and,
+	createOrm,
+	eq,
+	exists,
+	exprRef,
+	fn,
+	gt,
+	literal,
+	outerRef,
+	rawExists,
+	ref,
+	schema,
+	subquery,
+} from '@dbsp/core';
 import type { ModelIR, PlanReport } from '@dbsp/types';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter, PgAdapter } from './pgsql-adapter.js';
 import { createPgPhysicalModel } from './physical-model/index.js';
+
+const MODEL_REQUIRED =
+	'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.';
 
 function completeModel(
 	definition: Record<string, Record<string, unknown>>,
@@ -79,7 +96,7 @@ function testQuery<T = unknown>(
 describe('PgAdapter - Coverage Tests', () => {
 	describe('createPgCompileOnlyAdapter', () => {
 		it('creates adapter with default options', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 
 			expect(adapter).toBeDefined();
 			expect(adapter.dbCasing).toBe('preserve');
@@ -141,7 +158,7 @@ describe('PgAdapter - Coverage Tests', () => {
 
 	describe('dialectCapabilities', () => {
 		it('returns PostgreSQL capabilities', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const caps = adapter.dialectCapabilities;
 
 			expect(caps).toBeDefined();
@@ -153,14 +170,14 @@ describe('PgAdapter - Coverage Tests', () => {
 
 	describe('capabilities', () => {
 		it('compile-only adapter reports no execution support', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 
 			expect(adapter.capabilities.supportsReturning).toBe(true);
 			expect(adapter.capabilities.supportsStreaming).toBe(false);
 		});
 
 		it('compile-only adapter reports schema support', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 
 			expect(adapter.capabilities.supportsSchemas).toBe(true);
 		});
@@ -168,7 +185,7 @@ describe('PgAdapter - Coverage Tests', () => {
 
 	describe('compile - basic SELECT', () => {
 		it('compiles minimal SELECT plan', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan: PlanReport = nativePlan(
 				{ type: 'select', from: 'users' },
 				coverageModel,
@@ -183,7 +200,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles SELECT with specific columns', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan: PlanReport = nativePlan(
 				{
 					type: 'select',
@@ -204,6 +221,7 @@ describe('PgAdapter - Coverage Tests', () => {
 	describe('compile - schema scoping', () => {
 		it('includes schema from adapter options', () => {
 			const adapter = createPgCompileOnlyAdapter({
+				model: coverageModel,
 				schemaName: 'tenant_123',
 			});
 			const plan: PlanReport = nativePlan(
@@ -218,7 +236,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('includes schema from compile options', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan: PlanReport = nativePlan(
 				{ type: 'select', from: 'users' },
 				coverageModel,
@@ -232,6 +250,7 @@ describe('PgAdapter - Coverage Tests', () => {
 
 		it('compile options schemaName takes precedence over adapter constructor schemaName', () => {
 			const adapter = createPgCompileOnlyAdapter({
+				model: coverageModel,
 				schemaName: 'adapter_schema',
 			});
 			const plan: PlanReport = nativePlan(
@@ -250,6 +269,7 @@ describe('PgAdapter - Coverage Tests', () => {
 
 		it('compile options schemaName empty string falls through to adapter constructor schemaName', () => {
 			const adapter = createPgCompileOnlyAdapter({
+				model: coverageModel,
 				schemaName: 'adapter_default',
 			});
 			const plan: PlanReport = nativePlan(
@@ -268,7 +288,7 @@ describe('PgAdapter - Coverage Tests', () => {
 
 	describe('compile - schemaName validation in options', () => {
 		it('rejects malicious schemaName via compile options (SQL injection)', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan: PlanReport = nativePlan(
 				{ type: 'select', from: 'users' },
 				coverageModel,
@@ -281,7 +301,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('rejects schemaName with semicolon via compile options', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan: PlanReport = nativePlan(
 				{ type: 'select', from: 'users' },
 				coverageModel,
@@ -294,7 +314,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('accepts valid identifier in options.schemaName', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan: PlanReport = nativePlan(
 				{ type: 'select', from: 'users' },
 				coverageModel,
@@ -308,7 +328,7 @@ describe('PgAdapter - Coverage Tests', () => {
 
 	describe('compile - DISTINCT', () => {
 		it('compiles SELECT DISTINCT', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan: PlanReport = nativePlan(
 				{
 					type: 'select',
@@ -328,7 +348,7 @@ describe('PgAdapter - Coverage Tests', () => {
 
 	describe('compile - ORDER BY', () => {
 		it('compiles ORDER BY ASC', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan: PlanReport = nativePlan(
 				{
 					type: 'select',
@@ -345,12 +365,12 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles ORDER BY DESC', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan: PlanReport = nativePlan(
 				{
 					type: 'select',
 					from: 'users',
-					orderBy: [{ field: 'created_at', direction: 'desc' }],
+					orderBy: [{ field: 'name', direction: 'desc' }],
 				},
 				coverageModel,
 				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
@@ -365,7 +385,7 @@ describe('PgAdapter - Coverage Tests', () => {
 
 	describe('compile - LIMIT and OFFSET', () => {
 		it('compiles LIMIT', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan: PlanReport = nativePlan(
 				{ type: 'select', from: 'users', limit: 10 },
 				coverageModel,
@@ -378,7 +398,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles OFFSET', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan: PlanReport = nativePlan(
 				{ type: 'select', from: 'users', offset: 20 },
 				coverageModel,
@@ -391,7 +411,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles LIMIT and OFFSET together', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan: PlanReport = nativePlan(
 				{ type: 'select', from: 'users', limit: 10, offset: 20 },
 				coverageModel,
@@ -407,7 +427,7 @@ describe('PgAdapter - Coverage Tests', () => {
 
 	describe('compile - WHERE with parameters', () => {
 		it('compiles WHERE clause with parameterized value', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan: PlanReport = nativePlan(
 				{
 					type: 'select',
@@ -430,7 +450,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles WHERE with multiple conditions', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan: PlanReport = nativePlan(
 				{
 					type: 'select',
@@ -444,7 +464,7 @@ describe('PgAdapter - Coverage Tests', () => {
 								operator: 'eq',
 								value: true,
 							},
-							{ kind: 'comparison', field: 'age', operator: 'gt', value: 18 },
+							{ kind: 'comparison', field: 'id', operator: 'gt', value: 18 },
 						],
 					},
 				},
@@ -460,7 +480,7 @@ describe('PgAdapter - Coverage Tests', () => {
 
 	describe('compile - GROUP BY', () => {
 		it('compiles GROUP BY', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan: PlanReport = nativePlan(
 				{
 					type: 'select',
@@ -480,7 +500,7 @@ describe('PgAdapter - Coverage Tests', () => {
 
 	describe('withSchema', () => {
 		it('returns new adapter with schema scope', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const scopedAdapter = adapter.withSchema('tenant_456');
 
 			expect(scopedAdapter).toBeDefined();
@@ -488,7 +508,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('schema-scoped adapter includes schema in compiled SQL', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const scopedAdapter = adapter.withSchema('tenant_456');
 
 			const plan: PlanReport = nativePlan(
@@ -503,7 +523,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('validates schema identifier', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 
 			// Invalid schema name with SQL injection attempt
 			expect(() => adapter.withSchema('tenant"; DROP TABLE users--')).toThrow();
@@ -544,7 +564,7 @@ describe('PgAdapter - Coverage Tests', () => {
 
 	describe('compile with model option', () => {
 		it('passes model to compile function', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const mockModel = coverageModel;
 
 			const plan: PlanReport = nativePlan(
@@ -561,7 +581,7 @@ describe('PgAdapter - Coverage Tests', () => {
 
 	describe('compile - edge cases', () => {
 		it('compiles plan without decisions array', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan: PlanReport = nativePlan(
 				{ type: 'select', from: 'users' },
 				coverageModel,
@@ -575,7 +595,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles plan with intent object', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan: PlanReport = nativePlan(
 				{
 					type: 'select',
@@ -618,7 +638,7 @@ describe('PgAdapter - Coverage Tests', () => {
 			);
 
 			expect(() => adapter.compile(plan)).toThrow(
-				"PgAdapter compilation with dbCasing 'snake_case' requires a ModelIR",
+				'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.',
 			);
 		});
 	});
@@ -1119,7 +1139,7 @@ describe('PgAdapter - Coverage Tests', () => {
 
 	describe('compileRecursive', () => {
 		it('compiles adjacency-list descendant traversal', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const report = {
 				intent: {
 					cteName: 'tree_cte',
@@ -1146,7 +1166,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles adjacency-list ancestor traversal', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const report = {
 				intent: {
 					cteName: 'anc_cte',
@@ -1171,7 +1191,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles edge-table traversal', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const report = {
 				intent: {
 					cteName: 'graph_cte',
@@ -1199,7 +1219,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles edge-table with bidirectional direction', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const report = {
 				intent: {
 					cteName: 'bidir_cte',
@@ -1227,7 +1247,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles recursive with track depth', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const report = {
 				intent: {
 					cteName: 'depth_cte',
@@ -1251,7 +1271,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles recursive with track path', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const report = {
 				intent: {
 					cteName: 'path_cte',
@@ -1301,7 +1321,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('throws for unsupported traversal kind', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const report = {
 				intent: {
 					cteName: 'custom_cte',
@@ -1324,7 +1344,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles edge-table with anchor WHERE', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const report = {
 				intent: {
 					cteName: 'anchor_cte',
@@ -1356,7 +1376,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles edge-table with "in" direction (swaps edgeFrom/edgeTo)', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const report = {
 				intent: {
 					cteName: 'in_cte',
@@ -1384,7 +1404,7 @@ describe('PgAdapter - Coverage Tests', () => {
 
 	describe('buildRecursiveAnchorWhere - edge cases', () => {
 		it('handles AND condition with single item', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const report = {
 				intent: {
 					cteName: 'and_cte',
@@ -1416,7 +1436,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('handles OR condition with multiple items', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const report = {
 				intent: {
 					cteName: 'or_cte',
@@ -1449,7 +1469,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('refuses unknown recursive anchor kind', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const report = {
 				intent: {
 					cteName: 'unk_cte',
@@ -1477,7 +1497,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('handles null/undefined where with fallback to TRUE', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const report = {
 				intent: {
 					cteName: 'null_cte',
@@ -1507,7 +1527,7 @@ describe('PgAdapter - Coverage Tests', () => {
 
 	describe('createDump', () => {
 		it('creates a dump with minimal meta', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan = { rootTable: 'users', decisions: [] } as any;
 			const query = testQuery('SELECT 1');
 			const dump = adapter.createDump(plan, query);
@@ -1530,7 +1550,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('creates dump with custom meta overrides', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan = { rootTable: 'users', decisions: [] } as any;
 			const query = testQuery('SELECT 1');
 			const dump = adapter.createDump(plan, query, {
@@ -1545,49 +1565,49 @@ describe('PgAdapter - Coverage Tests', () => {
 
 	describe('error paths - compile-only adapter', () => {
 		it('throws on execute', async () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			await expect(adapter.execute(testQuery('SELECT 1'))).rejects.toThrow(
 				/constructed without a connection/,
 			);
 		});
 
 		it('throws on executeOne', async () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			await expect(adapter.executeOne(testQuery('SELECT 1'))).rejects.toThrow(
 				/constructed without a connection/,
 			);
 		});
 
 		it('throws on executeRaw', async () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			await expect(adapter.executeRaw('SELECT 1')).rejects.toThrow(
 				/constructed without a connection/,
 			);
 		});
 
 		it('throws on getPoolInstance', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			expect(() => adapter.getPoolInstance()).toThrow(
 				/constructed without a connection/,
 			);
 		});
 
 		it('throws on introspect', async () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			await expect(adapter.introspect()).rejects.toThrow(
 				/constructed without a connection/,
 			);
 		});
 
 		it('throws on transaction', async () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			await expect(adapter.transaction(async () => 'x')).rejects.toThrow(
 				/constructed without a connection/,
 			);
 		});
 
 		it('stream throws on a connectionless adapter', async () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const iter = adapter.stream(testQuery('SELECT 1'));
 			// The generator should throw when iterated
 			await expect(iter.next()).rejects.toThrow(
@@ -1598,12 +1618,12 @@ describe('PgAdapter - Coverage Tests', () => {
 
 	describe('validateIdentifier', () => {
 		it('accepts valid identifier', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			expect(() => adapter.validateIdentifier('users', 'table')).not.toThrow();
 		});
 
 		it('rejects SQL injection in identifier', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			expect(() =>
 				adapter.validateIdentifier('users"; DROP TABLE--', 'table'),
 			).toThrow();
@@ -1612,7 +1632,7 @@ describe('PgAdapter - Coverage Tests', () => {
 
 	describe('compile - lock mode variants', () => {
 		it('compiles FOR UPDATE via legacy plan', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan = nativePlan(
 				{
 					type: 'select',
@@ -1629,7 +1649,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles FOR SHARE with skipLocked via intent', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan = nativePlan(
 				{
 					type: 'select',
@@ -1647,7 +1667,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles FOR NO KEY UPDATE with noWait via intent', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan = nativePlan(
 				{
 					type: 'select',
@@ -1665,7 +1685,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('compiles FOR KEY SHARE via intent', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan = nativePlan(
 				{
 					type: 'select',
@@ -1684,7 +1704,7 @@ describe('PgAdapter - Coverage Tests', () => {
 
 	describe('compile - existsWrap via intent', () => {
 		it('wraps select in EXISTS when intent has existsWrap', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan = nativePlan(
 				{
 					type: 'select',
@@ -1711,7 +1731,7 @@ describe('PgAdapter - Coverage Tests', () => {
 				coverageModel,
 				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
 			);
-			expect(() => adapter.compile(plan)).toThrow('requires a ModelIR');
+			expect(() => adapter.compile(plan)).toThrow(new Error(MODEL_REQUIRED));
 		});
 
 		it('refuses camelCase naming without a model', () => {
@@ -1723,27 +1743,27 @@ describe('PgAdapter - Coverage Tests', () => {
 				coverageModel,
 				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
 			);
-			expect(() => adapter.compile(plan)).toThrow('requires a ModelIR');
+			expect(() => adapter.compile(plan)).toThrow(new Error(MODEL_REQUIRED));
 		});
 
 		it('refuses INSERT compilation without a model', () => {
 			const adapter = createPgCompileOnlyAdapter({ dbCasing: 'snake_case' });
 			expect(() =>
 				adapter.compileInsert({ table: 'users', values: [{ id: 1 }] } as any),
-			).toThrow('requires a ModelIR');
+			).toThrow(new Error(MODEL_REQUIRED));
 		});
 
 		it('refuses INSERT FROM compilation without a model', () => {
 			const adapter = createPgCompileOnlyAdapter({ dbCasing: 'snake_case' });
 			expect(() =>
 				adapter.compileInsertFrom({ table: 'users' } as any),
-			).toThrow('requires a ModelIR');
+			).toThrow(new Error(MODEL_REQUIRED));
 		});
 
 		it('refuses UPDATE compilation without a model', () => {
 			const adapter = createPgCompileOnlyAdapter({ dbCasing: 'snake_case' });
 			expect(() => adapter.compileUpdate({ table: 'users' } as any)).toThrow(
-				'requires a ModelIR',
+				new Error(MODEL_REQUIRED),
 			);
 		});
 
@@ -1751,13 +1771,13 @@ describe('PgAdapter - Coverage Tests', () => {
 			const adapter = createPgCompileOnlyAdapter({ dbCasing: 'snake_case' });
 			expect(() =>
 				adapter.compileBatchUpdate({ table: 'users' } as any),
-			).toThrow('requires a ModelIR');
+			).toThrow(new Error(MODEL_REQUIRED));
 		});
 
 		it('refuses DELETE compilation without a model', () => {
 			const adapter = createPgCompileOnlyAdapter({ dbCasing: 'snake_case' });
 			expect(() => adapter.compileDelete({ table: 'users' } as any)).toThrow(
-				'requires a ModelIR',
+				new Error(MODEL_REQUIRED),
 			);
 		});
 
@@ -1770,7 +1790,7 @@ describe('PgAdapter - Coverage Tests', () => {
 					onConflict: { columns: [] },
 					action: { type: 'doNothing' },
 				} as any),
-			).toThrow('requires a ModelIR');
+			).toThrow(new Error(MODEL_REQUIRED));
 		});
 
 		it('refuses UPSERT FROM compilation without a model', () => {
@@ -1782,13 +1802,13 @@ describe('PgAdapter - Coverage Tests', () => {
 					conflictColumns: [],
 					sourceQuery: {} as any,
 				} as any),
-			).toThrow('requires a ModelIR');
+			).toThrow(new Error(MODEL_REQUIRED));
 		});
 	});
 
 	describe('generateDDL', () => {
 		it('generates DDL from a simple model', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const model = {
 				tables: new Map([
 					[
@@ -2025,16 +2045,6 @@ describe('PgAdapter - Coverage Tests', () => {
 	});
 
 	describe('getColumnTypes — coverage', () => {
-		it('returns undefined when model is absent', () => {
-			const adapter = createPgCompileOnlyAdapter();
-			const result = adapter.compileInsert({
-				type: 'insert',
-				table: 'users',
-				values: [{ name: 'alice' }],
-			} as any);
-			expect(result.sql).toContain('INSERT');
-		});
-
 		it('returns no special column types for scalar columns in a declared model', () => {
 			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			// getColumnTypes is private, but exercised through compileInsert
@@ -2101,7 +2111,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		it('derives columns from model when not specified', () => {
 			const model = coverageModel;
 
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const result = adapter.compileUpsertFrom(
 				{
 					type: 'upsertFrom',
@@ -2226,7 +2236,7 @@ describe('PgAdapter - Coverage Tests', () => {
 
 	describe('compile — existsWrap and lock via intent', () => {
 		it('propagates lock from intent', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan = nativePlan(
 				{
 					type: 'select',
@@ -2243,7 +2253,7 @@ describe('PgAdapter - Coverage Tests', () => {
 		});
 
 		it('propagates existsWrap from intent', () => {
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan = nativePlan(
 				{
 					type: 'select',
@@ -2267,13 +2277,13 @@ describe('PgAdapter - Coverage Tests', () => {
 	});
 
 	describe('compile — unresolved exists() throws fail-closed', () => {
-		it('throws when exists() relation cannot be resolved (no model configured)', () => {
+		it('throws when an unissued report carries an exists() condition', () => {
 			// exists() requires a declared FK relation in the schema.
 			// When no model is configured and a filter-strategy was not produced
 			// (planner could not resolve the relation), the adapter throws rather than
 			// guessing (using the relation name as a table name with a derived FK),
 			// which would produce silently wrong SQL.
-			const adapter = createPgCompileOnlyAdapter();
+			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const plan = {
 				rootTable: 'posts',
 				decisions: [],
@@ -2500,5 +2510,294 @@ describe('synthetic binding includes', () => {
 		).toThrow(
 			'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
 		);
+	});
+});
+
+describe('compile without a model', () => {
+	const columns = {
+		id: { type: 'integer', primaryKey: true },
+		name: { type: 'text' },
+		score: { type: 'integer' },
+	} as const;
+	const db = schema({
+		users: columns,
+		imports: columns,
+		posts: {
+			...columns,
+			authorId: ref('users', { as: 'author', inverse: 'posts' }),
+		},
+	} as const);
+	const model = db.model;
+	const noModel = createPgCompileOnlyAdapter();
+	const withModel = createPgCompileOnlyAdapter({ model });
+	const refusal = new Error(MODEL_REQUIRED);
+	type Entry = [
+		string,
+		(adapter: PgAdapter, options?: { model: ModelIR }) => unknown,
+	];
+	const validEntries: Entry[] = [
+		[
+			'compile',
+			(a, o) =>
+				a.compile(
+					nativePlan({ type: 'select', from: 'users' }, model, {
+						dialectCapabilities: POSTGRESQL_CAPABILITIES,
+					}),
+					o,
+				),
+		],
+		[
+			'compileSelectExpression',
+			(a, o) => a.compileSelectExpression({ kind: 'literal', value: 1 }, o),
+		],
+		[
+			'compileInsert',
+			(a, o) =>
+				a.compileInsert(
+					{ type: 'insert', table: 'users', values: [{ id: 1, name: 'x' }] },
+					o,
+				),
+		],
+		[
+			'compileInsertFrom',
+			(a, o) =>
+				a.compileInsertFrom(
+					{
+						type: 'insert_from',
+						table: 'users',
+						source: 'imports',
+						columns: ['id', 'name'],
+					},
+					o,
+				),
+		],
+		[
+			'compileUpdate',
+			(a, o) =>
+				a.compileUpdate(
+					{
+						type: 'update',
+						table: 'users',
+						set: { name: 'x' },
+						where: eq('id', 1),
+					},
+					o,
+				),
+		],
+		[
+			'compileBatchUpdate',
+			(a, o) =>
+				a.compileBatchUpdate(
+					{
+						type: 'batchUpdate',
+						table: 'users',
+						matchColumns: ['id'],
+						updates: [{ id: 1, name: 'x' }],
+					},
+					o,
+				),
+		],
+		[
+			'compileDelete',
+			(a, o) =>
+				a.compileDelete(
+					{ type: 'delete', table: 'users', where: eq('id', 1) },
+					o,
+				),
+		],
+		[
+			'compileUpsert',
+			(a, o) =>
+				a.compileUpsert(
+					{
+						type: 'upsert',
+						table: 'users',
+						values: [{ id: 1, name: 'x' }],
+						onConflict: { columns: ['id'] },
+						action: { type: 'doNothing' },
+					},
+					o,
+				),
+		],
+		[
+			'compileUpsertFrom',
+			(a, o) =>
+				a.compileUpsertFrom(
+					{
+						type: 'upsert_from',
+						table: 'users',
+						source: 'imports',
+						conflictColumns: ['id'],
+						columns: ['id', 'name'],
+					},
+					o,
+				),
+		],
+		[
+			'compileCteQuery',
+			(a, o) =>
+				a.compileCteQuery(
+					{
+						kind: 'cteQuery',
+						ctes: [
+							{ kind: 'unnestCte', name: 'recent', columns: { id: [1, 2] } },
+						],
+						query: { type: 'select', from: 'users', where: eq('score', 1) },
+					},
+					o,
+				),
+		],
+	];
+
+	it('refuses every compilation entry without a model', () => {
+		const entries: Entry[] = [
+			...validEntries,
+			[
+				'compile on a report not issued by the planner',
+				(a) => a.compile({ rootTable: 'users', decisions: [] } as never),
+			],
+		];
+		for (const [name, call] of entries)
+			expect(() => call(noModel), name).toThrow(refusal);
+	});
+
+	it('compiles every entry with the model from the compile options', () => {
+		for (const [name, call] of validEntries) {
+			const fromOptions = call(noModel, { model }) as {
+				sql: string;
+				parameters: readonly unknown[];
+			};
+			const fromAdapter = call(withModel) as {
+				sql: string;
+				parameters: readonly unknown[];
+			};
+			expect(fromOptions.sql, name).not.toBe('');
+			expect(
+				{ sql: fromOptions.sql, parameters: fromOptions.parameters },
+				name,
+			).toEqual({ sql: fromAdapter.sql, parameters: fromAdapter.parameters });
+		}
+	});
+
+	it('refuses a model-less call before validating its rows', () => {
+		expect(() =>
+			noModel.compileInsert({ type: 'insert', table: 'users', values: [] }),
+		).toThrow(refusal);
+		expect(() =>
+			noModel.compileUpsert({
+				type: 'upsert',
+				table: 'users',
+				values: [{ id: 1 }, { name: 'x' }],
+				onConflict: { columns: ['id'] },
+				action: { type: 'doNothing' },
+			}),
+		).toThrow(refusal);
+	});
+
+	it('refuses the model-less inputs that compiled wrong SQL', () => {
+		expect(() =>
+			noModel.compileBatchUpdate({
+				type: 'batchUpdate',
+				table: 'users',
+				matchColumns: ['id'],
+				updates: [{ id: 1, name: 'x' }],
+				where: eq('id', outerRef('id')),
+			}),
+		).toThrow(refusal);
+		expect(() =>
+			noModel.compileUpdate({
+				type: 'update',
+				table: 'users',
+				set: { name: 'x' },
+				where: rawExists(subquery('posts').select('id')),
+			}),
+		).toThrow(refusal);
+		expect(() =>
+			noModel.compileDelete({
+				type: 'delete',
+				table: 'users',
+				where: exists('posts'),
+			}),
+		).toThrow(refusal);
+	});
+
+	it('compiles through an ORM over a model-less adapter', () => {
+		const orm = createOrm({
+			schema: db,
+			adapter: noModel,
+			suppressDxWarnings: true,
+		});
+		const sql = (dump: { sql: string }) => dump.sql;
+		expect(sql(orm.select('users').where(eq('score', 1)).dump())).toBe(
+			'SELECT users.* FROM users WHERE users.score = $1',
+		);
+		expect(
+			sql(orm.update('users').set({ name: 'x' }).where(eq('id', 1)).dump()),
+		).toBe('UPDATE users SET name = $1 WHERE users.id = $2');
+		expect(
+			sql(
+				orm
+					.update('users')
+					.batchSet('id', [{ id: 1, name: 'x' }])
+					.where(gt('score', 0))
+					.dump(),
+			),
+		).toBe(
+			'UPDATE users SET name = t.name FROM unnest(CAST($2 AS int4[]), CAST($3 AS text[])) AS t(id, name) WHERE users.id = t.id AND users.score > $1',
+		);
+		expect(
+			sql(
+				orm
+					.upsert('users')
+					.values([{ id: 1, name: 'x' }])
+					.onConflict(['id'])
+					.doUpdate({ name: 'y' }, eq('score', 1))
+					.dump(),
+			),
+		).toBe(
+			'INSERT INTO users (id, name) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET name = $3 WHERE users.score = $4',
+		);
+		expect(
+			sql(
+				orm
+					.withCte('recent')
+					.fromUnnest({ id: [1, 2] })
+					.query(orm.select('users').where(eq('score', 1)))
+					.dump(),
+			),
+		).toBe(
+			'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT users.* FROM users WHERE users.score = $2',
+		);
+		expect(
+			sql(
+				orm
+					.recursive('tree', {
+						base: orm.select('users').where(eq('id', 1)),
+						step: orm.select('users').where(eq('id', 2)),
+					})
+					.dump(),
+			),
+		).toBe(
+			'WITH RECURSIVE tree AS (SELECT users.* FROM users WHERE users.id = $1 UNION ALL SELECT users.* FROM users WHERE users.id = $2) SELECT tree.* FROM tree',
+		);
+		expect(orm.selectExpression(fn('now').as('t')).sql).toBe(
+			'SELECT now() AS t',
+		);
+		expect(sql(orm.nql`users | where score = 1`.dump())).toBe(
+			'SELECT users.* FROM users WHERE users.score = $1',
+		);
+	});
+
+	it("derives upsertFrom columns from the adapter's model", () => {
+		const expected =
+			'INSERT INTO users (id, name, score) SELECT imports.id AS id, imports.name AS name, imports.score AS score FROM imports ON CONFLICT (id) DO UPDATE SET name = excluded.name, score = excluded.score';
+		expect(
+			withModel.compileUpsertFrom({
+				type: 'upsert_from',
+				table: 'users',
+				source: 'imports',
+				conflictColumns: ['id'],
+			}).sql,
+		).toBe(expected);
 	});
 });
