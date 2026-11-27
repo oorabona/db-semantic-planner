@@ -355,6 +355,8 @@ export function resolveConditionContext(
 		readonly origin?: OriginFrame;
 		/** The condition sits in a function argument or FILTER of its query (#1014). */
 		readonly inCallArgument?: boolean;
+		/** The query root when `root` is another range (an include's target, #1014). */
+		readonly originRoot?: ResolvedRange;
 	},
 ): ResolvedCondition | undefined {
 	const label = mode?.label ?? 'WHERE';
@@ -387,8 +389,8 @@ export function resolveConditionContext(
 	const entryFrame: OriginFrame = {
 		parent: mode?.origin,
 		kind: 'query',
-		root,
-		ranges: rootScope,
+		root: mode?.originRoot ?? root,
+		ranges: mode?.originRoot ? [mode.originRoot, ...rootScope] : rootScope,
 	};
 	let frame: OriginFrame = entryFrame;
 	if (mode?.inCallArgument)
@@ -413,7 +415,8 @@ export function resolveConditionContext(
 			if (
 				f.ranges.includes(anchor) ||
 				f.root === anchor ||
-				f.target === anchor
+				f.target === anchor ||
+				f.hops?.includes(anchor) === true
 			) {
 				if (ownerPassed)
 					throw new Error(
@@ -1305,7 +1308,9 @@ export function resolveConditionContext(
 					name: input.function.toLowerCase(),
 					args: [
 						input.field === '*' ? { kind: 'star' } : ref(input.field),
-						...(input.extraArgs ?? []).map((v) => arg(v)),
+						...inFrame(callFrame(), () =>
+							(input.extraArgs ?? []).map((v) => arg(v)),
+						),
 					],
 					...(input.distinct !== undefined && { distinct: input.distinct }),
 					...(input.filter && {

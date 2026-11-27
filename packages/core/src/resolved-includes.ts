@@ -919,6 +919,7 @@ export function resolveReportIncludes(
 								defaultFilters: options.defaultFilters,
 								outerQualifiers: predicate.qualifiers,
 								aliasState,
+								originRoot: rootRange,
 							},
 						)!,
 						currentRange: node.targetRange,

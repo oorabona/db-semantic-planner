@@ -1,7 +1,11 @@
 import { NotYetSupportedError, RangeAllocator } from '@dbsp/types';
 import { copyDefaultFilters, getDefaultFilter } from './default-filter-map.js';
 import { assertUnplannedDefaultFilters } from './dx/default-filter-refusals.js';
-import { CALLBACK_SCOPE, REWRITTEN_SUBQUERY } from './dx/symbols.js';
+import {
+	CALLBACK_SCOPE,
+	QUANTIFIER_SCOPE,
+	REWRITTEN_SUBQUERY,
+} from './dx/symbols.js';
 import {
 	type OriginFrame,
 	resolveConditionContext,
@@ -1059,6 +1063,17 @@ function optimizeInToExists(
 // Where Processing
 // ============================================================================
 
+/**
+ * Where the decision pass stands (#1014): below a relation predicate, and the
+ * target table of each enclosing quantifier occurrence by its callback token,
+ * so a quantifier the resolver anchors by origin is decided from that table.
+ */
+interface DecisionScope {
+	readonly inBody: boolean;
+	readonly tokens: ReadonlyMap<object, string>;
+}
+const TOP_SCOPE: DecisionScope = { inBody: false, tokens: new Map() };
+
 function processWhere(
 	where: WhereIntent,
 	sourceTable: string,
@@ -1066,6 +1081,7 @@ function processWhere(
 	state: PlannerState,
 	opts: Required<PlanOptions>,
 	intentPath: string,
+	scope: DecisionScope = TOP_SCOPE,
 ): void {
 	switch (where.kind) {
 		case 'exists':
@@ -1078,21 +1094,36 @@ function processWhere(
 				opts,
 				`${intentPath}.${where.kind}`,
 				where.where,
+				undefined,
+				scope,
 			);
 			break;
 
-		case 'relationFilter':
+		case 'relationFilter': {
+			// A callback relation starts at its quantifier's target table; a
+			// table-rooted one below a body at its own table (#1014 O1, O2).
+			const token = (where as { readonly [CALLBACK_SCOPE]?: object })[
+				CALLBACK_SCOPE
+			];
+			const source =
+				(token !== undefined ? scope.tokens.get(token) : undefined) ??
+				(scope.inBody && where.pathRef && where.pathTable !== undefined
+					? where.pathTable
+					: sourceTable);
 			processRelationFilter(
 				where.relation,
-				sourceTable,
+				source,
 				model,
 				state,
 				opts,
 				`${intentPath}.relationFilter`,
 				where.where,
 				where.mode,
+				scope,
+				(where as { readonly [QUANTIFIER_SCOPE]?: object })[QUANTIFIER_SCOPE],
 			);
 			break;
+		}
 
 		case 'and':
 			for (let i = 0; i < where.conditions.length; i++) {
@@ -1105,6 +1136,7 @@ function processWhere(
 						state,
 						opts,
 						`${intentPath}.and[${i}]`,
+						scope,
 					);
 				}
 			}
@@ -1121,6 +1153,7 @@ function processWhere(
 						state,
 						opts,
 						`${intentPath}.or[${i}]`,
+						scope,
 					);
 				}
 			}
@@ -1134,6 +1167,7 @@ function processWhere(
 				state,
 				opts,
 				`${intentPath}.not`,
+				scope,
 			);
 			break;
 
@@ -1196,6 +1230,8 @@ function processRelationFilter(
 	intentPath: string,
 	nestedWhere?: WhereIntent,
 	mode?: 'some' | 'every' | 'none',
+	scope: DecisionScope = TOP_SCOPE,
+	token?: object,
 ): void {
 	state.relationsAnalyzed++;
 
@@ -1266,6 +1302,13 @@ function processRelationFilter(
 					state,
 					opts,
 					`${intentPath}.where`,
+					{
+						inBody: true,
+						tokens:
+							token === undefined
+								? scope.tokens
+								: new Map([...scope.tokens, [token, relation.target]]),
+					},
 				);
 			}
 		}

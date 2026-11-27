@@ -299,11 +299,7 @@ describe('ColumnRef in an upsert guard', () => {
 	});
 });
 
-describe('A relation-path ref inside a body is refused (#991)', () => {
-	const refusal = (field: string) =>
-		new Error(
-			`ColumnRef '${field}' follows a relation; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1014).`,
-		);
+describe('A relation-path ref at the top level or as data keeps its #991 reading', () => {
 	const L = () => eq(nodes.parent.label, 'x');
 	const writingsDb = schema({
 		users: { id: { type: 'integer', primaryKey: true }, email: 'text' },
@@ -501,15 +497,7 @@ describe('A relation-path ref inside a body is refused (#991)', () => {
 	});
 });
 
-describe('Typed quantifiers and callback refs inside nested bodies (#991)', () => {
-	const quantifierRefusal = (relation: string) =>
-		new Error(
-			`RelationRef '${relation}' follows a relation from its table; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1014).`,
-		);
-	const callbackRefusal = (name: string, mode: string) =>
-		new Error(
-			`'${name}' comes from the ${mode}() callback parameter and is used inside a nested relation predicate or subquery body, where it would be read from that body's row (#1014).`,
-		);
+describe('Typed quantifiers and callback refs (#991, #1014)', () => {
 	const quantifiers = { some, every, none } as const;
 	const writingsDb = schema({
 		users: { id: { type: 'integer', primaryKey: true }, email: 'text' },
@@ -1085,6 +1073,19 @@ describe('A typed ref inside a body resolves from its origin range (#1014)', () 
 	const CASE = () =>
 		caseWhen(eq(users.writings.published, true), literal(1)).else(literal(0));
 	const leaf = L();
+	// R9 asserts O11's message written out, not built by the error class (#1116).
+	const r9Message =
+		'a typed ref resolved from its origin in a typed function argument is not supported yet (#1116).';
+	const expectR9 = (build: () => unknown): void => {
+		let error: unknown;
+		try {
+			dumpOf(build);
+		} catch (caught) {
+			error = caught;
+		}
+		expect(error).toBeInstanceOf(NotYetSupportedError);
+		expect(error).toMatchObject({ issue: 1116, message: r9Message });
+	};
 	type Dumped = { sql: string; params?: unknown; parameters?: unknown };
 	const dumpOf = (build: () => unknown): Dumped => {
 		const built = build() as { dump?: () => Dumped } & Dumped;
@@ -2756,87 +2757,241 @@ describe('A typed ref inside a body resolves from its origin range (#1014)', () 
 	});
 
 	it('R9 / body-outer-anchor (X1)', () => {
-		expect(() =>
-			dumpOf(() =>
-				d.select('users').columns([
-					'id',
-					d
-						.select('posts')
-						.columns([
-							new ExpressionRef({
-								kind: 'function',
-								name: 'coalesce',
-								args: [CASE()],
-							}).as('v'),
-						])
-						.limit(1)
-						.asExpr('v'),
-				]),
-			),
-		).toThrow(
-			new NotYetSupportedError(
-				'a typed ref resolved from its origin',
-				'typed function argument',
-				1116,
-			),
+		expectR9(() =>
+			d.select('users').columns([
+				'id',
+				d
+					.select('posts')
+					.columns([
+						new ExpressionRef({
+							kind: 'function',
+							name: 'coalesce',
+							args: [CASE()],
+						}).as('v'),
+					])
+					.limit(1)
+					.asExpr('v'),
+			]),
 		);
 	});
 
 	it('R9 / body-inner-anchor (X3)', () => {
-		expect(() =>
-			dumpOf(() =>
-				d.select('users').columns([
-					'id',
-					d
-						.select('posts')
-						.columns([
-							new ExpressionRef({
-								kind: 'function',
-								name: 'coalesce',
-								args: [
-									caseWhen(eq(posts.author.email, 'x'), literal(1)).else(
-										literal(0),
-									),
-								],
-							}).as('v'),
-						])
-						.limit(1)
-						.asExpr('v'),
-				]),
-			),
-		).toThrow(
-			new NotYetSupportedError(
-				'a typed ref resolved from its origin',
-				'typed function argument',
-				1116,
-			),
+		expectR9(() =>
+			d.select('users').columns([
+				'id',
+				d
+					.select('posts')
+					.columns([
+						new ExpressionRef({
+							kind: 'function',
+							name: 'coalesce',
+							args: [
+								caseWhen(eq(posts.author.email, 'x'), literal(1)).else(
+									literal(0),
+								),
+							],
+						}).as('v'),
+					])
+					.limit(1)
+					.asExpr('v'),
+			]),
 		);
 	});
 
 	it('R9 / statement-body-path (X5)', () => {
+		expectR9(() =>
+			d.select('users').columns([
+				new ExpressionRef({
+					kind: 'function',
+					name: 'coalesce',
+					args: [
+						caseWhen(
+							exists('writings', {
+								where: eq(users.writings.published, true),
+							}),
+							literal(1),
+						).else(literal(0)),
+					],
+				}).as('v'),
+			]),
+		);
+	});
+	it('R6 / value-and-fn (E27)', () => {
+		let error: unknown;
+		try {
+			b.select('nodes').where(
+				some(nodes.children, (k: Any) =>
+					some(nodes.children, (g: Any) => eq(g.label, k.label)),
+				),
+			);
+		} catch (caught) {
+			error = caught;
+		}
+		expect(error).toBeInstanceOf(NotYetSupportedError);
+		expect(error).toMatchObject({
+			issue: 1052,
+			message:
+				'a callback-scoped ColumnRef in a comparison value is not supported yet (#1052).',
+		});
+	});
+
+	// Review regressions: an include's where starts O1 at the statement root, an
+	// intermediate hop is a range of its predicate for O8, a HAVING aggregate's
+	// extra arguments are call arguments, and the plan decides an anchored
+	// quantifier from its origin table.
+	const BI = schema({
+		...nodeTables,
+		items: { id: { type: 'integer', primaryKey: true } },
+	});
+	const bi = createOrm({
+		schema: BI,
+		adapter: createPgCompileOnlyAdapter({ model: BI.model }),
+		...options,
+	});
+	const bn: Any = bi.tables.nodes;
+	it('O1 include-where body starts at the statement root', () => {
+		expectDump(
+			() =>
+				bi.select('nodes').include('parent', {
+					join: 'left',
+					where: rawExists(
+						subquery('items').select('id').where(eq(bn.parent.label, 'x')),
+					),
+				}),
+			'SELECT nodes.*, parent.id AS "parent.id", parent.label AS "parent.label", parent.parent_id AS "parent.parent_id", parent.id AS __dbsp_presence_parent FROM nodes LEFT JOIN nodes AS parent ON nodes.parent_id = parent.id WHERE EXISTS (SELECT items_sq.id FROM items AS items_sq WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes.parent_id = nodes_exists_1.id AND nodes_exists_1.label = $1))',
+			['x'],
+		);
+	});
+	const commentsBody = (filter: unknown) =>
+		d
+			.select('comments')
+			.columns([
+				fn('count', star())
+					.filter(filter as never)
+					.as('n'),
+			])
+			.asExpr('n');
+	it.each([
+		[
+			'leaf in FILTER',
+			() => commentsBody(eq(users.writings.title, 'x')),
+			"ColumnRef 'writings.title'",
+		],
+		[
+			'leaf in a count argument',
+			() =>
+				d
+					.select('comments')
+					.columns([
+						fn(
+							'count',
+							caseWhen(eq(users.writings.title, 'x'), literal(1)).else(
+								literal(null),
+							),
+						).as('n'),
+					])
+					.asExpr('n'),
+			"ColumnRef 'writings.title'",
+		],
+		[
+			'quantifier in FILTER',
+			() =>
+				commentsBody(some(users.writings.replies, (k: Any) => eq(k.body, 'x'))),
+			"RelationRef 'writings.replies'",
+		],
+	])(
+		'O8 an intermediate-hop anchor is outside the body (%s)',
+		(_name, body, written) => {
+			expect(() =>
+				dumpOf(() =>
+					d
+						.select('users')
+						.where(exists('writings.replies', { where: gt(body(), 0) })),
+				),
+			).toThrow(
+				new Error(
+					`${written} resolves to a row outside this subquery body; in a function argument or FILTER there, SQL would evaluate the call in the enclosing query if it is an aggregate.`,
+				),
+			);
+		},
+	);
+	it('O8 a HAVING aggregate extra argument is a call argument', () => {
+		const agg = new ExpressionRef({
+			kind: 'aggregate',
+			function: 'string_agg',
+			field: 'title',
+			extraArgs: [
+				caseWhen(eq(users.writings.published, true), literal(',')).else(
+					literal(';'),
+				),
+			],
+		} as never);
 		expect(() =>
 			dumpOf(() =>
 				d.select('users').columns([
-					new ExpressionRef({
-						kind: 'function',
-						name: 'coalesce',
-						args: [
-							caseWhen(
-								exists('writings', {
-									where: eq(users.writings.published, true),
-								}),
-								literal(1),
-							).else(literal(0)),
-						],
-					}).as('v'),
+					d
+						.select('posts')
+						.columns([fn('count', star()).as('n')])
+						.having(eq(agg, 'x'))
+						.asExpr('v'),
 				]),
 			),
 		).toThrow(
-			new NotYetSupportedError(
-				'a typed ref resolved from its origin',
-				'typed function argument',
-				1116,
+			new Error(
+				"ColumnRef 'writings.published' resolves to a row outside this subquery body; in a function argument or FILTER there, SQL would evaluate the call in the enclosing query if it is an aggregate.",
 			),
 		);
 	});
+	type Planned = {
+		plan?: {
+			warnings: readonly { message: string }[];
+			decisions: readonly {
+				type: string;
+				context: { sourceTable?: string; relation?: string };
+			}[];
+		};
+	};
+	const decided = (build: () => unknown) => {
+		const plan = (dumpOf(build) as unknown as Planned).plan!;
+		return {
+			warnings: plan.warnings.map((w) => w.message),
+			decisions: plan.decisions
+				.filter((x) => x.type === 'filter-strategy')
+				.map((x) => `${x.context.sourceTable}.${x.context.relation}`),
+		};
+	};
+	it.each([
+		[
+			'table-rooted quantifier read from the outer root (C3)',
+			() => d.select('posts').where(exists('author', { where: q() })),
+			['posts.author', 'posts.replies'],
+		],
+		[
+			'table-rooted quantifier read from the statement root (C5)',
+			() =>
+				d.select('users').where(
+					exists('writings', {
+						where: some(users.edits, (p: Any) => eq(p.title, 'x')),
+					}),
+				),
+			['users.writings', 'users.edits'],
+		],
+		[
+			'callback relation in a nested predicate',
+			() =>
+				d.select('users').where(
+					some(users.writings, (p: Any) =>
+						exists('author', {
+							where: some(p.replies, (k: Any) => eq(k.body, 'x')),
+						}),
+					),
+				),
+			['users.writings', 'posts.author', 'posts.replies'],
+		],
+	])(
+		'the plan decides an anchored quantifier from its origin table (%s)',
+		(_name, build, decisions) => {
+			expect(decided(build)).toEqual({ warnings: [], decisions });
+		},
+	);
 });
