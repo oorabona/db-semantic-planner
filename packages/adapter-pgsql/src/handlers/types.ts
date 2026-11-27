@@ -526,8 +526,6 @@ export interface Decision {
 	// JSON-specific
 	readonly jsonPath?: readonly unknown[];
 	readonly jsonMode?: 'json' | 'text';
-	// Pre-compiled filter from EXISTS propagation (set by compiler, read by json_agg handler)
-	readonly _compiledFilterWhere?: import('@pgsql/types').Node;
 	// Pre-compiled FILTER (WHERE ...) node for aggregate expressions (set by compiler)
 	readonly filterWhere?: import('@pgsql/types').Node;
 	// Custom expression intent for selectCustomExpression, WHERE expression, and ORDER BY expression

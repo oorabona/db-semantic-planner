@@ -151,8 +151,8 @@ function buildScalarSubquery(
 	// DEFECT 2 FIX (defense-in-depth, decisions handler path):
 	// Check the LOWERED decision.conditions for a fieldRef with scope:'outer'.
 	// This fires when convertSubquery (decisions path entry) already threw for
-	// outerRef() in the intent; this guard catches manually-constructed Decisions
-	// that bypass the entry point (handler decisions whose
+	// outerRef() in the intent; this guard is defence in depth for a decision
+	// without provenance, which no current lowering site produces (handler decisions whose
 	// subqueryIntent is absent).
 	if (
 		decision.conditions &&

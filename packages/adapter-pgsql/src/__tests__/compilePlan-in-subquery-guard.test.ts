@@ -67,7 +67,7 @@ const inRefusal = (modifier: string) =>
 	new NotYetSupportedError(modifier, 'IN subquery body', 1087);
 
 // ============================================================================
-// 1. compilePlan path (dispatchWhere) — forbidden modifiers → throws
+// 1. IN-subquery body through orm.select().where() — forbidden modifiers → throws
 // ============================================================================
 
 describe('IN-subquery body with dropped modifiers → throws', () => {
@@ -96,14 +96,14 @@ describe('IN-subquery body with dropped modifiers → throws', () => {
 });
 
 // ============================================================================
-// 2. Nested IN subquery path (mapInSubqueryCondition) — forbidden modifiers → throws
+// 2. Nested IN subquery body — forbidden modifiers → throws
 // ============================================================================
 
 describe('nested IN-subquery body — forbidden modifiers → throws', () => {
 	/**
 	 * Outer IN: orders.customer_id IN (SELECT id FROM customers WHERE id IN subquery)
-	 * Inner IN subquery carries a forbidden modifier — must be caught by
-	 * mapInSubqueryCondition's guard before producing corrupted SQL.
+	 * Inner IN subquery carries a forbidden modifier — the nested body is refused
+	 * before any SQL is produced.
 	 */
 	it('nested IN subquery with GROUP BY → throws', () => {
 		expect(() =>
@@ -154,7 +154,7 @@ describe('nested IN-subquery body — forbidden modifiers → throws', () => {
 });
 
 // ============================================================================
-// 3. Valid IN-subquery via compilePlan → compiles correctly (no false positives)
+// 3. Valid IN-subquery bodies → compile correctly (no false positives)
 // ============================================================================
 
 describe('valid IN-subquery body still compiles (no false positives)', () => {
@@ -218,11 +218,9 @@ describe('valid IN-subquery body still compiles (no false positives)', () => {
 
 describe('IN subquery with a logical group (AND/OR/NOT) wrapping a child IN — DEFECT 1 recursion guard', () => {
 	/**
-	 * Outer IN subquery's `where` is a whereAnd group. One child of the group is
-	 * itself an IN-subquery carrying a forbidden modifier (GROUP BY).
-	 * mapInSubqueryCondition must recurse into the group's children and fire the
-	 * guard, rather than letting mapToHandlerDecision silently drop the subquery
-	 * and fall through to the plain-in handler.
+	 * Outer IN subquery's `where` is an AND/OR/NOT group. One child of the group
+	 * is itself an IN-subquery carrying a forbidden modifier; the refusal must
+	 * reach that child rather than the subquery being dropped.
 	 */
 	it('outer IN whose inner WHERE is an AND of eq and in+groupBy → throws', () => {
 		expect(() =>

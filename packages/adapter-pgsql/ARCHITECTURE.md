@@ -277,13 +277,17 @@ All values are parameterized using `$1`, `$2`, etc.:
 ## Usage
 
 ```typescript
-import { createOrm, plan } from '@dbsp/core';
+import { createOrm, plan, schema } from '@dbsp/core';
 import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
+const db = schema({ users: { id: { type: 'integer', primaryKey: true } } });
 const adapter = createPgCompileOnlyAdapter({ model: db.model });
+
 const report = plan({ type: 'select', from: 'users' }, db.model);
-const { sql, params } = adapter.compile(report);
-// or through the ORM: createOrm({ schema: db, adapter }).select('users').dump()
+const { sql, parameters } = adapter.compile(report);
+
+// The same query through the ORM: dump() returns { sql, params }.
+const dumped = createOrm({ schema: db, adapter }).select('users').dump();
 ```
 
 `PlanCompiler` is internal: the adapter builds its input from a planned report and does not export it.

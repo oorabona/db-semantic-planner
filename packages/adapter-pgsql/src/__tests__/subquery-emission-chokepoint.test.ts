@@ -185,7 +185,7 @@ describe('PATH B: intent scalar path (convertSubquery → scalarSubqueryHandler)
 });
 
 // ============================================================================
-// D. Nested IN (logical group) — mapInSubqueryCondition → inSubqueryHandler
+// D. Nested IN (logical group) — inSubqueryHandler
 // ============================================================================
 
 describe('PATH D: nested IN inside logical group (inSubqueryHandler)', () => {
@@ -348,8 +348,8 @@ describe('CORRECTNESS: whereNot with multiple children in IN-subquery WHERE', ()
 	 * A whereNot with multiple children (not(and(c1, c2))) must compile to
 	 * NOT (c1 AND c2) inside the subquery WHERE clause.
 	 *
-	 * Before this refactor, the lowering could lose the NOT wrapper when
-	 * the multi-child case was not correctly preserved through mapInSubqueryCondition.
+	 * The lowering once lost the NOT wrapper when the multi-child case was not
+	 * preserved.
 	 */
 	it('whereNot wrapping AND(c1, c2) inside IN-subquery compiles to NOT (c1 AND c2)', () => {
 		const orm = buildOrm();
@@ -468,8 +468,6 @@ describe('SUMMARY: buildPredicateSubquerySelect routes all handler-path emission
 		 *   - convertSubquery (intent-to-decisions.ts)
 		 *   - convertWhereCondition rawExists branch (intent-to-decisions.ts)
 		 *   - normalizeToDecision case 'in' (handlers/index.ts)
-		 *   - dispatchWhere (compiler.ts)
-		 *   - mapInSubqueryCondition (compiler.ts)
 		 *   - handleRawExistsIntent (compile-where.ts)
 		 */
 

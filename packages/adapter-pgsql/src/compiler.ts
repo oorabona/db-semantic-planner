@@ -2176,7 +2176,6 @@ export class PlanCompiler {
 			}
 
 			case 'selectRelationColumn':
-			case 'selectPseudoColumn':
 			case 'selectArithmetic': {
 				if (decision.type === 'selectRelationColumn') {
 					const trusted = getTrustedNqlRelationFilterFields(decision);
@@ -2204,9 +2203,7 @@ export class PlanCompiler {
 				const exprType =
 					decision.type === 'selectRelationColumn'
 						? 'relationColumn'
-						: decision.type === 'selectPseudoColumn'
-							? 'pseudoColumn'
-							: 'arithmetic';
+						: 'arithmetic';
 				const handler = getExpressionHandler(exprType);
 				const ctx = this.createHandlerContext(plan, plan.rootTable);
 				const state = this.createHandlerState();
@@ -2904,7 +2901,6 @@ export class PlanCompiler {
 					decision.type === 'selectNqlFunction' ||
 					decision.type === 'selectExpression' ||
 					decision.type === 'selectRelationColumn' ||
-					decision.type === 'selectPseudoColumn' ||
 					decision.type === 'selectArithmetic' ||
 					decision.type === 'selectWindow' ||
 					decision.type === 'selectCustomExpression'
@@ -2957,12 +2953,22 @@ export class PlanCompiler {
 				case 'selectNqlFunction':
 				case 'selectExpression':
 				case 'selectRelationColumn':
-				case 'selectPseudoColumn':
 				case 'selectArithmetic':
 				case 'selectWindow':
 				case 'selectCustomExpression':
 					this.compileSelectTarget(decision, plan, targetList);
 					break;
+
+				case 'where':
+				case 'whereAnd':
+				case 'whereOr':
+				case 'whereNot':
+				case 'having':
+					// Planned reads carry their WHERE and HAVING as resolved roots
+					// (resolvedWhere, rawWhere, rawHaving), never as decisions.
+					throw new Error(
+						`A ${decision.type} decision reached the compiler; conditions compile from the planned report.`,
+					);
 
 				case 'includeStrategy':
 					this.compileIncludeDecision(
