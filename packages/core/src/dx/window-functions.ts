@@ -24,7 +24,7 @@ import type {
 	RankingWindowIntent,
 	WindowIntent,
 } from '../intent-ast.js';
-import { getColumnName } from './column-utils.js';
+import { coerceColumnName } from './coerce.js';
 import type { ColumnRef } from './table-ref.js';
 import type { ExpressionSpec } from './types.js';
 
@@ -124,7 +124,7 @@ export class WindowBuilder {
 		...fields: (string | ColumnRef<string, string, unknown>)[]
 	): WindowBuilder {
 		const fieldNames = fields.map((f) =>
-			typeof f === 'string' ? f : getColumnName(f),
+			coerceColumnName(f, 'partitionBy', 'window partition'),
 		);
 		return new WindowBuilder(
 			this.fnKind,
@@ -152,7 +152,7 @@ export class WindowBuilder {
 		field: string | ColumnRef<string, string, unknown>,
 		direction: 'asc' | 'desc' = 'asc',
 	): WindowBuilder {
-		const fieldName = typeof field === 'string' ? field : getColumnName(field);
+		const fieldName = coerceColumnName(field, 'orderBy', 'window order');
 		return new WindowBuilder(this.fnKind, this.partitions, [
 			...this.orders,
 			{ field: fieldName, direction },
@@ -270,8 +270,13 @@ export function denseRank(): WindowBuilder {
  * wSum('amount').partitionBy('user_id').orderBy('date').as('running_total')
  * // → SUM("amount") OVER (PARTITION BY "user_id" ORDER BY "date" ASC) AS "running_total"
  */
-export function wSum(field: string): WindowBuilder {
-	return WindowBuilder.aggregate('sum', field);
+export function wSum(
+	field: string | ColumnRef<string, string, unknown>,
+): WindowBuilder {
+	return WindowBuilder.aggregate(
+		'sum',
+		coerceColumnName(field, 'wSum', 'window field'),
+	);
 }
 
 /**
@@ -283,8 +288,13 @@ export function wSum(field: string): WindowBuilder {
  * wAvg('price').partitionBy('category').as('avg_price')
  * // → AVG("price") OVER (PARTITION BY "category") AS "avg_price"
  */
-export function wAvg(field: string): WindowBuilder {
-	return WindowBuilder.aggregate('avg', field);
+export function wAvg(
+	field: string | ColumnRef<string, string, unknown>,
+): WindowBuilder {
+	return WindowBuilder.aggregate(
+		'avg',
+		coerceColumnName(field, 'wAvg', 'window field'),
+	);
 }
 
 /**
@@ -301,8 +311,15 @@ export function wAvg(field: string): WindowBuilder {
  * wCount('id').partitionBy('category').as('items_in_category')
  * // → COUNT("id") OVER (PARTITION BY "category") AS "items_in_category"
  */
-export function wCount(field?: string): WindowBuilder {
-	return WindowBuilder.aggregate('count', field);
+export function wCount(
+	field?: string | ColumnRef<string, string, unknown>,
+): WindowBuilder {
+	return WindowBuilder.aggregate(
+		'count',
+		field === undefined
+			? undefined
+			: coerceColumnName(field, 'wCount', 'window field'),
+	);
 }
 
 /**
@@ -314,8 +331,13 @@ export function wCount(field?: string): WindowBuilder {
  * wMin('price').partitionBy('category').as('min_price')
  * // → MIN("price") OVER (PARTITION BY "category") AS "min_price"
  */
-export function wMin(field: string): WindowBuilder {
-	return WindowBuilder.aggregate('min', field);
+export function wMin(
+	field: string | ColumnRef<string, string, unknown>,
+): WindowBuilder {
+	return WindowBuilder.aggregate(
+		'min',
+		coerceColumnName(field, 'wMin', 'window field'),
+	);
 }
 
 /**
@@ -327,8 +349,13 @@ export function wMin(field: string): WindowBuilder {
  * wMax('price').partitionBy('category').as('max_price')
  * // → MAX("price") OVER (PARTITION BY "category") AS "max_price"
  */
-export function wMax(field: string): WindowBuilder {
-	return WindowBuilder.aggregate('max', field);
+export function wMax(
+	field: string | ColumnRef<string, string, unknown>,
+): WindowBuilder {
+	return WindowBuilder.aggregate(
+		'max',
+		coerceColumnName(field, 'wMax', 'window field'),
+	);
 }
 
 /**
@@ -340,8 +367,13 @@ export function wMax(field: string): WindowBuilder {
  * lag('amount').orderBy('date').as('prev_amount')
  * // → LAG("amount") OVER (ORDER BY "date" ASC) AS "prev_amount"
  */
-export function lag(field: string): WindowBuilder {
-	return WindowBuilder.offset('lag', field);
+export function lag(
+	field: string | ColumnRef<string, string, unknown>,
+): WindowBuilder {
+	return WindowBuilder.offset(
+		'lag',
+		coerceColumnName(field, 'lag', 'window field'),
+	);
 }
 
 /**
@@ -353,6 +385,11 @@ export function lag(field: string): WindowBuilder {
  * lead('amount').orderBy('date').as('next_amount')
  * // → LEAD("amount") OVER (ORDER BY "date" ASC) AS "next_amount"
  */
-export function lead(field: string): WindowBuilder {
-	return WindowBuilder.offset('lead', field);
+export function lead(
+	field: string | ColumnRef<string, string, unknown>,
+): WindowBuilder {
+	return WindowBuilder.offset(
+		'lead',
+		coerceColumnName(field, 'lead', 'window field'),
+	);
 }

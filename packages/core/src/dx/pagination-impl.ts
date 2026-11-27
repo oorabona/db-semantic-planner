@@ -323,6 +323,16 @@ export async function cursorPaginate<TResult>(
 		);
 	}
 
+	// A qualified field cannot be read back from the row by name (#1074).
+	for (const orderBy of builder.orderByIntents) {
+		const field = typeof orderBy === 'string' ? orderBy : orderBy?.field;
+		if (typeof field === 'string' && field.includes('.'))
+			throw new InvalidOperationError(
+				'cursorPaginate',
+				'cursorPaginate reads each ordered column from the result row by its output name; order by the column name, e.g. orderBy("id"), or see #1074',
+			);
+	}
+
 	// Require orderBy for stable cursor pagination
 	if (builder.orderByIntents.length === 0) {
 		throw new InvalidOperationError(

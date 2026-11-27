@@ -17,7 +17,7 @@ import type {
 } from '../../intent-ast.js';
 import { normalizeSQL } from '../../sql-utils.js';
 import { ref as expressionRef, fn, op } from '../expressions.js';
-import { eq, gt, sql } from '../filters.js';
+import { distinct, eq, gt, rowNumber, sql, wSum } from '../filters.js';
 import { createOrm } from '../orm.js';
 import { ref, schema } from '../schema.js';
 import { outerRef, subquery } from '../subquery-builder.js';
@@ -476,5 +476,39 @@ describe('DX-040-SURFACE: Type-level safety', () => {
 				'id' | 'name'
 			>[]
 		>();
+	});
+
+	it('AC9 new calls typecheck: a ColumnRef, a SubqueryExpression and a spec-list ColumnRef are accepted', () => {
+		const { posts } = orm.tables;
+		const built = [
+			orm.select('posts').orderBy(posts.title),
+			orm.select('posts').orderBy(subquery('posts').count()),
+			orm.select('posts').groupBy([posts.published]),
+			orm.select('posts').distinctOn(posts.published),
+			orm.select('posts').count(posts.id),
+			orm.select('posts').sum(posts.id),
+			orm.select('posts').columns([posts.title]),
+			orm.select('posts').orderBy([{ column: posts.id, direction: 'desc' }]),
+		];
+		expect(built.map((q) => typeof q.dump().sql)).toEqual(
+			Array(8).fill('string'),
+		);
+		expect(wSum(posts.id).as('total').intent.kind).toBe('window');
+		expect(distinct(posts.published)).toEqual({
+			field: 'posts.published',
+			distinct: true,
+		});
+	});
+
+	it('AC9 type exclusions: a null list element, an unknown direction and an unaliased subquery column are type errors', () => {
+		if (skipRuntimeTypeCanaries()) {
+			// @ts-expect-error -- an orderBy list element is a { column } spec
+			orm.select('posts').orderBy([null]);
+			// @ts-expect-error -- direction is 'asc' or 'desc'
+			orm.select('posts').orderBy([{ column: 'id', direction: 'sideways' }]);
+			// @ts-expect-error -- a subquery column needs .asExpr(alias)
+			orm.select('posts').columns([subquery('posts').count()]);
+			rowNumber().orderBy(orm.tables.posts.id);
+		}
 	});
 });

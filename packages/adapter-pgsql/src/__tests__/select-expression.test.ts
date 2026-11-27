@@ -15,12 +15,16 @@ import {
 	caseWhen,
 	cast,
 	createOrm,
+	distinct,
+	ExpressionRef,
 	eq,
 	exprRef,
 	fn,
 	gt,
 	inArray,
 	isDistinctFrom,
+	lag,
+	lead,
 	like,
 	literal,
 	namedArg,
@@ -28,10 +32,16 @@ import {
 	outerRef,
 	param,
 	ref,
+	rowNumber,
 	SubqueryExpression,
 	schema,
 	subquery,
 	unary,
+	wAvg,
+	wCount,
+	wMax,
+	wMin,
+	wSum,
 } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -856,6 +866,504 @@ describe('correlated subquery on the right of a comparison (ADR 0011 delivery 2)
 		expect([dump.sql, dump.parameters]).toEqual([
 			'UPDATE products SET price = $1 WHERE products.price > (SELECT avg(products_1.price) FROM products AS products_1 WHERE products_1."categoryId" = products."categoryId")',
 			[1],
+		]);
+	});
+});
+
+// ============================================================================
+// orderBy, columns, groupBy, distinctOn, aggregates and windows (ADR 0011, delivery 3)
+// ============================================================================
+
+describe('ordering, grouping, aggregate and window leaves (ADR 0011 delivery 3)', () => {
+	const d3Db = schema({
+		users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			title: 'text',
+			status: 'text',
+			score: 'integer',
+			user_id: ref('users', { as: 'author' }),
+		},
+	});
+	const orm = createOrm({
+		schema: d3Db,
+		adapter: createPgCompileOnlyAdapter({ model: d3Db.model }),
+		suppressDxWarnings: true,
+	});
+	const posts = orm.tables.posts;
+	const users = orm.tables.users;
+	const q = () => orm.select('posts');
+	const sqlOf = (dump: { sql: string; params: readonly unknown[] }) => [
+		dump.sql,
+		dump.params,
+	];
+
+	it('AC1 orderBy SubqueryExpression: a subquery orders rows (#1032)', () => {
+		expect(
+			sqlOf(
+				q().columns(['id']).orderBy(subquery('posts').count(), 'desc').dump(),
+			),
+		).toEqual([
+			'SELECT posts.id FROM posts ORDER BY (SELECT count(*) FROM posts AS posts_1) DESC',
+			[],
+		]);
+	});
+
+	it('AC2 orderBy ColumnRef: single, list and relation forms order by the qualified column', () => {
+		expect(
+			sqlOf(q().columns(['id']).orderBy(posts.title, 'desc').dump()),
+		).toEqual(['SELECT posts.id FROM posts ORDER BY posts.title DESC', []]);
+		expect(
+			sqlOf(
+				q()
+					.columns(['id'])
+					.orderBy([{ column: posts.score, direction: 'desc' }])
+					.dump(),
+			),
+		).toEqual(['SELECT posts.id FROM posts ORDER BY posts.score DESC', []]);
+		expect(
+			sqlOf(
+				q().join('author').columns(['id']).orderBy(posts.author.name).dump(),
+			),
+		).toEqual([
+			'SELECT posts.id FROM posts JOIN users AS author ON posts.user_id = author.id ORDER BY author.name ASC',
+			[],
+		]);
+	});
+
+	it('AC2 orderBy ColumnRef with homonymous alias: the qualified column wins over the projection alias', () => {
+		expect(
+			sqlOf(
+				q()
+					.columns([exprRef('posts.score').as('id')])
+					.orderBy(posts.id)
+					.dump(),
+			),
+		).toEqual([
+			'SELECT posts.score AS id FROM posts ORDER BY posts.id ASC',
+			[],
+		]);
+	});
+
+	it('AC3 orderBy number: a positive integer is an output-column position', () => {
+		expect(sqlOf(q().columns(['id']).orderBy(2).dump())).toEqual([
+			'SELECT posts.id FROM posts ORDER BY 2 ASC',
+			[],
+		]);
+	});
+
+	it('AC3 orderBy expression spec column: the list form keeps direction and nulls', () => {
+		expect(
+			sqlOf(
+				q()
+					.columns(['id'])
+					.orderBy([
+						{
+							column: fn('lower', exprRef('title')),
+							direction: 'desc',
+							nulls: 'last',
+						},
+					])
+					.dump(),
+			),
+		).toEqual([
+			'SELECT posts.id FROM posts ORDER BY lower(title) DESC NULLS LAST',
+			[],
+		]);
+		expect(
+			sqlOf(
+				q()
+					.columns(['id'])
+					.orderBy([{ column: fn('lower', exprRef('title')) }])
+					.dump(),
+			),
+		).toEqual(['SELECT posts.id FROM posts ORDER BY lower(title) ASC', []]);
+	});
+
+	it('AC4 orderBy unchanged forms: strings, records and expressions keep their SQL', () => {
+		expect(sqlOf(q().columns(['id']).orderBy('title').dump())).toEqual([
+			'SELECT posts.id FROM posts ORDER BY posts.title ASC',
+			[],
+		]);
+		expect(sqlOf(q().columns(['id']).orderBy('posts.title').dump())).toEqual([
+			'SELECT posts.id FROM posts ORDER BY posts.title ASC',
+			[],
+		]);
+		expect(
+			sqlOf(q().columns(['id']).orderBy({ score: 'desc' }).dump()),
+		).toEqual(['SELECT posts.id FROM posts ORDER BY posts.score DESC', []]);
+		expect(sqlOf(q().columns(['id']).orderBy(exprRef('title')).dump())).toEqual(
+			['SELECT posts.id FROM posts ORDER BY title ASC', []],
+		);
+		expect(sqlOf(q().columns(['id']).orderBy(param(1)).dump())).toEqual([
+			'SELECT posts.id FROM posts ORDER BY $1 ASC',
+			[1],
+		]);
+		expect(sqlOf(q().columns(['id']).orderBy(literal(1)).dump())).toEqual([
+			'SELECT posts.id FROM posts ORDER BY 1 ASC',
+			[],
+		]);
+		expect(
+			sqlOf(
+				q()
+					.columns(['id'])
+					.orderBy(caseWhen(eq('score', 1), literal('a')).else(literal('b')))
+					.dump(),
+			),
+		).toEqual([
+			"SELECT posts.id FROM posts ORDER BY CASE WHEN posts.score = $1 THEN 'a' ELSE 'b' END ASC",
+			[1],
+		]);
+		expect(
+			sqlOf(
+				q()
+					.columns(['id'])
+					.orderBy(subquery('posts').count().asExpr('n'))
+					.dump(),
+			),
+		).toEqual([
+			'SELECT posts.id FROM posts ORDER BY (SELECT count(*) FROM posts AS posts_1) ASC',
+			[],
+		]);
+	});
+
+	it('AC5 columns own-table ColumnRef: a field column', () => {
+		expect(sqlOf(q().columns(['id', posts.title]).dump())).toEqual([
+			'SELECT posts.id, posts.title FROM posts',
+			[],
+		]);
+		// An ExpressionRef stays an expression column, whatever its intent kind.
+		const titleRef = new ExpressionRef({ kind: 'column', column: 'title' });
+		expect(
+			sqlOf(
+				q()
+					.columns([titleRef.as('t')])
+					.dump(),
+			),
+		).toEqual(['SELECT posts.title AS t FROM posts', []]);
+		expect(() =>
+			q().columns([titleRef]).groupBy(['title']).count().dump(),
+		).toThrow(/combine only with string columns\(\)/);
+	});
+
+	it('AC5 columns other-table ColumnRef: an expression column on a joined table', () => {
+		expect(
+			sqlOf(
+				q()
+					.join('users', { on: eq('user_id', exprRef('users.id')) })
+					.columns(['id', users.name])
+					.dump(),
+			),
+		).toEqual([
+			'SELECT posts.id, users.name FROM posts JOIN users AS users ON posts.user_id = users.id',
+			[],
+		]);
+	});
+
+	it('AC5b aliased ColumnRef column: the alias names the column', () => {
+		expect(
+			sqlOf(
+				q()
+					.columns(['title', posts.id.as('post_id')])
+					.dump(),
+			),
+		).toEqual(['SELECT posts.title, posts.id AS post_id FROM posts', []]);
+	});
+
+	it('AC5c own-table ColumnRef column with aggregate: stays a field column', () => {
+		expect(
+			sqlOf(q().columns([posts.status]).groupBy(['status']).count().dump()),
+		).toEqual([
+			'SELECT posts.status, count(*) FROM posts GROUP BY posts.status',
+			[],
+		]);
+	});
+
+	it('AC5d RefDefinition in orderBy and columns: the target column', () => {
+		expect(
+			sqlOf(q().columns(['id']).orderBy(ref('posts.title')).dump()),
+		).toEqual(['SELECT posts.id FROM posts ORDER BY posts.title ASC', []]);
+		expect(
+			sqlOf(
+				q()
+					.columns(['id', ref('posts.title')])
+					.dump(),
+			),
+		).toEqual(['SELECT posts.id, posts.title FROM posts', []]);
+	});
+
+	it('AC6 groupBy ColumnRef: with and without an aggregate selection', () => {
+		expect(
+			sqlOf(q().columns(['status']).groupBy([posts.status]).dump()),
+		).toEqual(['SELECT posts.status FROM posts GROUP BY posts.status', []]);
+		expect(sqlOf(q().groupBy([posts.status]).count('id', 'n').dump())).toEqual([
+			'SELECT posts.status, count(posts.id) AS n FROM posts GROUP BY posts.status',
+			[],
+		]);
+	});
+
+	it('AC6 distinctOn ColumnRef qualified: deduplicates on the column, not a homonymous alias', () => {
+		expect(
+			sqlOf(
+				q().columns(['id']).distinctOn(posts.status).orderBy('status').dump(),
+			),
+		).toEqual([
+			'SELECT DISTINCT ON (posts.status) posts.id FROM posts ORDER BY posts.status ASC',
+			[],
+		]);
+		expect(
+			sqlOf(
+				q()
+					.columns(['id', posts.score.as('status')])
+					.distinctOn(posts.status)
+					.orderBy(posts.status)
+					.dump(),
+			),
+		).toEqual([
+			'SELECT DISTINCT ON (posts.status) posts.id, posts.score AS status FROM posts ORDER BY posts.status ASC',
+			[],
+		]);
+	});
+
+	it('AC6 groupBy relation ColumnRef after join: the join alias', () => {
+		expect(
+			sqlOf(
+				q()
+					.join('author')
+					.columns(['status'])
+					.groupBy([posts.author.name])
+					.dump(),
+			),
+		).toEqual([
+			'SELECT posts.status FROM posts JOIN users AS author ON posts.user_id = author.id GROUP BY author.name',
+			[],
+		]);
+	});
+
+	it('AC7 aggregate ColumnRef fields: count, options, sum, avg, min, max', () => {
+		expect(sqlOf(q().count(posts.score, 'n').dump())).toEqual([
+			'SELECT count(posts.score) AS n FROM posts',
+			[],
+		]);
+		expect(sqlOf(q().count({ field: posts.score, as: 'n' }).dump())).toEqual([
+			'SELECT count(posts.score) AS n FROM posts',
+			[],
+		]);
+		expect(sqlOf(q().sum(posts.score).dump())).toEqual([
+			'SELECT sum(posts.score) FROM posts',
+			[],
+		]);
+		expect(sqlOf(q().avg(posts.score).dump())).toEqual([
+			'SELECT avg(posts.score) FROM posts',
+			[],
+		]);
+		expect(sqlOf(q().min(posts.score).dump())).toEqual([
+			'SELECT min(posts.score) FROM posts',
+			[],
+		]);
+		expect(sqlOf(q().max(posts.score).dump())).toEqual([
+			'SELECT max(posts.score) FROM posts',
+			[],
+		]);
+	});
+
+	it('AC7 count distinct ColumnRef and fn distinct ColumnRef', () => {
+		expect(sqlOf(q().count(distinct(posts.status)).dump())).toEqual([
+			'SELECT count(DISTINCT posts.status) FROM posts',
+			[],
+		]);
+		expect(
+			sqlOf(
+				q()
+					.columns([fn('count', distinct(posts.status)).as('n')])
+					.dump(),
+			),
+		).toEqual(['SELECT count(DISTINCT posts.status) AS n FROM posts', []]);
+	});
+
+	it('AC7 count unchanged forms', () => {
+		expect(sqlOf(q().count().dump())).toEqual([
+			'SELECT count(*) FROM posts',
+			[],
+		]);
+		expect(sqlOf(q().count({ as: 'n' }).dump())).toEqual([
+			'SELECT count(*) AS n FROM posts',
+			[],
+		]);
+		expect(sqlOf(q().count({ field: 'score', as: 'n' }).dump())).toEqual([
+			'SELECT count(posts.score) AS n FROM posts',
+			[],
+		]);
+	});
+
+	it('AC7b empty lists and records stay a no-op', () => {
+		expect(sqlOf(q().columns(['id']).orderBy([]).dump())).toEqual([
+			'SELECT posts.id FROM posts',
+			[],
+		]);
+		expect(sqlOf(q().columns(['id']).orderBy({}).dump())).toEqual([
+			'SELECT posts.id FROM posts',
+			[],
+		]);
+		expect(sqlOf(q().columns(['id']).groupBy([]).dump())).toEqual([
+			'SELECT posts.id FROM posts',
+			[],
+		]);
+	});
+
+	it('AC8b alias ignored and DISTINCT kept in column-name positions', () => {
+		expect(
+			sqlOf(
+				q()
+					.columns(['status'])
+					.groupBy([posts.status.as('s')])
+					.dump(),
+			),
+		).toEqual(['SELECT posts.status FROM posts GROUP BY posts.status', []]);
+		expect(sqlOf(q().sum(distinct(posts.score)).dump())).toEqual([
+			'SELECT sum(DISTINCT posts.score) FROM posts',
+			[],
+		]);
+		expect(sqlOf(q().avg(distinct(posts.score)).dump())).toEqual([
+			'SELECT avg(DISTINCT posts.score) FROM posts',
+			[],
+		]);
+	});
+
+	it('AC8 window helper fields: one row per helper', () => {
+		expect(
+			sqlOf(
+				q()
+					.columns(['id', wSum(posts.score).as('w')])
+					.dump(),
+			),
+		).toEqual([
+			'SELECT posts.id, sum(posts.score) OVER () AS w FROM posts',
+			[],
+		]);
+		expect(
+			sqlOf(
+				q()
+					.columns(['id', wAvg(posts.score).as('w')])
+					.dump(),
+			),
+		).toEqual([
+			'SELECT posts.id, avg(posts.score) OVER () AS w FROM posts',
+			[],
+		]);
+		expect(
+			sqlOf(
+				q()
+					.columns(['id', wMin(posts.score).as('w')])
+					.dump(),
+			),
+		).toEqual([
+			'SELECT posts.id, min(posts.score) OVER () AS w FROM posts',
+			[],
+		]);
+		expect(
+			sqlOf(
+				q()
+					.columns(['id', wMax(posts.score).as('w')])
+					.dump(),
+			),
+		).toEqual([
+			'SELECT posts.id, max(posts.score) OVER () AS w FROM posts',
+			[],
+		]);
+		expect(
+			sqlOf(
+				q()
+					.columns(['id', wCount(posts.score).as('w')])
+					.dump(),
+			),
+		).toEqual([
+			'SELECT posts.id, count(posts.score) OVER () AS w FROM posts',
+			[],
+		]);
+		expect(
+			sqlOf(
+				q()
+					.columns(['id', lag(posts.score).as('w')])
+					.dump(),
+			),
+		).toEqual([
+			'SELECT posts.id, lag(posts.score) OVER () AS w FROM posts',
+			[],
+		]);
+		expect(
+			sqlOf(
+				q()
+					.columns(['id', lead(posts.score).as('w')])
+					.dump(),
+			),
+		).toEqual([
+			'SELECT posts.id, lead(posts.score) OVER () AS w FROM posts',
+			[],
+		]);
+	});
+
+	it('AC8 wCount without field keeps count(*)', () => {
+		expect(
+			sqlOf(
+				q()
+					.columns(['id', wCount().as('w')])
+					.dump(),
+			),
+		).toEqual(['SELECT posts.id, count(*) OVER () AS w FROM posts', []]);
+	});
+
+	it('AC8 window partition and order unchanged', () => {
+		expect(
+			sqlOf(
+				q()
+					.columns([
+						'id',
+						rowNumber().partitionBy('status').orderBy('score', 'desc').as('w'),
+					])
+					.dump(),
+			),
+		).toEqual([
+			'SELECT posts.id, row_number() OVER (PARTITION BY posts.status ORDER BY posts.score DESC) AS w FROM posts',
+			[],
+		]);
+		expect(
+			sqlOf(
+				q()
+					.columns([
+						'id',
+						rowNumber()
+							.partitionBy(posts.status)
+							.orderBy(posts.score, 'desc')
+							.as('w'),
+					])
+					.dump(),
+			),
+		).toEqual([
+			'SELECT posts.id, row_number() OVER (PARTITION BY posts.status ORDER BY posts.score DESC) AS w FROM posts',
+			[],
+		]);
+		expect(
+			sqlOf(
+				q()
+					.join('author')
+					.columns(['id', rowNumber().partitionBy(posts.author.name).as('w')])
+					.dump(),
+			),
+		).toEqual([
+			'SELECT posts.id, row_number() OVER (PARTITION BY author.name) AS w FROM posts JOIN users AS author ON posts.user_id = author.id',
+			[],
+		]);
+		expect(
+			sqlOf(
+				q()
+					.join('author')
+					.columns(['id', rowNumber().orderBy(posts.author.name).as('w')])
+					.dump(),
+			),
+		).toEqual([
+			'SELECT posts.id, row_number() OVER (ORDER BY author.name ASC) AS w FROM posts JOIN users AS author ON posts.user_id = author.id',
+			[],
 		]);
 	});
 });

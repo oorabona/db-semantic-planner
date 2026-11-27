@@ -164,6 +164,22 @@ const names = await orm.select('users').columns(['id', 'name']).dump();
 // SQL: SELECT "id", "name" FROM "users"
 ```
 
+A `.columns()` entry can also be a `ColumnRef` from `orm.tables`, an aliased one, or an expression. An unaliased
+`ColumnRef` of the queried table is the same column as its name; a `ColumnRef` of another table needs that table in
+the query, through a join:
+
+```typescript
+const { posts } = orm.tables;
+
+orm.select('posts').columns(['id', posts.title, posts.createdAt.as('created')]).dump();
+// SQL: SELECT posts.id, posts.title, posts."createdAt" AS created FROM posts
+```
+
+A constant (`1`, `true`, a `Date`, an array) and a bare `subquery(...)` need a name, so `.columns()` refuses them with
+an `InvalidOperationError`: write `literal(value).as(alias)`, `param(value).as(alias)` or `subquery(...).asExpr(alias)`.
+A `ColumnRef` reached through a relation (`posts.author.name`) or taken from a `some()` / `every()` / `none()`
+callback parameter is refused with a `NotYetSupportedError` (#1052), aliased or not.
+
 ---
 
 ## Ordering
@@ -183,6 +199,34 @@ orm.select('users').orderBy([
   { column: 'createdAt', direction: 'desc', nulls: 'last' }
 ])
 ```
+
+`.orderBy()` and a `{ column }` entry also take a `ColumnRef`, an expression, a scalar subquery, or a positive
+integer naming a selected column by position:
+
+```typescript
+import { subquery } from '@dbsp/core';
+
+const { posts } = orm.tables;
+
+orm.select('posts').orderBy(posts.createdAt, 'desc').dump();
+// SQL: SELECT posts.* FROM posts ORDER BY posts."createdAt" DESC
+
+// A relation ColumnRef orders by the joined relation
+orm.select('posts').join('author').orderBy(posts.author.name).dump();
+// SQL: SELECT posts.* FROM posts JOIN users AS author ON posts."authorId" = author.id ORDER BY author.name ASC
+
+orm.select('users').orderBy(subquery('posts').count(), 'desc').dump();
+// SQL: SELECT users.* FROM users ORDER BY (SELECT count(*) FROM posts) DESC
+
+orm.select('posts').columns(['title', 'createdAt']).orderBy(2, 'desc').dump();
+// SQL: SELECT posts.title, posts."createdAt" FROM posts ORDER BY 2 DESC
+```
+
+A `ColumnRef` stays qualified in `ORDER BY`, so a selected alias with the same name does not capture it. An ordering
+that names no column — a `Date`, a boolean, a `bigint`, `0`, a fraction — is refused with an `InvalidOperationError`,
+and so is a list element that is not a `{ column, direction?, nulls? }` object. `.cursorPaginate()` reads each
+ordered column back from the row by its output name, so it refuses a qualified ordering (`orderBy(posts.id)`,
+`orderBy('posts.id')`): order by the column name instead (#1074).
 
 ---
 
@@ -218,6 +262,15 @@ const latest = await orm.select('posts')
   .orderBy('createdAt', 'desc')
   .dump();
 // SQL: SELECT DISTINCT ON ("author_id") * FROM "posts" ORDER BY "author_id", "created_at" DESC
+
+// DISTINCT ON a ColumnRef — the column stays qualified
+const { posts } = orm.tables;
+orm.select('posts')
+  .distinctOn(posts.authorId)
+  .orderBy(posts.authorId)
+  .orderBy(posts.createdAt, 'desc')
+  .dump();
+// SQL: SELECT DISTINCT ON (posts."authorId") posts.* FROM posts ORDER BY posts."authorId" ASC, posts."createdAt" DESC
 
 // DISTINCT ON a joined relation column — compile-only inspection
 const latestPostPerAuthorEmail = orm.select('posts')
@@ -299,6 +352,28 @@ orm.select('posts')
   .dump();
 // SQL: SELECT posts."authorId", count(*) AS "postCount" FROM posts GROUP BY posts."authorId", posts.published
 ```
+
+`groupBy()` fields, `distinctOn()` columns and the field of `count()`, `sum()`, `avg()`, `min()`, `max()` and
+`distinct()` each name a column: a column name or a `ColumnRef`, and an alias on the ref is ignored. In `groupBy()`
+and the aggregate methods, a `ColumnRef` of the queried table is used as its bare column name; `distinctOn()` and
+`distinct()` keep it qualified:
+
+```typescript
+import { distinct } from '@dbsp/core';
+
+const { posts } = orm.tables;
+
+orm.select('posts').groupBy([posts.published]).count(posts.id, 'postCount').dump();
+// SQL: SELECT posts.published, count(posts.id) AS "postCount" FROM posts GROUP BY posts.published
+
+orm.select('posts').count(distinct(posts.authorId), 'authors').dump();
+// SQL: SELECT count(DISTINCT posts."authorId") AS authors FROM posts
+```
+
+An expression in these positions is refused with a `NotYetSupportedError` (#1072). `null`, `undefined`, a plain
+object and `sql()` are refused with an `InvalidOperationError`, except that `count()` reads a plain object as its
+`{ field?, as? }` options. `min()` and `max()` take no `distinct()`, and `count({ field, distinct: true })` with a
+`ColumnRef` field is refused: write `count(distinct(field))`.
 
 `count()`, `sum()`, `avg()`, `min()` and `max()` throw an `InvalidOperationError` beside an expression
 projection from `.columns()` or `.coalesce()`. Put the aggregate in `.columns()` instead:

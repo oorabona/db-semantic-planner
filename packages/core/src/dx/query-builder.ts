@@ -28,6 +28,13 @@ import {
 } from '../relational-read-plans.js';
 import type { BatchValuesRef } from './batch-values.js';
 import { isBatchValuesRef } from './batch-values.js';
+import {
+	coerceColumnName,
+	coerceReference,
+	isReferenceObject,
+	type OrderByLeaf,
+} from './coerce.js';
+import { isRelationPathColumn } from './column-utils.js';
 import { assertUnplannedDefaultFilters } from './default-filter-refusals.js';
 import {
 	AmbiguousRelationError,
@@ -90,13 +97,15 @@ import {
 	SetOperationBuilderImpl,
 } from './set-operation-builder.js';
 import * as streamImpl from './stream-impl.js';
+import { isSubqueryExpression } from './subquery-builder.js';
+import { CALLBACK_SCOPE, COLUMN_META, TABLE_META } from './symbols.js';
+import { type ColumnRef, isAliasedColumn, isColumnRef } from './table-ref.js';
 import {
 	type AggregateOptions,
 	type AliasedExprColumn,
 	type ColumnSpec,
 	type CursorPaginatedResult,
 	type CursorPaginateOptions,
-	type ExpressionSpec,
 	type IncludeOptionsWithRecursive,
 	isExpressionSpec,
 	type OrderByRecord,
@@ -228,14 +237,11 @@ export class QueryBuilderImpl<TResult = unknown>
 		const expressionColumns: ExpressionIntent[] = [];
 		let hasExpressions = false;
 
-		for (const col of columns) {
-			if (isExpressionSpec(col)) {
+		for (const col of columns as readonly unknown[]) {
+			const entry = columnEntry(col, this.from);
+			if (isExpressionSpec(col as ColumnSpec) || entry.kind !== 'column')
 				hasExpressions = true;
-				expressionColumns.push(col.intent);
-			} else {
-				// Simple field → ColumnExpressionIntent (kind: 'column')
-				expressionColumns.push({ kind: 'column', column: col });
-			}
+			expressionColumns.push(entry);
 		}
 
 		// Use SelectWithExpressionsIntent if we have any expressions
@@ -305,7 +311,11 @@ export class QueryBuilderImpl<TResult = unknown>
 	}
 
 	count(
-		fieldOrOptions?: AggregateOptions | string | DistinctField,
+		fieldOrOptions?:
+			| AggregateOptions
+			| string
+			| ColumnRef<string, string, unknown>
+			| DistinctField,
 		as?: string,
 	): QueryBuilder<TResult> {
 		const builder = this.clone();
@@ -316,17 +326,37 @@ export class QueryBuilderImpl<TResult = unknown>
 
 		if (fieldOrOptions === undefined) {
 			// count() - COUNT(*)
-		} else if (typeof fieldOrOptions === 'string') {
-			// count('field', 'alias') - COUNT(field)
-			field = fieldOrOptions;
 		} else if (isDistinctField(fieldOrOptions)) {
 			// count(distinct('field'), 'alias') - COUNT(DISTINCT field)
 			field = fieldOrOptions.field;
 			distinct = true;
+		} else if (isPlainOptions(fieldOrOptions)) {
+			// count({ field, as }) - AggregateOptions; an absent field is COUNT(*)
+			if (Object.hasOwn(fieldOrOptions, 'distinct'))
+				throw new InvalidOperationError(
+					'count',
+					'use distinct(field) for COUNT DISTINCT',
+				);
+			const options = fieldOrOptions as {
+				readonly field?: unknown;
+				readonly as?: string;
+			};
+			if (options.field !== undefined)
+				field = coerceColumnName(
+					options.field,
+					'count',
+					'aggregate field',
+					this.from,
+				);
+			alias = options.as ?? as;
 		} else {
-			// count({ field, as }) - AggregateOptions
-			field = fieldOrOptions.field;
-			alias = fieldOrOptions.as ?? as;
+			// count('field' | ColumnRef, 'alias') - COUNT(field)
+			field = coerceColumnName(
+				fieldOrOptions,
+				'count',
+				'aggregate field',
+				this.from,
+			);
 		}
 
 		const agg: AggregateIntent = {
@@ -339,10 +369,15 @@ export class QueryBuilderImpl<TResult = unknown>
 		return builder;
 	}
 
-	sum(field: string | DistinctField, as?: string): QueryBuilder<TResult> {
+	sum(
+		field: string | ColumnRef<string, string, unknown> | DistinctField,
+		as?: string,
+	): QueryBuilder<TResult> {
 		const builder = this.clone();
 		const isDistinct = isDistinctField(field);
-		const fieldName = isDistinct ? field.field : field;
+		const fieldName = isDistinct
+			? field.field
+			: coerceColumnName(field, 'sum', 'aggregate field', this.from);
 		const agg: AggregateIntent = {
 			function: 'sum',
 			field: fieldName,
@@ -353,10 +388,15 @@ export class QueryBuilderImpl<TResult = unknown>
 		return builder;
 	}
 
-	avg(field: string | DistinctField, as?: string): QueryBuilder<TResult> {
+	avg(
+		field: string | ColumnRef<string, string, unknown> | DistinctField,
+		as?: string,
+	): QueryBuilder<TResult> {
 		const builder = this.clone();
 		const isDistinct = isDistinctField(field);
-		const fieldName = isDistinct ? field.field : field;
+		const fieldName = isDistinct
+			? field.field
+			: coerceColumnName(field, 'avg', 'aggregate field', this.from);
 		const agg: AggregateIntent = {
 			function: 'avg',
 			field: fieldName,
@@ -367,31 +407,43 @@ export class QueryBuilderImpl<TResult = unknown>
 		return builder;
 	}
 
-	min(field: string, as?: string): QueryBuilder<TResult> {
+	min(
+		field: string | ColumnRef<string, string, unknown>,
+		as?: string,
+	): QueryBuilder<TResult> {
 		const builder = this.clone();
 		const agg: AggregateIntent = {
 			function: 'min',
-			field,
+			field: coerceColumnName(field, 'min', 'aggregate field', this.from),
 			...(as !== undefined && { as }),
 		};
 		builder.aggregates.push(agg);
 		return builder;
 	}
 
-	max(field: string, as?: string): QueryBuilder<TResult> {
+	max(
+		field: string | ColumnRef<string, string, unknown>,
+		as?: string,
+	): QueryBuilder<TResult> {
 		const builder = this.clone();
 		const agg: AggregateIntent = {
 			function: 'max',
-			field,
+			field: coerceColumnName(field, 'max', 'aggregate field', this.from),
 			...(as !== undefined && { as }),
 		};
 		builder.aggregates.push(agg);
 		return builder;
 	}
 
-	groupBy(fields: readonly string[]): QueryBuilder<TResult> {
+	groupBy(
+		fields: readonly (string | ColumnRef<string, string, unknown>)[],
+	): QueryBuilder<TResult> {
 		const builder = this.clone();
-		builder.groupByFields.push(...fields);
+		builder.groupByFields.push(
+			...fields.map((f) =>
+				coerceColumnName(f, 'groupBy', 'GROUP BY', this.from),
+			),
+		);
 		return builder;
 	}
 
@@ -422,9 +474,13 @@ export class QueryBuilderImpl<TResult = unknown>
 	 * // SQL: SELECT DISTINCT ON ("user_id", "action") * FROM "logs"
 	 * ```
 	 */
-	distinctOn(...columns: string[]): QueryBuilder<TResult> {
+	distinctOn(
+		...columns: (string | ColumnRef<string, string, unknown>)[]
+	): QueryBuilder<TResult> {
 		const builder = this.clone();
-		builder.distinctOnColumns = columns;
+		builder.distinctOnColumns = columns.map((c) =>
+			coerceColumnName(c, 'distinctOn', 'DISTINCT ON'),
+		);
 		return builder;
 	}
 
@@ -500,37 +556,11 @@ export class QueryBuilderImpl<TResult = unknown>
 	}
 
 	orderBy(
-		fieldOrRecordOrSpecs:
-			| string
-			| OrderByRecord
-			| readonly OrderBySpec[]
-			| ExpressionRef
-			| ExpressionSpec,
+		fieldOrRecordOrSpecs: OrderByLeaf | OrderByRecord | readonly OrderBySpec[],
 		direction?: SortDirection,
 		options?: { nulls?: import('./types.js').NullsPosition },
 	): QueryBuilder<TResult> {
 		const builder = this.clone();
-
-		// ExpressionRef form: orderBy(expr) or orderBy(expr, 'desc') or orderBy(expr, 'desc', { nulls: 'last' })
-		if (fieldOrRecordOrSpecs instanceof ExpressionRef) {
-			builder.orderByIntents.push({
-				expression: fieldOrRecordOrSpecs.intent,
-				direction: direction ?? 'asc',
-				...(options?.nulls !== undefined ? { nulls: options.nulls } : {}),
-			});
-			return builder;
-		}
-
-		// ExpressionSpec form: orderBy(relationColumn(...)) or other plain ExpressionSpec objects
-		if (isExpressionSpec(fieldOrRecordOrSpecs as ColumnSpec)) {
-			builder.orderByIntents.push({
-				expression: (fieldOrRecordOrSpecs as { intent: ExpressionIntent })
-					.intent,
-				direction: direction ?? 'asc',
-				...(options?.nulls !== undefined ? { nulls: options.nulls } : {}),
-			});
-			return builder;
-		}
 
 		// String form: orderBy('field') or orderBy('field', 'desc') or orderBy('field', 'desc', { nulls: 'last' })
 		if (typeof fieldOrRecordOrSpecs === 'string') {
@@ -544,23 +574,34 @@ export class QueryBuilderImpl<TResult = unknown>
 
 		// Array form: orderBy([{ column, direction, nulls }])
 		if (Array.isArray(fieldOrRecordOrSpecs)) {
-			for (const spec of fieldOrRecordOrSpecs) {
-				builder.orderByIntents.push({
-					field: spec.column,
-					direction: spec.direction ?? 'asc',
-					nulls: spec.nulls,
-				});
+			for (const spec of fieldOrRecordOrSpecs as readonly unknown[]) {
+				if (!isPlainOptions(spec) || !Object.hasOwn(spec, 'column'))
+					throw new InvalidOperationError(
+						'orderBy',
+						'an orderBy list element must be { column, direction?, nulls? }; use orderBy(x) for a single column',
+					);
+				const item = spec as OrderBySpec;
+				builder.orderByIntents.push(
+					orderingOf(item.column, item.direction ?? 'asc', item.nulls, true),
+				);
 			}
 			return builder;
 		}
 
 		// Object form: orderBy({ field1: 'desc', field2: 'asc' })
-		for (const [field, dir] of Object.entries(fieldOrRecordOrSpecs)) {
-			builder.orderByIntents.push({
-				field,
-				direction: dir,
-			});
+		if (isPlainOptions(fieldOrRecordOrSpecs)) {
+			for (const [field, dir] of Object.entries(
+				fieldOrRecordOrSpecs as OrderByRecord,
+			)) {
+				builder.orderByIntents.push({ field, direction: dir });
+			}
+			return builder;
 		}
+
+		// A single leaf (ADR 0011, reference position)
+		builder.orderByIntents.push(
+			orderingOf(fieldOrRecordOrSpecs, direction ?? 'asc', options?.nulls),
+		);
 		return builder;
 	}
 
@@ -1890,4 +1931,104 @@ export class QueryBuilderImpl<TResult = unknown>
 		builder.skipDefaultFilters = true;
 		return builder;
 	}
+}
+
+/**
+ * A plain object read by its keys (an `orderBy` record or list element, a
+ * `count` options object): prototype `Object.prototype` or `null`, and none
+ * of the objects the leaf rule recognises.
+ */
+function isPlainOptions(value: unknown): value is object {
+	if (typeof value !== 'object' || value === null || isReferenceObject(value))
+		return false;
+	const proto = Object.getPrototypeOf(value);
+	return proto === Object.prototype || proto === null;
+}
+
+/**
+ * One ordering for an `orderBy` leaf (ADR 0011, reference position). A string
+ * is a field; a `ColumnRef` is a qualified field (a bare one would resolve to
+ * a projection alias first); a constant that does not name a column is
+ * refused; anything else is an expression ordering.
+ */
+function orderingOf(
+	leaf: unknown,
+	direction: SortDirection,
+	nulls: import('./types.js').NullsPosition | undefined,
+	inList = false,
+): OrderByIntent {
+	const nullsPart = nulls !== undefined ? { nulls } : {};
+	if (typeof leaf === 'string') return { field: leaf, direction, ...nullsPart };
+	if (isColumnRef(leaf))
+		return {
+			field: coerceColumnName(leaf, 'orderBy', 'ORDER BY'),
+			direction,
+			...nullsPart,
+		};
+	const kind =
+		leaf instanceof Date
+			? 'a Date'
+			: typeof leaf === 'boolean'
+				? 'a boolean'
+				: typeof leaf === 'bigint'
+					? 'a bigint'
+					: inList && Array.isArray(leaf)
+						? 'an array'
+						: typeof leaf === 'number' &&
+								!(Number.isSafeInteger(leaf) && leaf > 0)
+							? `the number ${String(leaf)}`
+							: undefined;
+	if (kind !== undefined)
+		throw new InvalidOperationError(
+			'orderBy',
+			`${kind} does not name a column or an expression to order by`,
+		);
+	return {
+		expression: coerceReference(leaf, 'orderBy'),
+		direction,
+		...nullsPart,
+	};
+}
+
+/**
+ * One `columns()` entry as a select column (ADR 0011, reference position):
+ * a string or an own-table `ColumnRef` is a field column; any other leaf is
+ * an expression column. Constants and a bare `SubqueryExpression` need a
+ * name, since unaliased they get a name PostgreSQL chooses (#1075).
+ */
+function columnEntry(col: unknown, from: string): ExpressionIntent {
+	if (typeof col === 'string') return { kind: 'column', column: col };
+	if (isExpressionSpec(col as ColumnSpec))
+		return (col as { intent: ExpressionIntent }).intent;
+	if (isColumnRef(col)) {
+		if (
+			!isAliasedColumn(col) &&
+			!isRelationPathColumn(col) &&
+			(col as { readonly [CALLBACK_SCOPE]?: object })[CALLBACK_SCOPE] ===
+				undefined &&
+			col[TABLE_META] === from
+		)
+			return { kind: 'column', column: col[COLUMN_META] };
+		const intent = coerceReference(col, 'columns');
+		return isAliasedColumn(col)
+			? ({ ...intent, as: col._alias } as ExpressionIntent)
+			: intent;
+	}
+	if (isSubqueryExpression(col))
+		throw new InvalidOperationError(
+			'columns',
+			'a subquery column needs a name; use .asExpr(alias)',
+		);
+	if (
+		typeof col === 'number' ||
+		typeof col === 'boolean' ||
+		typeof col === 'bigint' ||
+		Array.isArray(col) ||
+		col instanceof Date
+	)
+		throw new InvalidOperationError(
+			'columns',
+			'a constant column needs a name; use literal(value).as(alias) or param(value).as(alias)',
+		);
+	return coerceReference(col, 'columns');
 }

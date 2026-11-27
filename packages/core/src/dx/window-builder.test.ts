@@ -4,14 +4,18 @@ import { EXPRESSION_BRAND } from '@dbsp/types';
  * Tests for the fluent window function builder pattern
  */
 
+import { NotYetSupportedError } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import type { WindowIntent } from '../intent-ast.js';
+import { InvalidOperationError } from './errors.js';
+import { ref as exprRef } from './expressions.js';
 import {
 	denseRank,
 	lag,
 	lead,
 	rank,
 	rowNumber,
+	sql,
 	wAvg,
 	wCount,
 	wMax,
@@ -491,5 +495,58 @@ describe('DX-021: Window Functions Builder Pattern', () => {
 				{ field: 'employees.salary', direction: 'desc' },
 			]);
 		});
+	});
+});
+
+describe('window leaf refusals (ADR 0011 delivery 3)', () => {
+	function thrown(build: () => unknown): unknown {
+		try {
+			build();
+		} catch (error) {
+			return error;
+		}
+		throw new Error('expected a refusal, got none');
+	}
+
+	it('R3 column-name expression refusals: an expression in a window field, partition or order is not yet supported (#1072)', () => {
+		for (const [build, position] of [
+			[() => wSum(exprRef('title') as any), 'window field'],
+			[
+				() => rowNumber().partitionBy(exprRef('title') as any),
+				'window partition',
+			],
+			[() => rowNumber().orderBy(exprRef('title') as any), 'window order'],
+		] as const) {
+			const error = thrown(build);
+			expect(error).toBeInstanceOf(NotYetSupportedError);
+			expect(error).toMatchObject({
+				construct: 'an expression',
+				position,
+				issue: 1072,
+			});
+		}
+	});
+
+	it('R3 column-name null and sql refusals: a window helper refuses null and sql() by name', () => {
+		const SQL_MESSAGE =
+			'sql() is only accepted as an update or upsert value; use literal(), param() or an expression here';
+		const helpers = {
+			wSum: (leaf: unknown) => wSum(leaf as any),
+			partitionBy: (leaf: unknown) => rowNumber().partitionBy(leaf as any),
+			orderBy: (leaf: unknown) => rowNumber().orderBy(leaf as any),
+		};
+		for (const [helper, build] of Object.entries(helpers)) {
+			for (const [leaf, message] of [
+				[
+					null,
+					`Invalid ${helper}: null is not a column; use a column name or a ColumnRef`,
+				],
+				[sql('1'), `Invalid ${helper}: ${SQL_MESSAGE}`],
+			] as const) {
+				const error = thrown(() => build(leaf));
+				expect(error).toBeInstanceOf(InvalidOperationError);
+				expect((error as Error).message).toBe(message);
+			}
+		}
 	});
 });

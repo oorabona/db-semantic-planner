@@ -71,6 +71,24 @@ Builder methods available on all of the above:
 | `.orderBy('col', 'asc'\|'desc')` | Adds an ORDER BY column (chainable, appends) |
 | `.as('alias')` | Finalizes — returns `ExpressionSpec` for `.columns([...])` |
 
+Every `field`, `.partitionBy()` and `.orderBy()` argument names a column: a column name or a `ColumnRef` from
+`orm.tables`, which stays qualified:
+
+```typescript
+import { wSum } from '@dbsp/core';
+
+const { posts } = orm.tables;
+
+orm.select('posts')
+  .columns(['id', wSum(posts.id).partitionBy(posts.authorId).orderBy(posts.createdAt).as('x')])
+  .dump();
+// SQL: SELECT posts.id, sum(posts.id) OVER (PARTITION BY posts."authorId" ORDER BY posts."createdAt" ASC) AS x FROM posts
+```
+
+An expression there is refused with a `NotYetSupportedError` (#1072), and so is a `ColumnRef` taken from a
+`some()` / `every()` / `none()` callback parameter (#1052). `null` and `sql()` are refused with an
+`InvalidOperationError`.
+
 > **Note:** `firstValue()` and `lastValue()` are not yet exposed as helpers. Use `fn('first_value', exprRef('col'))` via [Expression Primitives](./expression-primitives) for those functions. (`ref` from `@dbsp/core` is the schema FK helper and is not valid in expression position — use `exprRef` instead. `op()` is a binary operator and requires three arguments — it cannot be used for function calls.)
 
 ---

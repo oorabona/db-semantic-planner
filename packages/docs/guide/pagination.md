@@ -194,6 +194,10 @@ orm.select('users').orderBy('createdAt', 'desc').orderBy('id', 'desc').cursorPag
 ```
 :::
 
+`cursorPaginate()` reads each ordered column back from the result row by its output name, so a column ordering must
+use the bare column name: a qualified one (`orderBy('users.id')`, or a `ColumnRef` such as `orderBy(orm.tables.users.id)`)
+is refused with an `InvalidOperationError` before any query (#1074).
+
 **When to use:** infinite scroll, public APIs, feeds, or any pagination over tables with more than ~10k rows.
 
 ---
