@@ -887,7 +887,7 @@ describe('selectExpression bodies and nested issued policies', () => {
 			subquery('posts').where(eq('score', 1)).max('score').asExpr('m'),
 		);
 		expect(result.sql).toBe(
-			'SELECT (SELECT max(posts.score) FROM posts WHERE posts.deleted_at IS NULL AND posts.score = $1)',
+			'SELECT (SELECT max(posts.score) FROM posts WHERE posts.deleted_at IS NULL AND posts.score = $1) AS m',
 		);
 		expect(result.parameters).toEqual([1]);
 	});
@@ -898,7 +898,7 @@ describe('selectExpression bodies and nested issued policies', () => {
 				subquery('posts').where(exists('comments')).count().asExpr('n'),
 			).sql,
 		).toBe(
-			'SELECT (SELECT count(*) FROM posts WHERE posts.deleted_at IS NULL AND EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts.id = comments_exists_0.post_id AND comments_exists_0.deleted_at IS NULL))',
+			'SELECT (SELECT count(*) FROM posts WHERE posts.deleted_at IS NULL AND EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts.id = comments_exists_0.post_id AND comments_exists_0.deleted_at IS NULL)) AS n',
 		);
 	});
 
@@ -929,7 +929,7 @@ describe('selectExpression bodies and nested issued policies', () => {
 	it('compiles an unfiltered body as an issued plan', () => {
 		expect(
 			plain.selectExpression(subquery('posts').max('score').asExpr('m')).sql,
-		).toBe('SELECT (SELECT max(posts.score) FROM posts)');
+		).toBe('SELECT (SELECT max(posts.score) FROM posts) AS m');
 	});
 
 	it('keeps the schema of withSchema', () => {
@@ -940,13 +940,13 @@ describe('selectExpression bodies and nested issued policies', () => {
 					subquery('posts').where(eq('score', 1)).max('score').asExpr('m'),
 				).sql,
 		).toBe(
-			'SELECT (SELECT max(posts.score) FROM t1.posts WHERE posts.deleted_at IS NULL AND posts.score = $1)',
+			'SELECT (SELECT max(posts.score) FROM t1.posts WHERE posts.deleted_at IS NULL AND posts.score = $1) AS m',
 		);
 	});
 
 	it('applies a nested builder policy in the body WHERE without outer filters', () => {
 		expect(outer.selectExpression(nestedPolicyBody()).sql).toBe(
-			'SELECT (SELECT count(*) FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL))',
+			'SELECT (SELECT count(*) FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL)) AS n',
 		);
 	});
 
@@ -959,20 +959,15 @@ describe('selectExpression bodies and nested issued policies', () => {
 	});
 
 	it('applies a nested builder policy in a scalar projected by a selectExpression body', () => {
-		const projecting = {
-			intent: {
-				kind: 'subquery',
-				query: {
-					type: 'select',
-					from: 'users',
-					select: {
-						type: 'expressions',
-						columns: [nestedPolicyBody().intent],
-					},
-					limit: 1,
-				},
+		const projecting = new SubqueryExpression({
+			type: 'select',
+			from: 'users',
+			select: {
+				type: 'expressions',
+				columns: [nestedPolicyBody().intent],
 			},
-		} as unknown as Parameters<typeof outer.selectExpression>[0];
+			limit: 1,
+		} as unknown as ConstructorParameters<typeof SubqueryExpression>[0]);
 		expect(outer.selectExpression(projecting).sql).toBe(
 			'SELECT (SELECT (SELECT count(*) FROM users AS users_1 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.deleted_at IS NULL)) AS n FROM users LIMIT 1)',
 		);
@@ -1082,7 +1077,7 @@ describe('selectExpression bodies and nested issued policies', () => {
 						.asExpr('n'),
 				).sql,
 			).toBe(
-				'SELECT (SELECT count(*) FROM users WHERE users.id = ANY (SELECT posts_subq_0.author_id FROM posts AS posts_subq_0))',
+				'SELECT (SELECT count(*) FROM users WHERE users.id = ANY (SELECT posts_subq_0.author_id FROM posts AS posts_subq_0)) AS n',
 			);
 		});
 		it('keeps a nested filtered builder under an unfiltered ORM', () => {
@@ -1094,7 +1089,7 @@ describe('selectExpression bodies and nested issued policies', () => {
 						.asExpr('n'),
 				).sql,
 			).toBe(
-				'SELECT (SELECT count(*) FROM users WHERE users.id = ANY (SELECT posts_subq_0.author_id FROM posts AS posts_subq_0 WHERE posts_subq_0.deleted_at IS NULL))',
+				'SELECT (SELECT count(*) FROM users WHERE users.id = ANY (SELECT posts_subq_0.author_id FROM posts AS posts_subq_0 WHERE posts_subq_0.deleted_at IS NULL)) AS n',
 			);
 		});
 		it('keeps a nested opt-out in a root WHERE', () => {

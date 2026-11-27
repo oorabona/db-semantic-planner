@@ -280,6 +280,45 @@ function expressionKind(leaf: object): string | undefined {
 	return undefined;
 }
 
+/**
+ * The kind of a leaf, in the words the refusal messages use (`null`,
+ * `a number`, `an expression`, `a ColumnRef`, `a plain object` …).
+ */
+export function leafKind(leaf: unknown): string {
+	if (leaf === null) return 'null';
+	if (leaf === undefined) return 'undefined';
+	if (typeof leaf !== 'object') return `a ${typeof leaf}`;
+	const kind = expressionKind(leaf);
+	if (kind !== undefined) return kind;
+	if (Array.isArray(leaf)) return 'an array';
+	if (leaf instanceof Date) return 'a Date';
+	if (isSqlRaw(leaf)) return 'a sql() marker';
+	if (leaf instanceof CaseBuilder) return 'an unfinished caseWhen()';
+	return 'a plain object';
+}
+
+/**
+ * Whether a value is an expression object in value position, as
+ * {@link coerceValue} leaves it: an `ExpressionRef` or branded spec, a schema
+ * `ref()` or an `outerRef()`. Plain values, `null`, arrays, `Date`s and plain
+ * objects are not.
+ */
+export function isValueExpression(leaf: unknown): boolean {
+	if (typeof leaf !== 'object' || leaf === null) return false;
+	return isBrandedExpression(leaf) || REF_BRAND in leaf || isOuterRef(leaf);
+}
+
+/**
+ * Whether a value-position expression is a `param(v)` wrapper, and its `v`.
+ */
+export function paramWrapperValue(
+	leaf: unknown,
+): { readonly value: unknown } | undefined {
+	if (typeof leaf !== 'object' || leaf === null) return undefined;
+	if (!isParamExpression(leaf)) return undefined;
+	return { value: (leaf as { intent: { value: unknown } }).intent.value };
+}
+
 function coerceUncarriedValue(
 	leaf: unknown,
 	helper: string,

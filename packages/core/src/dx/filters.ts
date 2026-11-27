@@ -41,7 +41,6 @@ import type {
 	WhereNotIntent,
 	WhereNullIntent,
 	WhereOrIntent,
-	WhereRangeIntent,
 	WhereRawExistsIntent,
 	WhereRawNotExistsIntent,
 	WhereRelationFilterIntent,
@@ -452,71 +451,6 @@ export function isNull(
 		},
 		field,
 	);
-}
-
-// ============================================================================
-// Range Operators (PostgreSQL)
-// ============================================================================
-
-/**
- * Range value for PostgreSQL range types.
- * @see WhereRangeIntent
- */
-import type { RangeOperand, RangeValue } from '@dbsp/types';
-
-export type { RangeOperand, RangeValue } from '@dbsp/types';
-
-/**
- * Range OVERLAPS check: field && range (PostgreSQL)
- * Tests if two ranges have any points in common.
- *
- * @example rangeOverlaps('dates', { lower: '2025-01-15', upper: '2025-01-20' })
- *          → dates && '[2025-01-15,2025-01-20)'
- *
- * @param field - Column name containing a range type
- * @param value - Range value with lower/upper bounds
- */
-export function rangeOverlaps(
-	field: string,
-	value: RangeValue,
-): WhereRangeIntent {
-	return { kind: 'range', field, operator: 'overlaps', value };
-}
-
-/**
- * Range CONTAINS check: field @> value (PostgreSQL)
- * Tests if the range contains a point or another range.
- *
- * @example rangeContains('salary_range', 50000)
- *          → salary_range @> 50000
- * @example rangeContains('date_range', { lower: '2025-01-01', upper: '2025-01-05' })
- *          → date_range @> '[2025-01-01,2025-01-05)'
- *
- * @param field - Column name containing a range type
- * @param value - Scalar value or range to check containment
- */
-export function rangeContains(
-	field: string,
-	value: RangeOperand,
-): WhereRangeIntent {
-	return { kind: 'range', field, operator: 'contains', value };
-}
-
-/**
- * Range CONTAINED BY check: field <@ range (PostgreSQL)
- * Tests if the field's range is fully contained within another range.
- *
- * @example rangeContainedBy('event_dates', { lower: '2025-01-01', upper: '2025-12-31' })
- *          → event_dates <@ '[2025-01-01,2025-12-31)'
- *
- * @param field - Column name containing a range type
- * @param value - Range that should contain the field's range
- */
-export function rangeContainedBy(
-	field: string,
-	value: RangeValue,
-): WhereRangeIntent {
-	return { kind: 'range', field, operator: 'containedBy', value };
 }
 
 /**

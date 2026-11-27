@@ -69,9 +69,9 @@ describe('condition compiler FILTER (#891, #296)', () => {
 			.where(eq('id', 9))
 			.dump();
 		expect(result.sql).toBe(
-			'SELECT count(*) FILTER (WHERE users.period && CAST($1 AS daterange) AND users.score = $2) AS n FROM users WHERE users.id = $3',
+			"SELECT count(*) FILTER (WHERE users.period && daterange($1, $2, '[)') AND users.score = $3) AS n FROM users WHERE users.id = $4",
 		);
-		expect(result.params).toEqual(['[2026-01-01,2026-02-01)', 7, 9]);
+		expect(result.params).toEqual(['2026-01-01', '2026-02-01', 7, 9]);
 	});
 	it('declared relation uses its declared key', () => {
 		const result = orm
@@ -91,12 +91,14 @@ describe('condition compiler FILTER (#891, #296)', () => {
 			.orderBy(aggregate(and(range, eq('score', 7))))
 			.dump();
 		expect(result.sql).toBe(
-			'SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.period && CAST($1 AS daterange)) > $2 ORDER BY count(*) FILTER (WHERE users.period && CAST($3 AS daterange) AND users.score = $4) ASC',
+			"SELECT users.* FROM users GROUP BY users.id HAVING count(*) FILTER (WHERE users.period && daterange($1, $2, '[)')) > $3 ORDER BY count(*) FILTER (WHERE users.period && daterange($4, $5, '[)') AND users.score = $6) ASC",
 		);
 		expect(result.params).toEqual([
-			'[2026-01-01,2026-02-01)',
+			'2026-01-01',
+			'2026-02-01',
 			3,
-			'[2026-01-01,2026-02-01)',
+			'2026-01-01',
+			'2026-02-01',
 			7,
 		]);
 	});
@@ -379,9 +381,9 @@ it('FILTER inside a nested expression retains range casting', () => {
 		.columns([fn('abs', aggregate(range)).as('n')])
 		.dump();
 	expect(result.sql).toBe(
-		'SELECT abs(count(*) FILTER (WHERE users.period && CAST($1 AS daterange))) AS n FROM users',
+		"SELECT abs(count(*) FILTER (WHERE users.period && daterange($1, $2, '[)'))) AS n FROM users",
 	);
-	expect(result.params).toEqual(['[2026-01-01,2026-02-01)']);
+	expect(result.params).toEqual(['2026-01-01', '2026-02-01']);
 });
 it('multi-hop FILTER resolves each raw relation in its own scope', () => {
 	const result = orm

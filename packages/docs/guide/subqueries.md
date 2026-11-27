@@ -91,6 +91,15 @@ Aggregate methods available on `SubqueryBuilder`:
 | `.min(field)` | `MIN("field")` |
 | `.max(field)` | `MAX("field")` |
 
+Each aggregate field is a column name or a `ColumnRef` (`subquery('posts').max(orm.tables.posts.score)`); an
+expression there is refused as not yet supported (#1072), and `count(null)` is refused.
+
+`.select(x)` takes a column name or a `ColumnRef` of the subquery's table as a field, and any other leaf as an
+expression column: `subquery('posts').select(fn('lower', exprRef('title')))` gives `(SELECT lower(title) FROM
+posts …)`, `.select(orm.tables.users.name)` reads the enclosing query's column. An expression column serves the
+scalar positions (`.asExpr()`, a comparison operand); `inSubquery` takes a field only and refuses it, and so does a
+scalar subquery over a CTE or binding source.
+
 ---
 
 ## Pattern: EXISTS with the `exists()` builder

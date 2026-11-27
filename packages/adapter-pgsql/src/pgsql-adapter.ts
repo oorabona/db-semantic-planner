@@ -3657,8 +3657,17 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 			},
 		};
 		const node = compileExpressionIntent(expr, ctx, state);
+		// The expression's alias (`.as()`, `.asExpr()`) names the result column.
+		const alias = (expr as { readonly as?: unknown }).as;
 		const ast = selectStmt({
-			targetList: [{ ResTarget: { val: node } }],
+			targetList: [
+				{
+					ResTarget: {
+						val: node,
+						...(typeof alias === 'string' && alias !== '' && { name: alias }),
+					},
+				},
+			],
 		});
 		const sql = deparseQuoted(ast);
 		return guardCompiledQuery(

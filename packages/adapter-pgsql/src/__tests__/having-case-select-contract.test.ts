@@ -128,8 +128,8 @@ for (const position of ['columns', 'orderBy'] as const) {
 		const result = (
 			position === 'columns' ? query.columns([expr]) : query.orderBy(expr)
 		).dump();
-		expect(result.sql).toContain('symbols.period && CAST($1 AS daterange)');
-		expect(result.params).toEqual(['[2026-01-01,2026-02-01)', 3]);
+		expect(result.sql).toContain("symbols.period && daterange($1, $2, '[)')");
+		expect(result.params).toEqual(['2026-01-01', '2026-02-01', 3]);
 	});
 }
 
@@ -151,9 +151,9 @@ it('CASE in a subquery body uses the child logical source and emitted alias', ()
 		)
 		.dump();
 	expect(result.sql).toBe(
-		'SELECT symbols.* FROM symbols WHERE EXISTS (SELECT 1 FROM calls AS calls_exists_0 WHERE symbols.id = calls_exists_0."symbolId" AND CASE WHEN calls_exists_0.period && CAST($1 AS tsrange) AND calls_exists_0.score = $2 THEN 1 ELSE 0 END = $3)',
+		`SELECT symbols.* FROM symbols WHERE EXISTS (SELECT 1 FROM calls AS calls_exists_0 WHERE symbols.id = calls_exists_0."symbolId" AND CASE WHEN calls_exists_0.period && tsrange($1, $2, '[)') AND calls_exists_0.score = $3 THEN 1 ELSE 0 END = $4)`,
 	);
-	expect(result.params).toEqual(['[2026-01-01,2026-02-01)', 4, 1]);
+	expect(result.params).toEqual(['2026-01-01', '2026-02-01', 4, 1]);
 });
 it('nested SELECT CASE uses its own source and reserved alias', () => {
 	const condition = rangeOverlaps('period', {
@@ -200,9 +200,9 @@ it('nested SELECT CASE uses its own source and reserved alias', () => {
 		},
 	});
 	expect(result.sql).toBe(
-		'SELECT (SELECT (SELECT (SELECT CASE WHEN calls_1.period && CAST($1 AS tsrange) AND calls_1.score = $2 THEN 1 ELSE 0 END AS rank FROM calls AS calls_1) FROM symbols) FROM calls)',
+		"SELECT (SELECT (SELECT (SELECT CASE WHEN calls_1.period && tsrange($1, $2, '[)') AND calls_1.score = $3 THEN 1 ELSE 0 END AS rank FROM calls AS calls_1) FROM symbols) FROM calls)",
 	);
-	expect(result.parameters).toEqual(['[2026-01-01,2026-02-01)', 4]);
+	expect(result.parameters).toEqual(['2026-01-01', '2026-02-01', 4]);
 });
 
 it('nested SELECT HAVING uses its own logical source', () => {
@@ -233,9 +233,9 @@ it('nested SELECT HAVING uses its own logical source', () => {
 		},
 	});
 	expect(result.sql).toBe(
-		'SELECT (SELECT (SELECT calls.period FROM calls GROUP BY calls.period HAVING calls.period && CAST($1 AS tsrange)) FROM symbols)',
+		"SELECT (SELECT (SELECT calls.period FROM calls GROUP BY calls.period HAVING calls.period && tsrange($1, $2, '[)')) FROM symbols)",
 	);
-	expect(result.parameters).toEqual(['[2026-01-01,2026-02-01)']);
+	expect(result.parameters).toEqual(['2026-01-01', '2026-02-01']);
 });
 
 for (const field of ['id', 'calls.id']) {
