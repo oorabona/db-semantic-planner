@@ -59,9 +59,9 @@ import {
 } from './hooks.js';
 import type { RefDefinition } from './schema.js';
 import type { SubqueryExpression } from './subquery-builder.js';
+import { NON_SUBQUERY_BUILDER_BRAND } from './symbols.js';
 import type { ColumnRef } from './table-ref.js';
 import type { ExpressionSpec } from './types.js';
-import { NON_SUBQUERY_BUILDER_BRAND } from './symbols.js';
 
 // ============================================================================
 // Types
@@ -144,9 +144,10 @@ type MutationWhereCondition = WhereIntent | PredicateRef;
 
 /**
  * Coerce the values of one mutation payload as value leaves (ADR 0011): a
- * `ColumnRef` or `SubqueryExpression` becomes an `ExpressionRef`, a query
- * builder or an unfinished `caseWhen()` is refused, a `sql()` marker is kept,
- * and plain values are returned unchanged. The payload is returned as is when
+ * `ColumnRef`, a `SubqueryExpression`, a select query builder or a
+ * `subquery(table)` builder becomes an `ExpressionRef` (a builder keeps its
+ * filter policy), any other builder and an unfinished `caseWhen()` are
+ * refused, a `sql()` marker is kept, and plain values are returned unchanged. The payload is returned as is when
  * nothing changes.
  */
 function coerceMutationValues<T extends object>(
@@ -159,7 +160,9 @@ function coerceMutationValues<T extends object>(
 	let changed = false;
 	for (const key of keys) {
 		const value = row[key];
-		const leaf = isSqlRaw(value) ? value : coerceValue(value, helper);
+		const leaf = isSqlRaw(value)
+			? value
+			: coerceValue(value, helper, 'mutation value');
 		if (leaf !== value) changed = true;
 		entries.push([key, leaf]);
 	}
