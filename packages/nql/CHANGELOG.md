@@ -1,5 +1,24 @@
 # Changelog
 
+## [3.0.0](https://github.com/oorabona/db-semantic-planner/compare/nql-v2.0.5...nql-v3.0.0) (2026-11-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* **adapter-pgsql:** compile, compileSelectExpression, compileInsert, compileInsertFrom, compileUpdate, compileBatchUpdate, compileDelete, compileUpsert, compileUpsertFrom, compileCteQuery and compile() on an NQL bundle throw "PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options." when neither the adapter nor the compile options carry a ModelIR.
+
+### Features
+
+* **adapter-pgsql:** Refuse compilation without a model ([#1108](https://github.com/oorabona/db-semantic-planner/issues/1108)) ([c532395](https://github.com/oorabona/db-semantic-planner/commit/c5323951d5206daeefe5d7fd3018e498d3adf4fc))
+* **core:** Raise not-yet refusals as NotYetSupportedError ([#1102](https://github.com/oorabona/db-semantic-planner/issues/1102)) ([92d0a39](https://github.com/oorabona/db-semantic-planner/commit/92d0a39259d28cb6d117ef6d6bf18d124beec742)), closes [#1027](https://github.com/oorabona/db-semantic-planner/issues/1027)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/types bumped to 7.0.0
+
 ## [2.0.5](https://github.com/oorabona/db-semantic-planner/compare/nql-v2.0.4...nql-v2.0.5) (2026-11-20)
 
 
