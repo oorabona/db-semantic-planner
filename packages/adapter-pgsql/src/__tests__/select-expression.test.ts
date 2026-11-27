@@ -1639,14 +1639,18 @@ describe('subquery fields and selectExpression leaves (ADR 0011 delivery 6)', ()
 				.where(inSubquery('id', subquery('posts').select(param(1))))
 				.dump(),
 		).toThrow(
-			'IN subquery with expressions SELECT (not supported in IN subquery) is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+			new NotYetSupportedError('expressions SELECT', 'IN subquery body', 1087),
 		);
 		const base = orm.select('posts').columns(['id', 'score']);
 		const tree = orm.recursive('tree', { base, step: base });
 		expect(() =>
 			tree.where(eq('id', subquery('tree').select(param(1)).build())).dump(),
 		).toThrow(
-			'scalar subquery with expressions SELECT (not supported in scalar subquery) is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+			new NotYetSupportedError(
+				'expressions SELECT',
+				'scalar subquery body',
+				1087,
+			),
 		);
 		expect(
 			orm
