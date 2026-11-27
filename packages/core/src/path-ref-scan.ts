@@ -1,4 +1,5 @@
 import { EXPRESSION_BRAND } from '@dbsp/types';
+import { CALLBACK_SCOPE, QUANTIFIER_SCOPE } from './dx/symbols.js';
 import { isRangeSideExpression, isRangeValueShape } from './intent-payload.js';
 
 /** Predicates whose `where` (and includes) are evaluated from the related row. */
@@ -161,77 +162,106 @@ function walkIncludes(
 	path.delete(includes);
 }
 
-/**
- * A marked filter leaf. A marked quantifier (`relationFilter` with
- * `pathTable`) is decided where its ranges are known, by the resolver.
- */
+/** A marked filter leaf (a marked quantifier is left to the legacy route's rule). */
 const hasPathRef = (node: Node): boolean =>
 	own(node, 'pathRef') === true && own(node, 'kind') !== 'relationFilter';
 
+/** A node core resolves from its origin: a `pathRef` leaf or quantifier, or a callback node. */
+const hasOrigin = (node: Node): boolean =>
+	own(node, 'pathRef') === true || own(node, CALLBACK_SCOPE) !== undefined;
+
 /**
- * The refusal of a table-rooted quantifier read from a body that is not the
- * single visible range of its table (#991).
+ * The refusal of a table-rooted quantifier on the adapter's legacy route of a
+ * query-local body when its body is not the single visible range of its table.
  *
  * @internal
  */
 export function refuseTableRootedQuantifier(relation: unknown): never {
 	throw new Error(
-		`RelationRef '${String(relation)}' follows a relation from its table; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1014).`,
-	);
-}
-
-/** The refusal of a `pathRef` leaf below a body. */
-function refusePathRef(node: Node): never {
-	throw new Error(
-		`ColumnRef '${String(own(node, 'field'))}' follows a relation; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1014).`,
+		`RelationRef '${String(relation)}' follows a relation from its table; inside a body over a query-local source (an NQL binding or a CTE) it cannot be resolved from its origin yet (#1040).`,
 	);
 }
 
 /**
- * Refuse a `pathRef` leaf below a body boundary anywhere in a query's
- * condition-bearing roots (#991). Nodes at the query's own top level
- * are left to the usual resolution.
+ * Refuse what the adapter's reduced route for a query-local source (#1040)
+ * cannot resolve from an origin: a `pathRef` leaf below a body boundary, and a
+ * callback node used anywhere but directly in the callback that issued its
+ * token. `isBody` is true when `value` is itself such a body (a query), false
+ * for a condition root holding one.
  *
  * @internal
  */
-export function assertNoPathRefInQueryBodies(query: unknown): void {
-	if (isObject(query))
-		walkQuery(query, false, new Set(), hasPathRef, refusePathRef);
-}
-
-/**
- * Refuse a `pathRef` leaf below a body boundary in one top-level
- * condition (a mutation WHERE or guard, a recursive `start.where`).
- *
- * @internal
- */
-export function assertNoPathRefInConditionBodies(condition: unknown): void {
-	walk(condition, false, new Set(), hasPathRef, refusePathRef);
-}
-
-/**
- * Refuse a node carrying a quantifier callback's scope token below a body
- * boundary inside the condition that callback returned (#991): there it would
- * be read from the nested body's row.
- *
- * @internal
- */
-export function assertCallbackScope(
-	condition: unknown,
-	scopeKey: symbol,
-	scope: object,
-	mode: string,
-): void {
-	walk(
-		condition,
-		false,
-		new Set(),
-		(node) => own(node, scopeKey) === scope,
-		(node) => {
-			const name = own(node, 'field') ?? own(node, 'relation');
+export function refuseLocalOriginRefs(value: unknown, isBody: boolean): void {
+	const refuseLeaf = (node: Node): never => {
+		throw new Error(
+			`ColumnRef '${String(own(node, 'field'))}' follows a relation; in a condition holding a body over a query-local source (an NQL binding or a CTE) it cannot be resolved from its origin yet (#1040).`,
+		);
+	};
+	if (isBody && isObject(value))
+		walkQuery(value, true, new Set(), hasPathRef, refuseLeaf);
+	else walk(value, false, new Set(), hasPathRef, refuseLeaf);
+	const path = new Set<object>();
+	// `active` is the token of the callback this position sits directly in.
+	const visit = (node: unknown, active: unknown): void => {
+		if (!isObject(node) || path.has(node)) return;
+		path.add(node);
+		if (Array.isArray(node)) {
+			for (const child of items(node)) visit(child, active);
+			path.delete(node);
+			return;
+		}
+		const kind = own(node, 'kind');
+		if (kind === 'literal' || kind === 'param') {
+			path.delete(node);
+			return;
+		}
+		const token = own(node, CALLBACK_SCOPE);
+		if (token !== undefined && token !== active)
 			throw new Error(
-				`'${String(name)}' comes from the ${mode}() callback parameter and is used inside a nested relation predicate or subquery body, where it would be read from that body's row (#1014).`,
+				`'${String(own(node, 'field') ?? own(node, 'relation'))}' comes from a quantifier callback parameter; in a condition holding a body over a query-local source (an NQL binding or a CTE) it is resolved only directly in that callback (#1040).`,
 			);
-		},
-	);
+		const relationBody = RELATION_BODIES.has(String(kind));
+		const dotted = hasDottedField(node);
+		for (const [key, descriptor] of Object.entries(
+			Object.getOwnPropertyDescriptors(node),
+		)) {
+			if (!('value' in descriptor) || !descriptor.enumerable) continue;
+			const child: unknown = descriptor.value;
+			if (key === 'defaultValue' || isPayload(kind, key, child)) continue;
+			let next = active;
+			if (key === 'subquery' || key === 'query') next = undefined;
+			else if (relationBody && key === 'where')
+				next =
+					kind === 'relationFilter' ? own(node, QUANTIFIER_SCOPE) : undefined;
+			else if (dotted && (key === 'value' || key === 'values'))
+				next = undefined;
+			visit(child, next);
+		}
+		path.delete(node);
+	};
+	visit(value, undefined);
+}
+
+/**
+ * Whether `value` holds a node core would resolve from its origin (#1014): a
+ * callback node anywhere, and a `pathRef` node anywhere (`inBody`) or only
+ * below a body boundary (a statement-level position).
+ *
+ * @internal
+ */
+export function containsOriginRefs(value: unknown, inBody: boolean): boolean {
+	let found = false;
+	const hit = () => {
+		found = true;
+	};
+	walk(value, inBody, new Set(), hasOrigin, hit);
+	if (!found && !inBody)
+		walk(
+			value,
+			true,
+			new Set(),
+			(node) => own(node, CALLBACK_SCOPE) !== undefined,
+			hit,
+		);
+	return found;
 }

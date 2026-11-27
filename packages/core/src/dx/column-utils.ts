@@ -1,4 +1,9 @@
-import { COLUMN_META, RELATION_PATH, TABLE_META } from './symbols.js';
+import {
+	COLUMN_META,
+	RELATION_FROM_TABLE,
+	RELATION_PATH,
+	TABLE_META,
+} from './symbols.js';
 import type { ColumnRef } from './table-ref.js';
 
 /**
@@ -72,4 +77,24 @@ export function getBareColumnName(
 		throw new Error('Invalid ColumnRef: missing COLUMN_META');
 	}
 	return colName;
+}
+
+/**
+ * The origin marker of a filter leaf built from `field`: `pathRef` for a ref
+ * reached through a relation, with `pathTable` when its path starts at a
+ * TableRef (a callback ref carries its scope token instead).
+ *
+ * @internal
+ */
+export function pathOrigin(
+	field: ColumnRef<string, string, unknown> | string,
+): { readonly pathRef?: true; readonly pathTable?: string } {
+	if (!isRelationPathColumn(field)) return {};
+	const table = (
+		field as unknown as { readonly [RELATION_FROM_TABLE]?: string }
+	)[RELATION_FROM_TABLE];
+	return {
+		pathRef: true,
+		...(typeof table === 'string' && { pathTable: table }),
+	};
 }

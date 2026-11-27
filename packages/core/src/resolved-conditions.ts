@@ -20,7 +20,6 @@ import {
 	type ResolvedRhs,
 	type ResolvedSubqueryBody,
 	type WhereIntent,
-	type WhereRelationFilterIntent,
 } from '@dbsp/types';
 import {
 	assertNoUnsupportedSubqueryModifiers,
@@ -31,9 +30,11 @@ import {
 } from '@dbsp/types/internal';
 import { getDefaultFilter } from './default-filter-map.js';
 import {
-	assertNoPathRefInConditionBodies,
-	refuseTableRootedQuantifier,
-} from './path-ref-scan.js';
+	CALLBACK_SCOPE,
+	QUANTIFIER_SCOPE,
+	REWRITTEN_SUBQUERY,
+} from './dx/symbols.js';
+import { containsOriginRefs } from './path-ref-scan.js';
 import { planNestedSelect } from './planner.js';
 import { getRelationalReadPolicy } from './relational-read-plans.js';
 import { classifyScalarBody } from './scalar-body.js';
@@ -80,7 +81,6 @@ export function resolveSelectWhere(
 	additionalOuterRanges: readonly ResolvedRange[] = [],
 	isLocalSource?: (name: string) => boolean,
 ): ResolvedCondition | undefined {
-	assertNoPathRefInConditionBodies(where);
 	return resolveConditionContext(
 		where,
 		root,
@@ -128,7 +128,6 @@ export function resolveValueExpression(
 	},
 ): ResolvedExpression {
 	const where = { kind: 'expression', expr: input } as WhereIntent;
-	assertNoPathRefInConditionBodies(where);
 	const resolved = resolveConditionContext(
 		where,
 		root,
@@ -170,7 +169,6 @@ export function resolveFromlessExpression(
 	const allocator = new RangeAllocator();
 	const root = allocator.bind('', '');
 	const where = { kind: 'expression', expr: input } as WhereIntent;
-	assertNoPathRefInConditionBodies(where);
 	const resolved = resolveConditionContext(
 		where,
 		root,
@@ -291,6 +289,33 @@ function assertNoFromlessStarInCondition(condition: ResolvedCondition): void {
 	}
 }
 
+/** A non-enumerable symbol-keyed mark of an intent node (scope tokens, the IN rewrite). */
+function mark(node: object, key: symbol): unknown {
+	return (node as { readonly [k: symbol]: unknown })[key];
+}
+
+/**
+ * One frame of the position a condition is resolved at (#1014): a query (the
+ * statement or a subquery body, with its root and its ranges), a relation
+ * predicate or quantifier (with its source, declared path, hop ranges and, for
+ * a quantifier, its callback's token), or a function call's arguments or
+ * FILTER. The frames chain outward through nested bodies.
+ *
+ * @internal
+ */
+export interface OriginFrame {
+	readonly parent: OriginFrame | undefined;
+	readonly kind: 'query' | 'relation' | 'call';
+	readonly root?: ResolvedRange;
+	readonly ranges: readonly ResolvedRange[];
+	readonly source?: ResolvedRange;
+	readonly names?: readonly string[];
+	readonly target?: ResolvedRange;
+	/** A relation frame's range per declared segment (the last one is `target`). */
+	readonly hops?: readonly ResolvedRange[];
+	readonly token?: object;
+}
+
 /** Resolve a condition with explicit current, visible and enclosing query ranges. */
 export function resolveConditionContext(
 	where: WhereIntent | undefined,
@@ -326,6 +351,10 @@ export function resolveConditionContext(
 		 * column or relation reached from it, at any depth, is refused.
 		 */
 		readonly unreadableRange?: UnreadableRange;
+		/** The enclosing position of a nested body (#1014). */
+		readonly origin?: OriginFrame;
+		/** The condition sits in a function argument or FILTER of its query (#1014). */
+		readonly inCallArgument?: boolean;
 	},
 ): ResolvedCondition | undefined {
 	const label = mode?.label ?? 'WHERE';
@@ -350,37 +379,145 @@ export function resolveConditionContext(
 		}
 	};
 	const entryDepth = mode?.entryDepth ?? enclosing.length;
-	/**
-	 * A table-rooted quantifier (#991) below a body is read from the body's row:
-	 * accepted only when that row is the single visible range of its table.
-	 */
-	const assertTableRootedQuantifier = (
-		node: WhereRelationFilterIntent,
-		current: ResolvedRange,
-		ranges: readonly ResolvedRange[],
-		scopes: readonly (readonly ResolvedRange[])[],
-	): void => {
-		const table = node.pathTable;
-		if (table === undefined) return;
-		if (scopes.length <= entryDepth) return;
-		const sameTable = new Set(
-			[ranges, ...scopes]
-				.flat()
-				.filter((range) => range.table === table)
-				.map((range) => range.id),
-		);
-		if (
-			current.table !== table ||
-			sameTable.size !== 1 ||
-			!sameTable.has(current.id)
-		)
-			refuseTableRootedQuantifier(node.relation);
-	};
 	const subqueryRefusal = mode?.subqueryRefusal;
 	let activeFilters = mode?.defaultFilters;
 	const rootScope = [...new Set([root, ...visible, ...additionalOuterRanges])];
 	const enclosingScope = (ranges: readonly ResolvedRange[]) =>
 		ranges === visible ? rootScope : ranges;
+	const entryFrame: OriginFrame = {
+		parent: mode?.origin,
+		kind: 'query',
+		root,
+		ranges: rootScope,
+	};
+	let frame: OriginFrame = entryFrame;
+	if (mode?.inCallArgument)
+		frame = { parent: entryFrame, kind: 'call', ranges: [] };
+	const callFrame = (): OriginFrame => ({
+		parent: frame,
+		kind: 'call',
+		ranges: [],
+	});
+	/**
+	 * A function argument or aggregate FILTER of a subquery body that reads a row
+	 * outside that body: SQL would evaluate an aggregate there in the enclosing
+	 * query, and core cannot tell an aggregate from another function by name.
+	 */
+	const assertAnchorInCallQuery = (
+		anchor: ResolvedRange,
+		written: string,
+	): void => {
+		let seenCall = false;
+		let ownerPassed = false;
+		for (let f: OriginFrame | undefined = frame; f; f = f.parent) {
+			if (
+				f.ranges.includes(anchor) ||
+				f.root === anchor ||
+				f.target === anchor
+			) {
+				if (ownerPassed)
+					throw new Error(
+						`${written} resolves to a row outside this subquery body; in a function argument or FILTER there, SQL would evaluate the call in the enclosing query if it is an aggregate.`,
+					);
+				return;
+			}
+			if (f.kind === 'call') seenCall = true;
+			else if (f.kind === 'query' && seenCall) {
+				if (f.parent === undefined) return;
+				ownerPassed = true;
+				seenCall = false;
+			}
+		}
+	};
+	const atTopLevel = () => {
+		if (entryFrame.parent !== undefined) return false;
+		for (
+			let f: OriginFrame | undefined = frame;
+			f && f !== entryFrame;
+			f = f.parent
+		)
+			if (f.kind !== 'call') return false;
+		return true;
+	};
+	const inFrame = <T>(next: OriginFrame, run: () => T): T => {
+		const previous = frame;
+		frame = next;
+		try {
+			return run();
+		} finally {
+			frame = previous;
+		}
+	};
+	/**
+	 * O1: the range a TableRef names here, walking the enclosing queries from the
+	 * innermost: the first one with a visible range of the table gives its root
+	 * when the root is of that table, else that single range (several refused).
+	 */
+	const tableOrigin = (table: string, written: string): ResolvedRange => {
+		let candidates: ResolvedRange[] = [];
+		for (let f: OriginFrame | undefined = frame; f; f = f.parent) {
+			if (f.kind === 'call') continue;
+			if (f.kind === 'relation') {
+				candidates.push(...f.ranges.filter((r) => r.table === table));
+				continue;
+			}
+			if (f.root?.table === table) return f.root;
+			candidates.push(...f.ranges.filter((r) => r.table === table));
+			const unique = [...new Set(candidates)];
+			if (unique.length === 1) return unique[0]!;
+			if (unique.length > 1)
+				throw new Error(
+					`${written} starts at table '${table}', which several ranges in scope read: ${unique
+						.map((r) => `'${r.alias}'`)
+						.sort()
+						.join(
+							', ',
+						)}; use the callback parameter of a quantifier, or write the path from this query's root.`,
+				);
+			candidates = [];
+		}
+		throw new Error(
+			`${written} starts at table '${table}', which no query in scope reads.`,
+		);
+	};
+	/** O2: the target of the enclosing quantifier occurrence that issued the token. */
+	const tokenOrigin = (token: unknown, written: string): ResolvedRange => {
+		for (let f: OriginFrame | undefined = frame; f; f = f.parent)
+			if (f.token !== undefined && f.token === token) return f.target!;
+		throw new Error(
+			`${written} comes from a quantifier callback parameter and is used outside that callback.`,
+		);
+	};
+	/**
+	 * O3: from the origin, bind the enclosing relation predicates and quantifiers
+	 * (outermost first) whose declared path continues the ref's path; a
+	 * quantifier's own last segment (`keepLast`) is never bound.
+	 */
+	const followChain = (
+		origin: ResolvedRange,
+		names: readonly string[],
+		keepLast: boolean,
+	): { anchor: ResolvedRange; rest: readonly string[] } => {
+		const chain: OriginFrame[] = [];
+		for (let f: OriginFrame | undefined = frame; f; f = f.parent)
+			if (f.kind === 'relation') chain.unshift(f);
+		let anchor = origin;
+		let rest = names;
+		for (const f of chain) {
+			if (f.source !== anchor) continue;
+			const n = f.names!;
+			const limit = Math.min(n.length, rest.length - (keepLast ? 1 : 0));
+			let k = 0;
+			while (k < limit && n[k] === rest[k]) k++;
+			if (k === 0) continue;
+			// The whole path binds the target; a shared prefix binds its last hop.
+			const bound = k === n.length ? f.target : f.hops?.[k - 1];
+			if (bound === undefined) continue;
+			anchor = bound;
+			rest = rest.slice(k);
+		}
+		return { anchor, rest };
+	};
 	if (!mode?.rootScopeReserved)
 		for (const range of rootScope) {
 			allocator.reserve(range.alias, range.table);
@@ -566,11 +703,12 @@ export function resolveConditionContext(
 			throw new Error(
 				"compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context.",
 			);
-		if (!model || localSubtree > 0)
+		if (!model || localSubtree > 0) {
 			return {
 				kind: 'subquery',
 				body: body(query, 'scalar', ranges, enclosing, true),
 			};
+		}
 		if (
 			classifyScalarBody(query, model, activeFilters, mode?.isLocalSource) ===
 			'local'
@@ -607,6 +745,7 @@ export function resolveConditionContext(
 					enclosing: scopes,
 					qualifiers,
 					entryDepth,
+					origin: frame,
 					...(mode?.unreadableRange && {
 						unreadableRange: mode.unreadableRange,
 					}),
@@ -684,6 +823,8 @@ export function resolveConditionContext(
 		if (!isExpressionBody) allocator.reserve(range.alias);
 		activeNames.add(range.alias);
 		const innerEnclosing = [enclosingScope(ranges), ...enclosing];
+		const previousFrame = frame;
+		frame = { parent: frame, kind: 'query', root: range, ranges: [range] };
 		const where = query.where
 			? visit(query.where, range, [range], innerEnclosing)
 			: undefined;
@@ -753,6 +894,7 @@ export function resolveConditionContext(
 		}));
 		activeNames.delete(range.alias);
 		if (isExpressionBody) expressionNext.set(query.from, expressionPrior);
+		frame = previousFrame;
 		const defaultFilter = resolveScanDefaultFilter(activeFilters, range, model);
 		const result: ResolvedSubqueryBody =
 			use === 'exists'
@@ -908,7 +1050,22 @@ export function resolveConditionContext(
 		}
 		const innerRanges = [target, ...includes.map((i) => i.range)];
 		writtenQualifiers.set(innerRanges, includeQualifiers);
-		return {
+		// A predicate rewritten from an inSubquery keeps the body's query root.
+		const token = mark(node, QUANTIFIER_SCOPE);
+		const relationFrame: OriginFrame =
+			mark(node, REWRITTEN_SUBQUERY) !== undefined
+				? { parent: frame, kind: 'query', root: target, ranges: innerRanges }
+				: {
+						parent: frame,
+						kind: 'relation',
+						ranges: innerRanges,
+						source,
+						names: path.logicalSegments,
+						target,
+						hops: hopRanges.map((hop) => hop.to),
+						...(typeof token === 'object' && token !== null && { token }),
+					};
+		return inFrame(relationFrame, () => ({
 			kind: 'relation',
 			path,
 			quantifier,
@@ -932,7 +1089,7 @@ export function resolveConditionContext(
 								...enclosing,
 							]),
 				}),
-		};
+		}));
 	};
 	/** HAVING's own level: not inside an aggregate FILTER or an absorbed body. */
 	const aliasActive = (ranges: readonly ResolvedRange[]): boolean =>
@@ -1108,20 +1265,30 @@ export function resolveConditionContext(
 			case 'coalesce':
 				return { kind: 'call', name: 'coalesce', args: input.fields.map(ref) };
 			case 'function':
+				// A typed function binds its arguments as values (#1116): a ref
+				// resolved from its origin there would be bound, not compiled.
+				if (containsOriginRefs(input.args, !atTopLevel()))
+					throw new NotYetSupportedError(
+						'a typed ref resolved from its origin',
+						'typed function argument',
+						1116,
+					);
 				return {
 					kind: 'call',
 					name: input.name,
-					args: input.args.map((v) => arg(v, true)),
+					args: inFrame(callFrame(), () => input.args.map((v) => arg(v, true))),
 				};
 			case 'customFn':
 				return {
 					kind: 'call',
 					name: input.name,
-					args: input.args.map(expr),
+					args: inFrame(callFrame(), () => input.args.map(expr)),
 					...(input.distinct !== undefined && { distinct: input.distinct }),
 					...(input.filter && {
 						filter: within('FILTER', () =>
-							visit(input.filter!, current, ranges, enclosing),
+							inFrame(callFrame(), () =>
+								visit(input.filter!, current, ranges, enclosing),
+							),
 						),
 					}),
 					...(input.aggOrderBy && {
@@ -1143,7 +1310,9 @@ export function resolveConditionContext(
 					...(input.distinct !== undefined && { distinct: input.distinct }),
 					...(input.filter && {
 						filter: within('FILTER', () =>
-							visit(input.filter!, current, ranges, enclosing),
+							inFrame(callFrame(), () =>
+								visit(input.filter!, current, ranges, enclosing),
+							),
 						),
 					}),
 				};
@@ -1245,10 +1414,24 @@ export function resolveConditionContext(
 			node.kind === 'notExists' ||
 			node.kind === 'relationFilter'
 		) {
-			if (node.kind === 'relationFilter')
-				assertTableRootedQuantifier(node, current, ranges, enclosing);
 			const name =
 				getTrustedNqlRelationFilterFields(node)?.relation ?? node.relation;
+			if (node.kind === 'relationFilter') {
+				const token = mark(node, CALLBACK_SCOPE);
+				const table = node.pathRef ? node.pathTable : undefined;
+				if (token !== undefined || (table !== undefined && !atTopLevel())) {
+					const segments = typeof name === 'string' ? name.split('.') : name;
+					const written = `RelationRef '${segments.join('.')}'`;
+					const origin =
+						token !== undefined
+							? tokenOrigin(token, written)
+							: tableOrigin(table!, written);
+					const names = pathFor(origin, segments, node.kind).logicalSegments;
+					const { anchor, rest } = followChain(origin, names, true);
+					assertAnchorInCallQuery(anchor, written);
+					return relation(node, anchor, ranges, enclosing, rest, node.where);
+				}
+			}
 			return relation(
 				node,
 				current,
@@ -1257,6 +1440,39 @@ export function resolveConditionContext(
 				typeof name === 'string' ? name.split('.') : name,
 				node.where,
 			);
+		}
+		if (fieldOverride === undefined && 'field' in node) {
+			const token = mark(node, CALLBACK_SCOPE);
+			const pathRef = (node as { readonly pathRef?: true }).pathRef === true;
+			if (token !== undefined || (pathRef && !atTopLevel())) {
+				const table = (node as { readonly pathTable?: string }).pathTable;
+				const parts = pathRef ? node.field.split('.') : [node.field];
+				const columnName = parts.pop()!;
+				const written = `ColumnRef '${node.field}'`;
+				let origin: ResolvedRange;
+				if (token !== undefined) origin = tokenOrigin(token, written);
+				else if (table !== undefined) origin = tableOrigin(table, written);
+				else
+					throw new Error(
+						`${written} follows a relation but carries no origin; build it from orm.tables or a quantifier callback parameter.`,
+					);
+				const names = parts.length
+					? pathFor(origin, parts, 'exists').logicalSegments
+					: [];
+				const { anchor, rest } = followChain(origin, names, false);
+				assertAnchorInCallQuery(anchor, written);
+				if (rest.length === 0)
+					return visit(node, anchor, ranges, enclosing, columnName);
+				return relation(
+					{ kind: 'exists', relation: rest.join('.') },
+					anchor,
+					ranges,
+					enclosing,
+					rest,
+					undefined,
+					{ node, field: columnName },
+				);
+			}
 		}
 		const alias =
 			fieldOverride === undefined && 'field' in node && aliasActive(ranges)

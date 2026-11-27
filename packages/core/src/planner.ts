@@ -1,11 +1,9 @@
 import { NotYetSupportedError, RangeAllocator } from '@dbsp/types';
 import { copyDefaultFilters, getDefaultFilter } from './default-filter-map.js';
 import { assertUnplannedDefaultFilters } from './dx/default-filter-refusals.js';
+import { CALLBACK_SCOPE, REWRITTEN_SUBQUERY } from './dx/symbols.js';
 import {
-	assertNoPathRefInConditionBodies,
-	assertNoPathRefInQueryBodies,
-} from './path-ref-scan.js';
-import {
+	type OriginFrame,
 	resolveConditionContext,
 	resolveScanDefaultFilter,
 	type UnreadableRange,
@@ -297,6 +295,8 @@ export interface PlanScope {
 		/** The names written for ranges of each enclosing scope (an include key), aligned with `enclosing`. */
 		readonly qualifiers: readonly ReadonlyMap<string, ResolvedRange>[];
 		readonly entryDepth: number;
+		/** The enclosing position of the body, for refs resolved from their origin (#1014). */
+		readonly origin?: OriginFrame;
 		/** An enclosing range whose row cannot be read (an INSERT values() target). */
 		readonly unreadableRange?: UnreadableRange;
 	};
@@ -344,7 +344,6 @@ export function planInScope(
 	options: PlanOptions,
 	scope: PlanScope,
 ): PlanReport {
-	assertNoPathRefInQueryBodies(intent);
 	const startTime = performance.now();
 
 	const state: PlannerState = {
@@ -653,7 +652,6 @@ export function planRecursive(
 		throw new Error(`Unknown table: ${startFrom}`);
 	}
 
-	assertNoPathRefInConditionBodies(intent.start.where);
 	// start.where resolves like a root WHERE over the anchor range, once
 	// the shape and the start table are known to be valid.
 	const startWhere = intent.start.where
@@ -971,6 +969,10 @@ function optimizeInToExists(
 			}
 
 			if (!matchedRelation) return where;
+			// A callback operand names its callback's range, which the relation chosen
+			// from this query's table may not start from: the IN is resolved as such.
+			if ((inWhere as { readonly [CALLBACK_SCOPE]?: object })[CALLBACK_SCOPE])
+				return where;
 
 			// NULL-safety guard: compute effective negation (XOR of outer context parity
 			// and the in-intent's own `not` flag) to determine whether this rewrite
@@ -996,11 +998,17 @@ function optimizeInToExists(
 			//   • inWhere.not === false → { kind: 'exists'    } — outer NOT wraps it if present
 			//   • inWhere.not === true  → { kind: 'notExists' } — outer NOT wraps it if present
 			const targetKind = inWhere.not ? 'notExists' : 'exists';
-			return {
+			const rewritten = {
 				kind: targetKind,
 				relation: matchedRelation,
 				...(inWhere.subquery.where && { where: inWhere.subquery.where }),
-			} as unknown as WhereIntent;
+			};
+			// The body's root stays a query root for the refs resolved from it (#1014).
+			Object.defineProperty(rewritten, REWRITTEN_SUBQUERY, {
+				value: inWhere.field,
+				enumerable: false,
+			});
+			return rewritten as unknown as WhereIntent;
 		}
 
 		case 'and': {

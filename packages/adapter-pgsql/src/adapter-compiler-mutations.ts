@@ -14,7 +14,6 @@ import {
 	plan as planFn,
 } from '@dbsp/core';
 import {
-	assertNoPathRefInConditionBodies,
 	coerceValue,
 	inspectMutationRows,
 	resolveSelectWhere,
@@ -726,7 +725,6 @@ export function compileInsertFrom(
 		MAX_DEPTH_LIMIT,
 	);
 	const state = createCompilerState();
-	assertNoPathRefInConditionBodies(intent.where);
 	// The source CTE is a local source of the WHERE, as in its compile context.
 	const whereCompiler = resolvedMutationWhere(intent.where, intent.source, {
 		...deps,
@@ -1301,7 +1299,6 @@ export function compileUpsertFrom(
 		MAX_DEPTH_LIMIT,
 	);
 	const state = createCompilerState();
-	assertNoPathRefInConditionBodies(intent.where);
 	// The source CTE is a local source of the WHERE, as in its compile context.
 	const whereCompiler = resolvedMutationWhere(intent.where, intent.source, {
 		...deps,

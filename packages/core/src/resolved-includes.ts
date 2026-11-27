@@ -27,9 +27,11 @@ import { singularize } from './conventions.js';
 import { getDefaultFilter } from './default-filter-map.js';
 import { relationJoinHops } from './dx/relation-join-path.js';
 import { isBoundPayload } from './intent-payload.js';
+import { containsOriginRefs, refuseLocalOriginRefs } from './path-ref-scan.js';
 import { getRelationalReadPolicy } from './relational-read-plans.js';
 import {
 	type HavingAggregate,
+	type OriginFrame,
 	resolveConditionContext,
 	resolveScanDefaultFilter,
 	type UnreadableRange,
@@ -413,6 +415,7 @@ export function resolveReportIncludes(
 			readonly qualifiers: readonly ReadonlyMap<string, ResolvedRange>[];
 			readonly entryDepth: number;
 			readonly unreadableRange?: UnreadableRange;
+			readonly origin?: OriginFrame;
 		};
 	} = {},
 ): { readonly execution: SelectExecution; readonly intent: QueryIntent } {
@@ -440,6 +443,7 @@ export function resolveReportIncludes(
 		...(nested && {
 			entryDepth: nested.entryDepth,
 			outerQualifiers: nested.qualifiers,
+			...(nested.origin && { origin: nested.origin }),
 		}),
 		...(nested?.unreadableRange && {
 			unreadableRange: nested.unreadableRange,
@@ -1050,6 +1054,7 @@ export function resolveReportIncludes(
 		};
 		return visit(start, options.defaultFilters);
 	};
+	let callDepth = 0;
 	const inspect = (
 		value: unknown,
 		intentPath: string,
@@ -1141,6 +1146,9 @@ export function resolveReportIncludes(
 						'local-source subquery body',
 						1040,
 					);
+				// The adapter's reduced route compiles this body: what it cannot resolve
+				// from an origin stays refused (#1040).
+				refuseLocalOriginRefs(query, true);
 				inspected.delete(value);
 				return;
 			}
@@ -1153,7 +1161,11 @@ export function resolveReportIncludes(
 				model,
 				0,
 				[],
-				{ defaultFilters: options.defaultFilters, ...scopeMode },
+				{
+					defaultFilters: options.defaultFilters,
+					...scopeMode,
+					...(callDepth > 0 && { inCallArgument: true }),
+				},
 			);
 			if (
 				resolved?.kind !== 'expression' ||
@@ -1207,6 +1219,9 @@ export function resolveReportIncludes(
 					...scopeMode,
 					label: condition,
 					aliasState: expressionAliases,
+					...((callDepth > 0 || condition === 'FILTER') && {
+						inCallArgument: true,
+					}),
 					...(inHaving && { havingAliases }),
 					...(underHaving && { fromHaving: true }),
 				},
@@ -1219,13 +1234,33 @@ export function resolveReportIncludes(
 		}
 		// Not resolved by another trigger: the root keeps the local route, recorded
 		// once, so localConditions and expressionConditions stay disjoint.
-		if (localRoot) localConditions.push({ intentPath });
+		if (localRoot) {
+			refuseLocalOriginRefs(node, false);
+			localConditions.push({ intentPath });
+		}
 		// A body left unresolved (no model) stays the adapter's: HAVING's aliases and
 		// the outer ranges do not reach into it.
 		if (absorbsBody(node)) {
 			inspected.delete(value);
 			return;
 		}
+		// A typed function binds its arguments as values (#1116): a ref resolved
+		// from its origin there would be bound, not compiled (#1014).
+		if (
+			node.kind === 'function' &&
+			containsOriginRefs(node.args, nested !== undefined)
+		)
+			throw new NotYetSupportedError(
+				'a typed ref resolved from its origin',
+				'typed function argument',
+				1116,
+			);
+		const isCall =
+			node.kind === 'customFn' ||
+			node.kind === 'aggregate' ||
+			node.kind === 'function' ||
+			(node.kind === undefined && typeof node.function === 'string');
+		if (isCall) callDepth++;
 		for (const [key, child] of Object.entries(node)) {
 			if (isBoundPayload(node, key, child)) continue;
 			// A CASE WHEN root is the condition of a CASE branch.
@@ -1261,6 +1296,7 @@ export function resolveReportIncludes(
 				filterRoot,
 			);
 		}
+		if (isCall) callDepth--;
 		inspected.delete(value);
 	};
 	inspect(executable.select, 'select');

@@ -1066,7 +1066,7 @@ describe('range helper refusals (ADR 0011 delivery 6)', () => {
 		);
 	});
 
-	it('range bound ColumnRef in a nested relation body keeps the #1014 refusal', () => {
+	it('AC5 range bound ColumnRef in a nested relation body resolves from the root (#1014)', () => {
 		const nodesDb = schema({
 			nodes: {
 				id: { type: 'integer', primaryKey: true },
@@ -1086,30 +1086,33 @@ describe('range helper refusals (ADR 0011 delivery 6)', () => {
 		const bound = caseWhen(eq(nodes.parent.score, 1), literal(1)).else(
 			literal(2),
 		);
-		const refusal =
-			"ColumnRef 'parent.score' follows a relation; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1014).";
-		expect(() =>
-			norm
-				.select('nodes')
-				.columns(['id'])
-				.where(
-					exists('children', {
-						where: rangeOverlaps('span', { lower: bound, upper: 5 }),
-					}),
-				)
-				.dump(),
-		).toThrow(refusal);
-		expect(() =>
-			norm
-				.update('nodes')
-				.set({ score: 2 })
-				.where(
-					exists('children', {
-						where: rangeOverlaps('span', { lower: 1, upper: bound }),
-					}),
-				)
-				.dump(),
-		).toThrow(refusal);
+		// The bound's typed path starts at the root's parent, outside the children body.
+		const select = norm
+			.select('nodes')
+			.columns(['id'])
+			.where(
+				exists('children', {
+					where: rangeOverlaps('span', { lower: bound, upper: 5 }),
+				}),
+			)
+			.dump();
+		expect(select.sql).toBe(
+			"SELECT nodes.id FROM nodes WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND nodes_exists_0.span && int4range(CASE WHEN EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes.parent_id = nodes_exists_1.id AND nodes_exists_1.score = $1) THEN 1 ELSE 2 END, $2, '[)'))",
+		);
+		expect(select.params).toEqual([1, 5]);
+		const update = norm
+			.update('nodes')
+			.set({ score: 2 })
+			.where(
+				exists('children', {
+					where: rangeOverlaps('span', { lower: 1, upper: bound }),
+				}),
+			)
+			.dump();
+		expect(update.sql).toBe(
+			"UPDATE nodes SET score = $1 WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND nodes_exists_0.span && int4range($2, CASE WHEN EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes.parent_id = nodes_exists_1.id AND nodes_exists_1.score = $3) THEN 1 ELSE 2 END, '[)'))",
+		);
+		expect(update.parameters).toEqual([2, 1, 1]);
 	});
 
 	it('RF14 a plain bound object is data for the unplanned-read walker', () => {
