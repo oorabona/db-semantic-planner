@@ -2377,6 +2377,64 @@ describe('A typed ref inside a body resolves from its origin range (#1014)', () 
 		);
 	});
 
+	// R5 / body-leaf: the m1 local forms (a scalar body over a CTE in a
+	// projection, in a CASE condition, in HAVING) keep the refusal (#1040).
+	const localBody = (cond: unknown) =>
+		new SE({
+			type: 'select',
+			from: 'recent',
+			where: cond,
+			select: {
+				type: 'expressions',
+				columns: [
+					{
+						kind: 'case',
+						when: [{ condition: cond, result: { kind: 'literal', value: 1 } }],
+						else: { kind: 'literal', value: 0 },
+						as: 'c',
+					},
+				],
+			},
+			limit: 1,
+		} as never).asExpr('v');
+	const localRefusal = new Error(
+		"ColumnRef 'author.email' follows a relation; in a condition holding a body over a query-local source (an NQL binding or a CTE) it cannot be resolved from its origin yet (#1040).",
+	);
+	it.each([
+		[
+			'L1',
+			() =>
+				cte(
+					d
+						.select('posts')
+						.columns(['id', localBody(eq(posts.author.email, 'x'))]),
+				),
+		],
+		[
+			'L2',
+			() =>
+				cte(
+					d.select('posts').columns([
+						caseWhen(gt(localBody(eq(posts.author.email, 'x')), 0), literal(1))
+							.else(literal(0))
+							.as('c'),
+					]),
+				),
+		],
+		[
+			'L3',
+			() =>
+				cte(
+					d
+						.select('posts')
+						.groupBy(['id'])
+						.having(gt(localBody(eq(posts.author.email, 'x')), 0)),
+				),
+		],
+	])('R5 / body-leaf (%s)', (_name, build) => {
+		expect(() => dumpOf(build)).toThrow(localRefusal);
+	});
+
 	it('R5 / body-leaf E25 (E25)', () => {
 		expect(() =>
 			dumpOf(() =>
