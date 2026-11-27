@@ -4,8 +4,8 @@
     "sql": null,
     "params": [],
     "error": {
-      "class": "Error",
-      "message": "Include where is not supported for strategy cte at include[0](payload0).where (oorabona/db-semantic-planner#892)."
+      "class": "NotYetSupportedError",
+      "message": "include where in a cte include at include[0](payload0) is not supported yet (#892)."
     },
     "payloads": [],
     "rows": []
@@ -108,8 +108,8 @@
     "sql": null,
     "params": [],
     "error": {
-      "class": "Error",
-      "message": "Include where is not supported for strategy cte at include[0](payload0).where (oorabona/db-semantic-planner#892)."
+      "class": "NotYetSupportedError",
+      "message": "include where in a cte include at include[0](payload0) is not supported yet (#892)."
     },
     "payloads": [],
     "rows": []
@@ -523,8 +523,8 @@
     "sql": null,
     "params": [],
     "error": {
-      "class": "Error",
-      "message": "Include where is not supported for strategy cte at include[0](payload0).where (oorabona/db-semantic-planner#892)."
+      "class": "NotYetSupportedError",
+      "message": "include where in a cte include at include[0](payload0) is not supported yet (#892)."
     },
     "payloads": [],
     "rows": []
@@ -627,8 +627,8 @@
     "sql": null,
     "params": [],
     "error": {
-      "class": "Error",
-      "message": "Include where is not supported for strategy cte at include[0](payload0).where (oorabona/db-semantic-planner#892)."
+      "class": "NotYetSupportedError",
+      "message": "include where in a cte include at include[0](payload0) is not supported yet (#892)."
     },
     "payloads": [],
     "rows": []
@@ -731,8 +731,8 @@
     "sql": null,
     "params": [],
     "error": {
-      "class": "Error",
-      "message": "Include where is not supported for strategy cte at include[0](payload0).where (oorabona/db-semantic-planner#892)."
+      "class": "NotYetSupportedError",
+      "message": "include where in a cte include at include[0](payload0) is not supported yet (#892)."
     },
     "payloads": [],
     "rows": []

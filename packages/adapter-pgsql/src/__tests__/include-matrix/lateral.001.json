@@ -351,8 +351,8 @@
     "sql": null,
     "params": [],
     "error": {
-      "class": "Error",
-      "message": "Include where is not supported for strategy lateral at include[0](children).where (oorabona/db-semantic-planner#892)."
+      "class": "NotYetSupportedError",
+      "message": "include where in a lateral include at include[0](children) is not supported yet (#892)."
     },
     "payloads": [],
     "rows": []
@@ -373,8 +373,8 @@
     "sql": null,
     "params": [],
     "error": {
-      "class": "Error",
-      "message": "Include where is not supported for strategy lateral at include[0](children).where (oorabona/db-semantic-planner#892)."
+      "class": "NotYetSupportedError",
+      "message": "include where in a lateral include at include[0](children) is not supported yet (#892)."
     },
     "payloads": [],
     "rows": []
@@ -384,8 +384,8 @@
     "sql": null,
     "params": [],
     "error": {
-      "class": "Error",
-      "message": "Include where is not supported for strategy lateral at include[0](children).where (oorabona/db-semantic-planner#892)."
+      "class": "NotYetSupportedError",
+      "message": "include where in a lateral include at include[0](children) is not supported yet (#892)."
     },
     "payloads": [],
     "rows": []
@@ -406,8 +406,8 @@
     "sql": null,
     "params": [],
     "error": {
-      "class": "Error",
-      "message": "Include where is not supported for strategy lateral at include[0](children).where (oorabona/db-semantic-planner#892)."
+      "class": "NotYetSupportedError",
+      "message": "include where in a lateral include at include[0](children) is not supported yet (#892)."
     },
     "payloads": [],
     "rows": []
@@ -417,8 +417,8 @@
     "sql": null,
     "params": [],
     "error": {
-      "class": "Error",
-      "message": "Include where is not supported for strategy lateral at include[0](children).where (oorabona/db-semantic-planner#892)."
+      "class": "NotYetSupportedError",
+      "message": "include where in a lateral include at include[0](children) is not supported yet (#892)."
     },
     "payloads": [],
     "rows": []
@@ -439,8 +439,8 @@
     "sql": null,
     "params": [],
     "error": {
-      "class": "Error",
-      "message": "Include where is not supported for strategy lateral at include[0](children).where (oorabona/db-semantic-planner#892)."
+      "class": "NotYetSupportedError",
+      "message": "include where in a lateral include at include[0](children) is not supported yet (#892)."
     },
     "payloads": [],
     "rows": []

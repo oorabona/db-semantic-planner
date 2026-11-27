@@ -47,7 +47,7 @@ const model = testSchema.model;
 const adapter = createPgCompileOnlyAdapter({ model });
 const orm = createOrm({ schema: testSchema, adapter });
 const refusal =
-	/Relation predicates inside an include where are not supported yet.*include\[0\]\(posts\).*#892/;
+	/^relation predicate (exists|notExists|relationFilter)\(\) in an include where at include\[0\]\(posts\)(\.include\[\d+\]\(\w+\))? is not supported yet \(#892\)\.$/;
 
 describe('#888 include preflight', () => {
 	for (const join of [undefined, 'inner', 'left'] as const) {

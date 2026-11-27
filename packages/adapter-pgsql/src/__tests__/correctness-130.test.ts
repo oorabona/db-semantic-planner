@@ -24,6 +24,7 @@ import {
 	ref,
 	schema,
 } from '@dbsp/core';
+import { NotYetSupportedError } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it } from 'vitest';
@@ -516,7 +517,7 @@ describe('DEFECT 3: scalar subquery with multiple aggregates is rejected', () =>
 			},
 		};
 		expect(() => convertWhereCondition(intent as any, 'orders')).toThrow(
-			/scalar subquery with multi-aggregate projection.*is not supported/,
+			/aggregate SELECT in a scalar subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -539,7 +540,7 @@ describe('DEFECT 3: scalar subquery with multiple aggregates is rejected', () =>
 		};
 		const ctx = makeCtx('orders');
 		expect(() => compileWhereIntent(intent as any, ctx)).toThrow(
-			/scalar subquery.*multi-aggregate projection.*is not supported/,
+			/aggregate SELECT in a scalar subquery body is not supported yet \(#1087\)/,
 		);
 	});
 
@@ -602,7 +603,7 @@ describe('DEFECT 3: scalar subquery with multiple aggregates is rejected', () =>
 		);
 	});
 
-	it('error message mentions restructuring guidance', () => {
+	it('the refusal is a NotYetSupportedError', () => {
 		const intent = {
 			kind: 'subquery' as const,
 			field: 'price',
@@ -620,7 +621,7 @@ describe('DEFECT 3: scalar subquery with multiple aggregates is rejected', () =>
 			},
 		};
 		expect(() => convertWhereCondition(intent as any, 'orders')).toThrow(
-			/restructure the query or use a CTE/,
+			NotYetSupportedError,
 		);
 	});
 });
@@ -1490,7 +1491,7 @@ describe('NEW DEFECT 5 (correlated scalar subquery fail-closed)', () => {
 			},
 		};
 		expect(() => convertWhereCondition(intent as any, 'users')).toThrow(
-			/correlated outerRef.*not yet supported/i,
+			/a correlated scalar subquery body in a condition compiled outside the planner is not supported yet \(#891\)/,
 		);
 	});
 
@@ -1586,7 +1587,7 @@ describe('NEW DEFECT 5 (correlated scalar subquery fail-closed)', () => {
 			},
 		};
 		expect(() => convertWhereCondition(intent as any, 'users')).toThrow(
-			/correlated outerRef.*not yet supported/i,
+			/a correlated scalar subquery body in a condition compiled outside the planner is not supported yet \(#891\)/,
 		);
 	});
 });

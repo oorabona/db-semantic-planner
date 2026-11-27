@@ -32,6 +32,7 @@ import {
 	unsafeAsPredicate,
 } from '@dbsp/core';
 import type { RecursiveIntent, WhereIntent } from '@dbsp/types';
+import { NotYetSupportedError } from '@dbsp/types';
 import { markNqlTrustedRelationFilter } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -415,9 +416,7 @@ describe('#891 recursive anchor review repairs', () => {
 				subquery: { type: 'select', from: 'posts', having: condition },
 			}),
 		).toThrow(
-			new Error(
-				'rawExists subquery with HAVING is not supported — it would silently change which rows match; restructure the query or use a CTE.',
-			),
+			new NotYetSupportedError('HAVING', 'rawExists subquery body', 1087),
 		);
 	});
 	it('SEC1 bound JSON resembling a recursive predicate remains data', () => {
@@ -849,8 +848,10 @@ describe('start.where resolves through core (#891 slice 4)', () => {
 	});
 	it('AC4 many-to-many: a many-to-many exists carries the start.where label', () => {
 		expect(() => plan(tagged, exists('tags'))).toThrow(
-			new Error(
-				"start.where exists('tags'): many-to-many traversal is not supported yet (#787).",
+			new NotYetSupportedError(
+				"many-to-many traversal exists('tags')",
+				'start.where condition',
+				787,
 			),
 		);
 	});
@@ -1221,5 +1222,92 @@ describe('a relation-path ColumnRef in a recursive start.where (#991)', () => {
 			'WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM nodes AS __n WHERE EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE __n.parent_id = nodes_exists_0.id AND nodes_exists_0.label = $1) UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN nodes AS __n ON __n.parent_id = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree',
 		);
 		expect(result.parameters).toEqual(['x']);
+	});
+});
+
+describe('hand-built recursive reports (#1027)', () => {
+	const linked = schema(
+		{
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				parentId: { type: 'integer', nullable: true },
+			},
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				authorId: ref('users', { as: 'author', inverse: 'authored' }),
+				parentId: { type: 'integer', nullable: true },
+			},
+			tags: { id: { type: 'integer', primaryKey: true } },
+			postTags: { postId: ref('posts'), tagId: ref('tags') },
+		},
+		undefined,
+		{
+			relations: {
+				posts: {
+					tags: manyToMany('tags', {
+						through: 'postTags',
+						inverse: 'posts',
+						sourceForeignKey: ['postId'],
+						targetForeignKey: ['tagId'],
+					}),
+				},
+			},
+		},
+	);
+	const local = createPgCompileOnlyAdapter({ model: linked.model });
+	// A report issued by planRecursive resolves start.where in core; one without
+	// recursiveFilters keeps the adapter's direct anchor compile.
+	function handBuilt(table: 'users' | 'posts', where: WhereIntent) {
+		const issued = planRecursive(
+			{
+				type: 'recursive',
+				cteName: 'tree',
+				start: {
+					from: table,
+					nodeIdExpr: { kind: 'column', name: 'id' },
+					where: eq('id', 1),
+				},
+				traversal: {
+					kind: 'adjacency',
+					nodeTable: table,
+					nodeId: 'id',
+					parentId: 'parentId',
+					direction: 'descendants',
+				},
+				maxDepth: 2,
+			},
+			linked.model,
+		);
+		const { recursiveFilters: _resolved, ...report } = issued;
+		return {
+			...report,
+			intent: { ...report.intent, start: { ...report.intent.start, where } },
+		} as typeof issued;
+	}
+	it("types the hand-built anchor's many-to-many refusal", () => {
+		expect(() =>
+			local.compileRecursive(handBuilt('posts', exists('tags')), linked.model),
+		).toThrow(
+			new NotYetSupportedError(
+				"many-to-many traversal exists('tags')",
+				'WHERE condition',
+				787,
+			),
+		);
+		expect(() =>
+			local.compileRecursive(
+				handBuilt(
+					'users',
+					exists('authored', { include: { tags: { join: 'inner' } } }),
+				),
+				linked.model,
+			),
+		).toThrow(
+			new NotYetSupportedError(
+				"many-to-many traversal include('tags')",
+				'RECURSIVE-ANCHOR condition',
+				787,
+			),
+		);
 	});
 });

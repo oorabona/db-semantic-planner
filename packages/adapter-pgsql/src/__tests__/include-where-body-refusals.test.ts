@@ -7,6 +7,7 @@ import {
 	InvalidOperationError,
 	inSubquery,
 	literal,
+	NotYetSupportedError,
 	op,
 	outerRef,
 	param,
@@ -28,12 +29,13 @@ const db = schema({
 	audit: { id: { type: 'integer', primaryKey: true }, userId: 'integer' },
 });
 const orm = createOrm({ schema: db, adapter: createPgCompileOnlyAdapter() });
-const scalarRefusal =
-	'scalar subquery with correlated outerRef() is not yet supported — use exists("relation", { where: ... }) when a schema relation exists, or restructure the query to avoid the correlation.';
-const relationRefusal =
-	'Relation predicates inside an include where are not supported yet at include[0](author).where for strategy join (oorabona/db-semantic-planner#892).';
-const rawRefusal = (kind: string) =>
-	`${kind}: correlated subqueries (outerRef inside the inner WHERE) are not yet supported. Workaround: use exists("relation", { where: ... }) when a schema relation exists, or wait for the rawExists correlation pipeline (tracked in TODO).`;
+const correlatedRefusal = (construct: string) =>
+	new NotYetSupportedError(construct, 'include where', 1079);
+const relationRefusal = new NotYetSupportedError(
+	'relation predicate exists()',
+	'include where at include[0](author)',
+	892,
+);
 const body = (correlated: boolean) =>
 	subquery('audit')
 		.select('userId')
@@ -44,7 +46,7 @@ describe('include where subquery bodies', () => {
 		[
 			'rawExists',
 			(correlated: boolean) => rawExists(body(correlated)),
-			rawRefusal('rawExists'),
+			correlatedRefusal('a correlated rawExists() body'),
 		],
 		[
 			'rawNotExists',
@@ -52,12 +54,12 @@ describe('include where subquery bodies', () => {
 				kind: 'rawNotExists' as const,
 				subquery: body(correlated).build().toIntent(),
 			}),
-			rawRefusal('rawNotExists'),
+			correlatedRefusal('a correlated rawNotExists() body'),
 		],
 		[
 			'inSubquery',
 			(correlated: boolean) => inSubquery('id', body(correlated)),
-			scalarRefusal,
+			correlatedRefusal('a correlated IN subquery body'),
 		],
 		[
 			'scalar comparison',
@@ -67,15 +69,15 @@ describe('include where subquery bodies', () => {
 				operator: 'eq' as const,
 				subquery: body(correlated).build().toIntent(),
 			}),
-			scalarRefusal,
+			correlatedRefusal('a correlated scalar subquery body'),
 		],
 	] as const) {
-		it(`refuses a correlated ${name} body during planning with the legacy diagnostic`, () => {
+		it(`refuses a correlated ${name} body during planning`, () => {
 			const query = orm
 				.select('posts')
 				.join('users', { as: 'users', on: eq('users.id', 1) })
 				.include('author', { join: 'left', where: predicate(true) });
-			expect(() => query.plan()).toThrow(new Error(refusal));
+			expect(() => query.plan()).toThrow(refusal);
 		});
 		it(`compiles an uncorrelated ${name} body`, () => {
 			const query = orm
@@ -123,7 +125,7 @@ describe('include where expression values', () => {
 			const query = orm
 				.select('posts')
 				.include('author', { join: 'left', where: eq('name', value()) });
-			expect(() => query.plan()).toThrow(new Error(relationRefusal));
+			expect(() => query.plan()).toThrow(relationRefusal);
 		});
 	}
 	it('keeps relation-shaped literal and parameter payloads opaque', () => {
@@ -139,5 +141,55 @@ describe('include where expression values', () => {
 					.plan(),
 			).not.toThrow();
 		}
+	});
+});
+
+describe('include where and join ON not-yet refusals', () => {
+	it('types the include where refusals', () => {
+		expect(() =>
+			orm
+				.select('posts')
+				.include('author', { join: 'left', where: exists('authored') })
+				.plan(),
+		).toThrow(
+			new NotYetSupportedError(
+				'relation predicate exists()',
+				'include where at include[0](author)',
+				892,
+			),
+		);
+		expect(() =>
+			orm
+				.select('posts')
+				.include('author', { where: eq('name', 'x') })
+				.plan(),
+		).toThrow(
+			new NotYetSupportedError(
+				'include where',
+				'json_agg include at include[0](author)',
+				892,
+			),
+		);
+	});
+	it('types the correlated join ON refusal', () => {
+		expect(() =>
+			orm
+				.select('posts')
+				.join('users', {
+					as: 'u',
+					on: rawExists(
+						subquery('audit')
+							.select('userId')
+							.where(eq('userId', outerRef('posts.id'))),
+					),
+				})
+				.dump(),
+		).toThrow(
+			new NotYetSupportedError(
+				'a correlated rawExists() body',
+				'join ON condition',
+				1079,
+			),
+		);
 	});
 });

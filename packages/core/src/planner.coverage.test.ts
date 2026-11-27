@@ -3,6 +3,7 @@
  * Coverage test for planner.ts - targets uncovered branches.
  */
 
+import { NotYetSupportedError } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { ref, schema } from './dx/schema.js';
 import type { QueryIntent } from './intent-ast.js';
@@ -1053,7 +1054,7 @@ describe('planner coverage', () => {
 		};
 
 		expect(() => plan(intent, testSchema)).toThrow(
-			'IN subquery with aggregate SELECT (use a scalar subquery comparison instead) is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+			new NotYetSupportedError('aggregate SELECT', 'IN subquery body', 1087),
 		);
 	});
 
@@ -1073,7 +1074,7 @@ describe('planner coverage', () => {
 		};
 
 		expect(() => plan(intent, testSchema)).toThrow(
-			'IN subquery with multi-field projection [authorId, title] (IN subquery must project exactly one named column — use a single field) is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+			'IN subquery with multi-field projection [authorId, title] (IN subquery must project exactly one named column — use a single field) is not supported.',
 		);
 	});
 
@@ -1646,7 +1647,11 @@ describe('processWhere handles all WhereIntent kinds (exhaustiveness)', () => {
 		};
 
 		expect(() => plan(intent, testSchema)).toThrow(
-			'scalar subquery with expressions SELECT (not supported in scalar subquery) is not supported — it would silently change which rows match; restructure the query or use a CTE.',
+			new NotYetSupportedError(
+				'expressions SELECT',
+				'scalar subquery body',
+				1087,
+			),
 		);
 	});
 

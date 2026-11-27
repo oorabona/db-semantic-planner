@@ -2,6 +2,7 @@ const plan = nativePlan;
 
 import { createOrm, plan as nativePlan, or, ref, schema } from '@dbsp/core';
 import type { PlanReport, ResolvedIncludeStrategy } from '@dbsp/types';
+import { NotYetSupportedError } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -344,8 +345,10 @@ describe('#900 flat strategy precedence', () => {
 				},
 			),
 		).toThrow(
-			new Error(
-				'Include where is not supported for strategy lateral at include[0](posts).where (oorabona/db-semantic-planner#892).',
+			new NotYetSupportedError(
+				'include where',
+				'lateral include at include[0](posts)',
+				892,
 			),
 		);
 	});

@@ -19,6 +19,7 @@ import {
 	isInsertIntent,
 	isUpdateIntent,
 	isUpsertIntent,
+	NotYetSupportedError,
 	nqlRaw,
 	outerRef,
 	POSTGRESQL_CAPABILITIES,
@@ -935,6 +936,25 @@ describe('NQL → SQL compile-only pipeline', () => {
 			'with ranked as (select variants.id, variants."productid", variants."pricecents", row_number() over (partition by variants."productid" order by variants."pricecents" desc, variants.id asc) as rn from tenant_42.variants), top_variants as (select ranked.id, ranked."productid", ranked."pricecents" from ranked) select ranked.* from ranked where ranked.rn <= $1',
 		);
 		expect(result.parameters).toEqual([2]);
+	});
+
+	it('orm.nql throws a not-yet refusal as NotYetSupportedError', () => {
+		const orm = createOrm({
+			model: testSchema.model,
+			adapter: createPgCompileOnlyAdapter({ model: testSchema.model }),
+		});
+		const refusal = new NotYetSupportedError(
+			"a set operation (CTE 'a')",
+			'CTE body',
+			1080,
+		);
+		expect(() =>
+			orm.nql`with a as (users | select id | union (users | select id)) a | select id`.dump(),
+		).toThrow(refusal);
+		// No interpolation hint: the refusal concerns a construct the text spells.
+		expect(() =>
+			orm.nql`with a as (users | where id = ${1} | select id | union (users | select id)) a | select id`.dump(),
+		).toThrow(refusal);
 	});
 
 	it('validates NQL CTE declaration names before emitting SQL', () => {

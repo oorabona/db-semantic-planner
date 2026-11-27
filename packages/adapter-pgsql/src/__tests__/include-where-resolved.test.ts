@@ -12,6 +12,7 @@ import {
 	schema,
 	subquery,
 } from '@dbsp/core';
+import { NotYetSupportedError } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 import { createPlanReportForQuery } from '../adapter-compiler-recursive.js';
 import {
@@ -300,8 +301,10 @@ describe('resolved include predicates', () => {
 					model,
 				),
 			).toThrow(
-				new Error(
-					'Relation predicates inside an include where are not supported yet at include[0](author).where for strategy join (oorabona/db-semantic-planner#892).',
+				new NotYetSupportedError(
+					'relation predicate exists()',
+					'include where at include[0](author)',
+					892,
 				),
 			);
 		});
@@ -315,8 +318,10 @@ describe('resolved include predicates', () => {
 				})
 				.plan(),
 		).toThrow(
-			new Error(
-				'Relation predicates inside an include where are not supported yet at include[0](author).where for strategy join (oorabona/db-semantic-planner#892).',
+			new NotYetSupportedError(
+				'relation predicate exists()',
+				'include where at include[0](author)',
+				892,
 			),
 		);
 	});
@@ -342,8 +347,10 @@ describe('resolved include predicates', () => {
 				.include('authored', { where: eq('nope', 1) })
 				.plan(),
 		).toThrow(
-			new Error(
-				'Include where is not supported for strategy json_agg at include[0](authored).where (oorabona/db-semantic-planner#892).',
+			new NotYetSupportedError(
+				'include where',
+				'json_agg include at include[0](authored)',
+				892,
 			),
 		);
 	});

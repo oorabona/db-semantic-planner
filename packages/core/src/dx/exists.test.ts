@@ -584,7 +584,7 @@ describe('DX-CATA-1: .exists() and .existsDump()', () => {
 
 			// #230: existence construction must preserve the include for preflight.
 			const refusal =
-				/Include where is not supported for strategy json_agg.*include\[0\]\(author\)\.where.*#892/;
+				/include where in a json_agg include at include\[0\]\(author\) is not supported yet \(#892\)/;
 			expect(() => query.existsDump()).toThrow(refusal);
 			await expect(query.exists()).rejects.toThrow(refusal);
 		});

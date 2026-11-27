@@ -1,14 +1,18 @@
 import {
 	and,
+	caseWhen,
 	createOrm,
 	eq,
 	exists,
+	fn,
+	literal,
 	not,
 	notExists,
 	or,
 	schema,
 } from '@dbsp/core';
 import type { ModelIR, RelationIR, WhereIntent } from '@dbsp/types';
+import { NotYetSupportedError } from '@dbsp/types';
 import { expect, it } from 'vitest';
 import { compileCondition } from '../condition-compiler.js';
 import { createCompilerState } from '../handlers/types.js';
@@ -78,7 +82,11 @@ for (const form of forms) {
 					where: eq('name', 'admin'),
 					mode: form === 'relationFilter' ? 'some' : form,
 				};
-	const message = `WHERE ${predicate.kind}('tags'): many-to-many traversal is not supported yet (#787).`;
+	const refusal = new NotYetSupportedError(
+		`many-to-many traversal ${predicate.kind}('tags')`,
+		'WHERE condition',
+		787,
+	);
 	for (const [route, wrap] of [
 		['direct', (p: WhereIntent) => p],
 		['legacy dotted', (p: WhereIntent) => and(p, eq('posts.id', 1))],
@@ -87,7 +95,7 @@ for (const form of forms) {
 		it(`${form} refuses ${route} root lowering`, () => {
 			expect(() =>
 				orm.select('posts').where(wrap(predicate)).dump(),
-			).toThrowError(new Error(message));
+			).toThrowError(refusal);
 		});
 	}
 	it(`${form} refuses direct compiler`, () => {
@@ -103,7 +111,7 @@ for (const form of forms) {
 					throw new Error('unexpected subquery');
 				},
 			}),
-		).toThrowError(new Error(message));
+		).toThrowError(refusal);
 	});
 }
 it('refuses a path containing a many-to-many hop', () => {
@@ -118,8 +126,38 @@ it('refuses a path containing a many-to-many hop', () => {
 			})
 			.dump(),
 	).toThrowError(
-		new Error(
-			"WHERE relationFilter('posts.tags'): many-to-many traversal is not supported yet (#787).",
+		new NotYetSupportedError(
+			"many-to-many traversal relationFilter('posts.tags')",
+			'WHERE condition',
+			787,
 		),
 	);
+});
+it('types the many-to-many refusal in HAVING, CASE WHEN, FILTER and mutation WHERE', () => {
+	const refusal = (position: string) =>
+		new NotYetSupportedError(
+			"many-to-many traversal exists('tags')",
+			`${position} condition`,
+			787,
+		);
+	expect(() =>
+		orm.select('posts').groupBy(['id']).having(exists('tags')).dump(),
+	).toThrowError(refusal('HAVING'));
+	expect(() =>
+		orm
+			.select('posts')
+			.columns([
+				caseWhen(exists('tags'), literal('y')).else(literal('n')).as('t'),
+			])
+			.dump(),
+	).toThrowError(refusal('CASE WHEN'));
+	expect(() =>
+		orm
+			.select('posts')
+			.columns([fn('count', '*').filter(exists('tags')).as('n')])
+			.dump(),
+	).toThrowError(refusal('FILTER'));
+	expect(() =>
+		orm.update('posts').set({ id: 2 }).where(exists('tags')).dump(),
+	).toThrowError(refusal('WHERE'));
 });

@@ -5,7 +5,12 @@
 
 import { describe, expect, it } from 'vitest';
 import { NqlErrorCodes } from './errors/types.js';
-import { compile, parse } from './index.js';
+import {
+	compile,
+	isNqlNotYetSupportedError,
+	type NqlNotYetSupportedError,
+	parse,
+} from './index.js';
 
 // ============================================================================
 // parse()
@@ -93,6 +98,58 @@ describe('compile()', () => {
 			return [];
 		},
 	};
+
+	it('reports a not-yet refusal with its code and issue', () => {
+		const body = compile(
+			'with a as (users | select id | union (users | select id)) a | select id',
+			validSchema,
+		);
+		expect(body).toEqual({
+			success: false,
+			errors: [
+				{
+					code: 'ERR-NOTYET-001',
+					message:
+						"a set operation (CTE 'a') in a CTE body is not supported yet (#1080).",
+					construct: "a set operation (CTE 'a')",
+					position: 'CTE body',
+					issue: 1080,
+				},
+			],
+			warnings: [],
+		});
+		const outer = compile(
+			'with a as (users | select id) a | select id | union (users | select id)',
+			validSchema,
+		);
+		const [error] = outer.errors;
+		expect(error && isNqlNotYetSupportedError(error)).toBe(true);
+		if (!error || !isNqlNotYetSupportedError(error)) return;
+		const typed: NqlNotYetSupportedError = error;
+		expect([
+			typed.construct,
+			typed.position,
+			typed.issue,
+			typed.message,
+		]).toEqual([
+			'a set operation',
+			'WITH clause outer query',
+			1080,
+			'a set operation in a WITH clause outer query is not supported yet (#1080).',
+		]);
+		const parseError = compile('users | where', validSchema).errors[0];
+		expect(parseError && isNqlNotYetSupportedError(parseError)).toBe(false);
+		expect(
+			isNqlNotYetSupportedError({ code: 'ERR-NOTYET-001', message: 'x' }),
+		).toBe(false);
+		expect(
+			isNqlNotYetSupportedError({
+				code: 'ERR-NOTYET-001',
+				message: 'x',
+				issue: '1080',
+			} as never),
+		).toBe(false);
+	});
 
 	it('returns success for valid query with schema', () => {
 		const result = compile('users', validSchema);

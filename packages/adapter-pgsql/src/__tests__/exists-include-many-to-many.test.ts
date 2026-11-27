@@ -4,6 +4,7 @@ import {
 	exists,
 	literal,
 	manyToMany,
+	NotYetSupportedError,
 	notExists,
 	ref,
 	schema,
@@ -43,8 +44,10 @@ function buildOrm(withPostId: boolean) {
 }
 
 function refusal(position: string) {
-	return new Error(
-		`${position} include('tags'): many-to-many traversal is not supported yet (#787).`,
+	return new NotYetSupportedError(
+		"many-to-many traversal include('tags')",
+		`${position} condition`,
+		787,
 	);
 }
 

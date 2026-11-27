@@ -1,5 +1,5 @@
 import { schema } from '@dbsp/core';
-import { resolveOutputReadHandling } from '@dbsp/types';
+import { NotYetSupportedError, resolveOutputReadHandling } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import { describe, expect, it } from 'vitest';
 import { createDeclaredNameResolver } from '../declared-name-resolver.js';
@@ -506,9 +506,7 @@ describe('projection envelope', () => {
 					reason: 'set-operation-positional-merge',
 				}),
 			),
-		).toThrow(
-			'`js` read type is not yet supported through set operations; use a plain select (tracking: #352)',
-		);
+		).toThrow(new NotYetSupportedError('`js` read type', 'set operation', 352));
 
 		const compiled = finalizeEnvelope(
 			dropPositionalUnion([nonConvertible], {
