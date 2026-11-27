@@ -182,26 +182,36 @@ describe('SC-12: large batch upsert (100 rows) uses unnest strategy', () => {
 
 	it('keeps wrapper-shaped row values opaque in unnest column arrays', () => {
 		const adapter = createUpsertTestAdapter();
-		const paramShaped = { kind: 'param', value: 7 };
 		const literalShaped = { kind: 'literal', value: 'x' };
 		const rows = makeEmbeddingRows(100).map((row, i) => ({
 			...row,
-			vector: i === 0 ? paramShaped : i === 1 ? literalShaped : row.vector,
+			vector: i === 1 ? literalShaped : row.vector,
 		})) as Record<string, unknown>[];
 		const intent = makeUpsertIntent(rows, ['symbol_id', 'chunk_index']);
 
 		const result = adapter.compileUpsert(intent as any);
 
 		expect(result.parameters[2]).toEqual([
-			paramShaped,
+			'vec_0',
 			literalShaped,
 			...Array.from({ length: 98 }, (_, i) => `vec_${i + 2}`),
 		]);
-		expect(result.parameters[2]).not.toEqual([
-			7,
-			'x',
-			...Array.from({ length: 98 }, (_, i) => `vec_${i + 2}`),
-		]);
+		// A ParamIntent-shaped cell is unwrapped by VALUES, so its batch takes VALUES
+		// on both strategies (ADR 0011 delivery 4).
+		const paramShaped = adapter.compileUpsert(
+			makeUpsertIntent(
+				rows.map((row, i) =>
+					i === 0 ? { ...row, vector: { kind: 'param', value: 7 } } : row,
+				),
+				['symbol_id', 'chunk_index'],
+			) as any,
+		);
+		expect(
+			paramShaped.sql.startsWith(
+				'INSERT INTO embeddings (symbol_id, chunk_index, vector, chunk_text) VALUES ($1, $2, $3, $4), ',
+			),
+		).toBe(true);
+		expect(paramShaped.parameters.slice(0, 4)).toEqual([1, 0, 7, 'chunk_0']);
 	});
 
 	it('conflict columns appear in ON CONFLICT clause', () => {

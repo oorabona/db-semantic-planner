@@ -1120,6 +1120,14 @@ export function compileSelectEnvelope<T = unknown>(
 		compileNestedSelect: nestedSelectCompiler(options, deps),
 	};
 
+	const localConditions = plan.execution?.localConditions?.map(
+		(entry) =>
+			planningNodeAtPath(
+				plan.executableIntent ?? plan.intent,
+				entry.intentPath,
+			) as import('@dbsp/types').WhereIntent,
+	);
+	const rootsResolved = plan.execution?.rootsResolved === true;
 	const expressionConditions = plan.execution?.expressionConditions?.map(
 		(entry) => ({
 			intent: planningNodeAtPath(
@@ -1235,6 +1243,8 @@ export function compileSelectEnvelope<T = unknown>(
 						directConditions: true,
 						...(plan.execution !== undefined && { resolvedExecution: true }),
 						...(expressionConditions && { expressionConditions }),
+						...(localConditions && { localConditions }),
+						...(rootsResolved && { rootsResolved: true }),
 						...(plan.execution?.expressionSubqueries && {
 							expressionSubqueries: bindExpressionSubqueries(
 								plan.executableIntent ?? plan.intent ?? execIntent,
@@ -1321,6 +1331,8 @@ export function compileSelectEnvelope<T = unknown>(
 			directConditions: true,
 			...(plan.execution !== undefined && { resolvedExecution: true }),
 			...(expressionConditions && { expressionConditions }),
+			...(localConditions && { localConditions }),
+			...(rootsResolved && { rootsResolved: true }),
 			...(plan.execution?.expressionSubqueries && {
 				expressionSubqueries: bindExpressionSubqueries(
 					plan.executableIntent ?? plan.intent ?? execIntent,

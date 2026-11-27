@@ -27,10 +27,12 @@ import { singularize } from './conventions.js';
 import { getDefaultFilter } from './default-filter-map.js';
 import { relationJoinHops } from './dx/relation-join-path.js';
 import { isBoundPayload } from './intent-payload.js';
+import { getRelationalReadPolicy } from './relational-read-plans.js';
 import {
 	type HavingAggregate,
 	resolveConditionContext,
 	resolveScanDefaultFilter,
+	type UnreadableRange,
 } from './resolved-conditions.js';
 import { classifyScalarBody, nextSelectBody } from './scalar-body.js';
 
@@ -410,6 +412,7 @@ export function resolveReportIncludes(
 			/** The names written for ranges of each enclosing scope, aligned with `enclosing`. */
 			readonly qualifiers: readonly ReadonlyMap<string, ResolvedRange>[];
 			readonly entryDepth: number;
+			readonly unreadableRange?: UnreadableRange;
 		};
 	} = {},
 ): { readonly execution: SelectExecution; readonly intent: QueryIntent } {
@@ -437,6 +440,9 @@ export function resolveReportIncludes(
 		...(nested && {
 			entryDepth: nested.entryDepth,
 			outerQualifiers: nested.qualifiers,
+		}),
+		...(nested?.unreadableRange && {
+			unreadableRange: nested.unreadableRange,
 		}),
 		...(options.isLocalSource && { isLocalSource: options.isLocalSource }),
 	};
@@ -992,13 +998,102 @@ export function resolveReportIncludes(
 				(range) => range.alias === qualifier || range.table === qualifier,
 			);
 		});
+	const localConditions: { intentPath: string }[] = [];
+	/**
+	 * Whether a condition root holds an expression subquery on a query-local
+	 * source. Decided before any resolution, so it allocates and plans nothing and
+	 * does not depend on operand order. It walks query structure only (bound
+	 * payloads, literals and parameters are data), and below a query carrying an
+	 * issued read policy it classifies with that policy's filters, an explicit
+	 * disable included, as the resolver does.
+	 */
+	const holdsLocalBody = (start: unknown): boolean => {
+		if (!model) return false;
+		const seen = new Set<object>();
+		const visit = (
+			value: unknown,
+			filters: typeof options.defaultFilters,
+		): boolean => {
+			if (!value || typeof value !== 'object' || isParamIntent(value))
+				return false;
+			if (seen.has(value)) return false;
+			seen.add(value);
+			if (Array.isArray(value))
+				return value.some((child) => visit(child, filters));
+			const node = value as Record<string, unknown>;
+			if (
+				node.kind === 'literal' ||
+				node.kind === 'param' ||
+				node.kind === 'parameter'
+			)
+				return false;
+			if (
+				node.kind === 'subquery' &&
+				node.query &&
+				classifyScalarBody(
+					node.query as QueryIntent,
+					model,
+					filters,
+					options.isLocalSource,
+				) === 'local'
+			)
+				return true;
+			const policy =
+				typeof node.from === 'string'
+					? getRelationalReadPolicy(value as QueryIntent)
+					: undefined;
+			const below = policy ? policy.filters : filters;
+			return Object.entries(node).some(
+				([key, child]) =>
+					!isBoundPayload(node, key, child) && visit(child, below),
+			);
+		};
+		return visit(start, options.defaultFilters);
+	};
 	const inspect = (
 		value: unknown,
 		intentPath: string,
 		condition?: 'HAVING' | 'CASE WHEN' | 'FILTER',
 		inHaving = false,
 		underHaving = false,
+		root = false,
 	): void => {
+		// A value at a condition root is a condition: a parameter, a literal or an
+		// expression subquery there is refused by the resolver while planning,
+		// never skipped as data.
+		if (
+			condition !== undefined &&
+			root &&
+			model !== undefined &&
+			value &&
+			typeof value === 'object' &&
+			!Array.isArray(value) &&
+			(isParamIntent(value) ||
+				(value as { kind?: unknown }).kind === 'literal' ||
+				(value as { kind?: unknown }).kind === 'param' ||
+				((value as { kind?: unknown }).kind === 'subquery' &&
+					(value as { query?: unknown }).query !== undefined))
+		) {
+			resolveConditionContext(
+				value as WhereIntent,
+				rootRange,
+				visible,
+				enclosing,
+				allocator,
+				model,
+				expressionAliases.count,
+				[],
+				{
+					defaultFilters: options.defaultFilters,
+					...scopeMode,
+					label: condition,
+					aliasState: expressionAliases,
+				},
+			);
+			throw new Error(
+				`${condition} condition kind '${String((value as { kind?: unknown }).kind)}' is not supported.`,
+			);
+		}
 		if (!value || typeof value !== 'object' || isParamIntent(value)) return;
 		if (inspected.has(value)) return;
 		inspected.add(value);
@@ -1073,6 +1168,9 @@ export function resolveReportIncludes(
 			inspected.delete(value);
 			return;
 		}
+		// With a model, a condition root resolves whole, unless it holds a body on a
+		// query-local source: that root keeps the adapter's local route (#1040).
+		const localRoot = condition !== undefined && root && holdsLocalBody(node);
 		const relationSensitive =
 			[
 				'exists',
@@ -1087,6 +1185,7 @@ export function resolveReportIncludes(
 		if (
 			condition &&
 			((relationSensitive && model) ||
+				(model !== undefined && root && !localRoot) ||
 				(inHaving && namesAlias(node)) ||
 				// In a body, every condition correlated by outerRef() (HAVING,
 				// CASE WHEN, FILTER, in any clause) is bound by core, the one
@@ -1118,6 +1217,9 @@ export function resolveReportIncludes(
 			inspected.delete(value);
 			return;
 		}
+		// Not resolved by another trigger: the root keeps the local route, recorded
+		// once, so localConditions and expressionConditions stay disjoint.
+		if (localRoot) localConditions.push({ intentPath });
 		// A body left unresolved (no model) stays the adapter's: HAVING's aliases and
 		// the outer ranges do not reach into it.
 		if (absorbsBody(node)) {
@@ -1137,6 +1239,7 @@ export function resolveReportIncludes(
 							bkey === 'condition' ? 'CASE WHEN' : condition,
 							inHaving,
 							underHaving,
+							bkey === 'condition',
 						);
 					}
 				});
@@ -1155,13 +1258,14 @@ export function resolveReportIncludes(
 				filterRoot ? 'FILTER' : condition,
 				inHaving && !filterRoot,
 				underHaving,
+				filterRoot,
 			);
 		}
 		inspected.delete(value);
 	};
 	inspect(executable.select, 'select');
 	inspect(executable.orderBy, 'orderBy');
-	inspect(executable.having, 'having', 'HAVING', true, true);
+	inspect(executable.having, 'having', 'HAVING', true, true, true);
 	return {
 		execution: {
 			rootRange,
@@ -1170,6 +1274,8 @@ export function resolveReportIncludes(
 			...(where && { where }),
 			...(expressionSubqueries.length && { expressionSubqueries }),
 			...(expressionConditions.length && { expressionConditions }),
+			...(localConditions.length && { localConditions }),
+			...(model !== undefined && { rootsResolved: true as const }),
 		},
 		intent: executable,
 	};

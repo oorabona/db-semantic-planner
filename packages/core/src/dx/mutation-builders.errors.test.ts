@@ -10,12 +10,16 @@
  * - Hook error chains: beforeMutation throws → onError fires
  */
 
+import { NotYetSupportedError } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import { caseWhen } from './case-when-builder.js';
 import {
 	ExecutionError,
 	InvalidOperationError,
 	UnsafeOperationError,
 } from './errors.js';
+import { literal } from './expressions.js';
+import { eq } from './filters.js';
 import { createHookManager } from './hooks.js';
 import {
 	DeleteBuilder,
@@ -413,6 +417,50 @@ describe('UpsertBuilder — error paths', () => {
 			action: { type: 'doNothing' },
 		});
 		expect(() => builder.dump()).toThrow(ExecutionError);
+	});
+});
+
+// ============================================================================
+// Mutation values — the value rule's refusals (ADR 0011 delivery 4)
+// ============================================================================
+
+describe('mutation values (ADR 0011 delivery 4)', () => {
+	it('mutation values refuse what the value rule refuses', () => {
+		const unfinished = () => caseWhen(eq('id', 1), literal(2)) as never;
+		const unfinishedMessage = (helper: string) =>
+			`Invalid ${helper}: caseWhen() is unfinished; complete it with .else(value) before using it as a value`;
+		expect(() => orm.update('users').set({ name: unfinished() })).toThrow(
+			unfinishedMessage('update'),
+		);
+		expect(() =>
+			orm.insert('users').values({ id: 1, name: unfinished() }),
+		).toThrow(unfinishedMessage('insert'));
+		expect(() =>
+			orm
+				.upsert('users')
+				.values({ id: 1 })
+				.onConflict(['id'])
+				.doUpdate({ name: unfinished() }),
+		).toThrow(unfinishedMessage('upsert'));
+		expect(() =>
+			orm
+				.update('users')
+				.batchSet('id', [{ id: 1, name: 'a' }])
+				.set({ email: unfinished() }),
+		).toThrow(unfinishedMessage('update'));
+
+		const builder = () =>
+			orm.update('users').set({ name: orm.select('users').count() as never });
+		expect(builder).toThrow(NotYetSupportedError);
+		expect(builder).toThrow(
+			'a query builder in an expression argument is not supported yet (#1053).',
+		);
+		const relation = () =>
+			orm.update('posts').set({ title: orm.tables.posts?.author.id as never });
+		expect(relation).toThrow(NotYetSupportedError);
+		expect(relation).toThrow(
+			'a relation-reached ColumnRef in an expression argument is not supported yet (#1052).',
+		);
 	});
 });
 

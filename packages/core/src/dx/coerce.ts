@@ -190,7 +190,7 @@ export function coerceReference(
 	if (isSqlRaw(leaf))
 		throw new InvalidOperationError(
 			helper,
-			'sql() is only accepted as an update or upsert value; use literal(), param() or an expression here',
+			'sql() is only accepted in set(), values(), doUpdate() and batchSet().set(); use literal(), param() or an expression here',
 		);
 	if (leaf instanceof CaseBuilder)
 		throw new InvalidOperationError(helper, UNFINISHED_CASE);
@@ -237,10 +237,15 @@ function isParamExpression(leaf: object): boolean {
  * Coerce one scalar leaf in value position (ADR 0011).
  *
  * Plain values (strings, numbers, booleans, `bigint`, arrays, `Date`, plain
- * objects), `null` and `undefined` are returned unchanged: they are bound,
- * except the intent shapes core reads structurally (`{ kind: 'param', value }`,
- * `{ kind: 'fieldRef', … }`, `{ kind: 'ref', column }`), which keep their
- * meaning. Wrap such an object in `param()` to bind it as data.
+ * objects), `null` and `undefined` are returned unchanged: they are bound.
+ * In a filter operand, core still reads the intent shapes
+ * `{ kind: 'param', value }`, `{ kind: 'fieldRef', … }` and
+ * `{ kind: 'ref', column }` structurally; wrap such an object in `param()` to
+ * bind it as data. In a mutation value (`set()`, `values()`, `doUpdate()`,
+ * `batchSet().set()`) only branded expressions, schema `ref()` and the
+ * `outerRef()` shape are read structurally, and a plain `ParamIntent`-shaped
+ * object is unwrapped one level as before (`param(obj)` binds such an object
+ * as opaque data); every other plain object is bound.
  * `ExpressionRef`s, branded specs, schema `ref()` and `outerRef()` are
  * returned unchanged; core compiles them. A `ColumnRef` and a bare
  * `SubqueryExpression` become an `ExpressionRef`.
@@ -394,7 +399,7 @@ export function coerceColumnName(
 	if (typeof leaf === 'object' && isSqlRaw(leaf))
 		throw new InvalidOperationError(
 			helper,
-			'sql() is only accepted as an update or upsert value; use literal(), param() or an expression here',
+			'sql() is only accepted in set(), values(), doUpdate() and batchSet().set(); use literal(), param() or an expression here',
 		);
 	if (leaf instanceof CaseBuilder)
 		throw new InvalidOperationError(helper, UNFINISHED_CASE);

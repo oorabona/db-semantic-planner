@@ -15,6 +15,7 @@ import type {
 } from './handlers/types.js';
 import { deriveConditionKeys } from './legacy-condition-keys.js';
 import type { PlanDecision, PlanExpressionOrderBy } from './plan-decision.js';
+import { assertConditionRootRecorded } from './resolved-condition-roots.js';
 
 function isJsonAggOrderBy(
 	orderBy: PlanDecision['orderBy'],
@@ -169,6 +170,7 @@ export function buildCustomFnFilter(
 	// lowers to nothing (a malformed or unsupported condition) must NOT silently
 	// drop to an unfiltered aggregate, which would broaden results. An empty or()
 	// lowers to FALSE and an empty and() to TRUE, so neither reaches this branch.
+	assertConditionRootRecorded(filterIntent, ctx, 'filter');
 	const filterNode = conditionCompiler(filterIntent, {
 		logicalSourceTable: ctx.rootTable,
 		emittedAlias: ctx.currentAlias ?? ctx.rootTable,

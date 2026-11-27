@@ -45,6 +45,8 @@ const rootTypeAdditions = [
 ];
 const internalAdditions = [
 	'assertNoPathRefInConditionBodies',
+	// The mutation value rule's leaf and resolver (ADR 0011 delivery 4).
+	'coerceValue',
 	'copyDefaultFilters',
 	'compileNqlRead',
 	'createBindingFinalPlan',
@@ -78,6 +80,7 @@ const includeValidationExports = [
 const internalNames = [
 	'resolveReportIncludes',
 	'resolveSelectWhere',
+	'resolveValueExpression',
 	'observeIncludeDecisions',
 	...includeValidationExports,
 	...names(before.internal.declarations),
@@ -91,6 +94,7 @@ const movedRuntime = before.root.runtime.filter((name) =>
 const internalRuntime = [
 	'resolveReportIncludes',
 	'resolveSelectWhere',
+	'resolveValueExpression',
 	'observeIncludeDecisions',
 	...includeValidationExports,
 	...before.internal.runtime,

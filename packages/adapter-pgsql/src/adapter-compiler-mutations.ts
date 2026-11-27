@@ -1,4 +1,4 @@
-import { EXPRESSION_BRAND } from '@dbsp/types';
+import { EXPRESSION_BRAND, REF_BRAND } from '@dbsp/types';
 import { createWhereDispatcher } from './handlers/index.js';
 /**
  * Mutation compilation: INSERT, UPDATE, DELETE, UPSERT.
@@ -15,14 +15,17 @@ import {
 } from '@dbsp/core';
 import {
 	assertNoPathRefInConditionBodies,
+	coerceValue,
 	inspectMutationRows,
 	resolveSelectWhere,
+	resolveValueExpression,
 } from '@dbsp/core/internal';
 import type {
 	BatchUpdateIntent,
 	CompiledQuery,
 	CompileOptions,
 	DeleteIntent,
+	ExpressionIntent,
 	InsertFromIntent,
 	InsertIntent,
 	QueryIntent,
@@ -53,6 +56,7 @@ import {
 } from './compile-where.js';
 import { buildCustomFnFilter, renumberParamRefsInAst } from './compiler.js';
 import {
+	parseRawExpression,
 	transposeToColumnArrays,
 	validateBatchCardinality,
 } from './compiler-utils.js';
@@ -93,7 +97,13 @@ import {
 	type UpsertConfig,
 	type UpsertFromConfig,
 } from './mutations/index.js';
-import { DEFAULT_INSERT_CELL } from './mutations/mutation-compiler.js';
+import {
+	COMPILED_MUTATION_VALUE,
+	type CompiledMutationValue,
+	DEFAULT_INSERT_CELL,
+	isCompiledMutationValue,
+} from './mutations/mutation-compiler.js';
+import { unwrapParamIntent } from './param-intent.js';
 import {
 	finalizeEnvelope,
 	fromAstProjection,
@@ -102,7 +112,10 @@ import {
 } from './projection-envelope.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
 import { resolveRelationKeys } from './relation-keys.js';
-import { compileResolvedCondition } from './resolved-condition-compiler.js';
+import {
+	compileResolvedCondition,
+	compileResolvedExpression,
+} from './resolved-condition-compiler.js';
 import {
 	queryLocal,
 	resolveDeclaredIdentifier,
@@ -512,15 +525,212 @@ function getColumnTypes(
 			// Mutation compiler columns are physical identifiers. Keep the cast map
 			// in that same SQL namespace after looking up the logical model column.
 			const physicalName = declaredMutationColumn(deps, tableName, col);
+			const arrayBase =
+				operation === 'update'
+					? undefined
+					: insertArrayBase(authored, castTarget, columnIR.type);
 			result[physicalName] = {
 				logicalTable: tableName,
 				logicalColumn: col,
 				physicalName,
 				databaseType: castTarget,
+				...(arrayBase !== undefined && { arrayBase }),
 			};
 		}
 	}
 	return result;
+}
+
+/**
+ * The element type an INSERT/UPSERT `unnest` array cast must name when the
+ * base mapping would store other values than VALUES does: a physical
+ * `timestamp` or `json`, the logical `number` (DDL `INTEGER`) and
+ * `float(1..24)` (`real`).
+ */
+function insertArrayBase(
+	authored: string | undefined,
+	castTarget: string,
+	logicalType: string,
+): string | undefined {
+	if (authored === undefined || authored === '')
+		return logicalType === 'number' ? 'int4' : undefined;
+	const base = castTarget.trim().toLowerCase();
+	if (base === 'timestamp') return 'timestamp';
+	if (base === 'json') return 'json';
+	const float = /^float\s*\(\s*(\d+)\s*\)$/.exec(base);
+	if (float && Number(float[1]) >= 1 && Number(float[1]) <= 24) return 'float4';
+	return undefined;
+}
+
+type MutationValuePosition = 'SET' | 'DO UPDATE SET' | 'VALUES';
+
+/** The expression intent of an expression value (ADR 0011), if it is one. */
+function valueExpressionIntent(leaf: unknown): ExpressionIntent | undefined {
+	if (typeof leaf !== 'object' || leaf === null) return undefined;
+	if (
+		EXPRESSION_BRAND in leaf &&
+		(leaf as { [EXPRESSION_BRAND]: unknown })[EXPRESSION_BRAND] === true &&
+		'intent' in leaf
+	) {
+		const intent = (leaf as { intent: ExpressionIntent }).intent;
+		return isParamIntent(intent) ? undefined : intent;
+	}
+	if (REF_BRAND in leaf)
+		return {
+			kind: 'ref',
+			column: (leaf as unknown as { target: string }).target,
+		};
+	const candidate = leaf as { kind?: unknown; outer?: unknown };
+	if (candidate.kind === 'ref' && candidate.outer === true)
+		return leaf as ExpressionIntent;
+	return undefined;
+}
+
+/**
+ * The value preparer of one mutation statement (ADR 0011 delivery 4). Each
+ * value goes through core's `coerceValue`; an expression value is resolved
+ * against the target table, bound as the root range of an allocator of its
+ * own (each value is a separate SQL scope, and a shared allocator would make
+ * alias searches grow with the batch), and returned as a
+ * `CompiledMutationValue`; a `sql()` marker in
+ * `values()` is parsed. Plain values, `param()` wrappers and the `sql()`
+ * markers of SET positions are returned unchanged.
+ */
+function mutationValuePreparer(
+	deps: AdapterCompilerDeps,
+	table: string,
+	operation: 'insert' | 'update' | 'upsert',
+): (value: unknown, position: MutationValuePosition) => unknown {
+	const valueScope = () => {
+		const allocator = new RangeAllocator();
+		const root = allocator.bind(table, table);
+		for (const name of [
+			...(deps.bindingNames ?? []),
+			...(deps.scope?.bindings.keys() ?? []),
+		]) {
+			allocator.reserve(name);
+		}
+		return { allocator, root };
+	};
+	const refuseRead = (
+		reference: { readonly column: string } | { readonly relation: string },
+	): never => {
+		const read =
+			'column' in reference
+				? `column '${reference.column}'`
+				: `relation '${reference.relation}'`;
+		throw new InvalidOperationError(
+			operation,
+			`values() cannot read ${read}; an INSERT row has no columns in scope. Use a value, param(), literal() or an uncorrelated subquery`,
+		);
+	};
+	return (value, position) => {
+		if (isSqlRaw(value)) {
+			if (position !== 'VALUES') return value;
+			const sql = value.sql;
+			return {
+				[COMPILED_MUTATION_VALUE]: true,
+				compile: () => parseRawExpression(sql),
+			} satisfies CompiledMutationValue;
+		}
+		const leaf = coerceValue(value, operation);
+		const intent = valueExpressionIntent(leaf);
+		if (intent === undefined) return leaf;
+		if (deps.model === undefined)
+			throw new InvalidOperationError(
+				operation,
+				'an expression value requires a ModelIR; pass a model to the adapter or to the compile options',
+			);
+		const { allocator, root } = valueScope();
+		const resolved = resolveValueExpression(
+			intent,
+			root,
+			allocator,
+			deps.model,
+			{
+				label: position,
+				isLocalSource: localSourcePredicate(deps.bindingNames, deps.scope),
+				...(position === 'VALUES' && { unreadableRoot: refuseRead }),
+			},
+		);
+		const ctx = {
+			...mutationContext(deps, table, MAX_DEPTH_LIMIT),
+			currentAlias: declaredMutationTable(deps, table),
+		};
+		return {
+			[COMPILED_MUTATION_VALUE]: true,
+			compile: (state) => compileResolvedExpression(resolved, ctx, state),
+		} satisfies CompiledMutationValue;
+	};
+}
+
+/**
+ * Whether the `unnest` strategy can carry a cell in a column array and store
+ * what VALUES stores. An expression value or a `sql()` marker never is; a
+ * `param(v)` is judged by `v`, read for transport only.
+ */
+function carriedByUnnest(cell: unknown): boolean {
+	if (isCompiledMutationValue(cell) || isSqlRaw(cell)) return false;
+	let value = cell;
+	if (
+		typeof cell === 'object' &&
+		cell !== null &&
+		EXPRESSION_BRAND in cell &&
+		(cell as { [EXPRESSION_BRAND]: unknown })[EXPRESSION_BRAND] === true &&
+		'intent' in cell &&
+		isParamIntent((cell as { intent: unknown }).intent)
+	)
+		value = (
+			(cell as { intent: { value: unknown } }).intent as { value: unknown }
+		).value;
+	else if (isParamIntent(cell)) return false;
+	if (value === null || value === undefined) return true;
+	switch (typeof value) {
+		case 'string':
+		case 'number':
+		case 'boolean':
+		case 'bigint':
+			return true;
+		case 'object':
+			break;
+		default:
+			return false;
+	}
+	if (Array.isArray(value)) return false;
+	if (value instanceof Date || ArrayBuffer.isView(value)) return true;
+	const prototype = Object.getPrototypeOf(value);
+	if (prototype !== Object.prototype && prototype !== null) return false;
+	// pg serialises an array element without the null guard of a scalar
+	// parameter, so an object that customises its serialisation (toPostgres,
+	// toJSON, an accessor) is bound as a VALUES cell. Descriptors are read
+	// without invoking a getter.
+	const descriptors = Object.getOwnPropertyDescriptors(value);
+	for (const descriptor of Reflect.ownKeys(descriptors).map(
+		(key) => descriptors[key as keyof typeof descriptors] as PropertyDescriptor,
+	))
+		if (
+			descriptor.get !== undefined ||
+			descriptor.set !== undefined ||
+			typeof descriptor.value === 'function'
+		)
+			return false;
+	return !isParamIntent(value);
+}
+
+/** The column-array cells of an unnest batch: a `param(v)` contributes `v`. */
+function unnestCells(values: readonly unknown[][]): unknown[][] {
+	return values.map((row) =>
+		row.map((cell) => unwrapParamIntent(cell) ?? null),
+	);
+}
+
+/** Whether a declared column type is itself an array (unnest would flatten it). */
+function hasArrayTypedColumn(
+	columnTypes: Record<string, MutationColumnMetadata> | undefined,
+): boolean {
+	return Object.values(columnTypes ?? {}).some((metadata) =>
+		metadata.databaseType.trim().endsWith('[]'),
+	);
 }
 
 /**
@@ -624,16 +834,23 @@ export function compileInsert(
 			'insert',
 			`insert: heterogeneous batch has ${rows.length} rows and ${columns.length} columns, exceeding cell limit ${HETEROGENEOUS_INSERT_CELL_LIMIT}; split the rows by shape`,
 		);
+	const prepare = mutationValuePreparer(deps, intent.table, 'insert');
 	const values = rows.map((row, index) =>
 		columns.map((col) =>
-			rowKeys[index]?.has(col) ? (row[col] ?? null) : DEFAULT_INSERT_CELL,
+			rowKeys[index]?.has(col)
+				? prepare(row[col] ?? null, 'VALUES')
+				: DEFAULT_INSERT_CELL,
 		),
 	);
 	const batchThreshold = options?.batchThreshold ?? 50;
+	// unnest only when every cell is carried as is and no column is array-typed;
+	// otherwise VALUES stores the same rows (ADR 0011 delivery 4).
 	const useUnnest =
 		!heterogeneous &&
 		values.length > 0 &&
-		(batchThreshold === 0 || values.length > batchThreshold);
+		(batchThreshold === 0 || values.length > batchThreshold) &&
+		!hasArrayTypedColumn(getColumnTypes(intent.table, columns, deps)) &&
+		values.every((row) => row.every(carriedByUnnest));
 	const columnTypes = getColumnTypes(
 		intent.table,
 		columns,
@@ -647,7 +864,7 @@ export function compileInsert(
 		columns: columns.map((column) =>
 			declaredMutationColumn(deps, intent.table, column),
 		),
-		values,
+		values: useUnnest ? unnestCells(values) : values,
 		...(intent.returning && { returning: [...intent.returning] }),
 		...(intent.returning && {
 			returningSources: mutationReturningSources(
@@ -849,12 +1066,13 @@ export function compileUpdate(
 			? resolveModelLessWhere(intent.where, intent.table, deps)
 			: undefined;
 
+	const prepare = mutationValuePreparer(deps, intent.table, 'update');
 	const config: UpdateConfig = {
 		table: declaredMutationTable(deps, intent.table),
 		tableMetadata: declaredMutationTableMetadata(deps, intent.table),
 		set: Object.entries(intent.set ?? {}).map(([column, value]) => ({
 			column: declaredMutationColumn(deps, intent.table, column),
-			value,
+			value: prepare(value, 'SET'),
 		})),
 		...(resolvedWhere && { where: [whereIntentAsDecision(resolvedWhere)] }),
 		...(whereCompiler && { whereCompiler }),
@@ -952,10 +1170,11 @@ export function compileBatchUpdate(
 	);
 
 	// Build scalar SET entries from scalarSet
+	const prepare = mutationValuePreparer(deps, intent.table, 'update');
 	const scalarSet = intent.scalarSet
 		? Object.entries(intent.scalarSet).map(([column, value]) => ({
 				column,
-				value,
+				value: prepare(value, 'SET'),
 			}))
 		: undefined;
 
@@ -1123,6 +1342,12 @@ export function compileUpsert(
 	// Explicit SET values apply only on conflict; INSERT rows retain their values().
 	const rawExprs: Record<string, string> = {};
 	const scalarSet: Record<string, unknown> = {};
+	const prepare = mutationValuePreparer(deps, intent.table, 'upsert');
+	const values = rows.map((row, index) =>
+		columns.map((col) =>
+			prepare(rowKeys[index]?.has(col) ? (row[col] ?? null) : null, 'VALUES'),
+		),
+	);
 	if (intent.action.type === 'doUpdate' && intent.action.set) {
 		for (const [key, val] of Object.entries(intent.action.set)) {
 			if (isSqlRaw(val)) rawExprs[key] = val.sql;
@@ -1136,19 +1361,20 @@ export function compileUpsert(
 					'intent' in val &&
 					isParamIntent(val.intent)
 						? val.intent
-						: val;
+						: prepare(val, 'DO UPDATE SET');
 			}
 		}
 	}
-	const values = rows.map((row, index) =>
-		columns.map((col) =>
-			rowKeys[index]?.has(col) ? (row[col] ?? null) : null,
-		),
-	);
 	const batchThreshold = options?.batchThreshold ?? 50;
+	// unnest only when every cell is carried as is and no column is array-typed;
+	// otherwise VALUES stores the same rows (ADR 0011 delivery 4).
 	const useUnnest =
 		values.length > 0 &&
-		(batchThreshold === 0 || values.length > batchThreshold);
+		(batchThreshold === 0 || values.length > batchThreshold) &&
+		!hasArrayTypedColumn(
+			getColumnTypes(intent.table, columns, deps, undefined, 'upsert'),
+		) &&
+		values.every((row) => row.every(carriedByUnnest));
 
 	// Build conflict target
 	const conflictTarget: {
@@ -1245,7 +1471,7 @@ export function compileUpsert(
 		columns: columns.map((column) =>
 			declaredMutationColumn(deps, intent.table, column),
 		),
-		values,
+		values: useUnnest ? unnestCells(values) : values,
 		...(intent.action.type === 'doUpdate' &&
 			intent.action.set && {
 				updateValues: new Map(

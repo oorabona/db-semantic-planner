@@ -559,33 +559,33 @@ describe('filter operands and object filters (ADR 0011 delivery 2)', () => {
 
 	it('AC2h expression vs expression having: the right operand is inlined in HAVING', () => {
 		expect(sqlOf(having(exprRef('score').gt(posts.id)))).toEqual([
-			'SELECT posts.id FROM posts GROUP BY posts.id, posts.score HAVING score > posts.id',
+			'SELECT posts.id FROM posts GROUP BY posts.id, posts.score HAVING posts.score > posts.id',
 			[],
 		]);
 		expect(
 			sqlOf(having(gt(fn('abs', exprRef('score')), subquery('posts').count()))),
 		).toEqual([
-			'SELECT posts.id FROM posts GROUP BY posts.id, posts.score HAVING abs(score) > (SELECT count(*) FROM posts AS posts_1)',
+			'SELECT posts.id FROM posts GROUP BY posts.id, posts.score HAVING abs(posts.score) > (SELECT count(*) FROM posts AS posts_1)',
 			[],
 		]);
 	});
 
 	it('AC2h expression vs expression case: the right operand is inlined in CASE WHEN', () => {
 		expect(sqlOf(inCase(exprRef('score').gt(posts.id)))).toEqual([
-			"SELECT CASE WHEN score > posts.id THEN 'y' ELSE 'n' END AS r FROM posts",
+			"SELECT CASE WHEN posts.score > posts.id THEN 'y' ELSE 'n' END AS r FROM posts",
 			[],
 		]);
 		expect(
 			sqlOf(inCase(gt(fn('abs', exprRef('score')), subquery('posts').count()))),
 		).toEqual([
-			"SELECT CASE WHEN abs(score) > (SELECT count(*) FROM posts AS posts_1) THEN 'y' ELSE 'n' END AS r FROM posts",
+			"SELECT CASE WHEN abs(posts.score) > (SELECT count(*) FROM posts AS posts_1) THEN 'y' ELSE 'n' END AS r FROM posts",
 			[],
 		]);
 	});
 
 	it('AC2h schema ref right of expression: ref() is the target column in HAVING', () => {
 		expect(sqlOf(having(exprRef('score').gt(ref('posts.id'))))).toEqual([
-			'SELECT posts.id FROM posts GROUP BY posts.id, posts.score HAVING score > posts.id',
+			'SELECT posts.id FROM posts GROUP BY posts.id, posts.score HAVING posts.score > posts.id',
 			[],
 		]);
 	});
