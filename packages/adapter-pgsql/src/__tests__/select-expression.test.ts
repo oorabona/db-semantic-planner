@@ -2353,6 +2353,7 @@ describe('FROM-less selectExpression resolved by core (#1002)', () => {
 				).as('n'),
 			),
 		).toEqual([
+			// The quoted outer "coalesce" is #1109; this case pins the FILTER body.
 			'SELECT "coalesce"(count(*) FILTER (WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1)), 0) AS n',
 			[0],
 		]);

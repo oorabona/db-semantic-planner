@@ -743,8 +743,8 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 *
 	 * @param expr - A reference leaf (ADR 0011): an expression from fn(), op(),
 	 *   literal(), etc., a subquery or a constant (inlined). A FROM-less SELECT
-	 *   has no row: a column or relation read outside a subquery body is refused
-	 *   by name, and subquery bodies read the default filters as any read does.
+	 *   has no row: a column or relation read outside a subquery body is
+	 *   refused, and subquery bodies read the default filters as any read does.
 	 *   An alias set with `.as()` or `.asExpr()` names the result column.
 	 * @returns An object with `sql`, `parameters`, and `execute()` method.
 	 *
