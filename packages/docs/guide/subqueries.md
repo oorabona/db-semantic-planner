@@ -79,7 +79,7 @@ orm.select('symbols')
 
 SELECT-expression subqueries, including those nested in `op(...)`, support `outerRef()` in their WHERE and HAVING. Unqualified references bind the immediately enclosing query; qualified references search enclosing queries nearest first: in each query, a written include key wins, then an exact emitted qualifier, otherwise the logical table must have exactly one range. Ambiguous logical tables are refused. A FROM-less `compileSelectExpression()` can correlate nested subqueries to their enclosing subquery, but has no outer table of its own. An `outerRef()` (qualified or unqualified) in its immediate subquery body is refused with `outerRef() requires an enclosing query range.`; it never binds that subquery's own range.
 
-In a root query, an `outerRef()` in HAVING, a CASE WHEN condition or an aggregate FILTER has no enclosing range and is refused with `outerRef() requires an enclosing query range.`, as in WHERE, unless that condition sits inside or holds a subquery over a CTE or an NQL binding. This holds for reads planned with a model (the ORM, NQL and `plan()`); hand-built `compilePlan` decisions and reads compiled without a model keep their route.
+In a root query, an `outerRef()` in HAVING, a CASE WHEN condition or an aggregate FILTER has no enclosing range and is refused with `outerRef() requires an enclosing query range.`, as in WHERE, unless that condition sits inside or holds a subquery over a CTE or an NQL binding and no aggregate alias, relation predicate or dotted field in it already makes core resolve it. This holds for reads planned with a model (the ORM, NQL and `plan()`); hand-built `compilePlan` decisions and reads compiled without a model keep their route.
 
 Aggregate methods available on `SubqueryBuilder`:
 

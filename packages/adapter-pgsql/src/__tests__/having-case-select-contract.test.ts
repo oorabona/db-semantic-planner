@@ -2033,6 +2033,60 @@ b | select case when score = 1 then 1 else 0 end as c`.dump(),
 			() => users().columns([fn('count', star()).filter(field).as('n')]),
 		])
 			expect(() => query().plan()).toThrow('Condition requires a column');
+		// A literal, a parameter or an expression subquery at a root is a
+		// malformed condition refused while planning, never skipped as data.
+		const at = (value: object) => [
+			{ groupBy: ['id'], having: value },
+			{
+				select: {
+					type: 'expressions',
+					columns: [
+						{
+							kind: 'case',
+							when: [
+								{ condition: value, result: { kind: 'literal', value: 1 } },
+							],
+							as: 'c',
+						},
+					],
+				},
+			},
+			{
+				select: {
+					type: 'expressions',
+					columns: [
+						{
+							kind: 'aggregate',
+							function: 'count',
+							field: '*',
+							filter: value,
+							as: 'n',
+						},
+					],
+				},
+			},
+		];
+		const planOf = (shape: object) => () =>
+			plan(
+				{ type: 'select', from: 'users', ...shape } as QueryIntent,
+				s5.model,
+			);
+		for (const [value, refusal] of [
+			[{ kind: 'literal', value: 1 }, "Unsupported predicate kind 'literal'"],
+			[{ kind: 'param', value: 1 }, "Unsupported predicate kind 'param'"],
+			[
+				{
+					kind: 'subquery',
+					query: {
+						type: 'select',
+						from: 'users',
+						select: { type: 'fields', fields: ['id'] },
+					},
+				},
+				'Condition requires a column',
+			],
+		] as const)
+			for (const shape of at(value)) expect(planOf(shape)).toThrow(refusal);
 	});
 
 	it('AC5 cyclic metadata on a condition never overflows the stack', () => {

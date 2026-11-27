@@ -1050,6 +1050,42 @@ export function resolveReportIncludes(
 		underHaving = false,
 		root = false,
 	): void => {
+		// A value at a condition root is a condition: a parameter, a literal or an
+		// expression subquery there is refused by the resolver while planning,
+		// never skipped as data.
+		if (
+			condition !== undefined &&
+			root &&
+			model !== undefined &&
+			value &&
+			typeof value === 'object' &&
+			!Array.isArray(value) &&
+			(isParamIntent(value) ||
+				(value as { kind?: unknown }).kind === 'literal' ||
+				(value as { kind?: unknown }).kind === 'param' ||
+				((value as { kind?: unknown }).kind === 'subquery' &&
+					(value as { query?: unknown }).query !== undefined))
+		) {
+			resolveConditionContext(
+				value as WhereIntent,
+				rootRange,
+				visible,
+				enclosing,
+				allocator,
+				model,
+				expressionAliases.count,
+				[],
+				{
+					defaultFilters: options.defaultFilters,
+					...scopeMode,
+					label: condition,
+					aliasState: expressionAliases,
+				},
+			);
+			throw new Error(
+				`${condition} condition kind '${String((value as { kind?: unknown }).kind)}' is not supported.`,
+			);
+		}
 		if (!value || typeof value !== 'object' || isParamIntent(value)) return;
 		if (inspected.has(value)) return;
 		inspected.add(value);
