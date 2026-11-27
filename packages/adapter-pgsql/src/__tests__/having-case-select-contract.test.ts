@@ -1666,8 +1666,15 @@ describe('#891 slice 5c: every HAVING, CASE WHEN and FILTER root through core', 
 			'posts | select coalesce(case when score = 1 then 1 else 0 end, 0) as c',
 		]) {
 			spy.mockClear();
-			o.nql([text] as unknown as TemplateStringsArray).dump();
-			expect(spy).toHaveBeenCalled();
+			const dump = o.nql([text] as unknown as TemplateStringsArray).dump();
+			const planned = 'plan' in dump ? dump.plan : undefined;
+			const entries = planned?.execution?.expressionConditions ?? [];
+			expect(entries).toHaveLength(1);
+			expect(spy).toHaveBeenCalledWith(
+				entries[0]!.condition,
+				expect.any(Object),
+				expect.any(Object),
+			);
 		}
 		// Raw and expressions aggregate FILTER through plan().
 		for (const select of [
@@ -1817,9 +1824,60 @@ b | select case when score = 1 then 1 else 0 end as c`.dump(),
 			sql: 'SELECT count(*) FILTER (WHERE users.data = $1) AS n FROM users',
 			params: [value],
 		});
-		expect(
-			users().groupBy(['id']).having(cond()).plan().execution?.localConditions,
-		).toBeUndefined();
+		for (const read of [
+			() => users().groupBy(['id']).having(cond()),
+			() =>
+				users().columns([
+					caseWhen(cond(), literal(1)).else(literal(0)).as('c'),
+				]),
+			() => users().columns([fn('count', star()).filter(cond()).as('n')]),
+		])
+			expect(read().plan().execution?.localConditions).toBeUndefined();
+	});
+
+	it('AC1 routed-body: an expression body resolves its own HAVING, CASE WHEN and FILTER roots', () => {
+		const spy = vi.spyOn(resolvedConditions, 'compileResolvedCondition');
+		const authored = () =>
+			o.select('posts').where(eq('authorId', outerRef('id')));
+		const cases = [
+			[
+				authored()
+					.groupBy(['authorId'])
+					.columns([fn('count', star()).as('n')])
+					.having(longName()),
+				['having'],
+				'SELECT users.id, (SELECT count(*) AS n FROM posts WHERE posts."authorId" = users.id GROUP BY posts."authorId" HAVING length(posts.name) > $1) AS v FROM users',
+			],
+			[
+				authored()
+					.columns([caseWhen(longName(), literal(1)).else(literal(0)).as('c')])
+					.limit(1),
+				['select.columns[0].when[0].condition'],
+				'SELECT users.id, (SELECT CASE WHEN length(posts.name) > $1 THEN 1 ELSE 0 END AS c FROM posts WHERE posts."authorId" = users.id LIMIT 1) AS v FROM users',
+			],
+			[
+				authored().columns([fn('count', star()).filter(longName()).as('n')]),
+				['select.columns[0].filter'],
+				'SELECT users.id, (SELECT count(*) FILTER (WHERE length(posts.name) > $1) AS n FROM posts WHERE posts."authorId" = users.id) AS v FROM users',
+			],
+		] as const;
+		for (const [inner, paths, sql] of cases) {
+			spy.mockClear();
+			const outer = () =>
+				o.select('users').columns(['id', body(inner).asExpr('v')]);
+			const nested =
+				outer().plan().execution?.expressionSubqueries?.[0]?.select.execution;
+			expect(nested?.rootsResolved).toBe(true);
+			expect(nested?.expressionConditions?.map((e) => e.intentPath)).toEqual(
+				paths,
+			);
+			expect(out(() => outer().dump())).toEqual({ sql, params: [2] });
+			expect(spy).toHaveBeenCalledWith(
+				nested?.expressionConditions?.[0]?.condition,
+				expect.any(Object),
+				expect.any(Object),
+			);
+		}
 	});
 
 	it('AC2 a bare operand column binds the root range over a join', () => {

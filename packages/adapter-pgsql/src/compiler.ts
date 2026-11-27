@@ -1293,6 +1293,38 @@ export class PlanCompiler {
 	// --------------------------------------------------------------------------
 
 	/** Build a HandlerCompilerContext for the given plan and optional alias override. */
+	/** Identity indexes of a plan's condition records, built once per plan object. */
+	private readonly conditionIndexCache = new WeakMap<
+		SimplifiedPlanReport,
+		{
+			readonly localConditions?: ReadonlySet<WhereIntent>;
+			readonly resolvedConditions?: ReadonlyMap<
+				WhereIntent,
+				import('@dbsp/types').ResolvedCondition
+			>;
+		}
+	>();
+
+	private conditionIndexes(plan: SimplifiedPlanReport) {
+		const cached = this.conditionIndexCache.get(plan);
+		if (cached) return cached;
+		const indexes = {
+			...(plan.localConditions && {
+				localConditions: new Set(plan.localConditions),
+			}),
+			...(plan.expressionConditions && {
+				resolvedConditions: new Map(
+					plan.expressionConditions.map((entry) => [
+						entry.intent,
+						entry.condition,
+					]),
+				),
+			}),
+		};
+		this.conditionIndexCache.set(plan, indexes);
+		return indexes;
+	}
+
 	private createHandlerContext(
 		plan: SimplifiedPlanReport,
 		currentAlias?: string,
@@ -1412,17 +1444,7 @@ export class PlanCompiler {
 			}),
 			...(this.model != null && { model: this.model }),
 			...(plan.rootsResolved && { rootsResolved: true }),
-			...(plan.localConditions && {
-				localConditions: new Set(plan.localConditions),
-			}),
-			...(plan.expressionConditions && {
-				resolvedConditions: new Map(
-					plan.expressionConditions.map((entry) => [
-						entry.intent,
-						entry.condition,
-					]),
-				),
-			}),
+			...this.conditionIndexes(plan),
 			...(this.nestedSelectCompiler !== undefined && {
 				compileNestedSelect: this.nestedSelectCompiler,
 			}),

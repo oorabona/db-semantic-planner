@@ -565,7 +565,7 @@ describe('filter operands and object filters (ADR 0011 delivery 2)', () => {
 		expect(
 			sqlOf(having(gt(fn('abs', exprRef('score')), subquery('posts').count()))),
 		).toEqual([
-			'SELECT posts.id FROM posts GROUP BY posts.id, posts.score HAVING abs(score) > (SELECT count(*) FROM posts AS posts_1)',
+			'SELECT posts.id FROM posts GROUP BY posts.id, posts.score HAVING abs(posts.score) > (SELECT count(*) FROM posts AS posts_1)',
 			[],
 		]);
 	});
@@ -578,7 +578,7 @@ describe('filter operands and object filters (ADR 0011 delivery 2)', () => {
 		expect(
 			sqlOf(inCase(gt(fn('abs', exprRef('score')), subquery('posts').count()))),
 		).toEqual([
-			"SELECT CASE WHEN abs(score) > (SELECT count(*) FROM posts AS posts_1) THEN 'y' ELSE 'n' END AS r FROM posts",
+			"SELECT CASE WHEN abs(posts.score) > (SELECT count(*) FROM posts AS posts_1) THEN 'y' ELSE 'n' END AS r FROM posts",
 			[],
 		]);
 	});

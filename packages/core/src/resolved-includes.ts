@@ -1127,7 +1127,6 @@ export function resolveReportIncludes(
 		// With a model, a condition root resolves whole, unless it holds a body on a
 		// query-local source: that root keeps the adapter's local route (#1040).
 		const localRoot = condition !== undefined && root && holdsLocalBody(node);
-		if (localRoot) localConditions.push({ intentPath });
 		const relationSensitive =
 			[
 				'exists',
@@ -1174,6 +1173,9 @@ export function resolveReportIncludes(
 			inspected.delete(value);
 			return;
 		}
+		// Not resolved by another trigger: the root keeps the local route, recorded
+		// once, so localConditions and expressionConditions stay disjoint.
+		if (localRoot) localConditions.push({ intentPath });
 		// A body left unresolved (no model) stays the adapter's: HAVING's aliases and
 		// the outer ranges do not reach into it.
 		if (absorbsBody(node)) {
