@@ -1,5 +1,33 @@
 # Changelog
 
+## [8.0.0](https://github.com/oorabona/db-semantic-planner/compare/core-v7.1.0...core-v8.0.0) (2026-11-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* **core:** expression and param() arguments of fullTextSearch, the range helpers and their bounds are compiled instead of bound as objects. A range value compiles to the column's range constructor and is refused on a column without a declared range type. subquery(t).count(null) is refused. Raw CTE columns/orderBy refuse a ColumnRef, null and a subquery. compileSelectExpression emits the intent's alias. The resolved range condition value gains a rangeConstructor variant.
+
+### Features
+
+* **core:** Coerce the leaves of the composite helpers ([#1100](https://github.com/oorabona/db-semantic-planner/issues/1100)) ([1850078](https://github.com/oorabona/db-semantic-planner/commit/18500787688369e1df8291770607d2f138d2e093)), closes [#1047](https://github.com/oorabona/db-semantic-planner/issues/1047)
+* **core:** Compile expression values in set, values, doUpdate and batchSet set ([#1099](https://github.com/oorabona/db-semantic-planner/issues/1099)) ([24046b9](https://github.com/oorabona/db-semantic-planner/commit/24046b992d9b0711bfdf7a5b315d494232a712b2)), closes [#1038](https://github.com/oorabona/db-semantic-planner/issues/1038) [#1048](https://github.com/oorabona/db-semantic-planner/issues/1048)
+* **core:** Raise not-yet refusals as NotYetSupportedError ([#1102](https://github.com/oorabona/db-semantic-planner/issues/1102)) ([92d0a39](https://github.com/oorabona/db-semantic-planner/commit/92d0a39259d28cb6d117ef6d6bf18d124beec742)), closes [#1027](https://github.com/oorabona/db-semantic-planner/issues/1027)
+* **core:** Resolve selectExpression through core's condition resolver ([#1110](https://github.com/oorabona/db-semantic-planner/issues/1110)) ([0487dcb](https://github.com/oorabona/db-semantic-planner/commit/0487dcbd749d4919650b214aef512b9aa72cac07)), closes [#1002](https://github.com/oorabona/db-semantic-planner/issues/1002) [#1104](https://github.com/oorabona/db-semantic-planner/issues/1104)
+* **core:** Turn query builders into subquery leaves that keep their filter policy ([#1098](https://github.com/oorabona/db-semantic-planner/issues/1098)) ([4cdbc2a](https://github.com/oorabona/db-semantic-planner/commit/4cdbc2a2ec632488867f589ff2a0c7750580483c)), closes [#1053](https://github.com/oorabona/db-semantic-planner/issues/1053) [#1034](https://github.com/oorabona/db-semantic-planner/issues/1034) [#1035](https://github.com/oorabona/db-semantic-planner/issues/1035) [#994](https://github.com/oorabona/db-semantic-planner/issues/994) [#1068](https://github.com/oorabona/db-semantic-planner/issues/1068)
+
+
+### Bug Fixes
+
+* **core:** Resolve every HAVING, CASE WHEN and FILTER condition root through core ([#1097](https://github.com/oorabona/db-semantic-planner/issues/1097)) ([9b4f1d0](https://github.com/oorabona/db-semantic-planner/commit/9b4f1d04e5e4ba967ed00e333d2afbbb301313e8)), closes [#1003](https://github.com/oorabona/db-semantic-planner/issues/1003) [#1037](https://github.com/oorabona/db-semantic-planner/issues/1037)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/nql bumped to 3.0.0
+    * @dbsp/types bumped to 7.0.0
+
 ## [7.1.0](https://github.com/oorabona/db-semantic-planner/compare/core-v7.0.0...core-v7.1.0) (2026-11-27)
 
 
