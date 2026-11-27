@@ -1,4 +1,3 @@
-import { compilePlan } from '@dbsp/adapter-pgsql/internal';
 import {
 	createOrm,
 	type PlanReport,
@@ -6,12 +5,22 @@ import {
 	ref,
 	schema,
 } from '@dbsp/core';
+import type { ColumnIR, OutputDescriptor } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { compileCteQuery } from '../adapter-compiler-recursive.js';
 import { createDeclaredNameResolver } from '../declared-name-resolver.js';
+import {
+	jsonAggContainerShape,
+	resolveJsonAggColumnReadHandling,
+} from '../json-agg-read-handling.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { createPgPhysicalModel } from '../physical-model/index.js';
 import { fromOutputDescriptors } from '../projection-envelope.js';
+import {
+	assertProjectedJsonContainerCanBeAggregated,
+	type ResolvedRelationTarget,
+} from '../relation-target-projection.js';
+import { queryLocal } from '../sql-identifier.js';
 
 const includeSchema = schema({
 	parents: {
@@ -82,143 +91,61 @@ describe('bigint js json_agg SQL projection', () => {
 	});
 
 	it('refuses to carry a convertible JSON container through a projected CTE', () => {
-		const projectedReadings = fromOutputDescriptors({
-			sql: 'SELECT readings_json FROM prior_readings',
-			parameters: [],
-			columns: ['id', 'parent_id', 'readings_json'],
-			declaredOutputs: [
-				{
-					outputKey: 'id',
-					source: { kind: 'modelColumn', table: 'readings', column: 'id' },
-					shape: { kind: 'scalar', cardinality: 'one' },
-				},
-				{
-					outputKey: 'parent_id',
-					source: {
-						kind: 'modelColumn',
-						table: 'readings',
-						column: 'parentId',
-					},
-					shape: { kind: 'scalar', cardinality: 'one' },
-				},
-				{
-					outputKey: 'readings_json',
-					source: {
-						kind: 'modelColumn',
-						table: 'readings',
-						column: 'observedAt',
-						js: 'bigint',
-					},
-					shape: { kind: 'array', cardinality: 'many', aggregate: 'json_agg' },
-				},
-			],
-		});
+		const target: ResolvedRelationTarget = {
+			target: queryLocal('readings'),
+			cteName: queryLocal('prior_readings'),
+		};
+		const descriptor: OutputDescriptor = {
+			outputKey: 'readings_json',
+			source: {
+				kind: 'modelColumn',
+				table: 'readings',
+				column: 'observedAt',
+				js: 'bigint',
+			},
+			shape: { kind: 'array', cardinality: 'many', aggregate: 'json_agg' },
+		};
 
 		expect(() =>
-			compilePlan(
-				{
-					rootTable: 'parents',
-					decisions: [
-						{ type: 'select', column: 'id' },
-						{
-							type: 'includeStrategy',
-							choice: 'json_agg',
-							relation: 'readings',
-							relationName: 'readings',
-							relationType: 'hasMany',
-							sourceTable: 'parents',
-							targetTable: 'readings',
-							sourceColumn: ['id'],
-							targetColumn: ['parentId'],
-							columns: ['readings_json'],
-						},
-					],
-				},
-				{
-					model: includeSchema.model,
-					bindingNames: new Set(['readings']),
-					relationTargetProjections: new Map([['readings', projectedReadings]]),
-				},
-			),
+			assertProjectedJsonContainerCanBeAggregated(target, descriptor),
 		).toThrow(
-			"Nested JSON conversion cannot be carried through a projected CTE: target 'readings', output 'readings_json'.",
+			new Error(
+				"Nested JSON conversion cannot be carried through a projected CTE: target 'readings', output 'readings_json'.",
+			),
 		);
 	});
 
 	it('forces explicit projection and casts opted-in bigint columns to text', () => {
-		const compiled = compilePlan(
-			{
-				rootTable: 'parents',
-				decisions: [
-					{ type: 'select', column: 'id' },
-					{
-						type: 'includeStrategy',
-						choice: 'json_agg',
-						relation: 'readings',
-						relationName: 'readings',
-						relationType: 'hasMany',
-						sourceTable: 'parents',
-						targetTable: 'readings',
-						sourceColumn: ['id'],
-						targetColumn: ['parentId'],
-					},
-				],
-			},
-			{ model: includeSchema.model },
-		);
+		const adapter = createPgCompileOnlyAdapter({ model: includeSchema.model });
+		const orm = createOrm({ schema: includeSchema, adapter });
 
-		expect(compiled.sql).toContain('jsonb_build_object');
-		expect(compiled.sql).not.toContain('to_jsonb(__t__)');
-		expect(compiled.sql).toMatch(/CAST\(__t__\."observedAt" AS text\)/);
-		expect(compiled.sql).toMatch(/CAST\(__t__\."safeCount" AS text\)/);
-		expect(compiled.sql).toMatch(/CAST\(__t__\."stringCount" AS text\)/);
-		expect(compiled.sql).not.toMatch(/CAST\(__t__\."legacyCount" AS text\)/);
+		const { sql, params } = orm
+			.select('parents')
+			.include('readings')
+			.withPlanOptions({ defaultIncludeStrategy: 'json_agg' })
+			.dump();
+
+		expect({ sql, params }).toEqual({
+			sql: `SELECT parents.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'parentId', __t__."parentId", 'observedAt', CAST(__t__."observedAt" AS text), 'safeCount', CAST(__t__."safeCount" AS text), 'stringCount', CAST(__t__."stringCount" AS text), 'parseJSON', CAST(__t__."parseJSON" AS text), 'legacyCount', __t__."legacyCount") ORDER BY __t__.id ASC NULLS LAST) FROM readings AS __t__ WHERE __t__."parentId" = parents.id), '[]'::json) AS readings_json FROM parents`,
+			params: [],
+		});
 	});
 
 	it('does not cast forged js metadata on non-bigint columns', () => {
-		const forgedSchema = schema({
-			parents: {
-				id: 'uuid',
-			},
-			readings: {
-				id: 'uuid',
-				parentId: ref('parents', {
-					as: 'parent',
-					inverse: 'readings',
-					references: ['id'],
-				}),
-				code: 'uuid',
-			},
-		});
-		const codeColumn = forgedSchema.model
-			.getTable('readings')
-			?.columns.find((column) => column.name === 'code');
-		(codeColumn as { js?: 'bigint' }).js = 'bigint';
+		const forgedColumn: ColumnIR = {
+			name: 'code',
+			type: 'uuid',
+			nullable: false,
+			js: 'bigint',
+		};
 
-		const compiled = compilePlan(
-			{
-				rootTable: 'parents',
-				decisions: [
-					{ type: 'select', column: 'id' },
-					{
-						type: 'includeStrategy',
-						choice: 'json_agg',
-						relation: 'readings',
-						relationName: 'readings',
-						relationType: 'hasMany',
-						sourceTable: 'parents',
-						targetTable: 'readings',
-						sourceColumn: ['id'],
-						targetColumn: ['parentId'],
-					},
-				],
-			},
-			{ model: forgedSchema.model },
-		);
-
-		expect(compiled.sql).toContain('to_jsonb(__t__)');
-		expect(compiled.sql).not.toContain('jsonb_build_object');
-		expect(compiled.sql).not.toMatch(/CAST\(__t__\.code AS text\)/);
+		expect(
+			resolveJsonAggColumnReadHandling(
+				'readings',
+				forgedColumn,
+				jsonAggContainerShape('hasMany'),
+			),
+		).toBeUndefined();
 	});
 
 	it('records exact JSON keys and resolver nested transforms on the compile-local hydration plan', () => {

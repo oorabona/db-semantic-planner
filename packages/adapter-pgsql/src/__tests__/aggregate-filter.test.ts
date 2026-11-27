@@ -6,10 +6,6 @@
  */
 
 import {
-	compilePlan,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
-import {
 	createOrm,
 	eq,
 	exists,
@@ -30,7 +26,7 @@ import {
 } from '@dbsp/core';
 import type { QueryIntent, WhereIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { eqExpr, normalizeSQL, sqlColumnRef } from '../ast-helpers.js';
+import { eqExpr, sqlColumnRef } from '../ast-helpers.js';
 import {
 	avgHandler,
 	countDistinctHandler,
@@ -207,156 +203,113 @@ describe('aggregate handler: FILTER (WHERE ...) injection', () => {
 });
 
 // ============================================================================
-// Full compiler pipeline tests (filterCondition → SQL via compilePlan)
+// Full compiler pipeline tests (aggregates[].filter → SQL via plan + compile)
 // ============================================================================
 
-describe('compilePlan: FILTER (WHERE ...) clause in aggregates', () => {
-	it('COUNT(*) FILTER (WHERE active = $1) produces FILTER clause in SQL', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'users',
-			decisions: [
+describe('aggregate FILTER (WHERE ...) clause in aggregates', () => {
+	const filterDb = schema({
+		users: {
+			id: { type: 'integer', primaryKey: true },
+			active: { type: 'boolean' },
+		},
+		orders: {
+			id: { type: 'integer', primaryKey: true },
+			status: { type: 'text' },
+			amount: { type: 'integer' },
+		},
+		products: {
+			id: { type: 'integer', primaryKey: true },
+			category: { type: 'text' },
+			price: { type: 'integer' },
+		},
+	} as const);
+	const filterAdapter = createPgCompileOnlyAdapter({ model: filterDb.model });
+	const compileAggregates = (
+		from: string,
+		aggregates: readonly {
+			readonly function: 'count' | 'sum' | 'avg';
+			readonly field: string;
+			readonly as: string;
+			readonly filter?: WhereIntent;
+		}[],
+	) => {
+		const { sql, parameters } = filterAdapter.compile(
+			plan(
 				{
-					type: 'selectFunction',
-					function: 'count',
-					column: '*',
-					alias: 'active_count',
-					filterCondition: {
-						type: 'where',
-						column: 'active',
-						operator: '=',
-						value: true,
-						paramIndex: 1,
-					},
+					type: 'select',
+					from,
+					select: { type: 'aggregate', aggregates },
 				},
-			],
-		};
-
-		const result = compilePlan(plan);
-		const normalized = normalizeSQL(result.sql);
-
-		expect(normalized).toEqual(
-			'select count(*) filter (where users.active = $1) as active_count from users',
+				filterDb.model,
+			),
 		);
-		expect(result.parameters).toEqual([true]);
+		return { sql, params: parameters };
+	};
+
+	it('COUNT(*) FILTER (WHERE active = $1) produces FILTER clause in SQL', () => {
+		expect(
+			compileAggregates('users', [
+				{
+					function: 'count',
+					field: '*',
+					as: 'active_count',
+					filter: eq('active', true),
+				},
+			]),
+		).toEqual({
+			sql: 'SELECT count(*) FILTER (WHERE users.active = $1) AS active_count FROM users',
+			params: [true],
+		});
 	});
 
 	it('SUM(amount) FILTER (WHERE status = $1) produces FILTER clause in SQL', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
+		expect(
+			compileAggregates('orders', [
 				{
-					type: 'selectFunction',
 					function: 'sum',
-					column: 'amount',
-					alias: 'pending_total',
-					filterCondition: {
-						type: 'where',
-						column: 'status',
-						operator: '=',
-						value: 'pending',
-						paramIndex: 1,
-					},
+					field: 'amount',
+					as: 'pending_total',
+					filter: eq('status', 'pending'),
 				},
-			],
-		};
-
-		const result = compilePlan(plan);
-		const normalized = normalizeSQL(result.sql);
-
-		expect(normalized).toEqual(
-			'select sum(orders.amount) filter (where orders.status = $1) as pending_total from orders',
-		);
-		expect(result.parameters).toEqual(['pending']);
+			]),
+		).toEqual({
+			sql: 'SELECT sum(orders.amount) FILTER (WHERE orders.status = $1) AS pending_total FROM orders',
+			params: ['pending'],
+		});
 	});
 
 	it('AVG(price) FILTER (WHERE category = $1) produces FILTER clause in SQL', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'products',
-			decisions: [
+		expect(
+			compileAggregates('products', [
 				{
-					type: 'selectFunction',
 					function: 'avg',
-					column: 'price',
-					alias: 'avg_electronics',
-					filterCondition: {
-						type: 'where',
-						column: 'category',
-						operator: '=',
-						value: 'electronics',
-						paramIndex: 1,
-					},
+					field: 'price',
+					as: 'avg_electronics',
+					filter: eq('category', 'electronics'),
 				},
-			],
-		};
-
-		const result = compilePlan(plan);
-		const normalized = normalizeSQL(result.sql);
-
-		expect(normalized).toEqual(
-			'select avg(products.price) filter (where products.category = $1) as avg_electronics from products',
-		);
-		expect(result.parameters).toEqual(['electronics']);
-	});
-
-	it('COUNT(*) without filterCondition still works (backward compat)', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'users',
-			decisions: [
-				{
-					type: 'selectFunction',
-					function: 'count',
-					column: '*',
-					alias: 'total',
-				},
-			],
-		};
-
-		const result = compilePlan(plan);
-		const normalized = normalizeSQL(result.sql);
-
-		expect(normalized).toContain('count');
-		expect(normalized).not.toContain('filter');
+			]),
+		).toEqual({
+			sql: 'SELECT avg(products.price) FILTER (WHERE products.category = $1) AS avg_electronics FROM products',
+			params: ['electronics'],
+		});
 	});
 
 	it('multiple aggregates: mixed with and without FILTER', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
+		expect(
+			compileAggregates('orders', [
+				{ function: 'count', field: '*', as: 'total_orders' },
 				{
-					type: 'selectFunction',
 					function: 'count',
-					column: '*',
-					alias: 'total_orders',
+					field: '*',
+					as: 'pending_orders',
+					filter: eq('status', 'pending'),
 				},
-				{
-					type: 'selectFunction',
-					function: 'count',
-					column: '*',
-					alias: 'pending_orders',
-					filterCondition: {
-						type: 'where',
-						column: 'status',
-						operator: '=',
-						value: 'pending',
-						paramIndex: 1,
-					},
-				},
-				{
-					type: 'selectFunction',
-					function: 'sum',
-					column: 'amount',
-					alias: 'total_amount',
-				},
-			],
-		};
-
-		const result = compilePlan(plan);
-		const normalized = normalizeSQL(result.sql);
-
-		expect(normalized).toEqual(
-			'select count(*) as total_orders, count(*) filter (where orders.status = $1) as pending_orders, sum(orders.amount) as total_amount from orders',
-		);
-		expect(result.parameters).toEqual(['pending']);
+				{ function: 'sum', field: 'amount', as: 'total_amount' },
+			]),
+		).toEqual({
+			sql: 'SELECT count(*) AS total_orders, count(*) FILTER (WHERE orders.status = $1) AS pending_orders, sum(orders.amount) AS total_amount FROM orders',
+			params: ['pending'],
+		});
 	});
 });
 

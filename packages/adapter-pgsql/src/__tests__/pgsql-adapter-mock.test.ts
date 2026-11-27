@@ -1,4 +1,3 @@
-import { compilePlan } from '@dbsp/adapter-pgsql/internal';
 import { POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 /**
  * Strict branch-coverage tests for pgsql-adapter.ts using pg.Pool mocks.
@@ -16,7 +15,7 @@ import { POSTGRESQL_CAPABILITIES } from '@dbsp/core';
  *  - listIndexes() / storageSize() schema fallback branches
  */
 
-import { type Adapter, createOrm, plan, schema } from '@dbsp/core';
+import { type Adapter, createOrm, exists, plan, ref, schema } from '@dbsp/core';
 import type { TransactionOptions } from '@dbsp/types';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import type { Pool, PoolClient } from 'pg';
@@ -39,6 +38,7 @@ import {
 	type PgBorrowedClientAdapterOptions,
 	resolveTransactionBeginOptions,
 } from '../pgsql-adapter.js';
+import * as resolvedConditions from '../resolved-condition-compiler.js';
 
 const TRANSACTION_CONTROL_BOUNDARY =
 	'Transaction control through raw SQL inside a scope dbsp is managing is unsupported. ' +
@@ -5891,6 +5891,14 @@ describe('PgAdapter [P2-T5b]: transaction() preserves full config', () => {
 	});
 });
 
+const keyAuthorityDb = schema({
+	users: { id: { type: 'integer', primaryKey: true } },
+	orders: {
+		id: { type: 'integer', primaryKey: true },
+		user_id: ref('users', { as: 'user', inverse: 'orders' }),
+	},
+});
+
 // ============================================================================
 // [P2-T5c]: defaultPkColumnName propagates through withSchema — Option A
 //
@@ -5901,47 +5909,25 @@ describe('PgAdapter [P2-T5b]: transaction() preserves full config', () => {
 
 describe('PgAdapter [P2-T5c]: defaultPkColumnName propagates through withSchema', () => {
 	it('custom defaultPkColumnName appears in EXISTS correlation after withSchema — removes defaultPkColumnName from cloneOptions → fails', () => {
-		// Build compile-only adapter with custom PK name
-		const adapter = createPgCompileOnlyAdapter({
-			defaultPkColumnName: 'custom_pk',
-		});
+		const spy = vi.spyOn(resolvedConditions, 'compileResolvedCondition');
+		try {
+			const adapter = createPgCompileOnlyAdapter({
+				model: keyAuthorityDb.model,
+				defaultPkColumnName: 'custom_pk',
+			});
 
-		const scoped = adapter.withSchema('s') as PgAdapter;
+			createOrm({ schema: keyAuthorityDb, adapter: adapter.withSchema('s') })
+				.select('users')
+				.where(exists('orders'))
+				.dump();
 
-		// Compile a plan with a WHERE-EXISTS decision that has NO explicit FK columns
-		// (no foreignKey, parentKey, or relationType). mapToHandlerDecision() calls
-		// deriveFkColumns() which uses defaultPk as sourceColumn (hasMany fallback):
-		//   sourceColumn = parentKey ?? defaultPk = 'custom_pk'
-		//   targetColumn = foreignKey ?? deriveFk('users', 'custom_pk') = '...'
-		// If defaultPkColumnName was NOT propagated, deriveFkColumns uses 'id' instead.
-		const plan = {
-			rootTable: 'users',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					operator: 'exists',
-					relation: 'orders',
-					targetTable: 'orders',
-					// foreignKey / parentKey / relationType deliberately omitted
-					// → deriveFkColumns() falls back to defaultPk / deriveFk
-				},
-			],
-		} as never;
-
-		const { sql } = compilePlan(plan, {
-			defaultPkColumnName: Reflect.get(scoped, 'defaultPk'),
-			deriveFkColumnName: Reflect.get(scoped, 'deriveFk'),
-			schema: 's',
-		});
-
-		// The source correlation column MUST be the custom PK, not the default 'id'.
-		// The deparser emits unquoted identifiers for simple column names.
-		// If cloneOptions() no longer copies defaultPkColumnName, this fails
-		// (sql would contain 'users.id' instead of 'users.custom_pk').
-		expect(sql).toContain('users.custom_pk');
-		// 'users.id' must NOT appear — proves we overrode the default
-		expect(sql).not.toMatch(/users\.id\b/);
+			// The model owns the relation keys, so the options never show in the
+			// SQL; the condition compiler receives them as its key authorities.
+			expect(spy).toHaveBeenCalledTimes(1);
+			expect(spy.mock.calls[0]?.[1].defaultPkColumnName).toBe('custom_pk');
+		} finally {
+			spy.mockRestore();
+		}
 	});
 });
 
@@ -5955,48 +5941,24 @@ describe('PgAdapter [P2-T5c]: defaultPkColumnName propagates through withSchema'
 
 describe('PgAdapter [P2-T5d]: deriveFkColumnName propagates through withSchema', () => {
 	it('custom deriveFkColumnName produces distinctive FK column after withSchema — removes deriveFkColumnName from cloneOptions → fails', () => {
-		// Custom derivation: always prefix with 'z_'
 		const customDerive = (table: string, pk: string) => `z_${table}_${pk}`;
+		const spy = vi.spyOn(resolvedConditions, 'compileResolvedCondition');
+		try {
+			const adapter = createPgCompileOnlyAdapter({
+				model: keyAuthorityDb.model,
+				deriveFkColumnName: customDerive,
+			});
 
-		const adapter = createPgCompileOnlyAdapter({
-			deriveFkColumnName: customDerive,
-		});
+			createOrm({ schema: keyAuthorityDb, adapter: adapter.withSchema('s') })
+				.select('users')
+				.where(exists('orders'))
+				.dump();
 
-		const scoped = adapter.withSchema('s') as PgAdapter;
-
-		// Compile a plan with a WHERE-EXISTS decision with no explicit FK columns.
-		// mapToHandlerDecision() calls deriveFkColumns() using the adapter's deriveFk:
-		//   targetColumn = foreignKey ?? deriveFk('users', 'id') = 'z_users_id'
-		// If deriveFkColumnName was NOT propagated, defaultFkDerivation is used
-		// and produces 'users_id' — the 'z_' prefix would be absent.
-		const plan = {
-			rootTable: 'users',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					operator: 'exists',
-					relation: 'orders',
-					targetTable: 'orders',
-					// foreignKey / parentKey / relationType deliberately omitted
-					// → deriveFkColumns falls back to deriveFk
-				},
-			],
-		} as never;
-
-		const { sql } = compilePlan(plan, {
-			defaultPkColumnName: Reflect.get(scoped, 'defaultPk'),
-			deriveFkColumnName: Reflect.get(scoped, 'deriveFk'),
-			schema: 's',
-		});
-
-		// The target column in the EXISTS correlation must carry the 'z_' prefix.
-		// The deparser emits unquoted identifiers for simple column names.
-		// If cloneOptions() no longer copies deriveFkColumnName, this assertion fails
-		// (sql would contain 'orders_exists_0.users_id' instead of 'z_users_id').
-		expect(sql).toContain('z_users_id');
-		// 'users_id' without the prefix must NOT appear
-		expect(sql).not.toMatch(/\.users_id\b/);
+			expect(spy).toHaveBeenCalledTimes(1);
+			expect(spy.mock.calls[0]?.[1].deriveFkColumnName).toBe(customDerive);
+		} finally {
+			spy.mockRestore();
+		}
 	});
 });
 
@@ -6015,42 +5977,28 @@ describe('PgAdapter [P2-T5e]: defaultPkColumnName + deriveFkColumnName propagate
 		const pool = makePool({ rows: [] }, txClient);
 
 		const adapter = new PgAdapter(pool, {
+			model: keyAuthorityDb.model,
 			defaultPkColumnName: 'custom_pk',
 			deriveFkColumnName: customDerive,
 		});
 
-		let capturedSql = '';
+		const spy = vi.spyOn(resolvedConditions, 'compileResolvedCondition');
+		try {
+			await adapter.transaction(async (tx) => {
+				createOrm({ schema: keyAuthorityDb, adapter: tx })
+					.select('users')
+					.where(exists('orders'))
+					.dump();
+			});
 
-		await adapter.transaction(async (tx) => {
-			// Same plan as P2-T5c/d — WHERE-EXISTS with no explicit FK columns.
 			// The tx adapter must carry both custom fields from cloneOptions().
-			const plan = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{
-						type: 'where',
-						operator: 'exists',
-						relation: 'orders',
-						targetTable: 'orders',
-						// foreignKey / parentKey / relationType deliberately omitted
-					},
-				],
-			} as never;
-
-			capturedSql = compilePlan(plan, {
-				defaultPkColumnName: Reflect.get(tx, 'defaultPk'),
-				deriveFkColumnName: Reflect.get(tx, 'deriveFk'),
-			}).sql;
-		});
-
-		// custom_pk: proves defaultPkColumnName propagated to tx adapter.
-		// The deparser emits unquoted identifiers for simple column names.
-		expect(capturedSql).toContain('users.custom_pk');
-		// z_users_custom_pk: proves deriveFkColumnName propagated AND was called
-		// with the custom PK name (not the default 'id').
-		// If either field is missing, 'users_id' would appear here instead.
-		expect(capturedSql).toContain('z_users_custom_pk');
+			expect(spy).toHaveBeenCalledTimes(1);
+			const ctx = spy.mock.calls[0]?.[1];
+			expect(ctx?.defaultPkColumnName).toBe('custom_pk');
+			expect(ctx?.deriveFkColumnName).toBe(customDerive);
+		} finally {
+			spy.mockRestore();
+		}
 	});
 });
 

@@ -888,6 +888,12 @@ describe('condition-body refusal classes', () => {
 		for (const [where, construct, position, issue] of [
 			[inBody({ groupBy: ['authorId'] }), 'GROUP BY', 'IN', 1087],
 			[inBody({ having: eq('authorId', 1) }), 'HAVING', 'IN', 1087],
+			[
+				inBody({ groupBy: ['authorId'], having: eq('authorId', 1) }),
+				'GROUP BY',
+				'IN',
+				1087,
+			],
 			[inBody({ distinctOn: ['authorId'] }), 'DISTINCT ON', 'IN', 1087],
 			[inBody({ include: flat }), 'flat include', 'IN', 1087],
 			[inBody({ joins: join }), 'joins', 'IN', 1087],

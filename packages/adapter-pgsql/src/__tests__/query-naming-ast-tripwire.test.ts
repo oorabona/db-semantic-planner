@@ -405,16 +405,16 @@ describe('query naming syntax tripwire for literal member and call forms', () =>
 			model,
 			adapter: createPgCompileOnlyAdapter({ model, dbCasing: 'snake_case' }),
 		});
-		expect(
-			orm
-				.select('posts')
-				.groupBy(['id'])
-				.sum('amount', 'totalAmount')
-				.having(gt('totalAmount', 10))
-				.dump().sql,
-		).toBe(
+		const dump = orm
+			.select('posts')
+			.groupBy(['id'])
+			.sum('amount', 'totalAmount')
+			.having(gt('totalAmount', 10))
+			.dump();
+		expect(dump.sql).toBe(
 			'SELECT posts.id, sum(posts.amount) AS "totalAmount" FROM posts GROUP BY posts.id HAVING sum(posts.amount) > $1',
 		);
+		expect(dump.params).toEqual([10]);
 	});
 
 	it('casts HAVING operands to aggregate result types', () => {

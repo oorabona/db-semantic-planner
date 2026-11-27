@@ -11,85 +11,102 @@
  * Previously the compiler would have emitted `calls.id` (root table qualified).
  */
 
-import {
-	compilePlan,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
-import { eq, exprRef, fn } from '@dbsp/core';
-import type { CustomFnExpressionIntent } from '@dbsp/types';
+import { createOrm, eq, exprRef, fn, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { normalizeSQL } from '../ast-helpers.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
-function compileFnExpr(
-	expr: ReturnType<typeof fn>,
-	rootTable = 'calls',
-): string {
-	const intent = (expr as unknown as { intent: CustomFnExpressionIntent })
-		.intent;
-	const plan: SimplifiedPlanReport = {
-		rootTable,
-		decisions: [
-			{
-				type: 'selectCustomExpression',
-				expressionIntent: intent,
-				alias: 'result',
-			},
-		],
-	};
-	return normalizeSQL(compilePlan(plan).sql);
-}
+const db = schema({
+	symbols: {
+		id: { type: 'integer', primaryKey: true },
+	},
+	calls: {
+		id: { type: 'integer', primaryKey: true },
+		name: { type: 'text' },
+		active: { type: 'boolean' },
+		callee_id: ref('symbols', { as: 'callee', inverse: 'callee_calls' }),
+	},
+} as const);
+const orm = createOrm({
+	schema: db,
+	adapter: createPgCompileOnlyAdapter({ model: db.model }),
+});
 
 describe('FN-REF-ALIAS: exprRef() inside fn() column qualification', () => {
 	it('exprRef("id") without dot → unqualified id, not calls.id', () => {
-		const sql = compileFnExpr(fn('array_agg', exprRef('id')));
-		// Deparser emits unquoted lowercase: array_agg(id)
-		expect(sql).toContain('array_agg(id)');
-		// Must NOT have root table prefix
-		expect(sql).not.toContain('calls.id');
+		const { sql, params } = orm
+			.select('calls')
+			.columns([fn('array_agg', exprRef('id')).as('result')])
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT array_agg(id) AS result FROM calls',
+			params: [],
+		});
 	});
 
 	it('exprRef("name") without dot → unqualified name', () => {
-		const sql = compileFnExpr(fn('array_agg', exprRef('name')));
-		expect(sql).toContain('array_agg(name)');
-		expect(sql).not.toContain('calls.name');
+		const { sql, params } = orm
+			.select('calls')
+			.columns([fn('array_agg', exprRef('name')).as('result')])
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT array_agg(name) AS result FROM calls',
+			params: [],
+		});
 	});
 
 	it('exprRef("callee.id") with dot → table-qualified callee.id', () => {
-		const sql = compileFnExpr(fn('array_agg', exprRef('callee.id')));
-		expect(sql).toContain('callee.id');
-		// The table prefix should be 'callee', not 'calls' (root table)
-		expect(sql).not.toContain('calls.id');
+		const { sql, params } = orm
+			.select('calls')
+			.join('callee')
+			.columns([fn('array_agg', exprRef('callee.id')).as('result')])
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT array_agg(callee.id) AS result FROM calls JOIN symbols AS callee ON calls.callee_id = callee.id',
+			params: [],
+		});
 	});
 
 	it('fn() with exprRef() arg + filter: arg is unqualified, filter uses rootTable', () => {
-		const expr = fn('array_agg', exprRef('id')).filter(eq('active', true));
-		const sql = compileFnExpr(expr);
-		// array_agg argument must be unqualified
-		expect(sql).toContain('array_agg(id)');
-		expect(sql).not.toContain('calls.id');
-		// FILTER clause uses root table for plain field refs (expected)
-		expect(sql).toContain('filter (where');
+		const { sql, params } = orm
+			.select('calls')
+			.columns([
+				fn('array_agg', exprRef('id')).filter(eq('active', true)).as('result'),
+			])
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT array_agg(id) FILTER (WHERE calls.active = $1) AS result FROM calls',
+			params: [true],
+		});
 	});
 
 	it('string arg shorthand inside fn() → same as exprRef() — unqualified', () => {
 		// fn('array_agg', 'id') is equivalent to fn('array_agg', exprRef('id'))
-		// toExpressionIntent converts strings to ref kind
-		const sql = compileFnExpr(fn('array_agg', 'id'));
-		expect(sql).toContain('array_agg(id)');
-		expect(sql).not.toContain('calls.id');
+		const { sql, params } = orm
+			.select('calls')
+			.columns([fn('array_agg', 'id').as('result')])
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT array_agg(id) AS result FROM calls',
+			params: [],
+		});
 	});
 
 	it('nested fn(): inner exprRef() stays unqualified', () => {
-		const sql = compileFnExpr(
-			fn(
-				'coalesce',
-				fn('array_agg', exprRef('id')),
-				fn('array_agg', exprRef('name')),
-			),
-		);
-		expect(sql).toContain('array_agg(id)');
-		expect(sql).toContain('array_agg(name)');
-		expect(sql).not.toContain('calls.id');
-		expect(sql).not.toContain('calls.name');
+		// The outer function is concat, not coalesce: fn('coalesce', ...) emits a
+		// quoted "coalesce"(...) that PostgreSQL rejects (#1109).
+		const { sql, params } = orm
+			.select('calls')
+			.columns([
+				fn(
+					'concat',
+					fn('array_agg', exprRef('id')),
+					fn('array_agg', exprRef('name')),
+				).as('result'),
+			])
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT concat(array_agg(id), array_agg(name)) AS result FROM calls',
+			params: [],
+		});
 	});
 });

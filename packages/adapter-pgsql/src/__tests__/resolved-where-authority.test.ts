@@ -145,12 +145,15 @@ describe('resolved root WHERE refusal proofs (#891)', () => {
 			'SELECT calls.* FROM calls JOIN users AS caller ON calls."callerId" = caller.id WHERE caller.name = $1 AND EXISTS (SELECT comments_sq.id FROM comments AS comments_sq WHERE comments_sq."postId" = caller.id)',
 		);
 		expect(compiled.parameters).toEqual(['Ada']);
-		expect(
-			orm.select('calls').join('caller').where(eq('caller.name', 'Ada')).dump()
-				.sql,
-		).toBe(
+		const lone = orm
+			.select('calls')
+			.join('caller')
+			.where(eq('caller.name', 'Ada'))
+			.dump();
+		expect(lone.sql).toBe(
 			'SELECT calls.* FROM calls JOIN users AS caller ON calls."callerId" = caller.id WHERE caller.name = $1',
 		);
+		expect(lone.params).toEqual(['Ada']);
 	});
 	it('3: explicit alias, self-join root name, predicate target and nearest outer range', () => {
 		expect(

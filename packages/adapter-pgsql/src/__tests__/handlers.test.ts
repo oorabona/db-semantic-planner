@@ -4,7 +4,7 @@ import { compileWhereIntent } from '../condition-compiler.js';
  * Tests for Handler Infrastructure (Block 1)
  */
 
-import { compilePlan } from '@dbsp/adapter-pgsql/internal';
+import { createOrm, ref, schema } from '@dbsp/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as includeHandlerModule from '../handlers/include/index.js';
 import {
@@ -34,6 +34,7 @@ import {
 	registerWhereHandler,
 	type WhereHandler,
 } from '../handlers/index.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 function expectOneLineError(fn: () => unknown, expected: string): void {
 	expect(fn).toThrow(expected);
@@ -180,23 +181,19 @@ describe('Handler Infrastructure', () => {
 
 	describe('INCLUDE Handler Registry', () => {
 		const compile: IncludeHandler['compile'] = () => ({ targets: [] });
+		const includeDb = schema({
+			authors: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				authorId: ref('authors', { as: 'author' }),
+			},
+		});
+		const includeOrm = createOrm({
+			schema: includeDb,
+			adapter: createPgCompileOnlyAdapter({ model: includeDb.model }),
+		});
 		const compileIncludePlan = () =>
-			compilePlan({
-				rootTable: 'posts',
-				decisions: [
-					{ type: 'select', column: '*', table: 'posts' },
-					{
-						type: 'includeStrategy',
-						choice: 'join',
-						relationName: 'author',
-						targetTable: 'authors',
-						relationType: 'belongsTo',
-						foreignKey: 'author_id',
-						parentKey: 'id',
-						columns: ['id', 'name'],
-					},
-				],
-			});
+			includeOrm.select('posts').include('author').dump();
 
 		it('freezes the built-in strategy set at runtime', () => {
 			expect(() =>
@@ -214,7 +211,9 @@ describe('Handler Infrastructure', () => {
 			]);
 
 			expect(() => ensureIncludeHandlersRegistered()).toThrow(
-				`Invalid INCLUDE handler strategy: __nope__ is not one of ${INCLUDE_STRATEGIES.join(', ')}`,
+				new Error(
+					`Invalid INCLUDE handler strategy: __nope__ is not one of ${INCLUDE_STRATEGIES.join(', ')}`,
+				),
 			);
 			expect(getRegisteredOperators().include).toEqual([]);
 			expect(() => compileIncludePlan()).not.toThrow();
@@ -228,15 +227,21 @@ describe('Handler Infrastructure', () => {
 				.mockReturnValueOnce([{ strategy: ' \t', compile }] as any);
 
 			expect(() => ensureIncludeHandlersRegistered()).toThrow(
-				'Invalid INCLUDE handler strategy: expected a string, received number',
+				new Error(
+					'Invalid INCLUDE handler strategy: expected a string, received number',
+				),
 			);
 			expect(getRegisteredOperators().include).toEqual([]);
 			expect(() => ensureIncludeHandlersRegistered()).toThrow(
-				'Invalid INCLUDE handler strategy: cannot be empty (received )',
+				new Error(
+					'Invalid INCLUDE handler strategy: cannot be empty (received )',
+				),
 			);
 			expect(getRegisteredOperators().include).toEqual([]);
 			expect(() => ensureIncludeHandlersRegistered()).toThrow(
-				/Invalid INCLUDE handler strategy: cannot be blank/,
+				new Error(
+					'Invalid INCLUDE handler strategy: cannot be blank (received  \\t)',
+				),
 			);
 			expect(getRegisteredOperators().include).toEqual([]);
 			expect(() => compileIncludePlan()).not.toThrow();

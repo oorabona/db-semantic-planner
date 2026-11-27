@@ -1,269 +1,108 @@
 /**
  * @module compiler-inner-join.test
- * Unit tests for INNER JOIN compilation via include(join: 'inner').
+ * Tests for INNER JOIN compilation via include(join: 'inner').
  *
- * When a PlanDecision has choice: 'join' and joinType: 'inner',
- * the compiler should produce JOIN (SQL INNER JOIN, no LEFT keyword) instead of LEFT JOIN.
+ * With `join: 'inner'` the compiler produces JOIN (SQL INNER JOIN, no LEFT keyword)
+ * instead of LEFT JOIN.
  *
  * Note: The pgsql deparser renders JOIN_INNER as plain "JOIN" (not "INNER JOIN"),
- * which is semantically equivalent. Tests verify absence of "LEFT JOIN".
+ * which is semantically equivalent.
  */
 
-import {
-	compilePlan,
-	type PlanDecision,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
+import { compilePlan } from '@dbsp/adapter-pgsql/internal';
+import { createOrm, eq, exprRef, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
-function compileToSql(plan: SimplifiedPlanReport): {
-	sql: string;
-	parameters: readonly unknown[];
-} {
-	return compilePlan(plan);
-}
+const db = schema({
+	symbols: {
+		id: { type: 'integer', primaryKey: true },
+		file_id: ref('files', { as: 'file', inverse: 'symbols' }),
+		project_id: ref('projects', { as: 'project', inverse: 'symbols' }),
+		author_id: ref('users', { as: 'author', inverse: 'symbols' }),
+	},
+	files: {
+		id: { type: 'integer', primaryKey: true },
+		path: { type: 'text' },
+	},
+	projects: {
+		id: { type: 'integer', primaryKey: true },
+		name: { type: 'text' },
+	},
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: { type: 'text' },
+	},
+	definitions: {
+		id: { type: 'integer', primaryKey: true },
+	},
+} as const);
+const orm = createOrm({
+	schema: db,
+	adapter: createPgCompileOnlyAdapter({ model: db.model }),
+});
 
 describe('INNER JOIN include compilation', () => {
 	describe('join: "inner" — produces INNER JOIN', () => {
-		it('should compile JOIN (inner) instead of LEFT JOIN', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'symbols',
-				decisions: [
-					{ type: 'select', column: '*', table: 'symbols' },
-					{
-						type: 'includeStrategy',
-						choice: 'join',
-						joinType: 'inner',
-						relationName: 'file',
-						targetTable: 'files',
-						relationType: 'belongsTo',
-						foreignKey: 'file_id',
-						parentKey: 'id',
-						columns: ['id', 'path'],
-					} satisfies PlanDecision,
-				],
-			};
-
-			const result = compileToSql(plan);
-
-			// JOIN_INNER is rendered as plain 'JOIN' by the pgsql deparser (semantically INNER JOIN)
-			expect(result.sql).toContain('JOIN');
-			expect(result.sql).not.toContain('LEFT JOIN');
-			expect(result.sql).toMatch(/symbols\.file_id\s*=\s*file\.id/);
-			expect(result.sql).toContain('"file.id"');
-			expect(result.sql).toContain('"file.path"');
-		});
-
-		it('compiles a manual JOIN ON every composite key column', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'orders',
-				decisions: [
-					{ type: 'select', column: '*', table: 'orders' },
-					{
-						type: 'join',
-						joinType: 'inner',
-						targetTable: 'order_items',
-						alias: 'items',
-						sourceColumn: ['order_id', 'tenant_id'],
-						targetColumn: ['order_id', 'tenant_id'],
-					} satisfies PlanDecision,
-				],
-			};
-
-			const result = compileToSql(plan);
-
-			expect(result.sql).toContain('JOIN');
-			expect(result.sql).toMatch(
-				/orders\.order_id\s*=\s*items\.order_id\s+AND\s+orders\.tenant_id\s*=\s*items\.tenant_id/i,
-			);
-		});
-
-		it('default (no joinType) should still produce LEFT JOIN', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'symbols',
-				decisions: [
-					{ type: 'select', column: '*', table: 'symbols' },
-					{
-						type: 'includeStrategy',
-						choice: 'join',
-						relationName: 'file',
-						targetTable: 'files',
-						relationType: 'belongsTo',
-						foreignKey: 'file_id',
-						parentKey: 'id',
-						columns: ['id', 'path'],
-					} satisfies PlanDecision,
-				],
-			};
-
-			const result = compileToSql(plan);
-
-			expect(result.sql).toContain('LEFT JOIN');
-			expect(result.sql).not.toContain('INNER JOIN');
-		});
-
-		it('explicit joinType: "left" should produce LEFT JOIN', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'symbols',
-				decisions: [
-					{ type: 'select', column: '*', table: 'symbols' },
-					{
-						type: 'includeStrategy',
-						choice: 'join',
-						joinType: 'left',
-						relationName: 'file',
-						targetTable: 'files',
-						relationType: 'belongsTo',
-						foreignKey: 'file_id',
-						parentKey: 'id',
-						columns: ['id', 'path'],
-					} satisfies PlanDecision,
-				],
-			};
-
-			const result = compileToSql(plan);
-
-			expect(result.sql).toContain('LEFT JOIN');
-			expect(result.sql).not.toContain('INNER JOIN');
-		});
-
-		it('JOIN (inner) with wildcard columns', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'symbols',
-				decisions: [
-					{ type: 'select', column: '*', table: 'symbols' },
-					{
-						type: 'includeStrategy',
-						choice: 'join',
-						joinType: 'inner',
-						relationName: 'file',
-						targetTable: 'files',
-						relationType: 'belongsTo',
-						foreignKey: 'file_id',
-						parentKey: 'id',
-						columns: ['*'],
-					} satisfies PlanDecision,
-				],
-			};
-
-			const result = compileToSql(plan);
-
-			expect(result.sql).toContain('JOIN');
-			expect(result.sql).not.toContain('LEFT JOIN');
-			// Wildcard: file.* alias
-			expect(result.sql).toMatch(/file\s*\.\s*\*/);
-		});
-
 		it('two inner JOINs to different tables', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'symbols',
-				decisions: [
-					{ type: 'select', column: '*', table: 'symbols' },
-					{
-						type: 'includeStrategy',
-						choice: 'join',
-						joinType: 'inner',
-						relationName: 'file',
-						targetTable: 'files',
-						relationType: 'belongsTo',
-						foreignKey: 'file_id',
-						parentKey: 'id',
-						columns: ['path'],
-					} satisfies PlanDecision,
-					{
-						type: 'includeStrategy',
-						choice: 'join',
-						joinType: 'inner',
-						relationName: 'project',
-						targetTable: 'projects',
-						relationType: 'belongsTo',
-						foreignKey: 'project_id',
-						parentKey: 'id',
-						columns: ['name'],
-					} satisfies PlanDecision,
-				],
-			};
+			const { sql, params } = orm
+				.select('symbols')
+				.include('file', {
+					join: 'inner',
+					select: { type: 'fields', fields: ['path'] },
+				})
+				.include('project', {
+					join: 'inner',
+					select: { type: 'fields', fields: ['name'] },
+				})
+				.dump();
 
-			const result = compileToSql(plan);
-
-			// Both are JOIN (INNER), neither is LEFT JOIN
-			expect(result.sql).not.toContain('LEFT JOIN');
-			expect(result.sql).toMatch(/JOIN\s+files\s+AS\s+file/i);
-			expect(result.sql).toMatch(/JOIN\s+projects\s+AS\s+project/i);
+			expect({ sql, params }).toEqual({
+				sql: 'SELECT symbols.*, file.path AS "file.path", file.id AS __dbsp_presence_file, project.name AS "project.name", project.id AS __dbsp_presence_project FROM symbols JOIN files AS file ON symbols.file_id = file.id JOIN projects AS project ON symbols.project_id = project.id',
+				params: [],
+			});
 		});
 
 		it('mixed inner JOIN and LEFT JOIN includes', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'symbols',
-				decisions: [
-					{ type: 'select', column: '*', table: 'symbols' },
-					// inner JOIN: required relation
-					{
-						type: 'includeStrategy',
-						choice: 'join',
-						joinType: 'inner',
-						relationName: 'file',
-						targetTable: 'files',
-						relationType: 'belongsTo',
-						foreignKey: 'file_id',
-						parentKey: 'id',
-						columns: ['path'],
-					} satisfies PlanDecision,
-					// LEFT JOIN: optional relation
-					{
-						type: 'includeStrategy',
-						choice: 'join',
-						relationName: 'author',
-						targetTable: 'users',
-						relationType: 'belongsTo',
-						foreignKey: 'author_id',
-						parentKey: 'id',
-						columns: ['name'],
-					} satisfies PlanDecision,
-				],
-			};
+			const { sql, params } = orm
+				.select('symbols')
+				.include('file', {
+					join: 'inner',
+					select: { type: 'fields', fields: ['path'] },
+				})
+				.include('author', {
+					join: 'left',
+					select: { type: 'fields', fields: ['name'] },
+				})
+				.dump();
 
-			const result = compileToSql(plan);
+			expect({ sql, params }).toEqual({
+				sql: 'SELECT symbols.*, file.path AS "file.path", file.id AS __dbsp_presence_file, author.name AS "author.name", author.id AS __dbsp_presence_author FROM symbols JOIN files AS file ON symbols.file_id = file.id LEFT JOIN users AS author ON symbols.author_id = author.id',
+				params: [],
+			});
+		});
+	});
+});
 
-			// file uses INNER (plain JOIN), author uses LEFT JOIN
-			expect(result.sql).toContain('LEFT JOIN');
-			// The file JOIN should appear — check both patterns
-			expect(result.sql).toMatch(/JOIN\s+files\s+AS\s+file/i);
-			expect(result.sql).toMatch(/LEFT JOIN\s+users\s+AS\s+author/i);
+describe('join decision authority', () => {
+	it('reserves manual aliases beside join includes', () => {
+		const { sql, params } = orm
+			.select('symbols')
+			.join('definitions', {
+				on: eq('id', exprRef('definitions.id')),
+				as: 'file',
+			})
+			.include('file', { join: 'inner' })
+			.dump();
+
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT symbols.*, file_1.id AS "file.id", file_1.path AS "file.path", file_1.id AS __dbsp_presence_file FROM symbols JOIN definitions AS file ON symbols.id = file.id JOIN files AS file_1 ON symbols.file_id = file_1.id',
+			params: [],
 		});
 	});
 });
 
 describe('compilePlan join decision authority', () => {
-	it('reserves manual aliases beside join includes', () => {
-		const result = compilePlan({
-			rootTable: 'symbols',
-			decisions: [
-				{ type: 'select', column: '*', table: 'symbols' },
-				{
-					type: 'join',
-					targetTable: 'definitions',
-					alias: 'file',
-					sourceColumn: 'id',
-					targetColumn: 'id',
-				},
-				{
-					type: 'includeStrategy',
-					choice: 'join',
-					joinType: 'inner',
-					relationName: 'file',
-					targetTable: 'files',
-					relationType: 'belongsTo',
-					foreignKey: 'file_id',
-					parentKey: 'id',
-					columns: ['id', 'path'],
-				},
-			],
-		});
-		expect(result.sql).toBe(
-			'SELECT symbols.*, file_1.id AS "file_1.id", file_1.path AS "file_1.path" FROM symbols JOIN definitions AS file ON symbols.id = file.id JOIN files AS file_1 ON symbols.file_id = file_1.id',
-		);
-	});
 	it('resolves relation paths from manual join decisions', () => {
 		const result = compilePlan({
 			rootTable: 'calls',

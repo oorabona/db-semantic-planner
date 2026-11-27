@@ -7,21 +7,13 @@
  * 3. Self-join pattern for find-duplicates using .join(..., { on, as })
  *
  * All tests use the compile-only adapter (no DB required).
- * SQL assertions use normalizeSQL + toContain / toBe (exact).
- *
- * Note on SQL quoting:
- * - compilePlan() with SimplifiedPlanReport produces unquoted SQL (no model → no naming plugin)
- * - orm.select() with a real model produces double-quoted SQL
+ * Every query goes through the model-carrying ORM and `.dump()`; the full SQL
+ * and params are asserted.
  */
 
-import {
-	compilePlan,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
 import { createOrm, exprRef, op, schema } from '@dbsp/core';
 import type { WhereComparisonIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { normalizeSQL } from '../ast-helpers.js';
 import {
 	cosineDistance,
 	rawDistance,
@@ -37,54 +29,26 @@ const testSchema = schema({
 	},
 });
 
-type ExprRef = ReturnType<typeof vectorDims>;
-
-function exprIntent(expr: ExprRef): unknown {
-	return (expr as unknown as { intent: unknown }).intent;
-}
-
-function compileSelect(
-	expr: ExprRef,
-	alias: string,
-): { sql: string; parameters: readonly unknown[] } {
-	const plan: SimplifiedPlanReport = {
-		rootTable: 'embeddings',
-		decisions: [
-			{
-				type: 'selectCustomExpression',
-				expressionIntent: exprIntent(expr),
-				alias,
-			},
-		],
-	};
-	return compilePlan(plan);
-}
-
-function compileOrderBy(
-	expressionIntent: unknown,
-	direction: 'ASC' | 'DESC' = 'ASC',
-): { sql: string; parameters: readonly unknown[] } {
-	const plan: SimplifiedPlanReport = {
-		rootTable: 'embeddings',
-		decisions: [
-			{ type: 'select', column: '*' },
-			{ type: 'orderBy', expressionIntent, direction },
-		],
-	};
-	return compilePlan(plan);
-}
+const orm = createOrm({
+	model: testSchema.model,
+	adapter: createPgCompileOnlyAdapter({ model: testSchema.model }),
+});
 
 const QV = [0.1, 0.2, 0.3];
 
 describe('vectorDims', () => {
+	const dims = () =>
+		orm
+			.select('embeddings')
+			.columns([vectorDims('vector').as('dim')])
+			.dump();
+
 	it('compiles to vector_dims(col) in SELECT', () => {
-		const expr = vectorDims('vector');
-		const { sql, parameters } = compileSelect(expr, 'dim');
-		const normalized = normalizeSQL(sql);
-		expect(normalized).toEqual(
-			'select vector_dims(vector) as dim from embeddings',
-		);
-		expect(parameters).toHaveLength(0);
+		const { sql, params } = dims();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT vector_dims(vector) AS dim FROM embeddings',
+			params: [],
+		});
 	});
 
 	it('returns ExpressionRef chainable with .as() — alias stored in intent', () => {
@@ -96,152 +60,105 @@ describe('vectorDims', () => {
 	});
 
 	it('produces no bound parameters', () => {
-		const { sql, parameters } = compileSelect(vectorDims('vector'), 'dim');
-		expect(parameters).toHaveLength(0);
-		expect(normalizeSQL(sql)).not.toContain('$1');
+		const { sql, params } = dims();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT vector_dims(vector) AS dim FROM embeddings',
+			params: [],
+		});
 	});
 
 	it('SQL contains FROM embeddings table', () => {
-		const { sql } = compileSelect(vectorDims('vector'), 'dim');
-		expect(normalizeSQL(sql)).toEqual(
-			'select vector_dims(vector) as dim from embeddings',
+		expect(dims().sql).toBe(
+			'SELECT vector_dims(vector) AS dim FROM embeddings',
 		);
 	});
 });
 
 describe('cosineDistance — SELECT', () => {
+	const scored = () =>
+		orm
+			.select('embeddings')
+			.columns([cosineDistance('vector', QV).as('score')])
+			.dump();
+
 	it('compiles 1 - (col <=> $1::vector) in SELECT', () => {
-		const expr = cosineDistance('vector', QV);
-		const { sql, parameters } = compileSelect(expr as ExprRef, 'score');
-		const normalized = normalizeSQL(sql);
-		expect(normalized).toEqual(
-			'select 1 - (vector <=> cast($1 as vector)) as score from embeddings',
-		);
-		expect(parameters).toHaveLength(1);
-		expect(parameters[0]).toEqual(QV);
+		const { sql, params } = scored();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT 1 - (vector <=> CAST($1 AS vector)) AS score FROM embeddings',
+			params: [QV],
+		});
 	});
 
 	it('CAST($N AS vector) appears in SELECT SQL', () => {
-		const { sql } = compileSelect(cosineDistance('vector', QV) as ExprRef, 's');
-		expect(normalizeSQL(sql)).toMatch(/cast\(\$\d+ as vector\)/);
+		const { sql, params } = scored();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT 1 - (vector <=> CAST($1 AS vector)) AS score FROM embeddings',
+			params: [QV],
+		});
 	});
 });
 
 describe('cosineDistance — WHERE', () => {
 	it('compiles cosineDistance expression in WHERE with gte threshold', () => {
-		const intent = exprIntent(
-			cosineDistance('vector', QV) as ExprRef,
-		) as Record<string, unknown>;
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'embeddings',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					operator: 'expression',
-					expressionIntent: intent,
-					value: 0.8,
-					subqueryOperator: '>=',
-				},
-			],
-		};
-		const { sql, parameters } = compilePlan(plan);
-		const normalized = normalizeSQL(sql);
-		expect(normalized).toEqual(
-			'select * from embeddings where (1 - (vector <=> cast($1 as vector))) >= $2',
-		);
-		expect(parameters).toHaveLength(2);
-		expect(parameters[0]).toEqual(QV);
-		expect(parameters[1]).toBe(0.8);
+		const { sql, params } = orm
+			.select('embeddings')
+			.where(cosineDistance('vector', QV).gte(0.8))
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT embeddings.* FROM embeddings WHERE (1 - (embeddings.vector <=> CAST($1 AS vector))) >= $2',
+			params: [QV, 0.8],
+		});
 	});
 
 	it('WHERE with lt threshold has correct parameter order', () => {
-		const intent = exprIntent(
-			cosineDistance('vector', QV) as ExprRef,
-		) as Record<string, unknown>;
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'embeddings',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					operator: 'expression',
-					expressionIntent: intent,
-					value: 0.3,
-					subqueryOperator: '<',
-				},
-			],
-		};
-		const { sql, parameters } = compilePlan(plan);
-		const normalized = normalizeSQL(sql);
-		expect(normalized).toEqual(
-			'select * from embeddings where (1 - (vector <=> cast($1 as vector))) < $2',
-		);
-		expect(parameters[1]).toBe(0.3);
+		const { sql, params } = orm
+			.select('embeddings')
+			.where(cosineDistance('vector', QV).lt(0.3))
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT embeddings.* FROM embeddings WHERE (1 - (embeddings.vector <=> CAST($1 AS vector))) < $2',
+			params: [QV, 0.3],
+		});
 	});
 });
 
 describe('cosineDistance — ORDER BY', () => {
 	it('compiles rawDistance in ORDER BY ASC', () => {
-		const expr = rawDistance('vector', QV);
-		const intent = exprIntent(expr as ExprRef);
-		const { sql, parameters } = compileOrderBy(intent, 'ASC');
-		const normalized = normalizeSQL(sql);
-		expect(normalized).toEqual(
-			'select * from embeddings order by vector <=> cast($1 as vector) asc',
-		);
-		expect(parameters[0]).toEqual(QV);
+		const { sql, params } = orm
+			.select('embeddings')
+			.orderBy(rawDistance('vector', QV), 'asc')
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT embeddings.* FROM embeddings ORDER BY vector <=> CAST($1 AS vector) ASC',
+			params: [QV],
+		});
 	});
 
 	it('compiles cosineDistance in ORDER BY DESC', () => {
-		const expr = cosineDistance('vector', QV);
-		const intent = exprIntent(expr as ExprRef);
-		const { sql, parameters } = compileOrderBy(intent, 'DESC');
-		const normalized = normalizeSQL(sql);
-		expect(normalized).toEqual(
-			'select * from embeddings order by 1 - (vector <=> cast($1 as vector)) desc',
-		);
-		expect(parameters[0]).toEqual(QV);
+		const { sql, params } = orm
+			.select('embeddings')
+			.orderBy(cosineDistance('vector', QV), 'desc')
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT embeddings.* FROM embeddings ORDER BY 1 - (vector <=> CAST($1 AS vector)) DESC',
+			params: [QV],
+		});
 	});
 });
 
 describe('cosineDistance — full ANN search pipeline', () => {
 	it('SELECT score + WHERE threshold + ORDER BY raw distance + LIMIT', () => {
-		const simExpr = cosineDistance('vector', QV);
-		const distExpr = rawDistance('vector', QV);
-		const distIntent = exprIntent(distExpr as ExprRef);
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'embeddings',
-			decisions: [
-				{ type: 'select', column: 'id' },
-				{
-					type: 'selectCustomExpression',
-					expressionIntent: exprIntent(simExpr as ExprRef),
-					alias: 'score',
-				},
-				{
-					type: 'where',
-					operator: 'expression',
-					expressionIntent: exprIntent(simExpr as ExprRef) as Record<
-						string,
-						unknown
-					>,
-					value: 0.5,
-					subqueryOperator: '>=',
-				},
-				{ type: 'orderBy', expressionIntent: distIntent, direction: 'ASC' },
-				{ type: 'limit', limit: 10 },
-			],
-		};
-		const { sql, parameters } = compilePlan(plan);
-		const normalized = normalizeSQL(sql);
-		expect(normalized).toEqual(
-			'select id, 1 - (vector <=> cast($1 as vector)) as score from embeddings where (1 - (vector <=> cast($2 as vector))) >= $3 order by vector <=> cast($4 as vector) asc limit 10',
-		);
-		expect(parameters).toHaveLength(4);
-		expect(parameters[0]).toEqual(QV);
-		expect(parameters[2]).toBe(0.5);
-		expect(parameters[3]).toEqual(QV);
+		const { sql, params } = orm
+			.select('embeddings')
+			.columns(['id', cosineDistance('vector', QV).as('score')])
+			.where(cosineDistance('vector', QV).gte(0.5))
+			.orderBy(rawDistance('vector', QV), 'asc')
+			.limit(10)
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT embeddings.id, 1 - (vector <=> CAST($1 AS vector)) AS score FROM embeddings WHERE (1 - (embeddings.vector <=> CAST($2 AS vector))) >= $3 ORDER BY vector <=> CAST($4 AS vector) ASC LIMIT 10',
+			params: [QV, QV, 0.5, QV],
+		});
 	});
 });
 
@@ -290,56 +207,33 @@ describe('self-join: find-duplicates pattern', () => {
 	});
 
 	it('col-vs-col <=> in SELECT produces zero params', () => {
-		const expr = op('<=>', exprRef('e1.vector'), exprRef('e2.vector'));
-		const intent = exprIntent(expr as ExprRef);
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'embeddings',
-			decisions: [
-				{
-					type: 'selectCustomExpression',
-					expressionIntent: intent,
-					alias: 'dist',
-				},
-			],
-		};
-		const { sql, parameters } = compilePlan(plan);
-		const normalized = normalizeSQL(sql);
-		expect(normalized).toEqual(
-			'select e1.vector <=> e2.vector as dist from embeddings',
-		);
-		expect(parameters).toHaveLength(0);
+		const { sql, params } = orm
+			.select('embeddings')
+			.join('embeddings', { on: selfJoinOn, as: 'e2', type: 'inner' })
+			.columns([
+				op('<=>', exprRef('embeddings.vector'), exprRef('e2.vector')).as(
+					'dist',
+				),
+			])
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT embeddings.vector <=> e2.vector AS dist FROM embeddings JOIN embeddings AS e2 ON embeddings.id < e2.id',
+			params: [],
+		});
 	});
 
 	it('self-join with cosineDistance in WHERE uses col-vs-col expr', () => {
 		// Verify: op(<=> ref ref) in WHERE with .lt() threshold
-		const distExpr = op(
-			'<=>',
-			exprRef('embeddings.vector'),
-			exprRef('e2.vector'),
-		);
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'embeddings',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					operator: 'expression',
-					expressionIntent: exprIntent(distExpr as ExprRef) as Record<
-						string,
-						unknown
-					>,
-					value: 0.2,
-					subqueryOperator: '<',
-				},
-			],
-		};
-		const { sql, parameters } = compilePlan(plan);
-		const normalized = normalizeSQL(sql);
-		expect(normalized).toEqual(
-			'select * from embeddings where (embeddings.vector <=> e2.vector) < $1',
-		);
-		// params: just the threshold — no vector param (col-vs-col)
-		expect(parameters).toHaveLength(1);
-		expect(parameters[0]).toBe(0.2);
+		const { sql, params } = orm
+			.select('embeddings')
+			.join('embeddings', { on: selfJoinOn, as: 'e2', type: 'inner' })
+			.where(
+				op('<=>', exprRef('embeddings.vector'), exprRef('e2.vector')).lt(0.2),
+			)
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT embeddings.* FROM embeddings JOIN embeddings AS e2 ON embeddings.id < e2.id WHERE (embeddings.vector <=> e2.vector) < $1',
+			params: [0.2],
+		});
 	});
 });

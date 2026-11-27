@@ -11,10 +11,6 @@ import { EXPRESSION_BRAND } from '@dbsp/types';
  */
 
 import {
-	compilePlan,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
-import {
 	and,
 	caseWhen,
 	createOrm,
@@ -97,83 +93,59 @@ describe('SubqueryExpression.asExpr()', () => {
 // ============================================================================
 
 describe('compileExpressionIntent — subquery kind', () => {
-	it('compiles a COUNT(*) subquery as a SELECT column', () => {
-		const intent = subquery('calls').count().asExpr('call_count')
-			.intent as SubqueryExpressionIntent;
-
-		const { sql } = compilePlan({
-			rootTable: 'symbols',
-			decisions: [
-				{
-					type: 'selectCustomExpression',
-					expressionIntent: intent,
-					alias: 'call_count',
-				},
-			],
-		});
-
-		// quoteIdent only quotes uppercase/reserved/special-char identifiers.
-		// Lowercase table/column names like calls, symbols, call_count are unquoted.
-		expect(normalizeSQL(sql)).toBe(
-			normalizeSQL(
-				`SELECT (SELECT count(*) FROM calls) AS call_count FROM symbols`,
-			),
-		);
-	});
-
 	it('compiles a MAX subquery as a SELECT column', () => {
-		const intent = subquery('products').max('price').asExpr('max_price')
-			.intent as SubqueryExpressionIntent;
-
-		const { sql } = compilePlan({
-			rootTable: 'categories',
-			decisions: [
-				{
-					type: 'selectCustomExpression',
-					expressionIntent: intent,
-					alias: 'max_price',
-				},
-			],
+		const db = schema({
+			categories: { id: { type: 'integer', primaryKey: true } },
+			products: { id: { type: 'integer', primaryKey: true }, price: 'integer' },
+		});
+		const orm = createOrm({
+			schema: db,
+			adapter: createPgCompileOnlyAdapter({ model: db.model }),
 		});
 
-		// quoteIdent only quotes uppercase/reserved/special-char identifiers.
-		// Lowercase names products, price, max_price, categories are unquoted.
-		expect(normalizeSQL(sql)).toBe(
-			normalizeSQL(
-				`SELECT (SELECT max(products.price) FROM products) AS max_price FROM categories`,
-			),
-		);
+		const { sql, params } = orm
+			.select('categories')
+			.columns([subquery('products').max('price').asExpr('max_price')])
+			.dump();
+
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT (SELECT max(products.price) FROM products) AS max_price FROM categories',
+			params: [],
+		});
 	});
 
-	it('compiles multiple subquery columns side by side', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'symbols',
-			decisions: [
-				{ type: 'select', column: 'id', table: 'symbols' },
-				{
-					type: 'selectCustomExpression',
-					expressionIntent: subquery('calls').count().asExpr('call_count')
-						.intent as SubqueryExpressionIntent,
-					alias: 'call_count',
-				},
-				{
-					type: 'selectCustomExpression',
-					expressionIntent: subquery('refs').count().asExpr('ref_count')
-						.intent as SubqueryExpressionIntent,
-					alias: 'ref_count',
-				},
-			],
-		};
-		const { sql } = compilePlan(plan);
+	it('numbers the select-list subquery param before the root WHERE param without collision', () => {
+		const db = schema({
+			symbols: {
+				id: { type: 'integer', primaryKey: true },
+				kind: 'text',
+			},
+			calls: {
+				id: { type: 'integer', primaryKey: true },
+				status: 'text',
+			},
+		});
+		const orm = createOrm({
+			schema: db,
+			adapter: createPgCompileOnlyAdapter({ model: db.model }),
+		});
 
-		// quoteIdent only quotes uppercase/reserved/special-char identifiers.
-		// Lowercase names are unquoted; just verify structural presence.
-		const normalized = normalizeSQL(sql);
-		expect(normalized).toContain('id');
-		expect(normalized).toContain('call_count');
-		expect(normalized).toContain('ref_count');
-		expect(normalized).toContain('from calls');
-		expect(normalized).toContain('from refs');
+		const { sql, params } = orm
+			.select('symbols')
+			.where(eq('kind', 'function'))
+			.columns([
+				'id',
+				subquery('calls')
+					.where(eq('status', 'active'))
+					.count()
+					.asExpr('call_count'),
+			])
+			.dump();
+
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT symbols.id, (SELECT count(*) FROM calls WHERE calls.status = $1) AS call_count FROM symbols WHERE symbols.kind = $2',
+			params: ['active', 'function'],
+		});
 	});
 
 	it('throws when ctx.compileSubquery is not set', async () => {
@@ -209,48 +181,6 @@ describe('compileExpressionIntent — subquery kind', () => {
 		expect(() => compileExpressionIntent(intent, ctx, state)).toThrow(
 			"'subquery' expression kind requires ctx.compileSubquery",
 		);
-	});
-});
-
-// ============================================================================
-// Parameter renumbering: outer query already has params
-// ============================================================================
-
-describe('subquery parameter renumbering', () => {
-	it('renumbers inner params to avoid collision with outer params', () => {
-		// Outer WHERE uses $1, inner subquery WHERE must become $2
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'symbols',
-			decisions: [
-				{ type: 'select', column: 'id', table: 'symbols' },
-				// WHERE kind = $1
-				{
-					type: 'where',
-					operator: 'eq',
-					column: 'kind',
-					value: 'function',
-					table: 'symbols',
-				},
-				// SELECT (SELECT count(*) FROM calls WHERE status = $2) AS call_count
-				{
-					type: 'selectCustomExpression',
-					expressionIntent: subquery('calls')
-						.where(eq('status', 'active'))
-						.count()
-						.asExpr('call_count').intent as SubqueryExpressionIntent,
-					alias: 'call_count',
-				},
-			],
-		};
-
-		const { sql, parameters } = compilePlan(plan);
-
-		// Both $1 (outer) and $2 (inner, renumbered) should appear
-		expect(sql).toContain('$1');
-		expect(sql).toContain('$2');
-		expect(parameters).toHaveLength(2);
-		expect(parameters[0]).toBe('function');
-		expect(parameters[1]).toBe('active');
 	});
 });
 

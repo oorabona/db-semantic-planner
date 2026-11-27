@@ -12,6 +12,7 @@ import {
 	manyToMany,
 	NotYetSupportedError,
 	namedArg,
+	not,
 	notExists,
 	op,
 	outerRef,
@@ -309,6 +310,22 @@ describe('default filters on physical read scans', () => {
 		const view = build(orm.withoutDefaultFilters()).dump();
 		expect({ sql: view.sql, params: view.params }).toEqual({
 			sql: 'SELECT users.* FROM users WHERE users.name = ANY (SELECT posts_subq_0.title FROM posts AS posts_subq_0)',
+			params: [],
+		});
+	});
+	it('filters unoptimized NOT IN subquery bodies', () => {
+		const build = (o: typeof orm) =>
+			o
+				.select('users')
+				.where(not(inSubquery('name', subquery('posts').select('title'))));
+		const filtered = build(orm).dump();
+		const unfiltered = build(orm).withoutDefaultFilters().dump();
+		expect({ sql: filtered.sql, params: filtered.params }).toEqual({
+			sql: 'SELECT users.* FROM users WHERE users."deletedAt" IS NULL AND NOT (users.name = ANY (SELECT posts_subq_0.title FROM posts AS posts_subq_0 WHERE posts_subq_0."deletedAt" IS NULL))',
+			params: [],
+		});
+		expect({ sql: unfiltered.sql, params: unfiltered.params }).toEqual({
+			sql: 'SELECT users.* FROM users WHERE NOT (users.name = ANY (SELECT posts_subq_0.title FROM posts AS posts_subq_0))',
 			params: [],
 		});
 	});

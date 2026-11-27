@@ -61,6 +61,25 @@ describe('join() + groupBy — relational rowset without include data', () => {
 		// (they would be: file.id AS "file.id", file.path AS "file.path", etc.)
 		expect(normalized).not.toMatch(/\bfile\.id\s+AS\s+"file\.id"/i);
 		expect(normalized).not.toMatch(/\bfile\.path\s+AS\s+"file\.path"/i);
+
+		// A root column and a relation column each resolve to their own table
+		expect(normalized).toEqual(
+			'SELECT symbols.* FROM symbols JOIN files AS file ON symbols.file_id = file.id GROUP BY symbols.id, file.path',
+		);
+		expect(dump.params).toEqual([]);
+	});
+
+	it('relation join + groupBy qualifies a root column and two columns of one relation', () => {
+		const dump = buildOrm()
+			.select('symbols')
+			.join('file')
+			.groupBy(['id', 'file.path', 'file.id'])
+			.dump();
+
+		expect(ws(dump.sql)).toEqual(
+			'SELECT symbols.* FROM symbols JOIN files AS file ON symbols.file_id = file.id GROUP BY symbols.id, file.path, file.id',
+		);
+		expect(dump.params).toEqual([]);
 	});
 
 	it('relation join + groupBy + columns only selects requested columns', () => {

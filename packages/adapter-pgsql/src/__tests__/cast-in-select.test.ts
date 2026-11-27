@@ -11,24 +11,17 @@
  *   6. Type name injection guard
  *   7. Dotted ref implicit alias uses the last dot-segment
  *
- * Two layers:
- *   - Unit (compilePlan): tests SQL compilation from a pre-built SimplifiedPlanReport.
- *     The deparser produces CAST(x AS type) syntax (standard SQL, not PostgreSQL ::type).
- *   - Integration (dump/ORM): tests the full pipeline through handleCustomExpressionSelect
- *     and intentToDecisions, which is where implicit alias derivation happens.
+ * Every test goes through the ORM pipeline (`dump()`), through
+ * handleCustomExpressionSelect and intentToDecisions, which is where implicit alias
+ * derivation happens. The deparser produces CAST(x AS type) syntax (standard SQL, not
+ * PostgreSQL ::type).
  *
  * Note: exprRef() is the expression column-reference helper exported as 'exprRef' from
  * @dbsp/core. The 'ref' export from @dbsp/core is the schema foreign-key ref function.
  */
 
-import {
-	compilePlan,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
 import { cast, createOrm, exprRef, fn, param, schema } from '@dbsp/core';
-import type { CastExpressionIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { normalizeSQL } from '../ast-helpers.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ============================================================================
@@ -57,27 +50,16 @@ function ws(sql: string): string {
 // Helpers
 // ============================================================================
 
-/**
- * Build a selectCustomExpression plan directly with an explicit alias.
- * This tests the compiler path (not the intentToDecisions handler).
- */
+/** Compile `cast(...)` as an explicitly aliased column of `events`. */
 function compileCastWithAlias(
 	castExpr: ReturnType<typeof cast>,
 	alias: string,
-): { sql: string; parameters: readonly unknown[] } {
-	const intent = (castExpr as unknown as { intent: CastExpressionIntent })
-		.intent;
-	const plan: SimplifiedPlanReport = {
-		rootTable: 'events',
-		decisions: [
-			{
-				type: 'selectCustomExpression',
-				expressionIntent: intent,
-				alias,
-			},
-		],
-	};
-	return compilePlan(plan);
+): { sql: string; params: readonly unknown[] } {
+	const { sql, params } = buildOrm()
+		.select('events')
+		.columns([castExpr.as(alias)])
+		.dump();
+	return { sql, params };
 }
 
 // ============================================================================
@@ -129,26 +111,24 @@ describe('cast-in-SELECT: implicit alias from source column (full ORM pipeline)'
 
 describe('cast-in-SELECT: explicit alias via .as()', () => {
 	it('cast(exprRef("created_at"), "text") + alias "createdAtText" emits CAST with alias', () => {
-		const { sql } = compileCastWithAlias(
-			cast(exprRef('created_at'), 'text'),
-			'createdAtText',
-		);
-		const normalized = normalizeSQL(sql);
-		// normalizeSQL lowercases; deparser produces CAST(x AS type)
-		expect(normalized).toContain('cast(created_at as text)');
-		// camelCase alias is quoted and lowercased by normalizeSQL
-		expect(normalized).toContain('"createdattext"');
+		expect(
+			compileCastWithAlias(
+				cast(exprRef('created_at'), 'text'),
+				'createdAtText',
+			),
+		).toEqual({
+			sql: 'SELECT CAST(created_at AS text) AS "createdAtText" FROM events',
+			params: [],
+		});
 	});
 
 	it('cast(param([0.1, 0.2]), "vector") + alias "embedding" binds params correctly', () => {
-		const { sql, parameters } = compileCastWithAlias(
-			cast(param([0.1, 0.2]), 'vector'),
-			'embedding',
-		);
-		const normalized = normalizeSQL(sql);
-		expect(normalized).toContain('cast($1 as vector)');
-		expect(normalized).toContain('as embedding');
-		expect(parameters).toEqual([[0.1, 0.2]]);
+		expect(
+			compileCastWithAlias(cast(param([0.1, 0.2]), 'vector'), 'embedding'),
+		).toEqual({
+			sql: 'SELECT CAST($1 AS vector) AS embedding FROM events',
+			params: [[0.1, 0.2]],
+		});
 	});
 });
 
@@ -158,24 +138,27 @@ describe('cast-in-SELECT: explicit alias via .as()', () => {
 
 describe('cast-in-SELECT: cast wrapping fn()', () => {
 	it('cast(fn("lower", exprRef("created_at")), "text") compiles correctly', () => {
-		const { sql } = compileCastWithAlias(
-			cast(fn('lower', exprRef('created_at')), 'text'),
-			'lower_ts',
-		);
-		const normalized = normalizeSQL(sql);
-		// Function call wrapped in CAST
-		expect(normalized).toMatch(/cast\(lower\(.*\) as text\)/);
-		expect(normalized).toContain('lower_ts');
+		expect(
+			compileCastWithAlias(
+				cast(fn('lower', exprRef('created_at')), 'text'),
+				'lower_ts',
+			),
+		).toEqual({
+			sql: 'SELECT CAST(lower(created_at) AS text) AS lower_ts FROM events',
+			params: [],
+		});
 	});
 
 	it('cast(fn("floor", exprRef("score")), "integer") compiles correctly', () => {
-		const { sql } = compileCastWithAlias(
-			cast(fn('floor', exprRef('score')), 'integer'),
-			'floored',
-		);
-		const normalized = normalizeSQL(sql);
-		expect(normalized).toMatch(/cast\(floor\(.*\) as integer\)/);
-		expect(normalized).toContain('floored');
+		expect(
+			compileCastWithAlias(
+				cast(fn('floor', exprRef('score')), 'integer'),
+				'floored',
+			),
+		).toEqual({
+			sql: 'SELECT CAST(floor(score) AS integer) AS floored FROM events',
+			params: [],
+		});
 	});
 });
 
@@ -185,23 +168,27 @@ describe('cast-in-SELECT: cast wrapping fn()', () => {
 
 describe('cast-in-SELECT: cast wrapping aggregate fn()', () => {
 	it('cast(fn("count", exprRef("id")), "text") compiles correctly', () => {
-		const { sql } = compileCastWithAlias(
-			cast(fn('count', exprRef('id')), 'text'),
-			'count_text',
-		);
-		const normalized = normalizeSQL(sql);
-		expect(normalized).toMatch(/cast\(count\(.*\) as text\)/);
-		expect(normalized).toContain('count_text');
+		expect(
+			compileCastWithAlias(
+				cast(fn('count', exprRef('id')), 'text'),
+				'count_text',
+			),
+		).toEqual({
+			sql: 'SELECT CAST(count(id) AS text) AS count_text FROM events',
+			params: [],
+		});
 	});
 
 	it('cast(fn("sum", exprRef("amount")), "float4") compiles correctly', () => {
-		const { sql } = compileCastWithAlias(
-			cast(fn('sum', exprRef('amount')), 'float4'),
-			'total_float',
-		);
-		const normalized = normalizeSQL(sql);
-		expect(normalized).toMatch(/cast\(sum\(.*\) as float4\)/);
-		expect(normalized).toContain('total_float');
+		expect(
+			compileCastWithAlias(
+				cast(fn('sum', exprRef('amount')), 'float4'),
+				'total_float',
+			),
+		).toEqual({
+			sql: 'SELECT CAST(sum(amount) AS float4) AS total_float FROM events',
+			params: [],
+		});
 	});
 });
 
@@ -261,16 +248,19 @@ describe('cast-in-SELECT: type name injection guard', () => {
 	});
 
 	it('cast() with simple type compiles correctly', () => {
-		const { sql } = compileCastWithAlias(cast(exprRef('score'), 'text'), 'v');
-		expect(normalizeSQL(sql)).toContain('cast(score as text)');
+		expect(compileCastWithAlias(cast(exprRef('score'), 'text'), 'v')).toEqual({
+			sql: 'SELECT CAST(score AS text) AS v FROM events',
+			params: [],
+		});
 	});
 
 	it('cast() with array type suffix compiles correctly', () => {
-		const { sql } = compileCastWithAlias(
-			cast(exprRef('score'), 'float4[]'),
-			'v',
-		);
-		expect(normalizeSQL(sql)).toContain('cast(score as float4[])');
+		expect(
+			compileCastWithAlias(cast(exprRef('score'), 'float4[]'), 'v'),
+		).toEqual({
+			sql: 'SELECT CAST(score AS float4[]) AS v FROM events',
+			params: [],
+		});
 	});
 });
 
@@ -288,31 +278,15 @@ describe('cast-in-SELECT: dotted ref implicit alias uses last dot-segment', () =
 		expect(derivedAlias).toBe('score');
 	});
 
-	it('compilePlan: cast with derived alias "score" compiles correctly', () => {
-		// Build the intent manually to simulate what the handler produces
-		// for cast(exprRef('t.score'), 'float4') with implicit alias.
-		const castIntent: CastExpressionIntent = {
-			kind: 'cast',
-			expr: { kind: 'ref', column: 't.score' },
-			typeName: 'float4',
-		};
-		const derivedAlias = 'score'; // last segment of 't.score'
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'events',
-			decisions: [
-				{
-					type: 'selectCustomExpression',
-					expressionIntent: castIntent,
-					alias: derivedAlias,
-				},
-			],
-		};
-		const { sql } = compilePlan(plan);
-		const normalized = normalizeSQL(sql);
-		// Cast compiles to standard CAST syntax
-		expect(normalized).toContain('cast(');
-		expect(normalized).toContain('as float4');
-		expect(normalized).toContain('as score');
+	it('cast with derived alias "score" compiles correctly', () => {
+		const { sql, params } = buildOrm()
+			.select('events')
+			.columns([cast(exprRef('events.score'), 'float4')])
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT CAST(events.score AS float4) AS score FROM events',
+			params: [],
+		});
 	});
 
 	it('ORM pipeline: cast(exprRef("score"), "float4") uses "score" as implicit alias', () => {

@@ -312,6 +312,30 @@ describe('10. nested and(or(eq, neq), not(isNull))', () => {
 	});
 });
 
+describe('10b. single-child groups collapse to the bare condition', () => {
+	it('and() with one condition emits no AND node', () => {
+		const dump = buildOrm()
+			.select('symbols')
+			.where(and(eq('exported', true)))
+			.dump();
+		expect(ws(dump.sql)).toEqual(
+			'SELECT symbols.* FROM symbols WHERE symbols.exported = $1',
+		);
+		expect(dump.params).toEqual([true]);
+	});
+
+	it('or() with one condition emits no OR node', () => {
+		const dump = buildOrm()
+			.select('symbols')
+			.where(or(eq('exported', true)))
+			.dump();
+		expect(ws(dump.sql)).toEqual(
+			'SELECT symbols.* FROM symbols WHERE symbols.exported = $1',
+		);
+		expect(dump.params).toEqual([true]);
+	});
+});
+
 // ---------------------------------------------------------------------------
 // 11. Regression: two exists() on same relation produce distinct params
 // ---------------------------------------------------------------------------

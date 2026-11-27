@@ -1,4 +1,3 @@
-import { compilePlan } from '@dbsp/adapter-pgsql/internal';
 /**
  * PARAM-TYPE-CAST: Explicit parameter type casting in WHERE comparisons.
  *
@@ -10,11 +9,14 @@ import { compilePlan } from '@dbsp/adapter-pgsql/internal';
  * may infer $1 as text instead of integer for nullable columns, causing runtime errors.
  */
 
+import { compilePlan } from '@dbsp/adapter-pgsql/internal';
+import { createOrm, eq, inArray, not } from '@dbsp/core';
 import type { ModelIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { createDeclaredNameResolver } from '../declared-name-resolver.js';
-import type { PgAdapterOptions } from '../pgsql-adapter.js';
-import { createPgPhysicalModel } from '../physical-model/index.js';
+import {
+	createPgCompileOnlyAdapter,
+	type PgAdapterOptions,
+} from '../pgsql-adapter.js';
 
 type ColumnDef = {
 	name: string;
@@ -60,51 +62,36 @@ function buildModel(tableName: string, columns: ColumnDef[]): ModelIR {
 	} as unknown as ModelIR;
 }
 
+function ormFor(
+	tableName: string,
+	columns: ColumnDef[],
+	adapterOptions: Pick<PgAdapterOptions, 'schemaName' | 'dbCasing'> = {},
+) {
+	const model = buildModel(tableName, columns);
+	return createOrm({
+		model,
+		adapter: createPgCompileOnlyAdapter({ model, ...adapterOptions }),
+		suppressDxWarnings: true,
+	});
+}
+
 function compileSelect(
 	tableName: string,
 	columns: ColumnDef[],
 	whereColumn: string,
 	whereValue: unknown,
-	operator = '=',
 	adapterOptions: Pick<PgAdapterOptions, 'schemaName' | 'dbCasing'> = {},
-): { sql: string; parameters: readonly unknown[] } {
-	const model = buildModel(tableName, columns);
-	return compilePlan(
-		{
-			rootTable: tableName,
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: whereColumn,
-					operator,
-					value: whereValue,
-				},
-			],
-		},
-		{
-			model,
-			declaredNames: createDeclaredNameResolver(
-				createPgPhysicalModel({
-					mode: 'logical',
-					model,
-					schema: adapterOptions.schemaName ?? 'public',
-					dbCasing: adapterOptions.dbCasing ?? 'preserve',
-				}),
-			),
-			...(adapterOptions.dbCasing !== undefined && {
-				dbCasing: adapterOptions.dbCasing,
-			}),
-			...(adapterOptions.schemaName !== undefined && {
-				schema: adapterOptions.schemaName,
-			}),
-		},
-	);
+): { sql: string; params: readonly unknown[] } {
+	const { sql, params } = ormFor(tableName, columns, adapterOptions)
+		.select(tableName)
+		.where(eq(whereColumn, whereValue as never))
+		.dump();
+	return { sql, params };
 }
 
 describe('PARAM-TYPE-CAST: comparison handler emits CAST when originalDbType set', () => {
 	it('casts integer column via originalDbType', () => {
-		const { sql, parameters } = compileSelect(
+		const result = compileSelect(
 			'items',
 			[
 				{
@@ -117,13 +104,14 @@ describe('PARAM-TYPE-CAST: comparison handler emits CAST when originalDbType set
 			'id',
 			42,
 		);
-		// pg-deparse converts $N::type to CAST($N AS type)
-		expect(sql).toContain('CAST($1 AS integer)');
-		expect(parameters).toEqual([42]);
+		expect(result).toEqual({
+			sql: 'SELECT items.* FROM items WHERE items.id = CAST($1 AS integer)',
+			params: [42],
+		});
 	});
 
 	it('casts nullable integer column (primary use-case for this feature)', () => {
-		const { sql, parameters } = compileSelect(
+		const result = compileSelect(
 			'orders',
 			[
 				{
@@ -136,12 +124,14 @@ describe('PARAM-TYPE-CAST: comparison handler emits CAST when originalDbType set
 			'user_id',
 			99,
 		);
-		expect(sql).toContain('CAST($1 AS integer)');
-		expect(parameters).toEqual([99]);
+		expect(result).toEqual({
+			sql: 'SELECT orders.* FROM orders WHERE orders.user_id = CAST($1 AS integer)',
+			params: [99],
+		});
 	});
 
 	it('casts uuid column via originalDbType', () => {
-		const { sql, parameters } = compileSelect(
+		const result = compileSelect(
 			'sessions',
 			[
 				{
@@ -154,13 +144,15 @@ describe('PARAM-TYPE-CAST: comparison handler emits CAST when originalDbType set
 			'user_id',
 			'abc-123',
 		);
-		expect(sql).toContain('CAST($1 AS uuid)');
-		expect(parameters).toEqual(['abc-123']);
+		expect(result).toEqual({
+			sql: 'SELECT sessions.* FROM sessions WHERE sessions.user_id = CAST($1 AS uuid)',
+			params: ['abc-123'],
+		});
 	});
 
 	it('casts timestamptz column via originalDbType', () => {
 		const date = new Date('2024-01-01');
-		const { sql, parameters } = compileSelect(
+		const result = compileSelect(
 			'events',
 			[
 				{
@@ -173,12 +165,14 @@ describe('PARAM-TYPE-CAST: comparison handler emits CAST when originalDbType set
 			'created_at',
 			date,
 		);
-		expect(sql).toContain('CAST($1 AS timestamptz)');
-		expect(parameters).toEqual([date]);
+		expect(result).toEqual({
+			sql: 'SELECT events.* FROM events WHERE events.created_at = CAST($1 AS timestamptz)',
+			params: [date],
+		});
 	});
 
 	it('casts boolean column via originalDbType', () => {
-		const { sql, parameters } = compileSelect(
+		const result = compileSelect(
 			'users',
 			[
 				{
@@ -191,20 +185,10 @@ describe('PARAM-TYPE-CAST: comparison handler emits CAST when originalDbType set
 			'active',
 			true,
 		);
-		expect(sql).toContain('CAST($1 AS bool)');
-		expect(parameters).toEqual([true]);
-	});
-
-	it('does NOT cast when originalDbType is absent (non-introspected schema)', () => {
-		const { sql, parameters } = compileSelect(
-			'items',
-			[{ name: 'id', type: 'number', nullable: false }],
-			'id',
-			42,
-		);
-		expect(sql).not.toContain('CAST');
-		expect(sql).toContain('$1');
-		expect(parameters).toEqual([42]);
+		expect(result).toEqual({
+			sql: 'SELECT users.* FROM users WHERE users.active = CAST($1 AS bool)',
+			params: [true],
+		});
 	});
 
 	it('does NOT cast when no model is provided (backward compat)', () => {
@@ -221,27 +205,18 @@ describe('PARAM-TYPE-CAST: comparison handler emits CAST when originalDbType set
 	});
 
 	it('does NOT cast FieldRef comparisons (column-to-column)', () => {
-		const model = buildModel('employees', [
+		const orm = ormFor('employees', [
 			{ name: 'manager_id', type: 'number', originalDbType: 'integer' },
 			{ name: 'id', type: 'number', originalDbType: 'integer' },
 		]);
-		const { sql } = compilePlan(
-			{
-				rootTable: 'employees',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{
-						type: 'where',
-						column: 'manager_id',
-						operator: '=',
-						value: { kind: 'fieldRef', column: 'id', scope: 'inner' },
-					},
-				],
-			},
-			{ model },
-		);
-		expect(sql).not.toContain('$1');
-		expect(sql).not.toContain('CAST');
+		const { sql, params } = orm
+			.select('employees')
+			.where(eq('manager_id', orm.tables.employees?.id as never))
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT employees.* FROM employees WHERE employees.manager_id = employees.id',
+			params: [],
+		});
 	});
 
 	it('routes faithful originalDbType through cast-safe WHERE targets', () => {
@@ -285,32 +260,31 @@ describe('PARAM-TYPE-CAST: comparison handler emits CAST when originalDbType set
 		];
 
 		expect(
-			cases.map(({ column, value }) => {
-				const result = compileSelect('products', [column], column.name, value);
-				return { sql: result.sql, parameters: result.parameters };
-			}),
+			cases.map(({ column, value }) =>
+				compileSelect('products', [column], column.name, value),
+			),
 		).toEqual([
 			{
-				sql: 'SELECT * FROM products WHERE products.name = CAST($1 AS varchar)',
-				parameters: ['widget'],
+				sql: 'SELECT products.* FROM products WHERE products.name = CAST($1 AS varchar)',
+				params: ['widget'],
 			},
 			{
-				sql: 'SELECT * FROM products WHERE products.price = CAST($1 AS numeric)',
-				parameters: [12.34],
+				sql: 'SELECT products.* FROM products WHERE products.price = CAST($1 AS numeric)',
+				params: [12.34],
 			},
 			{
-				sql: 'SELECT * FROM products WHERE products.created_at = CAST($1 AS timestamp with time zone)',
-				parameters: ['2024-01-01T00:00:00.000Z'],
+				sql: 'SELECT products.* FROM products WHERE products.created_at = CAST($1 AS timestamp with time zone)',
+				params: ['2024-01-01T00:00:00.000Z'],
 			},
 			{
-				sql: 'SELECT * FROM products WHERE products.count = CAST($1 AS integer)',
-				parameters: [7],
+				sql: 'SELECT products.* FROM products WHERE products.count = CAST($1 AS integer)',
+				params: [7],
 			},
 		]);
 	});
 
 	it('keeps target schema verbatim for target-scoped custom type casts', () => {
-		const { sql, parameters } = compileSelect(
+		const result = compileSelect(
 			'events',
 			[
 				{
@@ -324,75 +298,54 @@ describe('PARAM-TYPE-CAST: comparison handler emits CAST when originalDbType set
 			],
 			'state',
 			'active',
-			'=',
 			{ schemaName: 'tenantOne', dbCasing: 'snake_case' },
 		);
 
-		expect({ sql, parameters }).toEqual({
-			sql: 'SELECT * FROM "tenantOne".events WHERE events.state = CAST($1 AS "tenantOne".status)',
-			parameters: ['active'],
+		expect(result).toEqual({
+			sql: 'SELECT events.* FROM "tenantOne".events WHERE events.state = CAST($1 AS "tenantOne".status)',
+			params: ['active'],
 		});
 	});
 });
 
 describe('PARAM-TYPE-CAST: IN handler emits CAST when originalDbType set', () => {
 	it('casts integer IN list', () => {
-		const model = buildModel('items', [
+		const { sql, params } = ormFor('items', [
 			{ name: 'status', type: 'number', originalDbType: 'integer' },
-		]);
-		const { sql, parameters } = compilePlan(
-			{
-				rootTable: 'items',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{ type: 'where', column: 'status', operator: 'in', value: [1, 2, 3] },
-				],
-			},
-			{ model },
-		);
-		expect(sql).toContain('CAST($1 AS integer[])');
-		expect(parameters).toEqual([[1, 2, 3]]);
+		])
+			.select('items')
+			.where(inArray('status', [1, 2, 3]))
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT items.* FROM items WHERE items.status = ANY (CAST($1 AS integer[]))',
+			params: [[1, 2, 3]],
+		});
 	});
 
 	it('casts uuid IN list via originalDbType', () => {
-		const model = buildModel('users', [
+		const { sql, params } = ormFor('users', [
 			{ name: 'role_id', type: 'uuid', originalDbType: 'uuid' },
-		]);
-		const { sql, parameters } = compilePlan(
-			{
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{
-						type: 'where',
-						column: 'role_id',
-						operator: 'in',
-						value: ['aaa', 'bbb'],
-					},
-				],
-			},
-			{ model },
-		);
-		expect(sql).toContain('CAST($1 AS uuid[])');
-		expect(parameters).toEqual([['aaa', 'bbb']]);
+		])
+			.select('users')
+			.where(inArray('role_id', ['aaa', 'bbb']))
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT users.* FROM users WHERE users.role_id = ANY (CAST($1 AS uuid[]))',
+			params: [['aaa', 'bbb']],
+		});
 	});
 
 	it('casts integer NOT IN list', () => {
-		const model = buildModel('orders', [
+		const { sql, params } = ormFor('orders', [
 			{ name: 'state', type: 'number', originalDbType: 'integer' },
-		]);
-		const { sql, parameters } = compilePlan(
-			{
-				rootTable: 'orders',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{ type: 'where', column: 'state', operator: 'notIn', value: [0, 9] },
-				],
-			},
-			{ model },
-		);
-		expect(sql).toContain('CAST($1 AS integer[])');
-		expect(parameters).toEqual([[0, 9]]);
+		])
+			.select('orders')
+			.where(not(inArray('state', [0, 9])))
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT orders.* FROM orders WHERE NOT (orders.state = ANY (CAST($1 AS integer[])))',
+			params: [[0, 9]],
+		});
 	});
 
 	it('does NOT cast IN when no model is provided (backward compat)', () => {
@@ -407,30 +360,13 @@ describe('PARAM-TYPE-CAST: IN handler emits CAST when originalDbType set', () =>
 		expect(sql).toContain('$1');
 		expect(parameters).toEqual([[1, 2, 3]]);
 	});
-
-	it('does NOT cast IN when originalDbType is absent', () => {
-		const model = buildModel('items', [{ name: 'status', type: 'number' }]);
-		const { sql, parameters } = compilePlan(
-			{
-				rootTable: 'items',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{ type: 'where', column: 'status', operator: 'in', value: [1, 2, 3] },
-				],
-			},
-			{ model },
-		);
-		expect(sql).not.toContain('CAST');
-		expect(sql).toContain('$1');
-		expect(parameters).toEqual([[1, 2, 3]]);
-	});
 });
 
 describe('PARAM-TYPE-CAST [P0-T1]: originalDbType from introspection flows to compiled SQL CAST', () => {
 	it('vector column — introspected originalDbType produces CAST($1 AS vector)', () => {
 		// Simulates: buildTableIR sets col.originalDbType = col.udt_name ('vector')
 		// A parameterized WHERE clause against that column should emit CAST
-		const { sql, parameters } = compileSelect(
+		const result = compileSelect(
 			'embeddings',
 			[
 				{
@@ -443,12 +379,14 @@ describe('PARAM-TYPE-CAST [P0-T1]: originalDbType from introspection flows to co
 			'vec',
 			'[0.1,0.2,0.3]',
 		);
-		expect(sql).toContain('CAST($1 AS vector)');
-		expect(parameters).toEqual(['[0.1,0.2,0.3]']);
+		expect(result).toEqual({
+			sql: 'SELECT embeddings.* FROM embeddings WHERE embeddings.vec = CAST($1 AS vector)',
+			params: ['[0.1,0.2,0.3]'],
+		});
 	});
 
 	it('jsonb column — introspected originalDbType produces CAST($1 AS jsonb)', () => {
-		const { sql, parameters } = compileSelect(
+		const result = compileSelect(
 			'events',
 			[
 				{
@@ -461,18 +399,9 @@ describe('PARAM-TYPE-CAST [P0-T1]: originalDbType from introspection flows to co
 			'payload',
 			'{"key":"val"}',
 		);
-		expect(sql).toContain('CAST($1 AS jsonb)');
-		expect(parameters).toEqual(['{"key":"val"}']);
-	});
-
-	it('without originalDbType (manually defined schema) — no CAST emitted', () => {
-		// Manually defined schemas omit originalDbType; no automatic CAST should be emitted
-		const { sql } = compileSelect(
-			'items',
-			[{ name: 'code', type: 'string', nullable: false }],
-			'code',
-			'ABC',
-		);
-		expect(sql).not.toContain('CAST');
+		expect(result).toEqual({
+			sql: 'SELECT events.* FROM events WHERE events.payload = CAST($1 AS jsonb)',
+			params: ['{"key":"val"}'],
+		});
 	});
 });

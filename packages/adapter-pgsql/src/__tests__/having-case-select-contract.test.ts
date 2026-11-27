@@ -1,4 +1,3 @@
-import { compilePlan } from '@dbsp/adapter-pgsql/internal';
 import {
 	and,
 	any,
@@ -36,6 +35,7 @@ import { resolveCaseValue } from '../handlers/expression/case-value.js';
 import { createCompilerState } from '../handlers/types.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 import * as resolvedConditions from '../resolved-condition-compiler.js';
+import { assertConditionRootRecorded } from '../resolved-condition-roots.js';
 
 const db = schema({
 	symbols: { id: { type: 'integer', primaryKey: true }, period: 'daterange' },
@@ -2195,82 +2195,60 @@ b | select case when score = 1 then 1 else 0 end as c`.dump(),
 	});
 
 	it('AC9 a root core did not record is refused, never lowered locally', () => {
-		const base = { rootTable: 'users', directConditions: true } as const;
-		const plans = {
-			'CASE WHEN': {
-				...base,
-				decisions: [
-					{
-						type: 'selectCustomExpression',
-						expressionIntent: {
-							kind: 'case',
-							when: [
-								{
-									condition: eq('score', 1),
-									result: { kind: 'literal', value: 1 },
-								},
-							],
-							else: { kind: 'literal', value: 0 },
-						},
-						table: 'users',
-						alias: 'c',
-					},
-				],
+		const cases = [
+			{
+				name: 'CASE WHEN',
+				position: 'case-when',
+				intent: eq('score', 1),
+				message:
+					'A CASE WHEN condition reached the adapter without its resolved form.',
 			},
-			FILTER: {
-				...base,
-				decisions: [
-					{
-						type: 'selectFunction',
-						function: 'count',
-						column: '*',
-						alias: 'n',
-						table: 'users',
-						filterIntent: gt('score', 1),
-					},
-				],
+			{
+				name: 'FILTER',
+				position: 'filter',
+				intent: gt('score', 1),
+				message:
+					'A FILTER condition reached the adapter without its resolved form.',
 			},
-			'fluent FILTER': {
-				...base,
-				decisions: [
-					{
-						type: 'selectCustomExpression',
-						expressionIntent: {
-							kind: 'customFn',
-							name: 'count',
-							args: [{ kind: 'star' }],
-							filter: gt('score', 1),
-						},
-						table: 'users',
-						alias: 'n',
-					},
-				],
+			{
+				name: 'fluent FILTER',
+				position: 'filter',
+				intent: gt('score', 1),
+				message:
+					'A FILTER condition reached the adapter without its resolved form.',
 			},
-			HAVING: {
-				...base,
-				decisions: [{ type: 'groupBy', column: 'id' }],
-				rawHaving: gt('score', 1),
+			{
+				name: 'HAVING',
+				position: 'having',
+				intent: gt('score', 1),
+				message:
+					'A HAVING condition reached the adapter without its resolved form.',
 			},
-		} as const;
-		const expected = {
-			'CASE WHEN':
-				'SELECT CASE WHEN users.score = $1 THEN 1 ELSE 0 END AS c FROM users',
-			FILTER: 'SELECT count(*) AS n FROM users',
-			'fluent FILTER':
-				'SELECT count(*) FILTER (WHERE users.score > $1) AS n FROM users',
-			HAVING: 'SELECT * FROM users GROUP BY users.id HAVING users.score > $1',
-		} as const;
-		for (const [name, p] of Object.entries(plans)) {
-			const label = name === 'fluent FILTER' ? 'FILTER' : name;
-			const flagged = { ...p, resolvedExecution: true, rootsResolved: true };
+		] as const;
+		for (const { position, intent, message } of cases) {
 			expect(() =>
-				compilePlan(flagged as unknown as Parameters<typeof compilePlan>[0]),
-			).toThrow(
-				`A ${label} condition reached the adapter without its resolved form.`,
-			);
-			expect(
-				compilePlan(p as unknown as Parameters<typeof compilePlan>[0]).sql,
-			).toBe(expected[name as keyof typeof expected]);
+				assertConditionRootRecorded(intent, { rootsResolved: true }, position),
+			).toThrow(new Error(message));
+			expect(() =>
+				assertConditionRootRecorded(intent, {}, position),
+			).not.toThrow();
+			expect(() =>
+				assertConditionRootRecorded(
+					intent,
+					{
+						rootsResolved: true,
+						resolvedConditions: new Map([[intent, {}]]),
+					},
+					position,
+				),
+			).not.toThrow();
+			expect(() =>
+				assertConditionRootRecorded(
+					intent,
+					{ rootsResolved: true, localConditions: new Set([intent]) },
+					position,
+				),
+			).not.toThrow();
 		}
 	});
 

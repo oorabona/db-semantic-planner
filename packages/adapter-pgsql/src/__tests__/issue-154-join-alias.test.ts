@@ -1,8 +1,4 @@
 import {
-	compilePlan,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
-import {
 	createOrm,
 	eq,
 	InvalidOperationError,
@@ -89,58 +85,23 @@ describe('FIX-154: path-based join identity for multi-path includes', () => {
 	});
 
 	it('locks fallback hydration keys to relation-dotted paths when relation names collide', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'uses',
-			decisions: [
-				{
-					type: 'includeStrategy',
-					choice: 'join',
-					joinType: 'inner',
-					relationName: 'definition',
-					relationPath: 'definition',
-					targetTable: 'definitions',
-					sourceTable: 'uses',
-					relationType: 'belongsTo',
-					foreignKey: 'def_id',
-					parentKey: 'id',
-					columns: [],
-				},
-				{
-					type: 'includeStrategy',
-					choice: 'join',
-					joinType: 'inner',
-					relationName: 'file',
-					relationPath: 'definition.file',
-					hydrationPrefix: 'definition.file',
-					targetTable: 'files',
-					sourceTable: 'definitions',
-					relationType: 'belongsTo',
-					foreignKey: 'file_id',
-					parentKey: 'id',
-					columns: ['path'],
-				},
-				{
-					type: 'includeStrategy',
-					choice: 'join',
-					joinType: 'inner',
-					relationName: 'file',
-					relationPath: 'file',
-					hydrationPrefix: 'file',
-					targetTable: 'files',
-					sourceTable: 'uses',
-					relationType: 'belongsTo',
-					foreignKey: 'file_id',
-					parentKey: 'id',
-					columns: ['path'],
-				},
-			],
-		};
-		const sql = compact(compilePlan(plan).sql);
+		const { sql, params } = buildOrm()
+			.select('uses')
+			.include('definition', { join: 'inner' })
+			.include('definition.file', {
+				join: 'inner',
+				select: { type: 'fields', fields: ['path'] },
+			})
+			.include('file', {
+				join: 'inner',
+				select: { type: 'fields', fields: ['path'] },
+			})
+			.dump();
 
-		expect(joinCount(sql)).toBe(3);
-		expect(sql).toContain('file.path AS "definition.file.path"');
-		expect(sql).toContain('file_1.path AS "file.path"');
-		expect(sql).not.toContain('AS "file_1.path"');
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT uses.*, definition.id AS "definition.id", definition.file_id AS "definition.file_id", definition.id AS __dbsp_presence_definition, file.path AS "definition.file.path", file.id AS "__dbsp_presence_definition.file", file_1.path AS "file.path", file_1.id AS __dbsp_presence_file FROM uses JOIN definitions AS definition ON uses.def_id = definition.id JOIN files AS file ON definition.file_id = file.id JOIN files AS file_1 ON uses.file_id = file_1.id',
+			params: [],
+		});
 	});
 
 	it('generalizes to three paths to the same target table', () => {
@@ -169,48 +130,22 @@ describe('FIX-154: path-based join identity for multi-path includes', () => {
 	});
 
 	it('S6: same relation at two self-referential depths uses parent alias for the second hop', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'employees',
-			decisions: [
-				{
-					type: 'includeStrategy',
-					choice: 'join',
-					joinType: 'left',
-					relationName: 'manager',
-					relationPath: 'manager',
-					targetTable: 'employees',
-					sourceTable: 'employees',
-					relationType: 'belongsTo',
-					foreignKey: 'manager_id',
-					parentKey: 'id',
-					columns: ['name'],
-					columnAliases: { name: 'manager_name' },
-				},
-				{
-					type: 'includeStrategy',
-					choice: 'join',
-					joinType: 'left',
-					relationName: 'manager',
-					relationPath: 'manager.manager',
-					targetTable: 'employees',
-					sourceTable: 'employees',
-					relationType: 'belongsTo',
-					foreignKey: 'manager_id',
-					parentKey: 'id',
-					columns: ['name'],
-					columnAliases: { name: 'grandmanager_name' },
-				},
-			],
-		};
-		const sql = compact(compilePlan(plan).sql);
+		const { sql, params } = buildOrm(employeeSchema.model)
+			.select('employees')
+			.include('manager', {
+				join: 'left',
+				select: { type: 'fields', fields: ['name'] },
+			})
+			.include('manager.manager', {
+				join: 'left',
+				select: { type: 'fields', fields: ['name'] },
+			})
+			.dump();
 
-		expect(joinCount(sql)).toBe(2);
-		expect(sql).toMatch(/LEFT JOIN employees AS manager\b/);
-		expect(sql).toMatch(/LEFT JOIN employees AS manager_1\b/);
-		expect(sql).toContain('employees.manager_id = manager.id');
-		expect(sql).toContain('manager.manager_id = manager_1.id');
-		expect(sql).toContain('manager.name AS manager_name');
-		expect(sql).toContain('manager_1.name AS grandmanager_name');
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT employees.*, manager.name AS "manager.name", manager.id AS "manager.id", manager.manager_id AS "manager.manager_id", manager.id AS __dbsp_presence_manager, manager_1.name AS "manager.manager.name", manager_1.id AS "__dbsp_presence_manager.manager" FROM employees LEFT JOIN employees AS manager ON employees.manager_id = manager.id LEFT JOIN employees AS manager_1 ON manager.manager_id = manager_1.id',
+			params: [],
+		});
 	});
 
 	it('builder-driven self-referential chain keeps the second hop anchored to the first', () => {

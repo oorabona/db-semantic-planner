@@ -3,10 +3,6 @@
  */
 
 import {
-	compilePlan,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
-import {
 	and,
 	createOrm,
 	eq,
@@ -15,6 +11,7 @@ import {
 	neq,
 	not,
 	or,
+	plan,
 	ref,
 	schema,
 } from '@dbsp/core';
@@ -60,6 +57,31 @@ const testSchema = schema({
 	},
 } as const);
 
+const plannedDb = schema({
+	orders: {
+		id: { type: 'integer', primaryKey: true },
+		total: { type: 'integer' },
+	},
+	products: {
+		id: { type: 'integer', primaryKey: true },
+		price: { type: 'integer' },
+		category: { type: 'text' },
+	},
+	t: {
+		id: { type: 'integer', primaryKey: true },
+		meta: { type: 'jsonb' },
+	},
+} as const);
+
+/** Plans `where` on `from` and compiles it through a model-carrying adapter. */
+function compileWhereIntentFor(from: string, where: WhereIntent) {
+	const adapter = createPgCompileOnlyAdapter({ model: plannedDb.model });
+	const { sql, parameters } = adapter.compile(
+		plan({ type: 'select', from, where }, plannedDb.model),
+	);
+	return { sql, params: parameters };
+}
+
 function resolverFor(model: typeof testSchema.model) {
 	return createDeclaredNameResolver(
 		createPgPhysicalModel({
@@ -93,78 +115,66 @@ function deparseWhere(node: Node): string {
 }
 
 describe('#462 isDistinctFrom', () => {
-	const scalarSubqueryPlan = (
-		subqueryOperator: string,
-		conditions?: readonly unknown[],
-	): SimplifiedPlanReport =>
+	const scalarSubquery = (operator: string, where?: WhereIntent): WhereIntent =>
 		({
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'total',
-					operator: 'scalarSubquery',
-					subqueryOperator,
-					targetTable: 'products',
-					selectColumn: 'price',
-					conditions,
-				},
-			],
-		}) as SimplifiedPlanReport;
+			kind: 'subquery',
+			field: 'total',
+			operator,
+			subquery: {
+				type: 'select',
+				from: 'products',
+				select: { type: 'fields', fields: ['price'] },
+				...(where === undefined ? {} : { where }),
+			},
+		}) as unknown as WhereIntent;
+	const toolsOnly: WhereIntent = {
+		kind: 'comparison',
+		field: 'category',
+		operator: 'eq',
+		value: 'tools',
+	};
 
-	it('compiles scalar-subquery equality through compilePlan', () => {
-		const result = compilePlan(scalarSubqueryPlan('='));
-		expect(result.sql).toBe(
-			'SELECT * FROM orders WHERE orders.total = (SELECT products_subq_0.price FROM products AS products_subq_0)',
-		);
-		expect(result.parameters).toEqual([]);
+	it('compiles scalar-subquery not-equal', () => {
+		expect(compileWhereIntentFor('orders', scalarSubquery('neq'))).toEqual({
+			sql: 'SELECT orders.* FROM orders WHERE orders.total <> (SELECT products_subq_0.price FROM products AS products_subq_0)',
+			params: [],
+		});
 	});
 
-	it('compiles scalar-subquery not-equal through compilePlan', () => {
-		const result = compilePlan(scalarSubqueryPlan('!='));
-		expect(result.sql).toBe(
-			'SELECT * FROM orders WHERE orders.total <> (SELECT products_subq_0.price FROM products AS products_subq_0)',
-		);
-		expect(result.parameters).toEqual([]);
+	it('compiles scalar-subquery isDistinctFrom', () => {
+		expect(
+			compileWhereIntentFor('orders', scalarSubquery('isDistinctFrom')),
+		).toEqual({
+			sql: 'SELECT orders.* FROM orders WHERE orders.total IS DISTINCT FROM (SELECT products_subq_0.price FROM products AS products_subq_0)',
+			params: [],
+		});
 	});
 
-	it('compiles scalar-subquery isDistinctFrom through compilePlan', () => {
-		const result = compilePlan(scalarSubqueryPlan('isDistinctFrom'));
-		expect(result.sql).toBe(
-			'SELECT * FROM orders WHERE orders.total IS DISTINCT FROM (SELECT products_subq_0.price FROM products AS products_subq_0)',
-		);
-		expect(result.parameters).toEqual([]);
+	it('preserves scalar-subquery not-equal bindings', () => {
+		expect(
+			compileWhereIntentFor('orders', scalarSubquery('neq', toolsOnly)),
+		).toEqual({
+			sql: 'SELECT orders.* FROM orders WHERE orders.total <> (SELECT products_subq_0.price FROM products AS products_subq_0 WHERE products_subq_0.category = $1)',
+			params: ['tools'],
+		});
 	});
 
-	it('preserves scalar-subquery not-equal bindings through compilePlan', () => {
-		const result = compilePlan(
-			scalarSubqueryPlan('!=', [
-				{ type: 'where', column: 'category', operator: '=', value: 'tools' },
-			]),
-		);
-		expect(result.sql).toBe(
-			'SELECT * FROM orders WHERE orders.total <> (SELECT products_subq_0.price FROM products AS products_subq_0 WHERE products_subq_0.category = $1)',
-		);
-		expect(result.parameters).toEqual(['tools']);
+	it('preserves scalar-subquery isDistinctFrom bindings', () => {
+		expect(
+			compileWhereIntentFor(
+				'orders',
+				scalarSubquery('isDistinctFrom', toolsOnly),
+			),
+		).toEqual({
+			sql: 'SELECT orders.* FROM orders WHERE orders.total IS DISTINCT FROM (SELECT products_subq_0.price FROM products AS products_subq_0 WHERE products_subq_0.category = $1)',
+			params: ['tools'],
+		});
 	});
 
-	it('preserves scalar-subquery isDistinctFrom bindings through compilePlan', () => {
-		const result = compilePlan(
-			scalarSubqueryPlan('isDistinctFrom', [
-				{ type: 'where', column: 'category', operator: '=', value: 'tools' },
-			]),
-		);
-		expect(result.sql).toBe(
-			'SELECT * FROM orders WHERE orders.total IS DISTINCT FROM (SELECT products_subq_0.price FROM products AS products_subq_0 WHERE products_subq_0.category = $1)',
-		);
-		expect(result.parameters).toEqual(['tools']);
-	});
-
-	it('refuses an unknown scalar-subquery operator through compilePlan', () => {
-		expect(() => compilePlan(scalarSubqueryPlan('notAnOperator'))).toThrow(
-			'No WHERE handler registered for operator: notAnOperator',
-		);
+	it('refuses an unknown scalar-subquery operator', () => {
+		expect(() =>
+			compileWhereIntentFor('orders', scalarSubquery('notAnOperator')),
+		).toThrow(new Error("Unsupported comparison operator 'notAnOperator'"));
 	});
 
 	it('compiles select, update, and nested comparisons with the same bindings as neq', () => {
@@ -632,26 +642,20 @@ describe('#462 isDistinctFrom', () => {
 		expect(deparse(node)).toBe(deparseWhere(node));
 	});
 
-	it('preserves a normalized JSON decision comparison operator through compilePlan', () => {
-		const result = compilePlan({
-			rootTable: 't',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'meta',
-					operator: 'jsonComparison',
-					subqueryOperator: 'isDistinctFrom',
-					jsonPath: ['kind'],
-					jsonMode: 'text',
-					value: 'x',
-				},
-			],
+	it('preserves a normalized JSON decision comparison operator', () => {
+		expect(
+			compileWhereIntentFor('t', {
+				kind: 'comparison',
+				field: 'meta',
+				operator: 'isDistinctFrom',
+				jsonPath: ['kind'],
+				jsonMode: 'text',
+				value: 'x',
+			} as unknown as WhereIntent),
+		).toEqual({
+			sql: 'SELECT t.* FROM t WHERE (t.meta ->> $1) IS DISTINCT FROM $2',
+			params: ['kind', 'x'],
 		});
-		expect(result.sql).toBe(
-			'SELECT * FROM t WHERE (t.meta ->> $1) IS DISTINCT FROM $2',
-		);
-		expect(result.parameters).toEqual(['kind', 'x']);
 	});
 
 	it('lowers a standalone custom expression without a comparison-operator property', () => {
@@ -665,47 +669,33 @@ describe('#462 isDistinctFrom', () => {
 		expect(Object.hasOwn(decision!, 'subqueryOperator')).toBe(false);
 	});
 
-	it('refuses unsupported legacy custom-expression decisions through compilePlan', () => {
-		const decision = convertWhereCondition(
-			{
+	it('refuses unsupported legacy custom-expression decisions', () => {
+		expect(() =>
+			compileWhereIntentFor('t', {
 				kind: 'expression',
 				expr: { kind: 'literal', value: 1 },
 				operator: 'toString',
 				value: 2,
-			} as unknown as WhereIntent,
-			't',
-		);
-		expect(() =>
-			compilePlan({
-				rootTable: 't',
-				decisions: [{ type: 'select', column: '*' }, decision!],
-			}),
-		).toThrow('No WHERE handler registered for operator: toString');
+			} as unknown as WhereIntent),
+		).toThrow(new Error("Unsupported comparison operator 'toString'"));
 	});
 
 	it('keeps legacy custom-expression decisions in parity', () => {
-		const compileLegacy = (operator: 'neq' | 'isDistinctFrom') => {
-			const decision = convertWhereCondition(
-				{
-					kind: 'expression',
-					expr: { kind: 'literal', value: 1 },
-					operator,
-					value: 6,
-				} as unknown as WhereIntent,
-				't',
-			);
-			return compilePlan({
-				rootTable: 't',
-				decisions: [{ type: 'select', column: '*' }, decision!],
-			});
-		};
+		const compileLegacy = (operator: 'neq' | 'isDistinctFrom') =>
+			compileWhereIntentFor('t', {
+				kind: 'expression',
+				expr: { kind: 'literal', value: 1 },
+				operator,
+				value: 6,
+			} as unknown as WhereIntent);
 		const neqResult = compileLegacy('neq');
 		const distinctResult = compileLegacy('isDistinctFrom');
-		expect(neqResult.sql).toBe('SELECT * FROM t WHERE 1 != $1');
+		expect(neqResult.sql).toBe('SELECT t.* FROM t WHERE 1 <> $1');
 		expect(distinctResult.sql).toBe(
-			'SELECT * FROM t WHERE 1 IS DISTINCT FROM $1',
+			'SELECT t.* FROM t WHERE 1 IS DISTINCT FROM $1',
 		);
-		expect(distinctResult.parameters).toEqual(neqResult.parameters);
+		expect(neqResult.params).toEqual([6]);
+		expect(distinctResult.params).toEqual(neqResult.params);
 	});
 
 	it('keeps the recursive-anchor comparison route in parity', () => {

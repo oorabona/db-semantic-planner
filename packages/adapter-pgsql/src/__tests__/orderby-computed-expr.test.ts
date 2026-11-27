@@ -1,96 +1,72 @@
 // ORDERBY-COMPUTED-EXPR regression test
 
-import {
-	compilePlan,
-	type PlanDecision,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
-import { op, exprRef as ref } from '@dbsp/core';
+import { createOrm, op, exprRef as ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
-function compileToSql(plan: SimplifiedPlanReport): {
-	sql: string;
-	parameters: readonly unknown[];
-} {
-	return compilePlan(plan);
-}
+const db = schema({
+	symbols: {
+		id: { type: 'integer', primaryKey: true },
+		start_line: 'integer',
+		end_line: 'integer',
+	},
+	rankings: {
+		id: { type: 'integer', primaryKey: true },
+		score: 'integer',
+		bonus: 'integer',
+	},
+});
+const orm = createOrm({
+	model: db.model,
+	adapter: createPgCompileOnlyAdapter({ model: db.model }),
+});
 
 describe('ORDERBY-COMPUTED-EXPR: orderBy(op(...)) generates correct SQL', () => {
 	it('op("-", ref("end_line"), ref("start_line")) produces arithmetic in ORDER BY', () => {
-		const expr = op('-', ref('end_line'), ref('start_line'));
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'symbols',
-			decisions: [
-				{ type: 'select', column: '*', table: 'symbols' },
-				{
-					type: 'orderBy',
-					expressionIntent: expr.intent,
-					direction: 'ASC',
-					table: 'symbols',
-				} satisfies PlanDecision,
-			],
-		};
-		const result = compileToSql(plan);
-		expect(result.sql.toLowerCase()).toMatch(/order\s+by/);
-		expect(result.sql).toMatch(/end_line\s*-\s*start_line/i);
-		expect(result.sql).not.toContain('__expr');
-		expect(result.sql).not.toContain('customOp');
-		expect(result.parameters).toHaveLength(0);
+		const { sql, params } = orm
+			.select('symbols')
+			.orderBy(op('-', ref('end_line'), ref('start_line')), 'asc')
+			.dump();
+
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT symbols.* FROM symbols ORDER BY end_line - start_line ASC',
+			params: [],
+		});
 	});
 
 	it('ASC direction preserved for op("-") orderBy', () => {
-		const expr = op('-', ref('end_line'), ref('start_line'));
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'symbols',
-			decisions: [
-				{ type: 'select', column: '*', table: 'symbols' },
-				{
-					type: 'orderBy',
-					expressionIntent: expr.intent,
-					direction: 'ASC',
-					table: 'symbols',
-				} satisfies PlanDecision,
-			],
-		};
-		const result = compileToSql(plan);
-		expect(result.sql).toMatch(/end_line\s*-\s*start_line\s+ASC/i);
+		const { sql, params } = orm
+			.select('symbols')
+			.orderBy(op('-', ref('end_line'), ref('start_line')), 'asc')
+			.dump();
+
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT symbols.* FROM symbols ORDER BY end_line - start_line ASC',
+			params: [],
+		});
 	});
 
 	it('DESC direction preserved for op("-") orderBy', () => {
-		const expr = op('-', ref('end_line'), ref('start_line'));
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'symbols',
-			decisions: [
-				{ type: 'select', column: '*', table: 'symbols' },
-				{
-					type: 'orderBy',
-					expressionIntent: expr.intent,
-					direction: 'DESC',
-					table: 'symbols',
-				} satisfies PlanDecision,
-			],
-		};
-		const result = compileToSql(plan);
-		expect(result.sql).toMatch(/end_line\s*-\s*start_line\s+DESC/i);
+		const { sql, params } = orm
+			.select('symbols')
+			.orderBy(op('-', ref('end_line'), ref('start_line')), 'desc')
+			.dump();
+
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT symbols.* FROM symbols ORDER BY end_line - start_line DESC',
+			params: [],
+		});
 	});
 
 	it('op("+") in ORDER BY produces addition expression', () => {
-		const expr = op('+', ref('score'), ref('bonus'));
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'rankings',
-			decisions: [
-				{ type: 'select', column: '*', table: 'rankings' },
-				{
-					type: 'orderBy',
-					expressionIntent: expr.intent,
-					direction: 'DESC',
-					table: 'rankings',
-				} satisfies PlanDecision,
-			],
-		};
-		const result = compileToSql(plan);
-		expect(result.sql.toLowerCase()).toMatch(/order\s+by/);
-		expect(result.sql).toMatch(/score\s*\+\s*bonus/i);
-		expect(result.sql).toMatch(/DESC/i);
+		const { sql, params } = orm
+			.select('rankings')
+			.orderBy(op('+', ref('score'), ref('bonus')), 'desc')
+			.dump();
+
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT rankings.* FROM rankings ORDER BY score + bonus DESC',
+			params: [],
+		});
 	});
 });

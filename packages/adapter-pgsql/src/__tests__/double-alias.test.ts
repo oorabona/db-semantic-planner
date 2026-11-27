@@ -9,176 +9,72 @@
  * The compiler must deduplicate aliases by suffixing with _N.
  */
 
-import {
-	compilePlan,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
+import { createOrm, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { normalizeSQL } from '../ast-helpers.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 /**
  * Schema under test:
- *   variable_uses  --file_id-->  files        (direct relation 'file')
- *   variable_uses  --def_id--->  variable_defs
- *   variable_defs  --file_id-->  files        (nested: 'def.file', alias also 'file')
+ *   uses         --file_id-->   files        (direct relation 'file')
+ *   uses         --def_id--->   definitions
+ *   definitions  --file_id-->   files        (nested: 'definition.file', alias also 'file')
+ *   uses         --owner_id-->  owners
+ *   owners       --file_id-->   files        (nested: 'owner.file', alias also 'file')
  */
+const doubleAliasSchema = schema({
+	files: {
+		id: { type: 'integer', primaryKey: true },
+		path: 'string',
+	},
+	definitions: {
+		id: { type: 'integer', primaryKey: true },
+		file_id: ref('files', { as: 'file', inverse: 'definitions' }),
+	},
+	owners: {
+		id: { type: 'integer', primaryKey: true },
+		file_id: ref('files', { as: 'file', inverse: 'owners' }),
+	},
+	uses: {
+		id: { type: 'integer', primaryKey: true },
+		def_id: ref('definitions', { as: 'definition', inverse: 'uses' }),
+		file_id: ref('files', { as: 'file', inverse: 'uses' }),
+		owner_id: ref('owners', { as: 'owner', inverse: 'uses' }),
+	},
+});
+
+function buildOrm() {
+	const model = doubleAliasSchema.model;
+	return createOrm({
+		model,
+		adapter: createPgCompileOnlyAdapter({ model }),
+	});
+}
 
 describe('DOUBLE-ALIAS: duplicate join aliases are deduplicated', () => {
-	it('single include("file") uses alias "file" without suffix', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'variable_uses',
-			decisions: [
-				{ type: 'select', column: 'id' },
-				{
-					type: 'includeStrategy',
-					choice: 'join',
-					relation: 'file',
-					relationName: 'file',
-					targetTable: 'files',
-					sourceTable: 'variable_uses',
-					sourceColumn: 'file_id',
-					targetColumn: 'id',
-					relationType: 'belongsTo',
-					columns: ['path'],
-					columnAliases: { path: 'file.path' },
-				},
-			],
-		};
-
-		const result = compilePlan(plan);
-		const sql = normalizeSQL(result.sql);
-
-		expect(sql).toContain('join');
-		expect(sql).toContain('files');
-
-		// The alias 'file' should appear without a numeric suffix
-		expect(sql).toMatch(/files\s+as\s+file\b/i);
-		expect(sql).not.toMatch(/files\s+as\s+file_1\b/i);
-	});
-
 	it('include("def.file") + include("file") produces two JOINs with distinct aliases', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'variable_uses',
-			decisions: [
-				{ type: 'select', column: 'id' },
-				// First hop: variable_uses -> variable_defs (relation 'def')
-				{
-					type: 'includeStrategy',
-					choice: 'join',
-					relation: 'def',
-					relationName: 'def',
-					targetTable: 'variable_defs',
-					sourceTable: 'variable_uses',
-					sourceColumn: 'def_id',
-					targetColumn: 'id',
-					relationType: 'belongsTo',
-					columns: ['name'],
-					columnAliases: { name: 'def.name' },
-				},
-				// Second hop: variable_defs -> files (relation 'file', first usage)
-				{
-					type: 'includeStrategy',
-					choice: 'join',
-					relation: 'file',
-					relationName: 'file',
-					targetTable: 'files',
-					sourceTable: 'variable_defs',
-					sourceColumn: 'file_id',
-					targetColumn: 'id',
-					relationType: 'belongsTo',
-					columns: ['path'],
-					columnAliases: { path: 'def.file.path' },
-				},
-				// Direct: variable_uses -> files (relation 'file', SAME alias -> becomes file_1)
-				{
-					type: 'includeStrategy',
-					choice: 'join',
-					relation: 'file',
-					relationName: 'file',
-					targetTable: 'files',
-					sourceTable: 'variable_uses',
-					sourceColumn: 'file_id',
-					targetColumn: 'id',
-					relationType: 'belongsTo',
-					columns: ['path'],
-					columnAliases: { path: 'file.path' },
-				},
-			],
-		};
+		const { sql, params } = buildOrm()
+			.select('uses')
+			.include('definition.file', { join: 'inner' })
+			.include('file', { join: 'inner' })
+			.dump();
 
-		// Must NOT throw "table name specified more than once"
-		expect(() => compilePlan(plan)).not.toThrow();
-
-		const result = compilePlan(plan);
-		const sql = normalizeSQL(result.sql);
-
-		// At least 3 joins: def, file (from def.file), file_1 (direct)
-		const joinMatches = sql.match(/\bjoin\b/gi) ?? [];
-		expect(joinMatches.length).toBeGreaterThanOrEqual(3);
-
-		// Both original and suffixed alias must appear
-		expect(sql).toMatch(/files\s+as\s+file\b/i);
-		expect(sql).toMatch(/files\s+as\s+file_1\b/i);
-
-		// Two distinct JOINs to the files table
-		const filesMatches = sql.match(/\bfiles\b/gi) ?? [];
-		expect(filesMatches.length).toBeGreaterThanOrEqual(2);
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT uses.*, definition.id AS "definition.id", definition.file_id AS "definition.file_id", definition.id AS __dbsp_presence_definition, file.id AS "definition.file.id", file.path AS "definition.file.path", file.id AS "__dbsp_presence_definition.file", file_1.id AS "file.id", file_1.path AS "file.path", file_1.id AS __dbsp_presence_file FROM uses JOIN definitions AS definition ON uses.def_id = definition.id JOIN files AS file ON definition.file_id = file.id JOIN files AS file_1 ON uses.file_id = file_1.id',
+			params: [],
+		});
 	});
 
 	it('three includes with same alias get incremental suffixes: file, file_1, file_2', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'root_table',
-			decisions: [
-				{ type: 'select', column: 'id' },
-				{
-					type: 'includeStrategy',
-					choice: 'join',
-					relation: 'file',
-					relationName: 'file',
-					targetTable: 'files',
-					sourceTable: 'root_table',
-					sourceColumn: 'file_id',
-					targetColumn: 'id',
-					relationType: 'belongsTo',
-					columns: ['path'],
-				},
-				{
-					type: 'includeStrategy',
-					choice: 'join',
-					relation: 'file',
-					relationName: 'file',
-					targetTable: 'files',
-					sourceTable: 'root_table',
-					sourceColumn: 'file2_id',
-					targetColumn: 'id',
-					relationType: 'belongsTo',
-					columns: ['path'],
-				},
-				{
-					type: 'includeStrategy',
-					choice: 'join',
-					relation: 'file',
-					relationName: 'file',
-					targetTable: 'files',
-					sourceTable: 'root_table',
-					sourceColumn: 'file3_id',
-					targetColumn: 'id',
-					relationType: 'belongsTo',
-					columns: ['path'],
-				},
-			],
-		};
+		const { sql, params } = buildOrm()
+			.select('uses')
+			.include('definition.file', { join: 'inner' })
+			.include('file', { join: 'inner' })
+			.include('owner.file', { join: 'inner' })
+			.dump();
 
-		expect(() => compilePlan(plan)).not.toThrow();
-
-		const result = compilePlan(plan);
-		const sql = normalizeSQL(result.sql);
-
-		expect(sql).toMatch(/files\s+as\s+file\b/i);
-		expect(sql).toMatch(/files\s+as\s+file_1\b/i);
-		expect(sql).toMatch(/files\s+as\s+file_2\b/i);
-
-		const filesMatches = sql.match(/\bfiles\b/gi) ?? [];
-		expect(filesMatches.length).toBeGreaterThanOrEqual(3);
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT uses.*, definition.id AS "definition.id", definition.file_id AS "definition.file_id", definition.id AS __dbsp_presence_definition, file.id AS "definition.file.id", file.path AS "definition.file.path", file.id AS "__dbsp_presence_definition.file", file_1.id AS "file.id", file_1.path AS "file.path", file_1.id AS __dbsp_presence_file, owner.id AS "owner.id", owner.file_id AS "owner.file_id", owner.id AS __dbsp_presence_owner, file_2.id AS "owner.file.id", file_2.path AS "owner.file.path", file_2.id AS "__dbsp_presence_owner.file" FROM uses JOIN definitions AS definition ON uses.def_id = definition.id JOIN files AS file ON definition.file_id = file.id JOIN files AS file_1 ON uses.file_id = file_1.id JOIN owners AS owner ON uses.owner_id = owner.id JOIN files AS file_2 ON owner.file_id = file_2.id',
+			params: [],
+		});
 	});
 });

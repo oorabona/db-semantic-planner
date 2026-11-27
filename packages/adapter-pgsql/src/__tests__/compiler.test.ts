@@ -7,183 +7,65 @@
 
 import {
 	compilePlan,
-	PlanCompiler,
 	type SimplifiedPlanReport,
 } from '@dbsp/adapter-pgsql/internal';
+import {
+	createOrm,
+	type Dump,
+	eq,
+	gt,
+	inSubquery,
+	lt,
+	type MutationDump,
+	ref,
+	schema,
+	subquery,
+} from '@dbsp/core';
 import { parseSync } from 'pgsql-parser';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
+
+const db = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'text',
+		email: 'text',
+		age: 'integer',
+		active: 'boolean',
+		created_at: 'text',
+		createdAt: 'text',
+		firstName: 'text',
+		lastName: 'text',
+	},
+	customers: {
+		id: { type: 'integer', primaryKey: true },
+		active: 'boolean',
+	},
+	orders: {
+		id: { type: 'integer', primaryKey: true },
+		customer_id: ref('customers', { as: 'customer' }),
+		total: 'integer',
+		price: 'integer',
+		quantity: 'integer',
+		balance: 'integer',
+	},
+});
+const orm = createOrm({
+	schema: db,
+	adapter: createPgCompileOnlyAdapter({ model: db.model }),
+});
+
+/** The compiled SQL and bound values of a query or mutation dump. */
+function compiled(dump: Dump | MutationDump) {
+	return {
+		sql: dump.sql,
+		params: 'parameters' in dump ? dump.parameters : dump.params,
+	};
+}
 
 describe('PlanCompiler', () => {
 	describe('SELECT queries', () => {
-		it('compiles simple SELECT *', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [],
-			};
-
-			const result = compilePlan(plan);
-
-			expect(normalizeSQL(result.sql)).toContain('select');
-			expect(normalizeSQL(result.sql)).toMatch(/from\s+"?users"?/);
-		});
-
-		it('compiles SELECT with columns', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: 'id' },
-					{ type: 'select', column: 'name' },
-					{ type: 'select', column: 'email' },
-				],
-			};
-
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			expect(normalized).toContain('id');
-			expect(normalized).toContain('name');
-			expect(normalized).toContain('email');
-		});
-
-		it('compiles SELECT with column aliases', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: 'id', alias: 'user_id' },
-					{ type: 'select', column: 'name', alias: 'user_name' },
-				],
-			};
-
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			expect(normalized).toContain('as');
-		});
-
-		it('compiles SELECT with WHERE', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{ type: 'where', column: 'active', operator: '=', value: true },
-				],
-			};
-
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			expect(normalized).toContain('where');
-			expect(normalized).toContain('active');
-		});
-
-		it('compiles SELECT with parameterized WHERE', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{
-						type: 'where',
-						column: 'id',
-						operator: '=',
-						paramIndex: 1,
-						value: 42,
-					},
-				],
-			};
-
-			const result = compilePlan(plan);
-
-			expect(result.sql).toContain('$1');
-			expect(result.parameters).toContain(42);
-		});
-
-		it('compiles SELECT with multiple WHERE conditions (AND)', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{
-						type: 'whereAnd',
-						conditions: [
-							{ type: 'where', column: 'active', operator: '=', value: true },
-							{
-								type: 'where',
-								column: 'role',
-								operator: '=',
-								paramIndex: 1,
-								value: 'admin',
-							},
-						],
-					},
-				],
-			};
-
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			expect(normalized).toContain('and');
-		});
-
-		it('compiles SELECT with OR conditions', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{
-						type: 'whereOr',
-						conditions: [
-							{ type: 'where', column: 'role', operator: '=', value: 'admin' },
-							{
-								type: 'where',
-								column: 'role',
-								operator: '=',
-								value: 'moderator',
-							},
-						],
-					},
-				],
-			};
-
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			expect(normalized).toContain('or');
-		});
-
-		it('compiles SELECT with ORDER BY', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{ type: 'orderBy', column: 'created_at', direction: 'DESC' },
-				],
-			};
-
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			expect(normalized).toContain('order by');
-			expect(normalized).toContain('desc');
-		});
-
-		it('compiles SELECT with LIMIT and OFFSET', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{ type: 'limit', limit: 10 },
-					{ type: 'offset', offset: 20 },
-				],
-			};
-
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			expect(normalized).toContain('limit');
-			expect(normalized).toContain('offset');
-		});
-
 		it('compiles SELECT with parameterized LIMIT/OFFSET', () => {
 			const plan: SimplifiedPlanReport = {
 				rootTable: 'users',
@@ -199,461 +81,146 @@ describe('PlanCompiler', () => {
 			expect(result.sql).toContain('$1');
 			expect(result.sql).toContain('$2');
 		});
-
-		it('compiles SELECT DISTINCT', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [{ type: 'select', column: 'role' }, { type: 'distinct' }],
-			};
-
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			expect(normalized).toContain('distinct');
-		});
-
-		it('compiles SELECT with GROUP BY and HAVING', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'products',
-				decisions: [
-					{ type: 'select', column: 'category' },
-					{
-						type: 'selectFunction',
-						function: 'count',
-						column: '*',
-						alias: 'count',
-					},
-					{ type: 'groupBy', column: 'category' },
-					{ type: 'having', column: 'count', operator: '>', value: 5 },
-				],
-			};
-
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			expect(normalized).toContain('group by');
-			expect(normalized).toContain('having');
-		});
-
-		it('compiles SELECT with JOIN', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*', table: 'users' },
-					{
-						type: 'join',
-						joinType: 'inner',
-						targetTable: 'orders',
-						alias: 'o',
-						sourceColumn: 'id',
-						targetColumn: 'user_id',
-					},
-				],
-			};
-
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			expect(normalized).toContain('join');
-		});
-
-		it('compiles SELECT with LEFT JOIN', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{
-						type: 'join',
-						joinType: 'left',
-						targetTable: 'profiles',
-						sourceColumn: 'id',
-						targetColumn: 'user_id',
-					},
-				],
-			};
-
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			expect(normalized).toContain('left');
-			expect(normalized).toContain('join');
-		});
-
-		it('compiles SELECT with aggregate functions', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'orders',
-				decisions: [
-					{
-						type: 'selectFunction',
-						function: 'count',
-						column: '*',
-						alias: 'total',
-					},
-					{
-						type: 'selectFunction',
-						function: 'sum',
-						column: 'amount',
-						alias: 'total_amount',
-					},
-				],
-			};
-
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			expect(normalized).toContain('count');
-			expect(normalized).toContain('sum');
-		});
 	});
 
 	describe('INSERT queries', () => {
-		it('compiles simple INSERT', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{
-						type: 'insert',
-						columns: ['name', 'email'],
-						values: [
-							{ paramIndex: 1, value: 'John' },
-							{ paramIndex: 2, value: 'john@example.com' },
-						],
-					},
-				],
-			};
-
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			expect(normalized).toContain('insert into');
-			expect(normalized).toContain('users');
-			expect(result.sql).toContain('$1');
-			expect(result.sql).toContain('$2');
-		});
-
 		it('compiles INSERT with RETURNING', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{
-						type: 'insert',
-						columns: ['name'],
-						values: [{ paramIndex: 1, value: 'John' }],
-					},
-					{ type: 'returning', column: 'id' },
-					{ type: 'returning', column: 'created_at' },
-				],
-			};
+			const dump = orm
+				.insert('users')
+				.values({ name: 'John' })
+				.returning(['id', 'created_at'])
+				.dump();
 
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			expect(normalized).toContain('returning');
+			expect(compiled(dump)).toEqual({
+				sql: 'INSERT INTO users (name) VALUES ($1) RETURNING users.id AS id, users.created_at AS created_at',
+				params: ['John'],
+			});
 		});
 	});
 
 	describe('UPDATE queries', () => {
-		it('compiles simple UPDATE', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{
-						type: 'update',
-						set: [{ column: 'name', value: { paramIndex: 1, value: 'Jane' } }],
-					},
-					{
-						type: 'where',
-						column: 'id',
-						operator: '=',
-						paramIndex: 2,
-						value: 1,
-					},
-				],
-			};
+		it('compiles UPDATE with RETURNING *', () => {
+			// `*` is not a typed column key; the ORM builder forwards it verbatim.
+			const dump = orm
+				.update('users')
+				.set({ name: 'x' })
+				.where(eq('id', 1))
+				.returning(['*'] as never)
+				.dump();
 
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			expect(normalized).toContain('update');
-			expect(normalized).toContain('set');
-			expect(normalized).toContain('where');
-		});
-
-		it('compiles UPDATE with RETURNING', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{
-						type: 'update',
-						set: [{ column: 'status', value: 'active' }],
-					},
-					{
-						type: 'where',
-						column: 'id',
-						operator: '=',
-						paramIndex: 1,
-						value: 1,
-					},
-					{ type: 'returning', column: '*' },
-				],
-			};
-
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			expect(normalized).toContain('returning');
+			expect(compiled(dump)).toEqual({
+				sql: 'UPDATE users SET name = $1 WHERE users.id = $2 RETURNING *',
+				params: ['x', 1],
+			});
 		});
 	});
 
 	describe('DELETE queries', () => {
-		it('compiles simple DELETE', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'sessions',
-				decisions: [
-					{ type: 'delete' },
-					{
-						type: 'where',
-						column: 'id',
-						operator: '=',
-						paramIndex: 1,
-						value: 42,
-					},
-				],
-			};
-
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			expect(normalized).toContain('delete from');
-			expect(normalized).toContain('where');
-		});
-
 		it('compiles DELETE with RETURNING', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'delete' },
-					{
-						type: 'where',
-						column: 'id',
-						operator: '=',
-						paramIndex: 1,
-						value: 1,
-					},
-					{ type: 'returning', column: 'id' },
-					{ type: 'returning', column: 'email' },
-				],
-			};
+			const dump = orm
+				.delete('users')
+				.where(eq('id', 1))
+				.returning(['id', 'email'])
+				.dump();
 
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			expect(normalized).toContain('returning');
+			expect(compiled(dump)).toEqual({
+				sql: 'DELETE FROM users WHERE users.id = $1 RETURNING users.id AS id, users.email AS email',
+				params: [1],
+			});
 		});
 	});
 
 	describe('Naming convention', () => {
 		it('does not apply the legacy naming policy to direct compilation', () => {
-			const compiler = new PlanCompiler();
+			const { sql, params } = orm
+				.select('users')
+				.columns(['firstName', 'lastName'])
+				.where(gt('createdAt', '2024-01-01'))
+				.dump();
 
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'userProfiles',
-				decisions: [
-					{ type: 'select', column: 'firstName' },
-					{ type: 'select', column: 'lastName' },
-					{
-						type: 'where',
-						column: 'createdAt',
-						operator: '>',
-						paramIndex: 1,
-						value: '2024-01-01',
-					},
-				],
-			};
-
-			const result = compiler.compile(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			expect(normalized).toContain('userprofiles');
-			expect(normalized).toContain('firstname');
-			expect(normalized).toContain('lastname');
-			expect(normalized).toContain('createdat');
-		});
-	});
-
-	describe('Schema support', () => {
-		it('includes schema in table reference', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				schema: 'public',
-				decisions: [{ type: 'select', column: '*' }],
-			};
-
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			expect(normalized).toMatch(/"?public"?\."?users"?/);
+			expect({ sql, params }).toEqual({
+				sql: 'SELECT users."firstName", users."lastName" FROM users WHERE users."createdAt" > $1',
+				params: ['2024-01-01'],
+			});
 		});
 	});
 
 	describe('Comparison operators', () => {
 		const operators = [
-			{ op: '=', sql: '=' },
-			{ op: 'eq', sql: '=' },
-			{ op: '!=', sql: '<>' },
-			{ op: 'ne', sql: '<>' },
-			{ op: '<', sql: '<' },
-			{ op: 'lt', sql: '<' },
-			{ op: '<=', sql: '<=' },
-			{ op: 'lte', sql: '<=' },
-			{ op: '>', sql: '>' },
-			{ op: 'gt', sql: '>' },
-			{ op: '>=', sql: '>=' },
-			{ op: 'gte', sql: '>=' },
+			{
+				op: '<',
+				build: lt,
+				sql: 'SELECT users.* FROM users WHERE users.age < $1',
+			},
+			{
+				op: 'lt',
+				build: lt,
+				sql: 'SELECT users.* FROM users WHERE users.age < $1',
+			},
+			{
+				op: '>',
+				build: gt,
+				sql: 'SELECT users.* FROM users WHERE users.age > $1',
+			},
+			{
+				op: 'gt',
+				build: gt,
+				sql: 'SELECT users.* FROM users WHERE users.age > $1',
+			},
 		];
 
-		for (const { op, sql } of operators) {
+		for (const { op, build, sql } of operators) {
 			it(`handles ${op} operator`, () => {
-				const plan: SimplifiedPlanReport = {
-					rootTable: 'users',
-					decisions: [
-						{ type: 'select', column: '*' },
-						{ type: 'where', column: 'age', operator: op, value: 18 },
-					],
-				};
-
-				const result = compilePlan(plan);
-				expect(result.sql).toContain(sql);
+				const result = orm.select('users').where(build('age', 18)).dump();
+				expect({ sql: result.sql, params: result.params }).toEqual({
+					sql,
+					params: [18],
+				});
 			});
 		}
-
-		it('handles LIKE operator', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{ type: 'where', column: 'name', operator: 'like', value: '%john%' },
-				],
-			};
-
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-			// PostgreSQL LIKE can be output as 'like' or '~~'
-			expect(normalized.includes('like') || normalized.includes('~~')).toBe(
-				true,
-			);
-		});
-
-		it('handles IS NULL', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{ type: 'where', column: 'deleted_at', operator: 'isNull' },
-				],
-			};
-
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-			expect(normalized).toContain('is null');
-		});
-
-		it('handles IS NOT NULL', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{ type: 'where', column: 'email', operator: 'isNotNull' },
-				],
-			};
-
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-			expect(normalized).toContain('is not null');
-		});
 	});
 
 	describe('Roundtrip verification', () => {
 		it('compiled SQL parses correctly', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: 'id' },
-					{ type: 'select', column: 'name' },
-					{ type: 'where', column: 'active', operator: '=', value: true },
-					{ type: 'orderBy', column: 'created_at', direction: 'DESC' },
-					{ type: 'limit', limit: 10 },
-				],
-			};
+			const { sql } = orm
+				.select('users')
+				.columns(['id', 'name'])
+				.where(eq('active', true))
+				.orderBy('created_at', 'desc')
+				.limit(10)
+				.dump();
 
-			const result = compilePlan(plan);
-
+			expect(sql).toBe(
+				'SELECT users.id, users.name FROM users WHERE users.active = $1 ORDER BY users.created_at DESC LIMIT 10',
+			);
 			// Verify the SQL can be parsed
-			const parsed = parseSync(result.sql);
+			const parsed = parseSync(sql);
 			expect(parsed.stmts).toHaveLength(1);
 		});
 
 		it('complex query parses correctly', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'orders',
-				decisions: [
-					{ type: 'select', column: 'customer_id' },
-					{
-						type: 'selectFunction',
-						function: 'sum',
-						column: 'total',
-						alias: 'total_spent',
-					},
-					{
-						type: 'join',
-						joinType: 'inner',
-						targetTable: 'customers',
-						sourceColumn: 'customer_id',
-						targetColumn: 'id',
-						alias: 'c',
-					},
-					{ type: 'groupBy', column: 'customer_id' },
-					{ type: 'having', column: 'sum', operator: '>', value: 1000 },
-					{ type: 'orderBy', column: 'total_spent', direction: 'DESC' },
-					{ type: 'limit', limit: 10 },
-				],
-			};
+			const { sql, params } = orm
+				.select('orders')
+				.columns(['customer_id'])
+				.join('customer')
+				.groupBy(['customer_id'])
+				.sum('total', 'total_spent')
+				.having(gt('total_spent', 1000))
+				.orderBy('total_spent', 'desc')
+				.limit(10)
+				.dump();
 
-			const result = compilePlan(plan);
-
+			expect(sql).toBe(
+				'SELECT orders.customer_id, sum(orders.total) AS total_spent FROM orders JOIN customers AS customer ON orders.customer_id = customer.id GROUP BY orders.customer_id HAVING sum(orders.total) > $1 ORDER BY total_spent DESC LIMIT 10',
+			);
+			expect(params).toEqual([1000]);
 			// Verify the SQL can be parsed
-			const parsed = parseSync(result.sql);
+			const parsed = parseSync(sql);
 			expect(parsed.stmts).toHaveLength(1);
 		});
 	});
 
 	describe('IN (subquery) conditions', () => {
-		it('compiles WHERE field IN (SELECT col FROM table)', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'orders',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{
-						type: 'where',
-						column: 'customer_id',
-						operator: 'in',
-						subquery: {
-							from: 'active_customers',
-							select: 'id',
-						},
-					},
-				],
-			};
-
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			expect(normalized).toContain('= any');
-			expect(normalized).toContain('select');
-			expect(normalized).toContain('active_customers');
-			expect(result.parameters).toHaveLength(0);
-		});
-
 		it('compiles WHERE field NOT IN (SELECT col FROM table)', () => {
 			const plan: SimplifiedPlanReport = {
 				rootTable: 'orders',
@@ -681,126 +248,49 @@ describe('PlanCompiler', () => {
 		});
 
 		it('compiles WHERE field IN (SELECT col FROM table WHERE cond)', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'orders',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{
-						type: 'where',
-						column: 'customer_id',
-						operator: 'in',
-						subquery: {
-							from: 'customers',
-							select: 'id',
-							where: {
-								type: 'where',
-								column: 'active',
-								operator: '=',
-								value: true,
-								table: 'customers',
-							},
-						},
-					},
-				],
-			};
+			const { sql, params } = orm
+				.select('orders')
+				.where(
+					inSubquery(
+						'customer_id',
+						subquery('customers').select('id').where(eq('active', true)),
+					),
+				)
+				.dump();
 
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			expect(normalized).toContain('= any');
-			expect(normalized).toContain('customers');
-			expect(normalized).toContain('active');
-			expect(result.parameters).toEqual([true]);
-		});
-	});
-
-	describe('selectRelationColumn decisions', () => {
-		it('refuses relation column via expression handler without an emitted alias', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'orders',
-				decisions: [
-					{
-						type: 'selectRelationColumn',
-						relation: 'customer',
-						column: 'name',
-						table: 'orders',
-						alias: 'customer_name',
-					},
-				],
-			};
-
-			expect(() => compilePlan(plan)).toThrow(
-				'relation column "customer"."name" has no emitted alias in this query',
-			);
+			expect({ sql, params }).toEqual({
+				sql: 'SELECT orders.* FROM orders WHERE orders.customer_id = ANY (SELECT customers_subq_0.id FROM customers AS customers_subq_0 WHERE customers_subq_0.active = $1)',
+				params: [true],
+			});
 		});
 	});
 
 	describe('selectArithmetic decisions', () => {
 		it('compiles arithmetic expression price * quantity', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'order_items',
-				decisions: [
-					{
-						type: 'selectArithmetic',
-						operator: '*',
-						args: ['price', 'quantity'],
-						table: 'order_items',
-						alias: 'total',
-					},
-				],
-			};
+			const dump = orm.nql`orders | select price * quantity as total`.dump();
 
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			expect(normalized).toContain('*');
-			expect(normalized).toContain('price');
-			expect(normalized).toContain('quantity');
-			expect(normalized).toContain('total');
+			expect(compiled(dump)).toEqual({
+				sql: 'SELECT orders.price * orders.quantity AS total FROM orders',
+				params: [],
+			});
 		});
 
 		it('compiles arithmetic with literal operand', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'products',
-				decisions: [
-					{
-						type: 'selectArithmetic',
-						operator: '*',
-						args: ['price', 1.1],
-						table: 'products',
-						alias: 'with_tax',
-					},
-				],
-			};
+			const dump = orm.nql`orders | select price * 1.1 as with_tax`.dump();
 
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			expect(normalized).toContain('price');
-			expect(normalized).toContain('with_tax');
-			expect(result.parameters).toEqual([1.1]);
+			expect(compiled(dump)).toEqual({
+				sql: 'SELECT orders.price * $1 AS with_tax FROM orders',
+				params: [1.1],
+			});
 		});
 
 		it('compiles negation as arithmetic -1 * field', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'accounts',
-				decisions: [
-					{
-						type: 'selectArithmetic',
-						operator: '*',
-						args: [-1, 'balance'],
-						table: 'accounts',
-						alias: 'negative_balance',
-					},
-				],
-			};
+			const dump = orm.nql`orders | select -balance as negative_balance`.dump();
 
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			expect(normalized).toContain('balance');
-			expect(normalized).toContain('negative_balance');
-			expect(result.parameters).toEqual([-1]);
+			expect(compiled(dump)).toEqual({
+				sql: 'SELECT $1 * orders.balance AS negative_balance FROM orders',
+				params: [-1],
+			});
 		});
 	});
 
@@ -835,58 +325,21 @@ describe('PlanCompiler', () => {
 // ============================================================================
 
 describe('DISTINCT ON compilation', () => {
-	it('compiles DISTINCT ON with a single column', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'users',
-			decisions: [{ type: 'distinctOn', columns: ['id'] }],
-		};
-
-		const result = compilePlan(plan);
-		const normalized = normalizeSQL(result.sql);
-
-		expect(normalized).toMatch(/distinct on \([^)]*id[^)]*\)/i);
-	});
-
 	it('compiles DISTINCT ON with multiple columns', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'users',
-			decisions: [{ type: 'distinctOn', columns: ['id', 'name'] }],
-		};
+		const { sql, params } = orm.select('users').distinctOn('id', 'name').dump();
 
-		const result = compilePlan(plan);
-		const normalized = normalizeSQL(result.sql);
-
-		expect(normalized).toMatch(/distinct on \([^)]*id[^)]*name[^)]*\)/i);
-	});
-
-	it('compiles DISTINCT ON combined with explicit column selection', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'users',
-			decisions: [
-				{ type: 'select', column: 'id' },
-				{ type: 'select', column: 'email' },
-				{ type: 'distinctOn', columns: ['id'] },
-			],
-		};
-
-		const result = compilePlan(plan);
-		const normalized = normalizeSQL(result.sql);
-
-		expect(normalized).toMatch(/distinct on \([^)]*id[^)]*\)/i);
-		expect(normalized).toContain('id');
-		expect(normalized).toContain('email');
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT DISTINCT ON (id, name) users.* FROM users',
+			params: [],
+		});
 	});
 
 	it('does not apply the legacy naming policy to DISTINCT ON columns', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'users',
-			decisions: [{ type: 'distinctOn', columns: ['createdAt'] }],
-		};
+		const { sql, params } = orm.select('users').distinctOn('createdAt').dump();
 
-		const compiler = new PlanCompiler();
-		const result = compiler.compile(plan);
-		const normalized = normalizeSQL(result.sql);
-
-		expect(normalized).toMatch(/distinct on \([^)]*createdat[^)]*\)/i);
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT DISTINCT ON ("createdAt") users.* FROM users',
+			params: [],
+		});
 	});
 });

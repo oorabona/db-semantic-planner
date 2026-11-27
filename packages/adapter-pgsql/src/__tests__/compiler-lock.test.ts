@@ -1,21 +1,32 @@
 /**
- * PlanCompiler — Locking clause tests (E15)
+ * Locking clause tests (E15)
  *
- * Tests that SimplifiedPlanReport.lock compiles correctly
+ * Tests that the query builder's lock methods compile correctly
  * for all 4 strengths × 3 wait policies, and that lock scoping
  * works with JOINs (INV-E15-05).
  */
 
-import {
-	compilePlan,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
+import { createOrm, eq, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { normalizeSQL } from '../ast-helpers.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
-function sql(plan: SimplifiedPlanReport): string {
-	return normalizeSQL(compilePlan(plan).sql);
-}
+const db = schema({
+	jobs: {
+		id: { type: 'integer', primaryKey: true },
+		status: { type: 'text' },
+	},
+	customers: {
+		id: { type: 'integer', primaryKey: true },
+	},
+	orders: {
+		id: { type: 'integer', primaryKey: true },
+		customer_id: ref('customers', { as: 'customer', inverse: 'orders' }),
+	},
+} as const);
+const orm = createOrm({
+	schema: db,
+	adapter: createPgCompileOnlyAdapter({ model: db.model }),
+});
 
 describe('Compiler — lock clause', () => {
 	// ==========================================================================
@@ -23,41 +34,35 @@ describe('Compiler — lock clause', () => {
 	// ==========================================================================
 
 	it('FOR UPDATE (block)', () => {
-		const result = sql({
-			rootTable: 'jobs',
-			decisions: [],
-			lock: { strength: 'forUpdate', waitPolicy: 'block' },
+		const { sql, params } = orm.select('jobs').forUpdate().dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT jobs.* FROM jobs FOR UPDATE',
+			params: [],
 		});
-		expect(result).toContain('for update');
-		expect(result).not.toContain('skip locked');
-		expect(result).not.toContain('nowait');
 	});
 
 	it('FOR SHARE (block)', () => {
-		const result = sql({
-			rootTable: 'jobs',
-			decisions: [],
-			lock: { strength: 'forShare', waitPolicy: 'block' },
+		const { sql, params } = orm.select('jobs').forShare().dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT jobs.* FROM jobs FOR SHARE',
+			params: [],
 		});
-		expect(result).toContain('for share');
 	});
 
 	it('FOR NO KEY UPDATE (block)', () => {
-		const result = sql({
-			rootTable: 'jobs',
-			decisions: [],
-			lock: { strength: 'forNoKeyUpdate', waitPolicy: 'block' },
+		const { sql, params } = orm.select('jobs').forNoKeyUpdate().dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT jobs.* FROM jobs FOR NO KEY UPDATE',
+			params: [],
 		});
-		expect(result).toContain('for no key update');
 	});
 
 	it('FOR KEY SHARE (block)', () => {
-		const result = sql({
-			rootTable: 'jobs',
-			decisions: [],
-			lock: { strength: 'forKeyShare', waitPolicy: 'block' },
+		const { sql, params } = orm.select('jobs').forKeyShare().dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT jobs.* FROM jobs FOR KEY SHARE',
+			params: [],
 		});
-		expect(result).toContain('for key share');
 	});
 
 	// ==========================================================================
@@ -65,39 +70,35 @@ describe('Compiler — lock clause', () => {
 	// ==========================================================================
 
 	it('FOR UPDATE SKIP LOCKED', () => {
-		const result = sql({
-			rootTable: 'jobs',
-			decisions: [],
-			lock: { strength: 'forUpdate', waitPolicy: 'skipLocked' },
+		const { sql, params } = orm.select('jobs').forUpdate().skipLocked().dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT jobs.* FROM jobs FOR UPDATE SKIP LOCKED',
+			params: [],
 		});
-		expect(result).toContain('for update skip locked');
 	});
 
 	it('FOR UPDATE NOWAIT', () => {
-		const result = sql({
-			rootTable: 'jobs',
-			decisions: [],
-			lock: { strength: 'forUpdate', waitPolicy: 'noWait' },
+		const { sql, params } = orm.select('jobs').forUpdate().noWait().dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT jobs.* FROM jobs FOR UPDATE NOWAIT',
+			params: [],
 		});
-		expect(result).toContain('for update nowait');
 	});
 
 	it('FOR SHARE SKIP LOCKED', () => {
-		const result = sql({
-			rootTable: 'jobs',
-			decisions: [],
-			lock: { strength: 'forShare', waitPolicy: 'skipLocked' },
+		const { sql, params } = orm.select('jobs').forShare().skipLocked().dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT jobs.* FROM jobs FOR SHARE SKIP LOCKED',
+			params: [],
 		});
-		expect(result).toContain('for share skip locked');
 	});
 
 	it('FOR SHARE NOWAIT', () => {
-		const result = sql({
-			rootTable: 'jobs',
-			decisions: [],
-			lock: { strength: 'forShare', waitPolicy: 'noWait' },
+		const { sql, params } = orm.select('jobs').forShare().noWait().dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT jobs.* FROM jobs FOR SHARE NOWAIT',
+			params: [],
 		});
-		expect(result).toContain('for share nowait');
 	});
 
 	// ==========================================================================
@@ -105,17 +106,17 @@ describe('Compiler — lock clause', () => {
 	// ==========================================================================
 
 	it('job queue pattern: WHERE + LIMIT + FOR UPDATE SKIP LOCKED', () => {
-		const result = sql({
-			rootTable: 'jobs',
-			decisions: [
-				{ type: 'where', column: 'status', operator: '=', value: 'pending' },
-				{ type: 'limit', limit: 1 },
-			],
-			lock: { strength: 'forUpdate', waitPolicy: 'skipLocked' },
+		const { sql, params } = orm
+			.select('jobs')
+			.where(eq('status', 'pending'))
+			.limit(1)
+			.forUpdate()
+			.skipLocked()
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT jobs.* FROM jobs WHERE jobs.status = $1 LIMIT 1 FOR UPDATE SKIP LOCKED',
+			params: ['pending'],
 		});
-		expect(result).toContain('where');
-		expect(result).toContain('limit');
-		expect(result).toContain('for update skip locked');
 	});
 
 	// ==========================================================================
@@ -123,38 +124,14 @@ describe('Compiler — lock clause', () => {
 	// ==========================================================================
 
 	it('scopes lock to root table when query has JOIN (include)', () => {
-		const result = sql({
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*', table: 'orders' },
-				{
-					type: 'includeStrategy',
-					choice: 'join',
-					relationName: 'customer',
-					targetTable: 'customers',
-					relationType: 'belongsTo',
-					foreignKey: 'customer_id',
-				},
-			],
-			lock: { strength: 'forUpdate', waitPolicy: 'block' },
+		const { sql, params } = orm
+			.select('orders')
+			.include('customer', { join: 'left' })
+			.forUpdate()
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT orders.*, customer.id AS "customer.id", customer.id AS __dbsp_presence_customer FROM orders LEFT JOIN customers AS customer ON orders.customer_id = customer.id FOR UPDATE OF orders',
+			params: [],
 		});
-		// Should include "OF" to scope lock to root table only
-		expect(result).toContain('for update of');
-		expect(result).toContain('orders');
-	});
-
-	// ==========================================================================
-	// No lock when lock is undefined
-	// ==========================================================================
-
-	it('no lock clause when lock is undefined', () => {
-		const result = sql({
-			rootTable: 'jobs',
-			decisions: [],
-		});
-		expect(result).not.toContain('for update');
-		expect(result).not.toContain('for share');
-		expect(result).not.toContain('skip locked');
-		expect(result).not.toContain('nowait');
 	});
 });

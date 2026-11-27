@@ -7,7 +7,11 @@ const model = schema({
 		id: { type: 'integer', primaryKey: true },
 		authorId: ref('users', { as: 'author' }),
 	},
-	users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'text',
+		active: 'boolean',
+	},
 	roots: {
 		id: { type: 'integer', primaryKey: true },
 		targetId: ref('targets', { as: 'roots' }),
@@ -42,6 +46,20 @@ describe('#891 relation predicates always use EXISTS', () => {
 		expect(
 			dump.plan?.decisions.filter((d) => d.type === 'filter-strategy'),
 		).toMatchObject([{ choice: 'exists', alternatives: [] }]);
+	});
+	it('filtered exists with two inner conditions keeps both in one subquery', () => {
+		const dump = orm
+			.select('posts')
+			.where(
+				exists('author', {
+					where: and(eq('name', 'a'), eq('active', true)),
+				}),
+			)
+			.dump();
+		expect(dump.sql).toBe(
+			'SELECT posts.* FROM posts WHERE EXISTS (SELECT 1 FROM users AS users_exists_0 WHERE posts."authorId" = users_exists_0.id AND users_exists_0.name = $1 AND users_exists_0.active = $2)',
+		);
+		expect(dump.params).toEqual(['a', true]);
 	});
 	it('root and relation names collide without duplicate SQL ranges', () => {
 		const dump = orm

@@ -9,23 +9,35 @@
  * and the right part as the column name, bypassing root table alias substitution.
  */
 
-import {
-	compilePlan,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
+import { createOrm, isNotNull, isNull, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { normalizeSQL } from '../ast-helpers.js';
+import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ============================================================================
 // Helpers
 // ============================================================================
 
-function makePlan(
-	rootTable: string,
-	decisions: SimplifiedPlanReport['decisions'],
-): SimplifiedPlanReport {
-	return { rootTable, decisions };
-}
+const db = schema({
+	variable_defs: {
+		id: { type: 'integer', primaryKey: true },
+	},
+	def_variable_uses: {
+		id: { type: 'integer', primaryKey: true },
+		def_id: ref('variable_defs', { as: 'def', inverse: 'def_variable_uses' }),
+	},
+	orders: {
+		id: { type: 'integer', primaryKey: true },
+	},
+	order_items: {
+		id: { type: 'integer', primaryKey: true },
+		deleted_at: { type: 'timestamp', nullable: true },
+		order_id: ref('orders', { as: 'order', inverse: 'order_items' }),
+	},
+});
+const orm = createOrm({
+	model: db.model,
+	adapter: createPgCompileOnlyAdapter({ model: db.model }),
+});
 
 // ============================================================================
 // REF-IN-FILTER: dotted column names in WHERE / filter conditions
@@ -35,95 +47,28 @@ describe('REF-IN-FILTER: buildColumnRef splits dotted column names', () => {
 	it('ref("alias.col") in isNotNull filter produces "alias"."col", not "root"."alias.col"', () => {
 		// Primary regression: ref('def_variable_uses.id') inside isNotNull()
 		// previously emitted "variable_defs"."def_variable_uses.id" (3-part, wrong).
-		const plan = makePlan('variable_defs', [
-			{ type: 'select', column: '*' },
-			{
-				type: 'where',
-				column: 'def_variable_uses.id',
-				operator: 'isNotNull',
-			},
-		]);
+		const { sql, params } = orm
+			.select('variable_defs')
+			.join('def_variable_uses')
+			.where(isNotNull('def_variable_uses.id'))
+			.dump();
 
-		const result = compilePlan(plan);
-		const sql = normalizeSQL(result.sql);
-
-		// Must produce 2-part reference: def_variable_uses.id (deparser uses unquoted form)
-		expect(sql).toContain('def_variable_uses.id is not null');
-		// Must NOT contain the root table as the qualifier
-		expect(sql).not.toContain('variable_defs.def_variable_uses');
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT variable_defs.* FROM variable_defs JOIN def_variable_uses AS def_variable_uses ON variable_defs.id = def_variable_uses.def_id WHERE def_variable_uses.id IS NOT NULL',
+			params: [],
+		});
 	});
 
 	it('ref("alias.col") in isNull filter produces "alias"."col"', () => {
-		const plan = makePlan('orders', [
-			{ type: 'select', column: '*' },
-			{
-				type: 'where',
-				column: 'order_items.deleted_at',
-				operator: 'isNull',
-			},
-		]);
+		const { sql, params } = orm
+			.select('orders')
+			.join('order_items')
+			.where(isNull('order_items.deleted_at'))
+			.dump();
 
-		const result = compilePlan(plan);
-		const sql = normalizeSQL(result.sql);
-
-		expect(sql).toContain('order_items.deleted_at is null');
-		expect(sql).not.toContain('orders.order_items');
-	});
-
-	it('ref("alias.col") in equality comparison produces "alias"."col"', () => {
-		const plan = makePlan('posts', [
-			{ type: 'select', column: '*' },
-			{
-				type: 'where',
-				column: 'post_tags.tag_id',
-				operator: '=',
-				value: 42,
-			},
-		]);
-
-		const result = compilePlan(plan);
-		const sql = normalizeSQL(result.sql);
-
-		expect(sql).toContain('post_tags.tag_id = $1');
-		expect(sql).not.toContain('posts.post_tags');
-		expect(result.parameters).toEqual([42]);
-	});
-
-	// ============================================================================
-	// Regression guard: simple column names (no dot) still use root table alias
-	// ============================================================================
-
-	it('simple ref("col") without dot still uses root table alias (isNotNull)', () => {
-		const plan = makePlan('users', [
-			{ type: 'select', column: '*' },
-			{
-				type: 'where',
-				column: 'email',
-				operator: 'isNotNull',
-			},
-		]);
-
-		const result = compilePlan(plan);
-		const sql = normalizeSQL(result.sql);
-
-		expect(sql).toContain('users.email is not null');
-	});
-
-	it('simple ref("col") without dot still uses root table alias (equality)', () => {
-		const plan = makePlan('products', [
-			{ type: 'select', column: '*' },
-			{
-				type: 'where',
-				column: 'status',
-				operator: '=',
-				value: 'active',
-			},
-		]);
-
-		const result = compilePlan(plan);
-		const sql = normalizeSQL(result.sql);
-
-		expect(sql).toContain('products.status = $1');
-		expect(result.parameters).toEqual(['active']);
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT orders.* FROM orders JOIN order_items AS order_items ON orders.id = order_items.order_id WHERE order_items.deleted_at IS NULL',
+			params: [],
+		});
 	});
 });
