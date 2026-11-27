@@ -2,11 +2,10 @@ import {
 	copyDefaultFilters,
 	getRelationalReadPlan,
 	planInScope,
+	resolveFromlessExpression,
 	resolveReportIncludes,
 	validateRecursiveSetOperation,
 } from '@dbsp/core/internal';
-import { compileWhereIntent } from './condition-compiler.js';
-import { createWhereDispatcher } from './handlers/index.js';
 import { assertRelationalOutput } from './relational-output.js';
 /**
  * PgAdapter - Implements the Adapter interface for PostgreSQL using native pg driver.
@@ -27,7 +26,7 @@ import type {
 	TruncateOptions,
 	VacuumOptions,
 } from '@dbsp/core';
-import { POSTGRESQL_CAPABILITIES, plan as planFn } from '@dbsp/core';
+import { POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 import { inspectMutationRows } from '@dbsp/core/internal';
 import type {
 	Adapter,
@@ -98,6 +97,7 @@ import {
 	assertPlannedReportAuthority,
 	compileSelect,
 	compileSelectEnvelope,
+	nestedSelectCompiler,
 } from './adapter-compiler-select.js';
 import {
 	DEFAULT_PK_COLUMN,
@@ -113,11 +113,6 @@ import {
 	type QueryScope,
 	relationBindingFor,
 } from './binding-registry.js';
-import {
-	buildCustomFnFilter,
-	PlanCompiler,
-	renumberParamRefsInAst,
-} from './compiler.js';
 import {
 	dbTypeCastTarget,
 	renderColumnDbType,
@@ -139,15 +134,14 @@ import {
 	getCachedPgPhysicalModel,
 } from './declared-name-resolver.js';
 import { deparseQuoted } from './deparse.js';
-import { compileExpressionIntent } from './handlers/expression/custom.js';
-import { createCompilerState } from './handlers/types.js';
-import { intentToDecisions } from './intent-to-decisions.js';
+import { type CompilerContext, createCompilerState } from './handlers/types.js';
 import {
 	type IntrospectedModelIR,
 	type IntrospectionOptions,
 	introspectWithExecutor as introspectDb,
 } from './introspection.js';
 import { createParamRef } from './param-ref.js';
+import { compileResolvedExpression } from './resolved-condition-compiler.js';
 import type { PgPhysicalModel } from './physical-model/index.js';
 import { getPostgresqlCapabilitiesTargetVersion } from './postgresql-capabilities.js';
 import {
@@ -198,11 +192,6 @@ import { validateIdentifier } from './validate.js';
 // ============================================================================
 // Internal types
 // ============================================================================
-
-type CompileSubqueryResult = {
-	ast: import('@pgsql/types').Node;
-	parameters: readonly unknown[];
-};
 
 type StreamRowMapper<T> = (rows: Record<string, unknown>[]) => T[];
 
@@ -3592,71 +3581,26 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 		// This public path does not otherwise build compiler dependencies, so it
 		// must enter the same model/casing gate as every table-backed compiler.
 		const deps = this.buildCompileDeps(options);
-		const schemaName = deps.schemaName;
-		const dialectCapabilities = deps.dialectCapabilities;
+		const model = deps.model;
+		if (model === undefined)
+			throw new Error(
+				'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.',
+			);
+		// Core resolves the whole expression: a FROM-less SELECT has no row, so
+		// every read outside a subquery body is refused there, and each body is
+		// the one a read compiles (default filters, a builder's own policy).
+		const resolved = resolveFromlessExpression(expr, model, {
+			defaultFilters: options?.defaultFilters,
+		});
 		const state = createCompilerState();
 		const ctx = {
-			...(schemaName !== undefined && { schema: schemaName }),
-			...(dialectCapabilities !== undefined && { dialectCapabilities }),
+			...deps,
+			...(deps.schemaName !== undefined && { schema: deps.schemaName }),
 			rootTable: '',
 			maxRecursiveDepth: MAX_DEPTH_LIMIT,
-			compileCustomFnFilter: buildCustomFnFilter,
-			createWhereDispatcher: () => createWhereDispatcher(compileWhereIntent),
-			// Wire compileSubquery so that SubqueryExpressionIntent nested inside
-			// expr (e.g. op('+', subquery(...).asExpr(), literal(1))) compiles
-			// correctly via a fresh inner PlanCompiler (same pattern as PlanCompiler
-			// case 'selectCustomExpression').
-			compileSubquery(
-				query: import('@dbsp/types').QueryIntent,
-				paramOffset: number,
-			): CompileSubqueryResult {
-				// With a model, a body is the plan core issues for its query: the
-				// default filters apply to its scans, and a builder nested in its
-				// WHERE or projections keeps its policy where core resolves bodies.
-				if (deps.model !== undefined) {
-					const issued = planFn(query, deps.model, {
-						...(options?.defaultFilters && {
-							defaultFilters: options.defaultFilters,
-						}),
-						...(dialectCapabilities !== undefined && { dialectCapabilities }),
-					});
-					const envelope = compileSelectEnvelope(issued, options, deps);
-					if (envelope.ast === undefined)
-						throw new Error('A planned selectExpression body produced no AST.');
-					return {
-						ast: renumberParamRefsInAst(envelope.ast, paramOffset),
-						parameters: envelope.parameters,
-					};
-				}
-				const innerCompiler = new PlanCompiler({
-					dbCasing: deps.dbCasing ?? 'preserve',
-					defaultPkColumnName: deps.defaultPk,
-					deriveFkColumnName: deps.deriveFk,
-					...(schemaName !== undefined && { schema: schemaName }),
-					...(deps.declaredNames !== undefined && {
-						declaredNames: deps.declaredNames,
-					}),
-					...(deps.model !== undefined && { model: deps.model }),
-					...(dialectCapabilities !== undefined && { dialectCapabilities }),
-				});
-				const innerPlan = {
-					rootTable: query.from,
-					decisions: intentToDecisions(query, query.from, {
-						omitRootWhere: true,
-						directConditions: true,
-					}),
-					directConditions: true,
-					rootAlias: query.from,
-					enclosingRanges: [],
-					...(query.where && { rawWhere: query.where }),
-					...(query.having && { rawHaving: query.having }),
-				};
-				const innerResult = innerCompiler.compile(innerPlan);
-				const renumbered = renumberParamRefsInAst(innerResult.ast, paramOffset);
-				return { ast: renumbered, parameters: innerResult.parameters };
-			},
-		};
-		const node = compileExpressionIntent(expr, ctx, state);
+			compileNestedSelect: nestedSelectCompiler(options, deps),
+		} as CompilerContext;
+		const node = compileResolvedExpression(resolved, ctx, state);
 		// The expression's alias (`.as()`, `.asExpr()`) names the result column.
 		const alias = (expr as { readonly as?: unknown }).as;
 		const ast = selectStmt({
