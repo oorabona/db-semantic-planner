@@ -208,14 +208,6 @@ describe('valid IN-subquery body still compiles (no false positives)', () => {
 // 4. Nested IN with subquery in `value` (not `subquery`) — DEFECT 1 guard
 // ============================================================================
 
-describe('nested IN subquery bodies', () => {
-	/**
-	 * Outer IN uses `subquery` (normal shape).
-	 * Inner WHERE uses `value` instead of `subquery` to carry the nested subquery
-	 * (the shape the plan-decision-extractor produces).
-	 * The inner value-shape subquery carries GROUP BY — must be caught.
-	 */
-});
 
 // ============================================================================
 // 5. Typeless { fields: [...] } shape — DEFECT 2 guard
