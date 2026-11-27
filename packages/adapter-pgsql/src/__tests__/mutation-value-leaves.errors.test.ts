@@ -15,7 +15,6 @@ import {
 	literal,
 	op,
 	outerRef,
-	param,
 	ref,
 	schema,
 	subquery,
@@ -157,34 +156,20 @@ describe('ADR 0011 delivery 4: mutation value refusals', () => {
 		).toThrow("SET qualifier 't' is not visible in this query.");
 	});
 
-	it('expression values need a model', () => {
+	it('expression values are refused without a model', () => {
 		const adapter = createPgCompileOnlyAdapter();
-		const where = {
-			kind: 'comparison',
-			field: 'id',
-			operator: 'eq',
-			value: 1,
-		} as const;
-		refusal(
-			() =>
-				adapter.compileUpdate({
-					type: 'update',
-					table: 'posts',
-					set: { score: op('+', exprRef('score'), 1) },
-					where,
-				}),
-			'Invalid update: an expression value requires a ModelIR; pass a model to the adapter or to the compile options',
+		expect(() =>
+			adapter.compileUpdate({
+				type: 'update',
+				table: 'posts',
+				set: { score: op('+', exprRef('score'), 1) },
+				where: { kind: 'comparison', field: 'id', operator: 'eq', value: 1 },
+			}),
+		).toThrow(
+			new Error(
+				'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.',
+			),
 		);
-		const control = adapter.compileUpdate({
-			type: 'update',
-			table: 'posts',
-			set: { score: param(5) },
-			where,
-		});
-		expect({ sql: control.sql, params: control.parameters }).toEqual({
-			sql: 'UPDATE posts SET score = $1 WHERE posts.id = $2',
-			params: [5, 1],
-		});
 	});
 
 	it('fallback keeps the parameter limit', () => {

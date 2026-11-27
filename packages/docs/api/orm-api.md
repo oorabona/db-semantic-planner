@@ -1445,9 +1445,9 @@ This is transparent — no code changes needed. The adapter resolves types from 
 
 ## 9. Naming Conventions
 
-The adapter automatically derives foreign key column names from table names using a `singularize(tableName) + "_" + pkColumn` convention. For example, the `posts` table with PK `id` produces FK column `post_id`.
+Compilation requires a model: every `PgAdapter` compilation method, and `compile()` on an NQL bundle, throws `PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.` when neither the adapter nor the compile options carry a `ModelIR`. The ORM and NQL pass their schema's model, so an ORM over `createPgCompileOnlyAdapter()` compiles.
 
-Both the primary key convention and the FK derivation function are configurable.
+Relation keys of a planned read come from the model. Where a compiled plan carries no key of its own, the adapter assumes a primary key named `id` and derives a foreign key column with a `singularize(tableName) + "_" + pkColumn` convention (the `posts` table with PK `id` gives `post_id`). Both conventions are configurable.
 
 ### Adapter Options
 
@@ -1467,8 +1467,8 @@ const adapter = createPgAdapter(pool, {
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `defaultPkColumnName` | `string` | `'id'` | Primary-key convention when compiling without a model |
-| `deriveFkColumnName` | `(table: string, pk: string) => string` | `singularize(table)_pk` | Derives FK column names when compiling without a model |
+| `defaultPkColumnName` | `string` | `'id'` | Primary-key column assumed where a compiled plan carries no key |
+| `deriveFkColumnName` | `(table: string, pk: string) => string` | `singularize(table)_pk` | Derives the FK column where a compiled plan carries no key |
 
 Hand-built `ModelIR` relations use their declared key vectors, falling back only to the referenced table’s declared primary key, when included, joined or used in a relation predicate; traversing such a relation without a declared foreign key column is refused by relation name. Relation guards of UPDATE, DELETE and upsert do not follow this rule yet.
 

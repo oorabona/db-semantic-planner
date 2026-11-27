@@ -20,7 +20,7 @@ export interface AdapterCompilerDeps {
 	readonly defaultFilters?: import('@dbsp/types').PlanOptions['defaultFilters'];
 	readonly dbCasing?: DbCasing;
 	readonly schemaName: string | undefined;
-	readonly model: ModelIR | undefined;
+	readonly model: ModelIR;
 	/** Cached physical authority for the logical model used by this compile. */
 	readonly physicalModel?: PgPhysicalModel | undefined;
 	/** Resolves declared model objects; query-local names never go through it. */

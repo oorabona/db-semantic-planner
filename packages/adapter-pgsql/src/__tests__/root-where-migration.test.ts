@@ -608,11 +608,14 @@ describe('mutation WHERE resolves through the root resolver (#891)', () => {
 		}
 	});
 
-	it('C2 without a model, the old route keeps its outcome per position', () => {
+	it('C2 without a model, every position is refused', () => {
 		const noModel = createPgCompileOnlyAdapter();
 		const quantifier = some(users.posts, () => eq('title', 'x'));
 		const raw = rawExists(
 			subquery('posts').select('id').where(eq('title', 'x')),
+		);
+		const refusal = new Error(
+			'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.',
 		);
 		for (const where of [quantifier, raw]) {
 			expect(() =>
@@ -622,19 +625,16 @@ describe('mutation WHERE resolves through the root resolver (#891)', () => {
 					set: { name: 'n' },
 					where,
 				}),
-			).toThrow('No WHERE handler registered for operator: undefined');
+			).toThrow(refusal);
 			expect(() =>
 				noModel.compileDelete({ type: 'delete', table: 'users', where }),
-			).toThrow('No WHERE handler registered for operator: undefined');
+			).toThrow(refusal);
 		}
 		const spy = vi.spyOn(mutationAdapter, 'compileUpsert');
 		guard(raw);
 		const intent = spy.mock.calls[0]?.[0];
 		expect(intent).toBeDefined();
-		expect(noModel.compileUpsert(intent!)).toMatchObject({
-			sql: 'INSERT INTO users (id, name, score) VALUES ($1, $2, $3) ON CONFLICT (id) DO UPDATE SET name = $4 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.title = $5)',
-			parameters: [1, 'a', 0, 'b', 'x'],
-		});
+		expect(() => noModel.compileUpsert(intent!)).toThrow(refusal);
 	});
 
 	describe('a snake_case target and nested read policies', () => {

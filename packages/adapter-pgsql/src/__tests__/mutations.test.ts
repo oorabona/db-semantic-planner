@@ -900,8 +900,7 @@ describe('DELETE with notExists / exists WHERE (DELETE-NOT-EXISTS)', () => {
 		expect(sql).toMatch(/comment/i);
 	});
 
-	it('falls back to relation name when no model is available (compile-only mode)', () => {
-		// Preserve casing means caller-provided declared names are already SQL names.
+	it('refuses a DELETE compiled without a model (compile-only mode)', () => {
 		const adapterNoModel = createPgCompileOnlyAdapter();
 
 		const intent = {
@@ -909,9 +908,11 @@ describe('DELETE with notExists / exists WHERE (DELETE-NOT-EXISTS)', () => {
 			table: 'embeddings',
 			where: notExists('symbols'),
 		};
-		const { sql } = adapterNoModel.compileDelete(intent);
-		expect(sql).toMatch(/NOT.*EXISTS/i);
-		expect(sql).toMatch(/symbols/i);
+		expect(() => adapterNoModel.compileDelete(intent)).toThrow(
+			new Error(
+				'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.',
+			),
+		);
 	});
 
 	it('normalizeToDecision: kind=notExists routes to NOT EXISTS handler (not "=" comparison)', () => {
