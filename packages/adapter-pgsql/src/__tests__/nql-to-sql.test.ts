@@ -3980,17 +3980,16 @@ describe('NQL bundles without a model', () => {
 		'users | select id | union (users | select id)',
 	];
 
-	it('refuses every NQL bundle compiled without a model', () => {
-		for (const text of bundles)
-			expect(
-				() => createPgCompileOnlyAdapter().compile(bundle(text)),
-				text,
-			).toThrow(
+	it.each(bundles)(
+		'refuses the NQL bundle %s compiled without a model',
+		(text) => {
+			expect(() => createPgCompileOnlyAdapter().compile(bundle(text))).toThrow(
 				new Error(
 					'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.',
 				),
 			);
-	});
+		},
+	);
 
 	it('compiles every NQL bundle with the model from the compile options', () => {
 		for (const text of bundles) {

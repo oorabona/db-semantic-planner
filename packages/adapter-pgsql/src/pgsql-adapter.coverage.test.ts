@@ -2649,16 +2649,14 @@ describe('compile without a model', () => {
 		],
 	];
 
-	it('refuses every compilation entry without a model', () => {
-		const entries: Entry[] = [
-			...validEntries,
-			[
-				'compile on a report not issued by the planner',
-				(a) => a.compile({ rootTable: 'users', decisions: [] } as never),
-			],
-		];
-		for (const [name, call] of entries)
-			expect(() => call(noModel), name).toThrow(refusal);
+	it.each<Entry>([
+		...validEntries,
+		[
+			'compile on a report not issued by the planner',
+			(a) => a.compile({ rootTable: 'users', decisions: [] } as never),
+		],
+	])('refuses %s without a model', (_name, call) => {
+		expect(() => call(noModel)).toThrow(refusal);
 	});
 
 	it('compiles every entry with the model from the compile options', () => {
@@ -2694,98 +2692,113 @@ describe('compile without a model', () => {
 		).toThrow(refusal);
 	});
 
-	it('refuses the model-less inputs that compiled wrong SQL', () => {
-		expect(() =>
-			noModel.compileBatchUpdate({
-				type: 'batchUpdate',
-				table: 'users',
-				matchColumns: ['id'],
-				updates: [{ id: 1, name: 'x' }],
-				where: eq('id', outerRef('id')),
-			}),
-		).toThrow(refusal);
-		expect(() =>
-			noModel.compileUpdate({
-				type: 'update',
-				table: 'users',
-				set: { name: 'x' },
-				where: rawExists(subquery('posts').select('id')),
-			}),
-		).toThrow(refusal);
-		expect(() =>
-			noModel.compileDelete({
-				type: 'delete',
-				table: 'users',
-				where: exists('posts'),
-			}),
-		).toThrow(refusal);
+	it.each<[string, () => unknown]>([
+		[
+			'a batchSet guard with a root outerRef()',
+			() =>
+				noModel.compileBatchUpdate({
+					type: 'batchUpdate',
+					table: 'users',
+					matchColumns: ['id'],
+					updates: [{ id: 1, name: 'x' }],
+					where: eq('id', outerRef('id')),
+				}),
+		],
+		[
+			'an update guarded by rawExists()',
+			() =>
+				noModel.compileUpdate({
+					type: 'update',
+					table: 'users',
+					set: { name: 'x' },
+					where: rawExists(subquery('posts').select('id')),
+				}),
+		],
+		[
+			'a delete guarded by exists()',
+			() =>
+				noModel.compileDelete({
+					type: 'delete',
+					table: 'users',
+					where: exists('posts'),
+				}),
+		],
+	])('refuses %s compiled without a model', (_name, call) => {
+		expect(call).toThrow(refusal);
 	});
 
-	it('compiles through an ORM over a model-less adapter', () => {
+	describe('compiles through an ORM over a model-less adapter', () => {
 		const orm = createOrm({
 			schema: db,
 			adapter: noModel,
 			suppressDxWarnings: true,
 		});
-		const sql = (dump: { sql: string }) => dump.sql;
-		expect(sql(orm.select('users').where(eq('score', 1)).dump())).toBe(
-			'SELECT users.* FROM users WHERE users.score = $1',
-		);
-		expect(
-			sql(orm.update('users').set({ name: 'x' }).where(eq('id', 1)).dump()),
-		).toBe('UPDATE users SET name = $1 WHERE users.id = $2');
-		expect(
-			sql(
-				orm
-					.update('users')
-					.batchSet('id', [{ id: 1, name: 'x' }])
-					.where(gt('score', 0))
-					.dump(),
-			),
-		).toBe(
-			'UPDATE users SET name = t.name FROM unnest(CAST($2 AS int4[]), CAST($3 AS text[])) AS t(id, name) WHERE users.id = t.id AND users.score > $1',
-		);
-		expect(
-			sql(
-				orm
-					.upsert('users')
-					.values([{ id: 1, name: 'x' }])
-					.onConflict(['id'])
-					.doUpdate({ name: 'y' }, eq('score', 1))
-					.dump(),
-			),
-		).toBe(
-			'INSERT INTO users (id, name) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET name = $3 WHERE users.score = $4',
-		);
-		expect(
-			sql(
-				orm
-					.withCte('recent')
-					.fromUnnest({ id: [1, 2] })
-					.query(orm.select('users').where(eq('score', 1)))
-					.dump(),
-			),
-		).toBe(
-			'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT users.* FROM users WHERE users.score = $2',
-		);
-		expect(
-			sql(
-				orm
-					.recursive('tree', {
-						base: orm.select('users').where(eq('id', 1)),
-						step: orm.select('users').where(eq('id', 2)),
-					})
-					.dump(),
-			),
-		).toBe(
-			'WITH RECURSIVE tree AS (SELECT users.* FROM users WHERE users.id = $1 UNION ALL SELECT users.* FROM users WHERE users.id = $2) SELECT tree.* FROM tree',
-		);
-		expect(orm.selectExpression(fn('now').as('t')).sql).toBe(
-			'SELECT now() AS t',
-		);
-		expect(sql(orm.nql`users | where score = 1`.dump())).toBe(
-			'SELECT users.* FROM users WHERE users.score = $1',
-		);
+		it.each<[string, () => { sql: string }, string]>([
+			[
+				'select',
+				() => orm.select('users').where(eq('score', 1)).dump(),
+				'SELECT users.* FROM users WHERE users.score = $1',
+			],
+			[
+				'update',
+				() => orm.update('users').set({ name: 'x' }).where(eq('id', 1)).dump(),
+				'UPDATE users SET name = $1 WHERE users.id = $2',
+			],
+			[
+				'batchSet',
+				() =>
+					orm
+						.update('users')
+						.batchSet('id', [{ id: 1, name: 'x' }])
+						.where(gt('score', 0))
+						.dump(),
+				'UPDATE users SET name = t.name FROM unnest(CAST($2 AS int4[]), CAST($3 AS text[])) AS t(id, name) WHERE users.id = t.id AND users.score > $1',
+			],
+			[
+				'upsert',
+				() =>
+					orm
+						.upsert('users')
+						.values([{ id: 1, name: 'x' }])
+						.onConflict(['id'])
+						.doUpdate({ name: 'y' }, eq('score', 1))
+						.dump(),
+				'INSERT INTO users (id, name) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET name = $3 WHERE users.score = $4',
+			],
+			[
+				'withCte',
+				() =>
+					orm
+						.withCte('recent')
+						.fromUnnest({ id: [1, 2] })
+						.query(orm.select('users').where(eq('score', 1)))
+						.dump(),
+				'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT users.* FROM users WHERE users.score = $2',
+			],
+			[
+				'recursive',
+				() =>
+					orm
+						.recursive('tree', {
+							base: orm.select('users').where(eq('id', 1)),
+							step: orm.select('users').where(eq('id', 2)),
+						})
+						.dump(),
+				'WITH RECURSIVE tree AS (SELECT users.* FROM users WHERE users.id = $1 UNION ALL SELECT users.* FROM users WHERE users.id = $2) SELECT tree.* FROM tree',
+			],
+			[
+				'selectExpression',
+				() => orm.selectExpression(fn('now').as('t')),
+				'SELECT now() AS t',
+			],
+			[
+				'nql',
+				() => orm.nql`users | where score = 1`.dump(),
+				'SELECT users.* FROM users WHERE users.score = $1',
+			],
+		])('%s', (_form, dump, sql) => {
+			expect(dump().sql).toBe(sql);
+		});
 	});
 
 	it("derives upsertFrom columns from the adapter's model", () => {
