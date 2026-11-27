@@ -49,11 +49,13 @@ export {
 	type NqlCompilerOptions,
 } from './compiler/index.js';
 // Re-export error types
-export type {
-	NqlError,
-	NqlParseError,
-	NqlSemanticError,
-	NqlWarning,
+export {
+	isNqlNotYetSupportedError,
+	type NqlError,
+	type NqlNotYetSupportedError,
+	type NqlParseError,
+	type NqlSemanticError,
+	type NqlWarning,
 } from './errors/types.js';
 // Re-export lexer
 export { allTokens, NqlLexer, tokenize } from './lexer/index.js';
@@ -83,12 +85,14 @@ export interface ParseResult<T> {
 	warnings: import('./errors/types.js').NqlWarning[];
 }
 
+import { NotYetSupportedError } from '@dbsp/types';
 import {
 	type ColumnValidatorSchema,
 	type CompileResult,
 	NqlCompiler,
 } from './compiler/index.js';
 import { NqlErrorCodes, NqlSemanticException } from './errors/index.js';
+import type { NqlNotYetSupportedError } from './errors/types.js';
 import type { NqlProgram } from './parser/ast.js';
 import { parseCst } from './parser/index.js';
 import { cstToAst } from './semantic/index.js';
@@ -179,6 +183,16 @@ export function compile(
 			warnings: parseResult.warnings,
 		};
 	} catch (err) {
+		if (err instanceof NotYetSupportedError) {
+			const error: NqlNotYetSupportedError = {
+				code: NqlErrorCodes.NOT_YET_SUPPORTED,
+				message: err.message,
+				construct: err.construct,
+				position: err.position,
+				issue: err.issue,
+			};
+			return { success: false, errors: [error], warnings: [] };
+		}
 		const semanticError = err instanceof NqlSemanticException;
 		const code = semanticError ? err.code : NqlErrorCodes.SEM_UNREACHABLE;
 		return {

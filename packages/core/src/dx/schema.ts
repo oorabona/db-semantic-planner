@@ -1,4 +1,9 @@
-import { brandValue, RangeAllocator, REF_BRAND } from '@dbsp/types';
+import {
+	brandValue,
+	NotYetSupportedError,
+	RangeAllocator,
+	REF_BRAND,
+} from '@dbsp/types';
 import { copyDefaultFilters, getDefaultFilter } from '../default-filter-map.js';
 /**
  * ARCH-005: Unified Schema API
@@ -698,6 +703,7 @@ function validateDefaultFilter(
 		if (resolved) assertScanDefaultFilter(resolved, range, model);
 		else throw new Error('missing condition kind');
 	} catch (error) {
+		if (error instanceof NotYetSupportedError) throw error;
 		throw new SchemaValidationError(
 			`Default filter for table '${table}': ${error instanceof Error ? error.message : String(error)}`,
 		);

@@ -16,7 +16,7 @@ import {
 	type WhereIntent,
 } from '@dbsp/types';
 import {
-	belongsToManyJoinIncludeRefusal,
+	belongsToManyTraversalRefusal,
 	getTrustedNqlRelationFilterFields,
 	isFieldRef,
 	resolveDeclaredRelationKeys,
@@ -25,7 +25,6 @@ import {
 } from '@dbsp/types/internal';
 import { singularize } from './conventions.js';
 import { getDefaultFilter } from './default-filter-map.js';
-import { InvalidOperationError } from './dx/errors.js';
 import { relationJoinHops } from './dx/relation-join-path.js';
 import { isBoundPayload } from './intent-payload.js';
 import {
@@ -346,8 +345,10 @@ function assertSupportedIncludeWhere(
 					record.kind === 'notExists' ||
 					record.kind === 'relationFilter'
 				) {
-					throw new Error(
-						`Relation predicates inside an include where are not supported yet at ${path}.where for strategy ${strategy} (oorabona/db-semantic-planner#892).`,
+					throw new NotYetSupportedError(
+						`relation predicate ${record.kind}()`,
+						`include where at ${path}`,
+						892,
 					);
 				}
 				for (const [key, child] of Object.entries(record)) {
@@ -369,8 +370,10 @@ function assertSupportedIncludeWhere(
 			visit(include.where);
 
 			if (strategy !== 'join') {
-				throw new Error(
-					`Include where is not supported for strategy ${strategy} at ${path}.where (oorabona/db-semantic-planner#892).`,
+				throw new NotYetSupportedError(
+					'include where',
+					`${strategy} include at ${path}`,
+					892,
 				);
 			}
 		}
@@ -489,9 +492,9 @@ export function resolveReportIncludes(
 				.find((r) => r.name === segment);
 			if (!relation) throw notFound(segmentIndex, table);
 			if (relation.type === 'belongsToMany')
-				throw new InvalidOperationError(
-					'relation',
-					belongsToManyJoinIncludeRefusal(`${table}.${relation.name}`),
+				throw belongsToManyTraversalRefusal(
+					`${table}.${relation.name}`,
+					'join',
 				);
 			table = relation.target;
 		}

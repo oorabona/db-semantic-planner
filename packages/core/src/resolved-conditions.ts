@@ -3,6 +3,7 @@ import {
 	type ExpressionIntent,
 	isParamIntent,
 	type ModelIR,
+	NotYetSupportedError,
 	type QueryIntent,
 	RangeAllocator,
 	REF_BRAND,
@@ -327,8 +328,10 @@ export function resolveConditionContext(
 						: `${kind}('${segments.join('.')}'): no relation '${segment}' is declared on table '${table}'. Use rawExists(subquery(...)) for an EXISTS over an undeclared or uncorrelated subquery.`,
 				);
 			if (rel.type === 'belongsToMany')
-				throw new Error(
-					`${currentLabel()} ${kind}('${segments.join('.')}'): many-to-many traversal is not supported yet (#787).`,
+				throw new NotYetSupportedError(
+					`many-to-many traversal ${kind}('${segments.join('.')}')`,
+					`${currentLabel()} condition`,
+					787,
 				);
 			names.push(rel.name);
 			table = rel.target;
@@ -419,10 +422,10 @@ export function resolveConditionContext(
 			use !== 'exists' &&
 			containsOuterReference(query.where)
 		)
-			throw new Error(
-				'scalar subquery with correlated outerRef() is not yet supported — ' +
-					'use exists("relation", { where: ... }) when a schema relation exists, ' +
-					'or restructure the query to avoid the correlation.',
+			throw new NotYetSupportedError(
+				`a correlated ${use === 'in' ? 'IN' : 'scalar'} subquery body`,
+				'include where',
+				1079,
 			);
 		if (subqueryRefusal && use !== 'in') throw new Error(subqueryRefusal);
 		const previousFilters = activeFilters;
@@ -1176,9 +1179,10 @@ export function resolveConditionContext(
 				if (subqueryRefusal || mode?.include) {
 					assertNoUnsupportedSubqueryModifiers(node.subquery, 'rawExists');
 					if (containsOuterReference(node.subquery.where))
-						throw new Error(
-							`${node.kind}: correlated subqueries (outerRef inside the inner WHERE) are not yet supported. ` +
-								'Workaround: use exists("relation", { where: ... }) when a schema relation exists, or wait for the rawExists correlation pipeline (tracked in TODO).',
+						throw new NotYetSupportedError(
+							`a correlated ${node.kind}() body`,
+							mode?.include ? 'include where' : 'join ON condition',
+							1079,
 						);
 				}
 				return {
@@ -1375,6 +1379,7 @@ export function resolveScanDefaultFilter(
 		);
 		if (resolved) assertScanDefaultFilter(resolved, range, model);
 	} catch (error) {
+		if (error instanceof NotYetSupportedError) throw error;
 		throw new Error(
 			`${refusal} ${error instanceof Error ? error.message : String(error)}`,
 		);

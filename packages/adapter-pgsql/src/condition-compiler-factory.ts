@@ -1,5 +1,5 @@
 import { refuseTableRootedQuantifier } from '@dbsp/core/internal';
-import { EXPRESSION_BRAND, REF_BRAND } from '@dbsp/types';
+import { EXPRESSION_BRAND, NotYetSupportedError, REF_BRAND } from '@dbsp/types';
 import { compileResolvedCondition } from './resolved-condition-compiler.js';
 /**
  * Unified WHERE compiler: compiles WhereIntent directly to PostgreSQL AST nodes.
@@ -165,8 +165,10 @@ export function assertNoManyToManyRootRelations(
 				const relation = resolveConditionRelation(model, target, hop);
 				if (!relation) return;
 				if (relation.type === 'belongsToMany') {
-					throw new Error(
-						`${position} ${node.kind}('${path.join('.')}'): many-to-many traversal is not supported yet (#787).`,
+					throw new NotYetSupportedError(
+						`many-to-many traversal ${node.kind}('${path.join('.')}')`,
+						`${position} condition`,
+						787,
 					);
 				}
 				target = relation.target;
@@ -928,9 +930,10 @@ export function createConditionCompiler(
 				(intent as { kind?: string }).kind === 'rawNotExists'
 					? 'rawNotExists'
 					: 'rawExists';
-			throw new Error(
-				`${kindLabel}: correlated subqueries (outerRef inside the inner WHERE) are not yet supported. ` +
-					'Workaround: use exists("relation", { where: ... }) when a schema relation exists, or wait for the rawExists correlation pipeline (tracked in TODO).',
+			throw new NotYetSupportedError(
+				`a correlated ${kindLabel}() body`,
+				'condition compiled outside the planner',
+				891,
 			);
 		}
 		const {
