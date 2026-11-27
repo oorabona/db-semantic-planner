@@ -205,7 +205,22 @@ export type ResolvedCondition =
 			readonly kind: 'range';
 			readonly left: ResolvedColumnOperand;
 			readonly operator: RangeOperator;
-			readonly value: ResolvedParameter;
+			/**
+			 * A scalar or range-literal operand is one parameter. A `RangeValue`
+			 * (`{ lower, upper, bounds }`) is a range constructor call named after
+			 * the column's declared range type; each bound is a parameter or an
+			 * expression.
+			 */
+			readonly value:
+				| ResolvedParameter
+				| {
+						readonly kind: 'rangeConstructor';
+						/** The condition's field as written, for diagnostics. */
+						readonly field: string;
+						readonly lower: ResolvedRhs;
+						readonly upper: ResolvedRhs;
+						readonly bounds: '[)' | '[]' | '()' | '(]';
+				  };
 	  }
 	| {
 			readonly kind: 'jsonContains';

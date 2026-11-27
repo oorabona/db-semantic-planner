@@ -20,80 +20,80 @@
 			"position": "manual-join-on",
 			"kind": "range-overlaps",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period && CAST($1 AS daterange)",
-			"params": ["[2026-01-01,2026-02-01)"],
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period && daterange($1, $2, '[)')",
+			"params": ["2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "manual-join-on",
 			"kind": "range-overlaps",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period && CAST($1 AS daterange) AND users.score = $2",
-			"params": ["[2026-01-01,2026-02-01)", 13],
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period && daterange($1, $2, '[)') AND users.score = $3",
+			"params": ["2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "manual-join-on",
 			"kind": "range-overlaps",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period && CAST($1 AS daterange) OR users.score = $2",
-			"params": ["[2026-01-01,2026-02-01)", 13],
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period && daterange($1, $2, '[)') OR users.score = $3",
+			"params": ["2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "manual-join-on",
 			"kind": "range-overlaps",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.period && CAST($1 AS daterange))",
-			"params": ["[2026-01-01,2026-02-01)"],
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.period && daterange($1, $2, '[)'))",
+			"params": ["2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "manual-join-on",
 			"kind": "range-overlaps",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.period && CAST($2 AS daterange)) OR users.score = $3)",
-			"params": [13, "[2026-01-01,2026-02-01)", 17],
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.period && daterange($2, $3, '[)')) OR users.score = $4)",
+			"params": [13, "2026-01-01", "2026-02-01", 17],
 			"error": null
 		},
 		{
 			"position": "manual-join-on",
 			"kind": "range-contains",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period @> CAST($1 AS daterange)",
-			"params": ["[2026-01-01,2026-02-01)"],
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period @> daterange($1, $2, '[)')",
+			"params": ["2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "manual-join-on",
 			"kind": "range-contains",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period @> CAST($1 AS daterange) AND users.score = $2",
-			"params": ["[2026-01-01,2026-02-01)", 13],
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period @> daterange($1, $2, '[)') AND users.score = $3",
+			"params": ["2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "manual-join-on",
 			"kind": "range-contains",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period @> CAST($1 AS daterange) OR users.score = $2",
-			"params": ["[2026-01-01,2026-02-01)", 13],
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period @> daterange($1, $2, '[)') OR users.score = $3",
+			"params": ["2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "manual-join-on",
 			"kind": "range-contains",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.period @> CAST($1 AS daterange))",
-			"params": ["[2026-01-01,2026-02-01)"],
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.period @> daterange($1, $2, '[)'))",
+			"params": ["2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "manual-join-on",
 			"kind": "range-contains",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.period @> CAST($2 AS daterange)) OR users.score = $3)",
-			"params": [13, "[2026-01-01,2026-02-01)", 17],
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.period @> daterange($2, $3, '[)')) OR users.score = $4)",
+			"params": [13, "2026-01-01", "2026-02-01", 17],
 			"error": null
 		},
 		{
@@ -140,40 +140,40 @@
 			"position": "manual-join-on",
 			"kind": "range-containedBy",
 			"shape": "leaf",
-			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period <@ CAST($1 AS daterange)",
-			"params": ["[2026-01-01,2026-02-01)"],
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period <@ daterange($1, $2, '[)')",
+			"params": ["2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "manual-join-on",
 			"kind": "range-containedBy",
 			"shape": "and",
-			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period <@ CAST($1 AS daterange) AND users.score = $2",
-			"params": ["[2026-01-01,2026-02-01)", 13],
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period <@ daterange($1, $2, '[)') AND users.score = $3",
+			"params": ["2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "manual-join-on",
 			"kind": "range-containedBy",
 			"shape": "or",
-			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period <@ CAST($1 AS daterange) OR users.score = $2",
-			"params": ["[2026-01-01,2026-02-01)", 13],
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.period <@ daterange($1, $2, '[)') OR users.score = $3",
+			"params": ["2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "manual-join-on",
 			"kind": "range-containedBy",
 			"shape": "not",
-			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.period <@ CAST($1 AS daterange))",
-			"params": ["[2026-01-01,2026-02-01)"],
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON NOT (users.period <@ daterange($1, $2, '[)'))",
+			"params": ["2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "manual-join-on",
 			"kind": "range-containedBy",
 			"shape": "two-level",
-			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.period <@ CAST($2 AS daterange)) OR users.score = $3)",
-			"params": [13, "[2026-01-01,2026-02-01)", 17],
+			"sql": "SELECT users.* FROM users JOIN posts AS p ON users.score = $1 AND (NOT (users.period <@ daterange($2, $3, '[)')) OR users.score = $4)",
+			"params": [13, "2026-01-01", "2026-02-01", 17],
 			"error": null
 		},
 		{

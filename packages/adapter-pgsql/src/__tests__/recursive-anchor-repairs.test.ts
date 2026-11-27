@@ -113,8 +113,8 @@ const leaves: readonly [string, WhereIntent, string, readonly unknown[]][] = [
 	[
 		'range cast',
 		rangeOverlaps('period', { lower: '2026-01-01', upper: '2026-02-01' }),
-		'posts_exists_0.period && CAST($1 AS daterange)',
-		['[2026-01-01,2026-02-01)'],
+		"posts_exists_0.period && daterange($1, $2, '[)')",
+		['2026-01-01', '2026-02-01'],
 	],
 	[
 		'scalar subquery',
@@ -458,8 +458,8 @@ describe('#891 recursive anchor review repairs', () => {
 			'range',
 			(field: string) =>
 				rangeOverlaps(field, { lower: '2026-01-01', upper: '2026-02-01' }),
-			'__n.period && CAST($1 AS daterange)',
-			['[2026-01-01,2026-02-01)'],
+			"__n.period && daterange($1, $2, '[)')",
+			['2026-01-01', '2026-02-01'],
 		],
 	] as const) {
 		it(`EDGE1 qualified ${name} preserves type authority`, () => {

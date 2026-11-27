@@ -161,8 +161,8 @@ describe('#888 recursive anchor', () => {
 		[
 			'range',
 			rangeOverlaps('period', { lower: '2026-01-01', upper: '2026-02-01' }),
-			'__n.period && CAST($1 AS daterange)',
-			['[2026-01-01,2026-02-01)'],
+			"__n.period && daterange($1, $2, '[)')",
+			['2026-01-01', '2026-02-01'],
 		],
 	] as const) {
 		it(`supports recursive anchor ${name}`, () => {

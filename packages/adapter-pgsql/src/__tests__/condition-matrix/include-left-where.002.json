@@ -20,80 +20,80 @@
 			"position": "include-left-where",
 			"kind": "range-overlaps",
 			"shape": "leaf",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.period && $2",
-			"params": [31, "[2026-01-01,2026-02-01)"],
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.period && daterange($2, $3, '[)')",
+			"params": [31, "2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "include-left-where",
 			"kind": "range-overlaps",
 			"shape": "and",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.period && $2 AND post.score = $3",
-			"params": [31, "[2026-01-01,2026-02-01)", 13],
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.period && daterange($2, $3, '[)') AND post.score = $4",
+			"params": [31, "2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "include-left-where",
 			"kind": "range-overlaps",
 			"shape": "or",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND (post.period && $2 OR post.score = $3)",
-			"params": [31, "[2026-01-01,2026-02-01)", 13],
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND (post.period && daterange($2, $3, '[)') OR post.score = $4)",
+			"params": [31, "2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "include-left-where",
 			"kind": "range-overlaps",
 			"shape": "not",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (post.period && $2)",
-			"params": [31, "[2026-01-01,2026-02-01)"],
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (post.period && daterange($2, $3, '[)'))",
+			"params": [31, "2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "include-left-where",
 			"kind": "range-overlaps",
 			"shape": "two-level",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (post.period && $3) OR post.score = $4)",
-			"params": [31, 13, "[2026-01-01,2026-02-01)", 17],
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (post.period && daterange($3, $4, '[)')) OR post.score = $5)",
+			"params": [31, 13, "2026-01-01", "2026-02-01", 17],
 			"error": null
 		},
 		{
 			"position": "include-left-where",
 			"kind": "range-contains",
 			"shape": "leaf",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.period @> $2",
-			"params": [31, "[2026-01-01,2026-02-01)"],
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.period @> daterange($2, $3, '[)')",
+			"params": [31, "2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "include-left-where",
 			"kind": "range-contains",
 			"shape": "and",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.period @> $2 AND post.score = $3",
-			"params": [31, "[2026-01-01,2026-02-01)", 13],
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.period @> daterange($2, $3, '[)') AND post.score = $4",
+			"params": [31, "2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "include-left-where",
 			"kind": "range-contains",
 			"shape": "or",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND (post.period @> $2 OR post.score = $3)",
-			"params": [31, "[2026-01-01,2026-02-01)", 13],
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND (post.period @> daterange($2, $3, '[)') OR post.score = $4)",
+			"params": [31, "2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "include-left-where",
 			"kind": "range-contains",
 			"shape": "not",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (post.period @> $2)",
-			"params": [31, "[2026-01-01,2026-02-01)"],
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (post.period @> daterange($2, $3, '[)'))",
+			"params": [31, "2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "include-left-where",
 			"kind": "range-contains",
 			"shape": "two-level",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (post.period @> $3) OR post.score = $4)",
-			"params": [31, 13, "[2026-01-01,2026-02-01)", 17],
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (post.period @> daterange($3, $4, '[)')) OR post.score = $5)",
+			"params": [31, 13, "2026-01-01", "2026-02-01", 17],
 			"error": null
 		},
 		{
@@ -140,40 +140,40 @@
 			"position": "include-left-where",
 			"kind": "range-containedBy",
 			"shape": "leaf",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.period <@ $2",
-			"params": [31, "[2026-01-01,2026-02-01)"],
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.period <@ daterange($2, $3, '[)')",
+			"params": [31, "2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "include-left-where",
 			"kind": "range-containedBy",
 			"shape": "and",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.period <@ $2 AND post.score = $3",
-			"params": [31, "[2026-01-01,2026-02-01)", 13],
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.period <@ daterange($2, $3, '[)') AND post.score = $4",
+			"params": [31, "2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "include-left-where",
 			"kind": "range-containedBy",
 			"shape": "or",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND (post.period <@ $2 OR post.score = $3)",
-			"params": [31, "[2026-01-01,2026-02-01)", 13],
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND (post.period <@ daterange($2, $3, '[)') OR post.score = $4)",
+			"params": [31, "2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "include-left-where",
 			"kind": "range-containedBy",
 			"shape": "not",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (post.period <@ $2)",
-			"params": [31, "[2026-01-01,2026-02-01)"],
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (post.period <@ daterange($2, $3, '[)'))",
+			"params": [31, "2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "include-left-where",
 			"kind": "range-containedBy",
 			"shape": "two-level",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (post.period <@ $3) OR post.score = $4)",
-			"params": [31, 13, "[2026-01-01,2026-02-01)", 17],
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (post.period <@ daterange($3, $4, '[)')) OR post.score = $5)",
+			"params": [31, 13, "2026-01-01", "2026-02-01", 17],
 			"error": null
 		},
 		{
@@ -518,40 +518,40 @@
 			"position": "include-left-where",
 			"kind": "rawExists-range",
 			"shape": "leaf",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $2)",
-			"params": [31, "[2026-01-01,2026-02-01)"],
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && daterange($2, $3, '[)'))",
+			"params": [31, "2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "include-left-where",
 			"kind": "rawExists-range",
 			"shape": "and",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $2) AND post.score = $3",
-			"params": [31, "[2026-01-01,2026-02-01)", 13],
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && daterange($2, $3, '[)')) AND post.score = $4",
+			"params": [31, "2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "include-left-where",
 			"kind": "rawExists-range",
 			"shape": "or",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $2) OR post.score = $3)",
-			"params": [31, "[2026-01-01,2026-02-01)", 13],
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && daterange($2, $3, '[)')) OR post.score = $4)",
+			"params": [31, "2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "include-left-where",
 			"kind": "rawExists-range",
 			"shape": "not",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $2))",
-			"params": [31, "[2026-01-01,2026-02-01)"],
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && daterange($2, $3, '[)')))",
+			"params": [31, "2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "include-left-where",
 			"kind": "rawExists-range",
 			"shape": "two-level",
-			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && $3)) OR post.score = $4)",
-			"params": [31, 13, "[2026-01-01,2026-02-01)", 17],
+			"sql": "SELECT comments.*, post.id AS \"post.id\", post.name AS \"post.name\", post.score AS \"post.score\", post.period AS \"post.period\", post.data AS \"post.data\", post.\"authorId\" AS \"post.authorId\", post.id AS __dbsp_presence_post FROM comments LEFT JOIN posts AS post ON comments.\"postId\" = post.id WHERE comments.score = $1 AND post.score = $2 AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && daterange($3, $4, '[)'))) OR post.score = $5)",
+			"params": [31, 13, "2026-01-01", "2026-02-01", 17],
 			"error": null
 		},
 		{

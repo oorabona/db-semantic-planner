@@ -1951,7 +1951,7 @@ function isPlainOptions(value: unknown): value is object {
  * a projection alias first); a constant that does not name a column is
  * refused; anything else is an expression ordering.
  */
-function orderingOf(
+export function orderingOf(
 	leaf: unknown,
 	direction: SortDirection,
 	nulls: import('./types.js').NullsPosition | undefined,
@@ -1996,7 +1996,7 @@ function orderingOf(
  * an expression column. Constants and a bare `SubqueryExpression` need a
  * name, since unaliased they get a name PostgreSQL chooses (#1075).
  */
-function columnEntry(col: unknown, from: string): ExpressionIntent {
+export function columnEntry(col: unknown, from: string): ExpressionIntent {
 	if (typeof col === 'string') return { kind: 'column', column: col };
 	if (isExpressionSpec(col as ColumnSpec))
 		return (col as { intent: ExpressionIntent }).intent;

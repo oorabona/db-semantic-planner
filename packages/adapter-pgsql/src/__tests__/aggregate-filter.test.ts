@@ -596,8 +596,8 @@ describe('raw aggregate FILTER resolves through the root resolver (#891 slice 3)
 				v.db.model,
 			),
 		).toEqual({
-			sql: counted('users.period && CAST($1 AS daterange)'),
-			params: ['[2024-01-01,2024-02-01)'],
+			sql: counted("users.period && daterange($1, $2, '[)')"),
+			params: ['2024-01-01', '2024-02-01'],
 		});
 		expect(
 			compiled(

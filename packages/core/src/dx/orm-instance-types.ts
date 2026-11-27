@@ -14,6 +14,7 @@ import type { DialectCapabilities } from '../dialects/index.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanOptions } from '../planner.js';
 import type { BatchValuesOptions, BatchValuesRef } from './batch-values.js';
+import type { ReferenceLeaf } from './coerce.js';
 import type { CteBuilder } from './cte-builder.js';
 import type {
 	DeleteBuilder,
@@ -29,11 +30,7 @@ import type {
 } from './raw-cte-builder.js';
 import type { DropIndexOptions, TableDDL } from './table-ddl-types.js';
 import type { ColumnRef, InferTableRow, TableRef } from './table-ref.js';
-import type {
-	ExpressionSpec,
-	ListHierarchyOptions,
-	RelationHints,
-} from './types.js';
+import type { ListHierarchyOptions, RelationHints } from './types.js';
 
 /**
  * Configuration options for creating an ORM instance.
@@ -744,7 +741,10 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 * Used for expressions that do not query a specific table,
 	 * such as sequence functions, date functions, or scalar computations.
 	 *
-	 * @param expr - An ExpressionSpec produced by fn(), op(), literal(), etc.
+	 * @param expr - A reference leaf (ADR 0011): an expression from fn(), op(),
+	 *   literal(), etc., a subquery, a constant (inlined) or a column name. A
+	 *   column reference has no row to read in a FROM-less SELECT. An alias set
+	 *   with `.as()` or `.asExpr()` names the result column.
 	 * @returns An object with `sql`, `parameters`, and `execute()` method.
 	 *
 	 * @example
@@ -757,7 +757,7 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 * const [{ nextval }] = await orm.selectExpression(fn('nextval', literal('my_seq'))).execute();
 	 * ```
 	 */
-	selectExpression(expr: ExpressionSpec): SelectExpressionResult;
+	selectExpression(expr: ReferenceLeaf): SelectExpressionResult;
 
 	// =========================================================================
 	// Global DDL Shortcuts (F-005)

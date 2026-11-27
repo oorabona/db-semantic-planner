@@ -17,6 +17,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { batchValues } from '../batch-values.js';
 import { CteBuilder } from '../cte-builder.js';
 import { InvalidOperationError } from '../errors.js';
+import { ref as exprRef } from '../expressions.js';
 import { createOrm } from '../orm.js';
 import { wrapTablesProxyWithDDL } from '../orm-instance.js';
 import { createRawCteBuilder } from '../raw-cte-builder.js';
@@ -671,9 +672,7 @@ describe('createOrmInstance — transaction and raw error branches', () => {
 	});
 
 	it('should throw when selectExpression is called with adapter that throws not-implemented', () => {
-		const expr = {
-			intent: { kind: 'column', column: 'id' },
-		} as unknown as Parameters<typeof ormWithMock.selectExpression>[0];
+		const expr = exprRef('id');
 		expect(() => ormWithMock.selectExpression(expr)).toThrow(
 			'Not implemented in mock adapter',
 		);

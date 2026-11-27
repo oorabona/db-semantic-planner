@@ -82,7 +82,7 @@ describe('typed primitive and body dual compilation', () => {
 		inArray('id', [2, 3]),
 		any('id', [2, 3]),
 		isNull('name'),
-		rangeContains('period', { lower: '2024-01-01', upper: '2024-02-01' }),
+		rangeContains('period', '2024-01-15'),
 		{
 			kind: 'jsonContains',
 			field: 'data',

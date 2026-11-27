@@ -20,80 +20,80 @@
 			"position": "delete-where",
 			"kind": "range-overlaps",
 			"shape": "leaf",
-			"sql": "DELETE FROM users WHERE users.period && CAST($1 AS daterange)",
-			"params": ["[2026-01-01,2026-02-01)"],
+			"sql": "DELETE FROM users WHERE users.period && daterange($1, $2, '[)')",
+			"params": ["2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "delete-where",
 			"kind": "range-overlaps",
 			"shape": "and",
-			"sql": "DELETE FROM users WHERE users.period && CAST($1 AS daterange) AND users.score = $2",
-			"params": ["[2026-01-01,2026-02-01)", 13],
+			"sql": "DELETE FROM users WHERE users.period && daterange($1, $2, '[)') AND users.score = $3",
+			"params": ["2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "delete-where",
 			"kind": "range-overlaps",
 			"shape": "or",
-			"sql": "DELETE FROM users WHERE users.period && CAST($1 AS daterange) OR users.score = $2",
-			"params": ["[2026-01-01,2026-02-01)", 13],
+			"sql": "DELETE FROM users WHERE users.period && daterange($1, $2, '[)') OR users.score = $3",
+			"params": ["2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "delete-where",
 			"kind": "range-overlaps",
 			"shape": "not",
-			"sql": "DELETE FROM users WHERE NOT (users.period && CAST($1 AS daterange))",
-			"params": ["[2026-01-01,2026-02-01)"],
+			"sql": "DELETE FROM users WHERE NOT (users.period && daterange($1, $2, '[)'))",
+			"params": ["2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "delete-where",
 			"kind": "range-overlaps",
 			"shape": "two-level",
-			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.period && CAST($2 AS daterange)) OR users.score = $3)",
-			"params": [13, "[2026-01-01,2026-02-01)", 17],
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.period && daterange($2, $3, '[)')) OR users.score = $4)",
+			"params": [13, "2026-01-01", "2026-02-01", 17],
 			"error": null
 		},
 		{
 			"position": "delete-where",
 			"kind": "range-contains",
 			"shape": "leaf",
-			"sql": "DELETE FROM users WHERE users.period @> CAST($1 AS daterange)",
-			"params": ["[2026-01-01,2026-02-01)"],
+			"sql": "DELETE FROM users WHERE users.period @> daterange($1, $2, '[)')",
+			"params": ["2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "delete-where",
 			"kind": "range-contains",
 			"shape": "and",
-			"sql": "DELETE FROM users WHERE users.period @> CAST($1 AS daterange) AND users.score = $2",
-			"params": ["[2026-01-01,2026-02-01)", 13],
+			"sql": "DELETE FROM users WHERE users.period @> daterange($1, $2, '[)') AND users.score = $3",
+			"params": ["2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "delete-where",
 			"kind": "range-contains",
 			"shape": "or",
-			"sql": "DELETE FROM users WHERE users.period @> CAST($1 AS daterange) OR users.score = $2",
-			"params": ["[2026-01-01,2026-02-01)", 13],
+			"sql": "DELETE FROM users WHERE users.period @> daterange($1, $2, '[)') OR users.score = $3",
+			"params": ["2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "delete-where",
 			"kind": "range-contains",
 			"shape": "not",
-			"sql": "DELETE FROM users WHERE NOT (users.period @> CAST($1 AS daterange))",
-			"params": ["[2026-01-01,2026-02-01)"],
+			"sql": "DELETE FROM users WHERE NOT (users.period @> daterange($1, $2, '[)'))",
+			"params": ["2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "delete-where",
 			"kind": "range-contains",
 			"shape": "two-level",
-			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.period @> CAST($2 AS daterange)) OR users.score = $3)",
-			"params": [13, "[2026-01-01,2026-02-01)", 17],
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.period @> daterange($2, $3, '[)')) OR users.score = $4)",
+			"params": [13, "2026-01-01", "2026-02-01", 17],
 			"error": null
 		},
 		{
@@ -140,40 +140,40 @@
 			"position": "delete-where",
 			"kind": "range-containedBy",
 			"shape": "leaf",
-			"sql": "DELETE FROM users WHERE users.period <@ CAST($1 AS daterange)",
-			"params": ["[2026-01-01,2026-02-01)"],
+			"sql": "DELETE FROM users WHERE users.period <@ daterange($1, $2, '[)')",
+			"params": ["2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "delete-where",
 			"kind": "range-containedBy",
 			"shape": "and",
-			"sql": "DELETE FROM users WHERE users.period <@ CAST($1 AS daterange) AND users.score = $2",
-			"params": ["[2026-01-01,2026-02-01)", 13],
+			"sql": "DELETE FROM users WHERE users.period <@ daterange($1, $2, '[)') AND users.score = $3",
+			"params": ["2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "delete-where",
 			"kind": "range-containedBy",
 			"shape": "or",
-			"sql": "DELETE FROM users WHERE users.period <@ CAST($1 AS daterange) OR users.score = $2",
-			"params": ["[2026-01-01,2026-02-01)", 13],
+			"sql": "DELETE FROM users WHERE users.period <@ daterange($1, $2, '[)') OR users.score = $3",
+			"params": ["2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "delete-where",
 			"kind": "range-containedBy",
 			"shape": "not",
-			"sql": "DELETE FROM users WHERE NOT (users.period <@ CAST($1 AS daterange))",
-			"params": ["[2026-01-01,2026-02-01)"],
+			"sql": "DELETE FROM users WHERE NOT (users.period <@ daterange($1, $2, '[)'))",
+			"params": ["2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "delete-where",
 			"kind": "range-containedBy",
 			"shape": "two-level",
-			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.period <@ CAST($2 AS daterange)) OR users.score = $3)",
-			"params": [13, "[2026-01-01,2026-02-01)", 17],
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (users.period <@ daterange($2, $3, '[)')) OR users.score = $4)",
+			"params": [13, "2026-01-01", "2026-02-01", 17],
 			"error": null
 		},
 		{
@@ -508,40 +508,40 @@
 			"position": "delete-where",
 			"kind": "rawExists-range",
 			"shape": "leaf",
-			"sql": "DELETE FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($1 AS daterange))",
-			"params": ["[2026-01-01,2026-02-01)"],
+			"sql": "DELETE FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && daterange($1, $2, '[)'))",
+			"params": ["2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "delete-where",
 			"kind": "rawExists-range",
 			"shape": "and",
-			"sql": "DELETE FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($1 AS daterange)) AND users.score = $2",
-			"params": ["[2026-01-01,2026-02-01)", 13],
+			"sql": "DELETE FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && daterange($1, $2, '[)')) AND users.score = $3",
+			"params": ["2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "delete-where",
 			"kind": "rawExists-range",
 			"shape": "or",
-			"sql": "DELETE FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($1 AS daterange)) OR users.score = $2",
-			"params": ["[2026-01-01,2026-02-01)", 13],
+			"sql": "DELETE FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && daterange($1, $2, '[)')) OR users.score = $3",
+			"params": ["2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "delete-where",
 			"kind": "rawExists-range",
 			"shape": "not",
-			"sql": "DELETE FROM users WHERE NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($1 AS daterange)))",
-			"params": ["[2026-01-01,2026-02-01)"],
+			"sql": "DELETE FROM users WHERE NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && daterange($1, $2, '[)')))",
+			"params": ["2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "delete-where",
 			"kind": "rawExists-range",
 			"shape": "two-level",
-			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($2 AS daterange))) OR users.score = $3)",
-			"params": [13, "[2026-01-01,2026-02-01)", 17],
+			"sql": "DELETE FROM users WHERE users.score = $1 AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && daterange($2, $3, '[)'))) OR users.score = $4)",
+			"params": [13, "2026-01-01", "2026-02-01", 17],
 			"error": null
 		},
 		{

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import type { WhereRangeIntent } from '../intent-ast.js';
 import type { PredicateExpressionRef, PredicateRef } from './expressions.js';
 import {
 	boolFn,
 	cast,
+	ExpressionRef,
 	fn,
 	literal,
 	op,
@@ -11,6 +13,7 @@ import {
 	unsafeAsPredicate,
 } from './expressions.js';
 import type { QueryBuilder } from './query-builder-types.js';
+import { rangeContains, rangeOverlaps } from './range.js';
 import type { FromBuilder } from './typed-query-builder.js';
 
 declare const builder: QueryBuilder<{ readonly id: number }>;
@@ -102,6 +105,48 @@ function assertPredicateTypes(): void {
 }
 
 void assertPredicateTypes;
+
+/** ADR 0011 delivery 6: the range helpers' overload return types. */
+function assertRangeOverloadTypes(): void {
+	const viaExpression: PredicateExpressionRef | WhereRangeIntent =
+		rangeContains('span', ref('score'));
+	const viaParam: PredicateExpressionRef | WhereRangeIntent = rangeContains(
+		'span',
+		param(3),
+	);
+	// @ts-expect-error an expression operand may return a WhereRangeIntent (param() is unwrapped)
+	const narrowed: PredicateExpressionRef = rangeContains('span', ref('score'));
+	// @ts-expect-error .as() is not offered on the expression overload's union result
+	rangeContains('span', ref('score')).as('x');
+	const scalar: WhereRangeIntent = rangeContains('span', 3);
+	const rangeValue: WhereRangeIntent = rangeOverlaps('span', {
+		lower: 1,
+		upper: 5,
+	});
+	const tuple: PredicateExpressionRef = rangeOverlaps(
+		'span',
+		[1, 5],
+		'int4range',
+	);
+	builder.where(rangeContains('span', ref('score')));
+	void viaExpression;
+	void viaParam;
+	void narrowed;
+	void scalar;
+	void rangeValue;
+	void tuple;
+}
+
+void assertRangeOverloadTypes;
+
+describe('range helper overload results (ADR 0011 delivery 6)', () => {
+	it('AC10t overload return types: param() operand is a range intent, an expression a predicate', () => {
+		expect((rangeContains('span', param(3)) as WhereRangeIntent).kind).toBe(
+			'range',
+		);
+		expect(rangeContains('span', ref('score'))).toBeInstanceOf(ExpressionRef);
+	});
+});
 
 describe('PredicateRef type boundary', () => {
 	it('accepts only predicates in where()', () => {
