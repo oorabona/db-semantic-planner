@@ -38,9 +38,9 @@ orm.recursive<TResult>(name: string, options: RecursiveOptions): RawCteQueryBuil
 
 | Method | Description |
 |---|---|
-| `.columns(cols: string[])` | Select specific columns from the CTE in the outer query |
+| `.columns(entries)` | Select columns or expressions from the CTE in the outer query: a column name, an expression with `.as(alias)`, or a schema `ref()` |
 | `.where(condition)` | Filter rows in the outer query; successive calls combine with AND |
-| `.orderBy(column, direction?)` | Order outer results (`'asc'` default) — chainable |
+| `.orderBy(leaf, direction?)` | Order outer results (`'asc'` default) by a column name, an expression or an output-column position — chainable |
 | `.limit(n)` | Limit outer result set |
 | `.offset(n)` | Skip first N rows in outer result |
 | `.all()` | Execute and return all rows as `TResult[]` |
@@ -269,6 +269,10 @@ console.log(params); // [7, 20]
 - `packages/adapter-pgsql/src/__tests__/raw-cte.test.ts` — Full test suite (14 scenarios)
 
 ## Gotchas
+
+- **The outer query reads only the CTE.** `.columns()` and `.orderBy()` refuse a `ColumnRef` (it names a model
+  table, never the CTE) and `null`. A subquery there is refused as not yet supported (#1095): the outer query is
+  compiled without the ORM's default filters.
 
 - **The step query must select from the CTE name, not the original table.** `step: orm.select('parent_chain')` — not `orm.select('employees')`. Selecting from the wrong table produces a plain self-join, not recursion.
 - **`maxDepth` requires a depth-tracking column in your data.** The guard `WHERE depth < $N` only works if your base and step queries actually carry and increment a `depth` column. The ORM injects the WHERE clause but does not add the column for you. Without a real depth column the guard references a non-existent column and PostgreSQL will error.

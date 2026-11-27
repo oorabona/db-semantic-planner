@@ -7,13 +7,30 @@ import { brandValue, EXPRESSION_BRAND } from '@dbsp/types';
 
 import type {
 	ComparisonOperator,
+	ExpressionIntent,
 	QueryIntent,
 	SubqueryRefIntent,
 	WhereIntent,
 	WhereSubqueryIntent,
 } from '../intent-ast.js';
 import { andWhere } from './builder-utils.js';
+import {
+	coerceColumnName,
+	coerceReference,
+	type ReferenceLeaf,
+} from './coerce.js';
+import { isRelationPathColumn } from './column-utils.js';
+import { CALLBACK_SCOPE } from './symbols.js';
+import {
+	COLUMN_META,
+	type ColumnRef,
+	isColumnRef,
+	TABLE_META,
+} from './table-ref.js';
 import type { ExpressionSpec } from './types.js';
+
+/** An aggregate field of a subquery: a column name or a `ColumnRef`. */
+type SubqueryField = string | ColumnRef<string, string, unknown>;
 
 // ============================================================================
 // Subquery Builder
@@ -46,6 +63,7 @@ import type { ExpressionSpec } from './types.js';
 export class SubqueryBuilder {
 	private readonly _from: string;
 	private _select?: string;
+	private _selectExpression?: ExpressionIntent;
 	private _where?: WhereIntent;
 	private _aggregate?: {
 		fn: 'count' | 'sum' | 'avg' | 'min' | 'max';
@@ -57,13 +75,43 @@ export class SubqueryBuilder {
 	}
 
 	/**
-	 * Specify the field to select from the subquery.
-	 * For scalar subqueries, this should be a single field.
+	 * Specify what the subquery selects (ADR 0011 reference leaf). A column
+	 * name or a `ColumnRef` of this table is a field; any other leaf (an
+	 * expression, a constant, another table's `ColumnRef`) is an expression
+	 * column. `inSubquery` takes a field only.
 	 */
-	select(field: string): SubqueryBuilder {
+	select(field: ReferenceLeaf): SubqueryBuilder {
 		const clone = this.clone();
-		clone._select = field;
+		if (typeof field === 'string') {
+			clone._select = field;
+			delete clone._selectExpression;
+		} else if (this.isOwnColumn(field)) {
+			clone._select = (field as ColumnRef<string, string, unknown>)[
+				COLUMN_META
+			];
+			delete clone._selectExpression;
+		} else {
+			clone._selectExpression = coerceReference(field, 'select');
+			delete clone._select;
+		}
 		return clone;
+	}
+
+	/** A `ColumnRef` of this table, reached without a relation path or callback scope. */
+	private isOwnColumn(field: unknown): boolean {
+		return (
+			typeof field === 'object' &&
+			field !== null &&
+			isColumnRef(field) &&
+			field[TABLE_META] === this._from &&
+			!isRelationPathColumn(field) &&
+			(field as { readonly [CALLBACK_SCOPE]?: object })[CALLBACK_SCOPE] ===
+				undefined
+		);
+	}
+
+	private aggregateField(field: unknown, method: string): string {
+		return coerceColumnName(field, method, 'aggregate field', this._from);
 	}
 
 	/**
@@ -83,45 +131,48 @@ export class SubqueryBuilder {
 	/**
 	 * COUNT aggregate - count rows in subquery
 	 */
-	count(field = '*'): SubqueryExpression {
+	count(field: SubqueryField = '*'): SubqueryExpression {
 		const clone = this.clone();
-		clone._aggregate = { fn: 'count', field };
+		clone._aggregate = {
+			fn: 'count',
+			field: this.aggregateField(field, 'count'),
+		};
 		return clone.build();
 	}
 
 	/**
 	 * SUM aggregate - sum values in subquery
 	 */
-	sum(field: string): SubqueryExpression {
+	sum(field: SubqueryField): SubqueryExpression {
 		const clone = this.clone();
-		clone._aggregate = { fn: 'sum', field };
+		clone._aggregate = { fn: 'sum', field: this.aggregateField(field, 'sum') };
 		return clone.build();
 	}
 
 	/**
 	 * AVG aggregate - average values in subquery
 	 */
-	avg(field: string): SubqueryExpression {
+	avg(field: SubqueryField): SubqueryExpression {
 		const clone = this.clone();
-		clone._aggregate = { fn: 'avg', field };
+		clone._aggregate = { fn: 'avg', field: this.aggregateField(field, 'avg') };
 		return clone.build();
 	}
 
 	/**
 	 * MIN aggregate - minimum value in subquery
 	 */
-	min(field: string): SubqueryExpression {
+	min(field: SubqueryField): SubqueryExpression {
 		const clone = this.clone();
-		clone._aggregate = { fn: 'min', field };
+		clone._aggregate = { fn: 'min', field: this.aggregateField(field, 'min') };
 		return clone.build();
 	}
 
 	/**
 	 * MAX aggregate - maximum value in subquery
 	 */
-	max(field: string): SubqueryExpression {
+	max(field: SubqueryField): SubqueryExpression {
 		const clone = this.clone();
-		clone._aggregate = { fn: 'max', field };
+		clone._aggregate = { fn: 'max', field: this.aggregateField(field, 'max') };
 		return clone.build();
 	}
 
@@ -134,7 +185,7 @@ export class SubqueryBuilder {
 	 * Called automatically by aggregate methods or explicitly when using select().
 	 */
 	build(): SubqueryExpression {
-		if (!this._select && !this._aggregate) {
+		if (!this._select && !this._selectExpression && !this._aggregate) {
 			throw new Error(
 				'Subquery must have either select() or an aggregate function',
 			);
@@ -157,7 +208,9 @@ export class SubqueryBuilder {
 							},
 						],
 					}
-				: { type: 'fields', fields: [selectField] },
+				: this._selectExpression !== undefined
+					? { type: 'expressions', columns: [this._selectExpression] }
+					: { type: 'fields', fields: [selectField] },
 			...(this._where && { where: this._where }),
 		};
 
@@ -195,6 +248,8 @@ export class SubqueryBuilder {
 	private clone(): SubqueryBuilder {
 		const clone = new SubqueryBuilder(this._from);
 		if (this._select !== undefined) clone._select = this._select;
+		if (this._selectExpression !== undefined)
+			clone._selectExpression = this._selectExpression;
 		if (this._where !== undefined) clone._where = this._where;
 		if (this._aggregate !== undefined) clone._aggregate = this._aggregate;
 		return clone;

@@ -1,3 +1,4 @@
+import { compilePlan } from '@dbsp/adapter-pgsql/internal';
 import {
 	and,
 	any,
@@ -19,6 +20,7 @@ import {
 	op,
 	outerRef,
 	param,
+	plan,
 	rangeOverlaps,
 	rawExists,
 	ref,
@@ -28,10 +30,12 @@ import {
 	subquery,
 } from '@dbsp/core';
 import type { QueryIntent, WhereIntent } from '@dbsp/types';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as compilerModule from '../compiler.js';
 import { resolveCaseValue } from '../handlers/expression/case-value.js';
 import { createCompilerState } from '../handlers/types.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
+import * as resolvedConditions from '../resolved-condition-compiler.js';
 
 const db = schema({
 	symbols: { id: { type: 'integer', primaryKey: true }, period: 'daterange' },
@@ -124,8 +128,8 @@ for (const position of ['columns', 'orderBy'] as const) {
 		const result = (
 			position === 'columns' ? query.columns([expr]) : query.orderBy(expr)
 		).dump();
-		expect(result.sql).toContain('symbols.period && CAST($1 AS daterange)');
-		expect(result.params).toEqual(['[2026-01-01,2026-02-01)', 3]);
+		expect(result.sql).toContain("symbols.period && daterange($1, $2, '[)')");
+		expect(result.params).toEqual(['2026-01-01', '2026-02-01', 3]);
 	});
 }
 
@@ -147,9 +151,9 @@ it('CASE in a subquery body uses the child logical source and emitted alias', ()
 		)
 		.dump();
 	expect(result.sql).toBe(
-		'SELECT symbols.* FROM symbols WHERE EXISTS (SELECT 1 FROM calls AS calls_exists_0 WHERE symbols.id = calls_exists_0."symbolId" AND CASE WHEN calls_exists_0.period && CAST($1 AS tsrange) AND calls_exists_0.score = $2 THEN 1 ELSE 0 END = $3)',
+		`SELECT symbols.* FROM symbols WHERE EXISTS (SELECT 1 FROM calls AS calls_exists_0 WHERE symbols.id = calls_exists_0."symbolId" AND CASE WHEN calls_exists_0.period && tsrange($1, $2, '[)') AND calls_exists_0.score = $3 THEN 1 ELSE 0 END = $4)`,
 	);
-	expect(result.params).toEqual(['[2026-01-01,2026-02-01)', 4, 1]);
+	expect(result.params).toEqual(['2026-01-01', '2026-02-01', 4, 1]);
 });
 it('nested SELECT CASE uses its own source and reserved alias', () => {
 	const condition = rangeOverlaps('period', {
@@ -196,9 +200,9 @@ it('nested SELECT CASE uses its own source and reserved alias', () => {
 		},
 	});
 	expect(result.sql).toBe(
-		'SELECT (SELECT (SELECT (SELECT CASE WHEN calls_1.period && CAST($1 AS tsrange) AND calls_1.score = $2 THEN 1 ELSE 0 END AS rank FROM calls AS calls_1) FROM symbols) FROM calls)',
+		"SELECT (SELECT (SELECT (SELECT CASE WHEN calls_1.period && tsrange($1, $2, '[)') AND calls_1.score = $3 THEN 1 ELSE 0 END AS rank FROM calls AS calls_1) FROM symbols) FROM calls)",
 	);
-	expect(result.parameters).toEqual(['[2026-01-01,2026-02-01)', 4]);
+	expect(result.parameters).toEqual(['2026-01-01', '2026-02-01', 4]);
 });
 
 it('nested SELECT HAVING uses its own logical source', () => {
@@ -229,9 +233,9 @@ it('nested SELECT HAVING uses its own logical source', () => {
 		},
 	});
 	expect(result.sql).toBe(
-		'SELECT (SELECT (SELECT calls.period FROM calls GROUP BY calls.period HAVING calls.period && CAST($1 AS tsrange)) FROM symbols)',
+		"SELECT (SELECT (SELECT calls.period FROM calls GROUP BY calls.period HAVING calls.period && tsrange($1, $2, '[)')) FROM symbols)",
 	);
-	expect(result.parameters).toEqual(['[2026-01-01,2026-02-01)']);
+	expect(result.parameters).toEqual(['2026-01-01', '2026-02-01']);
 });
 
 for (const field of ['id', 'calls.id']) {
@@ -301,21 +305,23 @@ for (const position of ['HAVING', 'CASE WHEN'] as const) {
 			...eq('id', 1),
 			operator: 'invalid',
 		} as unknown as ReturnType<typeof eq>;
-		expect(() =>
+		const query = () =>
 			position === 'HAVING'
 				? orm
 						.select('symbols')
 						.count({ as: 'n' })
 						.groupBy(['id'])
 						.having(condition)
-						.dump()
 				: orm
 						.select('symbols')
 						.columns([
 							caseWhen(condition, literal(1)).else(literal(0)).as('flag'),
-						])
-						.dump(),
-		).toThrow(`No ${position} handler registered for operator: invalid`);
+						]);
+		const refusal = "Unsupported comparison operator 'invalid'";
+		expect(() => query().dump()).toThrow(refusal);
+		// The root WHERE's phase: planning keeps the operator, compiling refuses it.
+		const report = query().plan();
+		expect(() => adapter.compile(report, { model: db.model })).toThrow(refusal);
 	});
 }
 
@@ -536,13 +542,15 @@ it('FILTER nested in HAVING labels invalid operator refusal FILTER', () => {
 		...eq('id', 1),
 		operator: 'invalid',
 	} as unknown as ReturnType<typeof eq>;
-	expect(() =>
+	const query = () =>
 		orm
 			.select('symbols')
 			.groupBy(['id'])
-			.having(fn('count', star()).filter(condition).gt(1))
-			.dump(),
-	).toThrow('No FILTER handler registered for operator: invalid');
+			.having(fn('count', star()).filter(condition).gt(1));
+	const refusal = "Unsupported comparison operator 'invalid'";
+	expect(() => query().dump()).toThrow(refusal);
+	const report = query().plan();
+	expect(() => adapter.compile(report, { model: db.model })).toThrow(refusal);
 });
 
 describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
@@ -626,7 +634,7 @@ describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
 					.having(fn('count', star()).filter(recursive()).gt(1))
 					.dump(),
 			).toThrow(refusal('FILTER'));
-			// A CASE inside a relation body inside a FILTER takes the FILTER's label.
+			// A CASE inside a relation body inside a FILTER is the innermost root.
 			expect(() =>
 				categories()
 					.columns([
@@ -641,7 +649,7 @@ describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
 							.as('n'),
 					])
 					.dump(),
-			).toThrow(refusal('FILTER'));
+			).toThrow(refusal('CASE WHEN'));
 			// A FILTER wrapping not(...) inside a CASE condition is the innermost root.
 			expect(() =>
 				categories()
@@ -657,7 +665,7 @@ describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
 					])
 					.dump(),
 			).toThrow(refusal('FILTER'));
-			// A CASE absorbed as the right operand of a resolved dotted comparison.
+			// A CASE absorbed as the right operand of a dotted comparison is the innermost root.
 			expect(() =>
 				categories()
 					.columns([
@@ -671,7 +679,7 @@ describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
 							.as('n'),
 					])
 					.dump(),
-			).toThrow(refusal('FILTER'));
+			).toThrow(refusal('CASE WHEN'));
 		});
 
 		it(`AC1 a dotted HAVING field compiles to the root WHERE's EXISTS (${name})`, () => {
@@ -1565,5 +1573,715 @@ describe('#891 slice 3: labels, qualifiers and HAVING dotted fields', () => {
 				params: ['x', 'x'],
 			});
 		}
+	});
+});
+
+describe('#891 slice 5c: every HAVING, CASE WHEN and FILTER root through core', () => {
+	type Out = { sql: string; params: readonly unknown[] } | { error: string };
+	const out = (
+		run: () => {
+			sql: string;
+			params?: readonly unknown[];
+			parameters?: readonly unknown[];
+		},
+	): Out => {
+		try {
+			const r = run();
+			return { sql: r.sql, params: r.params ?? r.parameters ?? [] };
+		} catch (error) {
+			return { error: (error as Error).message };
+		}
+	};
+	const columns = {
+		id: { type: 'integer', primaryKey: true },
+		name: { type: 'text' },
+		score: { type: 'integer' },
+		period: { type: 'daterange' },
+		data: { type: 'jsonb' },
+	} as const;
+	const s5 = schema({
+		users: columns,
+		posts: {
+			...columns,
+			authorId: ref('users', { as: 'author', inverse: 'posts' }),
+			editorId: ref('users', { as: 'editor', inverse: 'edited' }),
+		},
+	});
+	const s5Adapter = createPgCompileOnlyAdapter({ model: s5.model });
+	const o = createOrm({ schema: s5, adapter: s5Adapter });
+	const body = (q: unknown) =>
+		new SubqueryExpression((q as { buildIntent(): QueryIntent }).buildIntent());
+	const longName = () => fn('length', exprRef('name')).gt(2);
+	afterEach(() => vi.restoreAllMocks());
+
+	it('AC1 routed: each root has a resolved entry that the resolved compiler receives', () => {
+		const spy = vi.spyOn(resolvedConditions, 'compileResolvedCondition');
+		const inputs = [
+			() => o.select('posts').groupBy(['id']).having(gt('score', 1)),
+			() =>
+				o
+					.select('posts')
+					.columns([
+						caseWhen(eq('score', 1), literal(1)).else(literal(0)).as('c'),
+					]),
+			() =>
+				o
+					.select('posts')
+					.orderBy(caseWhen(eq('score', 1), literal(1)).else(literal(0))),
+			() =>
+				o
+					.select('posts')
+					.columns([fn('count', star()).filter(eq('score', 1)).as('n')]),
+			() =>
+				o
+					.select('posts')
+					.groupBy(['id'])
+					.having(fn('count', star()).filter(eq('score', 1)).gt(2)),
+		];
+		for (const input of inputs) {
+			spy.mockClear();
+			const report = input().plan();
+			const entries = report.execution?.expressionConditions ?? [];
+			expect(entries).toHaveLength(1);
+			expect(report.execution?.rootsResolved).toBe(true);
+			input().dump();
+			expect(spy).toHaveBeenCalledWith(
+				entries[0]!.condition,
+				expect.any(Object),
+				expect.any(Object),
+			);
+		}
+		// A FILTER nested in a HAVING root lives in the HAVING entry.
+		const nested = o
+			.select('posts')
+			.groupBy(['id'])
+			.having(fn('count', star()).filter(eq('score', 1)).gt(2))
+			.plan();
+		expect(
+			nested.execution?.expressionConditions?.map((e) => e.intentPath),
+		).toEqual(['having']);
+		// NQL CASE, in a column and in a function argument.
+		for (const text of [
+			'posts | select case when score = 1 then 1 else 0 end as c',
+			'posts | select coalesce(case when score = 1 then 1 else 0 end, 0) as c',
+		]) {
+			spy.mockClear();
+			const dump = o.nql([text] as unknown as TemplateStringsArray).dump();
+			const planned = 'plan' in dump ? dump.plan : undefined;
+			const entries = planned?.execution?.expressionConditions ?? [];
+			expect(entries).toHaveLength(1);
+			expect(spy).toHaveBeenCalledWith(
+				entries[0]!.condition,
+				expect.any(Object),
+				expect.any(Object),
+			);
+		}
+		// Raw and expressions aggregate FILTER through plan().
+		for (const select of [
+			{
+				type: 'aggregate',
+				fields: ['id'],
+				aggregates: [
+					{ function: 'count', field: '*', as: 'n', filter: eq('score', 1) },
+				],
+			},
+			{
+				type: 'expressions',
+				columns: [
+					{
+						kind: 'aggregate',
+						function: 'count',
+						field: '*',
+						filter: eq('score', 1),
+						as: 'n',
+					},
+				],
+			},
+		]) {
+			spy.mockClear();
+			const report = plan(
+				{
+					type: 'select',
+					from: 'posts',
+					select,
+					...(select.type === 'aggregate' && { groupBy: ['id'] }),
+				} as QueryIntent,
+				s5.model,
+			);
+			const entries = report.execution?.expressionConditions ?? [];
+			expect(entries).toHaveLength(1);
+			s5Adapter.compile(report, { model: s5.model });
+			expect(spy).toHaveBeenCalledWith(
+				entries[0]!.condition,
+				expect.any(Object),
+				expect.any(Object),
+			);
+		}
+	});
+
+	it('AC1 plain leaves keep their SQL', () => {
+		expect(
+			out(() =>
+				o.select('posts').groupBy(['id']).having(gt('score', 1)).dump(),
+			),
+		).toEqual({
+			sql: 'SELECT posts.* FROM posts GROUP BY posts.id HAVING posts.score > $1',
+			params: [1],
+		});
+		expect(
+			out(() =>
+				o.nql`posts | select coalesce(case when score = 1 then 1 else 0 end, 0) as c`.dump(),
+			),
+		).toEqual({
+			sql: 'SELECT COALESCE(CASE WHEN posts.score = $1 THEN $2 ELSE $3 END, $4) AS c FROM posts',
+			params: [1, 1, 0, 0],
+		});
+	});
+
+	it('AC1 body-having: an expression body keeps its HAVING SQL', () => {
+		expect(
+			out(() =>
+				o
+					.select('users')
+					.columns([
+						'id',
+						body(
+							o
+								.select('posts')
+								.where(eq('authorId', outerRef('id')))
+								.groupBy(['authorId'])
+								.columns([fn('count', star()).as('n')])
+								.having(gt('authorId', 1)),
+						).asExpr('v'),
+					])
+					.dump(),
+			),
+		).toEqual({
+			sql: 'SELECT users.id, (SELECT count(*) AS n FROM posts WHERE posts."authorId" = users.id GROUP BY posts."authorId" HAVING posts."authorId" > $1) AS v FROM users',
+			params: [1],
+		});
+	});
+
+	it('AC1 nql-bind-root and union-branch keep their SQL', () => {
+		const u = schema({
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'text',
+				score: 'integer',
+			},
+		});
+		const ou = createOrm({
+			schema: u,
+			adapter: createPgCompileOnlyAdapter({ model: u.model }),
+		});
+		expect(
+			out(() =>
+				ou.nql`users | where score > 1 | bind b
+b | select case when score = 1 then 1 else 0 end as c`.dump(),
+			),
+		).toEqual({
+			sql: 'WITH b AS (SELECT users.* FROM users WHERE users.score > $1) SELECT CASE WHEN b.score = $2 THEN 1 ELSE 0 END AS c FROM b',
+			params: [1, 1],
+		});
+		expect(
+			out(() =>
+				ou.nql`users | select case when score = 1 then 1 else 0 end as c | union (users | select case when score = 2 then 1 else 0 end as c)`.dump(),
+			),
+		).toEqual({
+			sql: 'SELECT CASE WHEN users.score = $1 THEN 1 ELSE 0 END AS c FROM users UNION SELECT CASE WHEN users.score = $2 THEN 1 ELSE 0 END AS c FROM users',
+			params: [1, 2],
+		});
+	});
+
+	it('AC1 json-payload: a JSON value shaped like a subquery stays one parameter', () => {
+		const value = {
+			kind: 'subquery',
+			query: { from: 'users', joins: [{ relation: 'anything' }] },
+		};
+		const cond = () => eq('data', value);
+		const users = () => o.select('users');
+		expect(out(() => users().groupBy(['id']).having(cond()).dump())).toEqual({
+			sql: 'SELECT users.* FROM users GROUP BY users.id HAVING users.data = $1',
+			params: [value],
+		});
+		expect(
+			out(() =>
+				users()
+					.columns([caseWhen(cond(), literal(1)).else(literal(0)).as('c')])
+					.dump(),
+			),
+		).toEqual({
+			sql: 'SELECT CASE WHEN users.data = $1 THEN 1 ELSE 0 END AS c FROM users',
+			params: [value],
+		});
+		expect(
+			out(() =>
+				users()
+					.columns([fn('count', star()).filter(cond()).as('n')])
+					.dump(),
+			),
+		).toEqual({
+			sql: 'SELECT count(*) FILTER (WHERE users.data = $1) AS n FROM users',
+			params: [value],
+		});
+		for (const read of [
+			() => users().groupBy(['id']).having(cond()),
+			() =>
+				users().columns([
+					caseWhen(cond(), literal(1)).else(literal(0)).as('c'),
+				]),
+			() => users().columns([fn('count', star()).filter(cond()).as('n')]),
+		])
+			expect(read().plan().execution?.localConditions).toBeUndefined();
+	});
+
+	it('AC1 routed-body: an expression body resolves its own HAVING, CASE WHEN and FILTER roots', () => {
+		const spy = vi.spyOn(resolvedConditions, 'compileResolvedCondition');
+		const authored = () =>
+			o.select('posts').where(eq('authorId', outerRef('id')));
+		const cases = [
+			[
+				authored()
+					.groupBy(['authorId'])
+					.columns([fn('count', star()).as('n')])
+					.having(longName()),
+				['having'],
+				'SELECT users.id, (SELECT count(*) AS n FROM posts WHERE posts."authorId" = users.id GROUP BY posts."authorId" HAVING length(posts.name) > $1) AS v FROM users',
+			],
+			[
+				authored()
+					.columns([caseWhen(longName(), literal(1)).else(literal(0)).as('c')])
+					.limit(1),
+				['select.columns[0].when[0].condition'],
+				'SELECT users.id, (SELECT CASE WHEN length(posts.name) > $1 THEN 1 ELSE 0 END AS c FROM posts WHERE posts."authorId" = users.id LIMIT 1) AS v FROM users',
+			],
+			[
+				authored().columns([fn('count', star()).filter(longName()).as('n')]),
+				['select.columns[0].filter'],
+				'SELECT users.id, (SELECT count(*) FILTER (WHERE length(posts.name) > $1) AS n FROM posts WHERE posts."authorId" = users.id) AS v FROM users',
+			],
+		] as const;
+		for (const [inner, paths, sql] of cases) {
+			spy.mockClear();
+			const outer = () =>
+				o.select('users').columns(['id', body(inner).asExpr('v')]);
+			const nested =
+				outer().plan().execution?.expressionSubqueries?.[0]?.select.execution;
+			expect(nested?.rootsResolved).toBe(true);
+			expect(nested?.expressionConditions?.map((e) => e.intentPath)).toEqual(
+				paths,
+			);
+			expect(out(() => outer().dump())).toEqual({ sql, params: [2] });
+			expect(spy).toHaveBeenCalledWith(
+				nested?.expressionConditions?.[0]?.condition,
+				expect.any(Object),
+				expect.any(Object),
+			);
+		}
+	});
+
+	it('AC2 a bare operand column binds the root range over a join', () => {
+		const joined = () => o.select('posts').join('author');
+		expect(
+			out(() =>
+				joined()
+					.columns([
+						'id',
+						caseWhen(longName(), literal(1)).else(literal(0)).as('c'),
+					])
+					.dump(),
+			),
+		).toEqual({
+			sql: 'SELECT posts.id, CASE WHEN length(posts.name) > $1 THEN 1 ELSE 0 END AS c FROM posts JOIN users AS author ON posts."authorId" = author.id',
+			params: [2],
+		});
+		expect(
+			out(() =>
+				joined()
+					.columns([fn('count', star()).filter(longName()).as('n')])
+					.dump(),
+			),
+		).toEqual({
+			sql: 'SELECT count(*) FILTER (WHERE length(posts.name) > $1) AS n FROM posts JOIN users AS author ON posts."authorId" = author.id',
+			params: [2],
+		});
+		expect(
+			out(() => joined().groupBy(['id']).having(longName()).dump()),
+		).toEqual({
+			sql: 'SELECT posts.* FROM posts JOIN users AS author ON posts."authorId" = author.id GROUP BY posts.id HAVING length(posts.name) > $1',
+			params: [2],
+		});
+	});
+
+	it('AC3 a root outerRef() in HAVING, CASE WHEN and FILTER is refused', () => {
+		const refusal = 'outerRef() requires an enclosing query range.';
+		const users = () => o.select('users');
+		const shapes = [
+			() =>
+				users()
+					.groupBy(['id'])
+					.having(gt('score', outerRef('id'))),
+			() =>
+				users()
+					.groupBy(['id'])
+					.having(exprRef('score').gt(outerRef('id'))),
+			() =>
+				users().columns([
+					caseWhen(gt('score', outerRef('id')), literal(1))
+						.else(literal(0))
+						.as('c'),
+				]),
+			() =>
+				users().columns([
+					caseWhen(exprRef('score').gt(outerRef('id')), literal(1))
+						.else(literal(0))
+						.as('c'),
+				]),
+			() =>
+				users().columns([
+					fn('count', star())
+						.filter(gt('score', outerRef('id')))
+						.as('n'),
+				]),
+		];
+		for (const shape of shapes) expect(() => shape().dump()).toThrow(refusal);
+	});
+
+	it('AC4 the innermost CASE WHEN or FILTER root names the refusal', () => {
+		const cats = schema({
+			categories: {
+				id: { type: 'integer', primaryKey: true },
+				score: 'integer',
+				parentId: ref('categories', {
+					as: 'parent',
+					inverse: 'children',
+					nullable: true,
+					roles: { parent: 'parent', children: 'children' },
+				}),
+			},
+		});
+		const oc = createOrm({
+			schema: cats,
+			adapter: createPgCompileOnlyAdapter({ model: cats.model }),
+		});
+		const recursive = () =>
+			exists('children', {
+				recursive: { direction: 'down', through: 'children', maxDepth: 2 },
+			});
+		const refusal = (label: string) =>
+			`${label} exists('children'): recursive relation predicates are not supported inside ${label}.`;
+		const categories = () => oc.select('categories');
+		expect(() =>
+			categories()
+				.groupBy(['id'])
+				.columns([
+					'id',
+					caseWhen(
+						fn('count', star()).filter(not(recursive())).gt(1),
+						literal(1),
+					)
+						.else(literal(0))
+						.as('f'),
+				])
+				.dump(),
+		).toThrow(refusal('FILTER'));
+		expect(() =>
+			categories()
+				.where(eq(caseWhen(recursive(), literal(1)).else(literal(0)), 1))
+				.dump(),
+		).toThrow(refusal('WHERE'));
+		// An expression subquery is a new planned SELECT: its WHERE is labelled WHERE.
+		expect(() =>
+			categories()
+				.columns([
+					fn('count', star())
+						.filter(
+							gt(
+								body(
+									oc
+										.select('categories')
+										.where(
+											eq(caseWhen(recursive(), literal(1)).else(literal(0)), 1),
+										)
+										.count({ as: 'n' }),
+								).asExpr('v'),
+								0,
+							),
+						)
+						.as('m'),
+				])
+				.dump(),
+		).toThrow(refusal('WHERE'));
+	});
+
+	it('AC5 malformed conditions get the root WHERE refusal in its phase', () => {
+		const users = () => o.select('users');
+		const bogus = { kind: 'bogus', field: 'id' } as unknown as WhereIntent;
+		expect(() => users().groupBy(['id']).having(bogus).plan()).toThrow(
+			"Unsupported predicate kind 'bogus'",
+		);
+		expect(() =>
+			users()
+				.columns([caseWhen(bogus, literal(1)).else(literal(0)).as('c')])
+				.plan(),
+		).toThrow("Unsupported predicate kind 'bogus'");
+		const field = { kind: 'subquery' } as unknown as WhereIntent;
+		for (const query of [
+			() => users().groupBy(['id']).having(field),
+			() =>
+				users().columns([caseWhen(field, literal(1)).else(literal(0)).as('c')]),
+			() => users().columns([fn('count', star()).filter(field).as('n')]),
+		])
+			expect(() => query().plan()).toThrow('Condition requires a column');
+		// A literal, a parameter or an expression subquery at a root is a
+		// malformed condition refused while planning, never skipped as data.
+		const at = (value: object) => [
+			{ groupBy: ['id'], having: value },
+			{
+				select: {
+					type: 'expressions',
+					columns: [
+						{
+							kind: 'case',
+							when: [
+								{ condition: value, result: { kind: 'literal', value: 1 } },
+							],
+							as: 'c',
+						},
+					],
+				},
+			},
+			{
+				select: {
+					type: 'expressions',
+					columns: [
+						{
+							kind: 'aggregate',
+							function: 'count',
+							field: '*',
+							filter: value,
+							as: 'n',
+						},
+					],
+				},
+			},
+		];
+		const planOf = (shape: object) => () =>
+			plan(
+				{ type: 'select', from: 'users', ...shape } as QueryIntent,
+				s5.model,
+			);
+		for (const [value, refusal] of [
+			[{ kind: 'literal', value: 1 }, "Unsupported predicate kind 'literal'"],
+			[{ kind: 'param', value: 1 }, "Unsupported predicate kind 'param'"],
+			[
+				{
+					kind: 'subquery',
+					query: {
+						type: 'select',
+						from: 'users',
+						select: { type: 'fields', fields: ['id'] },
+					},
+				},
+				'Condition requires a column',
+			],
+		] as const)
+			for (const shape of at(value)) expect(planOf(shape)).toThrow(refusal);
+	});
+
+	it('AC5 cyclic metadata on a condition never overflows the stack', () => {
+		const u = schema({
+			users: { id: { type: 'integer', primaryKey: true }, score: 'integer' },
+		});
+		const a = createPgCompileOnlyAdapter({ model: u.model });
+		const cyclic = () => {
+			const cond = {
+				kind: 'comparison',
+				field: 'score',
+				operator: 'eq',
+				value: 1,
+			} as Record<string, unknown>;
+			cond.meta = { cond };
+			return cond as unknown as WhereIntent;
+		};
+		const compile = (i: object) =>
+			out(() =>
+				a.compile(
+					plan({ type: 'select', from: 'users', ...i } as QueryIntent, u.model),
+					{
+						model: u.model,
+					},
+				),
+			);
+		expect(
+			compile({
+				select: { type: 'fields', fields: ['id'] },
+				groupBy: ['id'],
+				having: cyclic(),
+			}),
+		).toEqual({
+			sql: 'SELECT users.id FROM users GROUP BY users.id HAVING users.score = $1',
+			params: [1],
+		});
+		for (const select of [
+			{
+				type: 'expressions',
+				columns: [
+					{
+						kind: 'case',
+						when: [
+							{ condition: cyclic(), result: { kind: 'literal', value: 1 } },
+						],
+						as: 'c',
+					},
+				],
+			},
+			{
+				type: 'expressions',
+				columns: [
+					{
+						kind: 'aggregate',
+						function: 'count',
+						field: '*',
+						filter: cyclic(),
+						as: 'n',
+					},
+				],
+			},
+		])
+			expect(compile({ select })).toEqual({
+				error: 'stableJson cannot serialize cyclic structures',
+			});
+	});
+
+	it('AC6 expression-operand qualifiers carry the position label', () => {
+		const q = () => o.select('posts').join('author').join('editor');
+		const joins =
+			'FROM posts JOIN users AS author ON posts."authorId" = author.id JOIN users AS editor ON posts."editorId" = editor.id';
+		const positions = [
+			[
+				'CASE WHEN',
+				(c: WhereIntent) =>
+					q().columns([caseWhen(c, literal(1)).else(literal(0)).as('c')]),
+				`SELECT CASE WHEN posts.name = editor.name THEN 1 ELSE 0 END AS c ${joins}`,
+			],
+			[
+				'FILTER',
+				(c: WhereIntent) =>
+					q().columns([fn('count', star()).filter(c).as('n')]),
+				`SELECT count(*) FILTER (WHERE posts.name = editor.name) AS n ${joins}`,
+			],
+			[
+				'HAVING',
+				(c: WhereIntent) => q().columns(['id']).groupBy(['id']).having(c),
+				`SELECT posts.id ${joins} GROUP BY posts.id HAVING posts.name = editor.name`,
+			],
+		] as const;
+		for (const [label, at, sql] of positions) {
+			expect(() => at(eq('name', exprRef('users.name'))).dump()).toThrow(
+				`${label} qualifier 'users' is ambiguous between 'author', 'editor'.`,
+			);
+			expect(out(() => at(eq('name', exprRef('editor.name'))).dump())).toEqual({
+				sql,
+				params: [],
+			});
+		}
+	});
+
+	it('AC9 a root core did not record is refused, never lowered locally', () => {
+		const base = { rootTable: 'users', directConditions: true } as const;
+		const plans = {
+			'CASE WHEN': {
+				...base,
+				decisions: [
+					{
+						type: 'selectCustomExpression',
+						expressionIntent: {
+							kind: 'case',
+							when: [
+								{
+									condition: eq('score', 1),
+									result: { kind: 'literal', value: 1 },
+								},
+							],
+							else: { kind: 'literal', value: 0 },
+						},
+						table: 'users',
+						alias: 'c',
+					},
+				],
+			},
+			FILTER: {
+				...base,
+				decisions: [
+					{
+						type: 'selectFunction',
+						function: 'count',
+						column: '*',
+						alias: 'n',
+						table: 'users',
+						filterIntent: gt('score', 1),
+					},
+				],
+			},
+			'fluent FILTER': {
+				...base,
+				decisions: [
+					{
+						type: 'selectCustomExpression',
+						expressionIntent: {
+							kind: 'customFn',
+							name: 'count',
+							args: [{ kind: 'star' }],
+							filter: gt('score', 1),
+						},
+						table: 'users',
+						alias: 'n',
+					},
+				],
+			},
+			HAVING: {
+				...base,
+				decisions: [{ type: 'groupBy', column: 'id' }],
+				rawHaving: gt('score', 1),
+			},
+		} as const;
+		const expected = {
+			'CASE WHEN':
+				'SELECT CASE WHEN users.score = $1 THEN 1 ELSE 0 END AS c FROM users',
+			FILTER: 'SELECT count(*) AS n FROM users',
+			'fluent FILTER':
+				'SELECT count(*) FILTER (WHERE users.score > $1) AS n FROM users',
+			HAVING: 'SELECT * FROM users GROUP BY users.id HAVING users.score > $1',
+		} as const;
+		for (const [name, p] of Object.entries(plans)) {
+			const label = name === 'fluent FILTER' ? 'FILTER' : name;
+			const flagged = { ...p, resolvedExecution: true, rootsResolved: true };
+			expect(() =>
+				compilePlan(flagged as unknown as Parameters<typeof compilePlan>[0]),
+			).toThrow(
+				`A ${label} condition reached the adapter without its resolved form.`,
+			);
+			expect(
+				compilePlan(p as unknown as Parameters<typeof compilePlan>[0]).sql,
+			).toBe(expected[name as keyof typeof expected]);
+		}
+	});
+
+	it('AC9 flag-carried: a public read carries rootsResolved to both compiler conversions', () => {
+		const spy = vi.spyOn(compilerModule, 'compilePlan');
+		const query = o
+			.select('posts')
+			.columns([
+				'id',
+				caseWhen(eq('score', 1), literal(1)).else(literal(0)).as('c'),
+			])
+			// A joined include with a presence marker runs the auxiliary projection compile.
+			.include('author', { join: 'left' });
+		expect(query.plan().execution?.rootsResolved).toBe(true);
+		query.dump();
+		expect(spy.mock.calls.length).toBeGreaterThanOrEqual(2);
+		for (const [input] of spy.mock.calls)
+			expect(input).toMatchObject({ rootsResolved: true });
 	});
 });

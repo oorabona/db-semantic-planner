@@ -148,7 +148,7 @@ describe('#247 aggregate DISTINCT', () => {
 			.having(fn('count', distinct('id')).gt(1))
 			.dump();
 		expect(dump.sql).toBe(
-			'SELECT tool_metrics.* FROM tool_metrics HAVING count(DISTINCT id) > $1',
+			'SELECT tool_metrics.* FROM tool_metrics HAVING count(DISTINCT tool_metrics.id) > $1',
 		);
 		expect(dump.params).toEqual([1]);
 	});

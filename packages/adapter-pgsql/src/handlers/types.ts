@@ -57,6 +57,10 @@ export type IncludeHandlerStrategy = (typeof INCLUDE_STRATEGIES)[number];
 export interface CompilerContext {
 	/** The plan's conditions were resolved by core at plan(); compile them through the resolved route. */
 	readonly resolvedExecution?: boolean;
+	/** Core recorded every HAVING, CASE WHEN and FILTER root: resolved, or left to the local route. */
+	readonly rootsResolved?: boolean;
+	/** Condition roots core left to the local route because they hold a query-local body (#1040). */
+	readonly localConditions?: ReadonlySet<import('@dbsp/types').WhereIntent>;
 	readonly compileCaseCondition?: (
 		intent: import('@dbsp/types').WhereIntent,
 		ctx: CompilerContext,

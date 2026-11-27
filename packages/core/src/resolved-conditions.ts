@@ -93,6 +93,65 @@ export function resolveSelectWhere(
 	);
 }
 
+/** A range whose row cannot be read, and how a read of it is refused. */
+export interface UnreadableRange {
+	readonly id: ResolvedRange['id'];
+	readonly refuse: (
+		reference: { readonly column: string } | { readonly relation: string },
+	) => never;
+}
+
+/**
+ * Resolve one mutation value (ADR 0011 delivery 4) against the mutation's
+ * target table, bound as `root`: the expression a SET, `doUpdate` or
+ * `values()` cell compiles to. It resolves as the right operand of the same
+ * mutation's WHERE does: no inherited default filter, a body's own policy
+ * kept. `unreadableRoot` refuses every column or relation read from the
+ * target row (a VALUES row has none).
+ */
+export function resolveValueExpression(
+	input: ExpressionIntent,
+	root: ResolvedRange,
+	allocator: RangeAllocator,
+	model: ModelIR | undefined,
+	options: {
+		readonly label: string;
+		readonly isLocalSource?: ((name: string) => boolean) | undefined;
+		readonly unreadableRoot?:
+			| ((
+					reference:
+						| { readonly column: string }
+						| { readonly relation: string },
+			  ) => never)
+			| undefined;
+	},
+): ResolvedExpression {
+	const where = { kind: 'expression', expr: input } as WhereIntent;
+	assertNoPathRefInConditionBodies(where);
+	const resolved = resolveConditionContext(
+		where,
+		root,
+		[root],
+		[],
+		allocator,
+		model,
+		0,
+		[],
+		{
+			label: options.label,
+			...(options.isLocalSource && { isLocalSource: options.isLocalSource }),
+			...(options.unreadableRoot && {
+				unreadableRange: { id: root.id, refuse: options.unreadableRoot },
+			}),
+		},
+	);
+	if (resolved?.kind !== 'expression')
+		throw new Error(
+			'Internal error: a mutation value resolved to no expression.',
+		);
+	return resolved.expression;
+}
+
 /** Resolve a condition with explicit current, visible and enclosing query ranges. */
 export function resolveConditionContext(
 	where: WhereIntent | undefined,
@@ -123,6 +182,11 @@ export function resolveConditionContext(
 		readonly isLocalSource?: (name: string) => boolean;
 		/** The caller already reserved every range of the root scope, names and tables. */
 		readonly rootScopeReserved?: boolean;
+		/**
+		 * A range with no readable row (an INSERT values() cell's target): a
+		 * column or relation reached from it, at any depth, is refused.
+		 */
+		readonly unreadableRange?: UnreadableRange;
 	},
 ): ResolvedCondition | undefined {
 	const label = mode?.label ?? 'WHERE';
@@ -130,9 +194,13 @@ export function resolveConditionContext(
 	const currentLabel = (): string => labels[labels.length - 1]!;
 	let filterDepth = 0;
 	const within = <T>(position: 'CASE WHEN' | 'FILTER', run: () => T): T => {
-		// A resolution entered from HAVING names its innermost CASE WHEN or FILTER;
-		// one entered from a CASE WHEN or FILTER root keeps that root's label.
-		const relabel = label === 'HAVING' || mode?.fromHaving === true;
+		// A resolution entered from a HAVING, CASE WHEN or FILTER root names its
+		// innermost CASE WHEN or FILTER; WHERE, ON and start.where keep their label.
+		const relabel =
+			label === 'HAVING' ||
+			label === 'CASE WHEN' ||
+			label === 'FILTER' ||
+			mode?.fromHaving === true;
 		if (position === 'FILTER') filterDepth++;
 		if (relabel) labels.push(position);
 		try {
@@ -244,6 +312,7 @@ export function resolveConditionContext(
 		enclosing: readonly (readonly ResolvedRange[])[],
 		outer = false,
 	): ResolvedColumnOperand => {
+		const written = name;
 		const dot = name.lastIndexOf('.');
 		const parts =
 			mode?.include && !outer && dot >= 0
@@ -277,6 +346,8 @@ export function resolveConditionContext(
 					`${currentLabel()} qualifier '${qualifier}' is not visible in this query.`,
 				);
 		}
+		if (mode?.unreadableRange && range.id === mode.unreadableRange.id)
+			mode.unreadableRange.refuse({ column: written });
 		if (
 			mode?.include &&
 			parts.join('.') !== '*' &&
@@ -390,7 +461,15 @@ export function resolveConditionContext(
 			issued ? issued.filters : activeFilters,
 			{
 				isLocalSource: mode?.isLocalSource,
-				nested: { allocator, enclosing: scopes, qualifiers, entryDepth },
+				nested: {
+					allocator,
+					enclosing: scopes,
+					qualifiers,
+					entryDepth,
+					...(mode?.unreadableRange && {
+						unreadableRange: mode.unreadableRange,
+					}),
+				},
 			},
 		);
 		return { kind: 'subquery', select };
@@ -587,6 +666,8 @@ export function resolveConditionContext(
 		nested?: WhereIntent,
 		dotted?: { node: WhereIntent; field: string },
 	): ResolvedCondition => {
+		if (mode?.unreadableRange && source.id === mode.unreadableRange.id)
+			mode.unreadableRange.refuse({ relation: segments.join('.') });
 		const trusted = getTrustedNqlRelationFilterFields(node);
 		if (
 			('recursive' in node && node.recursive !== undefined) ||
@@ -957,20 +1038,24 @@ export function resolveConditionContext(
 			bound: isParamIntent(authored),
 		};
 	};
+	/**
+	 * A `RangeValue` operand (`{ lower, upper, bounds }`), as opposed to a bound
+	 * `param()`, a scalar or a range-literal string. It compiles to a range
+	 * constructor call, never to a text literal (#1047).
+	 */
+	const rangeValueOperand = (
+		value: unknown,
+	): { lower?: unknown; upper?: unknown; bounds?: string } | undefined => {
+		if (value === null || typeof value !== 'object') return undefined;
+		if (isExpression(value) || isParamIntent(authoredParam(value)))
+			return undefined;
+		return 'lower' in value || 'upper' in value
+			? (value as { lower?: unknown; upper?: unknown; bounds?: string })
+			: undefined;
+	};
 	const rangeParameter = (value: unknown): ResolvedParameter => {
 		const authored = parameter(value, 'range');
 		if (authored.bound) return authored;
-		if (
-			value !== null &&
-			typeof value === 'object' &&
-			('lower' in value || 'upper' in value)
-		) {
-			const range = value as { lower?: unknown; upper?: unknown };
-			return {
-				...authored,
-				value: `[${range.lower ?? ''},${range.upper ?? ''})`,
-			};
-		}
 		if (typeof value === 'string' && /^\[.*,.*[)\]]$/.test(value))
 			return authored;
 		return { ...authored, cast: 'range-element' };
@@ -1150,18 +1235,41 @@ export function resolveConditionContext(
 				};
 			case 'null':
 				return { kind: 'null', left: leftOperand(), operator: node.operator };
-			case 'range':
+			case 'range': {
+				const rangeValue =
+					node.operator === 'between'
+						? undefined
+						: rangeValueOperand(node.value);
+				// Each bound follows a comparison's right-operand rule; an absent
+				// side is an unbounded one, bound as null.
+				const bound = (side: unknown): ResolvedRhs =>
+					side === undefined || side === null
+						? parameter(null)
+						: rhs(side, 'none');
 				return {
 					kind: 'range',
 					left: left(),
 					operator: node.operator,
 					value:
-						node.operator === 'between'
-							? parameter(node.value)
-							: mode?.include
-								? { ...rangeParameter(node.value), cast: 'none' }
-								: rangeParameter(node.value),
+						rangeValue !== undefined
+							? {
+									kind: 'rangeConstructor',
+									field: node.field,
+									lower: bound(rangeValue.lower),
+									upper: bound(rangeValue.upper),
+									bounds: (rangeValue.bounds ?? '[)') as
+										| '[)'
+										| '[]'
+										| '()'
+										| '(]',
+								}
+							: node.operator === 'between'
+								? parameter(node.value)
+								: mode?.include
+									? { ...rangeParameter(node.value), cast: 'none' }
+									: rangeParameter(node.value),
 				};
+			}
 			case 'jsonContains':
 				return {
 					kind: 'jsonContains',
@@ -1339,10 +1447,18 @@ export function assertScanDefaultFilter(
 				if (node.operand.kind !== 'values')
 					refuse("forbidden subquery in 'in'");
 				return;
+			case 'range':
+				column(node.left);
+				// A range value's bounds can be expressions: they follow the
+				// right-operand rule of a comparison.
+				if (node.value.kind === 'rangeConstructor') {
+					rhs(node.value.lower);
+					rhs(node.value.upper);
+				}
+				return;
 			case 'like':
 			case 'any':
 			case 'null':
-			case 'range':
 			case 'jsonContains':
 			case 'jsonExists':
 				column(node.left);

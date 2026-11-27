@@ -596,8 +596,8 @@ describe('raw aggregate FILTER resolves through the root resolver (#891 slice 3)
 				v.db.model,
 			),
 		).toEqual({
-			sql: counted('users.period && CAST($1 AS daterange)'),
-			params: ['[2024-01-01,2024-02-01)'],
+			sql: counted("users.period && daterange($1, $2, '[)')"),
+			params: ['2024-01-01', '2024-02-01'],
 		});
 		expect(
 			compiled(
@@ -613,6 +613,87 @@ describe('raw aggregate FILTER resolves through the root resolver (#891 slice 3)
 				aggregateFilter(v, eq('score', fn('length', exprRef('name')))),
 				v.db.model,
 			),
-		).toEqual({ sql: counted('users.score = length(name)'), params: [] });
+		).toEqual({ sql: counted('users.score = length(users.name)'), params: [] });
+	});
+});
+
+describe('an aggregate inside an expression keeps its FILTER (#1003, #891 slice 5c)', () => {
+	const db = schema({
+		users: {
+			id: { type: 'integer', primaryKey: true },
+			name: 'text',
+			score: 'integer',
+		},
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			name: 'text',
+			score: 'integer',
+			authorId: ref('users', { as: 'author', inverse: 'posts' }),
+		},
+	});
+	const adapter = createPgCompileOnlyAdapter({ model: db.model });
+	const compileColumn = (from: string, column: object) => {
+		const result = adapter.compile(
+			plan(
+				{
+					type: 'select',
+					from,
+					select: { type: 'expressions', columns: [column] },
+				} as QueryIntent,
+				db.model,
+			),
+			{ model: db.model },
+		);
+		return { sql: result.sql, params: result.parameters };
+	};
+	const counted = {
+		kind: 'aggregate',
+		function: 'count',
+		field: '*',
+		filter: eq('score', 1),
+	};
+	const zero = { kind: 'literal', value: 0 };
+
+	it('AC8 sql: a function argument', () => {
+		expect(
+			compileColumn('users', {
+				kind: 'function',
+				name: 'coalesce',
+				args: [counted, zero],
+				as: 'n',
+			}),
+		).toEqual({
+			sql: 'SELECT COALESCE(count(*) FILTER (WHERE users.score = $1), $2) AS n FROM users',
+			params: [1, 0],
+		});
+	});
+
+	it('AC8 arithmetic: an arithmetic operand', () => {
+		expect(
+			compileColumn('posts', {
+				kind: 'arithmetic',
+				op: '+',
+				left: counted,
+				right: { kind: 'literal', value: 1 },
+				as: 'n',
+			}),
+		).toEqual({
+			sql: 'SELECT count(*) FILTER (WHERE posts.score = $1) + $2 AS n FROM posts',
+			params: [1, 1],
+		});
+	});
+
+	it('AC8 distinct: a DISTINCT aggregate in a function argument', () => {
+		expect(
+			compileColumn('posts', {
+				kind: 'function',
+				name: 'coalesce',
+				args: [{ ...counted, distinct: true, field: 'score' }, zero],
+				as: 'n',
+			}),
+		).toEqual({
+			sql: 'SELECT COALESCE(count(DISTINCT posts.score) FILTER (WHERE posts.score = $1), $2) AS n FROM posts',
+			params: [1, 0],
+		});
 	});
 });

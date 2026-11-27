@@ -9,8 +9,25 @@
  * to either support the same SQL or receive a capability error at runtime.
  */
 
-import type { ExpressionRef, PredicateExpressionRef } from './expressions.js';
-import { array, fn, literal, namedArg, op, param, ref } from './expressions.js';
+import {
+	coerceReference,
+	coerceValue,
+	isValueExpression,
+	leafKind,
+	type ReferenceLeaf,
+} from './coerce.js';
+import { InvalidOperationError } from './errors.js';
+import type { PredicateExpressionRef } from './expressions.js';
+import {
+	array,
+	ExpressionRef,
+	fn,
+	literal,
+	namedArg,
+	op,
+	param,
+	ref,
+} from './expressions.js';
 
 // ============================================================================
 // Types
@@ -30,12 +47,18 @@ export type FullTextSearchField = {
  * Options for fullTextSearch().
  */
 export type FullTextSearchOptions = {
-	/** The query string (will be bound as a single $N parameter shared across all fields). */
+	/**
+	 * The query (ADR 0011 value leaf). A plain value is bound once per field
+	 * (`$1`, `$2`, … all equal); an expression (`exprRef`, `fn`, `literal`, a
+	 * `ColumnRef`, a subquery) is compiled as every field's `query_string`.
+	 */
 	readonly query: unknown;
 	/** Fields to search with per-field boost weights. */
 	readonly fields: readonly FullTextSearchField[];
 	/**
-	 * Table name or alias to qualify the left side of the @@@ operator.
+	 * Table name or alias for the left side of the @@@ operator, a relation
+	 * name (ParadeDB's whole-row `relation @@@ query`). Anything but a string is
+	 * refused.
 	 * Must match the exact table name (or alias) as it appears in the FROM clause.
 	 * In the standard ORM pipeline the root table has no alias, so pass the root table name.
 	 *
@@ -64,9 +87,10 @@ export type FullTextSearchOptions = {
  * )
  * ```
  *
- * The same query value is bound to separate $N parameters, one per field.
+ * A plain query value is bound to separate $N parameters, one per field; an
+ * expression query is compiled in each field.
  *
- * @param options.query      - Query string (bound as a single parameter)
+ * @param options.query      - Query value (bound once per field) or expression
  * @param options.fields     - Fields to search with per-field boost weights
  * @param options.tableAlias - Table name or alias as it appears in the FROM clause (required).
  *   In the standard ORM pipeline the root table has no alias — pass the root table name directly.
@@ -91,7 +115,15 @@ export function fullTextSearch({
 	fields,
 	tableAlias,
 }: FullTextSearchOptions): PredicateExpressionRef {
-	const queryParam = param(query);
+	if (typeof tableAlias !== 'string')
+		throw new InvalidOperationError(
+			'fullTextSearch',
+			`tableAlias must be the name of a table or alias in the FROM clause; got ${leafKind(tableAlias)}`,
+		);
+	const coerced = coerceValue(query, 'fullTextSearch');
+	const queryParam = isValueExpression(coerced)
+		? new ExpressionRef(coerceReference(coerced, 'fullTextSearch'))
+		: param(coerced);
 	const boostExprs = fields.map(({ name: fieldName, boost: weight }) =>
 		fn(
 			'paradedb.boost',
@@ -122,7 +154,8 @@ export function fullTextSearch({
  * Use in .columns() to include the score in results, and in .orderBy() to rank
  * results by relevance. Requires a BM25 index with the given key field on the table.
  *
- * @param keyField - The primary key field of the BM25 index (default: 'id')
+ * @param keyField - The primary key field of the BM25 index (default: 'id'): a
+ *   column name, a `ColumnRef` or an expression (ADR 0011 reference leaf)
  * @returns ExpressionRef for use in .columns() and .orderBy()
  *
  * @example
@@ -134,6 +167,9 @@ export function fullTextSearch({
  * // SQL: SELECT *, paradedb.score("id") AS "score" ... ORDER BY paradedb.score("id") DESC
  * ```
  */
-export function textScore(keyField = 'id'): ExpressionRef {
-	return fn('paradedb.score', ref(keyField));
+export function textScore(keyField: ReferenceLeaf = 'id'): ExpressionRef {
+	return fn(
+		'paradedb.score',
+		new ExpressionRef(coerceReference(keyField, 'textScore')),
+	);
 }

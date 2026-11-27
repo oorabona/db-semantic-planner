@@ -15,6 +15,7 @@ import {
 	rangeContainedBy,
 	rangeContains,
 	rangeOverlaps,
+	schema,
 } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -290,6 +291,74 @@ describe('PostgreSQL Range Types', () => {
 				.execute();
 
 			expect(bookings).toHaveLength(0);
+		});
+	});
+
+	describe('range values compile to the column constructor (ADR 0011 delivery 6, #1047)', () => {
+		const D6 = 'range_d6_e2e';
+		const d6Db = schema({
+			spans: {
+				id: { type: 'integer', primaryKey: true },
+				span: { type: 'int4range' },
+				period: { type: 'daterange' },
+			},
+		});
+
+		beforeAll(async () => {
+			const adapter = await getTestAdapter();
+			await adapter.executeRaw(`DROP SCHEMA IF EXISTS ${D6} CASCADE`);
+			await adapter.executeRaw(`CREATE SCHEMA ${D6}`);
+			await adapter.executeRaw(
+				`CREATE TABLE ${D6}.spans (id integer PRIMARY KEY, span int4range, period daterange)`,
+			);
+			await adapter.executeRaw(
+				`INSERT INTO ${D6}.spans (id, span, period) VALUES (1, '[5,6)', '[2024-01-02,2024-01-03)'), (2, '[0,1)', '[2023-12-31,2024-01-01)'), (3, NULL, '[2024-01-01,2024-01-02)')`,
+			);
+		});
+
+		afterAll(async () => {
+			const adapter = await getTestAdapter();
+			await adapter.executeRaw(`DROP SCHEMA IF EXISTS ${D6} CASCADE`);
+		});
+
+		const ids = async (condition: unknown) => {
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ schema: d6Db, adapter });
+			const rows = await orm
+				.withSchema(D6)
+				.select('spans')
+				.columns(['id'])
+				.where(condition as never)
+				.orderBy('id')
+				.execute();
+			return rows.map((row) => row.id);
+		};
+
+		it('AC17 bounds honoured on PostgreSQL: closed and half-open ranges select different rows', async () => {
+			expect(
+				await ids(rangeOverlaps('span', { lower: 1, upper: 5, bounds: '[]' })),
+			).toEqual([1]);
+			expect(
+				await ids(rangeOverlaps('span', { lower: 0, upper: 4, bounds: '(]' })),
+			).toEqual([]);
+			expect(await ids(rangeOverlaps('span', { lower: 0, upper: 4 }))).toEqual([
+				2,
+			]);
+		});
+
+		it('AC17 Date bound matches the tuple form under a non-UTC time zone', async () => {
+			const previous = process.env.TZ;
+			process.env.TZ = 'Europe/Paris';
+			try {
+				const d = new Date('2024-01-01T23:30:00Z');
+				expect(
+					await ids(rangeOverlaps('period', { lower: d, upper: null })),
+				).toEqual([1]);
+				expect(await ids(rangeOverlaps('period', [d, null]))).toEqual([1]);
+			} finally {
+				if (previous === undefined) delete process.env.TZ;
+				else process.env.TZ = previous;
+			}
 		});
 	});
 });

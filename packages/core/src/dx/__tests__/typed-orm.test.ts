@@ -16,7 +16,14 @@ import type {
 	WhereExpressionIntent,
 } from '../../intent-ast.js';
 import { normalizeSQL } from '../../sql-utils.js';
-import { ref as expressionRef, fn, op } from '../expressions.js';
+import { caseWhen } from '../case-when-builder.js';
+import {
+	ref as expressionRef,
+	fn,
+	literal,
+	op,
+	param,
+} from '../expressions.js';
 import { distinct, eq, gt, rowNumber, sql, wSum } from '../filters.js';
 import { createOrm } from '../orm.js';
 import { ref, schema } from '../schema.js';
@@ -422,6 +429,43 @@ describe('DX-040-SURFACE: Type-level safety', () => {
 		eq(posts.id, outerRef('id'));
 		orm.from(posts).where({ title: posts.title });
 		orm.from(posts).where({ id: { $gt: fn('abs', expressionRef('id')) } });
+	});
+
+	it('mutation values accept expression leaves (ADR 0011 delivery 4)', () => {
+		const { users } = orm.tables;
+		const built = [
+			orm.update('users').set({ id: op('+', expressionRef('id'), 1) }),
+			orm.update('users').set({ id: users.id }),
+			orm.update('users').set({ id: subquery('posts').count() }),
+			orm.update('users').set({ id: param(5) }),
+			orm.insert('users').values({ id: op('+', literal(1), 1) }),
+			orm.insert('users').values({ createdAt: sql('now()') }),
+			orm.upsert('users').values({ id: param(2) }),
+			orm
+				.upsert('users')
+				.values({ id: 1 })
+				.onConflict(['id'])
+				.doUpdate({
+					id: caseWhen(eq('id', 1), literal(2)).else(literal(3)),
+				}),
+			orm
+				.update('users')
+				.batchSet('id', [{ id: 1, name: 'a' }])
+				.set({ active: op('=', expressionRef('id'), 1) }),
+		];
+		expect(built).toHaveLength(9);
+		// @ts-expect-error — an outerRef() has no enclosing query in a mutation value
+		orm.update('users').set({ id: outerRef('id') });
+		// @ts-expect-error — an outerRef() has no enclosing query in a mutation value
+		orm.insert('users').values({ id: outerRef('id') });
+		// @ts-expect-error — a ColumnRef reads a column, which a VALUES row cannot
+		orm.insert('users').values({ id: users.id });
+		// @ts-expect-error — a schema ref() reads a column, which a VALUES row cannot
+		orm.insert('users').values({ id: ref('posts.id') });
+		orm.update('users').batchSet('id', [
+			// @ts-expect-error — batch row cells are scalars of the column type
+			{ id: 1, name: op('+', expressionRef('id'), 1) },
+		]);
 	});
 
 	it('AC9 exact return types: a column left gives a comparison, an expression left an expression intent', () => {

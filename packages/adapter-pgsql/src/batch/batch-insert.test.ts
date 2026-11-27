@@ -19,7 +19,7 @@ const insertFixtureModel = schema({
 		chunk_index: 'integer',
 	},
 	flags: { id: 'integer', active: 'boolean' },
-	metrics: { id: 'integer', score: 'number' },
+	metrics: { id: 'integer', score: { type: 'number', dbType: 'float8' } },
 }).model;
 
 function createInsertTestAdapter() {
@@ -107,11 +107,10 @@ describe('SC-01: large batch (100 rows) uses unnest', () => {
 
 	it('keeps wrapper-shaped row values opaque in unnest column arrays', () => {
 		const adapter = createInsertTestAdapter();
-		const paramShaped = { kind: 'param', value: 7 };
 		const literalShaped = { kind: 'literal', value: 'x' };
 		const values = Array.from({ length: 100 }, (_, i) => ({
 			symbol_id: i + 1,
-			vector: i === 0 ? paramShaped : i === 1 ? literalShaped : `v${i}`,
+			vector: i === 1 ? literalShaped : `v${i}`,
 		}));
 
 		const result = adapter.compileInsert({
@@ -121,14 +120,29 @@ describe('SC-01: large batch (100 rows) uses unnest', () => {
 		} as any);
 
 		expect(result.parameters[1]).toEqual([
-			paramShaped,
+			'v0',
 			literalShaped,
 			...Array.from({ length: 98 }, (_, i) => `v${i + 2}`),
 		]);
-		expect(result.parameters[1]).not.toEqual([
+		// A ParamIntent-shaped cell is unwrapped by VALUES, so its batch takes VALUES
+		// on both strategies (ADR 0011 delivery 4).
+		const paramShaped = adapter.compileInsert({
+			type: 'insert',
+			table: 'embeddings',
+			values: values.map((row, i) =>
+				i === 0 ? { ...row, vector: { kind: 'param', value: 7 } } : row,
+			),
+		} as any);
+		expect(
+			paramShaped.sql.startsWith(
+				'INSERT INTO embeddings (symbol_id, vector) VALUES ($1, $2), ($3, $4)',
+			),
+		).toBe(true);
+		expect(paramShaped.parameters.slice(0, 4)).toEqual([
+			1,
 			7,
-			'x',
-			...Array.from({ length: 98 }, (_, i) => `v${i + 2}`),
+			2,
+			literalShaped,
 		]);
 	});
 });

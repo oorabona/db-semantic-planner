@@ -1793,6 +1793,82 @@ authors | select name, posts.title | flat`.dump(),
 			'with scalar as (select users.id from users) select scalar.id from scalar',
 		);
 	});
+
+	it('AC10 model-less-cte: CASE WHEN, FILTER and HAVING of a model-less CTE read keep their route (#891 slice 5c)', () => {
+		const adapter = createPgCompileOnlyAdapter();
+		const ctes = [
+			{
+				kind: 'simpleCte',
+				name: 'scalar',
+				query: {
+					type: 'select',
+					from: 'users',
+					select: { type: 'fields', fields: ['id'] },
+				},
+			},
+		] as const;
+		const compile = (query: object) => {
+			const result = adapter.compileCteQuery({
+				kind: 'cteQuery',
+				ctes,
+				query,
+			} as unknown as Parameters<typeof adapter.compileCteQuery>[0]);
+			return { sql: result.sql, params: result.parameters };
+		};
+		const head = 'WITH scalar AS (SELECT users.id FROM users)';
+		expect(
+			compile({
+				type: 'select',
+				from: 'scalar',
+				select: {
+					type: 'expressions',
+					columns: [
+						{
+							kind: 'case',
+							when: [
+								{
+									condition: gt('id', 0),
+									result: { kind: 'literal', value: 1 },
+								},
+							],
+							else: { kind: 'literal', value: 0 },
+							as: 'c',
+						},
+					],
+				},
+			}),
+		).toEqual({
+			sql: `${head} SELECT CASE WHEN scalar.id > $1 THEN 1 ELSE 0 END AS c FROM scalar`,
+			params: [0],
+		});
+		expect(
+			compile({
+				type: 'select',
+				from: 'scalar',
+				select: {
+					type: 'aggregate',
+					aggregates: [
+						{ function: 'count', field: '*', as: 'n', filter: gt('id', 0) },
+					],
+				},
+			}),
+		).toEqual({
+			sql: `${head} SELECT count(*) FILTER (WHERE scalar.id > $1) AS n FROM scalar`,
+			params: [0],
+		});
+		expect(
+			compile({
+				type: 'select',
+				from: 'scalar',
+				select: { type: 'fields', fields: ['id'] },
+				groupBy: ['id'],
+				having: gt('id', 0),
+			}),
+		).toEqual({
+			sql: `${head} SELECT scalar.id FROM scalar GROUP BY scalar.id HAVING scalar.id > $1`,
+			params: [0],
+		});
+	});
 });
 
 describe('Bug regressions', () => {

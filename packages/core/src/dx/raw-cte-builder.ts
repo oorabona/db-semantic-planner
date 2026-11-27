@@ -16,25 +16,64 @@
  * ```
  */
 
-import type {
-	Adapter,
-	CompiledQuery,
-	CteQueryIntent,
-	ModelIR,
-	OrderByIntent,
-	QueryIntent,
-	RawCteIntent,
-	SelectWithExpressionsIntent,
-	WhereIntent,
+import {
+	type Adapter,
+	type CompiledQuery,
+	type CteQueryIntent,
+	type ExpressionIntent,
+	type ModelIR,
+	NotYetSupportedError,
+	type OrderByIntent,
+	type QueryIntent,
+	type RawCteIntent,
+	type SelectWithExpressionsIntent,
+	type SortDirection,
+	type WhereIntent,
 } from '@dbsp/types';
 import { executeCompiledQuery } from '../adapter.js';
+import { isBoundPayload } from '../intent-payload.js';
 import {
 	andWhere,
 	requireAdapter as requireAdapterUtil,
 } from './builder-utils.js';
-import type { QueryBuilderImpl } from './query-builder.js';
+import type { OrderByLeaf } from './coerce.js';
+import { InvalidOperationError } from './errors.js';
+import {
+	columnEntry,
+	orderingOf,
+	type QueryBuilderImpl,
+} from './query-builder.js';
 import type { QueryBuilder } from './query-builder-types.js';
+import type { RefDefinition } from './schema.js';
+import { isSubqueryExpression } from './subquery-builder.js';
 import { NON_SUBQUERY_BUILDER_BRAND } from './symbols.js';
+import { type ColumnRef, isColumnRef } from './table-ref.js';
+import type { ColumnSpec } from './types.js';
+
+/**
+ * Whether an outer entry reads another query at any depth: a scalar subquery,
+ * an EXISTS or IN body, or any other node carrying a query body. Bound and
+ * literal payloads are data and are not entered (#1095).
+ */
+function holdsSubquery(node: unknown): boolean {
+	if (Array.isArray(node)) return node.some(holdsSubquery);
+	if (typeof node !== 'object' || node === null) return false;
+	if (isSubqueryExpression(node)) return true;
+	const candidate = node as {
+		readonly kind?: unknown;
+		readonly type?: unknown;
+		readonly from?: unknown;
+	};
+	if (candidate.kind === 'param' || candidate.kind === 'literal') return false;
+	if (candidate.type === 'select' && typeof candidate.from === 'string')
+		return true;
+	const record = node as Readonly<Record<string, unknown>>;
+	return Object.entries(record).some(
+		([key, child]) =>
+			isSubqueryExpression(child) ||
+			(!isBoundPayload(record, key, child) && holdsSubquery(child)),
+	);
+}
 
 /**
  * Options for `orm.recursive()`.
@@ -98,14 +137,43 @@ export class RawCteQueryBuilder<TResult = unknown> {
 	}
 
 	/**
-	 * Select specific columns from the CTE result.
+	 * Select columns from the CTE result (ADR 0011 reference leaves): a column
+	 * name, an expression named with `.as(alias)`, or a schema `ref()`. A
+	 * `ColumnRef`, `null` and a subquery (#1095) are refused.
 	 */
-	columns(cols: readonly string[]): this {
+	columns(
+		cols: readonly (
+			| ColumnSpec
+			| ColumnRef<string, string, unknown>
+			| RefDefinition
+		)[],
+	): this {
 		this.outerSelect = {
 			type: 'expressions',
-			columns: cols.map((column) => ({ kind: 'column', column })),
+			columns: cols.map((column) => this.outerColumn(column)),
 		};
 		return this;
+	}
+
+	/**
+	 * One outer `columns()` entry, under `QueryBuilder.columns`'s leaf rule
+	 * (ADR 0011). A `ColumnRef` names a model table, never the CTE, and a
+	 * subquery would read without the ORM's default filters (#1095).
+	 */
+	private outerColumn(column: unknown): ExpressionIntent {
+		this.refuseColumnRef(column, 'columns');
+		const intent = columnEntry(column, this.cteName);
+		if (holdsSubquery(intent))
+			throw new NotYetSupportedError('a subquery', 'raw CTE column', 1095);
+		return intent;
+	}
+
+	private refuseColumnRef(leaf: unknown, helper: string): void {
+		if (typeof leaf === 'object' && leaf !== null && isColumnRef(leaf))
+			throw new InvalidOperationError(
+				helper,
+				`a ColumnRef names a model table; the recursive query reads only '${this.cteName}', so use a column name or an expression`,
+			);
 	}
 
 	/**
@@ -117,10 +185,15 @@ export class RawCteQueryBuilder<TResult = unknown> {
 	}
 
 	/**
-	 * Order the outer query result.
+	 * Order the outer query result by a column name, an expression or an
+	 * output-column position. A `ColumnRef`, `null` and a subquery (#1095) are
+	 * refused.
 	 */
-	orderBy(column: string, direction: 'asc' | 'desc' = 'asc'): this {
-		const clause: OrderByIntent = { field: column, direction };
+	orderBy(column: OrderByLeaf, direction: SortDirection = 'asc'): this {
+		this.refuseColumnRef(column, 'orderBy');
+		const clause: OrderByIntent = orderingOf(column, direction, undefined);
+		if ('expression' in clause && holdsSubquery(clause.expression))
+			throw new NotYetSupportedError('a subquery', 'raw CTE ordering', 1095);
 		this.outerOrderBy = [...(this.outerOrderBy ?? []), clause];
 		return this;
 	}

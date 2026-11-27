@@ -635,41 +635,46 @@ describe('mutation enumerable own keys contract', () => {
 		expect(jsdoc).toContain('Rows must share enumerable own keys');
 		expect(jsdoc).toContain('Batch rows must share enumerable own keys');
 	});
-	for (const operation of ['insert', 'upsert', 'update'] as const) {
-		it(`gives operation-valid array refusal advice for ${operation}`, () => {
-			const rows = [
-				{ id: 1, tags: ['a'] },
-				{ id: 2, tags: ['b'] },
-			];
-			const arrayOrm = createOrm({ model: db.model, adapter });
-			const advice =
-				operation === 'update'
-					? 'Use single-row updates, or scalar set for a non-match assignment column only when every row should receive the same array.'
-					: 'Set batchThreshold to at least the batch size to use VALUES, or use single-row mutations for array columns.';
-			const message = `Batch mutation of array-typed column 'tags' (text[]) is not supported: unnest flattens multi-dimensional arrays. ${advice}`;
-			exactRefusal(
-				() =>
-					operation === 'insert'
-						? insert(rows, 0)
-						: operation === 'upsert'
-							? upsert(rows, 0)
-							: update(rows),
-				message,
+	it('gives operation-valid array refusal advice for update', () => {
+		const rows = [
+			{ id: 1, tags: ['a'] },
+			{ id: 2, tags: ['b'] },
+		];
+		const arrayOrm = createOrm({ model: db.model, adapter });
+		const message =
+			"Batch mutation of array-typed column 'tags' (text[]) is not supported: unnest flattens multi-dimensional arrays. Use single-row updates, or scalar set for a non-match assignment column only when every row should receive the same array.";
+		exactRefusal(() => update(rows), message);
+		exactRefusal(
+			() => arrayOrm.update('t').batchSet('id', rows).dump(),
+			message,
+		);
+	});
+	for (const operation of ['insert', 'upsert'] as const) {
+		it(`takes VALUES for array-typed columns for ${operation}`, () => {
+			const tail = operation === 'upsert' ? ' ON CONFLICT (id) DO NOTHING' : '';
+			const compile = operation === 'insert' ? insert : upsert;
+			const arrays = compile(
+				[
+					{ id: 1, tags: ['a'] },
+					{ id: 2, tags: ['b'] },
+				],
+				0,
 			);
-			exactRefusal(
-				() =>
-					operation === 'insert'
-						? arrayOrm.insert('t').values(rows).dump({ batchThreshold: 0 })
-						: operation === 'upsert'
-							? arrayOrm
-									.upsert('t')
-									.values(rows)
-									.onConflict(['id'])
-									.doNothing()
-									.dump({ batchThreshold: 0 })
-							: arrayOrm.update('t').batchSet('id', rows).dump(),
-				message,
+			expect({ sql: arrays.sql, params: arrays.parameters }).toEqual({
+				sql: `INSERT INTO t (id, tags) VALUES ($1, $2), ($3, $4)${tail}`,
+				params: [1, ['a'], 2, ['b']],
+			});
+			const nulls = compile(
+				[
+					{ id: 1, tags: null },
+					{ id: 2, tags: null },
+				],
+				0,
 			);
+			expect({ sql: nulls.sql, params: nulls.parameters }).toEqual({
+				sql: `INSERT INTO t (id, tags) VALUES ($1, NULL), ($2, NULL)${tail}`,
+				params: [1, 2],
+			});
 		});
 	}
 });

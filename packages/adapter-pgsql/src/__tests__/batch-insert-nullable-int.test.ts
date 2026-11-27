@@ -403,7 +403,7 @@ describe('BATCH-INSERT-NULLABLE-INT: schema-driven int4[] for nullable integer c
 		expect(result.columnMetadata?.size).toBe(0);
 	});
 
-	it('fails loud on batch insert into an array-typed column (unnest cannot express it)', () => {
+	it('uses VALUES for an array-typed column above the threshold', () => {
 		const table = {
 			name: 'events',
 			columns: [
@@ -418,7 +418,7 @@ describe('BATCH-INSERT-NULLABLE-INT: schema-driven int4[] for nullable integer c
 					type: 'string',
 					nullable: false,
 					// unnest flattens a multi-dimensional array, so an array column
-					// cannot be batch-inserted via the unnest path.
+					// takes VALUES above the threshold.
 					originalDbType: 'integer[]',
 				},
 			],
@@ -433,21 +433,37 @@ describe('BATCH-INSERT-NULLABLE-INT: schema-driven int4[] for nullable integer c
 			model: buildSingleTableModel(table),
 		});
 
-		expect(() =>
-			adapter.compileInsert(
-				{
-					type: 'insert',
-					table: 'events',
-					values: [
-						{ id: 1, tags: [10, 20] },
-						{ id: 2, tags: [30, 40] },
-					],
-				},
-				UNNEST_OPTIONS,
-			),
-		).toThrow(
-			"Batch mutation of array-typed column 'tags' (integer[]) is not supported: unnest flattens multi-dimensional arrays. Set batchThreshold to at least the batch size to use VALUES, or use single-row mutations for array columns.",
+		const arrays = adapter.compileInsert(
+			{
+				type: 'insert',
+				table: 'events',
+				values: [
+					{ id: 1, tags: [10, 20] },
+					{ id: 2, tags: [30, 40] },
+				],
+			},
+			UNNEST_OPTIONS,
 		);
+		expect({ sql: arrays.sql, params: arrays.parameters }).toEqual({
+			sql: 'INSERT INTO events (id, tags) VALUES ($1, $2), ($3, $4)',
+			params: [1, [10, 20], 2, [30, 40]],
+		});
+		// The declared type decides, not only the cells: all-null cells too.
+		const nulls = adapter.compileInsert(
+			{
+				type: 'insert',
+				table: 'events',
+				values: [
+					{ id: 1, tags: null },
+					{ id: 2, tags: null },
+				],
+			},
+			UNNEST_OPTIONS,
+		);
+		expect({ sql: nulls.sql, params: nulls.parameters }).toEqual({
+			sql: 'INSERT INTO events (id, tags) VALUES ($1, NULL), ($2, NULL)',
+			params: [1, 2],
+		});
 	});
 
 	it('uses VALUES for an array-typed column when batchThreshold reaches the batch size', () => {

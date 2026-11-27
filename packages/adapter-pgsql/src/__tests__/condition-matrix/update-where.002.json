@@ -20,80 +20,80 @@
 			"position": "update-where",
 			"kind": "range-overlaps",
 			"shape": "leaf",
-			"sql": "UPDATE users SET score = $1 WHERE users.period && CAST($2 AS daterange)",
-			"params": [41, "[2026-01-01,2026-02-01)"],
+			"sql": "UPDATE users SET score = $1 WHERE users.period && daterange($2, $3, '[)')",
+			"params": [41, "2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "update-where",
 			"kind": "range-overlaps",
 			"shape": "and",
-			"sql": "UPDATE users SET score = $1 WHERE users.period && CAST($2 AS daterange) AND users.score = $3",
-			"params": [41, "[2026-01-01,2026-02-01)", 13],
+			"sql": "UPDATE users SET score = $1 WHERE users.period && daterange($2, $3, '[)') AND users.score = $4",
+			"params": [41, "2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "update-where",
 			"kind": "range-overlaps",
 			"shape": "or",
-			"sql": "UPDATE users SET score = $1 WHERE users.period && CAST($2 AS daterange) OR users.score = $3",
-			"params": [41, "[2026-01-01,2026-02-01)", 13],
+			"sql": "UPDATE users SET score = $1 WHERE users.period && daterange($2, $3, '[)') OR users.score = $4",
+			"params": [41, "2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "update-where",
 			"kind": "range-overlaps",
 			"shape": "not",
-			"sql": "UPDATE users SET score = $1 WHERE NOT (users.period && CAST($2 AS daterange))",
-			"params": [41, "[2026-01-01,2026-02-01)"],
+			"sql": "UPDATE users SET score = $1 WHERE NOT (users.period && daterange($2, $3, '[)'))",
+			"params": [41, "2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "update-where",
 			"kind": "range-overlaps",
 			"shape": "two-level",
-			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (users.period && CAST($3 AS daterange)) OR users.score = $4)",
-			"params": [41, 13, "[2026-01-01,2026-02-01)", 17],
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (users.period && daterange($3, $4, '[)')) OR users.score = $5)",
+			"params": [41, 13, "2026-01-01", "2026-02-01", 17],
 			"error": null
 		},
 		{
 			"position": "update-where",
 			"kind": "range-contains",
 			"shape": "leaf",
-			"sql": "UPDATE users SET score = $1 WHERE users.period @> CAST($2 AS daterange)",
-			"params": [41, "[2026-01-01,2026-02-01)"],
+			"sql": "UPDATE users SET score = $1 WHERE users.period @> daterange($2, $3, '[)')",
+			"params": [41, "2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "update-where",
 			"kind": "range-contains",
 			"shape": "and",
-			"sql": "UPDATE users SET score = $1 WHERE users.period @> CAST($2 AS daterange) AND users.score = $3",
-			"params": [41, "[2026-01-01,2026-02-01)", 13],
+			"sql": "UPDATE users SET score = $1 WHERE users.period @> daterange($2, $3, '[)') AND users.score = $4",
+			"params": [41, "2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "update-where",
 			"kind": "range-contains",
 			"shape": "or",
-			"sql": "UPDATE users SET score = $1 WHERE users.period @> CAST($2 AS daterange) OR users.score = $3",
-			"params": [41, "[2026-01-01,2026-02-01)", 13],
+			"sql": "UPDATE users SET score = $1 WHERE users.period @> daterange($2, $3, '[)') OR users.score = $4",
+			"params": [41, "2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "update-where",
 			"kind": "range-contains",
 			"shape": "not",
-			"sql": "UPDATE users SET score = $1 WHERE NOT (users.period @> CAST($2 AS daterange))",
-			"params": [41, "[2026-01-01,2026-02-01)"],
+			"sql": "UPDATE users SET score = $1 WHERE NOT (users.period @> daterange($2, $3, '[)'))",
+			"params": [41, "2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "update-where",
 			"kind": "range-contains",
 			"shape": "two-level",
-			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (users.period @> CAST($3 AS daterange)) OR users.score = $4)",
-			"params": [41, 13, "[2026-01-01,2026-02-01)", 17],
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (users.period @> daterange($3, $4, '[)')) OR users.score = $5)",
+			"params": [41, 13, "2026-01-01", "2026-02-01", 17],
 			"error": null
 		},
 		{
@@ -140,40 +140,40 @@
 			"position": "update-where",
 			"kind": "range-containedBy",
 			"shape": "leaf",
-			"sql": "UPDATE users SET score = $1 WHERE users.period <@ CAST($2 AS daterange)",
-			"params": [41, "[2026-01-01,2026-02-01)"],
+			"sql": "UPDATE users SET score = $1 WHERE users.period <@ daterange($2, $3, '[)')",
+			"params": [41, "2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "update-where",
 			"kind": "range-containedBy",
 			"shape": "and",
-			"sql": "UPDATE users SET score = $1 WHERE users.period <@ CAST($2 AS daterange) AND users.score = $3",
-			"params": [41, "[2026-01-01,2026-02-01)", 13],
+			"sql": "UPDATE users SET score = $1 WHERE users.period <@ daterange($2, $3, '[)') AND users.score = $4",
+			"params": [41, "2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "update-where",
 			"kind": "range-containedBy",
 			"shape": "or",
-			"sql": "UPDATE users SET score = $1 WHERE users.period <@ CAST($2 AS daterange) OR users.score = $3",
-			"params": [41, "[2026-01-01,2026-02-01)", 13],
+			"sql": "UPDATE users SET score = $1 WHERE users.period <@ daterange($2, $3, '[)') OR users.score = $4",
+			"params": [41, "2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "update-where",
 			"kind": "range-containedBy",
 			"shape": "not",
-			"sql": "UPDATE users SET score = $1 WHERE NOT (users.period <@ CAST($2 AS daterange))",
-			"params": [41, "[2026-01-01,2026-02-01)"],
+			"sql": "UPDATE users SET score = $1 WHERE NOT (users.period <@ daterange($2, $3, '[)'))",
+			"params": [41, "2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "update-where",
 			"kind": "range-containedBy",
 			"shape": "two-level",
-			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (users.period <@ CAST($3 AS daterange)) OR users.score = $4)",
-			"params": [41, 13, "[2026-01-01,2026-02-01)", 17],
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (users.period <@ daterange($3, $4, '[)')) OR users.score = $5)",
+			"params": [41, 13, "2026-01-01", "2026-02-01", 17],
 			"error": null
 		},
 		{
@@ -518,40 +518,40 @@
 			"position": "update-where",
 			"kind": "rawExists-range",
 			"shape": "leaf",
-			"sql": "UPDATE users SET score = $1 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($2 AS daterange))",
-			"params": [41, "[2026-01-01,2026-02-01)"],
+			"sql": "UPDATE users SET score = $1 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && daterange($2, $3, '[)'))",
+			"params": [41, "2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "update-where",
 			"kind": "rawExists-range",
 			"shape": "and",
-			"sql": "UPDATE users SET score = $1 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($2 AS daterange)) AND users.score = $3",
-			"params": [41, "[2026-01-01,2026-02-01)", 13],
+			"sql": "UPDATE users SET score = $1 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && daterange($2, $3, '[)')) AND users.score = $4",
+			"params": [41, "2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "update-where",
 			"kind": "rawExists-range",
 			"shape": "or",
-			"sql": "UPDATE users SET score = $1 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($2 AS daterange)) OR users.score = $3",
-			"params": [41, "[2026-01-01,2026-02-01)", 13],
+			"sql": "UPDATE users SET score = $1 WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && daterange($2, $3, '[)')) OR users.score = $4",
+			"params": [41, "2026-01-01", "2026-02-01", 13],
 			"error": null
 		},
 		{
 			"position": "update-where",
 			"kind": "rawExists-range",
 			"shape": "not",
-			"sql": "UPDATE users SET score = $1 WHERE NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($2 AS daterange)))",
-			"params": [41, "[2026-01-01,2026-02-01)"],
+			"sql": "UPDATE users SET score = $1 WHERE NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && daterange($2, $3, '[)')))",
+			"params": [41, "2026-01-01", "2026-02-01"],
 			"error": null
 		},
 		{
 			"position": "update-where",
 			"kind": "rawExists-range",
 			"shape": "two-level",
-			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && CAST($3 AS daterange))) OR users.score = $4)",
-			"params": [41, 13, "[2026-01-01,2026-02-01)", 17],
+			"sql": "UPDATE users SET score = $1 WHERE users.score = $2 AND (NOT (EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.period && daterange($3, $4, '[)'))) OR users.score = $5)",
+			"params": [41, 13, "2026-01-01", "2026-02-01", 17],
 			"error": null
 		},
 		{

@@ -903,7 +903,7 @@ describe('expression-constructor leaf refusals (ADR 0011)', () => {
 	it('R4 sql-marker: a sql() marker in fn() is refused by name', () => {
 		expectInvalid(
 			() => fn('f', sql('now()') as never),
-			'Invalid fn: sql() is only accepted as an update or upsert value; use literal(), param() or an expression here',
+			'Invalid fn: sql() is only accepted in set(), values(), doUpdate() and batchSet().set(); use literal(), param() or an expression here',
 		);
 	});
 
@@ -945,7 +945,7 @@ describe('expression-constructor leaf refusals (ADR 0011)', () => {
 	it('R6 boolFn: a sql() marker in boolFn() is refused', () => {
 		expectInvalid(
 			() => boolFn('f', sql('now()') as never),
-			'Invalid boolFn: sql() is only accepted as an update or upsert value; use literal(), param() or an expression here',
+			'Invalid boolFn: sql() is only accepted in set(), values(), doUpdate() and batchSet().set(); use literal(), param() or an expression here',
 		);
 	});
 
@@ -1022,7 +1022,7 @@ describe('expression-constructor leaf refusals (ADR 0011)', () => {
 		);
 		expectInvalid(
 			() => ref('score').gt(sql('now()')),
-			'Invalid ExpressionRef.gt: sql() is only accepted as an update or upsert value; use literal(), param() or an expression here',
+			'Invalid ExpressionRef.gt: sql() is only accepted in set(), values(), doUpdate() and batchSet().set(); use literal(), param() or an expression here',
 		);
 		expectNotYet(
 			() => ref('score').lt(posts.author.name),

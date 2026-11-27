@@ -115,8 +115,7 @@ for (const [index, wrap] of shapes.entries()) {
 			}),
 			expect.any(Object),
 		);
-		expect(result.sql).toContain('CAST(');
-		expect(result.sql).toContain('AS daterange)');
+		expect(result.sql).toMatch(/daterange\(\$\d+, \$\d+, '\[\)'\)/);
 	});
 }
 it('declared relation keys precede custom authorities and nested relations share aliases and parameters', () => {
@@ -327,7 +326,7 @@ it('dotted fields retain legacy lowering and scalar and ANY bodies keep canonica
 		},
 	};
 	expect(orm.select('users').where(scalar).dump().sql).toContain(
-		'CAST($1 AS daterange)',
+		"daterange($1, $2, '[)')",
 	);
 	const any = orm
 		.select('users')
@@ -339,7 +338,7 @@ it('dotted fields retain legacy lowering and scalar and ANY bodies keep canonica
 		)
 		.dump();
 	expect(any.sql).toContain('= ANY (SELECT');
-	expect(any.sql).toContain('CAST($1 AS daterange)');
+	expect(any.sql).toContain("daterange($1, $2, '[)')");
 });
 it('root context sees manual JOIN aliases allocated before predicate compilation', () => {
 	const spy = vi.spyOn(resolvedConditions, 'compileResolvedCondition');
@@ -1389,17 +1388,24 @@ describe('HAVING, CASE WHEN and aggregate FILTER resolve through the root resolv
 			value: 1,
 		} as unknown as WhereIntent;
 		const grouped = () => plain.select('posts').join('author').groupBy(['id']);
-		const refusal =
-			"compileExpressionIntent: unsupported expression kind 'aggregate'";
-		expect(() => grouped().having(aggregate).dump()).toThrow(refusal);
-		expect(() =>
-			grouped()
-				.columns([
-					'id',
-					caseWhen(aggregate, literal(1)).else(literal(0)).as('f'),
-				])
-				.dump(),
-		).toThrow(refusal);
+		// Resolved by core, as in WHERE: the dotted field is the joined range's column.
+		expect(sql(grouped().having(aggregate).dump())).toEqual({
+			sql: 'SELECT posts.* FROM posts JOIN users AS author ON posts."authorId" = author.id GROUP BY posts.id HAVING max(author.score) > $1',
+			params: [1],
+		});
+		expect(
+			sql(
+				grouped()
+					.columns([
+						'id',
+						caseWhen(aggregate, literal(1)).else(literal(0)).as('f'),
+					])
+					.dump(),
+			),
+		).toEqual({
+			sql: 'SELECT posts.id, CASE WHEN max(author.score) > $1 THEN 1 ELSE 0 END AS f FROM posts JOIN users AS author ON posts."authorId" = author.id GROUP BY posts.id',
+			params: [1],
+		});
 		expect(
 			sql(grouped().having(fn('max', 'author.score').gt(1)).dump()),
 		).toEqual({

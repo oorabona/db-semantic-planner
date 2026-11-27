@@ -27,18 +27,20 @@ import type {
 import type { ModelIR } from '../model-ir.js';
 import { inspectMutationRows } from '../mutation-rows.js';
 import { andWhere } from './builder-utils.js';
+import { coerceValue } from './coerce.js';
 import {
 	ExecutionError,
 	InvalidOperationError,
 	UnsafeOperationError,
 } from './errors.js';
 import {
+	type ExpressionRef,
 	hasPredicateRefDiscriminator,
 	isPredicateRef,
 	type PredicateRef,
 	predicateWhereIntent,
 } from './expressions.js';
-import type { SqlRawExpression } from './filters.js';
+import { isSqlRaw, type SqlRawExpression } from './filters.js';
 import type {
 	HookErrorHandler,
 	HookStore,
@@ -55,11 +57,37 @@ import {
 	runOnErrorHooks,
 	withReentrancyGuard,
 } from './hooks.js';
+import type { RefDefinition } from './schema.js';
+import type { SubqueryExpression } from './subquery-builder.js';
+import type { ColumnRef } from './table-ref.js';
+import type { ExpressionSpec } from './types.js';
 import { NON_SUBQUERY_BUILDER_BRAND } from './symbols.js';
 
 // ============================================================================
 // Types
 // ============================================================================
+
+/**
+ * An expression object accepted as an INSERT or UPSERT `values()` cell (ADR
+ * 0011 value position): compiled as SQL, never bound. A `ColumnRef` and a
+ * schema `ref()` always read a column, which a VALUES row cannot, so they are
+ * not part of it.
+ */
+type InsertValueExpression =
+	| ExpressionRef
+	| ExpressionSpec
+	| SubqueryExpression
+	| SqlRawExpression;
+
+/**
+ * An expression object accepted as a `set()`, `doUpdate()` or
+ * `batchSet().set()` value (ADR 0011 value position): compiled as SQL against
+ * the target row, never bound.
+ */
+type MutationValueExpression =
+	| InsertValueExpression
+	| ColumnRef<string, string, unknown>
+	| RefDefinition;
 
 /**
  * A row shape accepted by INSERT and UPSERT values().
@@ -68,15 +96,20 @@ import { NON_SUBQUERY_BUILDER_BRAND } from './symbols.js';
  * serial metadata needed to make only generated columns optional. Until that
  * schema metadata is threaded through the mutation builders (#449), every row
  * column is optional here. Keys and value types remain constrained to the row
- * type; the database enforces required columns.
+ * type; the database enforces required columns. A cell may also be an
+ * expression or a `sql()` marker, compiled as SQL.
  */
 export type Insertable<T> = T extends object
-	? Partial<T>
+	? { [K in keyof T]?: T[K] | InsertValueExpression }
 	: Record<string, unknown>;
 
-/** A partial row shape accepted by UPDATE and UPSERT update operations. */
+/**
+ * A partial row shape accepted by UPDATE and UPSERT update operations. A value
+ * may also be an expression, a `ColumnRef`, a schema `ref()` or a `sql()`
+ * marker, compiled as SQL against the target row.
+ */
 export type Updateable<T> = T extends object
-	? { [K in keyof T]?: T[K] | SqlRawExpression }
+	? { [K in keyof T]?: T[K] | MutationValueExpression }
 	: Record<string, unknown>;
 
 /** A scalar-only partial row shape accepted by batchSet(). */
@@ -108,6 +141,30 @@ type MutationReturningRow<T, K extends MutationKey<T>> = T extends object
 	: Record<string, unknown>;
 
 type MutationWhereCondition = WhereIntent | PredicateRef;
+
+/**
+ * Coerce the values of one mutation payload as value leaves (ADR 0011): a
+ * `ColumnRef` or `SubqueryExpression` becomes an `ExpressionRef`, a query
+ * builder or an unfinished `caseWhen()` is refused, a `sql()` marker is kept,
+ * and plain values are returned unchanged. The payload is returned as is when
+ * nothing changes.
+ */
+function coerceMutationValues<T extends object>(
+	data: T,
+	helper: 'insert' | 'update' | 'upsert',
+	keys: Iterable<string> = Object.keys(data),
+): T {
+	const row = data as Record<string, unknown>;
+	const entries: [string, unknown][] = [];
+	let changed = false;
+	for (const key of keys) {
+		const value = row[key];
+		const leaf = isSqlRaw(value) ? value : coerceValue(value, helper);
+		if (leaf !== value) changed = true;
+		entries.push([key, leaf]);
+	}
+	return (changed ? Object.fromEntries(entries) : data) as T;
+}
 
 function toWhereIntent(condition: MutationWhereCondition): WhereIntent {
 	if (isPredicateRef(condition)) return predicateWhereIntent(condition);
@@ -720,11 +777,16 @@ export class InsertBuilder<
 		data: Insertable<TRow> | readonly Insertable<TRow>[],
 	): InsertBuilder<TRow, TResult> {
 		const valueArray = Array.isArray(data) ? data : [data];
-		const { columns } = assertNonEmptyMutationRows('insert', valueArray);
+		const { columns, rowKeys } = assertNonEmptyMutationRows(
+			'insert',
+			valueArray,
+		);
 		assertMutationPayloadColumns('insert', this.model, this.table, columns);
 		return new InsertBuilder<TRow, TResult>({
 			...this.baseOpts,
-			values: valueArray as readonly Record<string, unknown>[],
+			values: (valueArray as readonly Record<string, unknown>[]).map(
+				(row, index) => coerceMutationValues(row, 'insert', rowKeys[index]),
+			),
 			returning: this.returningColumns,
 		});
 	}
@@ -837,7 +899,7 @@ export class UpdateBuilder<
 		);
 		return new UpdateBuilder<TRow, TResult>({
 			...this.baseOpts,
-			set: { ...this.setData, ...data },
+			set: coerceMutationValues({ ...this.setData, ...data }, 'update'),
 			where: this.whereIntent,
 			allowAll: this.allowAllFlag,
 			returning: this.returningColumns,
@@ -869,7 +931,7 @@ export class UpdateBuilder<
 	 * ```typescript
 	 * const updated = await orm.update(User)
 	 *   .set({ status: 'active' })
-	 *   .where({ type: 'comparison', field: 'id', operator: '=', value: 1 })
+	 *   .where(eq('id', 1))
 	 *   .returning(['id', 'status', 'updated_at'])
 	 *   .execute();
 	 * ```
@@ -1078,7 +1140,7 @@ export class DeleteBuilder<
 	 * @example
 	 * ```typescript
 	 * const deleted = await orm.delete(User)
-	 *   .where({ type: 'comparison', field: 'id', operator: '=', value: 1 })
+	 *   .where(eq('id', 1))
 	 *   .returning(['id', 'email'])
 	 *   .execute();
 	 * ```
@@ -1205,11 +1267,16 @@ export class UpsertBuilder<
 		data: Insertable<TRow> | readonly Insertable<TRow>[],
 	): UpsertBuilder<TRow, TResult> {
 		const valueArray = Array.isArray(data) ? data : [data];
-		const { columns } = assertNonEmptyMutationRows('upsert', valueArray);
+		const { columns, rowKeys } = assertNonEmptyMutationRows(
+			'upsert',
+			valueArray,
+		);
 		assertMutationPayloadColumns('upsert', this.model, this.table, columns);
 		return new UpsertBuilder<TRow, TResult>({
 			...this.baseOpts,
-			values: valueArray as readonly Record<string, unknown>[],
+			values: (valueArray as readonly Record<string, unknown>[]).map(
+				(row, index) => coerceMutationValues(row, 'upsert', rowKeys[index]),
+			),
 			onConflict: this.conflictTarget,
 			action: this.conflictAction,
 			returning: this.returningColumns,
@@ -1270,7 +1337,9 @@ export class UpsertBuilder<
 		}
 		const action: UpsertConflictAction = {
 			type: 'doUpdate',
-			...(set !== undefined && { set: set as Record<string, unknown> }),
+			...(set !== undefined && {
+				set: coerceMutationValues(set as Record<string, unknown>, 'upsert'),
+			}),
 			...(where && { where: toWhereIntent(where) }),
 		};
 		return new UpsertBuilder<TRow, TResult>({

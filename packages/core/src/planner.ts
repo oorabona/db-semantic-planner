@@ -8,6 +8,7 @@ import {
 import {
 	resolveConditionContext,
 	resolveScanDefaultFilter,
+	type UnreadableRange,
 } from './resolved-conditions.js';
 import {
 	observeIncludeDecisions,
@@ -296,6 +297,8 @@ export interface PlanScope {
 		/** The names written for ranges of each enclosing scope (an include key), aligned with `enclosing`. */
 		readonly qualifiers: readonly ReadonlyMap<string, ResolvedRange>[];
 		readonly entryDepth: number;
+		/** An enclosing range whose row cannot be read (an INSERT values() target). */
+		readonly unreadableRange?: UnreadableRange;
 	};
 }
 
