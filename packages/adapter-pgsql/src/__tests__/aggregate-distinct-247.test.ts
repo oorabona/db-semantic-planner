@@ -170,6 +170,24 @@ describe('#247 aggregate DISTINCT', () => {
 		expect(dump.params.length).toBe(0);
 	});
 
+	it('Form B: a lone fn(count, star()) column emits count(*) with no param binding', () => {
+		const dump = buildOrm()
+			.select('tool_metrics')
+			.columns([fn('count', star())])
+			.dump();
+		expect(dump.sql).toBe('SELECT count(*) FROM tool_metrics');
+		expect(dump.params).toEqual([]);
+	});
+
+	it('Form B: a lone aliased fn(count, star()) column emits count(*) AS alias', () => {
+		const dump = buildOrm()
+			.select('tool_metrics')
+			.columns([fn('count', star()).as('total')])
+			.dump();
+		expect(dump.sql).toBe('SELECT count(*) AS total FROM tool_metrics');
+		expect(dump.params).toEqual([]);
+	});
+
 	it('Form B: fn(count, distinct(field)) works in .orderBy() (not just .columns())', () => {
 		const orm = buildOrm();
 		const dump = orm

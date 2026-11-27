@@ -83,6 +83,38 @@ describe('PlanCompiler', () => {
 		});
 	});
 
+	describe('INSERT queries', () => {
+		it('compiles INSERT with RETURNING', () => {
+			const dump = orm
+				.insert('users')
+				.values({ name: 'John' })
+				.returning(['id', 'created_at'])
+				.dump();
+
+			expect(compiled(dump)).toEqual({
+				sql: 'INSERT INTO users (name) VALUES ($1) RETURNING users.id AS id, users.created_at AS created_at',
+				params: ['John'],
+			});
+		});
+	});
+
+	describe('UPDATE queries', () => {
+		it('compiles UPDATE with RETURNING *', () => {
+			// `*` is not a typed column key; the ORM builder forwards it verbatim.
+			const dump = orm
+				.update('users')
+				.set({ name: 'x' })
+				.where(eq('id', 1))
+				.returning(['*'] as never)
+				.dump();
+
+			expect(compiled(dump)).toEqual({
+				sql: 'UPDATE users SET name = $1 WHERE users.id = $2 RETURNING *',
+				params: ['x', 1],
+			});
+		});
+	});
+
 	describe('DELETE queries', () => {
 		it('compiles DELETE with RETURNING', () => {
 			const dump = orm

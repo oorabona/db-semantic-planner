@@ -227,13 +227,14 @@ describe('aggOrderBy() — qualified names through the ORM', () => {
 		schema: db,
 		adapter: createPgCompileOnlyAdapter({ model: db.model }),
 	});
-	const joined = (...orderBy: AggOrderByArg[]) =>
+	const joinedDump = (...orderBy: AggOrderByArg[]) =>
 		orm
 			.select('symbols')
 			.join('file')
 			.groupBy(['body_hash'])
 			.columns([arrayAgg(ref('symbols.name'), ...orderBy).as('names')])
-			.dump().sql;
+			.dump();
+	const joined = (...orderBy: AggOrderByArg[]) => joinedDump(...orderBy).sql;
 
 	it('a relation join alias qualifies the field', () => {
 		expect(joined(aggOrderBy('file.path'), aggOrderBy('start_line'))).toBe(
@@ -242,13 +243,15 @@ describe('aggOrderBy() — qualified names through the ORM', () => {
 	});
 
 	it('the root table qualifies the field', () => {
-		expect(joined(aggOrderBy('symbols.start_line', 'desc'))).toBe(
+		const dump = joinedDump(aggOrderBy('symbols.start_line', 'desc'));
+		expect(dump.sql).toBe(
 			'SELECT array_agg(symbols.name ORDER BY symbols.start_line DESC) AS names FROM symbols JOIN files AS file ON symbols.file_id = file.id GROUP BY symbols.body_hash',
 		);
+		expect(dump.params).toEqual([]);
 	});
 
 	it('an explicit join alias qualifies the field', () => {
-		const { sql } = orm
+		const { sql, params } = orm
 			.select('symbols')
 			.join('file', { as: 'f' })
 			.groupBy(['body_hash'])
@@ -259,6 +262,7 @@ describe('aggOrderBy() — qualified names through the ORM', () => {
 		expect(sql).toBe(
 			'SELECT array_agg(symbols.name ORDER BY f.path ASC) AS names FROM symbols JOIN files AS f ON symbols.file_id = f.id GROUP BY symbols.body_hash',
 		);
+		expect(params).toEqual([]);
 	});
 
 	it('a second-hop alias qualifies the field', () => {

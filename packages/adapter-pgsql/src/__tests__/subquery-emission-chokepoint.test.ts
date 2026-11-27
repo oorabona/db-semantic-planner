@@ -831,6 +831,75 @@ describe('DEFECT 3 regression: decision-level guard (assertNoDroppedDecisionModi
 		);
 	});
 
+	it('directly-constructed inSubquery decision with GROUP BY (no subqueryIntent) → throws', () => {
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'customer_id',
+					operator: 'inSubquery',
+					targetTable: 'customers',
+					selectColumn: 'id',
+					// No subqueryIntent — directly constructed
+					// @ts-expect-error: injecting forbidden modifier for guard test
+					groupBy: ['region'],
+				},
+			],
+		};
+		expect(() => compilePlan(plan)).toThrow(
+			/IN subquery with GROUP BY is not supported/,
+		);
+	});
+
+	it('directly-constructed inSubquery decision with HAVING (no subqueryIntent) → throws', () => {
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'customer_id',
+					operator: 'inSubquery',
+					targetTable: 'customers',
+					selectColumn: 'id',
+					// @ts-expect-error
+					having: {
+						kind: 'comparison',
+						field: 'count',
+						operator: 'gt',
+						value: 0,
+					},
+				},
+			],
+		};
+		expect(() => compilePlan(plan)).toThrow(
+			/IN subquery with HAVING is not supported/,
+		);
+	});
+
+	it('directly-constructed scalarSubquery decision with DISTINCT (no subqueryIntent) → throws', () => {
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'total',
+					operator: 'scalarSubquery',
+					subqueryOperator: '>',
+					targetTable: 'products',
+					selectColumn: 'price',
+					distinct: true,
+				},
+			],
+		};
+		expect(() => compilePlan(plan)).toThrow(
+			/scalar subquery with DISTINCT is not supported/,
+		);
+	});
+
 	it('directly-constructed scalarSubquery decision with aggregateDistinct but no aggregate (no subqueryIntent) → throws', () => {
 		// aggregateDistinct is only meaningful on an aggregate. Carried on a plain
 		// scalar projection with no aggregate, it would silently drop DISTINCT at

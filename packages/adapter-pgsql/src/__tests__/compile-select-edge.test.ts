@@ -216,6 +216,14 @@ describe('compileSelect — offset edge cases', () => {
 		});
 	});
 
+	it('should emit both LIMIT 5 and OFFSET 10 when both are literal numbers', () => {
+		const { sql, params } = orm.select('users').limit(5).offset(10).dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT users.* FROM users LIMIT 5 OFFSET 10',
+			params: [],
+		});
+	});
+
 	it('should NOT emit OFFSET when limit is invalid-type but offset is a valid number', () => {
 		const plan: SimplifiedPlanReport = {
 			rootTable: 'users',
@@ -244,6 +252,26 @@ describe('compileSelect — offset edge cases', () => {
 // ---------------------------------------------------------------------------
 
 describe('compileSelect — distinctOn edge cases', () => {
+	it('should emit no DISTINCT ON when columns is an empty array', () => {
+		const { sql, params } = orm.select('users').distinctOn().dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT users.* FROM users',
+			params: [],
+		});
+	});
+
+	it('should emit plain DISTINCT (no ON) for a distinct select', () => {
+		const { sql, params } = orm
+			.select('users')
+			.distinct()
+			.columns(['id'])
+			.dump();
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT DISTINCT users.id FROM users',
+			params: [],
+		});
+	});
+
 	it('should emit no DISTINCT ON when columns is undefined and not throw', () => {
 		const plan: SimplifiedPlanReport = {
 			rootTable: 'users',

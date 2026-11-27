@@ -345,6 +345,20 @@ const cases = [
 		},
 	},
 	{
+		behavior:
+			'refuses filtered ascendant and descendant binding projections in one select',
+		query:
+			'nodes | select id, parentId | bind n\nn | select id, ascendant.name, descendant.name',
+		filtered: {
+			error:
+				"Default filter for table 'nodes' is not supported at NQL.query.select.columns[1].relation.",
+		},
+		unfiltered: {
+			sql: 'WITH n AS (SELECT nodes.id, nodes."parentId" FROM nodes) SELECT n.id, (WITH RECURSIVE __rc_0 AS (SELECT __n.*, 1 AS __depth, ARRAY[__n.id] AS __visited FROM nodes AS __n WHERE __n.id = n."parentId" UNION ALL SELECT __n.*, __rc_0.__depth + 1 AS __depth, __rc_0.__visited || __n.id AS __visited FROM __rc_0 JOIN nodes AS __n ON __n.id = __rc_0."parentId" WHERE __rc_0.__depth < 10 AND __n.id <> ALL (__rc_0.__visited)) SELECT COALESCE(json_agg(__rc_0.name ORDER BY __rc_0.__depth), \'[]\'::json) FROM __rc_0) AS "ascendant.name", (WITH RECURSIVE __rc_1 AS (SELECT __n.*, 1 AS __depth, ARRAY[__n.id] AS __visited FROM nodes AS __n WHERE __n."parentId" = n.id UNION ALL SELECT __n.*, __rc_1.__depth + 1 AS __depth, __rc_1.__visited || __n.id AS __visited FROM __rc_1 JOIN nodes AS __n ON __n."parentId" = __rc_1.id WHERE __rc_1.__depth < 10 AND __n.id <> ALL (__rc_1.__visited)) SELECT COALESCE(json_agg(__rc_1.name ORDER BY __rc_1.__depth), \'[]\'::json) FROM __rc_1) AS "descendant.name" FROM n',
+			params: [],
+		},
+	},
+	{
 		behavior: 'filters direct parent predicate scans',
 		query: "nodes | where parent.name = 'x'",
 		filtered: {

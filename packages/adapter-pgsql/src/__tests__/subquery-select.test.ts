@@ -114,6 +114,40 @@ describe('compileExpressionIntent — subquery kind', () => {
 		});
 	});
 
+	it('numbers the select-list subquery param before the root WHERE param without collision', () => {
+		const db = schema({
+			symbols: {
+				id: { type: 'integer', primaryKey: true },
+				kind: 'text',
+			},
+			calls: {
+				id: { type: 'integer', primaryKey: true },
+				status: 'text',
+			},
+		});
+		const orm = createOrm({
+			schema: db,
+			adapter: createPgCompileOnlyAdapter({ model: db.model }),
+		});
+
+		const { sql, params } = orm
+			.select('symbols')
+			.where(eq('kind', 'function'))
+			.columns([
+				'id',
+				subquery('calls')
+					.where(eq('status', 'active'))
+					.count()
+					.asExpr('call_count'),
+			])
+			.dump();
+
+		expect({ sql, params }).toEqual({
+			sql: 'SELECT symbols.id, (SELECT count(*) FROM calls WHERE calls.status = $1) AS call_count FROM symbols WHERE symbols.kind = $2',
+			params: ['active', 'function'],
+		});
+	});
+
 	it('throws when ctx.compileSubquery is not set', async () => {
 		const { compileExpressionIntent } = await import(
 			'../handlers/expression/custom.js'
