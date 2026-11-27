@@ -68,12 +68,8 @@ Compiles to `"column" <@ rangeType($1, $2)`. Use when the test range must enclos
 
 `rangeOverlaps('period', { lower, upper, bounds })` (and the same for `rangeContains` and `rangeContainedBy`)
 compiles to the column's range constructor with its bounds as the third argument:
-
-```typescript
-// doctest: skip — SQL shape reference
-rangeOverlaps('period', { lower: '2024-06-10', upper: '2024-06-15', bounds: '[]' });
-// period && daterange($1, $2, '[]')
-```
+`rangeOverlaps('period', { lower: '2024-06-10', upper: '2024-06-15', bounds: '[]' })` gives
+`period && daterange($1, $2, '[]')`.
 
 - `bounds` is one of `'[)'` (the default), `'[]'`, `'()'` and `'(]'`; any other value is refused.
 - `lower` and `upper` follow the same value rule as tuple bounds. `null` or `undefined` is an unbounded side.
