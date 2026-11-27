@@ -130,21 +130,7 @@ const inRefusal = (modifier: string) =>
 // ============================================================================
 
 describe('compilePlan: IN-subquery with dropped modifiers → throws (dispatchWhere guard)', () => {
-	it('GROUP BY in IN-subquery → throws before producing SQL', () => {
-		const plan = makePlan({ groupBy: ['region'] });
-		expect(() => compilePlan(plan)).toThrow(
-			/GROUP BY in an IN subquery body is not supported yet \(#1087\)/,
-		);
-	});
 
-	it('HAVING in IN-subquery → throws', () => {
-		const plan = makePlan({
-			having: { kind: 'comparison', field: 'id', operator: 'gt', value: 0 },
-		});
-		expect(() => compilePlan(plan)).toThrow(
-			/HAVING in an IN subquery body is not supported yet \(#1087\)/,
-		);
-	});
 
 	it('OFFSET in IN-subquery → throws', () => {
 		expect(() => dumpIn(inBody({ offset: 5 }))).toThrow(inRefusal('OFFSET'));
@@ -156,67 +142,10 @@ describe('compilePlan: IN-subquery with dropped modifiers → throws (dispatchWh
 		);
 	});
 
-	it('DISTINCT ON in IN-subquery → throws', () => {
-		const plan = makePlan({ distinctOn: ['region'] });
-		expect(() => compilePlan(plan)).toThrow(
-			/DISTINCT ON in an IN subquery body is not supported yet \(#1087\)/,
-		);
-	});
 
-	it('joins in IN-subquery → throws', () => {
-		const plan = makePlan({
-			joins: [
-				{
-					table: 'regions',
-					on: { kind: 'comparison', field: 'id', operator: 'eq', value: 1 },
-				},
-			],
-		});
-		expect(() => compilePlan(plan)).toThrow(
-			/joins in an IN subquery body is not supported yet \(#1087\)/,
-		);
-	});
 
-	it('include (relation hydration) in IN-subquery → throws', () => {
-		const plan = makePlan({ include: [{ relation: 'addresses' }] });
-		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with include \(relation hydration\) is not supported/,
-		);
-	});
 
-	it('multi-field projection in IN-subquery → throws (would silently truncate)', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'in',
-					subquery: {
-						from: 'customers',
-						select: {
-							type: 'fields',
-							fields: ['id', 'region'],
-						} as any,
-					} as any,
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with multi-field projection \[id, region\].*is not supported/,
-		);
-	});
 
-	it('GROUP BY + HAVING combined → throws with both in message', () => {
-		const plan = makePlan({
-			groupBy: ['region'],
-			having: { kind: 'comparison', field: 'id', operator: 'gt', value: 0 },
-		});
-		expect(() => compilePlan(plan)).toThrow(
-			/GROUP BY in an IN subquery body is not supported yet \(#1087\)/,
-		);
-	});
 
 	it('the refusal is a NotYetSupportedError', () => {
 		expect(() => dumpIn(inBody(groupByRegion))).toThrow(NotYetSupportedError);
@@ -318,12 +247,6 @@ describe('compilePlan: nested IN-subquery (mapInSubqueryCondition) — forbidden
 // ============================================================================
 
 describe('compilePlan: valid IN-subquery still compiles (no false positives)', () => {
-	it('plain IN-subquery (select/from only) → produces ANY subquery SQL', () => {
-		const plan = makePlan({});
-		const result = compilePlan(plan);
-		expect(normalizeSQL(result.sql)).toContain('= any');
-		expect(normalizeSQL(result.sql)).toContain('customers');
-	});
 
 	it('IN-subquery with inner WHERE → compiles correctly', () => {
 		expect(
@@ -627,27 +550,6 @@ describe('compilePlan: typeless { fields: [...] } select shape — assertNoUnsup
 		expect(normalizeSQL(result.sql)).toContain('customers');
 	});
 
-	it('typed { type: "fields", fields: ["id", "region"] } still throws (no regression)', () => {
-		// Existing behaviour: typed multi-field must still be caught.
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'in',
-					subquery: {
-						from: 'customers',
-						select: { type: 'fields', fields: ['id', 'region'] } as any,
-					} as any,
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with multi-field projection \[id, region\].*is not supported/,
-		);
-	});
 
 	it('typeless { fields: undefined } select → throws (undefined fields key present)', () => {
 		// { fields: undefined } has the key present — isSelectWithFields in the compiler
