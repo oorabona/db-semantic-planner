@@ -1790,34 +1790,37 @@ authors | select name, posts.title | flat`.dump(),
 		);
 	});
 
-	it('keeps scalar CTE compilation working without a model', () => {
+	it('refuses scalar CTE compilation without a model', () => {
 		const adapter = createPgCompileOnlyAdapter();
-		const result = adapter.compileCteQuery({
-			kind: 'cteQuery',
-			ctes: [
-				{
-					kind: 'simpleCte',
-					name: 'scalar',
-					query: {
-						type: 'select',
-						from: 'users',
-						select: { type: 'fields', fields: ['id'] },
+		const compileScalar = () =>
+			adapter.compileCteQuery({
+				kind: 'cteQuery',
+				ctes: [
+					{
+						kind: 'simpleCte',
+						name: 'scalar',
+						query: {
+							type: 'select',
+							from: 'users',
+							select: { type: 'fields', fields: ['id'] },
+						},
 					},
+				],
+				query: {
+					type: 'select',
+					from: 'scalar',
+					select: { type: 'fields', fields: ['id'] },
 				},
-			],
-			query: {
-				type: 'select',
-				from: 'scalar',
-				select: { type: 'fields', fields: ['id'] },
-			},
-		});
+			});
 
-		expect(normalizeSQL(result.sql)).toBe(
-			'with scalar as (select users.id from users) select scalar.id from scalar',
+		expect(compileScalar).toThrow(
+			new Error(
+				'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.',
+			),
 		);
 	});
 
-	it('AC10 model-less-cte: CASE WHEN, FILTER and HAVING of a model-less CTE read keep their route (#891 slice 5c)', () => {
+	it('AC10 model-less-cte: a CASE WHEN or HAVING read of a CTE without a model is refused', () => {
 		const adapter = createPgCompileOnlyAdapter();
 		const ctes = [
 			{
@@ -1838,59 +1841,43 @@ authors | select name, posts.title | flat`.dump(),
 			} as unknown as Parameters<typeof adapter.compileCteQuery>[0]);
 			return { sql: result.sql, params: result.parameters };
 		};
-		const head = 'WITH scalar AS (SELECT users.id FROM users)';
-		expect(
-			compile({
-				type: 'select',
-				from: 'scalar',
-				select: {
-					type: 'expressions',
-					columns: [
-						{
-							kind: 'case',
-							when: [
-								{
-									condition: gt('id', 0),
-									result: { kind: 'literal', value: 1 },
-								},
-							],
-							else: { kind: 'literal', value: 0 },
-							as: 'c',
-						},
-					],
-				},
-			}),
-		).toEqual({
-			sql: `${head} SELECT CASE WHEN scalar.id > $1 THEN 1 ELSE 0 END AS c FROM scalar`,
-			params: [0],
-		});
-		expect(
-			compile({
-				type: 'select',
-				from: 'scalar',
-				select: {
-					type: 'aggregate',
-					aggregates: [
-						{ function: 'count', field: '*', as: 'n', filter: gt('id', 0) },
-					],
-				},
-			}),
-		).toEqual({
-			sql: `${head} SELECT count(*) FILTER (WHERE scalar.id > $1) AS n FROM scalar`,
-			params: [0],
-		});
-		expect(
-			compile({
-				type: 'select',
-				from: 'scalar',
-				select: { type: 'fields', fields: ['id'] },
-				groupBy: ['id'],
-				having: gt('id', 0),
-			}),
-		).toEqual({
-			sql: `${head} SELECT scalar.id FROM scalar GROUP BY scalar.id HAVING scalar.id > $1`,
-			params: [0],
-		});
+		const caseRead = {
+			type: 'select',
+			from: 'scalar',
+			select: {
+				type: 'expressions',
+				columns: [
+					{
+						kind: 'case',
+						when: [
+							{
+								condition: gt('id', 0),
+								result: { kind: 'literal', value: 1 },
+							},
+						],
+						else: { kind: 'literal', value: 0 },
+						as: 'c',
+					},
+				],
+			},
+		};
+		const havingRead = {
+			type: 'select',
+			from: 'scalar',
+			select: { type: 'fields', fields: ['id'] },
+			groupBy: ['id'],
+			having: gt('id', 0),
+		};
+		expect(() => compile(caseRead)).toThrow(
+			new Error(
+				'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.',
+			),
+		);
+		expect(() => compile(havingRead)).toThrow(
+			new Error(
+				'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.',
+			),
+		);
 	});
 });
 
@@ -3059,7 +3046,7 @@ draft_posts | where id in (comments | select postId) | select id`.dump();
 		expect(result.parameters).toEqual([true]);
 	});
 
-	it('direct compileInsertFrom with sourceQuery fails loudly without a model', () => {
+	it('direct compileInsertFrom with sourceQuery is refused without a model', () => {
 		const adapter = createPgCompileOnlyAdapter();
 		const sourceQuery: QueryIntent = {
 			type: 'select',
@@ -3079,7 +3066,9 @@ draft_posts | where id in (comments | select postId) | select id`.dump();
 		expect(() =>
 			adapter.compileInsertFrom(intent, { schemaName: 'tenant_direct' }),
 		).toThrow(
-			'compileInsertFrom with sourceQuery requires a model to emit the source CTE',
+			new Error(
+				'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.',
+			),
 		);
 	});
 
@@ -3924,3 +3913,107 @@ for (const suffix of ['flat', 'limit posts 5']) {
 		expect(result.parameters).toEqual([]);
 	});
 }
+
+describe('NQL-WITH SQL compilation', () => {
+	const withModel = schema({
+		products: {
+			id: { type: 'integer', primaryKey: true },
+			name: 'text',
+			active: 'boolean',
+		},
+		orders: {
+			id: { type: 'integer', primaryKey: true },
+			active: 'boolean',
+			productId: 'integer',
+		},
+	} as const).model;
+	const cteSql = (input: string) => {
+		const result = compile(input, withModel);
+		if (!result.success || !result.ast?.cteQuery)
+			throw new Error(`Compile error: ${result.errors[0]?.message}`);
+		return normalizeSQL(
+			createPgCompileOnlyAdapter({ model: withModel }).compileCteQuery(
+				result.ast.cteQuery,
+			).sql,
+		);
+	};
+
+	it('produces correct SQL with WITH and WHERE IN', () => {
+		const sql = cteSql(
+			'with recent as (orders | where active = true) products | where id in (recent | select id)',
+		);
+		expect(sql).toMatch(/^with/);
+		expect(sql).toContain('with recent as (');
+		expect(sql).toContain('from orders');
+		expect(sql).toContain('from products');
+	});
+
+	it('compiles WITH + WHERE IN to correct SQL', () => {
+		const sql = cteSql(
+			'with active as (products | where active = true | select id, name) orders | where productId in (active | select id) | select *',
+		);
+		expect(sql).toMatch(/^with/);
+		expect(sql).toContain('with active as (');
+		expect(sql).toContain('select products.id, products.name from products');
+		expect(sql).toContain('where products.active = $1');
+		expect(sql).toContain('select orders.* from orders');
+		expect(sql).toContain('from active');
+	});
+});
+
+describe('NQL bundles without a model', () => {
+	const columns = {
+		id: { type: 'integer', primaryKey: true },
+		name: { type: 'text' },
+		score: { type: 'integer' },
+	} as const;
+	const model = schema({ users: columns, imports: columns } as const).model;
+	const bundle = (text: string) => {
+		const result = compile(text, model);
+		if (!result.ast) throw new Error(JSON.stringify(result.errors));
+		return result.ast;
+	};
+	const bundles = [
+		"update users set name = 'x' where id = 1",
+		'users | where score = 1',
+		'with recent as (users | where score > 1) users | where id in (recent | select id)',
+		'users | select id | union (users | select id)',
+	];
+
+	it.each(bundles)(
+		'refuses the NQL bundle %s compiled without a model',
+		(text) => {
+			expect(() => createPgCompileOnlyAdapter().compile(bundle(text))).toThrow(
+				new Error(
+					'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.',
+				),
+			);
+		},
+	);
+
+	it('compiles every NQL bundle with the model from the compile options', () => {
+		for (const text of bundles) {
+			const fromOptions = createPgCompileOnlyAdapter().compile(bundle(text), {
+				model,
+			});
+			const fromAdapter = createPgCompileOnlyAdapter({ model }).compile(
+				bundle(text),
+			);
+			expect(fromOptions.sql, text).not.toBe('');
+			expect(
+				{ sql: fromOptions.sql, parameters: fromOptions.parameters },
+				text,
+			).toEqual({ sql: fromAdapter.sql, parameters: fromAdapter.parameters });
+		}
+	});
+
+	it("derives an NQL upsert-from bundle's columns from the adapter's model", () => {
+		expect(
+			createPgCompileOnlyAdapter({ model }).compile(
+				bundle('upsert into users on id from imports'),
+			).sql,
+		).toBe(
+			'INSERT INTO users (id, name, score) SELECT imports.id AS id, imports.name AS name, imports.score AS score FROM imports ON CONFLICT (id) DO UPDATE SET name = excluded.name, score = excluded.score',
+		);
+	});
+});

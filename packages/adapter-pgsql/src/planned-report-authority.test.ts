@@ -125,7 +125,9 @@ describe('external include reports lose registry authority', () => {
 		expect(isPlannedReport(report)).toBe(false);
 		expect(() => adapter.compile(report)).toThrow(new Error(refusal));
 		expect(() => createPgCompileOnlyAdapter().compile(report)).toThrow(
-			new Error(refusal),
+			new Error(
+				'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.',
+			),
 		);
 	});
 	it('refuses report-shaped input carrying an NQL query field before lowering', () => {

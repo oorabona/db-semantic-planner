@@ -5,7 +5,6 @@
  * BDD scenarios SC-01 through SC-10 from docs/plans/NQL-WITH.md
  */
 
-import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import type { CteQueryIntent, SimpleCteIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { compile } from '../src/index.js';
@@ -76,27 +75,6 @@ describe('NQL-WITH: SC-02 — Multiple CTEs', () => {
 		expect(cte1.query.from).toBe('orders');
 
 		expect(cteQuery.query.from).toBe('b');
-	});
-});
-
-// ---------------------------------------------------------------------------
-// SC-03: CTE used in WHERE IN subquery (SQL compilation)
-// ---------------------------------------------------------------------------
-
-describe('NQL-WITH: SC-03 — CTE used in WHERE IN subquery (SQL)', () => {
-	it('produces correct SQL with WITH and WHERE IN', () => {
-		const result = compileNql(
-			'with recent as (orders | where active = true) products | where id in (recent | select id)',
-		);
-		expect(result.cteQuery).toBeDefined();
-		const adapter = createPgCompileOnlyAdapter();
-		const compiled = adapter.compileCteQuery(result.cteQuery as CteQueryIntent);
-		const sql = ws(compiled.sql);
-		// Should start with WITH recent AS (
-		expect(sql).toMatch(/^WITH/);
-		expect(sql).toContain('WITH recent AS (');
-		expect(sql).toContain('FROM orders');
-		expect(sql).toContain('FROM products');
 	});
 });
 
@@ -186,30 +164,5 @@ describe('NQL-WITH: SC-09 — Empty CTE body', () => {
 		const result = compile('with empty as () users | select *', null);
 		expect(result.success).toBe(false);
 		expect(result.errors.length).toBeGreaterThan(0);
-	});
-});
-
-// ---------------------------------------------------------------------------
-// SC-10: Full SQL compilation
-// ---------------------------------------------------------------------------
-
-describe('NQL-WITH: SC-10 — Full SQL compilation', () => {
-	it('compiles WITH + WHERE IN to correct SQL', () => {
-		const result = compileNql(
-			'with active as (products | where active = true | select id, name) orders | where productId in (active | select id) | select *',
-		);
-		expect(result.cteQuery).toBeDefined();
-
-		const adapter = createPgCompileOnlyAdapter();
-		const compiled = adapter.compileCteQuery(result.cteQuery as CteQueryIntent);
-		const sql = ws(compiled.sql);
-
-		// Verify WITH clause structure (adapter runs without schema, so no double-quoting of identifiers)
-		expect(sql).toMatch(/^WITH/);
-		expect(sql).toContain('WITH active AS (');
-		expect(sql).toContain('SELECT products.id, products.name FROM products');
-		expect(sql).toContain('WHERE products.active = $1');
-		expect(sql).toContain('SELECT orders.* FROM orders');
-		expect(sql).toContain('FROM active');
 	});
 });

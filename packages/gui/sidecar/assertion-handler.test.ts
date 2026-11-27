@@ -371,3 +371,55 @@ describe('handleRunAssertions', () => {
 		});
 	});
 });
+
+const mutationCases: [string, string, unknown[]][] = [
+	[
+		"insert into users set id = 1, name = 'x'",
+		'INSERT INTO users (id, name) VALUES ($1, $2)',
+		[1, 'x'],
+	],
+	[
+		"update users set name = 'x' where id = 1",
+		'UPDATE users SET name = $1 WHERE users.id = $2',
+		['x', 1],
+	],
+	[
+		'delete from users where id = 1',
+		'DELETE FROM users WHERE users.id = $1',
+		[1],
+	],
+	[
+		"upsert into users on id set id = 1, name = 'x'",
+		'INSERT INTO users (id, name) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET id = $3, name = $4',
+		[1, 'x', 1, 'x'],
+	],
+];
+
+describe('handleRunAssertions — mutations', () => {
+	it.each(mutationCases)(
+		"compiles the NQL mutation %s with the connection's model",
+		async (nql, sql, params) => {
+			const { schema } = await import('@dbsp/core');
+			const model = schema({
+				users: { id: { type: 'integer', primaryKey: true }, name: 'string' },
+			}).model;
+			const result = await handleRunAssertions(
+				{
+					connectionId: 'test-conn',
+					dbspContent: nql,
+					assertContent: [
+						'--- query: 0',
+						`sql.equals: ${sql}`,
+						`params.equals: ${JSON.stringify(params)}`,
+					].join('\n'),
+					execute: false,
+				},
+				vi.fn().mockResolvedValue(model),
+				mockGetPoolThrows(),
+			);
+			expect(result.parseErrors).toEqual([]);
+			expect(result.summary.failed).toBe(0);
+			expect(result.summary.passed).toBe(2);
+		},
+	);
+});

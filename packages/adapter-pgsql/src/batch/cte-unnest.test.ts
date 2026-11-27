@@ -424,7 +424,7 @@ describe('SC-15: CTE joined with outer query', () => {
 	});
 
 	it('works with direct adapter compileCteQuery', () => {
-		const adapter = createPgCompileOnlyAdapter();
+		const adapter = createPgCompileOnlyAdapter({ model: batchSchema.model });
 		const result = adapter.compileCteQuery({
 			kind: 'cteQuery',
 			ctes: [

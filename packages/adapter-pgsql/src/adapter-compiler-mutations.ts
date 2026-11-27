@@ -49,11 +49,7 @@ import {
 	relationBinding,
 	withBindingName,
 } from './binding-registry.js';
-import {
-	buildSubqueryFromIntent,
-	compileWhereIntent,
-	type WhereCompilerCtx,
-} from './compile-where.js';
+import { compileWhereIntent } from './compile-where.js';
 import { buildCustomFnFilter, renumberParamRefsInAst } from './compiler.js';
 import {
 	parseRawExpression,
@@ -70,12 +66,7 @@ import {
 	type CompilerContext,
 	type CompilerState,
 	createCompilerState,
-	type Decision,
 } from './handlers/index.js';
-import {
-	currentExpressionBinding,
-	type ExpressionCompilerContext,
-} from './handlers/types.js';
 import {
 	type BatchUpdateConfig,
 	compileDelete as compileDeleteMutation,
@@ -111,7 +102,6 @@ import {
 	preserveOneToOne,
 } from './projection-envelope.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
-import { resolveRelationKeys } from './relation-keys.js';
 import {
 	compileResolvedCondition,
 	compileResolvedExpression,
@@ -171,33 +161,18 @@ function assertParameterLimit(
 // Internal helpers
 // ============================================================================
 
-/**
- * Bridge a WhereIntent into a Decision for mutation config.
- * The WHERE dispatcher's `normalizeToDecision` handles the actual
- * `kind`/`field` → `type`/`column`/`operator` conversion at runtime.
- */
-function whereIntentAsDecision(where: WhereIntent): Decision {
-	return where as never as Decision;
-}
-
 type SourceCteFragment = {
 	readonly ast: Node;
 	readonly parameters: readonly unknown[];
 };
 
 function compileSourceQueryCte(
-	operation: 'compileInsertFrom' | 'compileUpsertFrom',
 	sourceName: string,
 	sourceQuery: QueryIntent,
 	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): SourceCteFragment {
 	const model = deps.model;
-	if (model === undefined) {
-		throw new Error(
-			`${operation} with sourceQuery requires a model to emit the source CTE for '${sourceName}'.`,
-		);
-	}
 	const sourcePlan = planFn(sourceQuery, model, {
 		dialectCapabilities: deps.dialectCapabilities ?? POSTGRESQL_CAPABILITIES,
 	});
@@ -221,7 +196,7 @@ function compileMutationEnvelope(
 		parameters: state.parameters,
 		ast,
 		rootTable,
-		model: options?.model ?? deps.model,
+		model: deps.model,
 		...(deps.declaredNames !== undefined && {
 			declaredNames: deps.declaredNames,
 		}),
@@ -377,103 +352,6 @@ function mutationContext(
 }
 
 /**
- * Resolve relation metadata for an exists/notExists WHERE condition.
- *
- * `notExists('symbol')` carries `relation: 'symbol'` (the logical relation name).
- * The mutation path bypasses the planner, so `normalizeToDecision` sets
- * `targetTable: relation` — using 'symbol' as the table name instead of 'symbols'.
- *
- * This helper looks up `sourceTable.relation` in ModelIR and returns:
- * - `targetTable`: real DB table name (e.g. 'symbols' for relation 'symbol')
- * - `sourceColumn`: FK column on the root table for `belongsTo` (e.g. 'symbol_id')
- * - `targetColumn`: PK on the target table for belongsTo, FK on the target table for hasMany/hasOne
- *
- * Falls back gracefully when ModelIR is unavailable or relation not found.
- */
-function resolveExistsRelation(
-	sourceTable: string,
-	relation: string,
-	model: import('@dbsp/types').ModelIR | undefined,
-): {
-	targetTable: string;
-	sourceColumn?: string | readonly string[];
-	targetColumn?: string | readonly string[];
-} {
-	if (!model) return { targetTable: relation };
-	const relationName = `${sourceTable}.${relation}`;
-	const rel = model.getRelation(relationName);
-	if (!rel) return { targetTable: relation };
-	return {
-		targetTable: rel.target,
-		...resolveRelationKeys(sourceTable, rel, { model }),
-	};
-}
-
-/**
- * Enrich an exists/notExists WhereIntent with the resolved `targetTable`,
- * `sourceColumn`, and `targetColumn` so that `buildExistsSubquery` correlates
- * the subquery using the correct FK columns instead of convention-based defaults.
- */
-function resolveExistsIntent(
-	where: WhereIntent,
-	sourceTable: string,
-	deps: AdapterCompilerDeps,
-): WhereIntent {
-	const w = where as unknown as Record<string, unknown>;
-	const kind = w.kind as string | undefined;
-
-	// Recursively walk and/or/not branches so nested exists/notExists are enriched
-	if (kind === 'and' || kind === 'or') {
-		const conditions = w.conditions as WhereIntent[] | undefined;
-		if (!conditions) return where;
-		const enriched = conditions.map((c) =>
-			resolveExistsIntent(c, sourceTable, deps),
-		);
-		const changed = enriched.some((c, i) => c !== conditions[i]);
-		return changed
-			? ({ ...w, conditions: enriched } as unknown as WhereIntent)
-			: where;
-	}
-	if (kind === 'not') {
-		const condition = w.condition as WhereIntent | undefined;
-		if (!condition) return where;
-		const enriched = resolveExistsIntent(condition, sourceTable, deps);
-		return enriched !== condition
-			? ({ ...w, condition: enriched } as unknown as WhereIntent)
-			: where;
-	}
-
-	if (kind !== 'exists' && kind !== 'notExists') return where;
-	const relation = w.relation as string;
-	const resolved = resolveExistsRelation(sourceTable, relation, deps.model);
-	const nestedWhere = w.where as WhereIntent | undefined;
-	const enrichedNestedWhere =
-		nestedWhere !== undefined
-			? resolveExistsIntent(nestedWhere, resolved.targetTable, deps)
-			: undefined;
-	// Only enrich if we resolved to a different name (avoid mutation when model absent)
-	if (
-		resolved.targetTable === relation &&
-		!resolved.sourceColumn &&
-		!resolved.targetColumn &&
-		enrichedNestedWhere === nestedWhere
-	) {
-		return where;
-	}
-	return {
-		...w,
-		targetTable: resolved.targetTable,
-		...(resolved.sourceColumn !== undefined && {
-			sourceColumn: resolved.sourceColumn,
-		}),
-		...(resolved.targetColumn !== undefined && {
-			targetColumn: resolved.targetColumn,
-		}),
-		...(enrichedNestedWhere !== undefined && { where: enrichedNestedWhere }),
-	} as unknown as WhereIntent;
-}
-
-/**
  * Build addressed column metadata for a table, keyed by emitted physical name.
  * Logical model lookup happens before that key is built, so the SQL compiler
  * never asks a logical map for a physical identifier.
@@ -488,7 +366,6 @@ function getColumnTypes(
 	unnestedColumns: ReadonlySet<string> = new Set(),
 	operation: 'insert' | 'upsert' | 'update' = 'insert',
 ): Record<string, MutationColumnMetadata> | undefined {
-	if (!deps.model) return undefined;
 	const table = deps.model.getTable(tableName);
 	if (!table) return undefined;
 	const columnsByName = new Map(
@@ -636,11 +513,6 @@ function mutationValuePreparer(
 		const leaf = coerceValue(value, operation);
 		const intent = valueExpressionIntent(leaf);
 		if (intent === undefined) return leaf;
-		if (deps.model === undefined)
-			throw new InvalidOperationError(
-				operation,
-				'an expression value requires a ModelIR; pass a model to the adapter or to the compile options',
-			);
 		const { allocator, root } = valueScope();
 		const resolved = resolveValueExpression(
 			intent,
@@ -731,69 +603,6 @@ function hasArrayTypedColumn(
 	return Object.values(columnTypes ?? {}).some((metadata) =>
 		metadata.databaseType.trim().endsWith('[]'),
 	);
-}
-
-/**
- * A mutation guard's subquery body sees the guard's row as its enclosing range,
- * as a SELECT body does, so a relation path inside it is checked against every
- * visible range (#991).
- */
-function guardSubqueryParent(
-	parent: WhereCompilerCtx | undefined,
-): WhereCompilerCtx | undefined {
-	return (
-		parent && {
-			...parent,
-			// A guard context is a where context of the mutation's table; the
-			// binding helper reads only its current alias, root table and scope.
-			queryRanges: parent.queryRanges ?? [
-				currentExpressionBinding(
-					parent as unknown as ExpressionCompilerContext,
-				),
-			],
-		}
-	);
-}
-
-function compileUpsertActionWhere(
-	where: WhereIntent,
-	table: string,
-	state: ReturnType<typeof createCompilerState>,
-	deps: AdapterCompilerDeps,
-	schemaName: string | undefined,
-): import('@pgsql/types').Node {
-	const whereCtx: WhereCompilerCtx = {
-		rootTable: table,
-		aliases: new Map<string, string>(),
-		paramState: state,
-		...(schemaName !== undefined && { schemaName }),
-		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
-		...(deps.scope !== undefined && { scope: deps.scope }),
-		dbCasing: deps.dbCasing ?? 'preserve',
-		...(deps.relationTargetProjections !== undefined && {
-			relationTargetProjections: deps.relationTargetProjections,
-		}),
-		...(deps.declaredNames !== undefined && {
-			declaredNames: deps.declaredNames,
-		}),
-		...(deps.model !== undefined && { model: deps.model }),
-		...(deps.dialectCapabilities !== undefined && {
-			dialectCapabilities: deps.dialectCapabilities,
-		}),
-		compileSubquery: (sqIntent, paramOffset, parent) =>
-			buildSubqueryFromIntent(
-				sqIntent,
-				paramOffset,
-				deps.declaredNames,
-				schemaName,
-				'rawExists',
-				deps.scope,
-				deps.dialectCapabilities,
-				deps.dbCasing,
-				guardSubqueryParent(parent),
-			),
-	};
-	return compileWhereIntent(where, whereCtx);
 }
 
 // ============================================================================
@@ -904,13 +713,7 @@ export function compileInsertFrom(
 	const sourceCte =
 		intent.sourceQuery !== undefined &&
 		!hasBindingName(deps.bindingNames, intent.source)
-			? compileSourceQueryCte(
-					'compileInsertFrom',
-					intent.source,
-					intent.sourceQuery,
-					options,
-					deps,
-				)
+			? compileSourceQueryCte(intent.source, intent.sourceQuery, options, deps)
 			: undefined;
 	const bindingNames =
 		intent.sourceQuery !== undefined
@@ -929,10 +732,6 @@ export function compileInsertFrom(
 		...deps,
 		...(bindingNames !== undefined && { bindingNames }),
 	});
-	const resolvedWhere =
-		intent.where && !whereCompiler
-			? resolveExistsIntent(intent.where, intent.source, deps)
-			: undefined;
 
 	const sourceBinding = mutationBinding(
 		{ ...deps, ...(bindingNames !== undefined && { bindingNames }) },
@@ -965,7 +764,6 @@ export function compileInsertFrom(
 				}),
 			})),
 		}),
-		...(resolvedWhere && { where: [whereIntentAsDecision(resolvedWhere)] }),
 		...(whereCompiler && { whereCompiler }),
 		...(intent.limit !== undefined && { limit: intent.limit }),
 		...(intent.returning && { returning: [...intent.returning] }),
@@ -990,30 +788,16 @@ export function compileInsertFrom(
 }
 
 /**
- * The model-less fallback of a mutation WHERE: core's resolver does not see it,
- * so the relation-path refusal (#991) runs here before exists() enrichment.
- */
-function resolveModelLessWhere(
-	where: WhereIntent,
-	table: string,
-	deps: AdapterCompilerDeps,
-): WhereIntent {
-	assertNoPathRefInConditionBodies(where);
-	return resolveExistsIntent(where, table, deps);
-}
-
-/**
  * Resolve a mutation WHERE through core's root condition resolver, as a SELECT
  * WHERE is, and return a compiler for it. Mutations stay unfiltered: no default
  * filters are applied; a builder nested in the WHERE keeps its own policy.
- * Without a model the old route is kept (undefined).
  */
 function resolvedMutationWhere(
 	where: WhereIntent | undefined,
 	table: string,
 	deps: AdapterCompilerDeps,
 ): ((ctx: CompilerContext, state: CompilerState) => Node) | undefined {
-	if (!where || deps.model === undefined) return undefined;
+	if (!where) return undefined;
 	const allocator = new RangeAllocator();
 	const root = allocator.bind(table, table);
 	// Generated subquery aliases must not capture a NQL binding in scope.
@@ -1061,10 +845,6 @@ export function compileUpdate(
 	const setColumns = Object.keys(intent.set ?? {});
 	const columnTypes = getColumnTypes(intent.table, setColumns, deps);
 	const whereCompiler = resolvedMutationWhere(intent.where, intent.table, deps);
-	const resolvedWhere =
-		intent.where && !whereCompiler
-			? resolveModelLessWhere(intent.where, intent.table, deps)
-			: undefined;
 
 	const prepare = mutationValuePreparer(deps, intent.table, 'update');
 	const config: UpdateConfig = {
@@ -1074,7 +854,6 @@ export function compileUpdate(
 			column: declaredMutationColumn(deps, intent.table, column),
 			value: prepare(value, 'SET'),
 		})),
-		...(resolvedWhere && { where: [whereIntentAsDecision(resolvedWhere)] }),
 		...(whereCompiler && { whereCompiler }),
 		...(intent.returning && { returning: [...intent.returning] }),
 		...(intent.returning && {
@@ -1113,8 +892,6 @@ export function compileBatchUpdate(
 	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
-	// schemaName precedence (options > adapter ctor) is resolved in PgAdapter.buildCompileDeps; deps.schemaName is authoritative here
-	const schemaName = deps.schemaName;
 	const ctx = mutationContext(deps, intent.table, MAX_DEPTH_LIMIT);
 	const state = createCompilerState();
 
@@ -1193,41 +970,6 @@ export function compileBatchUpdate(
 			},
 			state,
 		);
-	else if (intent.where) {
-		assertNoPathRefInConditionBodies(intent.where);
-		const resolvedWhere = resolveExistsIntent(intent.where, intent.table, deps);
-		const whereCtx: WhereCompilerCtx = {
-			rootTable: intent.table,
-			aliases: new Map<string, string>(),
-			paramState: state,
-			...(schemaName !== undefined && { schemaName }),
-			...(deps.bindingNames !== undefined && {
-				bindingNames: deps.bindingNames,
-			}),
-			...(deps.scope !== undefined && { scope: deps.scope }),
-			dbCasing: deps.dbCasing ?? 'preserve',
-			...(deps.declaredNames !== undefined && {
-				declaredNames: deps.declaredNames,
-			}),
-			...(deps.model !== undefined && { model: deps.model }),
-			...(deps.dialectCapabilities !== undefined && {
-				dialectCapabilities: deps.dialectCapabilities,
-			}),
-			compileSubquery: (sqIntent, paramOffset, parent) =>
-				buildSubqueryFromIntent(
-					sqIntent,
-					paramOffset,
-					deps.declaredNames,
-					schemaName,
-					'rawExists',
-					deps.scope,
-					deps.dialectCapabilities,
-					deps.dbCasing,
-					guardSubqueryParent(parent),
-				),
-		};
-		whereGuard = compileWhereIntent(resolvedWhere, whereCtx);
-	}
 
 	const config: BatchUpdateConfig = {
 		table: declaredMutationTable(deps, intent.table),
@@ -1280,18 +1022,12 @@ export function compileDelete(
 	const ctx = mutationContext(deps, intent.table, MAX_DEPTH_LIMIT);
 	const state = createCompilerState();
 
-	// Resolve exists/notExists relation name → real table name before compiling.
-	// The mutation path bypasses the planner, so we must resolve targetTable here.
+	// Core's root condition resolver resolves the WHERE, relations included.
 	const whereCompiler = resolvedMutationWhere(intent.where, intent.table, deps);
-	const resolvedWhere =
-		intent.where && !whereCompiler
-			? resolveModelLessWhere(intent.where, intent.table, deps)
-			: undefined;
 
 	const config: DeleteConfig = {
 		table: declaredMutationTable(deps, intent.table),
 		tableMetadata: declaredMutationTableMetadata(deps, intent.table),
-		...(resolvedWhere && { where: [whereIntentAsDecision(resolvedWhere)] }),
 		...(whereCompiler && { whereCompiler }),
 		...(intent.returning && { returning: [...intent.returning] }),
 		...(intent.returning && {
@@ -1323,8 +1059,6 @@ export function compileUpsert(
 	deps: AdapterCompilerDeps,
 	rowShape?: ReturnType<typeof inspectMutationRows>,
 ): CompiledQuery {
-	// schemaName precedence (options > adapter ctor) is resolved in PgAdapter.buildCompileDeps; deps.schemaName is authoritative here
-	const schemaName = deps.schemaName;
 	const ctx = mutationContext(deps, intent.table, MAX_DEPTH_LIMIT);
 	const state = createCompilerState();
 
@@ -1459,11 +1193,6 @@ export function compileUpsert(
 		intent.table,
 		deps,
 	);
-	const resolvedActionWhere = actionWhere
-		? actionWhereCompiler
-			? actionWhere
-			: resolveModelLessWhere(actionWhere, intent.table, deps)
-		: undefined;
 
 	const config: UpsertConfig = {
 		table: declaredMutationTable(deps, intent.table),
@@ -1508,36 +1237,29 @@ export function compileUpsert(
 				]),
 			),
 		}),
-		...(resolvedActionWhere && {
-			actionWhereIntent: resolvedActionWhere,
-			compileActionWhere: (where, paramState) => {
-				// Lower the action in its own parameter namespace, then append it. The
-				// complete upsert statement is checked once after all parameters exist.
-				const actionState = createCompilerState();
-				const actionWhere = actionWhereCompiler
-					? actionWhereCompiler(
-							{
-								...mutationContext(deps, intent.table, MAX_DEPTH_LIMIT),
-								currentAlias: declaredMutationTable(deps, intent.table),
-							},
-							actionState,
-						)
-					: compileUpsertActionWhere(
-							where,
-							intent.table,
-							actionState,
-							deps,
-							schemaName,
-						);
-				const shifted = renumberParamRefsInAst(
-					actionWhere,
-					paramState.paramIndex,
-				);
-				paramState.parameters.push(...actionState.parameters);
-				paramState.paramIndex += actionState.paramIndex;
-				return shifted;
-			},
-		}),
+		...(actionWhere &&
+			actionWhereCompiler && {
+				actionWhereIntent: actionWhere,
+				compileActionWhere: (_where, paramState) => {
+					// Lower the action in its own parameter namespace, then append it. The
+					// complete upsert statement is checked once after all parameters exist.
+					const actionState = createCompilerState();
+					const actionNode = actionWhereCompiler(
+						{
+							...mutationContext(deps, intent.table, MAX_DEPTH_LIMIT),
+							currentAlias: declaredMutationTable(deps, intent.table),
+						},
+						actionState,
+					);
+					const shifted = renumberParamRefsInAst(
+						actionNode,
+						paramState.paramIndex,
+					);
+					paramState.parameters.push(...actionState.parameters);
+					paramState.paramIndex += actionState.paramIndex;
+					return shifted;
+				},
+			}),
 	};
 
 	// Strategy switch: unnest for large batches, VALUES for small (INV-03)
@@ -1566,13 +1288,7 @@ export function compileUpsertFrom(
 	const sourceCte =
 		intent.sourceQuery !== undefined &&
 		!hasBindingName(deps.bindingNames, intent.source)
-			? compileSourceQueryCte(
-					'compileUpsertFrom',
-					intent.source,
-					intent.sourceQuery,
-					options,
-					deps,
-				)
+			? compileSourceQueryCte(intent.source, intent.sourceQuery, options, deps)
 			: undefined;
 	const bindingNames =
 		intent.sourceQuery !== undefined
@@ -1591,17 +1307,13 @@ export function compileUpsertFrom(
 		...deps,
 		...(bindingNames !== undefined && { bindingNames }),
 	});
-	const resolvedWhere =
-		intent.where && !whereCompiler
-			? resolveExistsIntent(intent.where, intent.source, deps)
-			: undefined;
 
 	// Derive columns from model if not explicitly specified (needed for ON CONFLICT SET)
 	let columns: string[] | undefined;
 	if (intent.columns) {
 		columns = [...intent.columns];
-	} else if (options?.model) {
-		const targetTable = options.model.getTable(intent.table);
+	} else {
+		const targetTable = deps.model.getTable(intent.table);
 		if (targetTable) {
 			columns = targetTable.columns.map((c) => c.name);
 		}
@@ -1644,7 +1356,6 @@ export function compileUpsertFrom(
 				}),
 			})),
 		}),
-		...(resolvedWhere && { where: [whereIntentAsDecision(resolvedWhere)] }),
 		...(whereCompiler && { whereCompiler }),
 		...(intent.limit !== undefined && { limit: intent.limit }),
 		...(intent.returning && { returning: [...intent.returning] }),

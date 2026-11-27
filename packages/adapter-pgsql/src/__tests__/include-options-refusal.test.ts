@@ -579,7 +579,7 @@ for (const strategy of ['json_agg', 'lateral', 'join', 'cte'] as const) {
 		});
 	}
 }
-it('refuses a wildcard limited include without an enumerable compile model', () => {
+it('refuses a wildcard limited include compiled without a model', () => {
 	const report = plan(
 		{
 			type: 'select',
@@ -591,7 +591,7 @@ it('refuses a wildcard limited include without an enumerable compile model', () 
 	);
 	exactError(
 		() => createPgCompileOnlyAdapter().compile(report),
-		"Include payload 'posts' cannot enumerate wildcard keys for opaque target 'posts'.",
+		'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.',
 	);
 });
 it('builder plan refuses aggregate json_agg select', () => {

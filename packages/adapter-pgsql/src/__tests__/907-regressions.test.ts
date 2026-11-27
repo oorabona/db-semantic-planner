@@ -125,7 +125,7 @@ it('907 item 2 bigint expression binds and special literal identities stay disti
 			).toThrow(/conflicting public key 'n'/);
 		}
 });
-it('907 item 3 model-free compile refuses unavailable include read authority', () => {
+it('907 item 3 compile without a model is refused before include read authority', () => {
 	const report = orm
 		.select('users')
 		.columns([col('id', 'id')])
@@ -133,7 +133,7 @@ it('907 item 3 model-free compile refuses unavailable include read authority', (
 		.plan();
 	expect(() => createPgCompileOnlyAdapter().compile(report)).toThrow(
 		new Error(
-			"Include payload 'calls' cannot establish read conversions for column 'amount' without a compile model.",
+			'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.',
 		),
 	);
 	const query = adapter.compile(report);
@@ -151,7 +151,7 @@ it('907 item 3 model-free compile refuses unavailable include read authority', (
 		.plan();
 	expect(() => createPgCompileOnlyAdapter().compile(wildcard)).toThrow(
 		new Error(
-			"Include payload 'calls' cannot establish root wildcard ownership for 'users' without a compile model.",
+			'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.',
 		),
 	);
 });
