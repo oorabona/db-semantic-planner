@@ -153,6 +153,144 @@ export function resolveValueExpression(
 	return resolved.expression;
 }
 
+/**
+ * Resolve the expression of a FROM-less SELECT (`orm.selectExpression()`).
+ * It has no row: the root is a range that names no table, and every column
+ * or relation read from it, at any depth outside a subquery body, is refused,
+ * as is a `*` that is not directly a call argument. Subquery bodies read the
+ * default filters in force, as in any read; a body's own policy wins.
+ */
+export function resolveFromlessExpression(
+	input: ExpressionIntent,
+	model: ModelIR,
+	options: {
+		readonly defaultFilters?: Readonly<Record<string, WhereIntent>> | undefined;
+	} = {},
+): ResolvedExpression {
+	const allocator = new RangeAllocator();
+	const root = allocator.bind('', '');
+	const where = { kind: 'expression', expr: input } as WhereIntent;
+	assertNoPathRefInConditionBodies(where);
+	const resolved = resolveConditionContext(
+		where,
+		root,
+		[root],
+		[],
+		allocator,
+		model,
+		0,
+		[],
+		{
+			label: 'selectExpression',
+			...(options.defaultFilters && { defaultFilters: options.defaultFilters }),
+			unreadableRange: { id: root.id, refuse: refuseFromlessRead },
+		},
+	);
+	if (resolved?.kind !== 'expression')
+		throw new Error(
+			'Internal error: a FROM-less expression resolved to no expression.',
+		);
+	assertNoFromlessStar(resolved.expression, false);
+	return resolved.expression;
+}
+
+function refuseFromlessRead(
+	reference: { readonly column: string } | { readonly relation: string },
+): never {
+	const read =
+		'column' in reference
+			? `column '${escapeDiagnosticText(reference.column)}'`
+			: `relation '${escapeDiagnosticText(reference.relation)}'`;
+	throw new Error(
+		`selectExpression() cannot read ${read}; a FROM-less SELECT has no row. Use a value, param(), literal() or an uncorrelated subquery.`,
+	);
+}
+
+/**
+ * A `*` outside the subquery bodies expands the row a FROM-less SELECT does
+ * not have, unless it is directly a call argument (`count(*)`); which
+ * functions take `*` is left to the database.
+ */
+function assertNoFromlessStar(
+	expr: ResolvedExpression,
+	callArgument: boolean,
+): void {
+	switch (expr.kind) {
+		case 'star':
+			if (!callArgument) refuseFromlessRead({ column: '*' });
+			return;
+		case 'call':
+			for (const arg of expr.args) assertNoFromlessStar(arg, true);
+			if (expr.filter) assertNoFromlessStarInCondition(expr.filter);
+			for (const order of expr.orderBy ?? [])
+				assertNoFromlessStar(order.expression, false);
+			return;
+		case 'operator':
+			for (const operand of expr.operands) assertNoFromlessStar(operand, false);
+			return;
+		case 'cast':
+			assertNoFromlessStar(expr.expression, false);
+			return;
+		case 'case':
+			for (const branch of expr.branches) {
+				assertNoFromlessStarInCondition(branch.condition);
+				assertNoFromlessStar(branch.result, false);
+			}
+			if (expr.fallback) assertNoFromlessStar(expr.fallback, false);
+			return;
+		case 'array':
+			for (const element of expr.elements) assertNoFromlessStar(element, false);
+			return;
+		case 'namedArg':
+			assertNoFromlessStar(expr.value, false);
+			return;
+		default:
+			// subquery bodies, literals, parameters and references read no row here
+			return;
+	}
+}
+
+function assertNoFromlessStarInRhs(rhs: ResolvedRhs): void {
+	if (
+		rhs.kind === 'parameter' ||
+		rhs.kind === 'column' ||
+		rhs.kind === 'outerRef'
+	)
+		return;
+	// The remaining members of ResolvedRhs are expressions.
+	assertNoFromlessStar(rhs as ResolvedExpression, false);
+}
+
+function assertNoFromlessStarInCondition(condition: ResolvedCondition): void {
+	switch (condition.kind) {
+		case 'and':
+		case 'or':
+			for (const nested of condition.conditions)
+				assertNoFromlessStarInCondition(nested);
+			return;
+		case 'not':
+			assertNoFromlessStarInCondition(condition.condition);
+			return;
+		case 'expression':
+			assertNoFromlessStar(condition.expression, false);
+			if (condition.comparison)
+				assertNoFromlessStarInRhs(condition.comparison.right);
+			return;
+		case 'comparison':
+			assertNoFromlessStarInRhs(condition.right);
+			return;
+		case 'range':
+			if (condition.value.kind === 'rangeConstructor') {
+				assertNoFromlessStarInRhs(condition.value.lower);
+				assertNoFromlessStarInRhs(condition.value.upper);
+			}
+			return;
+		default:
+			// subquery bodies and parameter-only leaves hold no FROM-less operand
+			return;
+	}
+}
+
 /** Resolve a condition with explicit current, visible and enclosing query ranges. */
 export function resolveConditionContext(
 	where: WhereIntent | undefined,

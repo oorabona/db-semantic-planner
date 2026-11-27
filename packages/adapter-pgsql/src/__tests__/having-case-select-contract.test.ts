@@ -240,6 +240,8 @@ it('nested SELECT HAVING uses its own logical source', () => {
 
 for (const field of ['id', 'calls.id']) {
 	it(`FROM-less SELECT refuses outerRef('${field}') without an enclosing query`, () => {
+		// A FROM-less SELECT has no row: an unqualified outerRef reads its absent
+		// row, a qualified one names a range no enclosing query has (#1002).
 		expect(() =>
 			adapter.compileSelectExpression(
 				subquery('calls')
@@ -247,7 +249,11 @@ for (const field of ['id', 'calls.id']) {
 					.count()
 					.asExpr('n').intent,
 			),
-		).toThrow('outerRef() requires an enclosing query range.');
+		).toThrow(
+			field === 'id'
+				? "selectExpression() cannot read column 'id'; a FROM-less SELECT has no row. Use a value, param(), literal() or an uncorrelated subquery."
+				: "outerRef qualifier 'calls' is not visible in an enclosing query.",
+		);
 	});
 }
 it('HAVING alias resolves through nested CASE conditions', () => {
