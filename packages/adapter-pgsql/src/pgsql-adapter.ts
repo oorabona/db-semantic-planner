@@ -2313,9 +2313,6 @@ export function createNqlBindingSelectPlan(
 
 type NqlBindingProjectionRegistry = ReadonlyMap<string, ProjectionEnvelope>;
 
-/** Compile options once the entry has resolved the model it compiles with. */
-type ModelCompileOptions = CompileOptions & { readonly model: ModelIR };
-
 const COMPILE_MODEL_REQUIRED =
 	'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.';
 
@@ -3091,7 +3088,8 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 	}
 
 	private buildCompileDeps(
-		options: ModelCompileOptions,
+		options: CompileOptions | undefined,
+		model: ModelIR,
 		bindingNames?: BindingNameRegistry,
 		relationTargetProjections?: NqlBindingProjectionRegistry,
 		scope?: QueryScope,
@@ -3100,11 +3098,10 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 		// via direct callers of adapter.compile().  Empty string is treated as "no
 		// override" (falls through to this.schemaName via ||), so we skip it here;
 		// the empty-string → fallback behaviour is covered by existing tests.
-		if (options.schemaName) {
+		if (options?.schemaName) {
 			validateIdentifier(options.schemaName, 'schema');
 		}
-		const model = options.model;
-		const schemaName = options.schemaName || this.schemaName;
+		const schemaName = options?.schemaName || this.schemaName;
 		const physicalModel = getCachedPgPhysicalModel(
 			model,
 			schemaName ?? 'public',
@@ -3115,7 +3112,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 			scope ??
 			queryScopeForBindingProjections(bindingNames, relationTargetProjections);
 		return {
-			...(options.defaultFilters && {
+			...(options?.defaultFilters && {
 				defaultFilters: options.defaultFilters,
 			}),
 			dbCasing: this._dbCasing,
@@ -3125,7 +3122,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 			physicalModel,
 			declaredNames,
 			dialectCapabilities:
-				options.dialectCapabilities ?? this.dialectCapabilities,
+				options?.dialectCapabilities ?? this.dialectCapabilities,
 			defaultPk: this.defaultPk,
 			deriveFk: this.deriveFk,
 			...(bindingNames !== undefined && { bindingNames }),
@@ -3137,21 +3134,20 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 	}
 
 	/**
-	 * The model every compilation entry reads, once: the compile options' model,
-	 * else the adapter's. Compilation without one is refused before the intent
-	 * is read.
+	 * The model a compilation entry compiles with, read once: the compile
+	 * options' model, else the adapter's. Compilation without one is refused
+	 * before the intent is read; the caller's options are passed on unchanged.
 	 */
-	private withCompileModel(options?: CompileOptions): ModelCompileOptions {
+	private requireCompileModel(options?: CompileOptions): ModelIR {
 		const model = options?.model ?? this.model;
 		if (model === undefined) throw new Error(COMPILE_MODEL_REQUIRED);
-		return options?.model === model
-			? (options as ModelCompileOptions)
-			: { ...options, model };
+		return model;
 	}
 
 	private compileNqlMutation(
 		bundle: CompiledNqlQuery,
-		options: ModelCompileOptions,
+		options: CompileOptions | undefined,
+		model: ModelIR,
 		bindingNames?: BindingNameRegistry,
 		bindingProjections?: NqlBindingProjectionRegistry,
 	): CompiledQuery {
@@ -3164,6 +3160,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 		}
 		const deps = this.buildCompileDeps(
 			options,
+			model,
 			bindingNames,
 			bindingProjections,
 		);
@@ -3199,13 +3196,15 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 
 	private compileNqlBundleLeafEnvelope<T = unknown>(
 		bundle: CompiledNqlQuery,
-		options: ModelCompileOptions,
+		options: CompileOptions | undefined,
+		model: ModelIR,
 		bindingNames?: BindingNameRegistry,
 		bindingProjections?: NqlBindingProjectionRegistry,
 	): ProjectionEnvelope<T> {
 		if (bundle.query !== undefined) {
 			const deps = this.buildCompileDeps(
 				options,
+				model,
 				bindingNames,
 				bindingProjections,
 			);
@@ -3228,7 +3227,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 						)
 					: planInScope(
 							bundle.query,
-							options.model,
+							model,
 							{
 								...(scanFilters && {
 									defaultFilters: scanFilters,
@@ -3260,7 +3259,12 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 					compileCteQueryImpl<T>(
 						bundle.cteQuery,
 						options,
-						this.buildCompileDeps(options, bindingNames, bindingProjections),
+						this.buildCompileDeps(
+							options,
+							model,
+							bindingNames,
+							bindingProjections,
+						),
 						bindingProjections,
 					),
 					'NQL CTE query',
@@ -3268,7 +3272,6 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 			);
 		}
 		if (bundle.setOperation !== undefined) {
-			const model = options.model;
 			return fromCompiledQuery<T>(
 				guardCompiledQuery(
 					this.compileSetOperationWithBindings<T>(
@@ -3288,6 +3291,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 					this.compileNqlMutation(
 						bundle,
 						options,
+						model,
 						bindingNames,
 						bindingProjections,
 					),
@@ -3300,13 +3304,14 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 
 	private compileNqlBundle<T = unknown>(
 		bundle: CompiledNqlQuery,
-		options: ModelCompileOptions,
+		options: CompileOptions | undefined,
+		model: ModelIR,
 	): CompiledQuery<T> {
 		// Binding CTEs and the final statement form one tree (ADR 0012): each
 		// binding body compiled from $1 is shifted after the bindings before it.
 		const ctes: Node[] = [];
 		const parameters: unknown[] = [];
-		const deps = this.buildCompileDeps(options);
+		const deps = this.buildCompileDeps(options, model);
 		const bindingNamesInOrder = removeShadowedNqlBindingNames(
 			orderedNqlBindingNames(bundle),
 			shadowingLocalCteNames(bundle),
@@ -3323,6 +3328,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 				// query-local authority, never declared model addresses.
 				const bindingDeps = this.buildCompileDeps(
 					options,
+					model,
 					bindingNames,
 					bindingProjections,
 				);
@@ -3383,6 +3389,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 			const compiled = this.compileNqlBundleLeafEnvelope(
 				bindingBundle,
 				options,
+				model,
 				new Set(bindingProjections.keys()),
 				bindingProjections,
 			);
@@ -3447,6 +3454,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 		const compiledEnvelope = this.compileNqlBundleLeafEnvelope<T>(
 			leafBundle,
 			options,
+			model,
 			bindingNames,
 			bindingProjections,
 		);
@@ -3560,15 +3568,15 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 		plan: PlanReport | CompiledNqlQuery,
 		options?: CompileOptions,
 	): CompiledQuery<T> {
-		const opts = this.withCompileModel(options);
+		const model = this.requireCompileModel(options);
 		if (isCompiledNqlQuery(plan)) {
-			return this.compileNqlBundle<T>(plan, opts);
+			return this.compileNqlBundle<T>(plan, options, model);
 		}
 		assertPlannedReportAuthority(plan);
-		const deps = this.buildCompileDeps(opts);
-		this.assertDeclaredPlanReferences(plan, opts);
+		const deps = this.buildCompileDeps(options, model);
+		this.assertDeclaredPlanReferences(plan, options, model);
 		return guardCompiledQuery(
-			compileSelect<T>(plan, opts, deps),
+			compileSelect<T>(plan, options, deps),
 			'select plan',
 		);
 	}
@@ -3586,10 +3594,8 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 		expr: ExpressionIntent,
 		options?: CompileOptions,
 	): CompiledQuery<T> {
-		const opts = this.withCompileModel(options);
-		// This public path does not otherwise build compiler dependencies, so it
-		// must enter the same model/casing gate as every table-backed compiler.
-		const deps = this.buildCompileDeps(opts);
+		const model = this.requireCompileModel(options);
+		const deps = this.buildCompileDeps(options, model);
 		const schemaName = deps.schemaName;
 		const dialectCapabilities = deps.dialectCapabilities;
 		const state = createCompilerState();
@@ -3609,12 +3615,12 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 				paramOffset: number,
 			): CompileSubqueryResult {
 				const issued = planFn(query, deps.model, {
-					...(opts.defaultFilters && {
-						defaultFilters: opts.defaultFilters,
+					...(options?.defaultFilters && {
+						defaultFilters: options.defaultFilters,
 					}),
 					...(dialectCapabilities !== undefined && { dialectCapabilities }),
 				});
-				const envelope = compileSelectEnvelope(issued, opts, deps);
+				const envelope = compileSelectEnvelope(issued, options, deps);
 				if (envelope.ast === undefined)
 					throw new Error('A planned selectExpression body produced no AST.');
 				return {
@@ -3654,11 +3660,11 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 	 * - rows > batchThreshold OR batchThreshold === 0: SELECT unnest($1::type[]),...
 	 */
 	compileInsert(intent: InsertIntent, options?: CompileOptions): CompiledQuery {
-		const opts = this.withCompileModel(options);
+		const model = this.requireCompileModel(options);
 		const rowShape = inspectMutationRows(intent.values ?? [], {
 			operation: 'insert',
 		});
-		validateMutationRowCount('insert', intent.values ?? [], opts);
+		validateMutationRowCount('insert', intent.values ?? [], options);
 		this.assertDeclaredMutationReferences(
 			intent.table,
 			[
@@ -3667,10 +3673,16 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 					intent.returning ??
 					[]),
 			],
-			opts,
+			options,
+			model,
 		);
 		return guardCompiledQuery(
-			compileInsertImpl(intent, opts, this.buildCompileDeps(opts), rowShape),
+			compileInsertImpl(
+				intent,
+				options,
+				this.buildCompileDeps(options, model),
+				rowShape,
+			),
 			'insert',
 		);
 	}
@@ -3683,7 +3695,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 		intent: InsertFromIntent,
 		options?: CompileOptions,
 	): CompiledQuery {
-		const opts = this.withCompileModel(options);
+		const model = this.requireCompileModel(options);
 		this.assertDeclaredMutationReferences(
 			intent.table,
 			[
@@ -3692,17 +3704,23 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 					intent.returning ??
 					[]),
 			],
-			opts,
+			options,
+			model,
 		);
 		if (intent.sourceQuery === undefined) {
 			this.assertDeclaredMutationReferences(
 				intent.source,
 				intent.columns ?? [],
-				opts,
+				options,
+				model,
 			);
 		}
 		return guardCompiledQuery(
-			compileInsertFromImpl(intent, opts, this.buildCompileDeps(opts)),
+			compileInsertFromImpl(
+				intent,
+				options,
+				this.buildCompileDeps(options, model),
+			),
 			'insert from',
 		);
 	}
@@ -3711,7 +3729,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 	 * Compile an update intent to executable SQL.
 	 */
 	compileUpdate(intent: UpdateIntent, options?: CompileOptions): CompiledQuery {
-		const opts = this.withCompileModel(options);
+		const model = this.requireCompileModel(options);
 		this.assertDeclaredMutationReferences(
 			intent.table,
 			[
@@ -3720,10 +3738,11 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 					intent.returning ??
 					[]),
 			],
-			opts,
+			options,
+			model,
 		);
 		return guardCompiledQuery(
-			compileUpdateImpl(intent, opts, this.buildCompileDeps(opts)),
+			compileUpdateImpl(intent, options, this.buildCompileDeps(options, model)),
 			'update',
 		);
 	}
@@ -3741,9 +3760,13 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 		intent: BatchUpdateIntent,
 		options?: CompileOptions,
 	): CompiledQuery {
-		const opts = this.withCompileModel(options);
+		const model = this.requireCompileModel(options);
 		return guardCompiledQuery(
-			compileBatchUpdateImpl(intent, opts, this.buildCompileDeps(opts)),
+			compileBatchUpdateImpl(
+				intent,
+				options,
+				this.buildCompileDeps(options, model),
+			),
 			'batch update',
 		);
 	}
@@ -3752,16 +3775,17 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 	 * Compile a delete intent to executable SQL.
 	 */
 	compileDelete(intent: DeleteIntent, options?: CompileOptions): CompiledQuery {
-		const opts = this.withCompileModel(options);
+		const model = this.requireCompileModel(options);
 		this.assertDeclaredMutationReferences(
 			intent.table,
 			intent.returningItems?.map((item) => item.source) ??
 				intent.returning ??
 				[],
-			opts,
+			options,
+			model,
 		);
 		return guardCompiledQuery(
-			compileDeleteImpl(intent, opts, this.buildCompileDeps(opts)),
+			compileDeleteImpl(intent, options, this.buildCompileDeps(options, model)),
 			'delete',
 		);
 	}
@@ -3770,12 +3794,12 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 	 * Compile an upsert intent to executable SQL (DX-026).
 	 */
 	compileUpsert(intent: UpsertIntent, options?: CompileOptions): CompiledQuery {
-		const opts = this.withCompileModel(options);
+		const model = this.requireCompileModel(options);
 		const rowShape = inspectMutationRows(intent.values ?? [], {
 			operation: 'upsert',
 			homogeneous: true,
 		});
-		validateMutationRowCount('upsert', intent.values ?? [], opts);
+		validateMutationRowCount('upsert', intent.values ?? [], options);
 		const conflictColumns =
 			'columns' in intent.onConflict ? intent.onConflict.columns : [];
 		const actionColumns =
@@ -3792,10 +3816,16 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 					intent.returning ??
 					[]),
 			],
-			opts,
+			options,
+			model,
 		);
 		return guardCompiledQuery(
-			compileUpsertImpl(intent, opts, this.buildCompileDeps(opts), rowShape),
+			compileUpsertImpl(
+				intent,
+				options,
+				this.buildCompileDeps(options, model),
+				rowShape,
+			),
 			'upsert',
 		);
 	}
@@ -3808,7 +3838,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 		intent: UpsertFromIntent,
 		options?: CompileOptions,
 	): CompiledQuery {
-		const opts = this.withCompileModel(options);
+		const model = this.requireCompileModel(options);
 		this.assertDeclaredMutationReferences(
 			intent.table,
 			[
@@ -3818,17 +3848,23 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 					intent.returning ??
 					[]),
 			],
-			opts,
+			options,
+			model,
 		);
 		if (intent.sourceQuery === undefined) {
 			this.assertDeclaredMutationReferences(
 				intent.source,
 				intent.columns ?? [],
-				opts,
+				options,
+				model,
 			);
 		}
 		return guardCompiledQuery(
-			compileUpsertFromImpl(intent, opts, this.buildCompileDeps(opts)),
+			compileUpsertFromImpl(
+				intent,
+				options,
+				this.buildCompileDeps(options, model),
+			),
 			'upsert from',
 		);
 	}
@@ -3842,13 +3878,13 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 		model: ModelIR,
 		options?: CompileOptions,
 	): CompiledQuery<T> {
-		const compileOptions: ModelCompileOptions = { ...options, model };
+		const compileOptions: CompileOptions = { ...options, model };
 		return guardCompiledQuery(
 			compileRecursiveImpl<T>(
 				report,
 				model,
 				compileOptions,
-				this.buildCompileDeps(compileOptions),
+				this.buildCompileDeps(compileOptions, model),
 			),
 			'recursive query',
 		);
@@ -3865,9 +3901,13 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 		intent: CteQueryIntent,
 		options?: CompileOptions,
 	): CompiledQuery<T> {
-		const opts = this.withCompileModel(options);
+		const model = this.requireCompileModel(options);
 		return guardCompiledQuery(
-			compileCteQueryImpl<T>(intent, opts, this.buildCompileDeps(opts)),
+			compileCteQueryImpl<T>(
+				intent,
+				options,
+				this.buildCompileDeps(options, model),
+			),
 			'CTE query',
 		);
 	}
@@ -3901,6 +3941,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 			};
 			const deps = this.buildCompileDeps(
 				leafOptions,
+				model,
 				bindingNames,
 				bindingProjections,
 			);
@@ -7194,9 +7235,10 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 	private assertDeclaredMutationReferences(
 		table: string,
 		columns: readonly string[],
-		options: ModelCompileOptions,
+		options: CompileOptions | undefined,
+		model: ModelIR,
 	): void {
-		const names = this.buildCompileDeps(options).declaredNames;
+		const names = this.buildCompileDeps(options, model).declaredNames;
 		if (names === undefined) return;
 		if (names.table(table) === undefined) {
 			throw new Error(
@@ -7215,7 +7257,8 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 
 	private assertDeclaredPlanReferences(
 		plan: PlanReport,
-		options: ModelCompileOptions,
+		options: CompileOptions | undefined,
+		model: ModelIR,
 	): void {
 		// The root of a BatchValues plan is an unnest range variable, not a
 		// model-backed relation. Its alias and output columns are query-local.
@@ -7223,7 +7266,7 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 		// The check classifies identifiers from the report's intent; a report
 		// without one carries no address to check.
 		if (plan.intent === undefined) return;
-		const names = this.buildCompileDeps(options).declaredNames;
+		const names = this.buildCompileDeps(options, model).declaredNames;
 		if (names === undefined) return;
 		const rootTable = plan.intent?.from ?? plan.rootTable;
 		if (names.table(rootTable) === undefined) {

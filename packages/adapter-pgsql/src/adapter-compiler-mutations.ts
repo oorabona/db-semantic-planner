@@ -196,7 +196,7 @@ function compileMutationEnvelope(
 		parameters: state.parameters,
 		ast,
 		rootTable,
-		model: options?.model ?? deps.model,
+		model: deps.model,
 		...(deps.declaredNames !== undefined && {
 			declaredNames: deps.declaredNames,
 		}),
@@ -791,7 +791,6 @@ export function compileInsertFrom(
  * Resolve a mutation WHERE through core's root condition resolver, as a SELECT
  * WHERE is, and return a compiler for it. Mutations stay unfiltered: no default
  * filters are applied; a builder nested in the WHERE keeps its own policy.
- * Without a model the old route is kept (undefined).
  */
 function resolvedMutationWhere(
 	where: WhereIntent | undefined,
@@ -1023,8 +1022,7 @@ export function compileDelete(
 	const ctx = mutationContext(deps, intent.table, MAX_DEPTH_LIMIT);
 	const state = createCompilerState();
 
-	// Resolve exists/notExists relation name → real table name before compiling.
-	// The mutation path bypasses the planner, so we must resolve targetTable here.
+	// Core's root condition resolver resolves the WHERE, relations included.
 	const whereCompiler = resolvedMutationWhere(intent.where, intent.table, deps);
 
 	const config: DeleteConfig = {

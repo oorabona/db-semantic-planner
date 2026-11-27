@@ -2801,6 +2801,37 @@ describe('compile without a model', () => {
 		});
 	});
 
+	it("keeps the caller's compile options, inherited getters included", () => {
+		class TenantOptions {
+			get schemaName() {
+				return 'tenant_a';
+			}
+		}
+		expect(
+			withModel.compileUpdate(
+				{
+					type: 'update',
+					table: 'users',
+					set: { name: 'x' },
+					where: eq('id', 1),
+				},
+				new TenantOptions(),
+			).sql,
+		).toBe('UPDATE tenant_a.users SET name = $1 WHERE users.id = $2');
+	});
+
+	it('reads the compile options model once per call', () => {
+		let reads = 0;
+		const options = {
+			get model() {
+				reads += 1;
+				return model;
+			},
+		};
+		noModel.compileSelectExpression({ kind: 'literal', value: 1 }, options);
+		expect(reads).toBe(1);
+	});
+
 	it("derives upsertFrom columns from the adapter's model", () => {
 		const expected =
 			'INSERT INTO users (id, name, score) SELECT imports.id AS id, imports.name AS name, imports.score AS score FROM imports ON CONFLICT (id) DO UPDATE SET name = excluded.name, score = excluded.score';
