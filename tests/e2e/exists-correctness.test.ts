@@ -698,11 +698,16 @@ describe('a typed ref inside a body reads its origin range on real rows (#1014)'
 	it('AC15 chain-every: every(users.posts, () => users.posts.published) keeps Case 10 users', async () => {
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ model: existsCorrectnessModel, adapter });
-		const { users } = orm.tables;
+		// A model-only ORM types its TableRefs loosely; the relation is declared in the model.
+		const users = orm.tables.users as unknown as {
+			posts: Parameters<typeof every>[0] & {
+				published: Parameters<typeof eq>[0];
+			};
+		};
 		const rows = (await orm
 			.withSchema(SCHEMA)
 			.select('users')
-			.where(every(users.posts!, () => eq(users.posts!.published!, true)))
+			.where(every(users.posts, () => eq(users.posts.published, true)))
 			.columns(['id', 'name'])
 			.execute()) as Array<{ id: number; name: string }>;
 		// The path binds the quantifier's own post: every post published (Case 10).
@@ -712,11 +717,16 @@ describe('a typed ref inside a body reads its origin range on real rows (#1014)'
 	it('AC15 outer-traversal: a users path inside exists(comments) reads the outer user', async () => {
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ model: existsCorrectnessModel, adapter });
-		const { users } = orm.tables;
+		// A model-only ORM types its TableRefs loosely; the relation is declared in the model.
+		const users = orm.tables.users as unknown as {
+			posts: Parameters<typeof every>[0] & {
+				published: Parameters<typeof eq>[0];
+			};
+		};
 		const rows = (await orm
 			.withSchema(SCHEMA)
 			.select('users')
-			.where(exists('comments', { where: eq(users.posts!.published!, true) }))
+			.where(exists('comments', { where: eq(users.posts.published, true) }))
 			.columns(['id', 'name'])
 			.execute()) as Array<{ id: number; name: string }>;
 		// Commenters (Case 9 seed: Alice, Bob, Dave, Eve) with a published post (Case 1: Alice, Bob, Carol).
