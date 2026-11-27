@@ -8,6 +8,7 @@
  */
 
 import {
+	aggOrderBy,
 	any,
 	array,
 	arrayAgg,
@@ -18,6 +19,7 @@ import {
 	distinct,
 	ExpressionRef,
 	eq,
+	exists,
 	exprRef,
 	fn,
 	gt,
@@ -30,6 +32,7 @@ import {
 	lead,
 	like,
 	literal,
+	manyToMany,
 	NotYetSupportedError,
 	namedArg,
 	op,
@@ -41,6 +44,7 @@ import {
 	SubqueryExpression,
 	schema,
 	sql,
+	star,
 	subquery,
 	unary,
 	wAvg,
@@ -1564,9 +1568,11 @@ describe('subquery fields and selectExpression leaves (ADR 0011 delivery 6)', ()
 		]);
 	});
 
-	it('AC14 selectExpression leaves: columns, constants, subqueries and expressions', () => {
-		// 'title' and posts.title compile to text PostgreSQL rejects in a FROM-less SELECT (#1002).
-		expect(sel('title')).toEqual(['SELECT title', []]);
+	it('AC14 selectExpression leaves: constants, subqueries and expressions; columns are refused', () => {
+		// A FROM-less SELECT has no row: a column leaf is refused by name (#1002).
+		const noRow = (column: string) =>
+			`selectExpression() cannot read column '${column}'; a FROM-less SELECT has no row. Use a value, param(), literal() or an uncorrelated subquery.`;
+		expect(() => sel('title')).toThrow(noRow('title'));
 		expect(sel(2)).toEqual(['SELECT 2', []]);
 		expect(sel(true)).toEqual(['SELECT true', []]);
 		expect(sel(3n)).toEqual(['SELECT 3', []]);
@@ -1579,12 +1585,11 @@ describe('subquery fields and selectExpression leaves (ADR 0011 delivery 6)', ()
 			'SELECT (SELECT count(*) FROM posts)',
 			[],
 		]);
-		expect(sel(posts.title)).toEqual(['SELECT posts.title', []]);
-		expect(sel(exprRef('title'))).toEqual(['SELECT title', []]);
-		expect(sel(fn('lower', exprRef('title')))).toEqual([
-			'SELECT lower(title)',
-			[],
-		]);
+		expect(() => sel(posts.title)).toThrow(
+			"selectExpression qualifier 'posts' is not visible in this query.",
+		);
+		expect(() => sel(exprRef('title'))).toThrow(noRow('title'));
+		expect(() => sel(fn('lower', exprRef('title')))).toThrow(noRow('title'));
 		expect(sel(param('x'))).toEqual(['SELECT $1', ['x']]);
 	});
 
@@ -1708,8 +1713,7 @@ describe('subquery fields and selectExpression leaves (ADR 0011 delivery 6)', ()
 			'Invalid selectExpression: sql() is only accepted in set(), values(), doUpdate() and batchSet().set(); use literal(), param() or an expression here',
 		);
 		// A select builder is a scalar subquery here (ADR 0011 delivery 5); any
-		// other builder is refused by name. The FROM-less route has no arity check
-		// yet (#1104).
+		// other builder is refused by name.
 		expect(sel(orm.select('posts').count({ as: 'n' }))).toEqual([
 			'SELECT (SELECT count(*) AS n FROM posts)',
 			[],
@@ -2155,5 +2159,416 @@ describe('subquery leaves (ADR 0011 delivery 5)', () => {
 				.where(sq.toWhereIntent('id', 'eq'))
 				.dump(),
 		).toThrow(NO_PROJECTION);
+	});
+});
+
+// ============================================================================
+// orm.selectExpression() resolves its whole expression through core (#1002)
+// ============================================================================
+
+describe('FROM-less selectExpression resolved by core (#1002)', () => {
+	const filteredDb = schema(
+		{
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'text',
+				score: 'integer',
+			},
+			tags: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'text',
+				score: 'integer',
+			},
+			postTags: { postId: ref('posts'), tagId: ref('tags') },
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'text',
+				score: 'integer',
+				title: 'text',
+				authorId: ref('users', { as: 'author', inverse: 'posts' }),
+			},
+		},
+		undefined,
+		{
+			defaultFilters: { posts: eq('score', 0) },
+			relations: {
+				posts: {
+					tags: manyToMany('tags', {
+						through: 'postTags',
+						inverse: 'posts',
+						sourceForeignKey: ['postId'],
+						targetForeignKey: ['tagId'],
+					}),
+				},
+			},
+		},
+	);
+	const orm = createOrm({
+		schema: filteredDb,
+		adapter: createPgCompileOnlyAdapter({ model: filteredDb.model }),
+		suppressDxWarnings: true,
+	});
+	const posts = orm.tables.posts;
+	const sel = (expr: unknown) => {
+		const r = orm.selectExpression(expr as never);
+		return [r.sql, r.parameters];
+	};
+	const cw = (condition: unknown) =>
+		caseWhen(condition as never, literal(1))
+			.else(literal(0))
+			.as('f');
+	const read = (what: string) =>
+		`selectExpression() cannot read ${what}; a FROM-less SELECT has no row. Use a value, param(), literal() or an uncorrelated subquery.`;
+	const refusal = (expr: unknown): string => {
+		try {
+			sel(expr);
+		} catch (error) {
+			expect((error as Error).constructor).toBe(Error);
+			return (error as Error).message;
+		}
+		throw new Error('expected a refusal');
+	};
+
+	it('refuses every column read of a FROM-less SELECT', () => {
+		const column = (name: string) => read(`column '${name}'`);
+		expect(refusal(cw(eq('score', 1)))).toBe(column('score'));
+		expect(refusal(fn('count', star()).filter(eq('score', 1)).as('n'))).toBe(
+			column('score'),
+		);
+		expect(refusal(fn('upper', 'name').as('u'))).toBe(column('name'));
+		expect(refusal(op('+', exprRef('score'), literal(1)).as('v'))).toBe(
+			column('score'),
+		);
+		expect(refusal(fn('sum', 'score').as('n'))).toBe(column('score'));
+		expect(
+			refusal(
+				subquery('posts')
+					.select('id')
+					.where(eq('id', outerRef('id')))
+					.asExpr('v'),
+			),
+		).toBe(column('id'));
+		expect(refusal('title')).toBe(column('title'));
+		expect(refusal(exprRef('title'))).toBe(column('title'));
+		expect(refusal(cw(inSubquery('id', subquery('posts').select('id'))))).toBe(
+			column('id'),
+		);
+		expect(refusal(fn('array_agg', literal(1), aggOrderBy('id')))).toBe(
+			column('id'),
+		);
+		expect(refusal(exprRef('a\nb'))).toBe(column('a\\nb'));
+		// A qualifier that names no range fails before the row is read.
+		expect(refusal(posts.title)).toBe(
+			"selectExpression qualifier 'posts' is not visible in this query.",
+		);
+	});
+
+	it('refuses a star that is not directly a call argument', () => {
+		const star_ = read("column '*'");
+		expect(refusal(star())).toBe(star_);
+		expect(
+			refusal(
+				caseWhen(eq(literal(1), 1), star())
+					.else(literal(0))
+					.as('f'),
+			),
+		).toBe(star_);
+		expect(refusal(op('+', star(), literal(1)).as('v'))).toBe(star_);
+		expect(refusal(cw(eq(star(), 1)))).toBe(star_);
+		expect(refusal(fn('count', star()).filter(eq(star(), 1)).as('n'))).toBe(
+			star_,
+		);
+		expect(refusal(cast(star(), 'int'))).toBe(star_);
+		expect(refusal(fn('f', array(star())))).toBe(star_);
+		expect(refusal(fn('f', namedArg('x', star())))).toBe(star_);
+		expect(refusal(caseWhen(eq(literal(1), 1), literal(1)).else(star()))).toBe(
+			star_,
+		);
+		expect(refusal(cw(eq(literal(1), star())))).toBe(star_);
+		// A star directly a call argument is left to the database.
+		expect(sel(fn('count', star()).as('n'))).toEqual([
+			'SELECT count(*) AS n',
+			[],
+		]);
+		expect(sel(fn('upper', star()))).toEqual(['SELECT upper(*)', []]);
+	});
+
+	it('refuses every relation read of a FROM-less SELECT', () => {
+		const relation = (name: string) => read(`relation '${name}'`);
+		expect(refusal(cw(eq(posts.author.name, 'x')))).toBe(relation('author'));
+		expect(refusal(cw(exists('posts', { where: eq('title', 'x') })))).toBe(
+			relation('posts'),
+		);
+		expect(refusal(fn('count', star()).filter(exists('tags')).as('n'))).toBe(
+			relation('tags'),
+		);
+		expect(refusal(cw(eq('posts.score', 1)))).toBe(relation('posts'));
+	});
+
+	it('compiles CASE and FILTER bodies as planned filtered reads', () => {
+		expect(
+			sel(
+				cw(rawExists(subquery('posts').select('id').where(eq('title', 'x')))),
+			),
+		).toEqual([
+			'SELECT CASE WHEN EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.title = $1 AND posts_sq.score = $2) THEN 1 ELSE 0 END AS f',
+			['x', 0],
+		]);
+		expect(
+			sel(cw(rawExists(orm.select('posts').where(eq('title', 'x'))))),
+		).toEqual([
+			'SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_sq WHERE posts_sq.title = $1 AND posts_sq.score = $2) THEN 1 ELSE 0 END AS f',
+			['x', 0],
+		]);
+		expect(sel(cw(gt(subquery('posts').count().asExpr('n'), 0)))).toEqual([
+			'SELECT CASE WHEN (SELECT count(*) FROM posts WHERE posts.score = $1) > $2 THEN 1 ELSE 0 END AS f',
+			[0, 0],
+		]);
+		expect(
+			sel(
+				fn('count', star())
+					.filter(rawExists(subquery('posts').select('id')))
+					.as('n'),
+			),
+		).toEqual([
+			'SELECT count(*) FILTER (WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1)) AS n',
+			[0],
+		]);
+		expect(
+			sel(
+				caseWhen(eq(literal(1), 1), subquery('posts').count().asExpr('n'))
+					.else(literal(0))
+					.as('f'),
+			),
+		).toEqual([
+			'SELECT CASE WHEN 1 = $1 THEN (SELECT count(*) FROM posts WHERE posts.score = $2) ELSE 0 END AS f',
+			[1, 0],
+		]);
+		expect(
+			sel(
+				fn(
+					'coalesce',
+					fn('count', star()).filter(rawExists(subquery('posts').select('id'))),
+					literal(0),
+				).as('n'),
+			),
+		).toEqual([
+			'SELECT "coalesce"(count(*) FILTER (WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq.score = $1)), 0) AS n',
+			[0],
+		]);
+		// An IN body nested in a predicate body reads the filters in force.
+		expect(
+			sel(
+				cw(
+					rawExists(
+						subquery('users')
+							.select('id')
+							.where(inSubquery('id', subquery('posts').select('authorId'))),
+					),
+				),
+			),
+		).toEqual([
+			'SELECT CASE WHEN EXISTS (SELECT users_sq.id FROM users AS users_sq WHERE users_sq.id = ANY (SELECT posts_subq_0."authorId" FROM posts AS posts_subq_0 WHERE posts_subq_0.score = $1)) THEN 1 ELSE 0 END AS f',
+			[0],
+		]);
+		// A builder's own policy wins over the filters in force.
+		expect(
+			sel(
+				cw(
+					rawExists(
+						orm.select('posts').withoutDefaultFilters().where(eq('title', 'x')),
+					),
+				),
+			),
+		).toEqual([
+			'SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_sq WHERE posts_sq.title = $1) THEN 1 ELSE 0 END AS f',
+			['x'],
+		]);
+	});
+
+	it('compiles constant CASE conditions', () => {
+		expect(sel(cw(eq(literal(1), 1)))).toEqual([
+			'SELECT CASE WHEN 1 = $1 THEN 1 ELSE 0 END AS f',
+			[1],
+		]);
+		expect(sel(cw(eq(param(1), 1)))).toEqual([
+			'SELECT CASE WHEN $1 = $2 THEN 1 ELSE 0 END AS f',
+			[1, 1],
+		]);
+	});
+
+	it('refuses a scalar body that does not project one column', () => {
+		// posts declares five columns: id, name, score, title, authorId.
+		const arity = (n: number) =>
+			`scalar subquery body projects ${n} columns; a scalar subquery yields one value.`;
+		expect(() =>
+			sel(
+				new SubqueryExpression({ type: 'select', from: 'posts' }).asExpr('v'),
+			),
+		).toThrow(arity(5));
+		expect(() =>
+			sel(
+				new SubqueryExpression({
+					type: 'select',
+					from: 'posts',
+					select: { type: 'fields', fields: ['id', 'title'] },
+				}).asExpr('v'),
+			),
+		).toThrow(arity(2));
+		expect(() => sel(orm.select('posts'))).toThrow(arity(5));
+		expect(() =>
+			sel(
+				caseWhen(
+					eq(literal(1), 1),
+					new SubqueryExpression({
+						type: 'select',
+						from: 'posts',
+						select: { type: 'fields', fields: ['id', 'title'] },
+					}).asExpr('x'),
+				)
+					.else(literal(0))
+					.as('f'),
+			),
+		).toThrow(arity(2));
+		const emptyDb = schema({ empty: {} });
+		const emptyOrm = createOrm({
+			schema: emptyDb,
+			adapter: createPgCompileOnlyAdapter({ model: emptyDb.model }),
+			suppressDxWarnings: true,
+		});
+		expect(() =>
+			emptyOrm.selectExpression(
+				new SubqueryExpression({ type: 'select', from: 'empty' }).asExpr('v'),
+			),
+		).toThrow(arity(0));
+	});
+
+	it('keeps the FROM-less forms that read no row', () => {
+		expect(sel(fn('count', star()).as('n'))).toEqual([
+			'SELECT count(*) AS n',
+			[],
+		]);
+		expect(sel(subquery('posts').count().asExpr('n'))).toEqual([
+			'SELECT (SELECT count(*) FROM posts WHERE posts.score = $1) AS n',
+			[0],
+		]);
+		expect(
+			sel(orm.select('posts').columns(['id']).limit(1).forUpdate().asExpr('v')),
+		).toEqual([
+			'SELECT (SELECT posts.id FROM posts WHERE posts.score = $1 LIMIT 1 FOR UPDATE) AS v',
+			[0],
+		]);
+		expect(
+			sel(
+				orm
+					.select('posts')
+					.columns(['score'])
+					.groupBy(['score'])
+					.limit(1)
+					.asExpr('v'),
+			),
+		).toEqual([
+			'SELECT (SELECT posts.score FROM posts WHERE posts.score = $1 GROUP BY posts.score LIMIT 1) AS v',
+			[0],
+		]);
+		expect(sel(fn('nextval', literal('my_seq')))).toEqual([
+			"SELECT nextval('my_seq')",
+			[],
+		]);
+		expect(
+			sel(op('+', subquery('posts').count().asExpr('n'), literal(1)).as('v')),
+		).toEqual([
+			'SELECT (SELECT count(*) FROM posts WHERE posts.score = $1) + 1 AS v',
+			[0],
+		]);
+		const scoped = orm
+			.withSchema('t1')
+			.selectExpression(subquery('posts').count().asExpr('n'));
+		expect([scoped.sql, scoped.parameters]).toEqual([
+			'SELECT (SELECT count(*) FROM t1.posts WHERE posts.score = $1) AS n',
+			[0],
+		]);
+		expect(
+			sel(
+				orm
+					.select('users')
+					.columns(['id'])
+					.where(
+						rawExists(
+							subquery('posts')
+								.select('id')
+								.where(eq('authorId', outerRef('id'))),
+						),
+					)
+					.limit(1)
+					.asExpr('v'),
+			),
+		).toEqual([
+			'SELECT (SELECT users.id FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq WHERE posts_sq."authorId" = users.id AND posts_sq.score = $1) LIMIT 1) AS v',
+			[0],
+		]);
+	});
+
+	it('qualifies FROM-less bodies by schema and casing', () => {
+		const scoped = orm
+			.withSchema('t1')
+			.selectExpression(cw(rawExists(subquery('posts').select('id'))));
+		expect([scoped.sql, scoped.parameters]).toEqual([
+			'SELECT CASE WHEN EXISTS (SELECT posts_sq.id FROM t1.posts AS posts_sq WHERE posts_sq.score = $1) THEN 1 ELSE 0 END AS f',
+			[0],
+		]);
+		const plainDb = schema({
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'text',
+				score: 'integer',
+			},
+			tags: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'text',
+				score: 'integer',
+			},
+			postTags: { postId: ref('posts'), tagId: ref('tags') },
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'text',
+				score: 'integer',
+				title: 'text',
+				authorId: ref('users', { as: 'author', inverse: 'posts' }),
+			},
+		});
+		const snake = createOrm({
+			schema: plainDb,
+			adapter: createPgCompileOnlyAdapter({
+				model: plainDb.model,
+				dbCasing: 'snake_case',
+			}),
+			suppressDxWarnings: true,
+		});
+		const body = subquery('posts').select('authorId').where(eq('authorId', 1));
+		const predicate = snake.selectExpression(cw(rawExists(body)));
+		expect([predicate.sql, predicate.parameters]).toEqual([
+			'SELECT CASE WHEN EXISTS (SELECT posts_sq.author_id FROM posts AS posts_sq WHERE posts_sq.author_id = $1) THEN 1 ELSE 0 END AS f',
+			[1],
+		]);
+		const scalar = snake.selectExpression(body.asExpr('a'));
+		expect([scalar.sql, scalar.parameters]).toEqual([
+			'SELECT (SELECT posts.author_id FROM posts WHERE posts.author_id = $1) AS a',
+			[1],
+		]);
+	});
+
+	it('refuses an expression kind the resolver does not model', () => {
+		const adapter = createPgCompileOnlyAdapter({ model: filteredDb.model });
+		expect(() =>
+			adapter.compileSelectExpression({
+				kind: 'jsonExtract',
+				field: 'data',
+				path: ['a'],
+				mode: 'json',
+			}),
+		).toThrow(
+			"compileExpressionIntent: unsupported expression kind 'jsonExtract'",
+		);
 	});
 });

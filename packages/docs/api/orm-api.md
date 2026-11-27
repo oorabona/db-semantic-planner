@@ -889,6 +889,35 @@ const users = await orm.select('users')
 // SQL: SELECT id, name, (SELECT count(*) FROM posts WHERE author_id = users.id) AS post_count FROM users
 ```
 
+### `selectExpression()` — FROM-less SELECT
+
+`orm.selectExpression(expr)` compiles `SELECT <expr>` with no FROM clause, for values that read no table row: a sequence, a function, a constant, or a subquery.
+
+- A FROM-less SELECT has no row. A column or relation read outside a subquery body is refused by name: `selectExpression() cannot read column 'title'; a FROM-less SELECT has no row. Use a value, param(), literal() or an uncorrelated subquery.` (or `relation '<name>'`). Inside a condition such as `eq('posts.title', …)`, a dotted string is a relation path and is reported as `relation 'posts'`; a dotted expression leaf (`selectExpression('posts.title')`, a typed `ColumnRef`) is refused with `selectExpression qualifier 'posts' is not visible in this query.` A `star()` outside a function argument is refused the same way; `count(*)` is accepted.
+- Subquery bodies, including those inside CASE WHEN and aggregate FILTER conditions, compile as in any read: the schema's default filters apply to their scans, and a builder's own policy (`withoutDefaultFilters()`) wins.
+- An aggregate aggregates the single implicit row of a FROM-less SELECT: `count(*)` is always `1`, and `count(*) FILTER (WHERE …)` is `1` or `0`. To count rows, use a scalar subquery such as `subquery('posts').count().asExpr('n')`.
+
+```typescript
+import { exprRef, subquery } from '@dbsp/core';
+
+// A scalar subquery counts rows; its body is planned like any read.
+const counted = orm.selectExpression(subquery('posts').count().asExpr('n'));
+if (counted.sql !== 'SELECT (SELECT count(*) FROM posts) AS n') {
+  throw new Error(`selectExpression() did not compile as expected: ${counted.sql}`);
+}
+
+// A column read has no row to read from and is refused by name.
+let refusal = '';
+try {
+  orm.selectExpression(exprRef('title'));
+} catch (error) {
+  refusal = (error as Error).message;
+}
+if (!refusal.startsWith("selectExpression() cannot read column 'title'")) {
+  throw new Error(`selectExpression() did not refuse the column read: ${refusal}`);
+}
+```
+
 ### Set Operations
 
 Combine query results with UNION, INTERSECT, or EXCEPT. All variants support the `All` suffix (e.g., `.unionAll()`) to preserve duplicates.

@@ -536,7 +536,11 @@ export interface CompilingAdapter extends BaseAdapter {
 		options?: CompileOptions,
 	): CompiledQuery<T>;
 
-	/** Compile a FROM-less SELECT expression to SQL (e.g. SELECT nextval('seq')). */
+	/**
+	 * Compile a FROM-less SELECT expression to SQL (e.g. SELECT nextval('seq')).
+	 * The expression has no row: a column or relation read outside a subquery
+	 * body is refused.
+	 */
 	compileSelectExpression<T = unknown>(
 		expr: ExpressionIntent,
 		options?: CompileOptions,

@@ -3573,6 +3573,10 @@ export class PgAdapter<DB = unknown> implements Adapter<DB> {
 	 * Produces: SELECT <expr>
 	 * Example: SELECT nextval('my_seq')
 	 *
+	 * Core resolves the whole expression (`resolveFromlessExpression`): a
+	 * column or relation read outside a subquery body is refused, and each
+	 * body compiles as in a read, with the default filters in force.
+	 *
 	 * @param expr - ExpressionIntent to evaluate
 	 * @returns Compiled SQL and parameters
 	 */
