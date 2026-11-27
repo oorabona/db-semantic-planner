@@ -742,9 +742,10 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 * such as sequence functions, date functions, or scalar computations.
 	 *
 	 * @param expr - A reference leaf (ADR 0011): an expression from fn(), op(),
-	 *   literal(), etc., a subquery, a constant (inlined) or a column name. A
-	 *   column reference has no row to read in a FROM-less SELECT. An alias set
-	 *   with `.as()` or `.asExpr()` names the result column.
+	 *   literal(), etc., a subquery or a constant (inlined). A FROM-less SELECT
+	 *   has no row: a column or relation read outside a subquery body is
+	 *   refused, and subquery bodies read the default filters as any read does.
+	 *   An alias set with `.as()` or `.asExpr()` names the result column.
 	 * @returns An object with `sql`, `parameters`, and `execute()` method.
 	 *
 	 * @example

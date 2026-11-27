@@ -100,11 +100,12 @@ describe('compileExpressionIntent', () => {
 		it('escapes a newline in a rejected custom operator', () => {
 			// op() refuses the newline in core; only a raw intent reaches the
 			// adapter's own guard, through the public compileSelectExpression().
+			// Both operands are values: a FROM-less select refuses a column first.
 			expect(() =>
 				adapter.compileSelectExpression({
 					kind: 'customOp',
 					operator: 'invalid\nFAKE',
-					left: { kind: 'ref', column: 'a' },
+					left: { kind: 'param', value: 2 },
 					right: { kind: 'param', value: 1 },
 				}),
 			).toThrow(

@@ -109,6 +109,7 @@ export {
 } from './planner.js';
 export { getRelationalReadPlan } from './relational-read-plans.js';
 export {
+	resolveFromlessExpression,
 	resolveSelectWhere,
 	resolveValueExpression,
 } from './resolved-conditions.js';

@@ -11,6 +11,7 @@ import {
 	outerRef,
 	plan,
 	type QueryIntent,
+	rawExists,
 	ref,
 	SubqueryExpression,
 	schema,
@@ -106,6 +107,39 @@ describe('default filters on physical read scans', () => {
 			.selectExpression(count)
 			.execute();
 		expect(Object.values(unfiltered[0] as object)).toEqual(['4']);
+	});
+	it('applies default filters to CASE and FILTER bodies of selectExpression', async () => {
+		const orm = await makeOrm();
+		const value = async (expr: unknown) =>
+			Object.values(
+				(await orm.selectExpression(expr as never).execute())[0] as object,
+			);
+		const flag = (condition: unknown) =>
+			caseWhen(condition as never, literal(1))
+				.else(literal(0))
+				.as('f');
+		// Two visible posts (titled 'live'), two filtered ones (titled 'hidden').
+		expect(
+			await value(flag(gt(subquery('posts').count().asExpr('n'), 1))),
+		).toEqual([1]);
+		expect(
+			await value(
+				flag(
+					rawExists(
+						subquery('posts').select('id').where(eq('title', 'hidden')),
+					),
+				),
+			),
+		).toEqual([0]);
+		expect(await value(subquery('posts').count().asExpr('n'))).toEqual(['2']);
+		// A FROM-less aggregate aggregates its one implicit row.
+		expect(
+			await value(
+				fn('count', star())
+					.filter(rawExists(subquery('posts').select('id')))
+					.as('n'),
+			),
+		).toEqual(['1']);
 	});
 	it('preserves a left-joined parent when its author is filtered out', async () => {
 		const orm = await makeOrm();
