@@ -89,8 +89,7 @@ function createScalarSubLink(
  * `buildPredicateSubquerySelect` builds its inner subCtx with no `outerAlias`, so
  * a scope:'outer' FieldRef would bind to the inner alias — producing wrong SQL.
  *
- * This check covers the case where `decision.subqueryIntent` is absent (a
- * directly-constructed handler decision) so `buildPredicateSubquerySelect`'s
+ * This check covers the case where `decision.subqueryIntent` is absent, so `buildPredicateSubquerySelect`'s
  * `containsOuterRef(sourceIntent.where)` check cannot see the correlation.
  *
  * @internal
@@ -135,11 +134,11 @@ function conditionsContainOuterFieldRef(
  *    checks `sourceIntent.where` for `outerRef()` nodes.
  * 2. This wrapper also checks the LOWERED `decision.conditions` for a
  *    `fieldRef(scope:'outer')` — covering the case where `subqueryIntent` is
- *    absent (directly-constructed decision) and the correlation is only visible
+ *    absent and the correlation is only visible
  *    in the post-lowering conditions, not in `sourceIntent.where`.
  *
- * DEFENSE-IN-DEPTH: when `decision.subqueryIntent` is absent (directly-constructed
- * Decision without provenance), we synthesize a minimal QueryIntent from the lowered
+ * DEFENSE-IN-DEPTH: when `decision.subqueryIntent` is absent (a Decision
+ * without provenance), we synthesize a minimal QueryIntent from the lowered
  * fields so the chokepoint can still validate structural modifier violations.
  */
 function buildScalarSubquery(
@@ -153,7 +152,7 @@ function buildScalarSubquery(
 	// Check the LOWERED decision.conditions for a fieldRef with scope:'outer'.
 	// This fires when convertSubquery (decisions path entry) already threw for
 	// outerRef() in the intent; this guard catches manually-constructed Decisions
-	// that bypass the entry point (directly-constructed handler decisions whose
+	// that bypass the entry point (handler decisions whose
 	// subqueryIntent is absent).
 	if (
 		decision.conditions &&
@@ -167,7 +166,7 @@ function buildScalarSubquery(
 	}
 
 	// Resolve source intent: prefer the carried provenance; synthesize from
-	// lowered fields as fallback for directly-constructed decisions.
+	// lowered fields as fallback for decisions without provenance.
 	const sourceIntent: import('@dbsp/types').QueryIntent =
 		decision.subqueryIntent ??
 		(decision.selectColumn

@@ -277,18 +277,15 @@ All values are parameterized using `$1`, `$2`, etc.:
 ## Usage
 
 ```typescript
-import {
-  PlanCompiler,
-  type CompilerOptions,
-  type CompiledResult,
-  type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
+import { createOrm, plan } from '@dbsp/core';
+import { createPgCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
-const options: CompilerOptions = { schema: 'public' };
-const report: SimplifiedPlanReport = { rootTable: 'users', decisions: [] };
-const compiler = new PlanCompiler(options);
-const result: CompiledResult = compiler.compile(report);
-console.log(result.sql, result.parameters);
+const adapter = createPgCompileOnlyAdapter({ model: db.model });
+const report = plan({ type: 'select', from: 'users' }, db.model);
+const { sql, params } = adapter.compile(report);
+// or through the ORM: createOrm({ schema: db, adapter }).select('users').dump()
 ```
 
-Public `adapter.compile()` accepts SELECT `PlanReport` objects only when planned by this loaded copy of dbsp (`plan()`, the ORM or NQL). Copies and serialized reports remain inspectable, but refuse before lowering. Plan the query with this loaded copy, or use `compilePlan` from `@dbsp/adapter-pgsql/internal` for decision-level compilation. See [Authored intent and execution authority](../docs/guide/observability.md#authored-intent-and-execution-authority).
+`PlanCompiler` is internal: the adapter builds its input from a planned report and does not export it.
+
+Public `adapter.compile()` accepts SELECT `PlanReport` objects only when planned by this loaded copy of dbsp (`plan()`, the ORM or NQL). Copies and serialized reports remain inspectable, but refuse before lowering. Plan the query with this loaded copy. A report without an intent is refused too. See [Authored intent and execution authority](../docs/guide/observability.md#authored-intent-and-execution-authority).

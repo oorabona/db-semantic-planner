@@ -1,4 +1,3 @@
-import { compilePlan } from '@dbsp/adapter-pgsql/internal';
 import {
 	and,
 	createOrm,
@@ -22,7 +21,6 @@ import {
 } from '@dbsp/core';
 import type { WhereIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { convertWhereCondition } from '../intent-to-decisions.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const testSchema = schema({
@@ -357,28 +355,4 @@ describe('#888 empty logical groups', () => {
 				expected[name]!.params,
 			);
 		});
-	for (const kind of ['and', 'or'] as const) {
-		for (const malformed of [
-			{ kind: 'range', field: 'id' },
-			{ kind: 'subquery', subquery: { type: 'select', from: 'posts' } },
-			{ kind: 'unknown' },
-		])
-			it(`${kind} with ${malformed.kind} null child keeps omission`, () => {
-				const condition = {
-					kind,
-					conditions: [malformed],
-				} as unknown as WhereIntent;
-				const decision = convertWhereCondition(condition, 'users');
-				expect(decision).toBeNull();
-				const result = compilePlan({
-					rootTable: 'users',
-					decisions: [
-						{ type: 'select', column: '*' },
-						...(decision ? [decision] : []),
-					],
-				});
-				expect(result.sql).toBe('SELECT * FROM users');
-				expect(result.parameters).toEqual([]);
-			});
-	}
 });

@@ -6,10 +6,6 @@
  */
 
 import {
-	compilePlan,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
-import {
 	createOrm,
 	type Dump,
 	eq,
@@ -23,7 +19,6 @@ import {
 } from '@dbsp/core';
 import { parseSync } from 'pgsql-parser';
 import { describe, expect, it } from 'vitest';
-import { normalizeSQL } from '../ast-helpers.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const db = schema({
@@ -65,24 +60,6 @@ function compiled(dump: Dump | MutationDump) {
 }
 
 describe('PlanCompiler', () => {
-	describe('SELECT queries', () => {
-		it('compiles SELECT with parameterized LIMIT/OFFSET', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'users',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{ type: 'limit', limit: { paramIndex: 1 } },
-					{ type: 'offset', offset: { paramIndex: 2 } },
-				],
-			};
-
-			const result = compilePlan(plan);
-
-			expect(result.sql).toContain('$1');
-			expect(result.sql).toContain('$2');
-		});
-	});
-
 	describe('INSERT queries', () => {
 		it('compiles INSERT with RETURNING', () => {
 			const dump = orm
@@ -221,32 +198,6 @@ describe('PlanCompiler', () => {
 	});
 
 	describe('IN (subquery) conditions', () => {
-		it('compiles WHERE field NOT IN (SELECT col FROM table)', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'orders',
-				decisions: [
-					{ type: 'select', column: '*' },
-					{
-						type: 'where',
-						column: 'customer_id',
-						operator: 'notIn',
-						subquery: {
-							from: 'blocked_customers',
-							select: 'id',
-						},
-					},
-				],
-			};
-
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			expect(normalized).toContain('<> all');
-			expect(normalized).toContain('select');
-			expect(normalized).toContain('blocked_customers');
-			expect(result.parameters).toHaveLength(0);
-		});
-
 		it('compiles WHERE field IN (SELECT col FROM table WHERE cond)', () => {
 			const { sql, params } = orm
 				.select('orders')
@@ -291,31 +242,6 @@ describe('PlanCompiler', () => {
 				sql: 'SELECT $1 * orders.balance AS negative_balance FROM orders',
 				params: [-1],
 			});
-		});
-	});
-
-	describe('selectPseudoColumn decisions', () => {
-		it('compiles pseudo-column (recursive traversal) via expression handler', () => {
-			const plan: SimplifiedPlanReport = {
-				rootTable: 'employees',
-				decisions: [
-					{
-						type: 'selectPseudoColumn',
-						traversal: 'ancestors',
-						column: 'name',
-						table: 'employees',
-						pkColumn: 'id',
-						alias: 'ancestor_names',
-					},
-				],
-			};
-
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			// Pseudo-column handler generates recursive CTE subquery
-			expect(normalized).toContain('recursive');
-			expect(normalized).toContain('employees');
 		});
 	});
 });

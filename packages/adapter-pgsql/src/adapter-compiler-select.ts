@@ -1050,7 +1050,7 @@ function buildSimplifiedPlanReport(
 export function assertPlannedReportAuthority(plan: PlanReport): void {
 	if (!isPlannedReport(plan)) {
 		throw new Error(
-			'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+			'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy',
 		);
 	}
 }
@@ -1065,6 +1065,11 @@ export function compileSelectEnvelope<T = unknown>(
 	deps: AdapterCompilerDeps,
 	nested?: NestedSelectScope,
 ): ProjectionEnvelope<T> {
+	// Every route (direct compile, an NQL bundle's plan, internal callers)
+	// compiles only a report this loaded copy planned, and only from its intent.
+	assertPlannedReportAuthority(plan);
+	if ((plan.executableIntent ?? plan.intent) === undefined)
+		throw new Error('A select report without an intent reached the adapter.');
 	// schemaName precedence (options > adapter ctor) is resolved in PgAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const schemaName = deps.schemaName;
 
@@ -1141,7 +1146,6 @@ export function compileSelectEnvelope<T = unknown>(
 	// Convert PlanReport (core) → SimplifiedPlanReport (pgsql compiler)
 	// The core's plan.decisions contain observability data, not SQL instructions.
 	// The actual query structure is in plan.intent (QueryIntent).
-	// Note: For unit tests with mock plans (no intent), fall back to plan.decisions directly.
 	//
 	// execIntent: the intent the adapter should compile from.
 	// plan.executableIntent holds the rewritten WHERE (EXISTS form) when the planner ran
@@ -1352,14 +1356,7 @@ export function compileSelectEnvelope<T = unknown>(
 				resolvedWhere,
 			};
 	} else {
-		// Unit test with mock data: use decisions directly (legacy format).
-		// Tests supply adapter-format PlanDecisions inside a core PlanReport,
-		// so the runtime data is already in the right shape — bridge the type gap.
-		simplifiedPlan = {
-			rootTable: plan.rootTable,
-			decisions: plan.decisions as SimplifiedPlanReport['decisions'],
-			...(schemaName ? { schema: schemaName } : {}),
-		};
+		throw new Error('A select report without an intent reached the adapter.');
 	}
 
 	const result = compilePlan(simplifiedPlan, compilerOptions);

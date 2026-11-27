@@ -17,10 +17,7 @@
  * B. Intent scalar path      convertSubquery → scalarSubquery Decision
  *                            → scalarSubqueryHandler → buildScalarSubquery
  *                            → buildPredicateSubquerySelect
- * C. compilePlan decision    dispatchWhere → inSubquery Decision
- *                            → inSubqueryHandler → buildScalarSubquery
- *                            → buildPredicateSubquerySelect
- * D. Nested IN (logical)     mapInSubqueryCondition → inSubquery Decision
+ * D. Nested IN (logical)     nested lowering → inSubquery Decision
  *                            → inSubqueryHandler → buildScalarSubquery
  *                            → buildPredicateSubquerySelect
  * E. Mutation path           normalizeToDecision(case 'in') → inSubquery Decision
@@ -38,10 +35,6 @@
  * For valid inputs, each path must compile to correct SQL.
  */
 
-import {
-	compilePlan,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
 import {
 	and,
 	createOrm,
@@ -195,7 +188,7 @@ describe('PATH B: intent scalar path (convertSubquery → scalarSubqueryHandler)
 // D. Nested IN (logical group) — mapInSubqueryCondition → inSubqueryHandler
 // ============================================================================
 
-describe('PATH D: nested IN inside logical group (mapInSubqueryCondition → inSubqueryHandler)', () => {
+describe('PATH D: nested IN inside logical group (inSubqueryHandler)', () => {
 	it('GROUP BY in nested IN-subquery inside AND plan throws', () => {
 		const where = {
 			kind: 'in',
@@ -624,131 +617,11 @@ describe('direct compileWhereIntent scalar callback dispatch', () => {
 // REGRESSION LOCK — DEFECT 2: lowered outerRef in decision.conditions throws
 // ============================================================================
 
-describe('DEFECT 2 regression: directly-constructed decision with lowered outerRef throws', () => {
+describe('DEFECT 2 regression: an IN-subquery body without an outer reference', () => {
 	/**
-	 * When convertSubquery lowered a WhereSubqueryIntent to a Decision, any
-	 * outerRef() node in the inner WHERE became { kind:'fieldRef', scope:'outer' }
-	 * in the lowered Decision.conditions.  buildPredicateSubquerySelect only checks
-	 * sourceIntent.where (via containsOuterRef); when subqueryIntent is absent
-	 * (directly-constructed decision), the synthesized sourceIntent has no .where,
-	 * so the correlated reference was silently compiled against the wrong alias.
-	 *
-	 * Fix: buildScalarSubquery now checks decision.conditions recursively for
-	 * { kind:'fieldRef', scope:'outer' } before calling buildPredicateSubquerySelect.
+	 * A non-correlated body must compile: the outer-reference check in
+	 * buildScalarSubquery must not produce false positives.
 	 */
-	it('scalarSubquery decision with outer fieldRef in conditions → throws', () => {
-		// Directly-constructed handler Decision simulating a correlated scalar subquery
-		// whose outerRef was already lowered by convertComparison.
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'total',
-					operator: 'scalarSubquery',
-					subqueryOperator: '>',
-					targetTable: 'products',
-					selectColumn: 'price',
-					// subqueryIntent absent — directly-constructed decision
-					conditions: [
-						{
-							// Lowered outerRef: convertComparison turns outerRef('id') into
-							// { kind: 'fieldRef', scope: 'outer', column: 'id' }
-							type: 'where',
-							column: 'user_id',
-							operator: '=',
-							value: { kind: 'fieldRef', scope: 'outer', column: 'id' },
-							table: 'products',
-						},
-					],
-				},
-			],
-		};
-
-		expect(() => compilePlan(plan)).toThrow(
-			/a correlated scalar subquery body in a condition compiled outside the planner is not supported yet \(#891\)/,
-		);
-	});
-
-	it('inSubquery decision with outer fieldRef in conditions → throws', () => {
-		// Same scenario for an IN subquery.
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'inSubquery',
-					targetTable: 'customers',
-					selectColumn: 'id',
-					// subqueryIntent absent — directly-constructed decision
-					conditions: [
-						{
-							type: 'where',
-							column: 'id',
-							operator: '=',
-							value: {
-								kind: 'fieldRef',
-								scope: 'outer',
-								column: 'customer_id',
-							},
-							table: 'customers',
-						},
-					],
-				},
-			],
-		};
-
-		expect(() => compilePlan(plan)).toThrow(
-			/a correlated IN subquery body in a condition compiled outside the planner is not supported yet \(#891\)/,
-		);
-	});
-
-	it('outerRef nested in AND inside decision.conditions → throws', () => {
-		// The check must recurse into nested conditions (whereAnd etc.).
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'total',
-					operator: 'scalarSubquery',
-					subqueryOperator: '>',
-					targetTable: 'products',
-					selectColumn: 'price',
-					conditions: [
-						{
-							type: 'whereAnd',
-							conditions: [
-								{
-									type: 'where',
-									column: 'active',
-									operator: '=',
-									value: true,
-									table: 'products',
-								},
-								{
-									type: 'where',
-									column: 'user_id',
-									operator: '=',
-									// Correlated reference nested inside AND
-									value: { kind: 'fieldRef', scope: 'outer', column: 'id' },
-									table: 'products',
-								},
-							],
-						},
-					],
-				},
-			],
-		};
-
-		expect(() => compilePlan(plan)).toThrow(
-			/a correlated scalar subquery body in a condition compiled outside the planner is not supported yet \(#891\)/,
-		);
-	});
 
 	it('non-correlated IN-subquery body (no outer fieldRef) compiles correctly', () => {
 		// A body with no correlated reference must still compile — the outer
@@ -771,24 +644,12 @@ describe('DEFECT 2 regression: directly-constructed decision with lowered outerR
 });
 
 // ============================================================================
-// REGRESSION LOCK — DEFECT 3: decision-level guard catches directly-constructed
-// compilePlan inSubquery/scalarSubquery decisions with no subqueryIntent
+// REGRESSION LOCK — DEFECT 3: subquery body modifier refusals
 // ============================================================================
 
-describe('DEFECT 3 regression: decision-level guard (assertNoDroppedDecisionModifiers)', () => {
+describe('DEFECT 3 regression: subquery body modifier refusals', () => {
 	/**
-	 * When a caller constructs a SimplifiedPlanReport directly with
-	 * operator:'inSubquery' or 'scalarSubquery' and no subqueryIntent, the
-	 * chokepoint (buildPredicateSubquerySelect) synthesizes a minimal sourceIntent
-	 * (from/select only) — so Layer 1 (sourceIntent validation) passes vacuously.
-	 *
-	 * Layer 2 (assertNoDroppedDecisionModifiers) now validates the Decision's OWN
-	 * fields unconditionally so GROUP BY / HAVING / OFFSET / DISTINCT / include
-	 * carried directly on the decision are still caught.
-	 *
-	 * mapToHandlerDecision (compiler.ts ~131) preserves `include` through the mapper,
-	 * so `include` on a directly-constructed decision WOULD reach SQL emission unless
-	 * caught here.
+	 * Modifiers a subquery body cannot carry are refused with NotYetSupportedError.
 	 */
 
 	it('IN-subquery body with OFFSET → throws', () => {
@@ -831,100 +692,7 @@ describe('DEFECT 3 regression: decision-level guard (assertNoDroppedDecisionModi
 		);
 	});
 
-	it('directly-constructed inSubquery decision with GROUP BY (no subqueryIntent) → throws', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'inSubquery',
-					targetTable: 'customers',
-					selectColumn: 'id',
-					// No subqueryIntent — directly constructed
-					// @ts-expect-error: injecting forbidden modifier for guard test
-					groupBy: ['region'],
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with GROUP BY is not supported/,
-		);
-	});
-
-	it('directly-constructed inSubquery decision with HAVING (no subqueryIntent) → throws', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'inSubquery',
-					targetTable: 'customers',
-					selectColumn: 'id',
-					// @ts-expect-error
-					having: {
-						kind: 'comparison',
-						field: 'count',
-						operator: 'gt',
-						value: 0,
-					},
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with HAVING is not supported/,
-		);
-	});
-
-	it('directly-constructed scalarSubquery decision with DISTINCT (no subqueryIntent) → throws', () => {
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'total',
-					operator: 'scalarSubquery',
-					subqueryOperator: '>',
-					targetTable: 'products',
-					selectColumn: 'price',
-					distinct: true,
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/scalar subquery with DISTINCT is not supported/,
-		);
-	});
-
-	it('directly-constructed scalarSubquery decision with aggregateDistinct but no aggregate (no subqueryIntent) → throws', () => {
-		// aggregateDistinct is only meaningful on an aggregate. Carried on a plain
-		// scalar projection with no aggregate, it would silently drop DISTINCT at
-		// emission (the #247 class of bug) — the decision-level guard must fail loud.
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'total',
-					operator: 'scalarSubquery',
-					subqueryOperator: '>',
-					targetTable: 'products',
-					selectColumn: 'price',
-					aggregateDistinct: true,
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/aggregate DISTINCT without an aggregate function is not supported/,
-		);
-	});
-
-	it('valid directly-constructed inSubquery decision (with subqueryIntent) still compiles', () => {
+	it('a valid IN-subquery body still compiles', () => {
 		// Regression guard: a valid lowered decision with subqueryIntent must still work.
 		const orm = buildOrm();
 		expect(() =>
@@ -997,28 +765,6 @@ describe('malformed select.fields IN-subquery guard', () => {
 		};
 		expect(() => convertWhereCondition(intent as any, 'orders')).toThrow(
 			/non-string field element|empty fields list|IN subquery.*must project exactly one named column/i,
-		);
-	});
-
-	it('directly-constructed inSubquery decision with selectColumn = wildcard → throws at decision guard', () => {
-		// A directly-constructed decision where the malformed intent already lowered
-		// fields[0] to '*' (e.g. via the `?? '*'` fallback in convertIn).
-		// The decision-level guard catches this case.
-		const plan: SimplifiedPlanReport = {
-			rootTable: 'orders',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'where',
-					column: 'customer_id',
-					operator: 'inSubquery',
-					targetTable: 'customers',
-					selectColumn: '*', // wildcard — would emit SELECT * inside ANY(...)
-				},
-			],
-		};
-		expect(() => compilePlan(plan)).toThrow(
-			/IN subquery with missing or wildcard selectColumn.*is not supported/,
 		);
 	});
 

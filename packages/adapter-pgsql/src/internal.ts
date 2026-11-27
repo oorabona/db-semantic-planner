@@ -6,21 +6,6 @@
  * facades.
  */
 
-// Compiler
-export {
-	type BatchValuesJoinDecision,
-	type CompiledResult,
-	type CompilerOptions,
-	compilePlan,
-	isBatchValuesJoinDecision,
-	isJoinDecision,
-	isPrecompiledJoinDecision,
-	type JoinDecision,
-	PlanCompiler,
-	type PlanDecision,
-	type PrecompiledJoinDecision,
-	type SimplifiedPlanReport,
-} from './compiler.js';
 export {
 	type GenerateDDLOptions,
 	generateDDL,

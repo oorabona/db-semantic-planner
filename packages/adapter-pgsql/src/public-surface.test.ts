@@ -141,9 +141,9 @@ it.each([
 	'isJoinDecision',
 	'isPrecompiledJoinDecision',
 	'isBatchValuesJoinDecision',
-])('exports %s only through internal', (name) => {
+])('the decision compiler export %s is exported from neither entry', (name) => {
 	expect(root).not.toHaveProperty(name);
-	expect(internal).toHaveProperty(name);
+	expect(internal).not.toHaveProperty(name);
 });
 
 // ADR 0012: set operations compile from intents through adapter.compileSetOperation.

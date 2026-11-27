@@ -202,7 +202,7 @@ describe('#877 recursive option refusals', () => {
 			);
 			expect(() => adapter.compile({ ...plan, intent, decisions })).toThrow(
 				new Error(
-					'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+					'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy',
 				),
 			);
 		});
@@ -285,7 +285,7 @@ describe('#877 recursive option refusals', () => {
 			};
 			expect(() => adapter.compile({ ...plan, intent })).toThrow(
 				new Error(
-					'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+					'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy',
 				),
 			);
 		});
@@ -333,7 +333,7 @@ describe('#877 shared plan/compile refusals', () => {
 				adapter.compile({ ...report, intent: intent as QueryIntent }),
 			).toThrow(
 				new Error(
-					'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+					'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy',
 				),
 			);
 		});
@@ -358,7 +358,7 @@ describe('#877 shared plan/compile refusals', () => {
 			).toThrow(`Recursive include option ${name} is not supported`);
 			expect(() => adapter.compile({ ...report, intent })).toThrow(
 				new Error(
-					'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+					'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy',
 				),
 			);
 		});
@@ -392,7 +392,7 @@ describe('#877 shared plan/compile refusals', () => {
 			}),
 		).toThrow(
 			new Error(
-				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy',
 			),
 		);
 	});
@@ -486,7 +486,7 @@ describe('#877 shared plan/compile refusals', () => {
 		).toThrow("Relation 'categories.children' has mismatched key arity.");
 		expect(() => createPgCompileOnlyAdapter({ model }).compile(report)).toThrow(
 			new Error(
-				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy',
 			),
 		);
 	});
@@ -513,7 +513,7 @@ describe('#877 shared plan/compile refusals', () => {
 		).toThrow('Recursive include requires a single parentKey and foreignKey');
 		expect(() => createPgCompileOnlyAdapter({ model }).compile(report)).toThrow(
 			new Error(
-				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation',
+				'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy',
 			),
 		);
 	});
@@ -777,7 +777,7 @@ it('uses shared shortening for long requested keys and collision-free transport 
 			recursive: true,
 			direction: 'descendants',
 		})
-		.include('é'.repeat(39) + 'a', {
+		.include(`${'é'.repeat(39)}a`, {
 			via: 'parent',
 			recursive: true,
 			direction: 'ancestors',
@@ -786,7 +786,7 @@ it('uses shared shortening for long requested keys and collision-free transport 
 	const shapes = compiled.hydrationPlan!.includePayloads!;
 	expect(shapes.map((shape) => shape.publicKey)).toEqual([
 		'é'.repeat(40),
-		'é'.repeat(39) + 'a',
+		`${'é'.repeat(39)}a`,
 	]);
 	expect(new Set(shapes.map((shape) => shape.outputLabel)).size).toBe(2);
 	for (const shape of shapes)

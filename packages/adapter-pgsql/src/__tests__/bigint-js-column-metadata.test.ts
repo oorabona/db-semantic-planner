@@ -1,8 +1,4 @@
 import {
-	compilePlan,
-	type SimplifiedPlanReport,
-} from '@dbsp/adapter-pgsql/internal';
-import {
 	batchValues,
 	createOrm,
 	eq,
@@ -74,40 +70,6 @@ function compile(plan: PlanReport) {
 function compileCarryingModel(report: PlanReport) {
 	const adapter = createPgCompileOnlyAdapter({ model: testSchema.model });
 	return adapter.compile(report);
-}
-
-function compileDecisions(
-	report: SimplifiedPlanReport,
-	model = testSchema.model,
-) {
-	const compiled = compilePlan(report, {
-		model,
-		declaredNames: resolverFor(model),
-	});
-	const projections = buildCompiledColumnProjections(
-		compiled.ast,
-		report.rootTable,
-		model,
-		resolverFor(model),
-	);
-	return {
-		...compiled,
-		columnMetadata: new Map(
-			[...(projections ?? [])].flatMap(([key, source]) =>
-				source.kind === 'modelColumn' && source.js
-					? [
-							[
-								key,
-								{ table: source.table, column: source.column, js: source.js },
-							] as const,
-						]
-					: [],
-			),
-		),
-		outputKeyMap: new Map(
-			[...(projections ?? [])].map(([key, source]) => [key, source.logicalKey]),
-		),
-	};
 }
 
 function compileNqlToPg(nql: string) {
@@ -255,26 +217,6 @@ describe('bigint js column metadata provenance', () => {
 			column: 'sequence',
 			js: 'bigint',
 		});
-	});
-
-	it('leaves duplicate returned output labels without source mapping', () => {
-		const compiled = compileDecisions({
-			rootTable: 'events',
-			decisions: [
-				{ type: 'select', column: '*' },
-				{
-					type: 'includeStrategy',
-					choice: 'join',
-					relation: 'metrics',
-					relationName: 'metrics',
-					targetTable: 'metrics',
-					sourceColumn: ['id'],
-					targetColumn: ['eventId'],
-					columns: ['*'],
-				},
-			],
-		} as unknown as SimplifiedPlanReport);
-		expect(compiled.outputKeyMap?.has('id')).toBe(false);
 	});
 
 	it('uses output aliases to distinguish same-name joined ids', () => {

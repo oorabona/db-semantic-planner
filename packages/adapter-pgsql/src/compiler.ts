@@ -47,11 +47,8 @@ import {
 	sortBy,
 	sqlColumnRef,
 	sqlColumnRefStar,
-	sqlDeleteStmt,
-	sqlInsertStmt,
 	sqlRangeVar,
 	sqlResTarget,
-	sqlUpdateStmt,
 	typeCast,
 } from './ast-helpers.js';
 import {
@@ -73,7 +70,6 @@ import {
 import type { DeclaredNameResolver } from './declared-name-resolver.js';
 import { deparseQuoted } from './deparse.js';
 import { assertDialectCapability } from './dialect-capabilities.js';
-import { resolveCaseValue as resolveCaseValueShared } from './handlers/expression/case-value.js';
 import { compileExpressionIntent } from './handlers/expression/custom.js';
 import { bindParameter } from './handlers/expression/param-value.js';
 import { buildRecursiveScalarSubquery } from './handlers/expression/pseudo.js';
@@ -103,13 +99,10 @@ import {
 	expressionQualifiedColumnRef,
 	expressionRelationBinding,
 	expressionUnqualifiedColumnRef,
-	isSelectWithFields,
 } from './handlers/types.js';
 import { buildKeyCorrelation } from './handlers/where/exists.js';
 import { buildColumnRef, compileValue } from './handlers/where/utils.js';
 import {
-	assertNoSelectExpressionCorrelation,
-	assertNoUnsupportedSubqueryModifiers,
 	convertWhereCondition,
 	intentToDecisions,
 } from './intent-to-decisions.js';
@@ -137,7 +130,6 @@ import {
 	resolveDeclaredIdentifier,
 	type SqlIdentifier,
 } from './sql-identifier.js';
-import { assertNoDroppedDecisionModifiers } from './subquery-emission.js';
 import { validateIdentifier } from './validate.js';
 
 export class UnhandledNqlSelectExpressionKindError extends Error {
@@ -285,27 +277,10 @@ type IncludeCompilationResult = {
 	readonly cte?: Node;
 };
 
-function getRelationIdentityPath(
-	decision: PlanDecision,
-	rootTable: string,
-): string | undefined {
-	if (decision.relationPath) return decision.relationPath;
-	const relationName = decision.relationName ?? decision.relation;
-	if (!relationName && !decision.targetTable) return undefined;
-
-	// Legacy direct compilePlan() tests may construct includeStrategy decisions
-	// without relationPath. Keep those distinct by FK/source instead of treating
-	// repeated relation names as duplicate include paths.
-	const source = decision.sourceTable ?? rootTable;
-	const target = decision.targetTable ?? '';
-	const sourceColumn = decision.sourceColumn ?? decision.foreignKey ?? '';
-	return `__legacy__:${source}:${relationName ?? target}:${sourceColumn}:${target}`;
-}
-
 function getParentRelationPath(
 	relationPath: string | undefined,
 ): string | undefined {
-	if (!relationPath || relationPath.startsWith('__legacy__:')) return undefined;
+	if (!relationPath) return undefined;
 	const lastDot = relationPath.lastIndexOf('.');
 	return lastDot > 0 ? relationPath.slice(0, lastDot) : undefined;
 }
@@ -334,9 +309,7 @@ function mergeDuplicateJoinIncludeDecisions(
 
 	for (const decision of decisions) {
 		const identityPath =
-			decision.type === 'includeStrategy'
-				? getRelationIdentityPath(decision, rootTable)
-				: undefined;
+			decision.type === 'includeStrategy' ? decision.relationPath : undefined;
 		if (!identityPath) {
 			merged.push(decision);
 			continue;
@@ -761,17 +734,11 @@ export class PlanCompiler {
 	private resolvedJoinAliases(): Map<string, string> {
 		const aliases = new Map<string, string>();
 		for (const [relationPath, entry] of this.joinAliasMap) {
-			const isLegacyPath = relationPath.startsWith('__legacy__:');
-			if (!isLegacyPath) {
-				aliases.set(relationPath, entry.alias);
-			}
+			aliases.set(relationPath, entry.alias);
 
 			// Direct includes can resolve by relation name. Nested includes need the
 			// exact dotted path to avoid leaf-name collisions like file vs definition.file.
-			if (
-				entry.relationName &&
-				(isLegacyPath || relationPath === entry.relationName)
-			) {
+			if (entry.relationName && relationPath === entry.relationName) {
 				aliases.set(entry.relationName, entry.alias);
 			}
 		}
@@ -784,231 +751,6 @@ export class PlanCompiler {
 			column,
 			this.visibleSqlQualifiers,
 		);
-	}
-
-	/**
-	 * Dispatch a PlanDecision through the unified WHERE handler system.
-	 * Bridges PlanCompiler's state to handler types, calls dispatcher, syncs back.
-	 */
-	private dispatchWhere(
-		decision: PlanDecision,
-		ctxOverrides?: Partial<HandlerCompilerContext>,
-	): Node {
-		const dispatcher = createWhereDispatcher(compileWhereIntent);
-
-		// Decision-level guard for already-lowered predicate-subquery decisions
-		// (operator already 'inSubquery'/'notInSubquery'/'scalarSubquery'/...).
-		// These bypass the 'in'→remap branch below, so mapToHandlerDecision strips
-		// groupBy/having/distinct/include/joins before the handler sees them.
-		// We must validate BEFORE mapToHandlerDecision removes those extra fields.
-		// This is defense-in-depth for directly-constructed SimplifiedPlanReport
-		// decisions that have no subqueryIntent provenance.
-		{
-			const op = decision.operator;
-			if (
-				op === 'inSubquery' ||
-				op === 'notInSubquery' ||
-				op === 'scalarSubquery' ||
-				op === 'subqueryEq' ||
-				op === 'subqueryNeq' ||
-				op === 'subqueryLt' ||
-				op === 'subqueryLte' ||
-				op === 'subqueryGt' ||
-				op === 'subqueryGte'
-			) {
-				const use =
-					op === 'inSubquery' || op === 'notInSubquery' ? 'IN' : 'scalar';
-				assertNoDroppedDecisionModifiers(
-					decision as unknown as import('./handlers/types.js').Decision,
-					use,
-				);
-			}
-		}
-
-		const mapped = mapToHandlerDecision(
-			decision,
-			this.currentRootTable,
-			this.defaultPk,
-			this.deriveFk,
-		);
-		// Handle IN/NOT IN subquery: remap to inSubquery/notInSubquery
-		// Subquery can be in `decision.subquery` (direct PlanDecision) or
-		// `decision.value` (from legacy decision callers which put it in value)
-		const sub =
-			decision.subquery ??
-			(decision.value &&
-			typeof decision.value === 'object' &&
-			'from' in (decision.value as object)
-				? (decision.value as PlanDecision['subquery'])
-				: undefined);
-		if (sub && (decision.operator === 'in' || decision.operator === 'notIn')) {
-			// Early validation at lowering time (defense-in-depth before emission chokepoint).
-			// Covers directly-constructed SimplifiedPlanReport plans that bypass intentToDecisions.
-			assertNoUnsupportedSubqueryModifiers(sub as unknown as QueryIntent, 'IN');
-			const op = decision.operator === 'notIn' ? 'notInSubquery' : 'inSubquery';
-			// Extract selectColumn: may be a string or a SelectIntent with fields
-			const rawSelect = sub.select as unknown;
-			const selectColumn =
-				typeof rawSelect === 'string'
-					? rawSelect
-					: isSelectWithFields(rawSelect)
-						? (rawSelect.fields?.[0] ?? '*')
-						: '*';
-			const subConditions = sub.where
-				? [this.mapInSubqueryCondition(sub.where, sub.from)]
-				: [];
-			const rawLimit = sub.limit;
-			const rawOrderBy = sub.orderBy;
-			const subDecision = {
-				...mapped,
-				operator: op,
-				targetTable: sub.from,
-				selectColumn,
-				conditions: subConditions,
-				// Provenance: use already-set subqueryIntent from PlanDecision, or fall back
-				// to sub cast as QueryIntent for directly-constructed plans.
-				subqueryIntent:
-					decision.subqueryIntent ?? (sub as unknown as QueryIntent),
-				...(rawLimit != null && { limit: rawLimit }),
-				...(rawOrderBy && {
-					orderBy: rawOrderBy.map((o) => ({
-						column: o.field,
-						direction: (o.direction?.toUpperCase() ?? 'ASC') as 'ASC' | 'DESC',
-					})),
-				}),
-			} as HandlerDecision;
-			const ctx = ctxOverrides
-				? { ...this.handlerCtx(), ...ctxOverrides }
-				: this.handlerCtx();
-			return dispatcher(subDecision, ctx, this.state);
-		}
-		const ctx = ctxOverrides
-			? { ...this.handlerCtx(), ...ctxOverrides }
-			: this.handlerCtx();
-		return dispatcher(mapped, ctx, this.state);
-	}
-
-	/**
-	 * Recursively convert a PlanDecision (potentially with nested in+subquery
-	 * or a logical group whose children contain in+subquery nodes) into a
-	 * HandlerDecision suitable for the WHERE dispatcher.
-	 *
-	 * When a PlanDecision has operator='in'/'notIn' with a subquery object,
-	 * mapToHandlerDecision loses the subquery because HandlerDecision has no
-	 * `subquery` field. This method detects that pattern and converts it to the
-	 * inSubquery/notInSubquery form that buildScalarSubquery expects.
-	 *
-	 * When the node is a logical group (whereAnd / whereOr / whereNot), each
-	 * child in `conditions` / `condition` is mapped recursively so that nested
-	 * IN+subquery nodes at any depth are guarded and remapped correctly, rather
-	 * than falling through to mapToHandlerDecision which would silently drop the
-	 * subquery and produce a malformed plain-IN binding.
-	 *
-	 * Called recursively so 2+ levels of nesting all work.
-	 */
-	private mapInSubqueryCondition(
-		pd: PlanDecision,
-		rootTable: string,
-	): HandlerDecision {
-		// -----------------------------------------------------------------------
-		// Logical group: whereAnd / whereOr / whereNot
-		// Recurse into each child so nested IN+subquery nodes are detected and
-		// guarded instead of falling through to mapToHandlerDecision.
-		// -----------------------------------------------------------------------
-		if (
-			pd.type === 'whereAnd' ||
-			pd.type === 'whereOr' ||
-			pd.type === 'whereNot'
-		) {
-			const mappedConditions = (pd.conditions ?? []).map((child) =>
-				this.mapInSubqueryCondition(child, rootTable),
-			);
-			return {
-				...mapToHandlerDecision(pd, rootTable, this.defaultPk, this.deriveFk),
-				conditions: mappedConditions,
-			} as HandlerDecision;
-		}
-
-		// -----------------------------------------------------------------------
-		// IN / NOT IN with subquery
-		// Mirror dispatchWhere's dual-source detection: subquery can be in
-		// `pd.subquery` (direct PlanDecision shape) OR `pd.value` (from the
-		// legacy decision callers which store it in `value`).  Only checking
-		// `pd.subquery` would let a value-shaped nested IN bypass the guard and
-		// fall through to the plain inHandler which binds the whole object as a
-		// scalar ANY($n) parameter — producing structurally wrong SQL.
-		// -----------------------------------------------------------------------
-		const sub = (pd.subquery ??
-			(pd.value &&
-			typeof pd.value === 'object' &&
-			'from' in (pd.value as object)
-				? (pd.value as PlanDecision['subquery'])
-				: undefined)) as
-			| (PlanDecision['subquery'] & { where?: PlanDecision })
-			| undefined;
-		// Decision-level guard for already-lowered predicate-subquery decisions
-		// nested inside logical groups. Same as the check in dispatchWhere — must
-		// fire BEFORE mapToHandlerDecision strips the extra fields.
-		{
-			const op = pd.operator;
-			if (
-				op === 'inSubquery' ||
-				op === 'notInSubquery' ||
-				op === 'scalarSubquery' ||
-				op === 'subqueryEq' ||
-				op === 'subqueryNeq' ||
-				op === 'subqueryLt' ||
-				op === 'subqueryLte' ||
-				op === 'subqueryGt' ||
-				op === 'subqueryGte'
-			) {
-				const use =
-					op === 'inSubquery' || op === 'notInSubquery' ? 'IN' : 'scalar';
-				assertNoDroppedDecisionModifiers(
-					pd as unknown as import('./handlers/types.js').Decision,
-					use,
-				);
-			}
-		}
-
-		if (sub && (pd.operator === 'in' || pd.operator === 'notIn')) {
-			// Early validation at lowering time (defense-in-depth before emission chokepoint).
-			assertNoUnsupportedSubqueryModifiers(sub as unknown as QueryIntent, 'IN');
-			const op = pd.operator === 'notIn' ? 'notInSubquery' : 'inSubquery';
-			const rawSelect = sub.select as unknown;
-			const selectColumn =
-				typeof rawSelect === 'string'
-					? rawSelect
-					: isSelectWithFields(rawSelect)
-						? (rawSelect.fields?.[0] ?? '*')
-						: '*';
-			// Recursively apply: the inner subquery's WHERE may itself be
-			// another in+subquery (or a logical group containing one).
-			const subConditions: HandlerDecision[] = sub.where
-				? [this.mapInSubqueryCondition(sub.where, sub.from)]
-				: [];
-			const rawLimit = sub.limit;
-			const rawOrderBy = sub.orderBy;
-			return {
-				...mapToHandlerDecision(pd, rootTable, this.defaultPk, this.deriveFk),
-				operator: op,
-				targetTable: sub.from,
-				selectColumn,
-				conditions: subConditions,
-				// Provenance: use already-set subqueryIntent from PlanDecision, or fall back
-				// to sub cast as QueryIntent for directly-constructed plans.
-				subqueryIntent: pd.subqueryIntent ?? (sub as unknown as QueryIntent),
-				...(rawLimit != null && { limit: rawLimit }),
-				...(rawOrderBy && {
-					orderBy: rawOrderBy.map((o) => ({
-						column: o.field,
-						direction: (o.direction?.toUpperCase() ?? 'ASC') as 'ASC' | 'DESC',
-					})),
-				}),
-			} as HandlerDecision;
-		}
-		// Non-subquery, non-logical-group: plain mapToHandlerDecision suffices
-		return mapToHandlerDecision(pd, rootTable, this.defaultPk, this.deriveFk);
 	}
 
 	/**
@@ -1051,48 +793,8 @@ export class PlanCompiler {
 			handlerDecision.strategy as 'json_agg' | 'join' | 'lateral' | 'cte',
 		);
 
-		// Pre-compile filter conditions for the handler (e.g., EXISTS propagation).
-		// INCLUDE-WHERE-SCOPE: skip for 'join' strategy — its conditions are folded
-		// into the root WHERE clause in compileSelect() instead. Pre-compiling here
-		// would double-consume parameter slots without producing usable SQL.
-		if (
-			strategy !== 'join' &&
-			decision.conditions &&
-			(decision.conditions as PlanDecision[]).length > 0
-		) {
-			const innerAlias = '__t__';
-			const filterCtx = this.createHandlerContext(plan);
-			const targetTable = handlerDecision.targetTable ?? decision.targetTable;
-			const aliasColumnAuthorities = targetTable
-				? bindAliasAuthority(
-						filterCtx.aliasColumnAuthorities,
-						queryLocal(innerAlias),
-						resolveRelationTarget(queryLocal(targetTable), filterCtx),
-					)
-				: filterCtx.aliasColumnAuthorities;
-			const condNodes = (decision.conditions as PlanDecision[]).map((c) => {
-				// Rewrite condition table references to use the inner alias
-				const rewritten = { ...c, table: innerAlias };
-				return this.dispatchWhere(rewritten, {
-					currentAlias: innerAlias,
-					...(aliasColumnAuthorities !== undefined && {
-						aliasColumnAuthorities,
-					}),
-				});
-			});
-			const combined =
-				condNodes.length === 1 ? condNodes[0]! : andExpr(...condNodes);
-			// Inject pre-compiled filter for the json_agg handler to read.
-			// Property is readonly on Decision; the compiler is the sole writer.
-			(
-				handlerDecision as { _compiledFilterWhere?: Node }
-			)._compiledFilterWhere = combined;
-		}
-
 		const relationIdentityPath =
-			decision.choice === 'join'
-				? getRelationIdentityPath(decision, plan.rootTable)
-				: undefined;
+			decision.choice === 'join' ? decision.relationPath : undefined;
 		const requestedJoinType = decision.joinType ?? 'left';
 		const existingJoin = relationIdentityPath
 			? this.joinAliasMap.get(relationIdentityPath)
@@ -1244,30 +946,10 @@ export class PlanCompiler {
 		this.usedJoinAliases = new Set();
 		this.aliasColumnAuthorities = new Map();
 
-		// Determine query type from decisions
-		const queryType = this.detectQueryType(plan.decisions);
-
-		let ast: Node;
-
-		switch (queryType) {
-			case 'select':
-				ast = this.compileSelect(plan);
-				// Handle existsWrap: SELECT EXISTS(SELECT 1 ...) AS "exists"
-				if (plan.existsWrap) {
-					ast = this.wrapSelectInExists(ast);
-				}
-				break;
-			case 'insert':
-				ast = this.compileInsert(plan);
-				break;
-			case 'update':
-				ast = this.compileUpdate(plan);
-				break;
-			case 'delete':
-				ast = this.compileDelete(plan);
-				break;
-			default:
-				throw new Error(`Unsupported query type: ${queryType}`);
+		let ast: Node = this.compileSelect(plan);
+		// Handle existsWrap: SELECT EXISTS(SELECT 1 ...) AS "exists"
+		if (plan.existsWrap) {
+			ast = this.wrapSelectInExists(ast);
 		}
 
 		const sql = deparseQuoted(ast);
@@ -1277,15 +959,6 @@ export class PlanCompiler {
 			parameters: this.state.parameters,
 			ast,
 		};
-	}
-
-	private detectQueryType(decisions: readonly PlanDecision[]): string {
-		for (const decision of decisions) {
-			if (decision.type === 'insert') return 'insert';
-			if (decision.type === 'update') return 'update';
-			if (decision.type === 'delete') return 'delete';
-		}
-		return 'select';
 	}
 
 	// --------------------------------------------------------------------------
@@ -1996,18 +1669,6 @@ export class PlanCompiler {
 			throw new Error(
 				'An expression subquery reached the adapter without its nested select.',
 			);
-		if (!parentPlan.directConditions) {
-			assertNoSelectExpressionCorrelation(query);
-			const innerCompiler = new PlanCompiler(this.childCompilerOptions());
-			const innerResult = innerCompiler.compile({
-				rootTable: query.from,
-				decisions: intentToDecisions(query, query.from),
-			});
-			return {
-				ast: renumberParamRefsInAst(innerResult.ast, paramOffset),
-				parameters: innerResult.parameters,
-			};
-		}
 		const parent = parentContext ?? this.createHandlerContext(parentPlan);
 		const enclosingRanges = [
 			parent.queryRanges ?? [],
@@ -2495,19 +2156,11 @@ export class PlanCompiler {
 				break;
 			}
 
-			case 'selectExpression': {
-				if (decision.expressionType === 'case') {
-					const caseNode = this.compileCaseExpression(decision, plan);
-					const alias = decision.alias;
-					targetList.push({
-						ResTarget: {
-							val: caseNode,
-							...(alias ? { name: alias } : {}),
-						},
-					});
-				}
-				break;
-			}
+			case 'selectExpression':
+				// Planned reads compile CASE as a selectCustomExpression.
+				throw new Error(
+					'A CASE selectExpression decision reached the compiler; CASE compiles as a custom expression.',
+				);
 
 			case 'selectCustomExpression': {
 				const exprIntent = decision.expressionIntent as ExpressionIntent;
@@ -2743,33 +2396,6 @@ export class PlanCompiler {
 	}
 
 	/**
-	 * Fold a WHERE-family decision into an existing where expression.
-	 * Returns the updated (or new) where node.
-	 */
-	private compileWhereDecision(
-		decision: PlanDecision,
-		currentWhere: Node | undefined,
-	): Node | undefined {
-		switch (decision.type) {
-			case 'where': {
-				const whereExpr = this.dispatchWhere(decision);
-				return currentWhere ? andExpr(currentWhere, whereExpr) : whereExpr;
-			}
-
-			case 'whereAnd':
-			case 'whereOr':
-			case 'whereNot': {
-				if (!decision.conditions) return currentWhere;
-				const combined = this.dispatchWhere(decision);
-				return currentWhere ? andExpr(currentWhere, combined) : combined;
-			}
-
-			default:
-				return currentWhere;
-		}
-	}
-
-	/**
 	 * Flush pendingJoins and rawJoins into the FROM clause.
 	 * Mutates the from array in-place.
 	 */
@@ -2883,33 +2509,6 @@ export class PlanCompiler {
 			return where ? andExpr(where, condition) : condition;
 		}
 
-		if (
-			decision.choice !== 'join' ||
-			!decision.conditions ||
-			(decision.conditions as PlanDecision[]).length === 0
-		) {
-			return where;
-		}
-		const relationIdentityPath = getRelationIdentityPath(
-			decision,
-			this.currentRootTable,
-		);
-		const joinAlias =
-			(relationIdentityPath
-				? this.joinAliasMap.get(relationIdentityPath)?.alias
-				: undefined) ?? (decision.relationName as string | undefined);
-		for (const cond of decision.conditions as PlanDecision[]) {
-			const condExpr = this.dispatchWhere(
-				cond,
-				joinAlias ? { currentAlias: joinAlias } : undefined,
-			);
-			const projection = joinAlias
-				? this.keylessJoinProjections.get(joinAlias)
-				: undefined;
-			if (projection && joinAlias)
-				completeKeylessJoinProjection(projection, joinAlias, [condExpr], true);
-			where = where ? andExpr(where, condExpr) : condExpr;
-		}
 		return where;
 	}
 
@@ -3320,7 +2919,6 @@ export class PlanCompiler {
 		const orderBy: Node[] = [];
 		const orderByDecisions: PlanDecision[] = [];
 		const groupBy: Node[] = [];
-		let having: Node | undefined;
 		let limit: Node | undefined;
 		let offset: Node | undefined;
 		let distinct: boolean | Node[] = false;
@@ -3376,13 +2974,6 @@ export class PlanCompiler {
 					where = this.compileIncludeWhereConditions(decision, where);
 					break;
 
-				case 'where':
-				case 'whereAnd':
-				case 'whereOr':
-				case 'whereNot':
-					where = this.compileWhereDecision(decision, where);
-					break;
-
 				case 'join':
 					this.compileJoinDecision(decision, plan, from);
 					break;
@@ -3398,17 +2989,6 @@ export class PlanCompiler {
 					}
 					break;
 
-				case 'having':
-					having = this.dispatchWhere(
-						this.resolveHavingAggregateAlias(
-							decision.conditions
-								? { type: 'whereAnd', conditions: decision.conditions }
-								: decision,
-							decisions,
-						),
-					);
-					break;
-
 				case 'limit':
 					if (typeof decision.limit === 'number') {
 						limit = integerNode(decision.limit);
@@ -3416,9 +2996,6 @@ export class PlanCompiler {
 						this.state.parameters.push(unwrapParamIntent(decision.limit));
 						this.state.paramIndex++;
 						limit = createParamRef(this.state.paramIndex);
-					} else if (decision.limit?.paramIndex !== undefined) {
-						limit = createParamRef(decision.limit.paramIndex);
-						this.state.parameters.push(undefined); // Placeholder
 					}
 					break;
 
@@ -3429,9 +3006,6 @@ export class PlanCompiler {
 						this.state.parameters.push(unwrapParamIntent(decision.offset));
 						this.state.paramIndex++;
 						offset = createParamRef(this.state.paramIndex);
-					} else if (decision.offset?.paramIndex !== undefined) {
-						offset = createParamRef(decision.offset.paramIndex);
-						this.state.parameters.push(undefined); // Placeholder
 					}
 					break;
 
@@ -3451,7 +3025,7 @@ export class PlanCompiler {
 
 		flushRootWhere();
 
-		having = plan.rawHaving
+		const having = plan.rawHaving
 			? this.compilePositionCondition(
 					plan.rawHaving,
 					plan,
@@ -3459,7 +3033,7 @@ export class PlanCompiler {
 					this.state,
 					'having',
 				)
-			: having;
+			: undefined;
 
 		for (const decision of orderByDecisions) {
 			const obNode = this.compileOrderByDecision(decision, plan);
@@ -3543,103 +3117,10 @@ export class PlanCompiler {
 		});
 	}
 
-	// --------------------------------------------------------------------------
-	// CASE Expression Compilation
-	// --------------------------------------------------------------------------
-
-	private compileCaseExpression(
-		decision: PlanDecision,
-		plan: SimplifiedPlanReport,
-	): Node {
-		// CASE decisions carry { when, then } tuples in `conditions` —
-		// structurally different from the base PlanDecision[].
-		const conditions = decision.conditions as
-			| readonly { when: PlanDecision; then: unknown }[]
-			| undefined;
-		const elseValue = decision.value;
-
-		if (!conditions || conditions.length === 0) {
-			throw new Error('CASE requires at least one WHEN condition');
-		}
-
-		const args: Node[] = conditions.map((cond) => {
-			const whenExpr = this.dispatchWhere(cond.when);
-			const thenResult = this.compileCaseValue(
-				cond.then,
-				plan,
-				decision.table ?? this.currentRootTable,
-			);
-
-			return {
-				CaseWhen: {
-					expr: whenExpr,
-					result: thenResult,
-				},
-			};
-		});
-
-		let defresult: Node | undefined;
-		if (elseValue !== undefined) {
-			defresult = this.compileCaseValue(
-				elseValue,
-				plan,
-				decision.table ?? this.currentRootTable,
-			);
-		}
-
-		return {
-			CaseExpr: {
-				args,
-				...(defresult ? { defresult } : {}),
-			},
-		};
-	}
-
-	/**
-	 * Compile a CASE THEN/ELSE value based on its ExpressionIntent kind.
-	 * Delegates to shared resolveCaseValue with nested CASE support.
-	 */
-	private compileCaseValue(
-		value: unknown,
-		plan: SimplifiedPlanReport,
-		alias = this.currentRootTable,
-	): Node {
-		return resolveCaseValueShared(
-			value,
-			alias,
-			undefined,
-			(column) =>
-				expressionColumnRef(column, this.createHandlerContext(plan, alias)),
-			this.state,
-			(expr) => {
-				const nestedDecision = {
-					type: 'selectExpression',
-					expressionType: 'case',
-					conditions: (
-						expr.when as Array<{ condition: unknown; result: unknown }>
-					).map((wc) => ({
-						when: wc.condition as PlanDecision,
-						// biome-ignore lint/suspicious/noThenProperty: intentional
-						then: wc.result,
-					})),
-					value: expr.else,
-					table: this.currentRootTable,
-				} as unknown as PlanDecision;
-				return this.compileCaseExpression(nestedDecision, plan);
-			},
-			(expr) =>
-				this.compileCustomExpressionNode(
-					expr as unknown as ExpressionIntent,
-					plan,
-				),
-		);
-	}
-
 	/**
 	 * Compile a custom ExpressionIntent (customFn, customOp, ref, cast, unary,
 	 * array, function, subquery, …) to an AST node through the shared expression
-	 * compiler. Shared by the `selectCustomExpression` target path and CASE
-	 * THEN/ELSE values so both render the full expression surface identically.
+	 * compiler, for the `selectCustomExpression` target path.
 	 */
 	private compileCustomExpressionNode(
 		exprIntent: ExpressionIntent,
@@ -3652,169 +3133,6 @@ export class PlanCompiler {
 		// parameters are shared by reference; only sync paramIndex
 		this.state.paramIndex = state.paramIndex;
 		return node;
-	}
-
-	// --------------------------------------------------------------------------
-	// INSERT Compilation
-	// --------------------------------------------------------------------------
-
-	private compileInsert(plan: SimplifiedPlanReport): Node {
-		const columns: string[] = [];
-		const values: Node[][] = [];
-		const returning: Node[] = [];
-
-		for (const decision of plan.decisions) {
-			if (decision.type === 'insert') {
-				if (decision.columns) {
-					columns.push(...decision.columns);
-				}
-				if (decision.values) {
-					const row = decision.values.map((v) => compileValue(v, this.state));
-					values.push(row);
-				}
-			} else if (decision.type === 'returning') {
-				if (decision.column === '*') {
-					returning.push(sqlResTarget(sqlColumnRefStar()));
-				} else if (decision.column) {
-					returning.push(
-						sqlResTarget(
-							sqlColumnRef(
-								resolveDeclaredIdentifier(this.declaredNames, this.dbCasing, {
-									kind: 'column',
-									table: plan.rootTable,
-									column: decision.column,
-								}),
-							),
-							decision.alias === undefined
-								? undefined
-								: queryLocal(decision.alias),
-						),
-					);
-				}
-			}
-		}
-
-		const schema = plan.schema ?? this.schema;
-		return sqlInsertStmt({
-			table: this.tableIdentifier(plan.rootTable),
-			columns: columns.map((column) =>
-				resolveDeclaredIdentifier(this.declaredNames, this.dbCasing, {
-					kind: 'column',
-					table: plan.rootTable,
-					column,
-				}),
-			),
-			values,
-			...(schema !== undefined && { schema: queryLocal(schema) }),
-			...(returning.length > 0 && { returning }),
-		});
-	}
-
-	// --------------------------------------------------------------------------
-	// UPDATE Compilation
-	// --------------------------------------------------------------------------
-
-	private compileUpdate(plan: SimplifiedPlanReport): Node {
-		const set: Array<{ column: SqlIdentifier; value: Node }> = [];
-		let where: Node | undefined;
-		const returning: Node[] = [];
-
-		for (const decision of plan.decisions) {
-			if (decision.type === 'update') {
-				if (decision.set) {
-					for (const s of decision.set) {
-						set.push({
-							column: resolveDeclaredIdentifier(
-								this.declaredNames,
-								this.dbCasing,
-								{
-									kind: 'column',
-									table: plan.rootTable,
-									column: s.column,
-								},
-							),
-							value: compileValue(s.value, this.state),
-						});
-					}
-				}
-			} else if (decision.type === 'where') {
-				const whereExpr = this.dispatchWhere(decision);
-				where = where ? andExpr(where, whereExpr) : whereExpr;
-			} else if (decision.type === 'returning') {
-				if (decision.column === '*') {
-					returning.push(sqlResTarget(sqlColumnRefStar()));
-				} else if (decision.column) {
-					returning.push(
-						sqlResTarget(
-							sqlColumnRef(
-								resolveDeclaredIdentifier(this.declaredNames, this.dbCasing, {
-									kind: 'column',
-									table: plan.rootTable,
-									column: decision.column,
-								}),
-							),
-							decision.alias === undefined
-								? undefined
-								: queryLocal(decision.alias),
-						),
-					);
-				}
-			}
-		}
-
-		const updateSchema = plan.schema ?? this.schema;
-		return sqlUpdateStmt({
-			table: this.tableIdentifier(plan.rootTable),
-			set,
-			...(updateSchema !== undefined && { schema: queryLocal(updateSchema) }),
-			...(where !== undefined && { where }),
-			...(returning.length > 0 && { returning }),
-		});
-	}
-
-	// --------------------------------------------------------------------------
-	// DELETE Compilation
-	// --------------------------------------------------------------------------
-
-	private compileDelete(plan: SimplifiedPlanReport): Node {
-		let where: Node | undefined;
-		const returning: Node[] = [];
-
-		for (const decision of plan.decisions) {
-			if (decision.type === 'where') {
-				const whereExpr = this.dispatchWhere(decision);
-				where = where ? andExpr(where, whereExpr) : whereExpr;
-			} else if (decision.type === 'returning') {
-				if (decision.column === '*') {
-					returning.push(sqlResTarget(sqlColumnRefStar()));
-				} else if (decision.column) {
-					returning.push(
-						sqlResTarget(
-							sqlColumnRef(
-								resolveDeclaredIdentifier(this.declaredNames, this.dbCasing, {
-									kind: 'column',
-									table: plan.rootTable,
-									column: decision.column,
-								}),
-							),
-							decision.alias === undefined
-								? undefined
-								: queryLocal(decision.alias),
-						),
-					);
-				}
-			} else if (decision.type === 'delete') {
-				// Mark as delete query (handled by detectQueryType)
-			}
-		}
-
-		const deleteSchema = plan.schema ?? this.schema;
-		return sqlDeleteStmt({
-			table: this.tableIdentifier(plan.rootTable),
-			...(deleteSchema !== undefined && { schema: queryLocal(deleteSchema) }),
-			...(where !== undefined && { where }),
-			...(returning.length > 0 && { returning }),
-		});
 	}
 
 	// --------------------------------------------------------------------------

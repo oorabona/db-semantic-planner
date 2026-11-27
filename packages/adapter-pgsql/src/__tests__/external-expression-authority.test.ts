@@ -12,7 +12,7 @@ const model = schema({
 }).model;
 const adapter = createPgCompileOnlyAdapter({ model });
 const refusal =
-	'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy, or use compilePlan from @dbsp/adapter-pgsql/internal for decision-level compilation';
+	'Adapter compilation requires a report planned by this loaded copy of dbsp (plan(), the ORM or NQL); plan the query with this loaded copy';
 function external(): { -readonly [K in keyof PlanReport]: PlanReport[K] } {
 	return JSON.parse(
 		JSON.stringify(plan({ type: 'select', from: 'users' }, model)),
