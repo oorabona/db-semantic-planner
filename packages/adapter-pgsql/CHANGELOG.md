@@ -1,5 +1,25 @@
 # Changelog
 
+## [8.1.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v8.0.0...adapter-pgsql-v8.1.0) (2026-11-27)
+
+
+### Features
+
+* **core:** Accept ColumnRef leaves in ordering, grouping, aggregate and window positions ([#1076](https://github.com/oorabona/db-semantic-planner/issues/1076)) ([0b82340](https://github.com/oorabona/db-semantic-planner/commit/0b82340d4d389a89c3e1d4621513b1f841b5dac3)), closes [#1032](https://github.com/oorabona/db-semantic-planner/issues/1032) [#1045](https://github.com/oorabona/db-semantic-planner/issues/1045)
+* **core:** Route filter operands through the value and reference leaf rules ([#1067](https://github.com/oorabona/db-semantic-planner/issues/1067)) ([c4b2afa](https://github.com/oorabona/db-semantic-planner/commit/c4b2afa972a938e5f6ba2ea7dfadba1cf92eec43)), closes [#1045](https://github.com/oorabona/db-semantic-planner/issues/1045) [#1033](https://github.com/oorabona/db-semantic-planner/issues/1033) [#624](https://github.com/oorabona/db-semantic-planner/issues/624) [#1011](https://github.com/oorabona/db-semantic-planner/issues/1011) [#956](https://github.com/oorabona/db-semantic-planner/issues/956)
+
+
+### Bug Fixes
+
+* **core:** Combine successive where() calls with AND on mutations, subqueries and raw CTEs ([#1070](https://github.com/oorabona/db-semantic-planner/issues/1070)) ([9f206a8](https://github.com/oorabona/db-semantic-planner/commit/9f206a8986511455f608e3b582af31dc56a0237e)), closes [#1063](https://github.com/oorabona/db-semantic-planner/issues/1063) [#1028](https://github.com/oorabona/db-semantic-planner/issues/1028)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/core bumped to 7.1.0
+
 ## [8.0.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v7.3.0...adapter-pgsql-v8.0.0) (2026-11-20)
 
 
