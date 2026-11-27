@@ -1489,6 +1489,34 @@ describe('subquery fields and selectExpression leaves (ADR 0011 delivery 6)', ()
 			body('$1'),
 			['x'],
 		]);
+		// The selection survives a later call, and a later select() replaces it.
+		expect(
+			out(
+				column(
+					subquery('posts')
+						.select(fn('lower', exprRef('title')))
+						.where(eq('user_id', outerRef('id'))),
+				),
+			),
+		).toEqual([body('lower(title)'), []]);
+		expect(
+			out(
+				column(
+					correlated()
+						.select(fn('lower', exprRef('title')))
+						.select('title'),
+				),
+			),
+		).toEqual([body('posts.title'), []]);
+		expect(
+			out(
+				column(
+					correlated()
+						.select('title')
+						.select(fn('lower', exprRef('title'))),
+				),
+			),
+		).toEqual([body('lower(title)'), []]);
 	});
 
 	it('AC13 subquery aggregate ColumnRef: the same SQL as the string field', () => {

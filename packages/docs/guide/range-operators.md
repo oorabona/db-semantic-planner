@@ -58,7 +58,9 @@ Compiles to `"column" <@ rangeType($1, $2)`. Use when the test range must enclos
 
 ### Columns and bounds
 
-- The column can be a name, a `ColumnRef` (`orm.tables.bookings.period`) or an expression.
+- In the tuple form, the column can be a name, a `ColumnRef` (`orm.tables.bookings.period`) or an expression. The
+  object form below takes a name or a `ColumnRef` of the queried table; an expression column there is not yet
+  supported (#1065).
 - Each tuple bound is a value: a plain value (string, number, `Date`, `null`) is bound as a parameter, and pg
   serialises a `Date` itself. An expression (`exprRef('starts_at')`, `fn(...)`, a `ColumnRef`, a subquery) is
   compiled in place: `rangeOverlaps('span', [exprRef('score'), 5], 'int4range')` gives
@@ -76,8 +78,10 @@ compiles to the column's range constructor with its bounds as the third argument
   A bound can also be another column (`exprRef('score')`, a schema `ref()`) or, inside a subquery, `outerRef()`.
 - The constructor is named after the column's declared SQL type: a built-in range column (`'daterange'`, …),
   or the `dbType` it was declared with, a custom range type included (`{ type: 'string', dbType: 'ipspan' }`
-  gives `ipspan($1, $2, '[)')`). A column with no declared range type, a non-range type, a multirange or an
-  array type is refused by name; use the tuple form with a `rangeType` there.
+  gives `ipspan($1, $2, '[)')`). A column with no declared type, a built-in non-range type, a multirange, an array
+  or a modified type is refused by name; use the tuple form with a `rangeType` there. Any other declared type is
+  used as the constructor name, so a custom type that is not a range is rejected by PostgreSQL ("function … does
+  not exist").
 - Inside a `caseWhen()` in `columns()`/`orderBy()`, an aggregate `filter()` or a `having()`, a range value is not
   yet compiled this way: there, `bounds` other than `'[)'`, a `Date`, expression or empty-string bound, and a string
   bound containing `,` `(` `)` `[` `]` `"` or `\` are refused as not yet supported (#891).

@@ -31,6 +31,7 @@ import {
 	type WhereIntent,
 } from '@dbsp/types';
 import { executeCompiledQuery } from '../adapter.js';
+import { isBoundPayload } from '../intent-payload.js';
 import {
 	andWhere,
 	requireAdapter as requireAdapterUtil,
@@ -44,20 +45,33 @@ import {
 } from './query-builder.js';
 import type { QueryBuilder } from './query-builder-types.js';
 import type { RefDefinition } from './schema.js';
+import { isSubqueryExpression } from './subquery-builder.js';
 import { type ColumnRef, isColumnRef } from './table-ref.js';
 import type { ColumnSpec } from './types.js';
 
-/** Whether an expression intent holds a scalar subquery at any depth. */
+/**
+ * Whether an outer entry reads another query at any depth: a scalar subquery,
+ * an EXISTS or IN body, or any other node carrying a query body. Bound and
+ * literal payloads are data and are not entered (#1095).
+ */
 function holdsSubquery(node: unknown): boolean {
 	if (Array.isArray(node)) return node.some(holdsSubquery);
 	if (typeof node !== 'object' || node === null) return false;
+	if (isSubqueryExpression(node)) return true;
 	const candidate = node as {
 		readonly kind?: unknown;
-		readonly query?: unknown;
+		readonly type?: unknown;
+		readonly from?: unknown;
 	};
-	if (candidate.kind === 'subquery' && candidate.query !== undefined)
+	if (candidate.kind === 'param' || candidate.kind === 'literal') return false;
+	if (candidate.type === 'select' && typeof candidate.from === 'string')
 		return true;
-	return Object.values(node).some(holdsSubquery);
+	const record = node as Readonly<Record<string, unknown>>;
+	return Object.entries(record).some(
+		([key, child]) =>
+			isSubqueryExpression(child) ||
+			(!isBoundPayload(record, key, child) && holdsSubquery(child)),
+	);
 }
 
 /**

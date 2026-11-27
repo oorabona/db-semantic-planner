@@ -464,6 +464,20 @@ describe('range helper leaves and range values (ADR 0011 delivery 6)', () => {
 		expect(
 			out(
 				q()
+					.where(rangeOverlaps('span', exprRef('score')))
+					.dump(),
+			),
+		).toEqual([where('posts.span && posts.score'), []]);
+		expect(
+			out(
+				q()
+					.where(rangeContainedBy('span', exprRef('score')))
+					.dump(),
+			),
+		).toEqual([where('posts.span <@ posts.score'), []]);
+		expect(
+			out(
+				q()
 					.where(rangeOverlaps('span', fn('int4range', 1, 5)))
 					.dump(),
 			),
@@ -566,6 +580,13 @@ describe('range helper leaves and range values (ADR 0011 delivery 6)', () => {
 				folded: { type: 'string', dbType: 'MyRange' },
 				quoted: { type: 'string', dbType: '"MyRange"' },
 				schemaQuoted: { type: 'string', dbType: '"My Schema".ipspan' },
+				big: 'int8range',
+				num: 'numrange',
+				ts: 'tsrange',
+				tstz: 'tstzrange',
+				parenSchema: { type: 'string', dbType: '"Reporting (EU)".ipspan' },
+				parenName: { type: 'string', dbType: '"ip(span)"' },
+				catalog: { type: 'string', dbType: 'pg_catalog.int4range' },
 			},
 		});
 		const torm = createOrm({
@@ -592,6 +613,25 @@ describe('range helper leaves and range values (ADR 0011 delivery 6)', () => {
 		// An unquoted MyRange names the type PostgreSQL folds to myrange, as its cast does.
 		expect(sqlFor('folded')).toEqual(expected('folded', 'myrange'));
 		expect(sqlFor('quoted')).toEqual(expected('quoted', '"MyRange"'));
+		for (const [column, ctor] of [
+			['big', 'int8range'],
+			['num', 'numrange'],
+			['ts', 'tsrange'],
+			['tstz', 'tstzrange'],
+		] as const)
+			expect(sqlFor(column)).toEqual(expected(column, ctor));
+		// A parenthesis inside a quoted identifier is not a type modifier.
+		expect(sqlFor('parenSchema')).toEqual([
+			`SELECT t.id FROM t WHERE t."parenSchema" && "Reporting (EU)".ipspan($1, $2, '[)')`,
+			[1, 5],
+		]);
+		expect(sqlFor('parenName')).toEqual([
+			`SELECT t.id FROM t WHERE t."parenName" && "ip(span)"($1, $2, '[)')`,
+			[1, 5],
+		]);
+		expect(sqlFor('catalog')).toEqual(
+			expected('catalog', 'pg_catalog.int4range'),
+		);
 		expect(sqlFor('schemaQuoted')).toEqual([
 			`SELECT t.id FROM t WHERE t."schemaQuoted" && "My Schema".ipspan($1, $2, '[)')`,
 			[1, 5],
@@ -999,5 +1039,154 @@ describe('range helper refusals (ADR 0011 delivery 6)', () => {
 		expect(
 			form.recursive('tree', { base, step: step(param(5)) }).dump().params,
 		).toEqual([5, 6]);
+	});
+
+	it('RF5 helper names: rangeContains and rangeContainedBy name themselves in their refusals', () => {
+		for (const [helper, name] of [
+			[rangeOverlaps, 'rangeOverlaps'],
+			[rangeContains, 'rangeContains'],
+			[rangeContainedBy, 'rangeContainedBy'],
+		] as const) {
+			const call = helper as (
+				column: unknown,
+				value: unknown,
+				type?: string,
+			) => unknown;
+			invalid(
+				() => call(null, [1, 5], 'int4range'),
+				referenceRefusal(name, 'null'),
+			);
+			invalid(
+				() => call('span', { ...RV, bounds: 'bogus' }),
+				`Invalid ${name}: bounds must be one of '[)', '[]', '()', '(]'; got "bogus"`,
+			);
+			invalid(
+				() => call('span', [sql('1'), 5], 'int4range'),
+				`Invalid ${name}: sql() is only accepted as an update or upsert value; use literal(), param() or an expression here`,
+			);
+		}
+	});
+
+	it('RF12 legacy route refuses every non-default bounds form', () => {
+		const at = (c: WhereIntent) =>
+			q()
+				.columns(['id', caseWhen(c, literal(1)).else(literal(0)).as('x')])
+				.dump();
+		for (const bounds of ['()', '(]'] as const)
+			notYet(
+				() => at(rangeOverlaps('span', { ...RV, bounds })),
+				`bounds '${bounds}'`,
+				'CASE, FILTER or HAVING condition',
+				891,
+			);
+	});
+
+	it('RF6 refusal names the field as written and recognises qualified built-in and quoted multirange types', () => {
+		const msg = (field: string, detail: string) =>
+			`A range value { lower, upper } needs a column declared with a range type; '${field}' ${detail}. Declare the column's range type, or use the tuple form with a rangeType.`;
+		expect(() => q().where(rangeOverlaps('posts.score', RV)).dump()).toThrow(
+			msg('posts.score', "is declared 'integer'"),
+		);
+		const typed = schema({
+			t: {
+				id: { type: 'integer', primaryKey: true },
+				catalogInt: { type: 'string', dbType: 'pg_catalog.int4' },
+				quotedMulti: { type: 'string', dbType: '"Multirange"' },
+			},
+		});
+		const torm = createOrm({
+			schema: typed,
+			adapter: createPgCompileOnlyAdapter({ model: typed.model }),
+			suppressDxWarnings: true,
+		});
+		const compile = (column: string) => () =>
+			torm.select('t').columns(['id']).where(rangeOverlaps(column, RV)).dump();
+		expect(compile('catalogInt')).toThrow(
+			msg('catalogInt', "is declared 'pg_catalog.int4'"),
+		);
+		expect(compile('quotedMulti')).toThrow(
+			msg('quotedMulti', `is declared '"Multirange"'`),
+		);
+	});
+
+	it('range bound ColumnRef in a nested relation body keeps the #1014 refusal', () => {
+		const nodesDb = schema({
+			nodes: {
+				id: { type: 'integer', primaryKey: true },
+				score: 'integer',
+				span: { type: 'int4range' },
+				parent_id: ref('nodes', {
+					roles: { parent: 'parent', children: 'children' },
+				}),
+			},
+		});
+		const norm = createOrm({
+			schema: nodesDb,
+			adapter: createPgCompileOnlyAdapter({ model: nodesDb.model }),
+			suppressDxWarnings: true,
+		});
+		const nodes = norm.tables.nodes;
+		const bound = caseWhen(eq(nodes.parent.score, 1), literal(1)).else(
+			literal(2),
+		);
+		const refusal =
+			"ColumnRef 'parent.score' follows a relation; inside a relation predicate, quantifier callback or subquery body its path would be read from that body's row (#1014).";
+		expect(() =>
+			norm
+				.select('nodes')
+				.columns(['id'])
+				.where(
+					exists('children', {
+						where: rangeOverlaps('span', { lower: bound, upper: 5 }),
+					}),
+				)
+				.dump(),
+		).toThrow(refusal);
+		expect(() =>
+			norm
+				.update('nodes')
+				.set({ score: 2 })
+				.where(
+					exists('children', {
+						where: rangeOverlaps('span', { lower: 1, upper: bound }),
+					}),
+				)
+				.dump(),
+		).toThrow(refusal);
+	});
+
+	it('RF14 a plain bound object is data for the unplanned-read walker', () => {
+		const tables = {
+			users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				score: 'integer',
+				span: { type: 'int4range' },
+			},
+		} as const;
+		const filtered = schema(tables, undefined, {
+			defaultFilters: { users: eq('id', 7) },
+		});
+		const form = createOrm({
+			schema: filtered,
+			adapter: createPgCompileOnlyAdapter({ model: filtered.model }),
+			suppressDxWarnings: true,
+		});
+		const base = form.select('posts').columns(['id', 'score', 'span']);
+		const bound = { from: 'users', table: 'users', value: 1 };
+		const step = form
+			.select('tree' as never)
+			.columns(['id', 'score', 'span'])
+			.where(
+				rawExists(
+					subquery('posts')
+						.select('id')
+						.where(rangeOverlaps('span', { lower: bound, upper: 6 })),
+				),
+			);
+		expect(form.recursive('tree', { base, step }).dump().params).toEqual([
+			bound,
+			6,
+		]);
 	});
 });

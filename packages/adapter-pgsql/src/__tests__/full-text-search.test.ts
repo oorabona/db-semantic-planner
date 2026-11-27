@@ -570,6 +570,11 @@ describe('fullTextSearch and textScore leaves (ADR 0011 delivery 6)', () => {
 			caught = error;
 		}
 		expect(caught).toBeInstanceOf(NotYetSupportedError);
-		expect((caught as NotYetSupportedError).issue).toBe(1052);
+		const e = caught as NotYetSupportedError;
+		expect([e.construct, e.position, e.issue]).toEqual([
+			'a relation-reached ColumnRef',
+			'expression argument',
+			1052,
+		]);
 	});
 });

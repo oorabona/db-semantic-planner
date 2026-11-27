@@ -215,6 +215,8 @@ export type ResolvedCondition =
 				| ResolvedParameter
 				| {
 						readonly kind: 'rangeConstructor';
+						/** The condition's field as written, for diagnostics. */
+						readonly field: string;
 						readonly lower: ResolvedRhs;
 						readonly upper: ResolvedRhs;
 						readonly bounds: '[)' | '[]' | '()' | '(]';

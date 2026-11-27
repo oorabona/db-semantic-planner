@@ -1254,6 +1254,7 @@ export function resolveConditionContext(
 						rangeValue !== undefined
 							? {
 									kind: 'rangeConstructor',
+									field: node.field,
 									lower: bound(rangeValue.lower),
 									upper: bound(rangeValue.upper),
 									bounds: (rangeValue.bounds ?? '[)') as

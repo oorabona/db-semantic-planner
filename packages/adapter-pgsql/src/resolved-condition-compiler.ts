@@ -34,6 +34,7 @@ import {
 	dbTypeCastTarget,
 	isPgBuiltInTypeName,
 	renderColumnDbType,
+	splitDbType,
 	validateDbType,
 } from './db-type.js';
 import {
@@ -295,24 +296,33 @@ function typeNameParts(type: string): string[] {
  */
 function rangeConstructorName(
 	operand: ResolvedColumnOperand,
+	field: string,
 	ctx: CompilerContext,
 	state: CompilerState,
 ): string[] {
 	const col = metadata(operand, ctx, state);
 	const refuse = (detail: string): never => {
 		throw new Error(
-			`A range value { lower, upper } needs a column declared with a range type; '${operand.column}' ${detail}. Declare the column's range type, or use the tuple form with a rangeType.`,
+			`A range value { lower, upper } needs a column declared with a range type; '${field}' ${detail}. Declare the column's range type, or use the tuple form with a rangeType.`,
 		);
 	};
 	if (col?.originalDbType) {
 		const rendered = renderColumnDbType(col, ctx.schema).trim();
 		validateDbType(rendered);
-		const base = typeNameParts(rendered).at(-1) ?? '';
+		// The structural split tells a type modifier or an array suffix from a
+		// parenthesis inside a quoted identifier.
+		const split = splitDbType(rendered);
+		const parts = typeNameParts(split.base);
+		const base = parts.at(-1) ?? '';
+		const builtIn =
+			parts.length === 2 && parts[0] === 'pg_catalog'
+				? isPgBuiltInTypeName(base)
+				: isPgBuiltInTypeName(rendered);
 		if (
-			rendered.endsWith('[]') ||
-			rendered.includes('(') ||
-			base.endsWith('multirange') ||
-			(isPgBuiltInTypeName(rendered) && !BUILT_IN_RANGE_TYPES.has(base))
+			split.isArray ||
+			split.modifier !== undefined ||
+			base.toLowerCase().endsWith('multirange') ||
+			(builtIn && !BUILT_IN_RANGE_TYPES.has(base.toLowerCase()))
 		)
 			refuse(`is declared '${rendered}'`);
 		return typeNameParts(dbTypeCastTarget(rendered));
@@ -807,7 +817,12 @@ function compileResolvedConditionUnchecked(
 			);
 			const rangeValue = tree.value;
 			if (rangeValue.kind === 'rangeConstructor') {
-				const name = rangeConstructorName(tree.left, ctx, state);
+				const name = rangeConstructorName(
+					tree.left,
+					rangeValue.field,
+					ctx,
+					state,
+				);
 				// A null bound is a bound parameter (an unbounded side), never NULL text.
 				const bound = (side: ResolvedRhs): Node =>
 					side.kind === 'parameter' && 'cast' in side

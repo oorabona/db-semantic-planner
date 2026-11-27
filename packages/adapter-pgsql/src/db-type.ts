@@ -1,6 +1,6 @@
 import type { ColumnIR, ColumnType } from '@dbsp/types';
 
-type SplitDbType = {
+export type SplitDbType = {
 	base: string;
 	modifier: string | undefined;
 	isArray: boolean;
@@ -166,7 +166,7 @@ const SINGLE_INT_MODIFIER_BUILTINS = new Set([
 // (p,s). The scale may be negative on PostgreSQL 15+ (numeric(10,-2)).
 const PRECISION_SCALE_BUILTINS = new Set(['numeric', 'decimal']);
 
-function splitDbType(input: string): SplitDbType {
+export function splitDbType(input: string): SplitDbType {
 	const trimmed = input.trim();
 	let rest = trimmed;
 	let isArray = false;

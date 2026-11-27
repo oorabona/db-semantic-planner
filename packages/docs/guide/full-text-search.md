@@ -70,8 +70,9 @@ tableAlias @@@ paradedb.boolean(
 Each field gets its own `$N` parameter slot, all bound to the same query value.
 
 `query` follows the value rule: a plain value (string, number, `null`) is bound, `param(v)` binds `v`, and an
-expression is compiled as every field's `query_string`, with no parameter: `exprRef('search_terms')`,
-`fn('lower', ...)`, `literal('shoes')`, a `ColumnRef` or a subquery. `tableAlias` must be a string naming the
+expression is compiled as every field's `query_string` instead of being bound as an object:
+`exprRef('search_terms')`, `fn('lower', ...)`, `literal('shoes')`, a `ColumnRef` or a subquery. Parameters inside the
+expression (`fn('lower', param(term))`) stay parameters. `tableAlias` must be a string naming the
 relation; anything else is refused when `fullTextSearch()` is called.
 
 ---
@@ -96,7 +97,8 @@ paradedb.score(symbol_id)   -- textScore('symbol_id')
 paradedb.score(symbols.id)  -- textScore(orm.tables.symbols.id)
 ```
 
-Binds no parameters — the key field is a column reference, not a value.
+A column name or a `ColumnRef` binds no parameters — the key field is a column reference, not a value. An
+expression key keeps its own parameters.
 
 ---
 

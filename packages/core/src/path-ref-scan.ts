@@ -1,4 +1,5 @@
 import { EXPRESSION_BRAND } from '@dbsp/types';
+import { isRangeSideExpression, isRangeValueShape } from './intent-payload.js';
 
 /** Predicates whose `where` (and includes) are evaluated from the related row. */
 const RELATION_BODIES = new Set(['exists', 'notExists', 'relationFilter']);
@@ -30,9 +31,13 @@ function items(array: readonly unknown[]): unknown[] {
  * payload (as `isBoundPayload` decides), read without touching accessors.
  */
 function isPayload(kind: unknown, key: string, child: unknown): boolean {
+	if (key === 'lower' || key === 'upper')
+		return kind === undefined && !isRangeSideExpression(child);
 	if (key !== 'value' && key !== 'values') return false;
 	if (kind === 'namedArg') return false;
-	return !isObject(child) || !(EXPRESSION_BRAND in child);
+	if (!isObject(child) || !(EXPRESSION_BRAND in child))
+		return !(kind === 'range' && key === 'value' && isRangeValueShape(child));
+	return false;
 }
 
 /**

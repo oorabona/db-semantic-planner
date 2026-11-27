@@ -7,17 +7,22 @@
 
 import {
 	and,
+	caseWhen,
 	createOrm,
 	createRawCteBuilder,
 	eq,
 	exprRef,
 	fn,
 	gt,
+	inSubquery,
 	literal,
 	NotYetSupportedError,
 	op,
+	param,
+	rawExists,
 	ref,
 	schema,
+	star,
 	subquery,
 } from '@dbsp/core';
 import type { Dump } from '@dbsp/types';
@@ -798,5 +803,57 @@ describe('raw CTE outer columns and orderBy leaves (ADR 0011 delivery 6)', () =>
 			'raw CTE ordering',
 			1095,
 		);
+	});
+
+	it('RF13 raw CTE entries reading another query: EXISTS, IN and FILTER bodies are refused too', () => {
+		const exist = () =>
+			caseWhen(rawExists(subquery('posts').select('id')), literal(1)).else(
+				literal(0),
+			);
+		notYet(
+			() => rc().columns(['id', exist().as('f')]),
+			'a subquery',
+			'raw CTE column',
+			1095,
+		);
+		notYet(
+			() =>
+				rc().columns([
+					'id',
+					caseWhen(inSubquery('id', subquery('posts').select('id')), literal(1))
+						.else(literal(0))
+						.as('f'),
+				]),
+			'a subquery',
+			'raw CTE column',
+			1095,
+		);
+		notYet(
+			() =>
+				rc().columns([
+					fn('count', star())
+						.filter(rawExists(subquery('posts').select('id')))
+						.as('n'),
+				]),
+			'a subquery',
+			'raw CTE column',
+			1095,
+		);
+		notYet(() => rc().orderBy(exist()), 'a subquery', 'raw CTE ordering', 1095);
+	});
+
+	it('AC16 bound data shaped like a query stays data in raw CTE entries', () => {
+		const data = { kind: 'subquery', query: 'text' };
+		expect(
+			out(
+				rc()
+					.columns(['id', param(data).as('d')])
+					.dump(),
+			),
+		).toEqual([`${head}SELECT tree.id, $2 AS d FROM tree`, [1, data]]);
+		expect(out(rc().orderBy(param(data)).dump())).toEqual([
+			`${head}SELECT tree.* FROM tree ORDER BY $2 ASC`,
+			[1, data],
+		]);
 	});
 });
