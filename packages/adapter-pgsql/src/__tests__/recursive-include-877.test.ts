@@ -777,7 +777,7 @@ it('uses shared shortening for long requested keys and collision-free transport 
 			recursive: true,
 			direction: 'descendants',
 		})
-		.include(`${'é'.repeat(39)}a`, {
+		.include('é'.repeat(39) + 'a', {
 			via: 'parent',
 			recursive: true,
 			direction: 'ancestors',
@@ -786,7 +786,7 @@ it('uses shared shortening for long requested keys and collision-free transport 
 	const shapes = compiled.hydrationPlan!.includePayloads!;
 	expect(shapes.map((shape) => shape.publicKey)).toEqual([
 		'é'.repeat(40),
-		`${'é'.repeat(39)}a`,
+		'é'.repeat(39) + 'a',
 	]);
 	expect(new Set(shapes.map((shape) => shape.outputLabel)).size).toBe(2);
 	for (const shape of shapes)

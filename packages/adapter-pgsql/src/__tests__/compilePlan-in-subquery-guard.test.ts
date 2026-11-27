@@ -208,7 +208,6 @@ describe('valid IN-subquery body still compiles (no false positives)', () => {
 // 4. Nested IN with subquery in `value` (not `subquery`) — DEFECT 1 guard
 // ============================================================================
 
-
 // ============================================================================
 // 5. Typeless { fields: [...] } shape — DEFECT 2 guard
 // ============================================================================
