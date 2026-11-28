@@ -444,8 +444,8 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect(result.sql).toContain('FROM tenant_1.items');
 		expect(result.sql).toContain('FROM recent_items');
 		expect(result.sql).not.toContain('tenant_1.recent_items');
-		// A body on a binding keeps the adapter's route, with or without a
-		// default filter on the model table it reads (#891 slice 5b, R7).
+		// A body on a binding is a nested select, with or without a default
+		// filter on the model table the binding reads (#1040).
 		expect(
 			[undefined, { items: isNull('name') }].map((defaultFilters) => {
 				const compiled = adapter.compile(bundle, {

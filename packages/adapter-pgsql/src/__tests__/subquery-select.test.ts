@@ -1360,8 +1360,8 @@ describe('scalar subquery bodies compile every clause through core (#891 slice 5
 			expect(run()).toEqual(expected);
 		});
 
-		// A body on the CTE `recent` keeps the adapter's route, which does not
-		// see the include key `author` written below the root's own `author`.
+		// A body on the CTE `recent` is a nested select: its outerRef binds the
+		// include key `author` written below the root's own `author`.
 		const local = (column: string) =>
 			new SubqueryExpression({
 				type: 'select',
@@ -1434,7 +1434,7 @@ describe('scalar subquery bodies compile every clause through core (#891 slice 5
 		});
 	});
 
-	describe('a body on a mutation local source keeps the adapter route (CON1)', () => {
+	describe('a body on a mutation local source is a nested select (CON1)', () => {
 		const dbs = [
 			['plain', plainDb],
 			['filtered', filteredDb],
@@ -1857,7 +1857,7 @@ describe('scalar subquery bodies compile every clause through core (#891 slice 5
 	});
 });
 
-describe('conditions holding or inside a query-local body keep their route (#891 slice 5c)', () => {
+describe('conditions holding or inside a query-local body resolve through core (#1040)', () => {
 	const RECENT =
 		'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id))';
 	const usersDb = schema({
@@ -1941,7 +1941,7 @@ describe('conditions holding or inside a query-local body keep their route (#891
 	} as const;
 	afterEach(() => vi.restoreAllMocks());
 
-	it('AC10 local-source-body: CASE, FILTER and HAVING inside a CTE body keep their SQL', () => {
+	it('AC1 local-source-body: CASE, FILTER and HAVING inside a CTE body resolve through core', () => {
 		const column = (body: object) =>
 			out(() =>
 				withRecent(usersOrm, (s) => s.columns(['id', local(body).asExpr('v')])),
@@ -1960,7 +1960,7 @@ describe('conditions holding or inside a query-local body keep their route (#891
 		});
 	});
 
-	it('AC10 local-in-condition: a condition holding a CTE body keeps its route; WHERE keeps its outcomes', () => {
+	it('AC6 local-in-condition: a condition holding a CTE body resolves whole in every position', () => {
 		const cond = (body: object) => gt(local(body).asExpr('v'), 0);
 		const at = {
 			WHERE: (b: object) =>
@@ -2039,7 +2039,7 @@ describe('conditions holding or inside a query-local body keep their route (#891
 		}
 	});
 
-	it("AC10 local-in-condition: a root outerRef() or a bare operand beside a CTE body keeps today's SQL", () => {
+	it('AC6 local-in-condition: a root outerRef() beside a CTE body is refused; a bare operand beside it is qualified', () => {
 		const db = schema({
 			users: {
 				id: { type: 'integer', primaryKey: true },
@@ -2339,7 +2339,7 @@ describe('conditions holding or inside a query-local body keep their route (#891
 		});
 	});
 
-	it('AC10 nested-model-body: a model-table body holding a CASE, nested in a CTE body, keeps its SQL', () => {
+	it('AC1 nested-model-body: a model-table body holding a CASE, nested in a CTE body, is a nested select', () => {
 		const inner = {
 			type: 'select',
 			from: 'users',
@@ -2625,6 +2625,11 @@ describe('a body on a query-local source is planned like a body on a table (#104
 		columns: [{ kind: 'ref', column: 'id', as: 'v' }],
 	} as unknown as QueryIntent['select'];
 	const base = o.select('posts').columns(['id', 'score']);
+	const sourceWithName: QueryIntent = {
+		type: 'select',
+		from: 'users',
+		select: { type: 'fields', fields: ['id', 'name'] },
+	};
 	const source: QueryIntent = {
 		type: 'select',
 		from: 'users',
@@ -2729,6 +2734,7 @@ users | where not (id in (posts | select authorId)) | select id`.dump() as {
 					.dump(),
 			{
 				sql: 'WITH posts AS (SELECT t."authorId" AS "authorId" FROM unnest(CAST($1 AS int4[])) AS t("authorId")) SELECT users.* FROM users WHERE NOT (users.id = ANY (SELECT posts_subq_0."authorId" FROM posts AS posts_subq_0))',
+				params: [[1, null]],
 			},
 		],
 		[
@@ -2743,6 +2749,7 @@ users | where not (id in (posts | select authorId)) | select id`.dump() as {
 					.dump(),
 			{
 				sql: 'WITH posts AS (SELECT t."authorId" AS "authorId" FROM unnest(CAST($1 AS int4[])) AS t("authorId")) SELECT users.* FROM users WHERE NOT (NOT (EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0."authorId")))',
+				params: [[1, null]],
 			},
 		],
 		[
@@ -2920,6 +2927,7 @@ users | where not (id in (posts | select authorId)) | select id`.dump() as {
 				),
 			{
 				sql: 'WITH ids AS (SELECT users.id FROM users) INSERT INTO singles SELECT * FROM ids WHERE (SELECT ids_1.* FROM ids AS ids_1 LIMIT 1) > $1',
+				params: [0],
 			},
 		],
 		[
@@ -2937,6 +2945,7 @@ users | where not (id in (posts | select authorId)) | select id`.dump() as {
 				),
 			{
 				sql: 'WITH ids AS (SELECT users.id FROM users) INSERT INTO singles SELECT * FROM ids WHERE (SELECT ids_1.* FROM ids AS ids_1) > $1',
+				params: [0],
 			},
 		],
 		[
@@ -3310,6 +3319,174 @@ users | select id, (posts | select count(*)) as n`.dump() as {
 			{
 				error:
 					'scalar subquery body projects 4 columns; a scalar subquery yields one value.',
+			},
+		],
+		[
+			'AC9 orderBy body over a mutation source (compileInsertFrom)',
+			() =>
+				adapter.compileInsertFrom(
+					{
+						type: 'insert_from',
+						table: 'singles',
+						source: 'ids',
+						sourceQuery: source,
+						where: gt(
+							new SubqueryExpression({
+								type: 'select',
+								from: 'ids',
+								select: { type: 'fields', fields: ['id'] },
+								limit: 1,
+								orderBy: [{ field: 'id', direction: 'desc' }],
+							} as QueryIntent).asExpr('v'),
+							0,
+						),
+					} as never,
+					{ model: db.model },
+				),
+			{
+				sql: 'WITH ids AS (SELECT users.id FROM users) INSERT INTO singles SELECT * FROM ids WHERE (SELECT ids_1.id FROM ids AS ids_1 ORDER BY ids_1.id DESC LIMIT 1) > $1',
+				params: [0],
+			},
+		],
+		[
+			'AC9 orderBy body over a mutation source (compileUpsertFrom)',
+			() =>
+				adapter.compileUpsertFrom(
+					{
+						type: 'upsert_from',
+						table: 'users',
+						source: 'ids',
+						sourceQuery: sourceWithName,
+						columns: ['id', 'name'],
+						conflictColumns: ['id'],
+						where: gt(
+							new SubqueryExpression({
+								type: 'select',
+								from: 'ids',
+								select: { type: 'fields', fields: ['id'] },
+								limit: 1,
+								orderBy: [{ field: 'id', direction: 'desc' }],
+							} as QueryIntent).asExpr('v'),
+							0,
+						),
+					} as never,
+					{ model: db.model },
+				),
+			{
+				sql: "WITH ids AS (SELECT users.id, users.name FROM users) INSERT INTO users (id, name) SELECT ids.id AS id, ids.name AS name FROM ids WHERE (SELECT ids_1.id FROM ids AS ids_1 ORDER BY ids_1.id DESC LIMIT 1) > $1 ON CONFLICT (id) DO UPDATE SET name = excluded.name",
+				params: [0],
+			},
+		],
+		[
+			'AC9 groupBy body over a mutation source (compileInsertFrom)',
+			() =>
+				adapter.compileInsertFrom(
+					{
+						type: 'insert_from',
+						table: 'singles',
+						source: 'ids',
+						sourceQuery: source,
+						where: gt(
+							new SubqueryExpression({
+								type: 'select',
+								from: 'ids',
+								select: { type: 'fields', fields: ['id'] },
+								limit: 1,
+								groupBy: ['id'],
+							} as QueryIntent).asExpr('v'),
+							0,
+						),
+					} as never,
+					{ model: db.model },
+				),
+			{
+				sql: 'WITH ids AS (SELECT users.id FROM users) INSERT INTO singles SELECT * FROM ids WHERE (SELECT ids_1.id FROM ids AS ids_1 GROUP BY ids_1.id LIMIT 1) > $1',
+				params: [0],
+			},
+		],
+		[
+			'AC9 groupBy body over a mutation source (compileUpsertFrom)',
+			() =>
+				adapter.compileUpsertFrom(
+					{
+						type: 'upsert_from',
+						table: 'users',
+						source: 'ids',
+						sourceQuery: sourceWithName,
+						columns: ['id', 'name'],
+						conflictColumns: ['id'],
+						where: gt(
+							new SubqueryExpression({
+								type: 'select',
+								from: 'ids',
+								select: { type: 'fields', fields: ['id'] },
+								limit: 1,
+								groupBy: ['id'],
+							} as QueryIntent).asExpr('v'),
+							0,
+						),
+					} as never,
+					{ model: db.model },
+				),
+			{
+				sql: "WITH ids AS (SELECT users.id, users.name FROM users) INSERT INTO users (id, name) SELECT ids.id AS id, ids.name AS name FROM ids WHERE (SELECT ids_1.id FROM ids AS ids_1 GROUP BY ids_1.id LIMIT 1) > $1 ON CONFLICT (id) DO UPDATE SET name = excluded.name",
+				params: [0],
+			},
+		],
+		[
+			'AC9 distinctOn body over a mutation source (compileInsertFrom)',
+			() =>
+				adapter.compileInsertFrom(
+					{
+						type: 'insert_from',
+						table: 'singles',
+						source: 'ids',
+						sourceQuery: source,
+						where: gt(
+							new SubqueryExpression({
+								type: 'select',
+								from: 'ids',
+								select: { type: 'fields', fields: ['id'] },
+								limit: 1,
+								distinctOn: ['id'],
+							} as QueryIntent).asExpr('v'),
+							0,
+						),
+					} as never,
+					{ model: db.model },
+				),
+			{
+				sql: 'WITH ids AS (SELECT users.id FROM users) INSERT INTO singles SELECT * FROM ids WHERE (SELECT DISTINCT ON (id) ids_1.id FROM ids AS ids_1 LIMIT 1) > $1',
+				params: [0],
+			},
+		],
+		[
+			'AC9 distinctOn body over a mutation source (compileUpsertFrom)',
+			() =>
+				adapter.compileUpsertFrom(
+					{
+						type: 'upsert_from',
+						table: 'users',
+						source: 'ids',
+						sourceQuery: sourceWithName,
+						columns: ['id', 'name'],
+						conflictColumns: ['id'],
+						where: gt(
+							new SubqueryExpression({
+								type: 'select',
+								from: 'ids',
+								select: { type: 'fields', fields: ['id'] },
+								limit: 1,
+								distinctOn: ['id'],
+							} as QueryIntent).asExpr('v'),
+							0,
+						),
+					} as never,
+					{ model: db.model },
+				),
+			{
+				sql: "WITH ids AS (SELECT users.id, users.name FROM users) INSERT INTO users (id, name) SELECT ids.id AS id, ids.name AS name FROM ids WHERE (SELECT DISTINCT ON (id) ids_1.id FROM ids AS ids_1 LIMIT 1) > $1 ON CONFLICT (id) DO UPDATE SET name = excluded.name",
+				params: [0],
 			},
 		],
 	];

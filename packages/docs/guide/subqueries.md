@@ -79,7 +79,7 @@ orm.select('symbols')
 
 SELECT-expression subqueries, including those nested in `op(...)`, support `outerRef()` in their WHERE and HAVING. Unqualified references bind the immediately enclosing query; qualified references search enclosing queries nearest first: in each query, a written include key wins, then an exact emitted qualifier, otherwise the logical table must have exactly one range. Ambiguous logical tables are refused. A FROM-less `selectExpression()` can correlate nested subqueries to their enclosing subquery, but has no row of its own. An unqualified `outerRef()` in its immediate subquery body reads that missing row and is refused with `selectExpression() cannot read column '<name>'; a FROM-less SELECT has no row. …`; a qualified one names a range no enclosing query has and is refused with `outerRef qualifier '<q>' is not visible in an enclosing query.` Neither binds the subquery's own range.
 
-In a root query, an `outerRef()` in HAVING, a CASE WHEN condition or an aggregate FILTER has no enclosing range and is refused with `outerRef() requires an enclosing query range.`, as in WHERE, unless that condition sits inside or holds a subquery over a CTE or an NQL binding and no aggregate alias, relation predicate or dotted field in it already makes core resolve it. This holds for reads planned with a model (the ORM, NQL and `plan()`).
+In a root query, an `outerRef()` in HAVING, a CASE WHEN condition or an aggregate FILTER has no enclosing range and is refused with `outerRef() requires an enclosing query range.`, as in WHERE, a subquery over a CTE or an NQL binding beside it included. This holds for reads planned with a model (the ORM, NQL and `plan()`).
 
 Aggregate methods available on `SubqueryBuilder`:
 
@@ -97,8 +97,7 @@ expression there is refused as not yet supported (#1072), and `count(null)` is r
 `.select(x)` takes a column name or a `ColumnRef` of the subquery's table as a field, and any other leaf as an
 expression column: `subquery('posts').select(fn('lower', exprRef('title')))` gives `(SELECT lower(title) FROM
 posts …)`, `.select(orm.tables.users.name)` reads the enclosing query's column. An expression column serves the
-scalar positions (`.asExpr()`, a comparison operand); `inSubquery` takes a field only and refuses it, and so does a
-scalar subquery over a CTE or binding source.
+scalar positions (`.asExpr()`, a comparison operand); `inSubquery` takes a field only and refuses it.
 
 ---
 
@@ -205,6 +204,6 @@ With a model, a scalar subquery used as a value — in `.columns()`, `.orderBy()
 - A body that projects more than one column is refused: `scalar subquery body projects <n> columns; a scalar subquery yields one value.` The count reads the columns the body's SQL selects: a star, which an absent or empty projection selects, counts as every column of the body's model table; duplicate columns count once. A star over an NQL binding or a CTE is not counted at compile time (#1123): PostgreSQL refuses such a body when it returns more than one column (`subquery must return only one column`).
 - An `include()` that hydrates nested objects is refused: `include('<relation>') in a scalar subquery body hydrates nested objects; a scalar subquery yields one value.`
 - A flat include (#1030), a `batchValuesSource` (#1031) and a join (#1039) are not supported yet: they throw `NotYetSupportedError`, whose `issue` field names the issue. The same three issues apply to a scalar-comparison body in a condition.
-- A body whose FROM names an NQL binding or a CTE (an NQL `bind` or `with`, `orm.withCte()`, `orm.recursive()`, the source of an insert-from) is planned the same way, with every body below it. Its columns are the source's projection: a column outside it is refused with `Local relation '<name>' does not project expression column '<column>'.` A table's default filter never applies to a read of such a source, even one named like that table, while a table read below the body keeps its own filter. A body on the same source as its enclosing query reads its own rows under its alias (`recent AS recent_1`).
+- A body whose FROM names an NQL binding or a CTE (an NQL `bind` or `with`, `orm.withCte()`, `orm.recursive()`, the source of an insert-from) is planned the same way, with every body below it. Its columns are the source's projection: where that projection is known (an NQL binding or `with`, `orm.withCte()`, `orm.recursive()`), a column outside it is refused with `Local relation '<name>' does not project expression column '<column>'.`; the source of an insert-from or upsert-from has no known projection, and PostgreSQL checks its columns at execution. A table's default filter never applies to a read of such a source, even one named like that table, while a table read below the body keeps its own filter. A body on the same source as its enclosing query reads its own rows under its alias (`recent AS recent_1`).
 
 Compilation follows [Authored intent and execution authority](./observability.md#authored-intent-and-execution-authority).

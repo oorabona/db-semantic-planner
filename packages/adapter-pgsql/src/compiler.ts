@@ -608,19 +608,26 @@ export class PlanCompiler {
 					)
 				: undefined;
 		if (localRootAlias) bindings.push(localRootAlias);
+		const rootQualifier =
+			this.currentRootAlias !== undefined
+				? queryLocal(this.currentRootAlias)
+				: this.tableIdentifier(this.currentRootTable);
 		if (
 			this.currentRootTable.length > 0 &&
 			relationBindingFor(this.scope, queryLocal(this.currentRootTable)) ===
 				undefined &&
 			declaredRelationBindingFor(this.scope, this.currentRootTable) ===
-				undefined
+				undefined &&
+			// The effective bindings may already bind the root (a local source
+			// named by bindingNames, or its alias above).
+			!bindings.some(
+				(binding) =>
+					identifierText(binding.qualifier) === identifierText(rootQualifier),
+			)
 		) {
 			bindings.push(
 				relationBinding({
-					qualifier:
-						this.currentRootAlias !== undefined
-							? queryLocal(this.currentRootAlias)
-							: this.tableIdentifier(this.currentRootTable),
+					qualifier: rootQualifier,
 					kind: 'declared-table',
 					logicalTable: this.currentRootTable,
 				}),

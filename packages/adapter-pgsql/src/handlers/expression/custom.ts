@@ -420,7 +420,7 @@ export function compileExpressionIntent(
 
 			const caseArgs: Node[] = caseIntent.when.map((branch) => {
 				// dispatch accepts WhereIntent (via normalizeToDecision which handles `kind` field)
-				// Planned reads resolve CASE conditions through core; the dispatcher serves the local route.
+				// Planned reads resolve CASE conditions through core; the dispatcher remains for the shared lowering.
 				const whenNode = ctx.compileCaseCondition
 					? ctx.compileCaseCondition(branch.condition, ctx, state)
 					: dispatch!(

@@ -182,7 +182,7 @@ describe('SC-14c: an unnest CTE after a parameterised CTE (ADR 0012)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// SC-14b: a scalar body on a CTE keeps the adapter's route (#891 slice 5b, R7)
+// SC-14b: a scalar body on a CTE is a nested select (#1040)
 // ---------------------------------------------------------------------------
 describe('SC-14b: a scalar body on a CTE is a nested select (#1040)', () => {
 	const tables = {
@@ -374,6 +374,18 @@ describe('SC-14b: a scalar body on a CTE is a nested select (#1040)', () => {
 			dump(ormOf({ items: isNull('deletedAt') }), onCte(count('items'))),
 		).toEqual({
 			sql: 'WITH recent_items AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT users.id, (SELECT (SELECT count(*) FROM items WHERE items."deletedAt" IS NULL) AS n FROM recent_items LIMIT 1) AS v FROM users',
+			params: [[1, 2]],
+		});
+	});
+	it('AC7 local-policy-descendant-filtered: an issued policy on a filtered table keeps its filter below a CTE body', () => {
+		const o = ormOf({ items: isNull('deletedAt') });
+		const issued = (
+			o.select('items').columns([]).count('id', 'n') as unknown as {
+				buildSubqueryIntent(): QueryIntent;
+			}
+		).buildSubqueryIntent();
+		expect(dump(o, onCte(issued))).toEqual({
+			sql: 'WITH recent_items AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT users.id, (SELECT (SELECT count(items.id) AS n FROM items WHERE items."deletedAt" IS NULL) AS n FROM recent_items LIMIT 1) AS v FROM users',
 			params: [[1, 2]],
 		});
 	});
@@ -855,6 +867,7 @@ describe('SC-14c: a body on a local source reads its own range and its source (#
 				),
 			{
 				sql: 'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT recent.id, (SELECT recent_1.id AS v FROM recent AS recent_1 WHERE recent_1.id > $2 LIMIT 1) AS v FROM recent',
+				params: [[1], 0],
 			},
 		],
 		[
@@ -873,6 +886,7 @@ describe('SC-14c: a body on a local source reads its own range and its source (#
 				),
 			{
 				sql: 'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT recent.id, (SELECT recent_1.id FROM recent AS recent_1 ORDER BY recent_1.id DESC LIMIT 1) AS v FROM recent',
+				params: [[1]],
 			},
 		],
 		[
@@ -891,6 +905,7 @@ describe('SC-14c: a body on a local source reads its own range and its source (#
 				),
 			{
 				sql: 'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT recent.id, (SELECT recent_1.* FROM recent AS recent_1 WHERE recent_1.id > $2 LIMIT 1) AS v FROM recent',
+				params: [[1, 2], 1],
 			},
 		],
 		[
@@ -911,6 +926,7 @@ describe('SC-14c: a body on a local source reads its own range and its source (#
 				),
 			{
 				sql: 'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT recent.id, (SELECT recent_1.id FROM recent AS recent_1 GROUP BY recent_1.id HAVING recent_1.id > $2 LIMIT 1) AS v FROM recent',
+				params: [[1, 2], 0],
 			},
 		],
 		[
