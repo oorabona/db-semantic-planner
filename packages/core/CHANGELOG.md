@@ -1,5 +1,32 @@
 # Changelog
 
+## [9.0.0](https://github.com/oorabona/db-semantic-planner/compare/core-v8.0.0...core-v9.0.0) (2026-11-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **adapter-pgsql,core:** @dbsp/adapter-pgsql no longer exports compileUpdate, compileDelete, compileUpsert, buildOnConflictClause, compileMutation, conditionalUpdate, excludedRef, UpdateConfig, DeleteConfig, UpsertConfig, ConflictTarget, ConflictAction, WhereDispatcher or WhereHandler, and CompilerContext has no createWhereDispatcher member. compileRecursive refuses a recursive report whose start.where core did not resolve.
+* **core:** SelectExecution.localConditions is removed from @dbsp/types; bodies on query-local sources use core's aliases and refuse a root outerRef() beside them.
+* **adapter-pgsql:** bm25Search is no longer exported from @dbsp/adapter-pgsql; use fullTextSearch from @dbsp/core. A number[] vector is bound as its pgvector text instead of as an array, and a vector array holding anything but finite numbers is refused.
+* **core,adapter-pgsql:** an expression object in a typed function intent's arguments is refused instead of bound or compiled; the extension helpers compile an expression query or vector instead of binding it, and refuse non-string table and field names and null or object column arguments.
+* **core:** resolve a typed ref inside a body from its origin range ([#1117](https://github.com/oorabona/db-semantic-planner/issues/1117))
+
+### Features
+
+* **adapter-pgsql,core:** Delete the shared legacy WHERE lowering ([#1127](https://github.com/oorabona/db-semantic-planner/issues/1127)) ([048931f](https://github.com/oorabona/db-semantic-planner/commit/048931fba3267d9022773287de4e0b1d8b343530))
+* **adapter-pgsql:** Remove bm25Search, bind a number[] vector as pgvector text ([#1124](https://github.com/oorabona/db-semantic-planner/issues/1124)) ([909962b](https://github.com/oorabona/db-semantic-planner/commit/909962b082c5c08ca6a5606a04bc5aa6f4a29da6)), closes [#1119](https://github.com/oorabona/db-semantic-planner/issues/1119) [#1120](https://github.com/oorabona/db-semantic-planner/issues/1120)
+* **core,adapter-pgsql:** Refuse expression objects in typed function args, coerce extension leaves ([#1122](https://github.com/oorabona/db-semantic-planner/issues/1122)) ([42e0564](https://github.com/oorabona/db-semantic-planner/commit/42e0564bae81596265cd4ec300dae1e3eea5c52f)), closes [#1116](https://github.com/oorabona/db-semantic-planner/issues/1116) [#1082](https://github.com/oorabona/db-semantic-planner/issues/1082)
+* **core:** Plan a scalar body on a query-local source as a nested select ([#1125](https://github.com/oorabona/db-semantic-planner/issues/1125)) ([71ed4ab](https://github.com/oorabona/db-semantic-planner/commit/71ed4ab94b12590c4c77573a0fd391fa39bce021))
+* **core:** Resolve a typed ref inside a body from its origin range ([#1117](https://github.com/oorabona/db-semantic-planner/issues/1117)) ([a241394](https://github.com/oorabona/db-semantic-planner/commit/a2413944492b98db93d2c35421150f7f04c2e4c6)), closes [#1014](https://github.com/oorabona/db-semantic-planner/issues/1014)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/nql bumped to 3.0.1
+    * @dbsp/types bumped to 8.0.0
+
 ## [8.0.0](https://github.com/oorabona/db-semantic-planner/compare/core-v7.1.0...core-v8.0.0) (2026-11-27)
 
 
