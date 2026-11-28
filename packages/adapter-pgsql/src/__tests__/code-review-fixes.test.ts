@@ -284,4 +284,3 @@ describe('D1: validateSqlExpression $$ clarification', () => {
 // ---------------------------------------------------------------------------
 // C1 (round-2): Internal deparser emits WHERE in ON CONFLICT partial-index
 // ---------------------------------------------------------------------------
-describe('C1 (round-2): internal deparser — partial-index ON CONFLICT WHERE', () => {});

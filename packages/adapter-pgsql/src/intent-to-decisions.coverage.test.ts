@@ -657,10 +657,6 @@ describe('intentToDecisions - coverage', () => {
 		});
 	});
 
-	describe('IN with subquery without inner WHERE', () => {});
-
-	describe('relationFilter without where', () => {});
-
 	describe('column expression without alias', () => {
 		it('converts column expression without as → no alias property', () => {
 			const intent = {
@@ -757,6 +753,4 @@ describe('intentToDecisions - coverage', () => {
 			});
 		});
 	});
-
-	describe('CASE expression without ELSE and without alias', () => {});
 });
