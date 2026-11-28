@@ -28,8 +28,8 @@ export function assertNoUnsupportedSubqueryModifiers(
 	const notYet: string[] = [];
 	const semantic: string[] = [];
 
-	// The resolved root SELECT WHERE body contract refuses unsupported modifiers
-	// at plan(); legacy direct routes (including mutations) refuse at compilation.
+	// Core applies this guard when it resolves a subquery body, so unsupported
+	// modifiers are refused at plan().
 	if (subquery.groupBy && subquery.groupBy.length > 0) notYet.push('GROUP BY');
 	if (subquery.having) notYet.push('HAVING');
 	if (subquery.offset != null) notYet.push('OFFSET');
@@ -46,30 +46,24 @@ export function assertNoUnsupportedSubqueryModifiers(
 	}
 	if (subquery.joins && subquery.joins.length > 0) notYet.push('joins');
 
-	// Additional structural modifiers that have no path through buildSubqueryFromIntent.
+	// Additional structural modifiers no subquery body contract carries.
 	if (subquery.existsWrap) notYet.push('existsWrap');
 	if (subquery.lock) notYet.push('lock');
 	if (subquery.batchValuesSource) notYet.push('batchValuesSource');
 
-	// rawExists and scalar-direct: buildSubqueryFromIntent emits ONLY
-	// SELECT/FROM/WHERE — it does NOT emit sortClause or limitCount.
-	// The resolved root WHERE scalar body contract retains LIMIT and field ORDER BY;
-	// legacy scalar-direct routes cannot emit them.
+	// rawExists and scalar-direct bodies carry neither LIMIT nor ORDER BY; the
+	// scalar body contract retains LIMIT and field ORDER BY.
 	if (context === 'rawExists' || context === 'scalar-direct') {
 		if (subquery.limit != null) notYet.push('LIMIT');
 	}
 
-	// rawExists and scalar-direct: buildSubqueryFromIntent also drops orderBy
-	// entirely (no sortClause emitted), so both field-based and expression-based
-	// ORDER BY produce silently wrong results on the direct path.
-	// The resolved root WHERE scalar body contract retains field ORDER BY;
-	// legacy scalar-direct routes cannot emit it.
+	// Both field-based and expression-based ORDER BY are refused there.
 	if (context === 'rawExists' || context === 'scalar-direct') {
 		if (subquery.orderBy && subquery.orderBy.length > 0) {
 			notYet.push('ORDER BY');
 		}
 	} else if (subquery.orderBy && subquery.orderBy.length > 0) {
-		// On the resolved root WHERE / legacy IN routes: only expression-based orderBy is unsupported
+		// On the scalar and IN body contracts only expression-based orderBy is unsupported
 		// (field references are faithfully emitted there).
 		const hasExpressionSort = subquery.orderBy.some(
 			(o) => !('field' in o) || (o as { field?: unknown }).field == null,
@@ -148,11 +142,8 @@ export function assertNoUnsupportedSubqueryModifiers(
 		}
 	}
 
-	// Scalar SELECT validation — applies to the resolved root WHERE body contract ('scalar') and
-	// the direct compile-where path ('scalar-direct').  buildSubqueryFromIntent
-	// (used by the direct path) emits only fields[0] from a multi-field list,
-	// silently truncating the projection; expressions SELECT is not emitted at all.
-	// 'scalar-direct' must be at least as strict as 'scalar' on projection checks.
+	// Scalar SELECT validation — applies to the 'scalar' and 'scalar-direct' body
+	// contracts; 'scalar-direct' is at least as strict as 'scalar' on projection checks.
 	const isScalarContext = context === 'scalar' || context === 'scalar-direct';
 	if (isScalarContext) {
 		const select = subquery.select as
@@ -170,8 +161,7 @@ export function assertNoUnsupportedSubqueryModifiers(
 				'no projection (scalar subquery must project exactly one column — select one field or one aggregate)',
 			);
 		} else if (select.type === 'expressions') {
-			// SelectWithExpressionsIntent is not emitted by buildScalarSubquery or
-			// buildSubqueryFromIntent — dropped on both scalar paths.
+			// No scalar body contract emits a SelectWithExpressionsIntent projection.
 			notYet.push('expressions SELECT');
 		} else if (
 			select?.type === 'fields' &&
@@ -189,10 +179,9 @@ export function assertNoUnsupportedSubqueryModifiers(
 			select.aggregates != null &&
 			select.aggregates.length > 1
 		) {
-			// The legacy scalar compiler takes only aggregates[0] and the direct
-			// path emits every aggregate, so both refuse the list. Its length is not
-			// the arity (the compiler deduplicates repeated aggregates); the path
-			// that realises the body decides it.
+			// A scalar body projects one value, so an aggregate list is refused. Its
+			// length is not the arity (the compiler deduplicates repeated aggregates);
+			// the path that realises the body decides it.
 			notYet.push('aggregate SELECT');
 		}
 	}

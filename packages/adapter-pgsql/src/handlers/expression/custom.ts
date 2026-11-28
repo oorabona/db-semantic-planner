@@ -49,8 +49,6 @@ import {
 import { resolveCaseValue } from './case-value.js';
 import { numericLiteralNode } from './numeric-literal.js';
 
-// The condition compiler supplies the runtime dispatcher factory through context.
-// compile-where.ts preserves the compatibility re-export surface.
 // ---------------------------------------------------------------------------
 // Operator validation helper
 // ---------------------------------------------------------------------------

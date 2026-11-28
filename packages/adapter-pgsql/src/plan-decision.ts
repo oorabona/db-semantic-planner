@@ -105,7 +105,6 @@ export interface PlanDecision {
 	 * projection only.
 	 */
 	readonly aggregateDistinct?: boolean;
-	readonly subqueryOperator?: string;
 	// The FILTER condition as written; core resolved it
 	readonly filterIntent?: import('@dbsp/types').WhereIntent;
 	// Custom expression intent for selectCustomExpression, WHERE expression, and ORDER BY expression
@@ -123,14 +122,4 @@ export interface PlanDecision {
 	// The arrays then the ON values, numbered locally from $1 in joinRarg and joinOnNode;
 	// compileJoinDecision offsets both by the parameters already in the query.
 	readonly batchValuesParams?: readonly unknown[];
-	/**
-	 * Provenance: the ORIGINAL QueryIntent before lowering.
-	 * Carried through every lowering site (convertIn, convertSubquery,
-	 * normalizeToDecision) so that
-	 * `buildPredicateSubquerySelect` can validate the true caller intent.
-	 *
-	 * Required for IN / scalar / inSubquery / notInSubquery decisions.
-	 * Optional on other decision types.
-	 */
-	readonly subqueryIntent?: import('@dbsp/types').QueryIntent;
 }

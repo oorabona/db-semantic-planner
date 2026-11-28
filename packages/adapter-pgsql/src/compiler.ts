@@ -2938,7 +2938,7 @@ export class PlanCompiler {
 	}
 
 	// --------------------------------------------------------------------------
-	// Helpers (condition compilation via handler dispatcher)
+	// Helpers (condition compilation through the resolved condition compiler)
 	// --------------------------------------------------------------------------
 
 	private compileJoin(

@@ -14,8 +14,6 @@ import {
 import type { ModelIR, RelationIR, WhereIntent } from '@dbsp/types';
 import { NotYetSupportedError } from '@dbsp/types';
 import { expect, it } from 'vitest';
-import { compileCondition } from '../condition-compiler.js';
-import { createCompilerState } from '../handlers/types.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const base = schema({
@@ -98,18 +96,6 @@ for (const form of forms) {
 			).toThrowError(refusal);
 		});
 	}
-	it(`${form} refuses direct compiler`, () => {
-		expect(() =>
-			compileCondition(predicate, {
-				logicalSourceTable: 'posts',
-				emittedAlias: 'posts',
-				visibleAliases: new Map(),
-				position: 'where',
-				model,
-				paramState: createCompilerState(),
-			}),
-		).toThrowError(refusal);
-	});
 }
 it('refuses a path containing a many-to-many hop', () => {
 	expect(() =>

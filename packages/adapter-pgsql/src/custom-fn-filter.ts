@@ -62,7 +62,6 @@ export function mapToHandlerDecision(
 	const derivedFkColumns = pd.resolvedInclude
 		? { sourceColumn: pd.sourceColumn!, targetColumn: pd.targetColumn! }
 		: deriveConditionKeys(pd, pd.sourceTable ?? rootTable, defaultPk, deriveFk);
-	const subqueryOperator = pd.subqueryOperator;
 	return {
 		type: pd.type,
 		resolvedInclude: pd.resolvedInclude,
@@ -119,15 +118,11 @@ export function mapToHandlerDecision(
 		jsonPath: pd.jsonPath,
 		jsonMode: pd.jsonMode,
 		expressionIntent: pd.expressionIntent,
-		...(subqueryOperator !== undefined && {
-			subqueryOperator,
-		}),
 		selectColumn: pd.selectColumn,
 		aggregate: pd.aggregate,
 		aggregateDistinct: pd.aggregateDistinct,
 		columnAliases: pd.columnAliases,
 		escape: pd.escape,
-		subqueryIntent: pd.subqueryIntent,
 	} as HandlerDecision;
 }
 

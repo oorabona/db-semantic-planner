@@ -274,6 +274,11 @@ export function createConditionCompiler(
 		intent: WhereIntent,
 		ctx: ConditionCompilerCtx,
 	): Node {
+		const resolved = ctx.resolvedConditions?.get(intent);
+		if (!resolved)
+			throw new Error(
+				`${POSITION_LABELS[ctx.position]} condition reached the adapter without core's resolution.`,
+			);
 		const position =
 			ctx.position === 'having'
 				? 'HAVING'
@@ -290,11 +295,6 @@ export function createConditionCompiler(
 		);
 		if (ctx.position === 'recursive-anchor')
 			assertNoRecursiveAnchorRelations(intent);
-		const resolved = ctx.resolvedConditions?.get(intent);
-		if (!resolved)
-			throw new Error(
-				`${POSITION_LABELS[ctx.position]} condition reached the adapter without core's resolution.`,
-			);
 		const normalized: WhereCompilerCtx = {
 			...ctx,
 			rootTable: ctx.logicalSourceTable,

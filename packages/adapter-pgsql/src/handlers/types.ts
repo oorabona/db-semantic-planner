@@ -154,8 +154,8 @@ export interface CompilerContext {
 	) => Node;
 	/**
 	 * Optional callback to compile a custom fn() FILTER (WHERE ...) condition.
-	 * Set by PlanCompiler to keep WHERE-dispatcher dependencies out of expression
-	 * handlers while still applying FILTER in every expression position.
+	 * Set by PlanCompiler so expression handlers apply FILTER through the resolved
+	 * condition compiler in every expression position.
 	 */
 	readonly compileCustomFnFilter?: (
 		filterIntent: import('@dbsp/types').WhereIntent,
@@ -511,7 +511,6 @@ export interface Decision {
 	 * projection only.
 	 */
 	readonly aggregateDistinct?: boolean;
-	readonly subqueryOperator?: string;
 	// Pseudo-column specific
 	readonly traversal?: string;
 	readonly traversals?: readonly {
@@ -539,17 +538,6 @@ export interface Decision {
 	readonly expressionIntent?: unknown;
 	// LIKE escape character
 	readonly escape?: string;
-	/**
-	 * Provenance: the ORIGINAL QueryIntent before lowering.
-	 * Set by every lowering site (convertIn, convertSubquery, normalizeToDecision,
-	 * and their mutation-path equivalents) so that `buildPredicateSubquerySelect`
-	 * (subquery-emission.ts) can validate the true caller intent rather than the
-	 * stripped-down lowered decision fields.
-	 *
-	 * Required for IN / scalar / inSubquery / notInSubquery decisions.
-	 * Optional on other decision types.
-	 */
-	readonly subqueryIntent?: import('@dbsp/types').QueryIntent;
 }
 
 // ============================================================================
