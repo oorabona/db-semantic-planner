@@ -33,7 +33,9 @@ describe("a condition without core's resolution is refused (#1105)", () => {
 				resolvedConditions: new Map(),
 			}),
 		).toThrow(
-			`${label} condition reached the adapter without core's resolution.`,
+			new Error(
+				`${label} condition reached the adapter without core's resolution.`,
+			),
 		);
 	});
 });

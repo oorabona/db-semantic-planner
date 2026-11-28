@@ -106,6 +106,7 @@ export type SurfaceTypeChecks = [
 ];
 
 export const removedContextMember: Partial<KeptCompilerContext> = {
+	// `never` is assignable to any member type, so only a missing member leaves the directive used.
 	// @ts-expect-error The WHERE dispatcher is no longer a context member.
-	\u0063reateWhereDispatcher: () => undefined,
+	\u0063reateWhereDispatcher: undefined as never,
 };
