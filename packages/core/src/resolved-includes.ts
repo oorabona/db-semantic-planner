@@ -31,7 +31,11 @@ import {
 } from './dx/coerce.js';
 import { relationJoinHops } from './dx/relation-join-path.js';
 import { isBoundPayload } from './intent-payload.js';
-import { containsOriginRefs, refuseLocalOriginRefs } from './path-ref-scan.js';
+import {
+	containsOriginRefs,
+	isIntentRecord,
+	refuseLocalOriginRefs,
+} from './path-ref-scan.js';
 import { getRelationalReadPolicy } from './relational-read-plans.js';
 import {
 	type HavingAggregate,
@@ -1267,6 +1271,22 @@ export function resolveReportIncludes(
 		if (isCall) callDepth++;
 		for (const [key, child] of Object.entries(node)) {
 			if (isBoundPayload(node, key, child)) continue;
+			// A typed function's arguments other than intent records are data its
+			// compiler binds or refuses whole (#1116): they are not entered.
+			if (node.kind === 'function' && key === 'args') {
+				if (Array.isArray(child))
+					child.forEach((arg, index) => {
+						if (isIntentRecord(arg))
+							inspect(
+								arg,
+								`${intentPath}.args[${index}]`,
+								condition,
+								inHaving,
+								underHaving,
+							);
+					});
+				continue;
+			}
 			// A CASE WHEN root is the condition of a CASE branch.
 			if (node.kind === 'case' && key === 'when' && Array.isArray(child)) {
 				child.forEach((branch, index) => {

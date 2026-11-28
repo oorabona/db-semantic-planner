@@ -90,15 +90,11 @@ function walk(
 		if (key === 'defaultValue' || isPayload(kind, key, child)) continue;
 		// A typed function's array or plain-object argument is data its compiler
 		// binds or refuses whole: only its intent-record arguments are entered.
-		if (
-			opaqueDataArgs &&
-			kind === 'function' &&
-			key === 'args' &&
-			Array.isArray(child)
-		) {
-			for (const arg of items(child))
-				if (isIntentRecord(arg))
-					walk(arg, inBody, path, matches, onHit, opaqueDataArgs);
+		if (opaqueDataArgs && kind === 'function' && key === 'args') {
+			if (Array.isArray(child))
+				for (const arg of items(child))
+					if (isIntentRecord(arg))
+						walk(arg, inBody, path, matches, onHit, opaqueDataArgs);
 			continue;
 		}
 		if ((key === 'subquery' || key === 'query') && isObject(child))
@@ -181,8 +177,12 @@ function walkIncludes(
 	path.delete(includes);
 }
 
-/** An intent record: a plain object with a string `kind`, not an array. */
-function isIntentRecord(value: unknown): boolean {
+/**
+ * An intent record: a plain object with a string `kind`, not an array.
+ *
+ * @internal
+ */
+export function isIntentRecord(value: unknown): boolean {
 	return (
 		isObject(value) &&
 		!Array.isArray(value) &&

@@ -4079,6 +4079,9 @@ describe('typed function intent arguments (#1116)', () => {
 	it('AC-A1 / ColumnRef', () => {
 		expect(inColumns(T.posts.title)).toThrowError(refusal('a ColumnRef'));
 	});
+	it('AC-A1 / ColumnRef, relation-reached', () => {
+		expect(inColumns(T.posts.author.name)).toThrowError(refusal('a ColumnRef'));
+	});
 	it('AC-A1 / SubqueryExpression', () => {
 		expect(inColumns(subquery('posts').count())).toThrowError(
 			refusal('a SubqueryExpression'),
@@ -4327,6 +4330,35 @@ describe('typed function intent arguments (#1116)', () => {
 			params: [{ a: stored }],
 		});
 	});
+	it('AC-A4 / data args: a subquery or CASE stored in data stays bound', () => {
+		const storedBody = orm
+			.select('posts')
+			.columns([tf('coalesce', [exprRef('title')]).as('v')])
+			.limit(1)
+			.asExpr('w').intent;
+		const storedCase = caseWhen(
+			tf('upper', [exprRef('title')]).eq('X'),
+			literal(1),
+		).else(literal(0)).intent;
+		for (const stored of [storedBody, storedCase]) {
+			expect(
+				dumped(
+					orm.select('posts').columns([tf('coalesce', [[stored]]).as('v')]),
+				),
+			).toEqual({
+				sql: 'SELECT COALESCE($1) AS v FROM posts',
+				params: [[stored]],
+			});
+			expect(
+				dumped(
+					orm.select('posts').columns([tf('coalesce', [{ stored }]).as('v')]),
+				),
+			).toEqual({
+				sql: 'SELECT COALESCE($1) AS v FROM posts',
+				params: [{ stored }],
+			});
+		}
+	});
 	it('AC-A4 / param record', () => {
 		const title = exprRef('title');
 		expect(
@@ -4341,6 +4373,17 @@ describe('typed function intent arguments (#1116)', () => {
 		expect(
 			dumped(orm.select('posts').columns([tf('upper', undefined).as('v')])),
 		).toEqual({ sql: 'SELECT upper() AS v FROM posts', params: [] });
+	});
+	it('AC-A4 / no args: an object args keeps the compiler error', () => {
+		const nested = {
+			nested: { kind: 'function', name: 'coalesce', args: [exprRef('title')] },
+		};
+		expect(() =>
+			orm
+				.select('posts')
+				.columns([tf('upper', nested as never).as('v')])
+				.dump(),
+		).toThrowError(new TypeError('args.map is not a function'));
 	});
 	it('AC-A4 / NQL', () => {
 		expect(
