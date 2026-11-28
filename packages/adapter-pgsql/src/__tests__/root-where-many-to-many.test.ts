@@ -107,9 +107,6 @@ for (const form of forms) {
 				position: 'where',
 				model,
 				paramState: createCompilerState(),
-				compileSubquery: () => {
-					throw new Error('unexpected subquery');
-				},
 			}),
 		).toThrowError(refusal);
 	});

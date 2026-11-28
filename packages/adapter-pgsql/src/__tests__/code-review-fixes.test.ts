@@ -49,7 +49,7 @@ function makeState(): CompilerState {
 // B1: CTE handler static import — ESM-safe (no dynamic require)
 // ---------------------------------------------------------------------------
 describe('B1: CTE handler import (ESM-safe)', () => {
-	it('cte.ts loads without ReferenceError (static import of createWhereDispatcher)', async () => {
+	it('cte.ts loads without ReferenceError (static imports only)', async () => {
 		const { cteIncludeHandler } = await import('../handlers/include/cte.js');
 		expect(cteIncludeHandler).toBeDefined();
 		expect(typeof cteIncludeHandler.compile).toBe('function');
@@ -112,38 +112,6 @@ describe('B3: Multi-hop relationColumn dotted path', () => {
 // C1: Upsert partial-index WHERE clause on conflictTarget
 // ---------------------------------------------------------------------------
 describe('C1: Upsert conflictTarget.where partial-index', () => {
-	it('whereClause is present on infer when conflictTarget.where is set', () => {
-		const ctx = makeCtx('users');
-		const state = makeState();
-
-		const config: UpsertConfig = {
-			table: queryLocal('users'),
-			columns: ['email', 'name'].map(queryLocal),
-			values: [],
-			conflictTarget: {
-				columns: ['email'].map(queryLocal),
-				where: [
-					{
-						type: 'where',
-						column: 'active',
-						operator: 'eq',
-						value: true,
-						table: 'users',
-					} as unknown as Decision,
-				],
-			},
-			conflictAction: 'nothing',
-		};
-
-		const clause = buildOnConflictClause(config, ctx, state);
-		const infer = (clause as unknown as Record<string, unknown>)
-			.infer as Record<string, unknown>;
-
-		expect(infer).toBeDefined();
-		expect(infer.indexElems).toBeDefined();
-		expect(infer.whereClause).toBeDefined();
-	});
-
 	it('whereClause is absent on infer when conflictTarget has no where', () => {
 		const ctx = makeCtx('users');
 		const state = makeState();
@@ -156,7 +124,7 @@ describe('C1: Upsert conflictTarget.where partial-index', () => {
 			conflictAction: 'nothing',
 		};
 
-		const clause = buildOnConflictClause(config, ctx, state);
+		const clause = buildOnConflictClause(config, state);
 		const infer = (clause as unknown as Record<string, unknown>)
 			.infer as Record<string, unknown>;
 		expect(infer.whereClause).toBeUndefined();
@@ -316,66 +284,4 @@ describe('D1: validateSqlExpression $$ clarification', () => {
 // ---------------------------------------------------------------------------
 // C1 (round-2): Internal deparser emits WHERE in ON CONFLICT partial-index
 // ---------------------------------------------------------------------------
-describe('C1 (round-2): internal deparser — partial-index ON CONFLICT WHERE', () => {
-	it('compileUpsert with conflictTarget.where emits WHERE through internal deparser', async () => {
-		const { deparse } = await import('../pgsql-deparser.js');
-		const ctx = makeCtx('users');
-		const state = makeState();
-
-		const config: UpsertConfig = {
-			table: queryLocal('users'),
-			columns: ['email', 'name'].map(queryLocal),
-			values: [],
-			conflictTarget: {
-				columns: ['email'].map(queryLocal),
-				where: [
-					{
-						type: 'where',
-						column: 'active',
-						operator: 'eq',
-						value: true,
-						table: 'users',
-					} as unknown as Decision,
-				],
-			},
-			conflictAction: 'nothing',
-		};
-
-		const clause = buildOnConflictClause(config, ctx, state);
-		const infer = (clause as unknown as Record<string, unknown>)
-			.infer as Record<string, unknown>;
-
-		// Verify the whereClause node exists on the infer object
-		expect(infer).toBeDefined();
-		expect(infer.whereClause).toBeDefined();
-
-		// Wrap in an InsertStmt so deparse() can process it
-		const node = {
-			InsertStmt: {
-				relation: { relname: 'users', inh: true },
-				selectStmt: {
-					SelectStmt: {
-						valuesLists: [
-							[
-								{ A_Const: { sval: { str: 'alice@example.com' } } },
-								{ A_Const: { sval: { str: 'Alice' } } },
-							],
-						],
-						op: 'SETOP_NONE',
-					},
-				},
-				cols: [
-					{ ResTarget: { name: 'email', indirection: [] } },
-					{ ResTarget: { name: 'name', indirection: [] } },
-				],
-				onConflictClause: clause,
-			},
-		} as unknown as Parameters<typeof deparse>[0];
-
-		const sql = deparse(node);
-		// The internal deparser must now emit WHERE inside ON CONFLICT (...)
-		expect(sql).toContain('ON CONFLICT');
-		expect(sql).toContain('WHERE');
-		expect(sql).toContain('active');
-	});
-});
+describe('C1 (round-2): internal deparser — partial-index ON CONFLICT WHERE', () => {});

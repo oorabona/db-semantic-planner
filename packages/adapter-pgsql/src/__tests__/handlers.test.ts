@@ -1,11 +1,10 @@
-import { compileWhereIntent } from '../condition-compiler.js';
-
 /**
  * Tests for Handler Infrastructure (Block 1)
  */
 
 import { createOrm, ref, schema } from '@dbsp/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { compileExpressionIntent } from '../handlers/expression/custom.js';
 import * as includeHandlerModule from '../handlers/include/index.js';
 import {
 	ALL_OPERATORS,
@@ -13,7 +12,8 @@ import {
 	COMPARISON_OPERATORS,
 	clearHandlers,
 	createCompilerState,
-	createWhereDispatcher,
+	cteIncludeHandler,
+	type Decision,
 	type ExpressionHandler,
 	ensureExpressionHandlersRegistered,
 	ensureIncludeHandlersRegistered,
@@ -21,20 +21,17 @@ import {
 	getIncludeHandler,
 	getRegisteredOperators,
 	getRegistryStats,
-	getWhereHandler,
 	hasExpressionHandler,
 	hasIncludeHandler,
-	hasWhereHandler,
 	INCLUDE_STRATEGIES,
 	type IncludeHandler,
 	LOGICAL_OPERATORS,
 	NULL_OPERATORS,
 	PATTERN_OPERATORS,
 	registerExpressionHandler,
-	registerWhereHandler,
-	type WhereHandler,
 } from '../handlers/index.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { includeHandlerFixture } from './include-handler-fixture.js';
 
 function expectOneLineError(fn: () => unknown, expected: string): void {
 	expect(fn).toThrow(expected);
@@ -76,56 +73,6 @@ describe('Handler Infrastructure', () => {
 			expect(state.paramIndex).toBe(1);
 			expect(state.ctes.size).toBe(1);
 			expect(state.aliases.size).toBe(1);
-		});
-	});
-
-	describe('WHERE Handler Registry', () => {
-		const mockWhereHandler: WhereHandler = {
-			operators: ['testOp', 'anotherOp'],
-			compile: (_decision, _ctx, _state, _dispatch) => {
-				return { A_Const: { sval: { sval: 'mock' } } };
-			},
-		};
-
-		it('registers handler for multiple operators', () => {
-			registerWhereHandler(mockWhereHandler);
-
-			expect(hasWhereHandler('testOp')).toBe(true);
-			expect(hasWhereHandler('anotherOp')).toBe(true);
-			expect(hasWhereHandler('unknown')).toBe(false);
-		});
-
-		it('retrieves registered handler', () => {
-			registerWhereHandler(mockWhereHandler);
-
-			const handler = getWhereHandler('testOp');
-			expect(handler).toBe(mockWhereHandler);
-		});
-
-		it('throws on duplicate operator registration', () => {
-			registerWhereHandler(mockWhereHandler);
-
-			const duplicate: WhereHandler = {
-				operators: ['testOp'], // Already registered
-				compile: () => ({ A_Const: { sval: { sval: 'dup' } } }),
-			};
-
-			expect(() => registerWhereHandler(duplicate)).toThrow(
-				'WHERE handler already registered for operator: testOp',
-			);
-		});
-
-		it('throws when getting unregistered operator', () => {
-			expect(() => getWhereHandler('unknown')).toThrow(
-				'No WHERE handler registered for operator: unknown',
-			);
-		});
-
-		it('escapes an unregistered operator key in its diagnostic', () => {
-			expectOneLineError(
-				() => getWhereHandler('=\nFAKE'),
-				'No WHERE handler registered for operator: =\\nFAKE',
-			);
 		});
 	});
 
@@ -267,56 +214,8 @@ describe('Handler Infrastructure', () => {
 		it('returns zero counts when empty', () => {
 			const stats = getRegistryStats();
 
-			expect(stats.where).toBe(0);
 			expect(stats.expression).toBe(0);
 			expect(stats.include).toBe(0);
-		});
-
-		it('returns correct counts after registration', () => {
-			const whereOperator = '__handlers_test_where__';
-			const expressionType = '__handlers_test_expression__';
-			createWhereDispatcher(compileWhereIntent)(
-				{ type: 'where', column: 'id', operator: '=', value: 1 },
-				{
-					naming: {
-						toDatabase: (value: string) => value,
-						toModel: (value: string) => value,
-					},
-					rootTable: 'test',
-					maxRecursiveDepth: 100,
-				} as any,
-				createCompilerState(),
-			);
-			ensureExpressionHandlersRegistered();
-			ensureIncludeHandlersRegistered();
-			const before = getRegistryStats();
-			registerWhereHandler({
-				operators: [whereOperator],
-				compile: () => ({ A_Const: { sval: { sval: '' } } }),
-			});
-			registerExpressionHandler({
-				types: [expressionType],
-				compile: () => ({ A_Const: { sval: { sval: '' } } }),
-			});
-			const after = getRegistryStats();
-
-			expect(after.where).toBe(before.where + 1);
-			expect(after.expression).toBe(before.expression + 1);
-			expect(after.include).toBe(before.include);
-		});
-	});
-
-	describe('Registered Operators', () => {
-		it('returns registered operator names', () => {
-			const whereOperator = '__handlers_test_registered_operator__';
-			registerWhereHandler({
-				operators: [whereOperator],
-				compile: () => ({ A_Const: { sval: { sval: '' } } }),
-			});
-
-			const operators = getRegisteredOperators();
-
-			expect(operators.where).toContain(whereOperator);
 		});
 	});
 
@@ -359,5 +258,62 @@ describe('Handler Infrastructure', () => {
 			expect(ALL_OPERATORS).toMatchObject(COLLECTION_OPERATORS);
 			expect(ALL_OPERATORS).toMatchObject(LOGICAL_OPERATORS);
 		});
+	});
+});
+
+describe("handlers refuse a condition without core's resolution (#1105)", () => {
+	it('AC6b case-registry: the registry holds no Decision-based CASE handler', () => {
+		ensureExpressionHandlersRegistered();
+		expect(hasExpressionHandler('case')).toBe(false);
+		expect(hasExpressionHandler('simpleCase')).toBe(true);
+	});
+
+	it('AC6b custom-case: a CASE expression without compileCaseCondition is refused', () => {
+		expect(() =>
+			compileExpressionIntent(
+				{
+					kind: 'case',
+					when: [
+						{
+							condition: {
+								kind: 'comparison',
+								field: 'id',
+								operator: 'eq',
+								value: 1,
+							},
+							result: { kind: 'literal', value: 1 },
+						},
+					],
+				} as never,
+				{ rootTable: 'users', maxRecursiveDepth: 100 } as never,
+				createCompilerState(),
+			),
+		).toThrow(
+			"CASE WHEN condition reached the adapter without core's resolution.",
+		);
+	});
+
+	it('AC6b cte-include: an include decision carrying conditions is refused', () => {
+		const ctx = { rootTable: 'users', maxRecursiveDepth: 100 } as never;
+		const decision = {
+			type: 'includeStrategy',
+			relation: 'posts',
+			targetTable: 'posts',
+			sourceColumn: 'id',
+			targetColumn: 'user_id',
+			strategy: 'cte',
+			conditions: [
+				{ type: 'where', column: 'published', operator: '=', value: true },
+			],
+		} as Decision;
+		expect(() =>
+			cteIncludeHandler.compile(
+				includeHandlerFixture(decision, ctx),
+				ctx,
+				createCompilerState(),
+			),
+		).toThrow(
+			"An include condition reached the adapter without core's resolution.",
+		);
 	});
 });

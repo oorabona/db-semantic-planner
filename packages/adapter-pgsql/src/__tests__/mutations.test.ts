@@ -6,16 +6,11 @@ import { exists, notExists, ref, schema as schemaFn } from '@dbsp/core';
 import type { Node } from '@pgsql/types';
 import { describe, expect, it } from 'vitest';
 import { createDeclaredNameResolver } from '../declared-name-resolver.js';
-import type {
-	CompilerContext,
-	CompilerState,
-	Decision,
-} from '../handlers/types.js';
+import type { CompilerContext, CompilerState } from '../handlers/types.js';
 import {
 	buildOnConflictClause,
 	compileDelete,
 	compileInsert,
-	compileMutation,
 	compileUpdate,
 	compileUpsert,
 	conditionalUpdate,
@@ -230,30 +225,6 @@ describe('Mutation Compiler', () => {
 			expect(stmt.targetList).toHaveLength(2);
 		});
 
-		it('should handle WHERE clause', () => {
-			const ctx = createContext('posts');
-			const state = createState();
-
-			const config: UpdateConfig = {
-				table: queryLocal('posts'),
-				set: [{ column: queryLocal('published'), value: true }],
-				where: [
-					{
-						type: '=',
-						operator: '=',
-						column: queryLocal('id'),
-						value: 123,
-						table: queryLocal('posts'),
-					} as Decision,
-				],
-			};
-
-			const result = compileUpdate(config, ctx, state);
-			const stmt = (result as any).UpdateStmt;
-
-			expect(stmt.whereClause).toBeDefined();
-		});
-
 		it('should handle null values', () => {
 			const ctx = createContext('users');
 			const state = createState();
@@ -338,61 +309,6 @@ describe('Mutation Compiler', () => {
 			expect(stmt.relation.relname).toBe('posts');
 		});
 
-		it('should handle WHERE clause', () => {
-			const ctx = createContext('posts');
-			const state = createState();
-
-			const config: DeleteConfig = {
-				table: queryLocal('posts'),
-				where: [
-					{
-						type: '=',
-						operator: '=',
-						column: queryLocal('id'),
-						value: 456,
-						table: queryLocal('posts'),
-					} as Decision,
-				],
-			};
-
-			const result = compileDelete(config, ctx, state);
-			const stmt = (result as any).DeleteStmt;
-
-			expect(stmt.whereClause).toBeDefined();
-		});
-
-		it('should handle multiple WHERE conditions', () => {
-			const ctx = createContext('posts');
-			const state = createState();
-
-			const config: DeleteConfig = {
-				table: queryLocal('posts'),
-				where: [
-					{
-						type: '=',
-						operator: '=',
-						column: queryLocal('published'),
-						value: false,
-						table: queryLocal('posts'),
-					} as Decision,
-					{
-						type: '=',
-						operator: '=',
-						column: queryLocal('archived'),
-						value: true,
-						table: queryLocal('posts'),
-					} as Decision,
-				],
-			};
-
-			const result = compileDelete(config, ctx, state);
-			const stmt = (result as any).DeleteStmt;
-
-			// Multiple conditions should be AND'd
-			expect(stmt.whereClause).toHaveProperty('BoolExpr');
-			expect(stmt.whereClause.BoolExpr.boolop).toBe('AND_EXPR');
-		});
-
 		it('should include RETURNING clause when specified', () => {
 			const ctx = createContext('users');
 			const state = createState();
@@ -408,85 +324,6 @@ describe('Mutation Compiler', () => {
 
 			expect(stmt.returningClause?.exprs).toBeDefined();
 			expect(stmt.returningClause?.exprs).toHaveLength(1);
-		});
-	});
-
-	describe('compileMutation', () => {
-		it('should dispatch to compileInsert for insert decisions', () => {
-			const ctx = createContext('users');
-			const state = createState();
-
-			const decision: Decision = {
-				type: 'insert',
-				table: queryLocal('users'),
-				columns: ['name', 'email'].map(queryLocal),
-				values: ['Test', 'test@example.com'],
-			};
-
-			const result = compileMutation(decision, ctx, state);
-
-			expect(result).toHaveProperty('InsertStmt');
-		});
-
-		it('should dispatch to compileUpdate for update decisions', () => {
-			const ctx = createContext('users');
-			const state = createState();
-
-			const decision: Decision = {
-				type: 'update',
-				table: queryLocal('users'),
-				set: [{ column: queryLocal('name'), value: 'Updated' }],
-				conditions: [
-					{
-						type: '=',
-						operator: '=',
-						column: queryLocal('id'),
-						value: 1,
-						table: queryLocal('users'),
-					},
-				],
-			};
-
-			const result = compileMutation(decision, ctx, state);
-
-			expect(result).toHaveProperty('UpdateStmt');
-		});
-
-		it('should dispatch to compileDelete for delete decisions', () => {
-			const ctx = createContext('posts');
-			const state = createState();
-
-			const decision: Decision = {
-				type: 'delete',
-				table: queryLocal('posts'),
-				conditions: [
-					{
-						type: '=',
-						operator: '=',
-						column: queryLocal('id'),
-						value: 999,
-						table: queryLocal('posts'),
-					},
-				],
-			};
-
-			const result = compileMutation(decision, ctx, state);
-
-			expect(result).toHaveProperty('DeleteStmt');
-		});
-
-		it('should throw for unknown mutation type', () => {
-			const ctx = createContext('users');
-			const state = createState();
-
-			const decision = {
-				type: 'upsert' as any, // Not supported via compileMutation
-				table: queryLocal('users'),
-			};
-
-			expect(() => compileMutation(decision, ctx, state)).toThrow(
-				'Unknown mutation type',
-			);
 		});
 	});
 });
@@ -518,7 +355,7 @@ describe('UPSERT Compiler', () => {
 				conflictAction: 'nothing',
 			};
 
-			const result = buildOnConflictClause(config, ctx, state);
+			const result = buildOnConflictClause(config, state);
 
 			expect(result.action).toBe('ONCONFLICT_NOTHING');
 			expect(result.infer).toBeDefined();
@@ -538,51 +375,11 @@ describe('UPSERT Compiler', () => {
 				updateColumns: ['name'].map(queryLocal),
 			};
 
-			const result = buildOnConflictClause(config, ctx, state);
+			const result = buildOnConflictClause(config, state);
 
 			expect(result.action).toBe('ONCONFLICT_UPDATE');
 			expect(result.targetList).toBeDefined();
 			expect(result.targetList).toHaveLength(1);
-		});
-
-		it('should build DO UPDATE WHERE separately from partial-index WHERE', () => {
-			const ctx = createContext('users');
-			const state = createState();
-
-			const config: UpsertConfig = {
-				table: queryLocal('users'),
-				columns: ['email', 'name', 'active', 'score']
-					.map(queryLocal)
-					.map(queryLocal),
-				values: [['test@example.com', 'Test', true, 10]],
-				conflictTarget: {
-					columns: ['email'].map(queryLocal),
-					where: [
-						{
-							type: 'where',
-							column: 'active',
-							operator: '=',
-							value: true,
-						},
-					],
-				},
-				conflictAction: 'update',
-				updateColumns: ['name', 'score'].map(queryLocal),
-				actionWhere: [
-					{
-						type: 'where',
-						column: 'score',
-						operator: '>',
-						value: 0,
-					},
-				],
-			};
-
-			const result = buildOnConflictClause(config, ctx, state);
-
-			expect(result.infer?.whereClause).toBeDefined();
-			expect(result.whereClause).toBeDefined();
-			expect(state.parameters).toEqual([true, 0]);
 		});
 
 		it('should use EXCLUDED references for update values', () => {
@@ -599,7 +396,7 @@ describe('UPSERT Compiler', () => {
 				useExcluded: true,
 			};
 
-			const result = buildOnConflictClause(config, ctx, state);
+			const result = buildOnConflictClause(config, state);
 			const target = result.targetList![0] as any;
 
 			// Should reference EXCLUDED.column
@@ -620,7 +417,7 @@ describe('UPSERT Compiler', () => {
 				conflictAction: 'nothing',
 			};
 
-			const result = buildOnConflictClause(config, ctx, state);
+			const result = buildOnConflictClause(config, state);
 
 			expect(result.infer?.conname).toBe('users_email_unique');
 		});
@@ -913,29 +710,6 @@ describe('DELETE with notExists / exists WHERE (DELETE-NOT-EXISTS)', () => {
 				'PgAdapter compilation requires a ModelIR; pass { model } to the adapter or to the compile options.',
 			),
 		);
-	});
-
-	it('normalizeToDecision: kind=notExists routes to NOT EXISTS handler (not "=" comparison)', () => {
-		const state = {
-			parameters: [] as unknown[],
-			paramIndex: 0,
-			joins: [] as import('@pgsql/types').Node[],
-			ctes: new Map<string, import('@pgsql/types').Node>(),
-			aliases: new Map<string, string>(),
-		};
-		const ctx: import('../handlers/types.js').CompilerContext = {
-			rootTable: 'embeddings',
-			maxRecursiveDepth: 100,
-		};
-		const config: DeleteConfig = {
-			table: queryLocal('embeddings'),
-			where: [{ kind: 'notExists', relation: 'symbol' } as unknown as Decision],
-		};
-		const result = compileDelete(config, ctx, state);
-		const stmt = (result as any).DeleteStmt;
-		expect(stmt.whereClause).toBeDefined();
-		expect(stmt.whereClause).toHaveProperty('BoolExpr');
-		expect(stmt.whereClause.BoolExpr.boolop).toBe('NOT_EXPR');
 	});
 });
 

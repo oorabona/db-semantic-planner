@@ -3,7 +3,6 @@ import type {
 	DialectCapabilities,
 	ExpressionIntent,
 	ModelIR,
-	QueryIntent,
 } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { FkColumnDerivation } from './assert-field.js';
@@ -15,11 +14,8 @@ import type {
 	RelationTargetProjectionRegistry,
 } from './relation-target-projection.js';
 export type WhereCompilerCtx = {
-	/** Internal migration provenance; legacy where callers retain their lowering. */
+	/** The condition is a root WHERE, subquery WHERE, HAVING or CASE WHEN of the current query. */
 	readonly directRootWhere?: boolean;
-	readonly resolveHavingOperand?: (
-		intent: import('@dbsp/types').WhereIntent,
-	) => import('./handlers/types.js').Decision | undefined;
 	readonly position?: ConditionPosition;
 	/** Current root table name (or alias) */
 	readonly rootTable: string;
@@ -57,17 +53,6 @@ export type WhereCompilerCtx = {
 	/** Binding that owns unqualified columns in this WHERE expression. */
 	readonly currentBinding?: RelationBinding;
 	/**
-	 * Callback to compile a QueryIntent subquery into an AST node.
-	 * Used by EXISTS/NOT EXISTS handlers that need correlated subqueries.
-	 * Without a parent, returns parameter values for the caller to append.
-	 * With a parent, shares its parameter state and returns no values.
-	 */
-	readonly compileSubquery: (
-		intent: QueryIntent,
-		paramOffset: number,
-		parent?: WhereCompilerCtx,
-	) => { sql: Node; paramCount: number; parameters?: unknown[] };
-	/**
 	 * Optional callback to compile an ExpressionIntent to a Node.
 	 * Used by the 'expression' WHERE kind.
 	 */
@@ -85,7 +70,7 @@ export type WhereCompilerCtx = {
 	readonly currentAlias?: string;
 };
 
-/** Compilation position selects the migrated root WHERE, FILTER and recursive-anchor paths; other callers retain their lowering. */
+/** Where a condition sits; it names the position in the refusal of a condition without core's resolution. */
 export type ConditionPosition =
 	| 'where'
 	| 'having'
@@ -93,17 +78,10 @@ export type ConditionPosition =
 	| 'join-on'
 	| 'recursive-anchor'
 	| 'subquery'
-	| 'case-when'
-	| 'update-where'
-	| 'delete-where'
-	| 'upsert-guard';
-/** Explicit authorities for the direct compiler seam. Correlation bindings,
+	| 'case-when';
+/** Authorities for compiling a condition core resolved: the source range, its
+ * emitted alias, the visible aliases and the position. Correlation bindings,
  * declared names, model and shared parameter state retain their existing types.
- * Logical and relation descendants retain the caller's position; subquery
- * bodies use subquery. Only legacy top-level callers default to where.
- * Root WHERE, FILTER and recursive anchors enter the condition compiler and bypass PlanDecision;
- * relation predicates and predicate subqueries still lower through handler decisions
- * during migration. Other positions retain their historical lowering.
  */
 export type ConditionCompilerCtx = Omit<
 	WhereCompilerCtx,

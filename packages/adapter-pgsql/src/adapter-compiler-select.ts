@@ -1163,11 +1163,7 @@ export function compileSelectEnvelope<T = unknown>(
 
 	if (execIntent) {
 		const resolvedWhere = plan.execution?.where;
-		const decisions = intentToDecisions(execIntent, plan.rootTable, {
-			omitRootWhere: true,
-			directConditions: true,
-			resolvedFilters: plan.execution !== undefined,
-		});
+		const decisions = intentToDecisions(execIntent, plan.rootTable);
 
 		const enrichedUnifiedDecisions = planForCompilation.execution
 			? lowerResolvedIncludes(planForCompilation.execution, deps.defaultPk)
@@ -1256,10 +1252,6 @@ export function compileSelectEnvelope<T = unknown>(
 									...(execIntent.select && { select: execIntent.select }),
 								},
 								plan.rootTable,
-								{
-									directConditions: true,
-									resolvedFilters: plan.execution !== undefined,
-								},
 							).filter(
 								(d) =>
 									d.type !== 'selectRelationColumn' ||

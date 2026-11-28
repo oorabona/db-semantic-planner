@@ -2,7 +2,7 @@ import { createOrm, eq, literal, param, schema, sql } from '@dbsp/core';
 import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it } from 'vitest';
 import { createCompilerState } from '../handlers/types.js';
-import { compileUpsert } from '../index.js';
+import { compileUpsert } from '../mutations/index.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { queryLocal } from '../sql-identifier.js';
 

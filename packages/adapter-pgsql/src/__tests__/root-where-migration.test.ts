@@ -29,16 +29,9 @@ import {
 	subquery,
 } from '@dbsp/core';
 import type { WhereIntent } from '@dbsp/types';
-import { deparseSync } from 'pgsql-deparser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import * as conditions from '../condition-compiler.js';
 import type { ConditionCompilerCtx } from '../condition-context.js';
-import { createWhereDispatcher } from '../handlers/index.js';
-import {
-	type CompilerContext,
-	createCompilerState,
-	type Decision,
-} from '../handlers/types.js';
+import { createCompilerState } from '../handlers/types.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 import * as resolvedConditions from '../resolved-condition-compiler.js';
 
@@ -77,9 +70,6 @@ const ctx = (): ConditionCompilerCtx => ({
 	position: 'where',
 	model: db.model,
 	paramState: createCompilerState(),
-	compileSubquery: () => {
-		throw new Error('unexpected subquery');
-	},
 });
 afterEach(() => vi.restoreAllMocks());
 const shapes = [
@@ -138,37 +128,6 @@ it('declared relation keys precede custom authorities and nested relations share
 	expect(result.sql).toContain('users.id = posts_exists_0."authorId"');
 	expect(result.sql).toContain('posts_exists_0.id = posts_exists_1."parentId"');
 });
-it('hand-built relations declare their intended keys', () => {
-	const context = ctx();
-	const model = {
-		...db.model,
-		getTable: () => undefined,
-		getRelation: (name: string) => {
-			const relation = db.model.getRelation(name);
-			return (
-				relation && {
-					...relation,
-					foreignKey: 'z_users_custom_pk',
-					sourceKey: 'custom_pk',
-					targetKey: undefined,
-				}
-			);
-		},
-	};
-	const node = conditions.compileCondition(
-		exists('posts', { where: eq('score', 7) }),
-		{
-			...context,
-			model,
-			defaultPkColumnName: 'custom_pk',
-			deriveFkColumnName: (table, pk) => `z_${table}_${pk}`,
-		},
-	);
-	expect(deparseSync(node).replace(/\s+/g, ' ')).toContain(
-		'users.custom_pk = posts_exists_0.z_users_custom_pk',
-	);
-	expect(context.paramState.parameters).toEqual([7]);
-});
 it('every empty and validates the relation then yields true', () => {
 	const predicate: WhereIntent = {
 		kind: 'relationFilter',
@@ -185,25 +144,6 @@ it('every empty and validates the relation then yields true', () => {
 			.where({ ...predicate, relation: 'typo' })
 			.dump(),
 	).toThrow(/no relation/);
-});
-it('refuses undeclared root relations', () => {
-	expect(() => conditions.compileCondition(exists('typo'), ctx())).toThrow(
-		/no relation 'typo'/,
-	);
-});
-it('refuses forged root relation target and key hints', () => {
-	for (const hint of [
-		{ targetTable: 'evil' },
-		{ sourceColumn: 'evil' },
-		{ targetColumn: 'evil' },
-	]) {
-		expect(() =>
-			conditions.compileCondition(
-				{ ...exists('posts'), ...hint } as WhereIntent,
-				ctx(),
-			),
-		).toThrow(/supplied relation target or keys differ/);
-	}
 });
 for (const predicate of [exists, notExists]) {
 	it(`refuses root ${predicate.name} recursive options`, () => {
@@ -226,27 +166,6 @@ for (const predicate of [exists, notExists]) {
 		).toThrow(/recursive relation predicates are not supported inside WHERE/);
 	});
 }
-it('refuses recursive root relationFilter options', () => {
-	expect(() =>
-		conditions.compileCondition(
-			{
-				kind: 'relationFilter',
-				mode: 'some',
-				relation: 'posts',
-				recursive: { maxDepth: 5 },
-			} as unknown as WhereIntent,
-			ctx(),
-		),
-	).toThrow(/recursive relation predicates/);
-});
-it('refuses an unknown root predicate kind by name', () => {
-	expect(() =>
-		conditions.compileCondition(
-			{ kind: 'unknownRoot' } as unknown as WhereIntent,
-			ctx(),
-		),
-	).toThrow("Unsupported root WHERE predicate kind 'unknownRoot'");
-});
 it('refuses raw EXISTS modifiers before they can be discarded', () => {
 	expect(() =>
 		orm
@@ -262,40 +181,6 @@ it('refuses raw EXISTS modifiers before they can be discarded', () => {
 			} as WhereIntent)
 			.dump(),
 	).toThrow(/GROUP BY/);
-});
-it('validates raw entries and lets declared relation keys win over a decision’s columns', () => {
-	const predicate = {
-		...exists('posts'),
-		targetTable: 'evil',
-		sourceColumn: 'score',
-		targetColumn: 'score',
-	};
-	expect(() => conditions.compileCondition(predicate, ctx())).toThrow(
-		/supplied relation target or keys differ/,
-	);
-	const state = createCompilerState();
-	const node = createWhereDispatcher(conditions.compileWhereIntent)(
-		{
-			type: 'exists',
-			operator: 'exists',
-			relation: 'posts',
-			targetTable: 'posts',
-			sourceColumn: 'score',
-			targetColumn: 'score',
-		} as Decision,
-		{
-			rootTable: 'users',
-			position: 'where',
-			directRootWhere: true,
-			model: db.model,
-			dbCasing: 'preserve',
-			maxRecursiveDepth: 100,
-		} as CompilerContext,
-		state,
-	);
-	expect(deparseSync(node).replace(/\s+/g, ' ')).toContain(
-		'users.id = posts_exists_0."authorId"',
-	);
 });
 it('dotted fields retain legacy lowering and scalar and ANY bodies keep canonical range casts', () => {
 	const spy = vi.spyOn(resolvedConditions, 'compileResolvedCondition');
@@ -365,13 +250,6 @@ it('binds expression-valued scalar subqueries at the root (#891 step 4c decision
 		'SELECT users.* FROM users WHERE (SELECT posts.score FROM posts) > $1',
 	);
 	expect(result.params).toEqual([0]);
-});
-it('refuses a root relation without model authority', () => {
-	const { model, ...context } = ctx();
-	expect(model).toBe(db.model);
-	expect(() => conditions.compileCondition(exists('posts'), context)).toThrow(
-		/cannot resolve relation 'posts'.*no model/,
-	);
 });
 it('positive root relation leaves use EXISTS like boolean predicates', () => {
 	const positive = orm

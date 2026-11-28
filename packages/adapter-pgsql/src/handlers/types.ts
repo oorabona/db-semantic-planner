@@ -71,7 +71,6 @@ export interface CompilerContext {
 	) => Node;
 	readonly directRootWhere?: boolean;
 	readonly position?: import('../condition-context.js').ConditionPosition;
-	readonly createWhereDispatcher?: () => WhereDispatcher;
 	/** Addressed authority for model-backed identifiers. */
 	readonly declaredNames?: DeclaredNameResolver;
 	/** Casing policy applied when a model is unavailable. */
@@ -558,41 +557,6 @@ export interface Decision {
 // ============================================================================
 
 /**
- * Handler for WHERE clause conditions.
- * Transforms condition decisions into PostgreSQL AST expressions.
- */
-export interface WhereHandler {
-	/** Operator(s) this handler supports */
-	readonly operators: readonly string[];
-
-	/**
-	 * Compile a WHERE condition to AST.
-	 * @param decision The condition decision
-	 * @param ctx Immutable compiler context
-	 * @param state Mutable compiler state
-	 * @param dispatch Callback to compile nested conditions
-	 * @returns PostgreSQL AST node for the condition
-	 */
-	compile(
-		decision: Decision,
-		ctx: CompilerContext,
-		state: CompilerState,
-		dispatch: WhereDispatcher,
-	): Node;
-}
-
-/**
- * Dispatcher for recursive WHERE compilation.
- * The same function object may be passed to every level of a recursive compilation, so it is an opaque callback.
- * Handlers must not use its identity to distinguish frames or carry frame-local state.
- */
-export type WhereDispatcher = (
-	decision: Decision,
-	ctx: CompilerContext,
-	state: CompilerState,
-) => Node;
-
-/**
  * Handler for SELECT expressions.
  * Transforms expression decisions into PostgreSQL AST nodes.
  */
@@ -767,13 +731,6 @@ export interface WindowOver {
 }
 
 /**
- * Select options with field specification.
- */
-export interface SelectWithFields {
-	readonly fields?: readonly string[];
-}
-
-/**
  * PostgreSQL AST ResTarget node shape.
  */
 export interface ResTargetNode {
@@ -821,17 +778,6 @@ export function isSqlExpression(value: unknown): value is SqlExpression {
 }
 
 /**
- * Type guard for RangeValue.
- */
-export function isRangeValue(value: unknown): value is RangeValue {
-	return (
-		typeof value === 'object' &&
-		value !== null &&
-		('lower' in value || 'upper' in value)
-	);
-}
-
-/**
  * Type guard for ParamRef.
  */
 export function isParamRef(value: unknown): value is ParamRef {
@@ -840,19 +786,6 @@ export function isParamRef(value: unknown): value is ParamRef {
 		value !== null &&
 		'paramIndex' in value &&
 		typeof (value as Record<string, unknown>).paramIndex === 'number'
-	);
-}
-
-/**
- * Type guard for SelectWithFields.
- */
-export function isSelectWithFields(value: unknown): value is SelectWithFields {
-	return (
-		typeof value === 'object' &&
-		value !== null &&
-		'fields' in value &&
-		(Array.isArray((value as Record<string, unknown>).fields) ||
-			(value as Record<string, unknown>).fields === undefined)
 	);
 }
 

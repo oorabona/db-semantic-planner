@@ -382,13 +382,11 @@ export function compileExpressionIntent(
 
 		case 'case': {
 			// CaseExpressionIntent: CASE WHEN condition THEN result [...] [ELSE default] END
-			// The compiler supplies the dispatcher through the runtime context.
-			const dispatch = ctx.compileCaseCondition
-				? undefined
-				: ctx.createWhereDispatcher?.();
-			if (!ctx.compileCaseCondition && !dispatch)
+			// The compiler supplies the resolved CASE WHEN compiler through the context.
+			const compileCaseCondition = ctx.compileCaseCondition;
+			if (!compileCaseCondition)
 				throw new Error(
-					'Condition requires a compiler-supplied WHERE dispatcher',
+					"CASE WHEN condition reached the adapter without core's resolution.",
 				);
 
 			const caseIntent = intent as import('@dbsp/types').CaseExpressionIntent;
@@ -419,15 +417,7 @@ export function compileExpressionIntent(
 				);
 
 			const caseArgs: Node[] = caseIntent.when.map((branch) => {
-				// dispatch accepts WhereIntent (via normalizeToDecision which handles `kind` field)
-				// Planned reads resolve CASE conditions through core; the dispatcher remains for the shared lowering.
-				const whenNode = ctx.compileCaseCondition
-					? ctx.compileCaseCondition(branch.condition, ctx, state)
-					: dispatch!(
-							branch.condition as unknown as import('../types.js').Decision,
-							ctx as CompilerContext,
-							state,
-						);
+				const whenNode = compileCaseCondition(branch.condition, ctx, state);
 				const thenNode = resolveBranch(branch.result);
 				return {
 					CaseWhen: { expr: whenNode, result: thenNode },

@@ -5,14 +5,6 @@
  */
 
 import type { Node, NullTest } from '@pgsql/types';
-import type {
-	CompilerContext,
-	CompilerState,
-	Decision,
-	WhereHandler,
-} from '../types.js';
-import { NULL_OPERATORS } from '../types.js';
-import { buildColumnRef } from './utils.js';
 
 /**
  * Create a NullTest node
@@ -25,31 +17,3 @@ export function compileNull(arg: Node, isNull: boolean): Node {
 
 	return { NullTest: nullTest };
 }
-
-/**
- * Null operators handler (IS NULL, IS NOT NULL)
- */
-export const nullHandler: WhereHandler = {
-	operators: [NULL_OPERATORS.IS_NULL, NULL_OPERATORS.IS_NOT_NULL],
-
-	compile(
-		decision: Decision,
-		ctx: CompilerContext,
-		_state: CompilerState,
-	): Node {
-		const operator = decision.operator ?? 'isNull';
-		const column = decision.column;
-
-		if (!column) {
-			throw new Error('Null handler requires a column');
-		}
-
-		const columnNode = buildColumnRef(column, ctx);
-
-		if (operator === NULL_OPERATORS.IS_NULL || operator === 'isNull') {
-			return compileNull(columnNode, true);
-		}
-
-		return compileNull(columnNode, false);
-	},
-};

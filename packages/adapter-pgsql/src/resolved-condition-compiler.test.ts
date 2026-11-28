@@ -1,33 +1,8 @@
-import {
-	and,
-	any,
-	eq,
-	exprRef,
-	fn,
-	gt,
-	inArray,
-	isNull,
-	like,
-	neq,
-	param,
-	plan,
-	type QueryIntent,
-	rangeContains,
-	rawExists,
-	schema,
-	subquery,
-} from '@dbsp/core';
-import { resolveSelectWhere } from '@dbsp/core/internal';
-import { RangeAllocator, type WhereIntent } from '@dbsp/types';
+import { eq, fn, plan, type QueryIntent, schema, subquery } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import {
-	buildSubqueryFromIntent,
-	compileCondition,
-} from './condition-compiler.js';
-import { type CompilerContext, createCompilerState } from './handlers/types.js';
+import { compileCondition } from './condition-compiler.js';
+import { createCompilerState } from './handlers/types.js';
 import { createPgCompileOnlyAdapter } from './pgsql-adapter.js';
-import { deparse } from './pgsql-deparser.js';
-import { compileResolvedCondition } from './resolved-condition-compiler.js';
 
 const db = schema({
 	users: {
@@ -37,74 +12,30 @@ const db = schema({
 		data: 'jsonb',
 	},
 });
-function dual(where: WhereIntent) {
-	const allocator = new RangeAllocator();
-	const root = allocator.allocate('users', 'users');
-	allocator.reserve(root.alias);
-	const resolved = resolveSelectWhere(
-		where,
-		root,
-		[root],
-		allocator,
-		db.model,
-	)!;
-	const legacyState = createCompilerState(),
-		typedState = createCompilerState();
-	const ctx: CompilerContext = {
-		rootTable: 'users',
-		currentAlias: 'users',
-		model: db.model,
-		maxRecursiveDepth: 100,
-	};
-	const legacy = compileCondition(where, {
-		logicalSourceTable: 'users',
-		emittedAlias: 'users',
-		visibleAliases: new Map(),
-		position: 'where',
-		paramState: legacyState,
-		model: db.model,
-		compileSubquery: (query, offset, parent) =>
-			buildSubqueryFromIntent(query, offset, parent),
-	});
-	const typed = compileResolvedCondition(resolved, ctx, typedState);
-	expect({ sql: deparse(typed), params: typedState.parameters }).toEqual({
-		sql: deparse(legacy),
-		params: legacyState.parameters,
-	});
-}
-describe('typed primitive and body dual compilation', () => {
+describe("a condition without core's resolution is refused (#1105)", () => {
 	it.each([
-		eq('id', 4),
-		neq('name', null),
-		eq('name', param(null)),
-		gt('id', 2),
-		like('name', 'A%'),
-		inArray('id', [2, 3]),
-		any('id', [2, 3]),
-		isNull('name'),
-		rangeContains('period', '2024-01-15'),
-		{
-			kind: 'jsonContains',
-			field: 'data',
-			value: { active: true },
-			reversed: false,
-		} as WhereIntent,
-		{ kind: 'jsonExists', field: 'data', key: 'active' } as WhereIntent,
-		rawExists(subquery('users').select('id').where(eq('id', 3))),
-		{
-			kind: 'subquery',
-			field: 'id',
-			operator: 'eq',
-			subquery: {
-				type: 'select',
-				from: 'users',
-				select: { type: 'fields', fields: ['id'] },
-				where: eq('id', 3),
-			},
-		} as WhereIntent,
-		fn('lower', exprRef('users.name')).eq('ada'),
-		and(eq('id', 4), neq('name', null)),
-	])('preserves SQL and parameters for %j', dual);
+		['where', 'WHERE'],
+		['subquery', 'subquery WHERE'],
+		['join-on', 'JOIN ON'],
+		['having', 'HAVING'],
+		['case-when', 'CASE WHEN'],
+		['filter', 'FILTER'],
+		['recursive-anchor', 'recursive anchor'],
+	] as const)('AC4 unresolved %s condition', (position, label) => {
+		expect(() =>
+			compileCondition(eq('id', 4), {
+				logicalSourceTable: 'users',
+				emittedAlias: 'users',
+				visibleAliases: new Map(),
+				position,
+				paramState: createCompilerState(),
+				model: db.model,
+				resolvedConditions: new Map(),
+			}),
+		).toThrow(
+			`${label} condition reached the adapter without core's resolution.`,
+		);
+	});
 });
 
 it('dual compilation retains expression-body aggregate projection aliases', () => {

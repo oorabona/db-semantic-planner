@@ -7,7 +7,7 @@
  * silently lost, producing = ANY(NULL) instead of = ANY($1).
  *
  * Fix: normalizeToDecision 'in' case returns `value: raw.values` (not `values`)
- * to match inHandler's read path, consistent with convertWhereCondition.
+ * to match inHandler's read path, consistent with the WHERE lowering.
  *
  * Note on compiler output:
  *  - inArray compiles to `= ANY($N)` with the whole array as a single parameter.

@@ -855,16 +855,18 @@ describe('start.where resolves through core (#891 slice 4)', () => {
 			),
 		);
 	});
-	it('AC6 legacy-report: a report without recursiveFilters.start keeps the direct compile', () => {
+	it('AC2 recursive-refusal: a report without recursiveFilters.start is refused (#1105)', () => {
 		const report = plan(plain, neq('score', 1));
 		const { start, ...rest } = report.recursiveFilters ?? {};
 		expect(start).toBeDefined();
-		const result = local.compileRecursive(
-			{ ...report, recursiveFilters: rest },
-			plain.model,
+		expect(() =>
+			local.compileRecursive(
+				{ ...report, recursiveFilters: rest },
+				plain.model,
+			),
+		).toThrow(
+			"A recursive report's start.where reached the adapter without core's resolution; plan it with planRecursive() or the ORM.",
 		);
-		expect(result.sql).toBe(sql('__n.score != $1'));
-		expect(result.parameters).toEqual([1]);
 	});
 	const correlated = (column: string) =>
 		rawExists(
@@ -1288,15 +1290,11 @@ describe('hand-built recursive reports (#1027)', () => {
 			intent: { ...report.intent, start: { ...report.intent.start, where } },
 		} as typeof issued;
 	}
-	it("types the hand-built anchor's many-to-many refusal", () => {
+	it('AC2 hand-built-anchors: a hand-built anchor is refused before its many-to-many check (#1105)', () => {
 		expect(() =>
 			local.compileRecursive(handBuilt('posts', exists('tags')), linked.model),
 		).toThrow(
-			new NotYetSupportedError(
-				"many-to-many traversal exists('tags')",
-				'WHERE condition',
-				787,
-			),
+			"A recursive report's start.where reached the adapter without core's resolution; plan it with planRecursive() or the ORM.",
 		);
 		expect(() =>
 			local.compileRecursive(
@@ -1307,11 +1305,7 @@ describe('hand-built recursive reports (#1027)', () => {
 				linked.model,
 			),
 		).toThrow(
-			new NotYetSupportedError(
-				"many-to-many traversal include('tags')",
-				'RECURSIVE-ANCHOR condition',
-				787,
-			),
+			"A recursive report's start.where reached the adapter without core's resolution; plan it with planRecursive() or the ORM.",
 		);
 	});
 });

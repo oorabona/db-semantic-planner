@@ -3,7 +3,7 @@
  * through the planner to the SQL compiler.
  *
  * These tests use EXACT SQL matching (toEqual) to catch regressions like Issue 14
- * where field->column mapping was lost in compileWhereIntent.
+ * where field->column mapping was lost in the WHERE lowering.
  *
  * Schema mirrors the astix project structure:
  *   symbols - id, name, kind, start_line, end_line, complexity, exported, file_id->files
@@ -210,7 +210,7 @@ describe('7. DELETE with and(inArray, gte)', () => {
 // ---------------------------------------------------------------------------
 
 describe('8. UPDATE with eq WHERE', () => {
-	it('produces UPDATE SET ... WHERE using compileWhereIntent', () => {
+	it('produces UPDATE SET ... WHERE from the resolved condition', () => {
 		const orm = buildOrm();
 		const dump = (orm as any)
 			.update('symbols')

@@ -8,114 +8,13 @@ import type { Node } from '@pgsql/types';
 import {
 	distinctExpr,
 	eqExpr,
-	funcCall,
 	gtExpr,
 	gteExpr,
 	ltExpr,
 	lteExpr,
 	neExpr,
 } from '../../ast-helpers.js';
-import { normalizeParamIntent } from '../../param-intent.js';
 import { escapeDiagnosticText } from '../../validate.js';
-import type {
-	CompilerContext,
-	CompilerState,
-	Decision,
-	WhereHandler,
-} from '../types.js';
-import { COMPARISON_OPERATORS } from '../types.js';
-import { compileLiteralNullComparison } from './literal-null.js';
-import { resolveWhereOperator } from './operator-resolver.js';
-import {
-	buildColumnRef,
-	compileValueOrFieldRef,
-	resolveColumnPgType,
-} from './utils.js';
-
-const COMPARISON_OPERATOR_MAP: Record<string, string> = {
-	'=': '=',
-	'!=': '!=',
-	'<>': '!=',
-	isDistinctFrom: 'isDistinctFrom',
-	'<': '<',
-	'<=': '<=',
-	'>': '>',
-	'>=': '>=',
-};
-
-/**
- * Comparison operators handler
- */
-export const comparisonHandler: WhereHandler = {
-	operators: [
-		COMPARISON_OPERATORS.EQ,
-		COMPARISON_OPERATORS.NEQ,
-		COMPARISON_OPERATORS.IS_DISTINCT_FROM,
-		COMPARISON_OPERATORS.LT,
-		COMPARISON_OPERATORS.LTE,
-		COMPARISON_OPERATORS.GT,
-		COMPARISON_OPERATORS.GTE,
-	],
-
-	compile(
-		decision: Decision,
-		ctx: CompilerContext,
-		state: CompilerState,
-	): Node {
-		const operator = decision.operator;
-		const resolvedOperator = resolveWhereOperator(
-			operator,
-			COMPARISON_OPERATOR_MAP,
-		);
-		const column = decision.column;
-		const value = normalizeParamIntent(decision.value);
-
-		if (!column) {
-			throw new Error('Comparison handler requires a column');
-		}
-
-		const left =
-			decision.type === 'having' && decision.function
-				? funcCall(
-						decision.function,
-						column === '*' ? [] : [buildColumnRef(column, ctx)],
-						{
-							...(column === '*' && { star: true }),
-							...(decision.distinct !== undefined && {
-								distinct: decision.distinct,
-							}),
-						},
-					)
-				: buildColumnRef(column, ctx);
-		const nullComparison = compileLiteralNullComparison(operator, left, value);
-		if (nullComparison) return nullComparison;
-		const columnType =
-			decision.type === 'having' && decision.function
-				? resolveHavingAggregatePgType(decision.function, column, ctx)
-				: resolveColumnPgType(column, ctx);
-		const right = compileValueOrFieldRef(value, ctx, state, columnType);
-
-		return compileComparison(resolvedOperator, left, right);
-	},
-};
-
-/**
- * Resolve a HAVING parameter cast from the aggregate result, not its argument.
- * Unknown aggregate result types deliberately remain uncast so PostgreSQL can
- * infer them from the expression.
- */
-function resolveHavingAggregatePgType(
-	functionName: string,
-	column: string,
-	ctx: CompilerContext,
-): string | undefined {
-	return aggregateResultPgType(
-		functionName,
-		functionName.toLowerCase() === 'count'
-			? undefined
-			: resolveColumnPgType(column, ctx),
-	);
-}
 
 /** The result type of an aggregate over an argument of the given type, when known. */
 export function aggregateResultPgType(

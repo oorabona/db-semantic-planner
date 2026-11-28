@@ -1343,7 +1343,7 @@ describe('PgAdapter - Coverage Tests', () => {
 			).toThrow(/Unsupported traversal kind/);
 		});
 
-		it('compiles edge-table with anchor WHERE', () => {
+		it('refuses a hand-built edge-table anchor WHERE (#1105)', () => {
 			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const report = {
 				intent: {
@@ -1371,8 +1371,11 @@ describe('PgAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const result = adapter.compileRecursive(report as any, coverageModel);
-			expect(result.sql).toBeDefined();
+			expect(() =>
+				adapter.compileRecursive(report as any, coverageModel),
+			).toThrow(
+				"A recursive report's start.where reached the adapter without core's resolution; plan it with planRecursive() or the ORM.",
+			);
 		});
 
 		it('compiles edge-table with "in" direction (swaps edgeFrom/edgeTo)', () => {
@@ -1403,7 +1406,7 @@ describe('PgAdapter - Coverage Tests', () => {
 	});
 
 	describe('buildRecursiveAnchorWhere - edge cases', () => {
-		it('handles AND condition with single item', () => {
+		it('refuses a hand-built AND anchor (#1105)', () => {
 			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const report = {
 				intent: {
@@ -1431,11 +1434,14 @@ describe('PgAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const result = adapter.compileRecursive(report as any, coverageModel);
-			expect(result.sql).toBeDefined();
+			expect(() =>
+				adapter.compileRecursive(report as any, coverageModel),
+			).toThrow(
+				"A recursive report's start.where reached the adapter without core's resolution; plan it with planRecursive() or the ORM.",
+			);
 		});
 
-		it('handles OR condition with multiple items', () => {
+		it('refuses a hand-built OR anchor (#1105)', () => {
 			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const report = {
 				intent: {
@@ -1464,11 +1470,14 @@ describe('PgAdapter - Coverage Tests', () => {
 					},
 				},
 			};
-			const result = adapter.compileRecursive(report as any, coverageModel);
-			expect(result.sql).toBeDefined();
+			expect(() =>
+				adapter.compileRecursive(report as any, coverageModel),
+			).toThrow(
+				"A recursive report's start.where reached the adapter without core's resolution; plan it with planRecursive() or the ORM.",
+			);
 		});
 
-		it('refuses unknown recursive anchor kind', () => {
+		it('refuses a hand-built anchor of an unknown kind (#1105)', () => {
 			const adapter = createPgCompileOnlyAdapter({ model: coverageModel });
 			const report = {
 				intent: {
@@ -1493,7 +1502,9 @@ describe('PgAdapter - Coverage Tests', () => {
 			};
 			expect(() =>
 				adapter.compileRecursive(report as any, coverageModel),
-			).toThrow(/recursive start\.where.*unknown_kind/);
+			).toThrow(
+				"A recursive report's start.where reached the adapter without core's resolution; plan it with planRecursive() or the ORM.",
+			);
 		});
 
 		it('handles null/undefined where with fallback to TRUE', () => {

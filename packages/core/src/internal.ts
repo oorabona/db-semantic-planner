@@ -95,7 +95,6 @@ export type {
 	TableReaddressDeclaration,
 } from './model-ir.js';
 export { inspectMutationRows } from './mutation-rows.js';
-export { refuseTableRootedQuantifier } from './path-ref-scan.js';
 export {
 	normalizeRecursiveIncludeOptions,
 	type PlanScope,

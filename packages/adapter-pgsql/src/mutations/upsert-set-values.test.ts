@@ -2,9 +2,9 @@ import { createOrm, eq, param, schema, sql } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { deparseQuoted } from '../deparse.js';
 import { createCompilerState } from '../handlers/types.js';
-import { compileUpsert } from '../index.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { queryLocal } from '../sql-identifier.js';
+import { compileUpsert } from './index.js';
 
 const model = schema({ t: { id: 'integer', n: 'text', extra: 'text' } }).model;
 const adapter = createPgCompileOnlyAdapter({ model });

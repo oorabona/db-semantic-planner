@@ -19,13 +19,7 @@ import {
 	transposeToColumnArrays,
 	validateBatchCardinality,
 } from '../compiler-utils.js';
-import { compileWhereIntent } from '../condition-compiler.js';
-import { createWhereDispatcher } from '../handlers/index.js';
-import type {
-	CompilerContext,
-	CompilerState,
-	Decision,
-} from '../handlers/types.js';
+import type { CompilerContext, CompilerState } from '../handlers/types.js';
 import { unwrapParamIntent } from '../param-intent.js';
 import { createTypeCastParamRef } from '../param-ref.js';
 import { queryLocal, type SqlIdentifier } from '../sql-identifier.js';
@@ -62,8 +56,6 @@ export interface ConflictTarget {
 		readonly logicalConstraint: string;
 		readonly physicalName: SqlIdentifier;
 	};
-	/** WHERE clause for partial index */
-	where?: Decision[];
 }
 
 /**
@@ -84,8 +76,6 @@ export interface UpsertConfig {
 	/** Columns to update on conflict (for 'update' action) */
 	updateColumns?: SqlIdentifier[];
 	updateColumnAddresses?: MutationColumnAddress[];
-	/** Optional WHERE clause for ON CONFLICT DO UPDATE */
-	actionWhere?: Decision[];
 	/** Optional direct WHERE intent for ON CONFLICT DO UPDATE */
 	actionWhereIntent?: WhereIntent;
 	/** Compile the direct action WHERE intent using the caller's WHERE compiler */
@@ -118,27 +108,8 @@ export interface UpsertConfig {
 // ON CONFLICT Builder
 // ============================================================================
 
-function buildWhereClause(
-	conditions: Decision[] | undefined,
-	ctx: CompilerContext,
-	state: CompilerState,
-): Node | undefined {
-	if (!conditions || conditions.length === 0) return undefined;
-
-	const dispatch = createWhereDispatcher(compileWhereIntent);
-	if (conditions.length === 1) {
-		return dispatch(conditions[0]!, ctx, state);
-	}
-
-	const nodes = conditions.map((condition) => dispatch(condition, ctx, state));
-	return {
-		BoolExpr: { boolop: 'AND_EXPR', args: nodes },
-	} as unknown as Node;
-}
-
 function buildActionWhereClause(
 	config: UpsertConfig,
-	ctx: CompilerContext,
 	state: CompilerState,
 ): Node | undefined {
 	if (config.actionWhereIntent) {
@@ -149,8 +120,7 @@ function buildActionWhereClause(
 		}
 		return config.compileActionWhere(config.actionWhereIntent, state);
 	}
-
-	return buildWhereClause(config.actionWhere, ctx, state);
+	return undefined;
 }
 
 /**
@@ -158,7 +128,6 @@ function buildActionWhereClause(
  */
 export function buildOnConflictClause(
 	config: UpsertConfig,
-	ctx: CompilerContext,
 	state: CompilerState,
 ): OnConflictClause {
 	const action = config.conflictAction;
@@ -181,16 +150,6 @@ export function buildOnConflictClause(
 				},
 			})),
 		};
-
-		// Partial-index conflict: ON CONFLICT (col) WHERE predicate
-		if (config.conflictTarget.where && config.conflictTarget.where.length > 0) {
-			const whereClause = buildWhereClause(
-				config.conflictTarget.where,
-				ctx,
-				state,
-			);
-			if (whereClause) infer.whereClause = whereClause;
-		}
 	} else if (config.conflictTarget.constraint) {
 		// Conflict on named constraint
 		infer = {
@@ -262,7 +221,7 @@ export function buildOnConflictClause(
 			},
 		};
 	});
-	const whereClause = buildActionWhereClause(config, ctx, state);
+	const whereClause = buildActionWhereClause(config, state);
 
 	return {
 		action: 'ONCONFLICT_UPDATE',
@@ -294,7 +253,7 @@ export function compileUpsert(
 	}));
 
 	// Build ON CONFLICT clause
-	const onConflict = buildOnConflictClause(config, ctx, state);
+	const onConflict = buildOnConflictClause(config, state);
 
 	// Build RETURNING clause if specified
 	const returningExprs = buildReturningExprs(
@@ -390,7 +349,7 @@ export function compileUnnestUpsert(
 	};
 
 	// Build ON CONFLICT clause (same as VALUES path)
-	const onConflict = buildOnConflictClause(config, ctx, state);
+	const onConflict = buildOnConflictClause(config, state);
 
 	// Build RETURNING clause if specified
 	const returningExprs = buildReturningExprs(

@@ -32,6 +32,40 @@ import type { PgRollbackOnlyScope as NewPgRollbackOnlyScopeindex } from '@dbsp/a
 // @ts-expect-error The retired type must not be exported.
 import type { \u0052ollbackOnlyPgsqlScope as OldPgRollbackOnlyScopeindex } from '@dbsp/adapter-pgsql';
 
+// @ts-expect-error The condition lowering and its builders are not exported.
+import type { \u0063ompileUpdate as RemovedCompileUpdate } from '@dbsp/adapter-pgsql';
+// @ts-expect-error The condition lowering and its builders are not exported.
+import type { \u0063ompileDelete as RemovedCompileDelete } from '@dbsp/adapter-pgsql';
+// @ts-expect-error The condition lowering and its builders are not exported.
+import type { \u0063ompileUpsert as RemovedCompileUpsert } from '@dbsp/adapter-pgsql';
+// @ts-expect-error The condition lowering and its builders are not exported.
+import type { \u0062uildOnConflictClause as RemovedBuildOnConflictClause } from '@dbsp/adapter-pgsql';
+// @ts-expect-error The condition lowering and its builders are not exported.
+import type { \u0063ompileMutation as RemovedCompileMutation } from '@dbsp/adapter-pgsql';
+// @ts-expect-error The condition lowering and its builders are not exported.
+import type { \u0063onditionalUpdate as RemovedConditionalUpdate } from '@dbsp/adapter-pgsql';
+// @ts-expect-error The condition lowering and its builders are not exported.
+import type { \u0065xcludedRef as RemovedExcludedRef } from '@dbsp/adapter-pgsql';
+// @ts-expect-error The condition lowering and its builders are not exported.
+import type { \u0055pdateConfig as RemovedUpdateConfig } from '@dbsp/adapter-pgsql';
+// @ts-expect-error The condition lowering and its builders are not exported.
+import type { \u0044eleteConfig as RemovedDeleteConfig } from '@dbsp/adapter-pgsql';
+// @ts-expect-error The condition lowering and its builders are not exported.
+import type { \u0055psertConfig as RemovedUpsertConfig } from '@dbsp/adapter-pgsql';
+// @ts-expect-error The condition lowering and its builders are not exported.
+import type { \u0043onflictTarget as RemovedConflictTarget } from '@dbsp/adapter-pgsql';
+// @ts-expect-error The condition lowering and its builders are not exported.
+import type { \u0043onflictAction as RemovedConflictAction } from '@dbsp/adapter-pgsql';
+// @ts-expect-error The condition lowering and its builders are not exported.
+import type { \u0057hereDispatcher as RemovedWhereDispatcher } from '@dbsp/adapter-pgsql';
+// @ts-expect-error The condition lowering and its builders are not exported.
+import type { \u0057hereHandler as RemovedWhereHandler } from '@dbsp/adapter-pgsql';
+import type {
+	compileInsert as KeptCompileInsert,
+	CompilerContext as KeptCompilerContext,
+	InsertConfig as KeptInsertConfig,
+} from '@dbsp/adapter-pgsql';
+
 export type SurfaceTypeChecks = [
 	NewComparePgDatabaseSchemaOptionsindex,
 	OldComparePgDatabaseSchemaOptionsindex,
@@ -53,4 +87,25 @@ export type SurfaceTypeChecks = [
 	OldPgPreparedStatementsOptionsindex,
 	NewPgRollbackOnlyScopeindex,
 	OldPgRollbackOnlyScopeindex,
+	RemovedCompileUpdate,
+	RemovedCompileDelete,
+	RemovedCompileUpsert,
+	RemovedBuildOnConflictClause,
+	RemovedCompileMutation,
+	RemovedConditionalUpdate,
+	RemovedExcludedRef,
+	RemovedUpdateConfig,
+	RemovedDeleteConfig,
+	RemovedUpsertConfig,
+	RemovedConflictTarget,
+	RemovedConflictAction,
+	RemovedWhereDispatcher,
+	RemovedWhereHandler,
+	typeof KeptCompileInsert,
+	KeptInsertConfig,
 ];
+
+export const removedContextMember: Partial<KeptCompilerContext> = {
+	// @ts-expect-error The WHERE dispatcher is no longer a context member.
+	\u0063reateWhereDispatcher: () => undefined,
+};

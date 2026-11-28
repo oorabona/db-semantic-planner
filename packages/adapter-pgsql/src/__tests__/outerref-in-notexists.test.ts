@@ -5,12 +5,12 @@
  * was serialized as a JSON parameter $N = '{"kind":"ref","column":"file_id"}'
  * instead of being compiled to a SQL column reference (outer_alias.file_id).
  *
- * Root cause: convertWhereCondition() comparison case copied SubqueryRefIntent
+ * Root cause: the WHERE lowering comparison case copied SubqueryRefIntent
  * { kind: 'ref', column } directly to decision.value. isFieldRef() checks for
  * kind === 'fieldRef', so it fell through to compileValue(), which bound the
  * object as a parameter.
  *
- * Fix: convertWhereCondition() detects SubqueryRefIntent in comparison values
+ * Fix: the WHERE lowering detects SubqueryRefIntent in comparison values
  * and converts { kind: 'ref', column } → { kind: 'fieldRef', scope: 'outer', column }
  * before the Decision is created, so compileValueOrFieldRef() routes it to
  * columnRef() with the outer query alias.

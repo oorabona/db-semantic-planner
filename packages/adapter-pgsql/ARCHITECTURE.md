@@ -122,27 +122,22 @@ packages/adapter-pgsql/src/
 
 ## Handler Registry Pattern
 
-The compiler uses a **handler registry** pattern for extensibility:
+The compiler uses a **handler registry** pattern for expressions and include strategies. Conditions are not
+registered: core resolves every condition and `resolved-condition-compiler.ts` compiles it; a condition without
+core's resolution is refused.
 
 ```typescript
 // Registration
-const equalityHandler: WhereHandler = {
-  operators: ['='],
-  compile(decision, ctx, state, dispatch) { /* ... */ },
-};
 const countHandler: ExpressionHandler = {
   types: ['count'],
   compile(decision, ctx, state) { /* ... */ },
 };
-registerWhereHandler(equalityHandler);
 registerExpressionHandler(countHandler);
 
 // INCLUDE is a closed collection: extend it by changing
 // INCLUDE_STRATEGIES and allIncludeHandlers together.
 
 // Dispatch
-const whereHandler = getWhereHandler(operator);
-const whereNode = whereHandler.compile(decision, ctx, state, dispatch);
 const expressionHandler = getExpressionHandler(type);
 const expressionNode = expressionHandler.compile(decision, ctx, state);
 const includeHandler = getIncludeHandler(strategy);
@@ -152,16 +147,6 @@ const includeResult = includeHandler.compile(decision, ctx, state);
 ### Handler Interface
 
 ```typescript
-interface WhereHandler {
-  readonly operators: readonly string[];
-  compile(
-    decision: Decision,
-    ctx: CompilerContext,
-    state: CompilerState,
-    dispatch: WhereDispatcher
-  ): Node;
-}
-
 interface ExpressionHandler {
   readonly types: readonly string[];
   readonly nqlSafe?: boolean;

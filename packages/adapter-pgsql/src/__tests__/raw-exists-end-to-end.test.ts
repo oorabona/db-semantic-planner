@@ -3,7 +3,7 @@
  * full SELECT pipeline: DX API → planner → intent-to-decisions → compiler → SQL.
  *
  * L103 regression lock: before the fix, rawExists/rawNotExists were silently
- * dropped in convertWhereCondition (default: return null). These tests MUST
+ * dropped in the WHERE lowering (default: return null). These tests MUST
  * fail on main (no WHERE clause produced) and pass after the fix.
  *
  * All tests use createPgCompileOnlyAdapter + createOrm (compile-only path,
@@ -175,7 +175,7 @@ describe('rawExists / rawNotExists — SELECT pipeline (L103 regression lock)', 
 
 	/**
 	 * 7. rawExists inside or() — exercises convertLogicalGroup recursion path.
-	 *    Locks the regression that OR routing also walks through convertWhereCondition.
+	 *    Locks the regression that OR routing also walks through the WHERE lowering.
 	 */
 	it('rawExists in or() group propagates EXISTS to SQL', () => {
 		const orm = buildOrm();

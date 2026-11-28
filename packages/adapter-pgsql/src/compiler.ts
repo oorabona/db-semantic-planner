@@ -62,11 +62,7 @@ import {
 	relationBinding,
 	relationBindingFor,
 } from './binding-registry.js';
-import {
-	buildSubqueryFromIntent,
-	compileCondition,
-	compileWhereIntent,
-} from './condition-compiler.js';
+import { compileCondition } from './condition-compiler.js';
 import type { DeclaredNameResolver } from './declared-name-resolver.js';
 import { deparseQuoted } from './deparse.js';
 import { assertDialectCapability } from './dialect-capabilities.js';
@@ -79,7 +75,6 @@ import {
 	completeKeylessJoinProjections,
 } from './handlers/include/join.js';
 import {
-	createWhereDispatcher,
 	ensureExpressionHandlersRegistered,
 	ensureIncludeHandlersRegistered,
 	getExpressionHandler,
@@ -102,7 +97,6 @@ import {
 } from './handlers/types.js';
 import { buildKeyCorrelation } from './handlers/where/exists.js';
 import { buildColumnRef, compileValue } from './handlers/where/utils.js';
-import { convertWhereCondition } from './intent-to-decisions.js';
 import { unwrapParamIntent } from './param-intent.js';
 import { createParamRef } from './param-ref.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
@@ -174,7 +168,6 @@ function trustedRelationHasMultipleHops(
 
 import {
 	buildCustomFnFilter as buildCustomFnFilterWithCompiler,
-	compileFilterCondition,
 	mapToHandlerDecision,
 } from './custom-fn-filter.js';
 
@@ -402,8 +395,6 @@ function mergeDuplicateJoinIncludeDecisions(
  * Simplified PlanReport for the spike
  */
 export interface SimplifiedPlanReport {
-	/** Legacy SELECT-expression / NQL body predicate (HAVING, CASE and FILTER still use it); issued root WHERE uses resolvedWhere. */
-	readonly rawWhere?: WhereIntent;
 	readonly resolvedWhere?: import('@dbsp/types').ResolvedCondition;
 	/** Core resolved every HAVING, CASE WHEN and FILTER root. */
 	readonly rootsResolved?: boolean;
@@ -661,7 +652,6 @@ export class PlanCompiler {
 			}),
 			...(this.model != null && { model: this.model }),
 			compileCustomFnFilter: buildCustomFnFilter,
-			createWhereDispatcher: () => createWhereDispatcher(compileWhereIntent),
 		} as HandlerCompilerContext;
 	}
 
@@ -1072,8 +1062,7 @@ export class PlanCompiler {
 					intent: WhereIntent,
 					ctx: HandlerCompilerContext,
 					state: HandlerCompilerState,
-				) =>
-					this.compilePositionCondition(intent, plan, ctx, state, 'case-when'),
+				) => this.compilePositionCondition(intent, ctx, state, 'case-when'),
 			}),
 			queryRanges: bindings.filter(
 				(binding) =>
@@ -1124,7 +1113,6 @@ export class PlanCompiler {
 				state: HandlerCompilerState,
 			) => this.compileNqlFunctionArg(value, handlerCtx, state),
 			compileCustomFnFilter: buildCustomFnFilter,
-			createWhereDispatcher: () => createWhereDispatcher(compileWhereIntent),
 		} as HandlerCompilerContext;
 	}
 
@@ -1788,7 +1776,6 @@ export class PlanCompiler {
 					if (record.filter !== undefined) {
 						const filter = this.compilePositionCondition(
 							record.filter as WhereIntent,
-							{ rootTable: ctx.rootTable, decisions: [] },
 							ctx,
 							state,
 							'filter',
@@ -1913,27 +1900,6 @@ export class PlanCompiler {
 		return compileValue(arg, state);
 	}
 
-	private compileLegacyNqlCaseCondition(
-		condition: WhereIntent,
-		ctx: HandlerCompilerContext,
-		state: HandlerCompilerState,
-	): Node {
-		const conditionDecision = convertWhereCondition(condition, ctx.rootTable);
-		if (!conditionDecision) {
-			throw new Error('NQL CASE WHEN condition could not be compiled');
-		}
-		return createWhereDispatcher(compileWhereIntent)(
-			mapToHandlerDecision(
-				conditionDecision,
-				ctx.rootTable,
-				this.defaultPk,
-				this.deriveFk,
-			),
-			ctx,
-			state,
-		);
-	}
-
 	private compileNqlCaseExpressionArg(
 		expr: Record<string, unknown>,
 		ctx: HandlerCompilerContext,
@@ -1948,10 +1914,11 @@ export class PlanCompiler {
 			const condition = (branch as { condition?: unknown })
 				.condition as WhereIntent;
 			const result = (branch as { result?: unknown }).result;
-			const whenNode =
-				ctx.resolvedExecution && ctx.compileCaseCondition
-					? ctx.compileCaseCondition(condition, ctx, state)
-					: this.compileLegacyNqlCaseCondition(condition, ctx, state);
+			if (!ctx.resolvedExecution || !ctx.compileCaseCondition)
+				throw new Error(
+					"CASE WHEN condition reached the adapter without core's resolution.",
+				);
+			const whenNode = ctx.compileCaseCondition(condition, ctx, state);
 			const thenNode = this.compileNqlFunctionArg(result, ctx, state);
 			return {
 				CaseWhen: {
@@ -2032,21 +1999,14 @@ export class PlanCompiler {
 					this.deriveFk,
 				);
 				// Compile FILTER (WHERE ...) clause if present
-				const filterNode =
-					plan.resolvedExecution && decision.filterIntent
-						? this.compilePositionCondition(
-								decision.filterIntent,
-								plan,
-								ctx,
-								state,
-								'filter',
-							)
-						: compileFilterCondition(
-								decision.filterCondition,
-								createWhereDispatcher(compileWhereIntent),
-								ctx,
-								state,
-							);
+				const filterNode = decision.filterIntent
+					? this.compilePositionCondition(
+							decision.filterIntent,
+							ctx,
+							state,
+							'filter',
+						)
+					: undefined;
 				const hydratedDecision = filterNode
 					? { ...handlerDecision, filterWhere: filterNode }
 					: handlerDecision;
@@ -2707,43 +2667,8 @@ export class PlanCompiler {
 		return selectStmt(options);
 	}
 
-	/**
-	 * PostgreSQL does not resolve SELECT labels in HAVING. Reuse the selected
-	 * aggregate's source expression when HAVING names its output alias.
-	 */
-	private resolveHavingAggregateAlias(
-		decision: PlanDecision,
-		decisions: readonly PlanDecision[],
-	): PlanDecision {
-		if (decision.conditions) {
-			return {
-				...decision,
-				conditions: decision.conditions.map((child) =>
-					this.resolveHavingAggregateAlias(child, decisions),
-				),
-			};
-		}
-		if (!decision.column) return decision;
-		const projection = decisions.find(
-			(candidate) =>
-				candidate.type === 'selectFunction' &&
-				candidate.alias === decision.column,
-		);
-		if (!projection?.function || !projection.column) return decision;
-		return {
-			...decision,
-			type: 'having',
-			column: projection.column,
-			function: projection.function,
-			...(projection.distinct !== undefined && {
-				distinct: projection.distinct,
-			}),
-		};
-	}
-
 	private compilePositionCondition(
 		intent: WhereIntent,
-		plan: SimplifiedPlanReport,
 		ctx: HandlerCompilerContext,
 		state: HandlerCompilerState,
 		position: 'having' | 'case-when' | 'filter',
@@ -2757,74 +2682,8 @@ export class PlanCompiler {
 			visibleAliases: new Map(ctx.aliases),
 			paramState: state,
 			...(ctx.schema !== undefined && { schemaName: ctx.schema }),
-			...(position === 'having' && {
-				resolveHavingOperand: (condition: WhereIntent) => {
-					if (!('field' in condition)) return undefined;
-					const lowered = convertWhereCondition(condition, ctx.rootTable);
-					if (!lowered) return undefined;
-					const resolved = this.resolveHavingAggregateAlias(
-						lowered,
-						plan.decisions,
-					);
-					return resolved.type === 'having'
-						? mapToHandlerDecision(
-								resolved,
-								ctx.rootTable,
-								this.defaultPk,
-								this.deriveFk,
-							)
-						: undefined;
-				},
-			}),
-			compileSubquery: (query, offset, parent) =>
-				buildSubqueryFromIntent(
-					query,
-					offset,
-					this.declaredNames,
-					ctx.schema,
-					'rawExists',
-					ctx.scope,
-					this.dialectCapabilities,
-					this.dbCasing,
-					parent,
-				),
 			compileExpressionSubquery: ctx.compileSubquery,
 		});
-	}
-
-	private compileLegacyBodyWhere(
-		intent: WhereIntent,
-		plan: SimplifiedPlanReport,
-	): Node | undefined {
-		const handlerCtx = this.createHandlerContext(
-			plan,
-			this.tableIdentifier(plan.rootTable),
-		);
-		const condition = compileCondition(intent, {
-			...handlerCtx,
-			position: plan.enclosingRanges ? 'subquery' : 'where',
-			...(handlerCtx.outerAlias && { outerTable: handlerCtx.outerAlias }),
-			compileExpressionSubquery: handlerCtx.compileSubquery,
-			logicalSourceTable: plan.rootTable,
-			emittedAlias:
-				plan.batchValuesFromAlias ?? handlerCtx.currentAlias ?? plan.rootTable,
-			visibleAliases: new Map(this.visibleSqlQualifiers),
-			paramState: this.state,
-			...(handlerCtx.schema !== undefined && { schemaName: handlerCtx.schema }),
-			compileSubquery: (query, offset, parent) =>
-				buildSubqueryFromIntent(
-					query,
-					offset,
-					this.declaredNames,
-					handlerCtx.schema,
-					'rawExists',
-					handlerCtx.scope,
-					this.dialectCapabilities,
-					this.dbCasing,
-					parent,
-				),
-		});
-		return condition;
 	}
 
 	private compileSelect(plan: SimplifiedPlanReport): Node {
@@ -2863,7 +2722,6 @@ export class PlanCompiler {
 		let offset: Node | undefined;
 		let distinct: boolean | Node[] = false;
 
-		let rootWherePending = plan.rawWhere;
 		let resolvedWherePending = plan.resolvedWhere;
 		const flushRootWhere = () => {
 			if (resolvedWherePending) {
@@ -2882,11 +2740,6 @@ export class PlanCompiler {
 				);
 				where = where ? andExpr(where, root) : root;
 				resolvedWherePending = undefined;
-			}
-			if (rootWherePending) {
-				const root = this.compileLegacyBodyWhere(rootWherePending, plan);
-				if (root) where = where ? andExpr(where, root) : root;
-				rootWherePending = undefined;
 			}
 		};
 		for (const decision of decisions) {
@@ -2909,7 +2762,7 @@ export class PlanCompiler {
 				case 'whereNot':
 				case 'having':
 					// Planned reads carry their WHERE and HAVING as resolved roots
-					// (resolvedWhere, rawWhere, rawHaving), never as decisions.
+					// (resolvedWhere, rawHaving), never as decisions.
 					throw new Error(
 						`A ${decision.type} decision reached the compiler; conditions compile from the planned report.`,
 					);
@@ -2978,7 +2831,6 @@ export class PlanCompiler {
 		const having = plan.rawHaving
 			? this.compilePositionCondition(
 					plan.rawHaving,
-					plan,
 					this.createHandlerContext(plan),
 					this.state,
 					'having',

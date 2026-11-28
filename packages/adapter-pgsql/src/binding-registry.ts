@@ -103,17 +103,6 @@ export function queryScope(
 	return { bindings: indexed };
 }
 
-/** Extend a scope with an already-authoritative relation binding. */
-export function withRelationBinding(
-	scope: QueryScope | undefined,
-	binding: RelationBinding,
-): QueryScope {
-	return queryScope([
-		...(scope === undefined ? [] : scope.bindings.values()),
-		binding,
-	]);
-}
-
 /** Look up the binding addressed by an emitted relation qualifier. */
 export function relationBindingFor(
 	scope: QueryScope | undefined,

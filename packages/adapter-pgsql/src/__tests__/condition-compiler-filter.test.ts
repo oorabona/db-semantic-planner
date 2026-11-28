@@ -17,8 +17,6 @@ import {
 } from '@dbsp/core';
 import type { WhereIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { compileCondition } from '../condition-compiler.js';
-import { createCompilerState } from '../handlers/types.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const db = schema({
@@ -613,31 +611,5 @@ describe('third review FILTER repairs', () => {
 				"notExists('typo'): no relation 'typo' is declared on table 'users'. Use rawExists(subquery(...)) for an EXISTS over an undeclared or uncorrelated subquery.",
 			),
 		);
-	});
-	it.each([
-		{ targetTable: 'secrets' },
-		{ sourceColumn: ['uuid'] },
-		{ targetColumn: ['id'] },
-	])('refuses conflicting raw relation hints: %j', (hint) => {
-		const state = createCompilerState();
-		expect(() =>
-			compileCondition({ ...exists('posts'), ...hint } as WhereIntent, {
-				logicalSourceTable: 'users',
-				emittedAlias: 'users',
-				visibleAliases: new Map(),
-				position: 'filter',
-				model: keysDb.model,
-				paramState: state,
-				compileSubquery: () => {
-					throw new Error('unexpected subquery');
-				},
-			}),
-		).toThrow(
-			new Error(
-				"exists('posts'): supplied relation target or keys differ from the model.",
-			),
-		);
-		expect(state.parameters).toEqual([]);
-		expect(state.paramIndex).toBe(0);
 	});
 });

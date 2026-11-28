@@ -28,7 +28,6 @@ import {
 import { stringAgg } from '@dbsp/core/internal';
 import type { ExpressionIntent, QueryIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { buildSubqueryFromIntent } from '../compile-where.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const testSchema = schema({
@@ -318,28 +317,6 @@ describe('#247 aggregate DISTINCT', () => {
 					}),
 				),
 			).toThrow(new Error(COUNT_DISTINCT_STAR));
-		});
-
-		it('direct compile-where path: aggregate with field "*" and distinct throws (compile-where.ts chokepoint)', () => {
-			const intent = {
-				type: 'select' as const,
-				from: 'products',
-				select: {
-					type: 'aggregate' as const,
-					aggregates: [
-						{ function: 'count' as const, field: '*', distinct: true },
-					],
-				},
-			};
-			expect(() =>
-				buildSubqueryFromIntent(
-					intent,
-					0,
-					undefined,
-					undefined,
-					'scalar-direct',
-				),
-			).toThrow(/count\(DISTINCT \*\) is not valid SQL/);
 		});
 
 		it('expression aggregate lowering: count with no field propagates distinct instead of dropping it (select-expression-handlers.ts chokepoint)', () => {
