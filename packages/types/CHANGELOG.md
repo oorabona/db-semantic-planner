@@ -1,5 +1,20 @@
 # Changelog
 
+## [8.0.0](https://github.com/oorabona/db-semantic-planner/compare/types-v7.0.0...types-v8.0.0) (2026-11-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **adapter-pgsql,core:** @dbsp/adapter-pgsql no longer exports compileUpdate, compileDelete, compileUpsert, buildOnConflictClause, compileMutation, conditionalUpdate, excludedRef, UpdateConfig, DeleteConfig, UpsertConfig, ConflictTarget, ConflictAction, WhereDispatcher or WhereHandler, and CompilerContext has no createWhereDispatcher member. compileRecursive refuses a recursive report whose start.where core did not resolve.
+* **core:** SelectExecution.localConditions is removed from @dbsp/types; bodies on query-local sources use core's aliases and refuse a root outerRef() beside them.
+* **core:** resolve a typed ref inside a body from its origin range ([#1117](https://github.com/oorabona/db-semantic-planner/issues/1117))
+
+### Features
+
+* **adapter-pgsql,core:** Delete the shared legacy WHERE lowering ([#1127](https://github.com/oorabona/db-semantic-planner/issues/1127)) ([048931f](https://github.com/oorabona/db-semantic-planner/commit/048931fba3267d9022773287de4e0b1d8b343530))
+* **core:** Plan a scalar body on a query-local source as a nested select ([#1125](https://github.com/oorabona/db-semantic-planner/issues/1125)) ([71ed4ab](https://github.com/oorabona/db-semantic-planner/commit/71ed4ab94b12590c4c77573a0fd391fa39bce021))
+* **core:** Resolve a typed ref inside a body from its origin range ([#1117](https://github.com/oorabona/db-semantic-planner/issues/1117)) ([a241394](https://github.com/oorabona/db-semantic-planner/commit/a2413944492b98db93d2c35421150f7f04c2e4c6)), closes [#1014](https://github.com/oorabona/db-semantic-planner/issues/1014)
+
 ## [7.0.0](https://github.com/oorabona/db-semantic-planner/compare/types-v6.4.0...types-v7.0.0) (2026-11-27)
 
 
