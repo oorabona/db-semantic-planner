@@ -29,7 +29,7 @@ Each helper reads its arguments with the same rule as the core helpers (ADR 0011
 
 | Argument | Kind | A plain value | An expression (`literal()`, `exprRef()`, a `ColumnRef`, a subquery, a query builder) |
 |----------|------|---------------|-----------------------------------------------------------------------------------|
-| the vector of `cosineDistance`, `rawDistance`, `l2Distance`, `innerProduct` | value | bound as `CAST($N AS vector)`; a `number[]` is sent as pgvector's text form `'[a,b,…]'` | compiled inside `CAST(… AS vector)` |
+| the vector of `cosineDistance`, `rawDistance`, `l2Distance`, `innerProduct` | value | bound as `CAST($N AS vector)`; an array of finite numbers is sent as pgvector's text form `'[a,b,…]'`, an empty array or other elements are refused | compiled inside `CAST(… AS vector)` |
 | the query of `parse` | value | bound as `$N` | compiled as the query |
 | the column of the distances and of `vectorDims`, the key field of `score`, the expression of `boost`, each element of `booleanSearch` | reference | a string is a column; a finite number or boolean is inlined | compiled (a `ColumnRef` gives its qualified column) |
 | the field of `parse` | name | a string only | refused |
@@ -90,7 +90,7 @@ const results = orm
 | `l2Distance(col, vec)` | `col <-> vec` | Lower = closer | Euclidean ORDER BY |
 | `innerProduct(col, vec)` | `col <#> vec` | Lower = more similar (negative) | Maximum inner product search |
 
-**Important:** Use `cosineDistance` in SELECT for a human-readable score [0, 1].
+**Important:** Use `cosineDistance` in SELECT for a human-readable similarity score in [-1, 1] (1 = same direction).
 Use `rawDistance` in ORDER BY — it maps directly to the index operator and avoids
 a full-table recompute.
 

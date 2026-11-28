@@ -10,9 +10,10 @@
  * Each user argument follows the ADR 0011 leaf rule before it is wrapped:
  * - the column is a reference leaf: a string is a column, a `ColumnRef` its
  *   qualified column, an expression is compiled;
- * - the vector is a value leaf inside `CAST(… AS vector)`: a `number[]` is
- *   bound as pgvector's text form `'[a,b,…]'`, another plain value (a
- *   `'[1,0,0]'` string) is bound as given, an expression (`literal('[1,0,0]')`,
+ * - the vector is a value leaf inside `CAST(… AS vector)`: an array of finite
+ *   numbers is bound as pgvector's text form `'[a,b,…]'`; an empty array or an
+ *   array holding anything else is refused by name; another plain value (a
+ *   `'[1,0,0]'` string) is bound as given; an expression (`literal('[1,0,0]')`,
  *   a `ColumnRef`, a subquery …) is compiled inside the cast.
  */
 
@@ -20,21 +21,36 @@ import {
 	cast,
 	type ExpressionRef,
 	fn,
+	InvalidOperationError,
 	literal,
 	op,
 	type ReferenceLeaf,
 } from '@dbsp/core';
+import { leafKind } from '@dbsp/core/internal';
 import { referenceLeaf, valueLeaf } from './leaves.js';
 
 /**
- * The vector leaf: a plain array is bound as pgvector's text form `[a,b,…]`
- * (`pg` would send a JavaScript array as a PostgreSQL array literal, which
- * `vector_in` refuses); any other leaf follows the value rule.
+ * The vector leaf: a plain array of finite numbers is bound as pgvector's
+ * text form `[a,b,…]` (`pg` would send a JavaScript array as a PostgreSQL
+ * array literal, which `vector_in` refuses); an empty array or another
+ * element is refused by name; any other leaf follows the value rule.
  */
 function vectorLeaf(vector: unknown, helper: string): ExpressionRef {
-	return Array.isArray(vector)
-		? valueLeaf(JSON.stringify(vector.map(Number)), helper)
-		: valueLeaf(vector, helper);
+	if (!Array.isArray(vector)) return valueLeaf(vector, helper);
+	if (vector.length === 0)
+		throw new InvalidOperationError(
+			helper,
+			'vector must have at least one dimension',
+		);
+	for (let index = 0; index < vector.length; index++) {
+		const element: unknown = vector[index];
+		if (typeof element !== 'number' || !Number.isFinite(element))
+			throw new InvalidOperationError(
+				helper,
+				`vector must be an array of finite numbers; got ${typeof element === 'number' ? String(element) : leafKind(element)} at index ${index}`,
+			);
+	}
+	return valueLeaf(JSON.stringify(vector), helper);
 }
 
 /** `<column> <operator> CAST(<vector> AS vector)`, each leaf coerced under `helper`. */
@@ -54,7 +70,7 @@ function distance(
 /**
  * Cosine similarity: 1 - (col <=> vector)
  *
- * Score in [0, 1], higher = more similar.
+ * Score in [-1, 1] for non-zero vectors, higher = more similar.
  * Use in SELECT to get a similarity score.
  *
  * @example

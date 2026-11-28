@@ -345,6 +345,28 @@ describe('pgvector helper leaves (#1082)', () => {
 			notAnArgument('vectorDims', 'undefined'),
 		);
 	});
+	it('refuses an empty vector and a non-finite or non-number element (#1120)', () => {
+		expect(() => select(cosineDistance('embedding', []))).toThrowError(
+			new InvalidOperationError(
+				'cosineDistance',
+				'vector must have at least one dimension',
+			),
+		);
+		expect(() =>
+			select(rawDistance('embedding', [null, 1] as never)),
+		).toThrowError(
+			new InvalidOperationError(
+				'rawDistance',
+				'vector must be an array of finite numbers; got null at index 0',
+			),
+		);
+		expect(() => select(l2Distance('embedding', [1, Number.NaN]))).toThrowError(
+			new InvalidOperationError(
+				'l2Distance',
+				'vector must be an array of finite numbers; got NaN at index 1',
+			),
+		);
+	});
 	it('RT-B6 / outerRef', () => {
 		expect(() =>
 			select(cosineDistance('embedding', outerRef('embedding'))),
