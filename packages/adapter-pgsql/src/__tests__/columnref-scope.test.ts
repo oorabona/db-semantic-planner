@@ -16,6 +16,7 @@ import {
 	exists,
 	fn,
 	gt,
+	InvalidOperationError,
 	inArray,
 	inSubquery,
 	isNotNull,
@@ -1073,9 +1074,10 @@ describe('A typed ref inside a body resolves from its origin range (#1014)', () 
 	const CASE = () =>
 		caseWhen(eq(users.writings.published, true), literal(1)).else(literal(0));
 	const leaf = L();
-	// R9 asserts O11's message written out, not built by the error class (#1116).
+	// An expression object in a typed function argument is refused before any
+	// origin check (#1116); R9's cases pass a caseWhen() ExpressionRef there.
 	const r9Message =
-		'a typed ref resolved from its origin in a typed function argument is not supported yet (#1116).';
+		'Invalid typed function: an expression is not a typed function argument; build the call with fn(name, ...args)';
 	const expectR9 = (build: () => unknown): void => {
 		let error: unknown;
 		try {
@@ -1083,8 +1085,8 @@ describe('A typed ref inside a body resolves from its origin range (#1014)', () 
 		} catch (caught) {
 			error = caught;
 		}
-		expect(error).toBeInstanceOf(NotYetSupportedError);
-		expect(error).toMatchObject({ issue: 1116, message: r9Message });
+		expect(error).toBeInstanceOf(InvalidOperationError);
+		expect(error).toMatchObject({ message: r9Message });
 	};
 	type Dumped = { sql: string; params?: unknown; parameters?: unknown };
 	const dumpOf = (build: () => unknown): Dumped => {

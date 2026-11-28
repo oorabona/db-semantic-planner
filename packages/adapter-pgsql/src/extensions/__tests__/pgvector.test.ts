@@ -7,7 +7,19 @@
  * Every query goes through a model-carrying ORM and `.dump()`.
  */
 
-import { cast, createOrm, exprRef, op, param, schema } from '@dbsp/core';
+import {
+	cast,
+	createOrm,
+	exprRef,
+	InvalidOperationError,
+	literal,
+	NotYetSupportedError,
+	op,
+	outerRef,
+	param,
+	ref,
+	schema,
+} from '@dbsp/core';
 import type { WhereComparisonIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../../pgsql-adapter.js';
@@ -16,6 +28,7 @@ import {
 	innerProduct,
 	l2Distance,
 	rawDistance,
+	vectorDims,
 } from '../pgvector.js';
 
 // ---------------------------------------------------------------------------
@@ -234,5 +247,101 @@ describe('raw expression composition', () => {
 			sql: 'SELECT vec <=> CAST($1 AS vector) AS d FROM docs',
 			params: [qv],
 		});
+	});
+});
+
+// ---------------------------------------------------------------------------
+// ADR 0011 leaf rule (#1082): the column is a reference leaf, the vector a
+// value leaf inside CAST(… AS vector).
+// ---------------------------------------------------------------------------
+
+describe('pgvector helper leaves (#1082)', () => {
+	const leafDb = schema({
+		users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			title: 'text',
+			embedding: { type: 'text', dbType: 'vector(2)' },
+			user_id: ref('users', { as: 'author' }),
+		},
+	});
+	const leafOrm = createOrm({
+		schema: leafDb,
+		adapter: createPgCompileOnlyAdapter({ model: leafDb.model }),
+		suppressDxWarnings: true,
+	});
+	const T = leafOrm.tables;
+	const select = (expr: ExprRef) => {
+		const { sql, params } = leafOrm
+			.select('posts')
+			.columns([expr.as('v')])
+			.dump();
+		return { sql, params };
+	};
+	const notAnArgument = (helper: string, kind: string) =>
+		new InvalidOperationError(
+			helper,
+			`${kind} is not an expression argument; use literal(null), param(value) or an expression`,
+		);
+
+	it('AC-B5 / ColumnRef', () => {
+		expect(select(cosineDistance(T.posts.embedding, [0.1, 0.2]))).toEqual({
+			sql: 'SELECT 1 - (posts.embedding <=> CAST($1 AS vector)) AS v FROM posts',
+			params: [[0.1, 0.2]],
+		});
+		expect(select(rawDistance(T.posts.embedding, [0.1, 0.2]))).toEqual({
+			sql: 'SELECT posts.embedding <=> CAST($1 AS vector) AS v FROM posts',
+			params: [[0.1, 0.2]],
+		});
+		expect(select(l2Distance(T.posts.embedding, [0.1, 0.2]))).toEqual({
+			sql: 'SELECT posts.embedding <-> CAST($1 AS vector) AS v FROM posts',
+			params: [[0.1, 0.2]],
+		});
+		expect(select(innerProduct(T.posts.embedding, [0.1, 0.2]))).toEqual({
+			sql: 'SELECT posts.embedding <#> CAST($1 AS vector) AS v FROM posts',
+			params: [[0.1, 0.2]],
+		});
+		expect(select(vectorDims(T.posts.embedding))).toEqual({
+			sql: 'SELECT vector_dims(posts.embedding) AS v FROM posts',
+			params: [],
+		});
+	});
+	it('AC-B6 / plain', () => {
+		expect(select(cosineDistance('embedding', [0.1, 0.2]))).toEqual({
+			sql: 'SELECT 1 - (embedding <=> CAST($1 AS vector)) AS v FROM posts',
+			params: [[0.1, 0.2]],
+		});
+	});
+	it('AC-B6 / expression', () => {
+		expect(select(rawDistance('embedding', literal('[1,0]')))).toEqual({
+			sql: "SELECT embedding <=> '[1,0]'::vector AS v FROM posts",
+			params: [],
+		});
+		expect(select(l2Distance('embedding', T.posts.embedding))).toEqual({
+			sql: 'SELECT embedding <-> CAST(posts.embedding AS vector) AS v FROM posts',
+			params: [],
+		});
+	});
+	it('AC-B6 / param', () => {
+		expect(select(innerProduct('embedding', param([0.1, 0.2])))).toEqual({
+			sql: 'SELECT embedding <#> CAST($1 AS vector) AS v FROM posts',
+			params: [[0.1, 0.2]],
+		});
+	});
+
+	it('RT-B5 / null', () => {
+		expect(() => select(cosineDistance(null as never, [0.1]))).toThrowError(
+			notAnArgument('cosineDistance', 'null'),
+		);
+		expect(() => select(vectorDims(undefined as never))).toThrowError(
+			notAnArgument('vectorDims', 'undefined'),
+		);
+	});
+	it('RT-B6 / outerRef', () => {
+		expect(() =>
+			select(cosineDistance('embedding', outerRef('embedding'))),
+		).toThrowError(
+			new NotYetSupportedError('outerRef()', 'expression argument', 1029),
+		);
 	});
 });

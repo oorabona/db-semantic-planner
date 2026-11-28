@@ -32,6 +32,7 @@ import type {
 	SubqueryExpressionIntent,
 	SubqueryRefIntent,
 } from '../intent-ast.js';
+import { forEachTypedFunctionArgs } from '../path-ref-scan.js';
 import { CaseBuilder } from './case-when-builder.js';
 import { getColumnName, isRelationPathColumn } from './column-utils.js';
 import { InvalidOperationError } from './errors.js';
@@ -391,6 +392,72 @@ export function leafKind(leaf: unknown): string {
 	if (isSqlRaw(leaf)) return 'a sql() marker';
 	if (leaf instanceof CaseBuilder) return 'an unfinished caseWhen()';
 	return 'a plain object';
+}
+
+const TYPED_FUNCTION = 'typed function';
+const TYPED_FUNCTION_GUIDANCE = 'build the call with fn(name, ...args)';
+
+/**
+ * The kind of a DX object passed as an argument of a `{ kind: 'function' }`
+ * intent (a typed function intent, NQL's form), in the words of
+ * {@link leafKind}; `undefined` for the forms such an argument takes: a
+ * string, a number or another plain value, an array, a plain object, an
+ * intent record.
+ */
+function typedFunctionObjectKind(arg: unknown): string | undefined {
+	if (typeof arg !== 'object' || arg === null) return undefined;
+	if (Array.isArray(arg) || arg instanceof Date) return undefined;
+	const kind = expressionKind(arg);
+	if (kind !== undefined) return kind;
+	if (isNonSubqueryBuilder(arg)) return 'a query builder';
+	if (isSqlRaw(arg)) return 'a sql() marker';
+	if (arg instanceof CaseBuilder) return 'an unfinished caseWhen()';
+	return undefined;
+}
+
+/**
+ * Refuse a DX object among the arguments of a typed function intent (ADR
+ * 0011, #1116). The intent takes NQL's argument forms and binds or refuses
+ * anything else as data; `fn(name, ...args)` is the helper that applies the
+ * leaf rule to function arguments. `args` that is not an array is left to the
+ * compiler.
+ *
+ * @throws InvalidOperationError naming the object's kind
+ */
+export function refuseTypedFunctionArguments(args: unknown): void {
+	if (!Array.isArray(args)) return;
+	for (const arg of args) {
+		const kind = typedFunctionObjectKind(arg);
+		if (kind !== undefined)
+			throw new InvalidOperationError(
+				TYPED_FUNCTION,
+				`${kind} is not a typed function argument; ${TYPED_FUNCTION_GUIDANCE}`,
+			);
+	}
+}
+
+/**
+ * Apply {@link refuseTypedFunctionArguments} to every typed function intent
+ * reachable from a query (`isQuery`) or from a condition or expression root,
+ * every body below it included.
+ */
+export function refuseTypedFunctionObjects(
+	root: unknown,
+	isQuery: boolean,
+): void {
+	forEachTypedFunctionArgs(root, isQuery, refuseTypedFunctionArguments);
+}
+
+/**
+ * The refusal of a ref resolved from its origin (a `pathRef` or callback
+ * node) inside a typed function argument: the intent's arguments are not
+ * resolved from an origin.
+ */
+export function refuseTypedFunctionOriginRef(): never {
+	throw new InvalidOperationError(
+		TYPED_FUNCTION,
+		`a ref resolved from its origin is not a typed function argument; ${TYPED_FUNCTION_GUIDANCE}`,
+	);
 }
 
 /**

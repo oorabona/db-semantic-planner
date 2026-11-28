@@ -6,17 +6,38 @@
  * - SELECT: .column(cosineDistance('vector', qv).as('score'))
  * - WHERE:  .where(cosineDistance('vector', qv).gte(0.5))
  * - ORDER BY: .orderBy(rawDistance('vector', qv), 'asc')
+ *
+ * Each user argument follows the ADR 0011 leaf rule before it is wrapped:
+ * - the column is a reference leaf: a string is a column, a `ColumnRef` its
+ *   qualified column, an expression is compiled;
+ * - the vector is a value leaf inside `CAST(… AS vector)`: a plain value is
+ *   bound as given, an expression (`literal('[1,0,0]')`, a `ColumnRef`, a
+ *   subquery …) is compiled inside the cast.
  */
 
 import {
 	cast,
 	type ExpressionRef,
-	exprRef,
 	fn,
 	literal,
 	op,
-	param,
+	type ReferenceLeaf,
 } from '@dbsp/core';
+import { referenceLeaf, valueLeaf } from './leaves.js';
+
+/** `<column> <operator> CAST(<vector> AS vector)`, each leaf coerced under `helper`. */
+function distance(
+	operator: '<=>' | '<->' | '<#>',
+	column: ReferenceLeaf,
+	vector: unknown,
+	helper: string,
+): ExpressionRef {
+	return op(
+		operator,
+		referenceLeaf(column, helper),
+		cast(valueLeaf(vector, helper), 'vector'),
+	);
+}
 
 /**
  * Cosine similarity: 1 - (col <=> vector)
@@ -28,14 +49,10 @@ import {
  * orm.select('embeddings').column(cosineDistance('vector', qv).as('score'))
  */
 export function cosineDistance(
-	column: string,
-	vector: number[],
+	column: ReferenceLeaf,
+	vector: unknown,
 ): ExpressionRef {
-	return op(
-		'-',
-		literal(1),
-		op('<=>', exprRef(column), cast(param(vector), 'vector')),
-	);
+	return op('-', literal(1), distance('<=>', column, vector, 'cosineDistance'));
 }
 
 /**
@@ -47,8 +64,11 @@ export function cosineDistance(
  * @example
  * orm.select('embeddings').orderBy(rawDistance('vector', qv), 'asc')
  */
-export function rawDistance(column: string, vector: number[]): ExpressionRef {
-	return op('<=>', exprRef(column), cast(param(vector), 'vector'));
+export function rawDistance(
+	column: ReferenceLeaf,
+	vector: unknown,
+): ExpressionRef {
+	return distance('<=>', column, vector, 'rawDistance');
 }
 
 /**
@@ -57,8 +77,11 @@ export function rawDistance(column: string, vector: number[]): ExpressionRef {
  * @example
  * orm.select('embeddings').orderBy(l2Distance('vector', qv), 'asc')
  */
-export function l2Distance(column: string, vector: number[]): ExpressionRef {
-	return op('<->', exprRef(column), cast(param(vector), 'vector'));
+export function l2Distance(
+	column: ReferenceLeaf,
+	vector: unknown,
+): ExpressionRef {
+	return distance('<->', column, vector, 'l2Distance');
 }
 
 /**
@@ -69,8 +92,11 @@ export function l2Distance(column: string, vector: number[]): ExpressionRef {
  * @example
  * orm.select('embeddings').orderBy(innerProduct('vector', qv), 'asc')
  */
-export function innerProduct(column: string, vector: number[]): ExpressionRef {
-	return op('<#>', exprRef(column), cast(param(vector), 'vector'));
+export function innerProduct(
+	column: ReferenceLeaf,
+	vector: unknown,
+): ExpressionRef {
+	return distance('<#>', column, vector, 'innerProduct');
 }
 
 /**
@@ -79,10 +105,12 @@ export function innerProduct(column: string, vector: number[]): ExpressionRef {
  * Returns an integer — the dimension count of the stored vector.
  * Useful for sanity-checking that embeddings match the expected model dimension.
  *
+ * @param column - A column name, a `ColumnRef` or an expression (reference leaf)
+ *
  * @example
  * orm.from(embeddings).columns([vectorDims('vector').as('dim')]).first()
  * // → SELECT vector_dims("t0"."vector") AS "dim" FROM "embeddings" AS "t0"
  */
-export function vectorDims(column: string): ExpressionRef {
-	return fn('vector_dims', exprRef(column));
+export function vectorDims(column: ReferenceLeaf): ExpressionRef {
+	return fn('vector_dims', referenceLeaf(column, 'vectorDims'));
 }
