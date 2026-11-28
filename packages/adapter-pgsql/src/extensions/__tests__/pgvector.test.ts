@@ -67,6 +67,8 @@ function dumpSelectExpr(
 }
 
 const QV = [0.1, 0.2, 0.3];
+// A number[] vector is bound as pgvector's text form (#1120).
+const QV_TEXT = '[0.1,0.2,0.3]';
 
 // ---------------------------------------------------------------------------
 // cosineDistance
@@ -76,14 +78,14 @@ describe('cosineDistance', () => {
 	it('produces correct SQL in SELECT with alias', () => {
 		expect(dumpSelectExpr(cosineDistance('vector', QV), 'score')).toEqual({
 			sql: 'SELECT 1 - (vector <=> CAST($1 AS vector)) AS score FROM embeddings',
-			params: [QV],
+			params: [QV_TEXT],
 		});
 	});
 
 	it('binds exactly one parameter', () => {
 		expect(
 			dumpSelectExpr(cosineDistance('vector', QV), 'score').params,
-		).toEqual([QV]);
+		).toEqual([QV_TEXT]);
 	});
 });
 
@@ -95,7 +97,7 @@ describe('rawDistance', () => {
 	it('produces correct SQL in SELECT', () => {
 		expect(dumpSelectExpr(rawDistance('vector', QV), 'dist')).toEqual({
 			sql: 'SELECT vector <=> CAST($1 AS vector) AS dist FROM embeddings',
-			params: [QV],
+			params: [QV_TEXT],
 		});
 	});
 
@@ -106,7 +108,7 @@ describe('rawDistance', () => {
 			.dump();
 		expect({ sql, params }).toEqual({
 			sql: 'SELECT embeddings.* FROM embeddings ORDER BY vector <=> CAST($1 AS vector) ASC',
-			params: [QV],
+			params: [QV_TEXT],
 		});
 	});
 });
@@ -119,7 +121,7 @@ describe('l2Distance', () => {
 	it('uses <-> operator', () => {
 		expect(dumpSelectExpr(l2Distance('vector', QV), 'l2')).toEqual({
 			sql: 'SELECT vector <-> CAST($1 AS vector) AS l2 FROM embeddings',
-			params: [QV],
+			params: [QV_TEXT],
 		});
 	});
 });
@@ -132,7 +134,7 @@ describe('innerProduct', () => {
 	it('uses <#> operator', () => {
 		expect(dumpSelectExpr(innerProduct('vector', QV), 'ip')).toEqual({
 			sql: 'SELECT vector <#> CAST($1 AS vector) AS ip FROM embeddings',
-			params: [QV],
+			params: [QV_TEXT],
 		});
 	});
 });
@@ -149,7 +151,7 @@ describe('WHERE with expression comparison', () => {
 			.dump();
 		expect({ sql, params }).toEqual({
 			sql: 'SELECT embeddings.* FROM embeddings WHERE (1 - (embeddings.vector <=> CAST($1 AS vector))) >= $2',
-			params: [QV, 0.5],
+			params: [QV_TEXT, 0.5],
 		});
 	});
 });
@@ -166,7 +168,7 @@ describe('ORDER BY with expression', () => {
 			.dump();
 		expect({ sql, params }).toEqual({
 			sql: 'SELECT embeddings.* FROM embeddings ORDER BY vector <=> CAST($1 AS vector) ASC',
-			params: [QV],
+			params: [QV_TEXT],
 		});
 	});
 
@@ -177,7 +179,7 @@ describe('ORDER BY with expression', () => {
 			.dump();
 		expect({ sql, params }).toEqual({
 			sql: 'SELECT embeddings.* FROM embeddings ORDER BY vector <-> CAST($1 AS vector) ASC',
-			params: [QV],
+			params: [QV_TEXT],
 		});
 	});
 });
@@ -198,7 +200,7 @@ describe('full integration', () => {
 		// Two params: one for cosineDistance SELECT, one for rawDistance ORDER BY
 		expect({ sql, params }).toEqual({
 			sql: 'SELECT embeddings.id, embeddings.content, 1 - (vector <=> CAST($1 AS vector)) AS score FROM embeddings ORDER BY vector <=> CAST($2 AS vector) ASC LIMIT 10',
-			params: [qv, qv],
+			params: ['[0.1,0.2,0.3]', '[0.1,0.2,0.3]'],
 		});
 	});
 });
@@ -287,29 +289,35 @@ describe('pgvector helper leaves (#1082)', () => {
 	it('AC-B5 / ColumnRef', () => {
 		expect(select(cosineDistance(T.posts.embedding, [0.1, 0.2]))).toEqual({
 			sql: 'SELECT 1 - (posts.embedding <=> CAST($1 AS vector)) AS v FROM posts',
-			params: [[0.1, 0.2]],
+			params: ['[0.1,0.2]'],
 		});
 		expect(select(rawDistance(T.posts.embedding, [0.1, 0.2]))).toEqual({
 			sql: 'SELECT posts.embedding <=> CAST($1 AS vector) AS v FROM posts',
-			params: [[0.1, 0.2]],
+			params: ['[0.1,0.2]'],
 		});
 		expect(select(l2Distance(T.posts.embedding, [0.1, 0.2]))).toEqual({
 			sql: 'SELECT posts.embedding <-> CAST($1 AS vector) AS v FROM posts',
-			params: [[0.1, 0.2]],
+			params: ['[0.1,0.2]'],
 		});
 		expect(select(innerProduct(T.posts.embedding, [0.1, 0.2]))).toEqual({
 			sql: 'SELECT posts.embedding <#> CAST($1 AS vector) AS v FROM posts',
-			params: [[0.1, 0.2]],
+			params: ['[0.1,0.2]'],
 		});
 		expect(select(vectorDims(T.posts.embedding))).toEqual({
 			sql: 'SELECT vector_dims(posts.embedding) AS v FROM posts',
 			params: [],
 		});
 	});
-	it('AC-B6 / plain', () => {
+	it('AC-B6 / plain: a number[] is bound as pgvector text (#1120)', () => {
 		expect(select(cosineDistance('embedding', [0.1, 0.2]))).toEqual({
 			sql: 'SELECT 1 - (embedding <=> CAST($1 AS vector)) AS v FROM posts',
-			params: [[0.1, 0.2]],
+			params: ['[0.1,0.2]'],
+		});
+	});
+	it('a string vector is bound as given', () => {
+		expect(select(rawDistance('embedding', '[1,0]'))).toEqual({
+			sql: 'SELECT embedding <=> CAST($1 AS vector) AS v FROM posts',
+			params: ['[1,0]'],
 		});
 	});
 	it('AC-B6 / expression', () => {
@@ -335,6 +343,28 @@ describe('pgvector helper leaves (#1082)', () => {
 		);
 		expect(() => select(vectorDims(undefined as never))).toThrowError(
 			notAnArgument('vectorDims', 'undefined'),
+		);
+	});
+	it('refuses an empty vector and a non-finite or non-number element (#1120)', () => {
+		expect(() => select(cosineDistance('embedding', []))).toThrowError(
+			new InvalidOperationError(
+				'cosineDistance',
+				'vector must have at least one dimension',
+			),
+		);
+		expect(() =>
+			select(rawDistance('embedding', [null, 1] as never)),
+		).toThrowError(
+			new InvalidOperationError(
+				'rawDistance',
+				'vector must be an array of finite numbers; got null at index 0',
+			),
+		);
+		expect(() => select(l2Distance('embedding', [1, Number.NaN]))).toThrowError(
+			new InvalidOperationError(
+				'l2Distance',
+				'vector must be an array of finite numbers; got NaN at index 1',
+			),
 		);
 	});
 	it('RT-B6 / outerRef', () => {

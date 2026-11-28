@@ -35,6 +35,8 @@ const orm = createOrm({
 });
 
 const QV = [0.1, 0.2, 0.3];
+// A number[] vector is bound as pgvector's text form (#1120).
+const QV_TEXT = '[0.1,0.2,0.3]';
 
 describe('vectorDims', () => {
 	const dims = () =>
@@ -85,7 +87,7 @@ describe('cosineDistance — SELECT', () => {
 		const { sql, params } = scored();
 		expect({ sql, params }).toEqual({
 			sql: 'SELECT 1 - (vector <=> CAST($1 AS vector)) AS score FROM embeddings',
-			params: [QV],
+			params: [QV_TEXT],
 		});
 	});
 
@@ -93,7 +95,7 @@ describe('cosineDistance — SELECT', () => {
 		const { sql, params } = scored();
 		expect({ sql, params }).toEqual({
 			sql: 'SELECT 1 - (vector <=> CAST($1 AS vector)) AS score FROM embeddings',
-			params: [QV],
+			params: [QV_TEXT],
 		});
 	});
 });
@@ -106,7 +108,7 @@ describe('cosineDistance — WHERE', () => {
 			.dump();
 		expect({ sql, params }).toEqual({
 			sql: 'SELECT embeddings.* FROM embeddings WHERE (1 - (embeddings.vector <=> CAST($1 AS vector))) >= $2',
-			params: [QV, 0.8],
+			params: [QV_TEXT, 0.8],
 		});
 	});
 
@@ -117,7 +119,7 @@ describe('cosineDistance — WHERE', () => {
 			.dump();
 		expect({ sql, params }).toEqual({
 			sql: 'SELECT embeddings.* FROM embeddings WHERE (1 - (embeddings.vector <=> CAST($1 AS vector))) < $2',
-			params: [QV, 0.3],
+			params: [QV_TEXT, 0.3],
 		});
 	});
 });
@@ -130,7 +132,7 @@ describe('cosineDistance — ORDER BY', () => {
 			.dump();
 		expect({ sql, params }).toEqual({
 			sql: 'SELECT embeddings.* FROM embeddings ORDER BY vector <=> CAST($1 AS vector) ASC',
-			params: [QV],
+			params: [QV_TEXT],
 		});
 	});
 
@@ -141,7 +143,7 @@ describe('cosineDistance — ORDER BY', () => {
 			.dump();
 		expect({ sql, params }).toEqual({
 			sql: 'SELECT embeddings.* FROM embeddings ORDER BY 1 - (vector <=> CAST($1 AS vector)) DESC',
-			params: [QV],
+			params: [QV_TEXT],
 		});
 	});
 });
@@ -157,7 +159,7 @@ describe('cosineDistance — full ANN search pipeline', () => {
 			.dump();
 		expect({ sql, params }).toEqual({
 			sql: 'SELECT embeddings.id, 1 - (vector <=> CAST($1 AS vector)) AS score FROM embeddings WHERE (1 - (embeddings.vector <=> CAST($2 AS vector))) >= $3 ORDER BY vector <=> CAST($4 AS vector) ASC LIMIT 10',
-			params: [QV, QV, 0.5, QV],
+			params: [QV_TEXT, QV_TEXT, 0.5, QV_TEXT],
 		});
 	});
 });

@@ -5,7 +5,6 @@
  */
 
 export {
-	bm25Search,
 	booleanSearch,
 	boost,
 	parse,

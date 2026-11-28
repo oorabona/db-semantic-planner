@@ -322,7 +322,7 @@ The `key_field` option must match the `keyField` argument to `textScore()`.
 
 - `packages/core/src/dx/full-text-search.ts` — `fullTextSearch()`, `textScore()`, type definitions
 - `packages/adapter-pgsql/src/__tests__/full-text-search.test.ts` — test suite with SQL snapshots
-- `packages/adapter-pgsql/src/extensions/paradedb.ts` — lower-level `score()`, `parse()`, `boost()`, `bm25Search()` primitives
+- `packages/adapter-pgsql/src/extensions/paradedb.ts` — lower-level `score()`, `parse()`, `boost()`, `booleanSearch()` primitives
 - [guide](https://oorabona.github.io/db-semantic-planner/guide/extensions) — pgvector + lower-level ParadeDB primitives
 
 ---
@@ -375,10 +375,9 @@ ParadeDB runtime error.
 Calling `textScore('id')` on a table without a BM25 index (or with a different
 `key_field`) will fail at query execution time.
 
-### `fullTextSearch` vs. lower-level `bm25Search`
+### `fullTextSearch` and the lower-level primitives
 
-`fullTextSearch` (from `@dbsp/core`) is the recommended high-level helper with named
-field structs and explicit boost values. The older `bm25Search` (from
-`@dbsp/adapter-pgsql`) accepts an object of `{ field: weight }` pairs, but on
-pg_search 0.25.3 its positional `paradedb.parse` call fails at execution (#1119).
-Prefer `fullTextSearch` for new code — it is adapter-agnostic and lives in core.
+`fullTextSearch` (from `@dbsp/core`) is the multi-field BM25 helper, with named field
+structs and explicit boost values. For a search it does not cover, compose the
+`@dbsp/adapter-pgsql` primitives `parse()`, `boost()` and `booleanSearch()` under
+`op('@@@', exprRef('<table>'), …)`.

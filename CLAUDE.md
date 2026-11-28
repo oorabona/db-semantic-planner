@@ -248,8 +248,8 @@ All helpers respect `orm.withSchema()`. See `packages/docs/guide/ddl-provisionin
 |---------|-----|---------|
 | Expression primitives | `op()`, `fn()`, `ref()`, `param()`, `cast()`, `literal()`, `unary()`, `namedArg()` | `op('<=>', ref('vector'), cast(param(qv), 'vector'))` |
 | pgvector | `cosineDistance()`, `rawDistance()`, `l2Distance()`, `innerProduct()` | `cosineDistance('vector', qv).as('score')` |
-| ParadeDB (low-level) | `score()`, `bm25Search()`, `parse()`, `boost()`, `booleanSearch()` | `bm25Search('s', term, { name: 3.0 })` |
-| Full-text search | `fullTextSearch()`, `textScore()` | `fullTextSearch({ query, fields, tableAlias })` — preferred over `bm25Search`; see `packages/docs/guide/full-text-search.md` |
+| ParadeDB (low-level) | `score()`, `parse()`, `boost()`, `booleanSearch()` | `op('@@@', exprRef('s'), booleanSearch([boost(3, parse('name', term))]))` |
+| Full-text search | `fullTextSearch()`, `textScore()` | `fullTextSearch({ query, fields, tableAlias })` — the multi-field BM25 helper; see `packages/docs/guide/full-text-search.md` |
 | PG builtins | `generateSeries()`, `nextval()`, `isDistinctFrom()` | `generateSeries(1, 100)`, `nextval('seq')` |
 | INNER JOIN | `include('rel', { join: 'inner' })` | Filters root rows by relation |
 | Manual JOIN | `.join(rel)` / `.join(table, { on, as, type })` — flat, non-hydrating | `orm.select('calls').join('caller')` / `.join('t', { on: eq(...), as: 'alias' })` |

@@ -112,7 +112,6 @@ export {
 } from './expression-canonicalizer.js';
 // Extensions (pgvector, ParadeDB, PG builtins)
 export {
-	bm25Search,
 	booleanSearch,
 	boost,
 	cosineDistance,

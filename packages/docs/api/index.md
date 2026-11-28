@@ -32,6 +32,6 @@ title: API Reference
 | `createPgAdapter()` | Create adapter for pg Pool instance |
 | `createPgCompileOnlyAdapter()` | Create a connectionless PgAdapter (no DB required) |
 | `cosineDistance()`, `l2Distance()`, `innerProduct()` | pgvector similarity operators |
-| `bm25Search()`, `score()` | ParadeDB full-text search |
+| `score()`, `parse()`, `boost()`, `booleanSearch()` | ParadeDB full-text search primitives (multi-field search: core's `fullTextSearch()`) |
 
 See individual [guide pages](/guide/getting-started) for usage examples.
