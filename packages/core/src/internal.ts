@@ -50,7 +50,12 @@ export {
 	MYSQL_CAPABILITIES,
 	SQLITE_CAPABILITIES,
 } from './dialects/index.js';
-export { coerceValue } from './dx/coerce.js';
+export {
+	coerceReference,
+	coerceValue,
+	isValueExpression,
+	leafKind,
+} from './dx/coerce.js';
 export {
 	countDistinctRelationPathsByName,
 	deriveRelationPathFromIntentPath,

@@ -254,6 +254,23 @@ describe('extension feature real-DB e2e', () => {
 			expect(valuesNonDecreasing(distances)).toBe(true);
 			expect(distances[0]!).toBeCloseTo(0, 6);
 		});
+		it('AC-BE / vector: an inlined vector orders as the bound one (#1082)', async () => {
+			requireVector(capabilities);
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: extensionFeaturesModel, adapter });
+
+			const rows = (await orm
+				.withSchema(SCHEMA)
+				.select('vectors')
+				.columns([
+					'label',
+					cosineDistance('embedding', literal('[1,0,0]')).as('score'),
+				])
+				.orderBy(cosineDistance('embedding', literal('[1,0,0]')), 'desc')
+				.all()) as VectorRow[];
+
+			expect(rows.map((row) => row.label)).toEqual(vectorLabels.cosineOrder);
+		});
 	});
 
 	describe('ParadeDB BM25', () => {
@@ -305,6 +322,58 @@ describe('extension feature real-DB e2e', () => {
 			);
 			const scores = rows.map((row) => asNumber(row.score));
 			expect(scores[0]!).toBeGreaterThan(scores[1]!);
+		});
+
+		it('AC-BE / parse: an inlined query returns the rows of the bound form (#1082)', async () => {
+			requirePgSearch(capabilities);
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: extensionFeaturesModel, adapter });
+			const titles = async (query: unknown) =>
+				(
+					(await orm
+						.withSchema(SCHEMA)
+						.select('documents')
+						.columns(['title'])
+						.where(
+							asWhereExpression(
+								op('@@@', exprRef('documents'), parse('title', query)),
+							),
+						)
+						.orderBy('title', 'asc')
+						.all()) as DocumentRow[]
+				).map((row) => row.title);
+
+			const bound = await titles('turbo');
+			expect(bound.length).toBeGreaterThan(0);
+			expect(await titles(literal('turbo'))).toEqual(bound);
+		});
+
+		it('AC-BE / score: a ColumnRef key orders as the column name (#1082)', async () => {
+			requirePgSearch(capabilities);
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: extensionFeaturesModel, adapter });
+			const ranked = async (key: Parameters<typeof score>[0]) =>
+				(
+					(await orm
+						.withSchema(SCHEMA)
+						.select('documents')
+						.columns(['title', score(key).as('score')])
+						.where(
+							asWhereExpression(
+								bm25SearchExpression('documents', 'semantic', {
+									title: 1,
+									body: 1,
+								}),
+							),
+						)
+						.orderBy(score(key), 'desc')
+						.all()) as DocumentRow[]
+				).map((row) => row.title);
+
+			expect(await ranked(orm.tables.documents!.id!)).toEqual(
+				await ranked('id'),
+			);
+			expect(await ranked('id')).toEqual(documentTitles.bm25Order);
 		});
 
 		it('ranks fullTextSearch/textScore results through the high-level BM25 helper', async () => {

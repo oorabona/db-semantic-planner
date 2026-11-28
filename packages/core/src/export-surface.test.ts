@@ -46,6 +46,10 @@ const rootTypeAdditions = [
 const internalAdditions = [
 	// The mutation value rule's leaf and resolver (ADR 0011 delivery 4).
 	'coerceValue',
+	// The leaf rule of the adapter's extension helpers (ADR 0011, #1082).
+	'coerceReference',
+	'isValueExpression',
+	'leafKind',
 	'copyDefaultFilters',
 	'compileNqlRead',
 	'createBindingFinalPlan',
