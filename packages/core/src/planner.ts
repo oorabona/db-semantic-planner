@@ -390,10 +390,16 @@ export function planInScope(
 
 	// Validate root table — skip when the FROM is a BatchValues unnest() source
 	// (the alias is not a real table; schema validation would incorrectly fail)
+	// or a visible query-local source (an NQL binding or a CTE), which a nested
+	// body reads like a table.
 	const rootTable = intent.batchValuesSource
 		? null
 		: model.getTable(intent.from);
-	if (!intent.batchValuesSource && !rootTable) {
+	if (
+		!intent.batchValuesSource &&
+		!rootTable &&
+		!scope.isLocalSource?.(intent.from)
+	) {
 		throw new Error(`Unknown table: ${intent.from}`);
 	}
 
@@ -402,7 +408,7 @@ export function planInScope(
 	// while `intent` stays as the original submitted intent (observable via dump()).
 	// `plannedIntent` is only used locally to decide whether to emit executableIntent.
 	const optimizedWhere = intent.where
-		? optimizeInToExists(intent.where, intent.from, model)
+		? optimizeInToExists(intent.where, intent.from, model, scope.isLocalSource)
 		: undefined;
 
 	// Build the post-optimization intent (used as executableIntent when optimization ran)
@@ -621,11 +627,13 @@ export function planRecursive(
 		options.defaultFilters,
 		anchorRange,
 		model,
+		undefined,
 	);
 	const stepFilter = resolveScanDefaultFilter(
 		options.defaultFilters,
 		stepRange,
 		model,
+		undefined,
 	);
 	const startTime = performance.now();
 
@@ -874,6 +882,9 @@ function optimizeInToExists(
 	where: WhereIntent,
 	sourceTable: string,
 	model: ModelIR,
+	// A visible query-local source (an NQL binding or a CTE) carries none of the
+	// model's nullability guarantees, even when it is named like a model table.
+	isLocalSource: ((name: string) => boolean) | undefined,
 	// negated tracks whether this node is under an odd number of NOT wrappers.
 	// It is used ONLY for the NULL-safety guard — it never determines the rewrite
 	// form (exists vs notExists).
@@ -986,6 +997,13 @@ function optimizeInToExists(
 			// filter.  Block the rewrite in that case.
 			const effectiveNegated = negated !== Boolean(inWhere.not);
 			if (effectiveNegated) {
+				// The negated rewrite needs both compared columns non-null, which only
+				// the model proves; a local source on either side proves nothing.
+				if (
+					isLocalSource?.(sourceTable) ||
+					isLocalSource?.(inWhere.subquery.from)
+				)
+					return where;
 				const existsIntent = { relation: matchedRelation };
 				if (
 					!isSubquerySelectedColumnNonNullable(existsIntent, sourceTable, model)
@@ -1018,7 +1036,7 @@ function optimizeInToExists(
 		case 'and': {
 			const andWhere = where as WhereAndIntent;
 			const optimized = andWhere.conditions.map((c) =>
-				optimizeInToExists(c, sourceTable, model, negated),
+				optimizeInToExists(c, sourceTable, model, isLocalSource, negated),
 			);
 			if (optimized.every((c, i) => c === andWhere.conditions[i])) return where;
 			return { kind: 'and', conditions: optimized } as WhereAndIntent;
@@ -1030,7 +1048,7 @@ function optimizeInToExists(
 			// Recursing here is safe: an exists inside an OR stays inside that OR.
 			const orWhere = where as WhereOrIntent;
 			const optimized = orWhere.conditions.map((c) =>
-				optimizeInToExists(c, sourceTable, model, negated),
+				optimizeInToExists(c, sourceTable, model, isLocalSource, negated),
 			);
 			if (optimized.every((c, i) => c === orWhere.conditions[i])) return where;
 			return { kind: 'or', conditions: optimized } as WhereOrIntent;
@@ -1048,6 +1066,7 @@ function optimizeInToExists(
 				notWhere.condition,
 				sourceTable,
 				model,
+				isLocalSource,
 				!negated,
 			);
 			if (optimized === notWhere.condition) return where;

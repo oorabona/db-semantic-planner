@@ -1369,7 +1369,7 @@ describe('A typed ref inside a body resolves from its origin range (#1014)', () 
 		expectDump(
 			() =>
 				cte(d.select('posts').where(eq('id', lb(eq(posts.author.email, 'x'))))),
-			'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT posts.* FROM posts WHERE posts.id = (SELECT recent.id FROM recent AS recent WHERE EXISTS (SELECT 1 FROM users AS users_exists_0 WHERE posts.author_id = users_exists_0.id AND users_exists_0.email = $2) LIMIT 1)',
+			'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT posts.* FROM posts WHERE posts.id = (SELECT recent.id FROM recent WHERE EXISTS (SELECT 1 FROM users AS users_exists_0 WHERE posts.author_id = users_exists_0.id AND users_exists_0.email = $2) LIMIT 1)',
 			[[1, 2], 'x'],
 		);
 	});
@@ -1384,7 +1384,7 @@ describe('A typed ref inside a body resolves from its origin range (#1014)', () 
 							eq('id', lb(some(posts.replies, (k: Any) => eq(k.body, 'x')))),
 						),
 				),
-			'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT posts.* FROM posts WHERE posts.id = (SELECT recent.id FROM recent AS recent WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts.id = comments_exists_0.post_id AND comments_exists_0.body = $2) LIMIT 1)',
+			'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT posts.* FROM posts WHERE posts.id = (SELECT recent.id FROM recent WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts.id = comments_exists_0.post_id AND comments_exists_0.body = $2) LIMIT 1)',
 			[[1, 2], 'x'],
 		);
 	});
@@ -1399,7 +1399,7 @@ describe('A typed ref inside a body resolves from its origin range (#1014)', () 
 							some(users.writings, (p: Any) => eq('id', lb(eq(p.title, 'x')))),
 						),
 				),
-			'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND posts_exists_0.id = (SELECT recent.id FROM recent AS recent WHERE posts_exists_0.title = $2 LIMIT 1))',
+			'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT users.* FROM users WHERE EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND posts_exists_0.id = (SELECT recent.id FROM recent WHERE posts_exists_0.title = $2 LIMIT 1))',
 			[[1, 2], 'x'],
 		);
 	});
@@ -1422,7 +1422,7 @@ describe('A typed ref inside a body resolves from its origin range (#1014)', () 
 							.as('c'),
 					]),
 				),
-			'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND (SELECT recent.id FROM recent AS recent WHERE recent.id = $2 LIMIT 1) > $3 AND posts_exists_0.published = $4) THEN 1 ELSE 0 END AS c FROM users',
+			'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT CASE WHEN EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND (SELECT recent.id FROM recent WHERE recent.id = $2 LIMIT 1) > $3 AND posts_exists_0.published = $4) THEN 1 ELSE 0 END AS c FROM users',
 			[[1, 2], 1, 0, true],
 		);
 	});
@@ -2201,7 +2201,7 @@ describe('A typed ref inside a body resolves from its origin range (#1014)', () 
 								.as('c'),
 						]),
 					),
-			'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT CASE WHEN EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND nodes_exists_0.label = $2) AND nodes.id = (SELECT recent.id FROM recent AS recent LIMIT 1) THEN 1 ELSE 0 END AS c FROM nodes',
+			'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT CASE WHEN EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND nodes_exists_0.label = $2) AND nodes.id = (SELECT recent.id FROM recent LIMIT 1) THEN 1 ELSE 0 END AS c FROM nodes',
 			[[1], 'x'],
 		);
 	});
@@ -2380,8 +2380,8 @@ describe('A typed ref inside a body resolves from its origin range (#1014)', () 
 		);
 	});
 
-	// R5 / body-leaf: the m1 local forms (a scalar body over a CTE in a
-	// projection, in a CASE condition, in HAVING) keep the refusal (#1040).
+	// AC8 / body-leaf: a typed ref from the root inside a scalar body over a CTE
+	// (in a projection, a CASE condition, HAVING) resolves from its origin.
 	const localBody = (cond: unknown) =>
 		new SE({
 			type: 'select',
@@ -2400,9 +2400,6 @@ describe('A typed ref inside a body resolves from its origin range (#1014)', () 
 			},
 			limit: 1,
 		} as never).asExpr('v');
-	const localRefusal = new Error(
-		"ColumnRef 'author.email' follows a relation; in a condition holding a body over a query-local source (an NQL binding or a CTE) it cannot be resolved from its origin yet (#1040).",
-	);
 	it.each([
 		[
 			'L1',
@@ -2434,13 +2431,29 @@ describe('A typed ref inside a body resolves from its origin range (#1014)', () 
 						.having(gt(localBody(eq(posts.author.email, 'x')), 0)),
 				),
 		],
-	])('R5 / body-leaf (%s)', (_name, build) => {
-		expect(() => dumpOf(build)).toThrow(localRefusal);
+	])('AC8 / body-leaf (%s)', (name, build) => {
+		const expected: Record<string, { sql: string; params: unknown[] }> = {
+			L1: {
+				sql: 'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT posts.id, (SELECT CASE WHEN EXISTS (SELECT 1 FROM users AS users_exists_1 WHERE posts.author_id = users_exists_1.id AND users_exists_1.email = $2) THEN 1 ELSE 0 END AS c FROM recent WHERE EXISTS (SELECT 1 FROM users AS users_exists_0 WHERE posts.author_id = users_exists_0.id AND users_exists_0.email = $3) LIMIT 1) AS v FROM posts',
+				params: [[1, 2], 'x', 'x'],
+			},
+			L2: {
+				sql: 'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT CASE WHEN (SELECT CASE WHEN EXISTS (SELECT 1 FROM users AS users_exists_1 WHERE posts.author_id = users_exists_1.id AND users_exists_1.email = $2) THEN 1 ELSE 0 END AS c FROM recent WHERE EXISTS (SELECT 1 FROM users AS users_exists_0 WHERE posts.author_id = users_exists_0.id AND users_exists_0.email = $3) LIMIT 1) > $4 THEN 1 ELSE 0 END AS c FROM posts',
+				params: [[1, 2], 'x', 'x', 0],
+			},
+			L3: {
+				sql: 'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT posts.* FROM posts GROUP BY posts.id HAVING (SELECT CASE WHEN EXISTS (SELECT 1 FROM users AS users_exists_1 WHERE posts.author_id = users_exists_1.id AND users_exists_1.email = $2) THEN 1 ELSE 0 END AS c FROM recent WHERE EXISTS (SELECT 1 FROM users AS users_exists_0 WHERE posts.author_id = users_exists_0.id AND users_exists_0.email = $3) LIMIT 1) > $4',
+				params: [[1, 2], 'x', 'x', 0],
+			},
+		};
+		const want = expected[name];
+		if (!want) throw new Error(`no expectation for ${name}`);
+		expectDump(build, want.sql, want.params);
 	});
 
-	it('R5 / body-leaf E25 (E25)', () => {
-		expect(() =>
-			dumpOf(() =>
+	it('AC8 / body-leaf E25 (E25)', () => {
+		expectDump(
+			() =>
 				d
 					.withCte('recent')
 					.fromUnnest({ id: [1, 2] })
@@ -2459,17 +2472,14 @@ describe('A typed ref inside a body resolves from its origin range (#1014)', () 
 							}).asExpr('v'),
 						]),
 					),
-			),
-		).toThrow(
-			new Error(
-				"ColumnRef 'author.email' follows a relation; in a condition holding a body over a query-local source (an NQL binding or a CTE) it cannot be resolved from its origin yet (#1040).",
-			),
+			'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT posts.id, (SELECT 1 AS c FROM recent WHERE EXISTS (SELECT 1 FROM users AS users_exists_0 WHERE posts.author_id = users_exists_0.id AND users_exists_0.email = $2) LIMIT 1) AS v FROM posts',
+			[[1, 2], 'x'],
 		);
 	});
 
-	it('R5 / root-sibling-leaf (S3b)', () => {
-		expect(() =>
-			dumpOf(() =>
+	it('AC8 / root-sibling-leaf (S3b)', () => {
+		expectDump(
+			() =>
 				b
 					.withCte('recent')
 					.fromUnnest({ id: [1] })
@@ -2483,11 +2493,8 @@ describe('A typed ref inside a body resolves from its origin range (#1014)', () 
 								.as('c'),
 						]),
 					),
-			),
-		).toThrow(
-			new Error(
-				"ColumnRef 'parent.label' follows a relation; in a condition holding a body over a query-local source (an NQL binding or a CTE) it cannot be resolved from its origin yet (#1040).",
-			),
+			'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT CASE WHEN EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.parent_id = nodes_exists_0.id AND nodes_exists_0.label = $2) AND nodes.id = (SELECT recent.id FROM recent LIMIT 1) THEN 1 ELSE 0 END AS c FROM nodes',
+			[[1], 'x'],
 		);
 	});
 
@@ -2507,14 +2514,14 @@ describe('A typed ref inside a body resolves from its origin range (#1014)', () 
 			),
 		).toThrow(
 			new Error(
-				"'label' comes from a quantifier callback parameter; in a condition holding a body over a query-local source (an NQL binding or a CTE) it is resolved only directly in that callback (#1040).",
+				"ColumnRef 'label' comes from a quantifier callback parameter and is used outside that callback.",
 			),
 		);
 	});
 
-	it('R5 / root-sibling-nested-callback (S3c)', () => {
-		expect(() =>
-			dumpOf(() =>
+	it('AC8 / root-sibling-nested-callback (S3c)', () => {
+		expectDump(
+			() =>
 				b
 					.withCte('recent')
 					.fromUnnest({ id: [1] })
@@ -2533,17 +2540,14 @@ describe('A typed ref inside a body resolves from its origin range (#1014)', () 
 								.as('c'),
 						]),
 					),
-			),
-		).toThrow(
-			new Error(
-				"'label' comes from a quantifier callback parameter; in a condition holding a body over a query-local source (an NQL binding or a CTE) it is resolved only directly in that callback (#1040).",
-			),
+			'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT CASE WHEN EXISTS (SELECT 1 FROM nodes AS nodes_exists_0 WHERE nodes.id = nodes_exists_0.parent_id AND EXISTS (SELECT 1 FROM nodes AS nodes_exists_1 WHERE nodes_exists_0.parent_id = nodes_exists_1.id AND nodes_exists_0.label = $2)) AND nodes.id = (SELECT recent.id FROM recent LIMIT 1) THEN 1 ELSE 0 END AS c FROM nodes',
+			[[1], 'x'],
 		);
 	});
 
-	it('R5 / root-reduced-typed (Y2)', () => {
-		expect(() =>
-			dumpOf(() =>
+	it('AC8 / root-reduced-typed (Y2)', () => {
+		expectDump(
+			() =>
 				cte(
 					d.select('users').columns([
 						caseWhen(
@@ -2559,17 +2563,14 @@ describe('A typed ref inside a body resolves from its origin range (#1014)', () 
 							.as('c'),
 					]),
 				),
-			),
-		).toThrow(
-			new Error(
-				"ColumnRef 'writings.published' follows a relation; in a condition holding a body over a query-local source (an NQL binding or a CTE) it cannot be resolved from its origin yet (#1040).",
-			),
+			'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT CASE WHEN (SELECT recent.id FROM recent WHERE recent.id = $2 LIMIT 1) > $3 AND EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id AND posts_exists_0.published = $4) THEN 1 ELSE 0 END AS c FROM users',
+			[[1, 2], 1, 0, true],
 		);
 	});
 
-	it('R5 / case-body-quantifier (W4)', () => {
-		expect(() =>
-			dumpOf(() =>
+	it('AC8 / case-body-quantifier (W4)', () => {
+		expectDump(
+			() =>
 				cte(
 					d.select('posts').columns([
 						caseWhen(
@@ -2580,11 +2581,8 @@ describe('A typed ref inside a body resolves from its origin range (#1014)', () 
 							.as('c'),
 					]),
 				),
-			),
-		).toThrow(
-			new Error(
-				"RelationRef 'replies' follows a relation from its table; inside a body over a query-local source (an NQL binding or a CTE) it cannot be resolved from its origin yet (#1040).",
-			),
+			'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT CASE WHEN (SELECT recent.id FROM recent WHERE EXISTS (SELECT 1 FROM comments AS comments_exists_0 WHERE posts.id = comments_exists_0.post_id AND comments_exists_0.body = $2) LIMIT 1) > $3 THEN 1 ELSE 0 END AS c FROM posts',
+			[[1, 2], 'x', 0],
 		);
 	});
 

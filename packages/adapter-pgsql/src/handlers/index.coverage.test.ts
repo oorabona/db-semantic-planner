@@ -12,7 +12,7 @@
  * - clearHandlers
  */
 
-import { createOrm, eq, ref, SubqueryExpression, schema } from '@dbsp/core';
+import { createOrm, ref, schema } from '@dbsp/core';
 import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it, vi } from 'vitest';
 import { compileWhereIntent } from '../condition-compiler.js';
@@ -78,27 +78,17 @@ function readPostsWithAuthor() {
 }
 
 /**
- * A public read whose condition sits inside a query-local body: the one public
- * route that still reaches the WHERE dispatcher.
+ * The WHERE registry initialises on its first dispatch; no public read reaches
+ * it since every condition and body resolves through core.
  */
-function readWithQueryLocalCondition() {
-	const { sql, params } = registryOrm
-		.withCte('recent')
-		.fromUnnest({ id: [1, 2] })
-		.query(
-			registryOrm.select('posts').columns([
-				'id',
-				new SubqueryExpression({
-					type: 'select',
-					from: 'recent',
-					where: eq('id', 1),
-					select: { type: 'fields', fields: ['id'] },
-					limit: 1,
-				}).asExpr('v'),
-			]),
-		)
-		.dump();
-	return { sql, params };
+function dispatchWhereEquality() {
+	const state = createCompilerState();
+	const node = createWhereDispatcher(compileWhereIntent)(
+		{ type: 'where', column: 'x', operator: '=', value: 1 },
+		{ rootTable: 'test', dbCasing: 'preserve', maxRecursiveDepth: 100 } as any,
+		state,
+	);
+	return { sql: deparseSync(node), params: state.parameters };
 }
 
 const ORDER_COUNT = {
@@ -109,16 +99,16 @@ const POSTS_WITH_AUTHOR = {
 	sql: `SELECT posts.*, COALESCE((SELECT json_agg(jsonb_build_object('id', __t__.id, 'name', __t__.name) ORDER BY __t__.id ASC NULLS LAST) FROM authors AS __t__ WHERE __t__.id = posts."authorId"), '[]'::json) AS author_json FROM posts`,
 	params: [],
 };
-const QUERY_LOCAL_CONDITION = {
-	sql: 'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT posts.id, (SELECT recent.id FROM recent AS recent WHERE recent.id = $2 LIMIT 1) AS v FROM posts',
-	params: [[1, 2], 1],
+const WHERE_EQUALITY = {
+	sql: 'test.x = $1',
+	params: [1],
 };
 
 function restoreAllHandlerFamilies() {
 	ensureRegistered();
 	readOrderCount();
 	readPostsWithAuthor();
-	readWithQueryLocalCondition();
+	dispatchWhereEquality();
 	const operators = getRegisteredOperators();
 	expect(operators.where).toContain('=');
 	expect(operators.expression).toContain('count');
@@ -840,11 +830,11 @@ describe('handlers/index - Coverage Tests', () => {
 					failingHandler,
 				] as any);
 
-				expect(() => readWithQueryLocalCondition()).toThrow(
+				expect(() => dispatchWhereEquality()).toThrow(
 					new Error('simulated WHERE initialization failure'),
 				);
 				expect(getRegisteredOperators()).toEqual(beforeAttempt);
-				expect(readWithQueryLocalCondition()).toEqual(QUERY_LOCAL_CONDITION);
+				expect(dispatchWhereEquality()).toEqual(WHERE_EQUALITY);
 			} finally {
 				vi.restoreAllMocks();
 				clearHandlers();

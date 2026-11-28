@@ -42,7 +42,7 @@ import {
 import { containsOriginRefs } from './path-ref-scan.js';
 import { planNestedSelect } from './planner.js';
 import { getRelationalReadPolicy } from './relational-read-plans.js';
-import { classifyScalarBody } from './scalar-body.js';
+import { assertScalarBodyConstructs } from './scalar-body.js';
 
 import { escapeDiagnosticText } from './transition/diagnostic-text.js';
 
@@ -696,12 +696,11 @@ export function resolveConditionContext(
 			throw new Error(`Unresolved condition relation '${segments.join('.')}'`);
 		return path;
 	};
-	/** Bodies below a query-local source keep today's reduced route. */
-	let localSubtree = 0;
 	/**
 	 * An expression-subquery body. With a model it is planned by the root
-	 * planner inside this query: one allocator, the enclosing ranges in scope.
-	 * Without a model, and below a query-local source, it keeps the reduced body.
+	 * planner inside this query, whether its FROM names a model table or a
+	 * visible query-local source: one allocator, the enclosing ranges in scope.
+	 * Without a model it keeps the reduced body.
 	 */
 	const expressionSubquery = (
 		query: QueryIntent,
@@ -712,26 +711,13 @@ export function resolveConditionContext(
 			throw new Error(
 				"compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. Use asExpr() in .columns(), .orderBy(), HAVING, CASE values or conditions, and FILTER conditions with a query compilation context.",
 			);
-		if (!model || localSubtree > 0) {
+		if (!model) {
 			return {
 				kind: 'subquery',
 				body: body(query, 'scalar', ranges, enclosing, true),
 			};
 		}
-		if (
-			classifyScalarBody(query, model, activeFilters, mode?.isLocalSource) ===
-			'local'
-		) {
-			localSubtree++;
-			try {
-				return {
-					kind: 'subquery',
-					body: body(query, 'scalar', ranges, enclosing, true),
-				};
-			} finally {
-				localSubtree--;
-			}
-		}
+		assertScalarBodyConstructs(query);
 		// A body's own policy wins, an explicit disable included; otherwise it
 		// reads the filters in force here (none in a mutation WHERE).
 		const issued = getRelationalReadPolicy(query);
@@ -904,7 +890,12 @@ export function resolveConditionContext(
 		activeNames.delete(range.alias);
 		if (isExpressionBody) expressionNext.set(query.from, expressionPrior);
 		frame = previousFrame;
-		const defaultFilter = resolveScanDefaultFilter(activeFilters, range, model);
+		const defaultFilter = resolveScanDefaultFilter(
+			activeFilters,
+			range,
+			model,
+			mode?.isLocalSource,
+		);
 		const result: ResolvedSubqueryBody =
 			use === 'exists'
 				? {
@@ -1014,7 +1005,12 @@ export function resolveConditionContext(
 				alias = generated(hop.toTable, `_exists_${aliasCount++}`);
 			const to = allocator.allocate(hop.toTable, alias, subqueryScope);
 			allocator.reserve(to.alias);
-			const defaultFilter = resolveScanDefaultFilter(activeFilters, to, model);
+			const defaultFilter = resolveScanDefaultFilter(
+				activeFilters,
+				to,
+				model,
+				mode?.isLocalSource,
+			);
 			const result = { from, to, ...(defaultFilter && { defaultFilter }) };
 			from = to;
 			return result;
@@ -1051,6 +1047,7 @@ export function resolveConditionContext(
 							activeFilters,
 							range,
 							model,
+							mode?.isLocalSource,
 						);
 						return defaultFilter ? { defaultFilter } : {};
 					})(),
@@ -1836,12 +1833,18 @@ export function assertScanDefaultFilter(
 	visit(condition);
 }
 
-/** Resolve one physical scan's filter in isolation and reject additional ranges. */
+/**
+ * Resolve one physical scan's filter in isolation and reject additional ranges.
+ * A range whose table names a visible query-local source reads that source,
+ * not the model table of the same name: it takes no filter.
+ */
 export function resolveScanDefaultFilter(
 	filters: Readonly<Record<string, WhereIntent>> | undefined,
 	range: ResolvedRange,
 	model: ModelIR | undefined,
+	isLocalSource: ((name: string) => boolean) | undefined,
 ): ResolvedCondition | undefined {
+	if (isLocalSource?.(range.table)) return undefined;
 	const filter = getDefaultFilter(filters, range.table);
 	if (!filter) return undefined;
 	const refusal = `Default filter for table '${range.table}' must reference only its own scan.`;

@@ -57,10 +57,8 @@ export type IncludeHandlerStrategy = (typeof INCLUDE_STRATEGIES)[number];
 export interface CompilerContext {
 	/** The plan's conditions were resolved by core at plan(); compile them through the resolved route. */
 	readonly resolvedExecution?: boolean;
-	/** Core recorded every HAVING, CASE WHEN and FILTER root: resolved, or left to the local route. */
+	/** Core resolved every HAVING, CASE WHEN and FILTER root. */
 	readonly rootsResolved?: boolean;
-	/** Condition roots core left to the local route because they hold a query-local body (#1040). */
-	readonly localConditions?: ReadonlySet<import('@dbsp/types').WhereIntent>;
 	readonly compileCaseCondition?: (
 		intent: import('@dbsp/types').WhereIntent,
 		ctx: CompilerContext,
@@ -278,6 +276,15 @@ export function expressionRelationBinding(
 	ctx: ExpressionCompilerContext,
 ): RelationBinding {
 	const identifier = queryLocal(qualifier);
+	// A body emitted under an alias: its table's name names the body's own range.
+	if (
+		ctx.rootRangeAlias !== undefined &&
+		ctx.rootRangeAlias !== ctx.rootTable &&
+		qualifier === ctx.rootTable
+	) {
+		const own = relationBindingFor(ctx.scope, queryLocal(ctx.rootRangeAlias));
+		if (own !== undefined) return own;
+	}
 	const bound = relationBindingFor(ctx.scope, identifier);
 	if (bound !== undefined) return bound;
 	const declaredBound = declaredRelationBindingFor(ctx.scope, qualifier);
