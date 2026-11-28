@@ -2004,10 +2004,7 @@ export class PlanCompiler {
 								? expressionUnqualifiedColumnRef(decision.column, ctx)
 								: expressionQualifiedColumnRef(
 										decision.column,
-										decision.table === plan.rootTable &&
-											plan.rootAlias !== undefined
-											? plan.rootAlias
-											: decision.table,
+										decision.table,
 										ctx,
 									),
 							decision.alias === undefined
