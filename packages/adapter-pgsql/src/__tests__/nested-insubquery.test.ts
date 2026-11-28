@@ -2,7 +2,7 @@
  * Regression test: NESTED-INSUBQUERY
  *
  * Bug: inSubquery nested 2 levels deep does not compile correctly.
- * Root cause: convertWhereCondition() converts nested subquery WHERE clauses
+ * Root cause: the WHERE lowering converts nested subquery WHERE clauses
  * to PlanDecision, then normalizeToDecision() sees column !== undefined and
  * returns early -- never re-normalizing inner 'in'+subquery to 'inSubquery'.
  *

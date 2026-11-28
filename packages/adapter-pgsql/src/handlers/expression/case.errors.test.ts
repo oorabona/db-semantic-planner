@@ -1,7 +1,7 @@
 /**
  * Error-path tests for case.ts expression handlers.
  *
- * Covers: caseHandler, simpleCaseHandler
+ * Covers: simpleCaseHandler
  * Focus: error branches and edge cases only.
  */
 
@@ -9,45 +9,10 @@ import { describe, expect, it } from 'vitest';
 import { makeCtx } from '../../__tests__/helpers/test-context.js';
 import type { Decision } from '../types.js';
 import { createCompilerState } from '../types.js';
-import { caseHandler, simpleCaseHandler } from './case.js';
+import { simpleCaseHandler } from './case.js';
 
 // ============================================================================
-// caseHandler errors
 // ============================================================================
-
-describe('caseHandler errors', () => {
-	const ctx = makeCtx();
-
-	it('throws when conditions is undefined', () => {
-		const state = createCompilerState();
-		const decision = { type: 'case' } as Decision;
-		expect(() => caseHandler.compile(decision, ctx, state)).toThrow(
-			'CASE requires at least one WHEN condition',
-		);
-	});
-
-	it('throws when conditions is an empty array', () => {
-		const state = createCompilerState();
-		const decision = {
-			type: 'case',
-			conditions: [],
-		} as unknown as Decision;
-		expect(() => caseHandler.compile(decision, ctx, state)).toThrow(
-			'CASE requires at least one WHEN condition',
-		);
-	});
-
-	it('throws when conditions is null-ish (explicitly set to null)', () => {
-		const state = createCompilerState();
-		const decision = {
-			type: 'case',
-			conditions: null,
-		} as unknown as Decision;
-		expect(() => caseHandler.compile(decision, ctx, state)).toThrow(
-			'CASE requires at least one WHEN condition',
-		);
-	});
-});
 
 // ============================================================================
 // simpleCaseHandler errors

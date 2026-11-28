@@ -67,39 +67,14 @@ function buildCteSelect(
 	columns: readonly string[] | undefined,
 	whereConditions: readonly Decision[] | undefined,
 	ctx: CompilerContext,
-	state: CompilerState,
 ): Node {
 	const targetList = buildCteTargets(columns, innerAlias, ctx);
 
-	// Build WHERE if conditions exist
-	let whereClause: Node | undefined;
-	if (whereConditions && whereConditions.length > 0) {
-		if (!ctx.createWhereDispatcher)
-			throw new Error(
-				'Condition requires a compiler-supplied WHERE dispatcher',
-			);
-		const dispatch = ctx.createWhereDispatcher();
-
-		const subCtx: CompilerContext = {
-			...ctx,
-			rootTable: targetTable,
-			currentAlias: innerAlias,
-		};
-
-		if (whereConditions.length === 1) {
-			whereClause = dispatch(whereConditions[0]!, subCtx, state);
-		} else {
-			const conditions = whereConditions.map((cond) =>
-				dispatch(cond, subCtx, state),
-			);
-			whereClause = {
-				BoolExpr: {
-					boolop: 'AND_EXPR',
-					args: conditions,
-				},
-			};
-		}
-	}
+	// Include conditions reach this handler only as core-resolved decisions.
+	if (whereConditions && whereConditions.length > 0)
+		throw new Error(
+			"An include condition reached the adapter without core's resolution.",
+		);
 
 	const stmt: SelectStmt = {
 		targetList,
@@ -117,7 +92,6 @@ function buildCteSelect(
 				ctx.schema === undefined ? undefined : queryLocal(ctx.schema),
 			),
 		],
-		...(whereClause && { whereClause }),
 	};
 
 	return { SelectStmt: stmt };
@@ -279,7 +253,6 @@ export const cteIncludeHandler: IncludeHandler = {
 			columns,
 			conditions,
 			scopedCtx,
-			state,
 		);
 
 		const defaultFilter = decision.resolvedInclude?.defaultFilter;

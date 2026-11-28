@@ -1,5 +1,4 @@
 import { EXPRESSION_BRAND, REF_BRAND } from '@dbsp/types';
-import { createWhereDispatcher } from './handlers/index.js';
 /**
  * Mutation compilation: INSERT, UPDATE, DELETE, UPSERT.
  * Extracted from PgAdapter.compileInsert/Update/Delete/Upsert/etc.
@@ -48,7 +47,6 @@ import {
 	relationBinding,
 	withBindingName,
 } from './binding-registry.js';
-import { compileWhereIntent } from './compile-where.js';
 import { buildCustomFnFilter, renumberParamRefsInAst } from './compiler.js';
 import {
 	parseRawExpression,
@@ -345,7 +343,6 @@ function mutationContext(
 		...(deps.schemaName !== undefined && { schema: deps.schemaName }),
 		maxRecursiveDepth,
 		compileCustomFnFilter: buildCustomFnFilter,
-		createWhereDispatcher: () => createWhereDispatcher(compileWhereIntent),
 		compileNestedSelect: nestedSelectCompiler(undefined, deps),
 	} as CompilerContext;
 }

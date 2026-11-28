@@ -17,11 +17,6 @@ import {
 } from '@dbsp/core';
 import type { ModelIR, WhereIntent } from '@dbsp/types';
 import { expect, it } from 'vitest';
-import {
-	buildSubqueryFromIntent,
-	compileCondition,
-} from '../condition-compiler.js';
-import { createCompilerState } from '../handlers/types.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const db = schema({
@@ -46,68 +41,6 @@ const dump = (body: WhereIntent) =>
 		.select('users')
 		.where(rawExists(subquery('posts').select('id').where(body)))
 		.dump();
-
-it('supplied callback sentinel retains its result and parameters', () => {
-	const sentinel = { A_Const: { ival: { ival: 731 } } };
-	const state = createCompilerState();
-	let calls = 0;
-	const result = compileCondition(
-		rawExists(subquery('posts').select('id').where(eq('score', 5))),
-		{
-			logicalSourceTable: 'users',
-			emittedAlias: 'users',
-			visibleAliases: new Map(),
-			position: 'where',
-			paramState: state,
-			compileSubquery: (_intent, offset, parent) => {
-				calls++;
-				expect(offset).toBe(0);
-				expect(parent?.paramState).toBe(state);
-				return { sql: sentinel, paramCount: 1, parameters: [91] };
-			},
-		},
-	);
-	expect(calls).toBe(1);
-	expect(result).toMatchObject({ SubLink: { subselect: sentinel } });
-	expect(state.parameters).toEqual([91]);
-	expect(state.paramIndex).toBe(1);
-});
-
-it('supplied callback sentinel survives inside the direct builder', () => {
-	const state = createCompilerState();
-	const sentinel = { A_Const: { ival: { ival: 733 } } };
-	let calls = 0;
-	const result = buildSubqueryFromIntent(
-		subquery('posts')
-			.select('id')
-			.where(rawExists(subquery('comments').select('id')))
-			.build().intent,
-		0,
-		{
-			rootTable: 'users',
-			aliases: new Map(),
-			paramState: state,
-			compileSubquery: (_query, offset, child) => {
-				calls++;
-				expect(offset).toBe(0);
-				expect(child?.rootTable).toBe('posts');
-				expect(child?.currentAlias).toBe('posts_sq');
-				expect(child?.paramState).toBe(state);
-				state.parameters.push(93);
-				state.paramIndex++;
-				return { sql: sentinel, paramCount: 0, parameters: [] };
-			},
-		},
-	);
-	expect(calls).toBe(1);
-	expect(result.sql).toMatchObject({
-		SelectStmt: { whereClause: { SubLink: { subselect: sentinel } } },
-	});
-	expect(result.paramCount).toBe(0);
-	expect(result.parameters).toEqual([]);
-	expect(state.parameters).toEqual([93]);
-	expect(state.paramIndex).toBe(1);
-});
 
 it('child alias exact SQL', () => {
 	const result = dump(exists('comments', { where: eq('score', 7) }));

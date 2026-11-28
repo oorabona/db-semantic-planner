@@ -5,12 +5,6 @@ import {
 } from '@dbsp/core/internal';
 import { markPlannedReport } from '@dbsp/types/internal';
 import { andExpr } from './ast-helpers.js';
-import {
-	buildSubqueryFromIntent,
-	compileCondition,
-	compileWhereIntent,
-} from './condition-compiler.js';
-import { createWhereDispatcher } from './handlers/index.js';
 import { assertRelationalOutput } from './relational-output.js';
 import { compileResolvedCondition } from './resolved-condition-compiler.js';
 /**
@@ -52,9 +46,7 @@ import {
 	emittedBindName,
 	hasBindingName,
 	localSourcePredicate,
-	relationBinding,
 	withBindingName,
-	withRelationBinding,
 } from './binding-registry.js';
 import { buildCustomFnFilter } from './compiler.js';
 import { inferPgArrayType, stripArraySuffix } from './compiler-utils.js';
@@ -77,10 +69,7 @@ import {
 	buildRecursiveCte,
 	type RecursiveCteConfig,
 } from './recursive/index.js';
-import {
-	bindAliasAuthority,
-	queryScopeForBindingProjections,
-} from './relation-target-projection.js';
+import { queryScopeForBindingProjections } from './relation-target-projection.js';
 import { queryLocal, resolveDeclaredIdentifier } from './sql-identifier.js';
 import {
 	commonTableExpression,
@@ -433,58 +422,11 @@ export function compileRecursive<T = unknown>(
 		);
 	}
 
-	const anchorBinding = relationBinding({
-		kind: 'declared-table',
-		logicalTable: startTable,
-		qualifier: queryLocal('__n'),
-	});
-	const anchorScope = withRelationBinding(deps.scope, anchorBinding);
-
-	// A report planRecursive issued carries start.where resolved (recursiveFilters.start);
-	// a report without it (hand-built) keeps the direct compile.
-	const anchorWhere =
-		intent.start.where && !report.recursiveFilters?.start
-			? compileCondition(intent.start.where, {
-					position: 'recursive-anchor',
-					logicalSourceTable: startTable,
-					emittedAlias: '__n',
-					visibleAliases: new Map([['__n', startTable]]),
-					paramState: state,
-					defaultPkColumnName: deps.defaultPk,
-					deriveFkColumnName: deps.deriveFk,
-					aliasColumnAuthorities: bindAliasAuthority(
-						undefined,
-						queryLocal('__n'),
-						{
-							target: queryLocal(startTable),
-							logicalTable: startTable,
-						},
-					),
-					model: deps.model,
-					...(deps.declaredNames !== undefined && {
-						declaredNames: deps.declaredNames,
-					}),
-					...(schemaName !== undefined && { schemaName }),
-					...(deps.dbCasing !== undefined && { dbCasing: deps.dbCasing }),
-					...(deps.dialectCapabilities !== undefined && {
-						dialectCapabilities: deps.dialectCapabilities,
-					}),
-					scope: anchorScope,
-					currentBinding: anchorBinding,
-					compileSubquery: (query, offset, parent) =>
-						buildSubqueryFromIntent(
-							query,
-							offset,
-							deps.declaredNames,
-							schemaName,
-							'rawExists',
-							anchorScope,
-							deps.dialectCapabilities,
-							deps.dbCasing,
-							parent,
-						),
-				})
-			: undefined;
+	// A report planRecursive issued carries start.where resolved (recursiveFilters.start).
+	if (intent.start.where && !report.recursiveFilters?.start)
+		throw new Error(
+			"A recursive report's start.where reached the adapter without core's resolution; plan it with planRecursive() or the ORM.",
+		);
 
 	let config: RecursiveCteConfig;
 
@@ -497,7 +439,6 @@ export function compileRecursive<T = unknown>(
 			...(schemaName !== undefined && { schema: schemaName }),
 			maxRecursiveDepth: intent.maxDepth,
 			compileCustomFnFilter: buildCustomFnFilter,
-			createWhereDispatcher: () => createWhereDispatcher(compileWhereIntent),
 			compileNestedSelect: nestedSelectCompiler(options, deps),
 		} as CompilerContext;
 
@@ -592,10 +533,6 @@ export function compileRecursive<T = unknown>(
 				traversal.edgeStorageHint === 'directed-only' ? 'union-all' : 'union';
 		}
 
-		if (anchorWhere) {
-			base.anchorWhere = anchorWhere;
-		}
-
 		config = base;
 	} else if (traversal.kind === 'adjacency') {
 		const table = traversal.nodeTable;
@@ -606,7 +543,6 @@ export function compileRecursive<T = unknown>(
 			...(schemaName !== undefined && { schema: schemaName }),
 			maxRecursiveDepth: intent.maxDepth,
 			compileCustomFnFilter: buildCustomFnFilter,
-			createWhereDispatcher: () => createWhereDispatcher(compileWhereIntent),
 			compileNestedSelect: nestedSelectCompiler(options, deps),
 		} as CompilerContext;
 
@@ -634,7 +570,6 @@ export function compileRecursive<T = unknown>(
 
 		// Adjacency-list traversal: self-referencing FK
 		config = {
-			...(anchorWhere !== undefined && { anchorWhere }),
 			cteAlias: queryLocal(intent.cteName),
 			table: resolveDeclaredIdentifier(
 				deps.declaredNames,

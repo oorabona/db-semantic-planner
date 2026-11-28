@@ -2,11 +2,8 @@
 /**
  * Coverage tests for case.ts expression handlers.
  *
- * Covers: simpleCaseHandler (caseHandler tested via integration tests due to dynamic require)
+ * Covers: simpleCaseHandler
  * Focus: Multiple WHEN/THEN branches, ELSE present/absent, nested expressions, NULL handling
- *
- * NOTE: caseHandler uses dynamic require() for WHERE dispatcher which doesn't work in
- * unit tests. Coverage for caseHandler's success paths is achieved via integration tests.
  */
 
 import { describe, expect, it } from 'vitest';

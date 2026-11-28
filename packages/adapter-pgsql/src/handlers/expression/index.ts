@@ -14,7 +14,7 @@ import {
 	sumHandler,
 } from './aggregate.js';
 import { arithmeticHandler } from './arithmetic.js';
-import { caseHandler, simpleCaseHandler } from './case.js';
+import { simpleCaseHandler } from './case.js';
 import {
 	coalesceHandler,
 	greatestHandler,
@@ -60,7 +60,7 @@ export {
 	sumHandler,
 } from './aggregate.js';
 export { arithmeticHandler } from './arithmetic.js';
-export { caseHandler, simpleCaseHandler } from './case.js';
+export { simpleCaseHandler } from './case.js';
 export {
 	coalesceHandler,
 	greatestHandler,
@@ -122,7 +122,6 @@ const aggregateExpressionHandlers = [
  * Conditional expression handlers (CASE, COALESCE, etc.)
  */
 const conditionalExpressionHandlers = [
-	caseHandler,
 	simpleCaseHandler,
 	coalesceHandler,
 	nullIfHandler,

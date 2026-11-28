@@ -33,12 +33,6 @@ vi.mock('../condition-compiler.js', async (importOriginal) => {
 			if (tripwire.active) throw new Error('include used compileCondition');
 			return original.compileCondition(...args);
 		},
-		compileWhereIntent: (
-			...args: Parameters<typeof original.compileWhereIntent>
-		) => {
-			if (tripwire.active) throw new Error('include used compileWhereIntent');
-			return original.compileWhereIntent(...args);
-		},
 	};
 });
 function withoutLegacyCompilation<T>(run: () => T): T {

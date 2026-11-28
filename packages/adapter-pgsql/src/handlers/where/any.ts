@@ -11,21 +11,8 @@
 
 import type { Node } from '@pgsql/types';
 import { mapModelIRTypeToPgBase } from '../../compiler-utils.js';
-import { assertDialectCapability } from '../../dialect-capabilities.js';
-import { unwrapParamIntent } from '../../param-intent.js';
 import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
-import type {
-	CompilerContext,
-	CompilerState,
-	Decision,
-	WhereHandler,
-} from '../types.js';
-import { COLLECTION_OPERATORS } from '../types.js';
-import {
-	buildColumnRef,
-	resolveColumnAbstractPgBase,
-	resolveColumnPgType,
-} from './utils.js';
+import type { CompilerState } from '../types.js';
 
 /**
  * Infer PostgreSQL base type from a runtime value sample.
@@ -55,46 +42,6 @@ function createTypedArrayParam(paramNumber: number, pgBaseType: string): Node {
 		},
 	};
 }
-
-/**
- * ANY operator handler.
- *
- * Compiles WhereAnyIntent (kind='any') to: "col" = ANY($N::type[])
- */
-export const anyHandler: WhereHandler = {
-	operators: [COLLECTION_OPERATORS.ANY],
-
-	compile(
-		decision: Decision,
-		ctx: CompilerContext,
-		state: CompilerState,
-	): Node {
-		assertDialectCapability(
-			ctx.dialectCapabilities,
-			'supportsArrayType',
-			'ANY array operator is',
-		);
-		const column = decision.column;
-
-		if (!column) {
-			throw new Error('ANY handler requires a column');
-		}
-
-		const rawValues = unwrapParamIntent(decision.values);
-		const values = Array.isArray(rawValues) ? rawValues : [];
-		const columnNode = buildColumnRef(column, ctx);
-		const columnType = resolveColumnPgType(column, ctx);
-
-		return compileAny(
-			columnNode,
-			values,
-			state,
-			columnType,
-			columnType ? undefined : resolveColumnAbstractPgBase(column, ctx),
-			decision.dataType,
-		);
-	},
-};
 
 /** Typed ANY primitive with explicit type authority supplied by its caller. */
 export function compileAny(

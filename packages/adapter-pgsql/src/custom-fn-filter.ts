@@ -1,13 +1,9 @@
-/** FILTER bridge and legacy decision helpers, without compiler import cycles. */
+/** FILTER bridge and PlanDecision helpers, without compiler import cycles. */
 import type { WhereIntent } from '@dbsp/types';
 import type { JsonAggOrderByEntry } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
-import {
-	defaultFkDerivation,
-	type FkColumnDerivation,
-} from './assert-field.js';
+import type { FkColumnDerivation } from './assert-field.js';
 import type { ConditionCompilerCtx } from './condition-context.js';
-import { createSubqueryBuilder } from './condition-subquery.js';
 import type {
 	CompilerContext as HandlerCompilerContext,
 	CompilerState as HandlerCompilerState,
@@ -66,7 +62,6 @@ export function mapToHandlerDecision(
 	const derivedFkColumns = pd.resolvedInclude
 		? { sourceColumn: pd.sourceColumn!, targetColumn: pd.targetColumn! }
 		: deriveConditionKeys(pd, pd.sourceTable ?? rootTable, defaultPk, deriveFk);
-	const subqueryOperator = pd.subqueryOperator;
 	return {
 		type: pd.type,
 		resolvedInclude: pd.resolvedInclude,
@@ -123,36 +118,12 @@ export function mapToHandlerDecision(
 		jsonPath: pd.jsonPath,
 		jsonMode: pd.jsonMode,
 		expressionIntent: pd.expressionIntent,
-		...(subqueryOperator !== undefined && {
-			subqueryOperator,
-		}),
 		selectColumn: pd.selectColumn,
 		aggregate: pd.aggregate,
 		aggregateDistinct: pd.aggregateDistinct,
 		columnAliases: pd.columnAliases,
 		escape: pd.escape,
-		subqueryIntent: pd.subqueryIntent,
 	} as HandlerDecision;
-}
-
-/**
- * Compile an optional filterCondition (PlanDecision) to an AST Node.
- * Used to hydrate filterWhere on aggregate handler decisions.
- */
-export function compileFilterCondition(
-	filterCondition: PlanDecision | undefined,
-	dispatcher: import('./handlers/types.js').WhereDispatcher,
-	ctx: HandlerCompilerContext,
-	state: HandlerCompilerState,
-): import('@pgsql/types').Node | undefined {
-	if (!filterCondition) return undefined;
-	const mapped = mapToHandlerDecision(
-		filterCondition,
-		ctx.rootTable,
-		ctx.defaultPkColumnName ?? 'id',
-		ctx.deriveFkColumnName ?? defaultFkDerivation,
-	);
-	return dispatcher(mapped, ctx, state);
 }
 
 export type FilterConditionCompiler = (
@@ -220,27 +191,6 @@ export function buildCustomFnFilter(
 			aliasColumnAuthorities: ctx.aliasColumnAuthorities,
 		}),
 		...(ctx.outerAlias !== undefined && { outerTable: ctx.outerAlias }),
-		compileSubquery: (intent, offset, parent) => {
-			return createSubqueryBuilder((innerIntent, inner) =>
-				conditionCompiler(innerIntent, {
-					...inner,
-					logicalSourceTable: inner.rootTable,
-					emittedAlias: inner.currentAlias ?? inner.rootTable,
-					visibleAliases: inner.aliases,
-					position: inner.position ?? 'subquery',
-				}),
-			)(
-				intent,
-				offset,
-				ctx.declaredNames,
-				ctx.schema,
-				'rawExists',
-				ctx.scope,
-				ctx.dialectCapabilities,
-				ctx.dbCasing,
-				parent,
-			);
-		},
 	});
 	if (!filterNode) {
 		throw new Error(

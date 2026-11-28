@@ -21,15 +21,7 @@ import {
 	star,
 } from '@dbsp/core';
 import type { WhereIntent } from '@dbsp/types';
-import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it } from 'vitest';
-import { compileWhereIntent } from '../condition-compiler.js';
-import {
-	type CompilerContext,
-	createCompilerState,
-	createWhereDispatcher,
-	type Decision,
-} from '../handlers/index.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 function expectExactError(run: () => unknown, message: string): void {
@@ -309,44 +301,4 @@ it('recursive anchor distinct null has no comparison parameter', () => {
 		'WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM users AS __n WHERE __n.score IS DISTINCT FROM NULL UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN users AS __n ON __n.score = tree.id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree',
 	);
 	expect(result.parameters).toEqual([]);
-});
-
-describe('custom-expression dispatcher operands', () => {
-	const compile = (operator: string, value: unknown) => {
-		const state = createCompilerState();
-		const node = createWhereDispatcher(compileWhereIntent)(
-			{
-				type: 'where',
-				operator: 'expression',
-				subqueryOperator: operator,
-				expressionIntent: fn('abs', exprRef('users.score')).intent,
-				value,
-			} as Decision,
-			{
-				rootTable: 'users',
-				dbCasing: 'preserve',
-				maxRecursiveDepth: 100,
-			} as CompilerContext,
-			state,
-		);
-		return { sql: deparseSync(node), params: state.parameters };
-	};
-	it('distinct null is literal', () => {
-		expect(compile('isDistinctFrom', null)).toEqual({
-			sql: 'abs(users.score) IS DISTINCT FROM NULL',
-			params: [],
-		});
-	});
-	it('bare undefined is refused', () => {
-		expectExactError(
-			() => compile('eq', undefined),
-			'Right comparison operand is undefined; use isNull or param(...)',
-		);
-	});
-	it.each([null, 5])('param(%s) binds its inner value', (value) => {
-		expect(compile('eq', param(value))).toEqual({
-			sql: 'abs(users.score) = $1',
-			params: [value],
-		});
-	});
 });

@@ -29,12 +29,7 @@ export type SelectExpressionHandler = (
 	applyFilter: (
 		decision: Mutable<PlanDecision>,
 		filter: WhereIntent | undefined,
-		table: string,
 	) => void,
-	convertCondition: (
-		condition: WhereIntent,
-		table: string,
-	) => PlanDecision | null,
 ) => void;
 
 // ============================================================================
@@ -216,51 +211,6 @@ function handleWindowExpression(
 }
 
 /**
- * case — CASE WHEN … THEN … ELSE … END [AS alias]
- */
-function handleCaseExpression(
-	expr: Record<string, unknown>,
-	rootTable: string,
-	decisions: PlanDecision[],
-	_applyFilter: (
-		decision: Mutable<PlanDecision>,
-		filter: WhereIntent | undefined,
-		table: string,
-	) => void,
-	convertCondition: (
-		condition: WhereIntent,
-		table: string,
-	) => PlanDecision | null,
-): void {
-	const whenClauses = expr.when as Array<{
-		condition: WhereIntent;
-		result: Record<string, unknown>;
-	}>;
-	const conditions = whenClauses.map((wc) => ({
-		when: convertCondition(wc.condition, rootTable),
-		// biome-ignore lint/suspicious/noThenProperty: intentional reserved word in decision object
-		then: wc.result,
-	}));
-
-	// CASE decisions carry { when, then } tuples in `conditions` —
-	// structurally different from PlanDecision[]. The compiler and
-	// case handler both expect this shape at runtime.
-	const decision: Mutable<PlanDecision> = {
-		type: 'selectExpression',
-		expressionType: 'case',
-		table: rootTable,
-	};
-	// Assign conditions separately: the runtime type is { when, then }[]
-	// but PlanDecision declares conditions as PlanDecision[].
-	(decision as Record<string, unknown>).conditions = conditions;
-	if (expr.else) {
-		decision.value = expr.else;
-	}
-	if (expr.as) decision.alias = expr.as as string;
-	decisions.push(decision);
-}
-
-/**
  * relationColumn — SELECT relation.column AS alias
  */
 function handleRelationColumnExpression(
@@ -410,14 +360,6 @@ export const EXPRESSION_HANDLERS: Record<string, SelectExpressionHandler> = {
 		handleFunctionExpression(expr, rootTable, decisions),
 	window: (expr, rootTable, decisions) =>
 		handleWindowExpression(expr, rootTable, decisions),
-	case: (expr, rootTable, decisions, applyFilter, convertCondition) =>
-		handleCaseExpression(
-			expr,
-			rootTable,
-			decisions,
-			applyFilter,
-			convertCondition,
-		),
 	relationColumn: (expr, rootTable, decisions) =>
 		handleRelationColumnExpression(expr, rootTable, decisions),
 	pseudoColumn: () => {

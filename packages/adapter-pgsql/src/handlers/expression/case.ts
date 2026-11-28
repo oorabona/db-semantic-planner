@@ -6,7 +6,6 @@
  * Produces CaseExpr nodes.
  */
 
-import type { ExpressionIntent } from '@dbsp/types';
 import type { CaseExpr, CaseWhen, Node } from '@pgsql/types';
 import { unwrapParamIntent } from '../../param-intent.js';
 import type {
@@ -16,8 +15,6 @@ import type {
 	ExpressionHandler,
 } from '../types.js';
 import { expressionColumnRef } from '../types.js';
-import { resolveCaseValue as resolveCaseValueShared } from './case-value.js';
-import { compileExpressionIntent } from './custom.js';
 import { bindParameter } from './param-value.js';
 
 /**
@@ -27,86 +24,6 @@ interface CaseCondition {
 	when: Decision;
 	then: unknown;
 }
-
-/** Adapter: route expression context fields to the shared resolveCaseValue signature. */
-function resolveCaseValue(
-	value: unknown,
-	ctx: ExpressionCompilerContext,
-	state: CompilerState,
-): Node {
-	const alias = ctx.currentAlias ?? ctx.rootTable;
-	return resolveCaseValueShared(
-		value,
-		alias,
-		undefined,
-		(column) => expressionColumnRef(column, ctx),
-		state,
-		undefined,
-		// Handler-level path: renders every expression kind via the shared
-		// expression compiler. Any customFn FILTER modifier is applied when the
-		// caller-provided CompilerContext supplies compileCustomFnFilter.
-		(expr) =>
-			compileExpressionIntent(expr as unknown as ExpressionIntent, ctx, state),
-	);
-}
-
-export const caseHandler: ExpressionHandler = {
-	types: ['case', 'CASE', 'caseWhen'],
-
-	compile(
-		decision: Decision,
-		ctx: ExpressionCompilerContext,
-		state: CompilerState,
-	): Node {
-		// CASE decisions carry { when: Decision; then: unknown } tuples in `conditions`,
-		// which is structurally different from the base Decision[]. The planner
-		// guarantees this shape at runtime for expressionType === 'case'.
-		const conditions = decision.conditions as
-			| readonly CaseCondition[]
-			| undefined;
-		const elseValue = decision.value;
-
-		if (!conditions || conditions.length === 0) {
-			throw new Error('CASE requires at least one WHEN condition');
-		}
-
-		// Import WHERE dispatcher for compiling WHEN conditions
-		// Note: We need to avoid circular dependencies
-		if (!ctx.createWhereDispatcher)
-			throw new Error(
-				'Condition requires a compiler-supplied WHERE dispatcher',
-			);
-		const dispatch = ctx.createWhereDispatcher();
-
-		const args: Node[] = conditions.map((cond) => {
-			// Compile the WHEN condition
-			const whenExpr = dispatch(cond.when, ctx, state);
-
-			// Build the THEN result using expression-aware resolution
-			const thenResult = resolveCaseValue(cond.then, ctx, state);
-
-			const caseWhen: CaseWhen = {
-				expr: whenExpr,
-				result: thenResult,
-			};
-
-			return { CaseWhen: caseWhen };
-		});
-
-		// Build ELSE clause if present
-		let defresult: Node | undefined;
-		if (elseValue !== undefined) {
-			defresult = resolveCaseValue(elseValue, ctx, state);
-		}
-
-		const caseExpr: CaseExpr = {
-			args,
-			...(defresult && { defresult }),
-		};
-
-		return { CaseExpr: caseExpr };
-	},
-};
 
 /**
  * Simple CASE expression handler
@@ -122,7 +39,7 @@ export const simpleCaseHandler: ExpressionHandler = {
 		state: CompilerState,
 	): Node {
 		const column = decision.column;
-		// Same structural override as in caseHandler — see above.
+		// CASE decisions carry tuples in `conditions`, structurally different from Decision[].
 		const conditions = decision.conditions as
 			| readonly CaseCondition[]
 			| undefined;

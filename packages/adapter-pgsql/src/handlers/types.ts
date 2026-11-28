@@ -71,7 +71,6 @@ export interface CompilerContext {
 	) => Node;
 	readonly directRootWhere?: boolean;
 	readonly position?: import('../condition-context.js').ConditionPosition;
-	readonly createWhereDispatcher?: () => WhereDispatcher;
 	/** Addressed authority for model-backed identifiers. */
 	readonly declaredNames?: DeclaredNameResolver;
 	/** Casing policy applied when a model is unavailable. */
@@ -155,8 +154,8 @@ export interface CompilerContext {
 	) => Node;
 	/**
 	 * Optional callback to compile a custom fn() FILTER (WHERE ...) condition.
-	 * Set by PlanCompiler to keep WHERE-dispatcher dependencies out of expression
-	 * handlers while still applying FILTER in every expression position.
+	 * Set by PlanCompiler so expression handlers apply FILTER through the resolved
+	 * condition compiler in every expression position.
 	 */
 	readonly compileCustomFnFilter?: (
 		filterIntent: import('@dbsp/types').WhereIntent,
@@ -512,7 +511,6 @@ export interface Decision {
 	 * projection only.
 	 */
 	readonly aggregateDistinct?: boolean;
-	readonly subqueryOperator?: string;
 	// Pseudo-column specific
 	readonly traversal?: string;
 	readonly traversals?: readonly {
@@ -540,57 +538,11 @@ export interface Decision {
 	readonly expressionIntent?: unknown;
 	// LIKE escape character
 	readonly escape?: string;
-	/**
-	 * Provenance: the ORIGINAL QueryIntent before lowering.
-	 * Set by every lowering site (convertIn, convertSubquery, normalizeToDecision,
-	 * and their mutation-path equivalents) so that `buildPredicateSubquerySelect`
-	 * (subquery-emission.ts) can validate the true caller intent rather than the
-	 * stripped-down lowered decision fields.
-	 *
-	 * Required for IN / scalar / inSubquery / notInSubquery decisions.
-	 * Optional on other decision types.
-	 */
-	readonly subqueryIntent?: import('@dbsp/types').QueryIntent;
 }
 
 // ============================================================================
 // Handler Interfaces
 // ============================================================================
-
-/**
- * Handler for WHERE clause conditions.
- * Transforms condition decisions into PostgreSQL AST expressions.
- */
-export interface WhereHandler {
-	/** Operator(s) this handler supports */
-	readonly operators: readonly string[];
-
-	/**
-	 * Compile a WHERE condition to AST.
-	 * @param decision The condition decision
-	 * @param ctx Immutable compiler context
-	 * @param state Mutable compiler state
-	 * @param dispatch Callback to compile nested conditions
-	 * @returns PostgreSQL AST node for the condition
-	 */
-	compile(
-		decision: Decision,
-		ctx: CompilerContext,
-		state: CompilerState,
-		dispatch: WhereDispatcher,
-	): Node;
-}
-
-/**
- * Dispatcher for recursive WHERE compilation.
- * The same function object may be passed to every level of a recursive compilation, so it is an opaque callback.
- * Handlers must not use its identity to distinguish frames or carry frame-local state.
- */
-export type WhereDispatcher = (
-	decision: Decision,
-	ctx: CompilerContext,
-	state: CompilerState,
-) => Node;
 
 /**
  * Handler for SELECT expressions.
@@ -767,13 +719,6 @@ export interface WindowOver {
 }
 
 /**
- * Select options with field specification.
- */
-export interface SelectWithFields {
-	readonly fields?: readonly string[];
-}
-
-/**
  * PostgreSQL AST ResTarget node shape.
  */
 export interface ResTargetNode {
@@ -821,17 +766,6 @@ export function isSqlExpression(value: unknown): value is SqlExpression {
 }
 
 /**
- * Type guard for RangeValue.
- */
-export function isRangeValue(value: unknown): value is RangeValue {
-	return (
-		typeof value === 'object' &&
-		value !== null &&
-		('lower' in value || 'upper' in value)
-	);
-}
-
-/**
  * Type guard for ParamRef.
  */
 export function isParamRef(value: unknown): value is ParamRef {
@@ -840,19 +774,6 @@ export function isParamRef(value: unknown): value is ParamRef {
 		value !== null &&
 		'paramIndex' in value &&
 		typeof (value as Record<string, unknown>).paramIndex === 'number'
-	);
-}
-
-/**
- * Type guard for SelectWithFields.
- */
-export function isSelectWithFields(value: unknown): value is SelectWithFields {
-	return (
-		typeof value === 'object' &&
-		value !== null &&
-		'fields' in value &&
-		(Array.isArray((value as Record<string, unknown>).fields) ||
-			(value as Record<string, unknown>).fields === undefined)
 	);
 }
 

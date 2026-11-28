@@ -9,7 +9,6 @@ export {
 	compileDelete,
 	compileInsert,
 	compileInsertFrom,
-	compileMutation,
 	compileUnnestInsert,
 	compileUnnestUpdate,
 	compileUpdate,

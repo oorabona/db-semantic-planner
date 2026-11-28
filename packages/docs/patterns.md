@@ -25,7 +25,9 @@ This document catalogues the recurring design patterns used in db-semantic-plann
 
 ### Intent
 
-Decouple the SQL compiler from the logic of each individual WHERE operator or expression kind. A dispatch key belongs to a handler object; the compiler looks up and dispatches to the correct handler at compile time. Adding a WHERE operator or expression type normally does not touch the compiler core; INCLUDE strategies are a closed collection.
+Decouple the SQL compiler from the logic of each expression kind and include strategy. A dispatch key belongs to a handler object; the compiler looks up and dispatches to the correct handler at compile time. Adding an expression type normally does not touch the compiler core; INCLUDE strategies are a closed collection.
+
+Conditions (WHERE, HAVING, CASE WHEN, FILTER, recursive anchors, mutation guards) are not dispatched through a handler registry. Core resolves every condition, and the adapter compiles the resolved condition in `packages/adapter-pgsql/src/resolved-condition-compiler.ts`; a condition that reaches the adapter without core's resolution is refused.
 
 ### Structure
 
@@ -33,14 +35,13 @@ Decouple the SQL compiler from the logic of each individual WHERE operator or ex
 |------|------|
 | Handler interfaces | `packages/adapter-pgsql/src/handlers/types.ts` |
 | Registry + lookup | `packages/adapter-pgsql/src/handlers/index.ts` |
-| WHERE handlers | `packages/adapter-pgsql/src/handlers/where/` |
 | Expression handlers | `packages/adapter-pgsql/src/handlers/expression/` |
 | Include handlers | `packages/adapter-pgsql/src/handlers/include/` |
+| Condition leaf emitters (used by the resolved condition compiler) | `packages/adapter-pgsql/src/handlers/where/` |
 
-Three independent registries exist, one per handler family:
+Two independent registries exist, one per handler family:
 
 ```
-WhereHandler      { readonly operators: readonly string[]; compile(decision, ctx, state, dispatch): Node }
 ExpressionHandler { readonly types: readonly string[]; compile(decision, ctx, state): Node }
 IncludeHandler    { readonly strategy: IncludeHandlerStrategy; compile(decision, ctx, state): IncludeResult }
 ```
@@ -49,8 +50,7 @@ Registration:
 
 ```typescript
 // doctest: skip — API signature reference (TypeScript function signatures, not executable code)
-registerWhereHandler(handler: WhereHandler): void   // throws on duplicate
-registerExpressionHandler(handler: ExpressionHandler): void
+registerExpressionHandler(handler: ExpressionHandler): void   // throws on duplicate
 ```
 
 INCLUDE is not an extension surface: strategies outside `INCLUDE_STRATEGIES` are invalid, and the initializer already installs every allowed strategy. Extend INCLUDE by changing `INCLUDE_STRATEGIES` and `allIncludeHandlers` together.
@@ -59,46 +59,40 @@ Lookup (throws if missing):
 
 ```typescript
 // doctest: skip — API signature reference (TypeScript function signatures, not executable code)
-getWhereHandler(operator: string): WhereHandler
 getExpressionHandler(type: string): ExpressionHandler
 getIncludeHandler(strategy: IncludeHandlerStrategy): IncludeHandler
 ```
 
 ### Example
 
-Adding a WHERE handler for a new, unregistered operator:
+Adding an expression handler for a new type:
 
 ```typescript
-// doctest: skip — illustrative fragment (registerWhereHandler is an internal adapter-pgsql API, not in doctest preamble)
-// packages/adapter-pgsql/src/handlers/where/pattern.ts
-const matchesHandler: WhereHandler = {
-  operators: ['matches'],
-  compile(decision, ctx, state, dispatch) {
+// doctest: skip — illustrative fragment (registerExpressionHandler is an internal adapter-pgsql API, not in doctest preamble)
+// packages/adapter-pgsql/src/handlers/expression/greeting.ts
+const greetingHandler: ExpressionHandler = {
+  types: ['greeting'],
+  compile(decision, ctx, state) {
     // return PostgreSQL AST node
   },
 };
 
-// packages/adapter-pgsql/src/handlers/where/index.ts
-export const simpleWhereHandlers = Object.freeze([
-  // existing handlers
-  matchesHandler,
-]);
+// packages/adapter-pgsql/src/handlers/expression/index.ts — add it to allExpressionHandlers
 ```
 
-The central WHERE family initializer in `handlers/index.ts` installs `allWhereHandlers` lazily. The WHERE dispatcher resolves aliases, then calls `getWhereHandler(operator).compile(...)` — no switch statements.
+The expression family initializer in `handlers/index.ts` installs `allExpressionHandlers` lazily; the compiler then calls `getExpressionHandler(type).compile(...)` — no switch statements.
 
 ### Convention
 
-- Handler files live in `handlers/{where,expression,include}/`
+- Handler files live in `handlers/{expression,include}/`
 - Handler modules export handler objects, not classes
-- Each sub-directory `index.ts` exports its top-level `all*Handlers` collection frozen; the matching family initializer in `handlers/index.ts` installs it lazily
-- Direct bulk registration was removed so the central initializer can install each family transactionally and recover from failures
+- Each sub-directory `index.ts` exports its top-level `all*Handlers` collection frozen; the matching family initializer in `handlers/index.ts` installs it lazily and transactionally
 - Handler interfaces are in `handlers/types.ts` — never inline types in handler files
-- WHERE dispatch calls `ensureHandlersRegistered()` before lookup; expression and INCLUDE compilation call their matching `ensure*Registered()` functions before lookup
+- Expression and INCLUDE compilation call their matching `ensure*Registered()` functions before lookup
 
 ### When to use
 
-Use this pattern for WHERE operators and expression types expected to grow over time. INCLUDE strategies use the same dispatch shape but are deliberately closed; add one only by updating both `INCLUDE_STRATEGIES` and `allIncludeHandlers`. Do NOT use a switch statement in the compiler itself.
+Use this pattern for expression types expected to grow over time. INCLUDE strategies use the same dispatch shape but are deliberately closed; add one only by updating both `INCLUDE_STRATEGIES` and `allIncludeHandlers`. Do NOT use a switch statement in the compiler itself. A new condition kind is added to core's resolution and to `resolved-condition-compiler.ts`, not to a registry.
 
 ---
 

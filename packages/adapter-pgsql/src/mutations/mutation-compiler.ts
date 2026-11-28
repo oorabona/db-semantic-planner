@@ -38,21 +38,14 @@ import {
 	transposeToColumnArrays,
 	validateBatchCardinality,
 } from '../compiler-utils.js';
-import { compileWhereIntent } from '../condition-compiler.js';
-import { createWhereDispatcher } from '../handlers/index.js';
 import type {
 	CompilerContext,
 	CompilerState,
-	Decision,
 	InsertStmtNode,
 } from '../handlers/types.js';
 import { normalizeParamIntent, unwrapParamIntent } from '../param-intent.js';
 import { createTypeCastParamRef } from '../param-ref.js';
-import {
-	queryLocal,
-	resolveDeclaredIdentifier,
-	type SqlIdentifier,
-} from '../sql-identifier.js';
+import { queryLocal, type SqlIdentifier } from '../sql-identifier.js';
 
 // ============================================================================
 // Shared Helpers
@@ -259,8 +252,6 @@ export interface UpdateConfig {
 	tableMetadata?: MutationTableMetadata;
 	/** Column-value pairs to set */
 	set: { column: SqlIdentifier; value: unknown }[];
-	/** WHERE conditions */
-	where?: Decision[];
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
 	returningSources?: SqlIdentifier[];
@@ -279,8 +270,6 @@ export interface DeleteConfig {
 	/** Table to delete from */
 	table: SqlIdentifier;
 	tableMetadata?: MutationTableMetadata;
-	/** WHERE conditions */
-	where?: Decision[];
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
 	returningSources?: SqlIdentifier[];
@@ -304,9 +293,7 @@ export interface InsertFromConfig {
 		targetAddress?: MutationColumnAddress;
 		sourceAddress?: MutationColumnAddress;
 	}[];
-	/** WHERE conditions for source query */
-	where?: Decision[];
-	/** Core-resolved source WHERE, compiled in place of `where` when present. */
+	/** Core-resolved source WHERE. */
 	readonly whereCompiler?: (ctx: CompilerContext, state: CompilerState) => Node;
 	/** LIMIT for source query */
 	limit?: number | ParamIntent;
@@ -333,9 +320,7 @@ export interface UpsertFromConfig {
 		targetAddress?: MutationColumnAddress;
 		sourceAddress?: MutationColumnAddress;
 	}[];
-	/** WHERE conditions for source query */
-	where?: Decision[];
-	/** Core-resolved source WHERE, compiled in place of `where` when present. */
+	/** Core-resolved source WHERE. */
 	readonly whereCompiler?: (ctx: CompilerContext, state: CompilerState) => Node;
 	/** LIMIT for source query */
 	limit?: number | ParamIntent;
@@ -518,23 +503,6 @@ export function compileUpdate(
 			{ ...ctx, currentAlias: tableAlias },
 			state,
 		);
-	} else if (config.where && config.where.length > 0) {
-		const dispatch = createWhereDispatcher(compileWhereIntent);
-		const subCtx = { ...ctx, currentAlias: tableAlias };
-
-		if (config.where.length === 1) {
-			whereClause = dispatch(config.where[0]!, subCtx, state);
-		} else {
-			const conditions = config.where.map((cond) =>
-				dispatch(cond, subCtx, state),
-			);
-			whereClause = {
-				BoolExpr: {
-					boolop: 'AND_EXPR',
-					args: conditions,
-				},
-			};
-		}
 	}
 
 	// Build RETURNING clause if specified
@@ -722,23 +690,6 @@ export function compileDelete(
 			{ ...ctx, currentAlias: tableAlias },
 			state,
 		);
-	} else if (config.where && config.where.length > 0) {
-		const dispatch = createWhereDispatcher(compileWhereIntent);
-		const subCtx = { ...ctx, currentAlias: tableAlias };
-
-		if (config.where.length === 1) {
-			whereClause = dispatch(config.where[0]!, subCtx, state);
-		} else {
-			const conditions = config.where.map((cond) =>
-				dispatch(cond, subCtx, state),
-			);
-			whereClause = {
-				BoolExpr: {
-					boolop: 'AND_EXPR',
-					args: conditions,
-				},
-			};
-		}
 	}
 
 	// Build RETURNING clause if specified
@@ -808,23 +759,6 @@ export function compileInsertFrom(
 			{ ...ctx, currentAlias: sourceAlias },
 			state,
 		);
-	} else if (config.where && config.where.length > 0) {
-		const dispatch = createWhereDispatcher(compileWhereIntent);
-		const subCtx = { ...ctx, currentAlias: sourceAlias };
-
-		if (config.where.length === 1) {
-			whereClause = dispatch(config.where[0]!, subCtx, state);
-		} else {
-			const conditions = config.where.map((cond) =>
-				dispatch(cond, subCtx, state),
-			);
-			whereClause = {
-				BoolExpr: {
-					boolop: 'AND_EXPR',
-					args: conditions,
-				},
-			};
-		}
 	}
 
 	// Build LIMIT clause if specified
@@ -925,23 +859,6 @@ export function compileUpsertFrom(
 			{ ...ctx, currentAlias: sourceAlias },
 			state,
 		);
-	} else if (config.where && config.where.length > 0) {
-		const dispatch = createWhereDispatcher(compileWhereIntent);
-		const subCtx = { ...ctx, currentAlias: sourceAlias };
-
-		if (config.where.length === 1) {
-			whereClause = dispatch(config.where[0]!, subCtx, state);
-		} else {
-			const conditions = config.where.map((cond) =>
-				dispatch(cond, subCtx, state),
-			);
-			whereClause = {
-				BoolExpr: {
-					boolop: 'AND_EXPR',
-					args: conditions,
-				},
-			};
-		}
 	}
 
 	// Build LIMIT clause if specified
@@ -1109,119 +1026,6 @@ function limitToNode(limit: number | ParamIntent, state: CompilerState): Node {
 		};
 	}
 	return { A_Const: { ival: { ival: limit } } };
-}
-
-/**
- * Compile a mutation decision to AST.
- * Determines mutation type from decision.type and delegates.
- */
-export function compileMutation(
-	decision: Decision,
-	ctx: CompilerContext,
-	state: CompilerState,
-): Node {
-	const type = decision.type;
-	if (type !== 'insert' && type !== 'update' && type !== 'delete') {
-		throw new Error(`Unknown mutation type: ${type}`);
-	}
-	const table = decision.table ?? ctx.rootTable;
-	const addressedTable = resolveDeclaredIdentifier(
-		ctx.declaredNames,
-		ctx.dbCasing ?? 'preserve',
-		{ kind: 'table', table },
-	);
-
-	switch (type) {
-		case 'insert': {
-			const columns = decision.columns?.map((column) =>
-				resolveDeclaredIdentifier(
-					ctx.declaredNames,
-					ctx.dbCasing ?? 'preserve',
-					{
-						kind: 'column',
-						table,
-						column,
-					},
-				),
-			);
-			const insertConfig: InsertConfig = {
-				table: addressedTable,
-				columns: columns ?? [],
-				values: decision.values ? [[...decision.values] as unknown[]] : [],
-			};
-			if (decision.columns) {
-				insertConfig.returning = [...decision.columns];
-				insertConfig.returningSources = decision.columns.map((column) =>
-					resolveDeclaredIdentifier(
-						ctx.declaredNames,
-						ctx.dbCasing ?? 'preserve',
-						{
-							kind: 'column',
-							table,
-							column,
-						},
-					),
-				);
-			}
-			return compileInsert(insertConfig, ctx, state);
-		}
-
-		case 'update': {
-			const set = decision.set?.map(({ column, value }) => ({
-				column: resolveDeclaredIdentifier(
-					ctx.declaredNames,
-					ctx.dbCasing ?? 'preserve',
-					{ kind: 'column', table, column },
-				),
-				value,
-			}));
-			const updateConfig: UpdateConfig = {
-				table: addressedTable,
-				set: set ?? [],
-			};
-			if (decision.conditions) updateConfig.where = [...decision.conditions];
-			if (decision.columns) {
-				updateConfig.returning = [...decision.columns];
-				updateConfig.returningSources = decision.columns.map((column) =>
-					resolveDeclaredIdentifier(
-						ctx.declaredNames,
-						ctx.dbCasing ?? 'preserve',
-						{
-							kind: 'column',
-							table,
-							column,
-						},
-					),
-				);
-			}
-			return compileUpdate(updateConfig, ctx, state);
-		}
-
-		case 'delete': {
-			const deleteConfig: DeleteConfig = {
-				table: addressedTable,
-			};
-			if (decision.conditions) deleteConfig.where = [...decision.conditions];
-			if (decision.columns) {
-				deleteConfig.returning = [...decision.columns];
-				deleteConfig.returningSources = decision.columns.map((column) =>
-					resolveDeclaredIdentifier(
-						ctx.declaredNames,
-						ctx.dbCasing ?? 'preserve',
-						{
-							kind: 'column',
-							table,
-							column,
-						},
-					),
-				);
-			}
-			return compileDelete(deleteConfig, ctx, state);
-		}
-
-		default:
-			throw new Error(`Unknown mutation type: ${type}`);
-	}
 }
 
 /** Internal sentinel for an absent insert cell; explicit undefined is SQL NULL. */

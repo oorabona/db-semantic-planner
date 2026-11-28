@@ -97,7 +97,7 @@ function makePlanWithRegexIncludeWhere(
  * Minimal PlanReport: top-level .where(op().eq()) on files table.
  * Regression guard — this path must keep working after the fix.
  * Uses the intent.where field (same path as ORM .where()) so
- * convertWhereCondition handles the expression kind.
+ * the WHERE lowering handles the expression kind.
  */
 function makePlanWithTopLevelRegexWhere(regexValue = '^src/'): PlanReport {
 	return plan(

@@ -15,7 +15,6 @@ import {
 	compileDelete,
 	compileInsert,
 	compileInsertFrom,
-	compileMutation,
 	compileUpdate,
 	compileUpsertFrom,
 	RANGE_TYPES,
@@ -284,50 +283,6 @@ describe('mutation-compiler - coverage', () => {
 			expect(state.parameters).toHaveLength(3);
 		});
 
-		it('compiles UPDATE with single WHERE condition', () => {
-			const config = {
-				table: queryLocal('users'),
-				set: [{ column: queryLocal('name'), value: 'Jane' }],
-				where: [
-					{
-						type: 'where',
-						column: 'id',
-						operator: 'eq',
-						value: 1,
-						table: queryLocal('users'),
-					},
-				],
-			};
-			const node = compileUpdate(config, ctx, state);
-			expect(node.UpdateStmt.whereClause).toBeDefined();
-		});
-
-		it('compiles UPDATE with multiple WHERE conditions (AND)', () => {
-			const config = {
-				table: queryLocal('users'),
-				set: [{ column: queryLocal('active'), value: false }],
-				where: [
-					{
-						type: 'where',
-						column: 'role',
-						operator: 'eq',
-						value: 'guest',
-						table: queryLocal('users'),
-					},
-					{
-						type: 'where',
-						column: 'last_login',
-						operator: 'lt',
-						value: '2020-01-01',
-						table: queryLocal('users'),
-					},
-				],
-			};
-			const node = compileUpdate(config, ctx, state);
-			expect(node.UpdateStmt.whereClause.BoolExpr.boolop).toBe('AND_EXPR');
-			expect(node.UpdateStmt.whereClause.BoolExpr.args).toHaveLength(2);
-		});
-
 		it('compiles UPDATE with RETURNING clause', () => {
 			const config = {
 				table: queryLocal('users'),
@@ -388,48 +343,6 @@ describe('mutation-compiler - coverage', () => {
 			expect(node.DeleteStmt).toBeDefined();
 			expect(node.DeleteStmt.relation.relname).toBe('temp_logs');
 			expect(node.DeleteStmt.whereClause).toBeUndefined();
-		});
-
-		it('compiles DELETE with single WHERE condition', () => {
-			const config = {
-				table: queryLocal('users'),
-				where: [
-					{
-						type: 'where',
-						column: 'id',
-						operator: 'eq',
-						value: 42,
-						table: queryLocal('users'),
-					},
-				],
-			};
-			const node = compileDelete(config, ctx, state);
-			expect(node.DeleteStmt.whereClause).toBeDefined();
-			expect(state.parameters).toHaveLength(1);
-		});
-
-		it('compiles DELETE with multiple WHERE conditions (AND)', () => {
-			const config = {
-				table: queryLocal('sessions'),
-				where: [
-					{
-						type: 'where',
-						column: 'expired',
-						operator: 'eq',
-						value: true,
-						table: queryLocal('sessions'),
-					},
-					{
-						type: 'where',
-						column: 'created_at',
-						operator: 'lt',
-						value: '2020-01-01',
-						table: queryLocal('sessions'),
-					},
-				],
-			};
-			const node = compileDelete(config, ctx, state);
-			expect(node.DeleteStmt.whereClause.BoolExpr.boolop).toBe('AND_EXPR');
 		});
 
 		it('compiles DELETE with RETURNING clause', () => {
@@ -503,61 +416,6 @@ describe('mutation-compiler - coverage', () => {
 				node.InsertStmt.selectStmt.SelectStmt.targetList[0].ResTarget.val
 					.ColumnRef.fields[0],
 			).toHaveProperty('A_Star');
-		});
-
-		it('compiles INSERT FROM with WHERE clause', () => {
-			const config = {
-				targetTable: queryLocal('active_users'),
-				source: relationBinding({
-					qualifier: queryLocal('users'),
-					kind: 'cte-bind',
-				}),
-				columns: ['id', 'name'].map((column) => ({
-					target: queryLocal(column),
-					source: queryLocal(column),
-				})),
-				where: [
-					{
-						type: 'where',
-						column: 'active',
-						operator: 'eq',
-						value: true,
-						table: queryLocal('users'),
-					},
-				],
-			};
-			const node = compileInsertFrom(config, ctx, state);
-			expect(node.InsertStmt.selectStmt.SelectStmt.whereClause).toBeDefined();
-		});
-
-		it('compiles INSERT FROM with multiple WHERE conditions', () => {
-			const config = {
-				targetTable: queryLocal('premium_users'),
-				source: relationBinding({
-					qualifier: queryLocal('users'),
-					kind: 'cte-bind',
-				}),
-				where: [
-					{
-						type: 'where',
-						column: 'plan',
-						operator: 'eq',
-						value: 'premium',
-						table: queryLocal('users'),
-					},
-					{
-						type: 'where',
-						column: 'active',
-						operator: 'eq',
-						value: true,
-						table: queryLocal('users'),
-					},
-				],
-			};
-			const node = compileInsertFrom(config, ctx, state);
-			expect(
-				node.InsertStmt.selectStmt.SelectStmt.whereClause.BoolExpr.boolop,
-			).toBe('AND_EXPR');
 		});
 
 		it('compiles INSERT FROM with LIMIT', () => {
@@ -655,32 +513,6 @@ describe('mutation-compiler - coverage', () => {
 			expect(node.InsertStmt.onConflictClause.targetList).toHaveLength(2);
 		});
 
-		it('compiles UPSERT FROM with WHERE clause', () => {
-			const config = {
-				targetTable: queryLocal('cache'),
-				source: relationBinding({
-					qualifier: queryLocal('temp_cache'),
-					kind: 'cte-bind',
-				}),
-				conflictColumns: ['key'].map(queryLocal),
-				columns: ['key', 'value'].map((column) => ({
-					target: queryLocal(column),
-					source: queryLocal(column),
-				})),
-				where: [
-					{
-						type: 'where',
-						column: 'valid',
-						operator: 'eq',
-						value: true,
-						table: queryLocal('temp_cache'),
-					},
-				],
-			};
-			const node = compileUpsertFrom(config, ctx, state);
-			expect(node.InsertStmt.selectStmt.SelectStmt.whereClause).toBeDefined();
-		});
-
 		it('compiles UPSERT FROM with LIMIT', () => {
 			const config = {
 				targetTable: queryLocal('sync_data'),
@@ -734,57 +566,6 @@ describe('mutation-compiler - coverage', () => {
 			};
 			const node = compileUpsertFrom(config, ctxWithSchema, state);
 			expect(node.InsertStmt.relation.schemaname).toBe('staging');
-		});
-	});
-
-	describe('compileMutation', () => {
-		it('compiles INSERT mutation decision', () => {
-			const decision = {
-				type: 'insert',
-				table: queryLocal('users'),
-				columns: ['name'].map(queryLocal),
-				values: ['John'],
-			};
-			const node = compileMutation(decision, ctx, state);
-			expect(node.InsertStmt).toBeDefined();
-		});
-
-		it('compiles UPDATE mutation decision', () => {
-			const decision = {
-				type: 'update',
-				table: queryLocal('users'),
-				set: [{ column: queryLocal('name'), value: 'Jane' }],
-			};
-			const node = compileMutation(decision, ctx, state);
-			expect(node.UpdateStmt).toBeDefined();
-		});
-
-		it('compiles DELETE mutation decision', () => {
-			const decision = {
-				type: 'delete',
-				table: queryLocal('users'),
-			};
-			const node = compileMutation(decision, ctx, state);
-			expect(node.DeleteStmt).toBeDefined();
-		});
-
-		it('throws error for unknown mutation type', () => {
-			const decision = {
-				type: 'merge',
-				table: queryLocal('users'),
-			};
-			expect(() => compileMutation(decision, ctx, state)).toThrow(
-				'Unknown mutation type: merge',
-			);
-		});
-
-		it('uses rootTable from context if decision.table undefined', () => {
-			const decision = {
-				type: 'delete',
-				columns: ['id'].map(queryLocal),
-			};
-			const node = compileMutation(decision, ctx, state);
-			expect(node.DeleteStmt.relation.relname).toBe('users');
 		});
 	});
 });

@@ -23,13 +23,11 @@ import {
 	compileRecursive,
 } from '../adapter-compiler-recursive.js';
 import { requiredColumn } from '../assert-field.js';
-import { caseHandler, simpleCaseHandler } from '../handlers/expression/case.js';
+import { simpleCaseHandler } from '../handlers/expression/case.js';
 import { resolveCaseValue } from '../handlers/expression/case-value.js';
 import {
 	createCompilerState,
 	isParamRef,
-	isRangeValue,
-	isSelectWithFields,
 	isSqlExpression,
 } from '../handlers/types.js';
 import { introspect } from '../introspection.js';
@@ -776,24 +774,6 @@ describe('isSqlExpression', () => {
 	});
 });
 
-describe('isRangeValue', () => {
-	it('true — has lower', () => {
-		expect(isRangeValue({ lower: 1 })).toBe(true);
-	});
-	it('true — has upper', () => {
-		expect(isRangeValue({ upper: 100 })).toBe(true);
-	});
-	it('false — null', () => {
-		expect(isRangeValue(null)).toBe(false);
-	});
-	it('false — primitive', () => {
-		expect(isRangeValue(42)).toBe(false);
-	});
-	it('false — neither lower nor upper', () => {
-		expect(isRangeValue({ value: 5 })).toBe(false);
-	});
-});
-
 describe('isParamRef', () => {
 	it('true — numeric paramIndex', () => {
 		expect(isParamRef({ paramIndex: 1 })).toBe(true);
@@ -809,24 +789,6 @@ describe('isParamRef', () => {
 	});
 	it('false — paramIndex missing', () => {
 		expect(isParamRef({ other: 1 })).toBe(false);
-	});
-});
-
-describe('isSelectWithFields', () => {
-	it('true — array fields', () => {
-		expect(isSelectWithFields({ fields: ['a'] })).toBe(true);
-	});
-	it('true — undefined fields', () => {
-		expect(isSelectWithFields({ fields: undefined })).toBe(true);
-	});
-	it('false — null', () => {
-		expect(isSelectWithFields(null)).toBe(false);
-	});
-	it('false — no fields key', () => {
-		expect(isSelectWithFields({ other: [] })).toBe(false);
-	});
-	it('false — non-object', () => {
-		expect(isSelectWithFields('str')).toBe(false);
 	});
 });
 
@@ -1034,50 +996,8 @@ describe('resolveCaseValue', () => {
 });
 
 // ---------------------------------------------------------------------------
-// handlers/expression/case.ts — caseHandler + simpleCaseHandler
+// handlers/expression/case.ts — simpleCaseHandler
 // ---------------------------------------------------------------------------
-
-describe('caseHandler.compile', () => {
-	const ctx = {
-		naming: identityNaming,
-		rootTable: 'tbl',
-		maxRecursiveDepth: 10,
-	};
-
-	it('throws when conditions is empty array', () => {
-		expect(() =>
-			caseHandler.compile(
-				{
-					type: 'case',
-					conditions: [],
-					column: undefined,
-					value: undefined,
-				} as never,
-				ctx as never,
-				createCompilerState(),
-			),
-		).toThrow('CASE requires at least one WHEN condition');
-	});
-
-	it('throws when conditions is undefined', () => {
-		expect(() =>
-			caseHandler.compile(
-				{
-					type: 'case',
-					conditions: undefined,
-					column: undefined,
-					value: undefined,
-				} as never,
-				ctx as never,
-				createCompilerState(),
-			),
-		).toThrow('CASE requires at least one WHEN condition');
-	});
-
-	// Positive-path tests (reaching WHEN dispatch) hit require('../index.js') which
-	// resolves against dist/ only at runtime, not in source-level unit tests.
-	// Those branches are exercised by the integration suite (case-when.test.ts).
-});
 
 describe('simpleCaseHandler.compile', () => {
 	const ctx = {

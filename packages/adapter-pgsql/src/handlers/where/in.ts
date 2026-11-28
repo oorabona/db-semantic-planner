@@ -4,21 +4,10 @@
  * Handles: in, notIn
  */
 
-import { isParamIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import { booleanConstNode } from '../../ast-helpers.js';
-import { supportsDialectCapability } from '../../dialect-capabilities.js';
-import { unwrapParamIntent } from '../../param-intent.js';
 import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
-import { escapeDiagnosticText } from '../../validate.js';
-import type {
-	CompilerContext,
-	CompilerState,
-	Decision,
-	WhereHandler,
-} from '../types.js';
-import { COLLECTION_OPERATORS } from '../types.js';
-import { buildColumnRef, resolveColumnPgType } from './utils.js';
+import type { CompilerState } from '../types.js';
 
 /**
  * Create IN expression using = ANY($N)
@@ -94,92 +83,6 @@ function createLiteralInListExpr(
 		},
 	};
 }
-
-function isWholeArrayParamList(value: unknown[]): boolean {
-	return (
-		value.length === 1 &&
-		isParamIntent(value[0]) &&
-		Array.isArray(value[0].value)
-	);
-}
-
-function unwrapCompilerInListValues(value: unknown[]): unknown[] {
-	const values: unknown[] = [];
-	for (const item of value) {
-		values.push(unwrapParamIntent(item));
-	}
-	return values;
-}
-
-/**
- * Collection operators handler (IN, NOT IN)
- */
-export const inHandler: WhereHandler = {
-	operators: [COLLECTION_OPERATORS.IN, COLLECTION_OPERATORS.NOT_IN],
-
-	compile(
-		decision: Decision,
-		ctx: CompilerContext,
-		state: CompilerState,
-	): Node {
-		const operator = decision.operator ?? 'in';
-		const column = decision.column;
-		const value = unwrapParamIntent(decision.value);
-
-		if (!column) {
-			throw new Error('In handler requires a column');
-		}
-
-		// Fail-closed backstop: the plain `in`/`notIn` handler ONLY accepts a
-		// scalar array as `value`.  Anything else — a subquery-shaped object
-		// (has `from`/`select` keys), `undefined`, `null`, or any other non-array
-		// — indicates a compiler bug where an IN+subquery decision was not remapped
-		// to inSubquery/notInSubquery before dispatch.  Binding such a value as
-		// `ANY($n)` produces structurally wrong SQL (the object is serialized as a
-		// parameter, not a subquery, or the parameter slot holds `undefined`).
-		//
-		// This backstop catches any current or future unguarded path that bypasses
-		// the normalizeToDecision and lowering-site guards.
-		if (!Array.isArray(value)) {
-			const hint =
-				value !== null &&
-				typeof value === 'object' &&
-				('from' in (value as object) || 'select' in (value as object))
-					? 'IN+subquery decisions must be remapped to inSubquery/notInSubquery before reaching the in handler'
-					: `expected a scalar array but received ${value === undefined ? 'undefined' : value === null ? 'null' : typeof value}`;
-			throw new Error(
-				`[in handler] Received a non-array value for operator '${escapeDiagnosticText(operator)}' on column '${escapeDiagnosticText(column)}'. ` +
-					`This is a compiler bug: ${hint}. File a bug report.`,
-			);
-		}
-
-		// Handle empty arrays
-		const values = isWholeArrayParamList(value)
-			? (value[0].value as unknown[])
-			: unwrapCompilerInListValues(value);
-		if (values.length === 0) {
-			// Empty IN is always false, empty NOT IN is always true
-			if (operator === COLLECTION_OPERATORS.NOT_IN || operator === 'notIn') {
-				return booleanConstNode(true);
-			}
-			return booleanConstNode(false);
-		}
-
-		const columnNode = buildColumnRef(column, ctx);
-		const columnType = resolveColumnPgType(column, ctx);
-		const isNotIn =
-			operator === COLLECTION_OPERATORS.NOT_IN || operator === 'notIn';
-
-		return compileInValues(
-			columnNode,
-			state,
-			values,
-			isNotIn,
-			columnType,
-			supportsDialectCapability(ctx.dialectCapabilities, 'supportsArrayType'),
-		);
-	},
-};
 
 /** Typed collection primitive after legacy value validation and unwrapping. */
 export function compileInValues(

@@ -1,7 +1,7 @@
 /**
  * Regression test: notExists() nested inside and() must produce exactly ONE NOT EXISTS clause.
  *
- * Bug: convertWhereCondition processed notExists inside and() as a whereAnd containing
+ * Bug: the WHERE lowering processed notExists inside and() as a whereAnd containing
  * a broken notExists (relation name as targetTable). extractExistsDecisions ALSO processed
  * the same intent from the planner's filter-strategy decision (correct table name).
  * Result: two NOT EXISTS clauses — one with "calls", one with "callee_calls".

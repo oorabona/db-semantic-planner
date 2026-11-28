@@ -132,8 +132,6 @@ export type {
 	ExpressionHandler,
 	IncludeHandler,
 	IncludeResult,
-	WhereDispatcher,
-	WhereHandler,
 } from './handlers/index.js';
 // Introspection
 export {
@@ -144,22 +142,7 @@ export {
 	type SchemaScopeOptions,
 } from './introspection.js';
 // Mutations
-export {
-	buildOnConflictClause,
-	type ConflictAction,
-	type ConflictTarget,
-	compileDelete,
-	compileInsert,
-	compileMutation,
-	compileUpdate,
-	compileUpsert,
-	conditionalUpdate,
-	type DeleteConfig,
-	excludedRef,
-	type InsertConfig,
-	type UpdateConfig,
-	type UpsertConfig,
-} from './mutations/index.js';
+export { compileInsert, type InsertConfig } from './mutations/index.js';
 // Naming plugins
 export {
 	CamelCaseNamingPlugin,

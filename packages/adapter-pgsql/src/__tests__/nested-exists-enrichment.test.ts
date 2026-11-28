@@ -10,7 +10,7 @@
  * (2) Fail-closed for undeclared nested relations: enrichExistsStubsInConditions
  *     previously convention-compiled an undeclared inner relation; now throws.
  *
- * (3) outerRef rejection on the direct compile-where path (compileWhereIntent /
+ * (3) outerRef rejection on the direct compile-where path (the WHERE lowering /
  *     handleRawExistsIntent).  The decisions path already rejected this; the direct
  *     path now matches.
  */
@@ -31,12 +31,6 @@ import {
 	subquery,
 } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import {
-	buildSubqueryFromIntent,
-	compileWhereIntent,
-	type WhereCompilerCtx,
-} from '../compile-where.js';
-import { createCompilerState } from '../handlers/types.js';
 import { createPgCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
@@ -212,82 +206,10 @@ describe('nested exists — fail-closed for undeclared inner relation', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Defect 3 — rawExists + outerRef on the direct compileWhereIntent path
+// Defect 3 — rawExists + outerRef on the direct the WHERE lowering path
 // ---------------------------------------------------------------------------
 
-describe('rawExists + outerRef on direct compileWhereIntent path', () => {
-	function makeRealCtx(): WhereCompilerCtx {
-		const paramState = createCompilerState();
-		return {
-			rootTable: 'users',
-			aliases: new Map(),
-			paramState,
-			compileSubquery: (subIntent, paramOffset) =>
-				buildSubqueryFromIntent(subIntent, paramOffset),
-		};
-	}
-
-	it('rawExists(subquery with outerRef) on direct path → throws', () => {
-		const intent = {
-			kind: 'rawExists' as const,
-			subquery: {
-				type: 'select' as const,
-				from: 'posts',
-				select: { type: 'fields' as const, fields: ['id'] as const },
-				where: {
-					kind: 'comparison',
-					field: 'author_id',
-					operator: 'eq',
-					value: outerRef('id'),
-				},
-			},
-		};
-		const ctx = makeRealCtx();
-		expect(() => compileWhereIntent(intent as any, ctx)).toThrow(
-			/a correlated rawExists\(\) body in a condition compiled outside the planner is not supported yet \(#891\)/,
-		);
-	});
-
-	it('rawNotExists(subquery with outerRef) on direct path → throws', () => {
-		const intent = {
-			kind: 'rawNotExists' as const,
-			subquery: {
-				type: 'select' as const,
-				from: 'posts',
-				select: { type: 'fields' as const, fields: ['id'] as const },
-				where: {
-					kind: 'comparison',
-					field: 'author_id',
-					operator: 'eq',
-					value: outerRef('id'),
-				},
-			},
-		};
-		const ctx = makeRealCtx();
-		expect(() => compileWhereIntent(intent as any, ctx)).toThrow(
-			/a correlated rawNotExists\(\) body in a condition compiled outside the planner is not supported yet \(#891\)/,
-		);
-	});
-
-	it('rawExists without outerRef on direct path → does NOT throw', () => {
-		const ctx = makeRealCtx();
-		const safeIntent = {
-			kind: 'rawExists' as const,
-			subquery: {
-				type: 'select' as const,
-				from: 'posts',
-				select: { type: 'fields' as const, fields: ['id'] as const },
-				where: {
-					kind: 'comparison',
-					field: 'published',
-					operator: 'eq',
-					value: true,
-				},
-			},
-		};
-		expect(() => compileWhereIntent(safeIntent as any, ctx)).not.toThrow();
-	});
-
+describe('rawExists + outerRef on the ORM path', () => {
 	it('rawExists + outerRef on ORM path keeps outer qualifier', () => {
 		const orm = buildOrm();
 		const correlated = rawExists(
@@ -480,161 +402,15 @@ describe('nested exists — string[] relationFilter inside outer exists', () => 
 });
 
 // ---------------------------------------------------------------------------
-// Defect 3 — scalar subquery modifier guard on direct compileWhereIntent path
+// Defect 3 — scalar subquery modifier guard on direct the WHERE lowering path
 // ---------------------------------------------------------------------------
-
-describe('scalar subquery modifier guard on direct compileWhereIntent path', () => {
-	function makeScalarCtx(): WhereCompilerCtx {
-		const paramState = createCompilerState();
-		return {
-			rootTable: 'users',
-			aliases: new Map(),
-			paramState,
-			compileSubquery: (subIntent, paramOffset) =>
-				buildSubqueryFromIntent(subIntent, paramOffset),
-		};
-	}
-
-	it('scalar subquery with GROUP BY on direct path → throws', () => {
-		const intent = {
-			kind: 'subquery' as const,
-			field: 'id',
-			operator: 'eq',
-			subquery: {
-				type: 'select' as const,
-				from: 'posts',
-				select: {
-					type: 'aggregate' as const,
-					fn: 'count' as const,
-					field: 'id',
-				},
-				groupBy: ['author_id'],
-			},
-		};
-		expect(() => compileWhereIntent(intent as any, makeScalarCtx())).toThrow(
-			/GROUP BY.*not supported|not supported.*GROUP BY/i,
-		);
-	});
-
-	it('scalar subquery with HAVING on direct path → throws', () => {
-		const intent = {
-			kind: 'subquery' as const,
-			field: 'id',
-			operator: 'eq',
-			subquery: {
-				type: 'select' as const,
-				from: 'posts',
-				select: {
-					type: 'aggregate' as const,
-					fn: 'count' as const,
-					field: 'id',
-				},
-				having: {
-					kind: 'comparison',
-					field: 'id',
-					operator: 'gt',
-					value: 5,
-				},
-			},
-		};
-		expect(() => compileWhereIntent(intent as any, makeScalarCtx())).toThrow(
-			/HAVING.*not supported|not supported.*HAVING/i,
-		);
-	});
-
-	it('scalar subquery with OFFSET on direct path → throws', () => {
-		const intent = {
-			kind: 'subquery' as const,
-			field: 'id',
-			operator: 'eq',
-			subquery: {
-				type: 'select' as const,
-				from: 'posts',
-				select: { type: 'fields' as const, fields: ['id'] as const },
-				offset: 5,
-			},
-		};
-		expect(() => compileWhereIntent(intent as any, makeScalarCtx())).toThrow(
-			/OFFSET.*not supported|not supported.*OFFSET/i,
-		);
-	});
-
-	it('plain scalar subquery (no forbidden modifiers) on direct path → does NOT throw', () => {
-		const intent = {
-			kind: 'subquery' as const,
-			field: 'id',
-			operator: 'eq',
-			subquery: {
-				type: 'select' as const,
-				from: 'posts',
-				select: {
-					type: 'aggregate' as const,
-					fn: 'count' as const,
-					field: 'id',
-				},
-			},
-		};
-		expect(() =>
-			compileWhereIntent(intent as any, makeScalarCtx()),
-		).not.toThrow();
-	});
-});
 
 // ---------------------------------------------------------------------------
 // Bounded refinement 1 — scalar-direct rejects limit/orderBy; decisions-path
 //   scalar still allows them (regression guard for propagation).
 // ---------------------------------------------------------------------------
 
-describe('scalar-direct guard: limit and orderBy rejected on direct path', () => {
-	function makeScalarCtx(): WhereCompilerCtx {
-		const paramState = createCompilerState();
-		return {
-			rootTable: 'users',
-			aliases: new Map(),
-			paramState,
-			compileSubquery: (subIntent, paramOffset) =>
-				buildSubqueryFromIntent(subIntent, paramOffset),
-		};
-	}
-
-	it('scalar subquery with LIMIT on direct path throws', () => {
-		const intent = {
-			kind: 'subquery' as const,
-			field: 'id',
-			operator: 'eq',
-			subquery: {
-				type: 'select' as const,
-				from: 'posts',
-				select: {
-					type: 'aggregate' as const,
-					fn: 'count' as const,
-					field: 'id',
-				},
-				limit: 0,
-			},
-		};
-		expect(() => compileWhereIntent(intent as any, makeScalarCtx())).toThrow(
-			/LIMIT.*not supported|not supported.*LIMIT/i,
-		);
-	});
-
-	it('scalar subquery with field ORDER BY on direct path throws', () => {
-		const intent = {
-			kind: 'subquery' as const,
-			field: 'id',
-			operator: 'eq',
-			subquery: {
-				type: 'select' as const,
-				from: 'posts',
-				select: { type: 'fields' as const, fields: ['id'] as const },
-				orderBy: [{ field: 'id', direction: 'asc' }],
-			},
-		};
-		expect(() => compileWhereIntent(intent as any, makeScalarCtx())).toThrow(
-			/ORDER BY.*not supported|not supported.*ORDER BY/i,
-		);
-	});
-
+describe('scalar guard: limit and orderBy rejected', () => {
 	it('a structural { buildIntent } object with LIMIT is refused by name before planning (ADR 0011 delivery 5)', () => {
 		const orm = buildOrm();
 		const withLimit = {
@@ -795,64 +571,3 @@ describe('nested multi-hop fail-closed for undeclared hops', () => {
 // ---------------------------------------------------------------------------
 // scalar-direct projection validation inherits all scalar checks
 // ---------------------------------------------------------------------------
-
-describe('scalar-direct projection validation on direct compileWhereIntent path', () => {
-	function makeScalarCtx() {
-		const paramState = createCompilerState();
-		return {
-			rootTable: 'users',
-			aliases: new Map(),
-			paramState,
-			compileSubquery: (subIntent: any, paramOffset: number) =>
-				buildSubqueryFromIntent(subIntent, paramOffset),
-		};
-	}
-
-	it('scalar subquery with 2-field projection on direct path throws', () => {
-		const intent = {
-			kind: 'subquery' as const,
-			field: 'id',
-			operator: 'eq',
-			subquery: {
-				type: 'select' as const,
-				from: 'posts',
-				select: { type: 'fields' as const, fields: ['id', 'title'] as const },
-			},
-		};
-		expect(() => compileWhereIntent(intent as any, makeScalarCtx())).toThrow(
-			/multi-field projection.*scalar subquery must project exactly one column/i,
-		);
-	});
-
-	it('scalar subquery with expressions projection on direct path throws', () => {
-		const intent = {
-			kind: 'subquery' as const,
-			field: 'id',
-			operator: 'eq',
-			subquery: {
-				type: 'select' as const,
-				from: 'posts',
-				select: { type: 'expressions' as const },
-			},
-		};
-		expect(() => compileWhereIntent(intent as any, makeScalarCtx())).toThrow(
-			/expressions SELECT in a scalar subquery body is not supported yet \(#1087\)/i,
-		);
-	});
-
-	it('scalar subquery with single-field projection on direct path does NOT throw', () => {
-		const intent = {
-			kind: 'subquery' as const,
-			field: 'id',
-			operator: 'eq',
-			subquery: {
-				type: 'select' as const,
-				from: 'posts',
-				select: { type: 'fields' as const, fields: ['id'] as const },
-			},
-		};
-		expect(() =>
-			compileWhereIntent(intent as any, makeScalarCtx()),
-		).not.toThrow();
-	});
-});

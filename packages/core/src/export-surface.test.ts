@@ -55,7 +55,6 @@ const internalAdditions = [
 	'createBindingFinalPlan',
 	'getRelationalReadPlan',
 	'planInScope',
-	'refuseTableRootedQuantifier',
 ];
 // The scope a query is planned in: local sources and a body's enclosing query (#891 slice 5b).
 const internalTypeAdditions = ['PlanScope'];

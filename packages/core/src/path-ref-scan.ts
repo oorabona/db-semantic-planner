@@ -217,18 +217,6 @@ const hasOrigin = (node: Node): boolean =>
 	own(node, 'pathRef') === true || own(node, CALLBACK_SCOPE) !== undefined;
 
 /**
- * The refusal of a table-rooted quantifier on the adapter's legacy route of a
- * query-local body when its body is not the single visible range of its table.
- *
- * @internal
- */
-export function refuseTableRootedQuantifier(relation: unknown): never {
-	throw new Error(
-		`RelationRef '${String(relation)}' follows a relation from its table; inside a body over a query-local source (an NQL binding or a CTE) it cannot be resolved from its origin yet (#1040).`,
-	);
-}
-
-/**
  * Whether `value` holds a node core would resolve from its origin (#1014): a
  * callback node anywhere, and a `pathRef` node anywhere (`inBody`) or only
  * below a body boundary (a statement-level position).
