@@ -3373,7 +3373,7 @@ users | select id, (posts | select count(*)) as n`.dump() as {
 					{ model: db.model },
 				),
 			{
-				sql: "WITH ids AS (SELECT users.id, users.name FROM users) INSERT INTO users (id, name) SELECT ids.id AS id, ids.name AS name FROM ids WHERE (SELECT ids_1.id FROM ids AS ids_1 ORDER BY ids_1.id DESC LIMIT 1) > $1 ON CONFLICT (id) DO UPDATE SET name = excluded.name",
+				sql: 'WITH ids AS (SELECT users.id, users.name FROM users) INSERT INTO users (id, name) SELECT ids.id AS id, ids.name AS name FROM ids WHERE (SELECT ids_1.id FROM ids AS ids_1 ORDER BY ids_1.id DESC LIMIT 1) > $1 ON CONFLICT (id) DO UPDATE SET name = excluded.name',
 				params: [0],
 			},
 		],
@@ -3429,7 +3429,7 @@ users | select id, (posts | select count(*)) as n`.dump() as {
 					{ model: db.model },
 				),
 			{
-				sql: "WITH ids AS (SELECT users.id, users.name FROM users) INSERT INTO users (id, name) SELECT ids.id AS id, ids.name AS name FROM ids WHERE (SELECT ids_1.id FROM ids AS ids_1 GROUP BY ids_1.id LIMIT 1) > $1 ON CONFLICT (id) DO UPDATE SET name = excluded.name",
+				sql: 'WITH ids AS (SELECT users.id, users.name FROM users) INSERT INTO users (id, name) SELECT ids.id AS id, ids.name AS name FROM ids WHERE (SELECT ids_1.id FROM ids AS ids_1 GROUP BY ids_1.id LIMIT 1) > $1 ON CONFLICT (id) DO UPDATE SET name = excluded.name',
 				params: [0],
 			},
 		],
@@ -3485,7 +3485,7 @@ users | select id, (posts | select count(*)) as n`.dump() as {
 					{ model: db.model },
 				),
 			{
-				sql: "WITH ids AS (SELECT users.id, users.name FROM users) INSERT INTO users (id, name) SELECT ids.id AS id, ids.name AS name FROM ids WHERE (SELECT DISTINCT ON (id) ids_1.id FROM ids AS ids_1 LIMIT 1) > $1 ON CONFLICT (id) DO UPDATE SET name = excluded.name",
+				sql: 'WITH ids AS (SELECT users.id, users.name FROM users) INSERT INTO users (id, name) SELECT ids.id AS id, ids.name AS name FROM ids WHERE (SELECT DISTINCT ON (id) ids_1.id FROM ids AS ids_1 LIMIT 1) > $1 ON CONFLICT (id) DO UPDATE SET name = excluded.name',
 				params: [0],
 			},
 		],
