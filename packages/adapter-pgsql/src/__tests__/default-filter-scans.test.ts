@@ -2,6 +2,7 @@ import type { QueryBuilder, SubqueryBuilder, WhereIntent } from '@dbsp/core';
 import {
 	caseWhen,
 	createOrm,
+	ExpressionRef,
 	eq,
 	exists,
 	exprRef,
@@ -588,6 +589,27 @@ describe('default filters on unsupported read paths', () => {
 		);
 		expect(invalid.select('posts').withoutDefaultFilters().dump().sql).toBe(
 			'SELECT posts.* FROM posts',
+		);
+	});
+	it('AC-A2 / default filter at planning: refuses an expression object in a typed function argument (#1116)', () => {
+		// Bypass eager schema validation to exercise the planning-time defense.
+		const invalidSchema = schema(db.definition, undefined, {
+			defaultFilters: { posts: isNull('deletedAt') },
+		});
+		if (!invalidSchema.defaultFilters) throw new Error('Missing filters');
+		invalidSchema.defaultFilters.posts = new ExpressionRef({
+			kind: 'function',
+			name: 'upper',
+			args: [exprRef('title')],
+		} as never).eq('X');
+		const invalid = createOrm({
+			schema: invalidSchema,
+			adapter: createPgCompileOnlyAdapter(),
+		});
+		expect(() => invalid.select('posts').dump()).toThrowError(
+			new Error(
+				"Default filter for table 'posts' must reference only its own scan. Invalid typed function: an expression is not a typed function argument; build the call with fn(name, ...args)",
+			),
 		);
 	});
 	it('refuses invalid target filters before compiling an include scan', () => {

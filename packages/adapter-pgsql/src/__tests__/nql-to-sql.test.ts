@@ -10,25 +10,34 @@
  */
 
 import {
+	caseWhen,
 	createOrm,
+	ExpressionRef,
 	eq,
 	exists,
 	exprRef,
 	gt,
+	InvalidOperationError,
 	isDeleteIntent,
 	isInsertIntent,
 	isUpdateIntent,
 	isUpsertIntent,
+	literal,
 	NotYetSupportedError,
 	nqlRaw,
+	op,
 	outerRef,
 	POSTGRESQL_CAPABILITIES,
+	param,
 	plan,
 	type QueryIntent,
 	raw,
 	rawExists,
 	ref,
+	SubqueryExpression,
 	schema,
+	some,
+	sql,
 	subquery,
 } from '@dbsp/core';
 import { compile } from '@dbsp/nql';
@@ -38,7 +47,7 @@ import type {
 	SetOperationIntent,
 	UpsertFromIntent,
 } from '@dbsp/types';
-import { NQL_SELECT_SCALAR_FUNCTIONS } from '@dbsp/types';
+import { EXPRESSION_BRAND, NQL_SELECT_SCALAR_FUNCTIONS } from '@dbsp/types';
 import {
 	createNqlBindingRef,
 	NQL_SELECT_WINDOW_FUNCTIONS,
@@ -4015,5 +4024,375 @@ describe('NQL bundles without a model', () => {
 		).toBe(
 			'INSERT INTO users (id, name, score) SELECT imports.id AS id, imports.name AS name, imports.score AS score FROM imports ON CONFLICT (id) DO UPDATE SET name = excluded.name, score = excluded.score',
 		);
+	});
+});
+
+// A typed function intent ({ kind: 'function' }) takes NQL's argument forms;
+// a DX object among its arguments is refused by name in every position (#1116).
+describe('typed function intent arguments (#1116)', () => {
+	const db = schema({
+		users: { id: { type: 'integer', primaryKey: true }, name: 'text' },
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			title: 'text',
+			published: 'boolean',
+			score: 'integer',
+			user_id: ref('users', { as: 'author' }),
+		},
+	});
+	const orm = createOrm({
+		schema: db,
+		adapter: createPgCompileOnlyAdapter({ model: db.model }),
+		suppressDxWarnings: true,
+	});
+	const T = orm.tables;
+	const tf = (name: string, args: readonly unknown[] | undefined) =>
+		new ExpressionRef({ kind: 'function', name, args } as never);
+	const refusal = (kind: string) =>
+		new InvalidOperationError(
+			'typed function',
+			`${kind} is not a typed function argument; build the call with fn(name, ...args)`,
+		);
+	const originRefusal = new InvalidOperationError(
+		'typed function',
+		'a ref resolved from its origin is not a typed function argument; build the call with fn(name, ...args)',
+	);
+	const inColumns = (arg: unknown) => () =>
+		orm
+			.select('posts')
+			.columns([tf('coalesce', [arg]).as('v')])
+			.dump();
+	const dumped = (built: {
+		dump(): { sql: string; params: readonly unknown[] };
+	}) => {
+		const { sql, params } = built.dump();
+		return { sql, params };
+	};
+	const CASE = () =>
+		caseWhen(eq(T.posts.author.name, 'x'), literal(1)).else(literal(0));
+
+	it('AC-A1 / expression', () => {
+		expect(
+			inColumns(caseWhen(eq('published', true), literal(1)).else(literal(0))),
+		).toThrowError(refusal('an expression'));
+	});
+	it('AC-A1 / ColumnRef', () => {
+		expect(inColumns(T.posts.title)).toThrowError(refusal('a ColumnRef'));
+	});
+	it('AC-A1 / ColumnRef, relation-reached', () => {
+		expect(inColumns(T.posts.author.name)).toThrowError(refusal('a ColumnRef'));
+	});
+	it('AC-A1 / SubqueryExpression', () => {
+		expect(inColumns(subquery('posts').count())).toThrowError(
+			refusal('a SubqueryExpression'),
+		);
+	});
+	it('AC-A1 / query builder', () => {
+		expect(inColumns(subquery('posts').select('id'))).toThrowError(
+			refusal('a query builder'),
+		);
+	});
+	it('AC-A1 / select builder', () => {
+		expect(inColumns(orm.select('posts').count())).toThrowError(
+			refusal('a query builder'),
+		);
+	});
+	it('AC-A1 / ref', () => {
+		expect(inColumns(ref('users'))).toThrowError(refusal('ref()'));
+	});
+	it('AC-A1 / outerRef', () => {
+		expect(inColumns(outerRef('id'))).toThrowError(refusal('outerRef()'));
+	});
+	it('AC-A1 / sql', () => {
+		expect(inColumns(sql('1'))).toThrowError(refusal('a sql() marker'));
+	});
+	it('AC-A1 / second arg', () => {
+		expect(() =>
+			orm
+				.select('posts')
+				.columns([tf('coalesce', ['title', exprRef('title')]).as('v')])
+				.dump(),
+		).toThrowError(refusal('an expression'));
+	});
+	it('AC-A1 / branded spec', () => {
+		expect(
+			inColumns({
+				[EXPRESSION_BRAND]: true,
+				intent: { kind: 'ref', column: 'title' },
+			}),
+		).toThrowError(refusal('an expression'));
+	});
+	it('AC-A1 / other builder', () => {
+		expect(inColumns(orm.update('posts').set({ title: 'x' }))).toThrowError(
+			refusal('a query builder'),
+		);
+	});
+	it('AC-A1 / unfinished case', () => {
+		expect(inColumns(caseWhen(eq('published', true), literal(1)))).toThrowError(
+			refusal('an unfinished caseWhen()'),
+		);
+	});
+
+	it('AC-A2 / where', () => {
+		expect(() =>
+			orm
+				.select('posts')
+				.columns(['id'])
+				.where(op('=', tf('upper', [exprRef('title')]), param('X')))
+				.dump(),
+		).toThrowError(refusal('an expression'));
+	});
+	it('AC-A2 / set', () => {
+		expect(() =>
+			orm
+				.update('posts')
+				.set({ title: tf('upper', [T.posts.title]) })
+				.where(eq('id', 1))
+				.dump(),
+		).toThrowError(refusal('a ColumnRef'));
+	});
+	const body = () =>
+		orm
+			.select('posts')
+			.columns([tf('coalesce', [exprRef('title')]).as('v')])
+			.limit(1);
+	it('AC-A2 / set body', () => {
+		expect(() =>
+			orm
+				.update('posts')
+				.set({ title: body() as never })
+				.where(eq('id', 1))
+				.dump(),
+		).toThrowError(refusal('an expression'));
+	});
+	it('AC-A2 / values body', () => {
+		expect(() =>
+			orm
+				.insert('posts')
+				.values({ id: 1, title: body() as never })
+				.dump(),
+		).toThrowError(refusal('an expression'));
+	});
+	it('AC-A2 / body columns', () => {
+		expect(() =>
+			orm
+				.select('users')
+				.columns([
+					'id',
+					subquery('posts')
+						.select(tf('upper', [exprRef('title')]) as never)
+						.asExpr('v'),
+				])
+				.dump(),
+		).toThrowError(refusal('an expression'));
+	});
+	it('AC-A2 / local body', () => {
+		const local = new SubqueryExpression({
+			type: 'select',
+			from: 'recent',
+			select: {
+				type: 'expressions',
+				columns: [tf('coalesce', [exprRef('id')]).as('v').intent],
+			},
+			limit: 1,
+		} as never).asExpr('w');
+		expect(() =>
+			orm
+				.withCte('recent')
+				.fromUnnest({ id: [1, 2] })
+				.query(orm.select('posts').columns(['id', local]))
+				.dump(),
+		).toThrowError(refusal('an expression'));
+	});
+	it('AC-A2 / union arm', () => {
+		expect(() =>
+			orm
+				.select('posts')
+				.columns([tf('coalesce', [exprRef('title')]).as('v')])
+				.union(orm.select('posts').columns(['title']) as never)
+				.dump(),
+		).toThrowError(refusal('an expression'));
+	});
+	it('AC-A2 / comparison value', () => {
+		const comparison = new ExpressionRef({
+			kind: 'comparison',
+			column: 'title',
+			operator: '=',
+			value: { kind: 'function', name: 'upper', args: [T.posts.title] },
+		} as never);
+		expect(() =>
+			orm.select('posts').columns(['id']).where(comparison.eq(true)).dump(),
+		).toThrowError(refusal('a ColumnRef'));
+	});
+	it('AC-A2 / default filter', () => {
+		expect(() =>
+			schema(db.definition, undefined, {
+				defaultFilters: { posts: tf('upper', [exprRef('title')]).eq('X') },
+			}),
+		).toThrowError(
+			expect.objectContaining({
+				name: 'SchemaValidationError',
+				message:
+					"Default filter for table 'posts': Invalid typed function: an expression is not a typed function argument; build the call with fn(name, ...args)",
+			}),
+		);
+	});
+
+	it('AC-A3 / origin ref', () => {
+		expect(() =>
+			orm
+				.select('users')
+				.columns([
+					'id',
+					orm
+						.select('posts')
+						.columns([tf('coalesce', [CASE().intent]).as('v')])
+						.limit(1)
+						.asExpr('w'),
+				])
+				.dump(),
+		).toThrowError(originRefusal);
+	});
+	it('AC-A3 / resolver site', () => {
+		expect(() =>
+			orm
+				.select('users')
+				.columns([
+					'id',
+					orm
+						.select('posts')
+						.columns(['id'])
+						.where(op('=', tf('upper', [CASE().intent]), param('X')))
+						.limit(1)
+						.asExpr('w'),
+				])
+				.dump(),
+		).toThrowError(originRefusal);
+	});
+	it('AC-A3 / callback', () => {
+		expect(() =>
+			orm
+				.select('users')
+				.columns(['id'])
+				.where(
+					some(T.users.posts, (p) =>
+						tf('coalesce', [
+							caseWhen(eq(p.title!, 'x'), literal(1)).else(literal(0)).intent,
+						]).eq(1),
+					),
+				)
+				.dump(),
+		).toThrowError(originRefusal);
+	});
+
+	it('AC-A4 / root record', () => {
+		expect(
+			dumped(
+				orm.select('posts').columns([tf('coalesce', [CASE().intent]).as('v')]),
+			),
+		).toEqual({
+			sql: 'SELECT COALESCE(CASE WHEN EXISTS (SELECT 1 FROM users AS users_exists_0 WHERE posts.user_id = users_exists_0.id AND users_exists_0.name = $1) THEN $2 ELSE $3 END) AS v FROM posts',
+			params: ['x', 1, 0],
+		});
+	});
+	it('AC-A4 / plain args', () => {
+		expect(
+			dumped(orm.select('posts').columns([tf('coalesce', ['title']).as('v')])),
+		).toEqual({
+			sql: 'SELECT COALESCE(posts.title) AS v FROM posts',
+			params: [],
+		});
+		expect(
+			dumped(orm.select('posts').columns([tf('upper', ['title']).as('v')])),
+		).toEqual({ sql: 'SELECT upper(posts.title) AS v FROM posts', params: [] });
+		expect(
+			dumped(
+				orm
+					.select('posts')
+					.columns([tf('coalesce', [{ kind: 'literal', value: 'x' }]).as('v')]),
+			),
+		).toEqual({ sql: 'SELECT COALESCE($1) AS v FROM posts', params: ['x'] });
+	});
+	it('AC-A4 / data args', () => {
+		const stored = tf('coalesce', [exprRef('title')]).intent;
+		expect(
+			dumped(orm.select('posts').columns([tf('coalesce', [[stored]]).as('v')])),
+		).toEqual({
+			sql: 'SELECT COALESCE($1) AS v FROM posts',
+			params: [[stored]],
+		});
+		expect(
+			dumped(
+				orm.select('posts').columns([tf('coalesce', [{ a: stored }]).as('v')]),
+			),
+		).toEqual({
+			sql: 'SELECT COALESCE($1) AS v FROM posts',
+			params: [{ a: stored }],
+		});
+	});
+	it('AC-A4 / data args: a subquery or CASE stored in data stays bound', () => {
+		const storedBody = orm
+			.select('posts')
+			.columns([tf('coalesce', [exprRef('title')]).as('v')])
+			.limit(1)
+			.asExpr('w').intent;
+		const storedCase = caseWhen(
+			tf('upper', [exprRef('title')]).eq('X'),
+			literal(1),
+		).else(literal(0)).intent;
+		for (const stored of [storedBody, storedCase]) {
+			expect(
+				dumped(
+					orm.select('posts').columns([tf('coalesce', [[stored]]).as('v')]),
+				),
+			).toEqual({
+				sql: 'SELECT COALESCE($1) AS v FROM posts',
+				params: [[stored]],
+			});
+			expect(
+				dumped(
+					orm.select('posts').columns([tf('coalesce', [{ stored }]).as('v')]),
+				),
+			).toEqual({
+				sql: 'SELECT COALESCE($1) AS v FROM posts',
+				params: [{ stored }],
+			});
+		}
+	});
+	it('AC-A4 / param record', () => {
+		const title = exprRef('title');
+		expect(
+			dumped(
+				orm
+					.select('posts')
+					.columns([tf('coalesce', [{ kind: 'param', value: title }]).as('v')]),
+			),
+		).toEqual({ sql: 'SELECT COALESCE($1) AS v FROM posts', params: [title] });
+	});
+	it('AC-A4 / no args', () => {
+		expect(
+			dumped(orm.select('posts').columns([tf('upper', undefined).as('v')])),
+		).toEqual({ sql: 'SELECT upper() AS v FROM posts', params: [] });
+	});
+	it('AC-A4 / no args: an object args keeps the compiler error', () => {
+		const nested = {
+			nested: { kind: 'function', name: 'coalesce', args: [exprRef('title')] },
+		};
+		expect(() =>
+			orm
+				.select('posts')
+				.columns([tf('upper', nested as never).as('v')])
+				.dump(),
+		).toThrowError(new TypeError('args.map is not a function'));
+	});
+	it('AC-A4 / NQL', () => {
+		expect(
+			dumped(
+				orm.nql`posts | select coalesce(upper(title), ${'z'}) as d` as never,
+			),
+		).toEqual({
+			sql: 'SELECT COALESCE(upper(posts.title), $1) AS d FROM posts',
+			params: ['z'],
+		});
 	});
 });

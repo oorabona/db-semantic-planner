@@ -23,6 +23,21 @@ imported from `@dbsp/adapter-pgsql`.
 | `@dbsp/adapter-pgsql` | pgvector | `cosineDistance`, `rawDistance`, `l2Distance`, `innerProduct` |
 | `@dbsp/adapter-pgsql` | ParadeDB | `score`, `parse`, `boost`, `booleanSearch`, `bm25Search` |
 
+### How arguments are read
+
+Each helper reads its arguments with the same rule as the core helpers (ADR 0011):
+
+| Argument | Kind | A plain value | An expression (`literal()`, `exprRef()`, a `ColumnRef`, a subquery, a query builder) |
+|----------|------|---------------|-----------------------------------------------------------------------------------|
+| the vector of `cosineDistance`, `rawDistance`, `l2Distance`, `innerProduct` | value | bound as `CAST($N AS vector)` | compiled inside `CAST(… AS vector)` |
+| the query of `parse`, `bm25Search` | value | bound as `$N` (`bm25Search`: once per field) | compiled as the query |
+| the column of the distances and of `vectorDims`, the key field of `score`, the expression of `boost`, each element of `booleanSearch` | reference | a string is a column; a finite number or boolean is inlined | compiled (a `ColumnRef` gives its qualified column) |
+| the table of `bm25Search`, the field of `parse` | name | a string only | refused |
+
+`param(v)` always binds `v`. An argument a helper cannot use (`null` or `undefined` in a reference position, a plain
+object there, a `sql()` marker, an unfinished `caseWhen()`) is refused with an `InvalidOperationError` naming the
+helper.
+
 ---
 
 ## pgvector
@@ -58,11 +73,11 @@ const results = orm
   .limit(20)
   .dump();
 // SQL:
-//   SELECT 1 - ("embeddings"."vector" <=> $1::vector) AS "score", ...
-//   FROM "embeddings"
-//   INNER JOIN "symbols" ON ...
-//   WHERE 1 - ("embeddings"."vector" <=> $2::vector) >= $3
-//   ORDER BY "embeddings"."vector" <=> $4::vector ASC
+//   SELECT embeddings.*, 1 - (vector <=> CAST($1 AS vector)) AS score, ...
+//   FROM embeddings
+//   JOIN symbols AS symbol ON embeddings."symbolId" = symbol.id
+//   WHERE (1 - (embeddings.vector <=> CAST($2 AS vector))) >= $3
+//   ORDER BY vector <=> CAST($4 AS vector) ASC
 //   LIMIT 20
 ```
 
@@ -144,14 +159,14 @@ const results = orm
   .limit(50)
   .dump();
 // SQL:
-//   SELECT paradedb.score("id") AS "score", ...
-//   FROM "symbols"
-//   WHERE "symbols" @@@ paradedb.boolean(
-//     paradedb.boost(3.0, paradedb.parse('name', $1)),
-//     paradedb.boost(1.5, paradedb.parse('signature', $1)),
-//     paradedb.boost(1.0, paradedb.parse('doc_comment', $1))
-//   )
-//   ORDER BY paradedb.score("id") DESC
+//   SELECT paradedb.score(id) AS score
+//   FROM symbols
+//   WHERE symbols @@@ paradedb.boolean(should => ARRAY[
+//     paradedb.boost(3, paradedb.parse('name', $1)),
+//     paradedb.boost(1.5, paradedb.parse('signature', $2)),
+//     paradedb.boost(1, paradedb.parse('doc_comment', $3))
+//   ])
+//   ORDER BY paradedb.score(id) DESC
 //   LIMIT 50
 ```
 
@@ -159,15 +174,18 @@ const results = orm
 
 | Function | SQL output | Use case |
 |----------|------------|----------|
-| `score(keyField)` | `paradedb.score("keyField")` | Relevance score in SELECT / ORDER BY |
+| `score(keyField)` | `paradedb.score(keyField)` | Relevance score in SELECT / ORDER BY |
 | `bm25Search(table, query, fieldBoosts)` | `table @@@ paradedb.boolean(...)` | Multi-field BM25 with per-field weights |
 | `parse(field, query)` | `paradedb.parse(field => '...', query_string => $N)` | Single-field query sub-expression |
 | `boost(factor, expr)` | `paradedb.boost(factor, expr)` | Apply weight multiplier to sub-expression |
-| `booleanSearch(exprs[])` | `paradedb.boolean(expr1, expr2, ...)` | Combine sub-expressions with OR logic |
+| `booleanSearch(exprs[])` | `paradedb.boolean(should => ARRAY[expr1, expr2, ...])` | Combine sub-expressions with OR logic |
 
-**`bm25Search` query parameter sharing:** All `parse()` calls inside `bm25Search`
-reference the same `$N` slot. If you need different query strings per field, compose
-`parse()` / `boost()` / `booleanSearch()` manually.
+**`bm25Search` binds a plain query once per field** (`$1`, `$2`, … all equal); an expression query is compiled in
+every field. For different query strings per field, compose `parse()` / `boost()` / `booleanSearch()` manually.
+
+**`bm25Search` does not execute on pg_search 0.25.3:** its `paradedb.parse('<field>', <query>)` call is ambiguous
+there (#1119). Use core's [`fullTextSearch()`](./full-text-search), which emits the named
+`paradedb.parse(field => …, query_string => …)` form.
 
 ### DDL: BM25 Index
 

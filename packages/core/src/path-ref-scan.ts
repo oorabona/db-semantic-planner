@@ -63,11 +63,13 @@ function walk(
 	path: Set<object>,
 	matches: (node: Node) => boolean,
 	onHit: OnHit,
+	opaqueDataArgs = false,
 ): void {
 	if (!isObject(value) || path.has(value)) return;
 	path.add(value);
 	if (Array.isArray(value)) {
-		for (const child of items(value)) walk(child, inBody, path, matches, onHit);
+		for (const child of items(value))
+			walk(child, inBody, path, matches, onHit, opaqueDataArgs);
 		path.delete(value);
 		return;
 	}
@@ -86,8 +88,17 @@ function walk(
 		if (!('value' in descriptor) || !descriptor.enumerable) continue;
 		const child: unknown = descriptor.value;
 		if (key === 'defaultValue' || isPayload(kind, key, child)) continue;
+		// A typed function's array or plain-object argument is data its compiler
+		// binds or refuses whole: only its intent-record arguments are entered.
+		if (opaqueDataArgs && kind === 'function' && key === 'args') {
+			if (Array.isArray(child))
+				for (const arg of items(child))
+					if (isIntentRecord(arg))
+						walk(arg, inBody, path, matches, onHit, opaqueDataArgs);
+			continue;
+		}
 		if ((key === 'subquery' || key === 'query') && isObject(child))
-			walkQuery(child, true, path, matches, onHit);
+			walkQuery(child, true, path, matches, onHit, opaqueDataArgs);
 		else
 			walk(
 				child,
@@ -97,6 +108,7 @@ function walk(
 				path,
 				matches,
 				onHit,
+				opaqueDataArgs,
 			);
 	}
 	path.delete(value);
@@ -113,13 +125,16 @@ function walkQuery(
 	path: Set<object>,
 	matches: (node: Node) => boolean,
 	onHit: OnHit,
+	opaqueDataArgs = false,
 ): void {
 	if (path.has(query)) return;
 	path.add(query);
-	const visit = (child: unknown) => walk(child, inBody, path, matches, onHit);
+	const visit = (child: unknown) =>
+		walk(child, inBody, path, matches, onHit, opaqueDataArgs);
 	if (own(query, 'kind') === 'setOperation') {
 		for (const side of [own(query, 'left'), own(query, 'right')])
-			if (isObject(side)) walkQuery(side, inBody, path, matches, onHit);
+			if (isObject(side))
+				walkQuery(side, inBody, path, matches, onHit, opaqueDataArgs);
 		path.delete(query);
 		return;
 	}
@@ -160,6 +175,41 @@ function walkIncludes(
 		path.delete(include);
 	}
 	path.delete(includes);
+}
+
+/**
+ * An intent record: a plain object with a string `kind`, not an array.
+ *
+ * @internal
+ */
+export function isIntentRecord(value: unknown): boolean {
+	return (
+		isObject(value) &&
+		!Array.isArray(value) &&
+		typeof own(value, 'kind') === 'string'
+	);
+}
+
+/**
+ * Call `visit` with the `args` of every `{ kind: 'function' }` node (a typed
+ * function intent) reachable from `value`: a query (`isQuery`) through its
+ * condition-bearing roots, or a condition or expression root, every body below
+ * it included. A typed function's array or plain-object argument is not
+ * entered (its compiler binds or refuses it as data).
+ *
+ * @internal
+ */
+export function forEachTypedFunctionArgs(
+	value: unknown,
+	isQuery: boolean,
+	visit: (args: unknown) => void,
+): void {
+	const matches = (node: Node): boolean =>
+		own(node, 'kind') === 'function' && !(EXPRESSION_BRAND in node);
+	const onHit = (node: Node): void => visit(own(node, 'args'));
+	if (isQuery && isObject(value))
+		walkQuery(value, true, new Set(), matches, onHit, true);
+	else walk(value, true, new Set(), matches, onHit, true);
 }
 
 /** A marked filter leaf (a marked quantifier is left to the legacy route's rule). */

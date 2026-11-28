@@ -30,6 +30,11 @@ import {
 } from '@dbsp/types/internal';
 import { getDefaultFilter } from './default-filter-map.js';
 import {
+	refuseTypedFunctionArguments,
+	refuseTypedFunctionObjects,
+	refuseTypedFunctionOriginRef,
+} from './dx/coerce.js';
+import {
 	CALLBACK_SCOPE,
 	QUANTIFIER_SCOPE,
 	REWRITTEN_SUBQUERY,
@@ -359,6 +364,7 @@ export function resolveConditionContext(
 		readonly originRoot?: ResolvedRange;
 	},
 ): ResolvedCondition | undefined {
+	refuseTypedFunctionObjects(where, false);
 	const label = mode?.label ?? 'WHERE';
 	const labels = [label];
 	const currentLabel = (): string => labels[labels.length - 1]!;
@@ -1268,14 +1274,11 @@ export function resolveConditionContext(
 			case 'coalesce':
 				return { kind: 'call', name: 'coalesce', args: input.fields.map(ref) };
 			case 'function':
-				// A typed function binds its arguments as values (#1116): a ref
-				// resolved from its origin there would be bound, not compiled.
+				// A typed function takes NQL's argument forms (#1116): a DX object
+				// there is refused, and so is a ref resolved from its origin.
+				refuseTypedFunctionArguments(input.args);
 				if (containsOriginRefs(input.args, !atTopLevel()))
-					throw new NotYetSupportedError(
-						'a typed ref resolved from its origin',
-						'typed function argument',
-						1116,
-					);
+					refuseTypedFunctionOriginRef();
 				return {
 					kind: 'call',
 					name: input.name,

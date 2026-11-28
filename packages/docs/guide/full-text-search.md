@@ -379,6 +379,6 @@ Calling `textScore('id')` on a table without a BM25 index (or with a different
 
 `fullTextSearch` (from `@dbsp/core`) is the recommended high-level helper with named
 field structs and explicit boost values. The older `bm25Search` (from
-`@dbsp/adapter-pgsql`) accepts an object of `{ field: weight }` pairs and is
-suitable for simpler cases. Prefer `fullTextSearch` for new code — it is
-adapter-agnostic and lives in core.
+`@dbsp/adapter-pgsql`) accepts an object of `{ field: weight }` pairs, but on
+pg_search 0.25.3 its positional `paradedb.parse` call fails at execution (#1119).
+Prefer `fullTextSearch` for new code — it is adapter-agnostic and lives in core.

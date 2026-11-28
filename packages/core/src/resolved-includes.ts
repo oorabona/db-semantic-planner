@@ -25,9 +25,17 @@ import {
 } from '@dbsp/types/internal';
 import { singularize } from './conventions.js';
 import { getDefaultFilter } from './default-filter-map.js';
+import {
+	refuseTypedFunctionObjects,
+	refuseTypedFunctionOriginRef,
+} from './dx/coerce.js';
 import { relationJoinHops } from './dx/relation-join-path.js';
 import { isBoundPayload } from './intent-payload.js';
-import { containsOriginRefs, refuseLocalOriginRefs } from './path-ref-scan.js';
+import {
+	containsOriginRefs,
+	isIntentRecord,
+	refuseLocalOriginRefs,
+} from './path-ref-scan.js';
 import { getRelationalReadPolicy } from './relational-read-plans.js';
 import {
 	type HavingAggregate,
@@ -454,6 +462,9 @@ export function resolveReportIncludes(
 		options.skipRootDefaultFilter || intent.batchValuesSource
 			? undefined
 			: resolveScanDefaultFilter(options.defaultFilters, rootRange, model);
+	// After the root default filter, which the planned WHERE also holds: its
+	// refusal keeps that filter's envelope.
+	refuseTypedFunctionObjects(intent, true);
 	for (const name of options.whereReservedNames ?? []) allocator.reserve(name);
 	const rangesByPath = new Map<
 		string,
@@ -1245,17 +1256,13 @@ export function resolveReportIncludes(
 			inspected.delete(value);
 			return;
 		}
-		// A typed function binds its arguments as values (#1116): a ref resolved
-		// from its origin there would be bound, not compiled (#1014).
+		// A typed function's arguments are not resolved from an origin (#1116,
+		// #1014): a ref that would be is refused.
 		if (
 			node.kind === 'function' &&
 			containsOriginRefs(node.args, nested !== undefined)
 		)
-			throw new NotYetSupportedError(
-				'a typed ref resolved from its origin',
-				'typed function argument',
-				1116,
-			);
+			refuseTypedFunctionOriginRef();
 		const isCall =
 			node.kind === 'customFn' ||
 			node.kind === 'aggregate' ||
@@ -1264,6 +1271,22 @@ export function resolveReportIncludes(
 		if (isCall) callDepth++;
 		for (const [key, child] of Object.entries(node)) {
 			if (isBoundPayload(node, key, child)) continue;
+			// A typed function's arguments other than intent records are data its
+			// compiler binds or refuses whole (#1116): they are not entered.
+			if (node.kind === 'function' && key === 'args') {
+				if (Array.isArray(child))
+					child.forEach((arg, index) => {
+						if (isIntentRecord(arg))
+							inspect(
+								arg,
+								`${intentPath}.args[${index}]`,
+								condition,
+								inHaving,
+								underHaving,
+							);
+					});
+				continue;
+			}
 			// A CASE WHEN root is the condition of a CASE branch.
 			if (node.kind === 'case' && key === 'when' && Array.isArray(child)) {
 				child.forEach((branch, index) => {
