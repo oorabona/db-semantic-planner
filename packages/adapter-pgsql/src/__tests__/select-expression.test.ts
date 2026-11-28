@@ -616,7 +616,7 @@ describe('filter operands and object filters (ADR 0011 delivery 2)', () => {
 			)
 			.dump();
 		expect(sqlOf(dump)).toEqual([
-			'WITH chain AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT posts.id, (SELECT count(*) FROM chain AS chain WHERE id = posts.id) AS n FROM posts',
+			'WITH chain AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT posts.id, (SELECT count(*) FROM chain WHERE chain.id = posts.id) AS n FROM posts',
 			[[1, 2]],
 		]);
 	});
@@ -1684,22 +1684,21 @@ describe('subquery fields and selectExpression leaves (ADR 0011 delivery 6)', ()
 		);
 		const base = orm.select('posts').columns(['id', 'score']);
 		const tree = orm.recursive('tree', { base, step: base });
-		expect(() =>
-			tree.where(eq('id', subquery('tree').select(param(1)).build())).dump(),
-		).toThrow(
-			new NotYetSupportedError(
-				'expressions SELECT',
-				'scalar subquery body',
-				1087,
-			),
-		);
+		// A body on the recursive CTE is a nested select, as a body on a table.
+		const compared = tree
+			.where(eq('id', subquery('tree').select(param(1)).build()))
+			.dump();
+		expect({ sql: compared.sql, params: compared.params }).toEqual({
+			sql: 'WITH RECURSIVE tree AS (SELECT posts.id, posts.score FROM posts UNION ALL SELECT posts.id, posts.score FROM posts) SELECT tree.* FROM tree WHERE tree.id = (SELECT $1 FROM tree AS tree_1)',
+			params: [1],
+		});
 		expect(
 			orm
 				.recursive('tree', { base, step: base })
 				.where(eq('id', subquery('tree').select('id').build()))
 				.dump().sql,
 		).toBe(
-			'WITH RECURSIVE tree AS (SELECT posts.id, posts.score FROM posts UNION ALL SELECT posts.id, posts.score FROM posts) SELECT tree.* FROM tree WHERE tree.id = (SELECT tree_sq.id FROM tree AS tree_sq)',
+			'WITH RECURSIVE tree AS (SELECT posts.id, posts.score FROM posts UNION ALL SELECT posts.id, posts.score FROM posts) SELECT tree.* FROM tree WHERE tree.id = (SELECT tree_1.id FROM tree AS tree_1)',
 		);
 	});
 

@@ -1,4 +1,4 @@
-import { createOrm, isNull, schema } from '@dbsp/core';
+import { createOrm, isNull, ref, schema } from '@dbsp/core';
 import { compile } from '@dbsp/nql';
 import type {
 	ColumnJsReadType,
@@ -456,11 +456,11 @@ describe('NQL bind CTE identifier injection defense', () => {
 			}),
 		).toEqual([
 			{
-				sql: 'WITH recent_items AS (SELECT items.id FROM tenant_1.items) SELECT items.id, (SELECT count(*) AS total FROM recent_items AS recent_items) AS recent_count FROM tenant_1.items',
+				sql: 'WITH recent_items AS (SELECT items.id FROM tenant_1.items) SELECT items.id, (SELECT count(*) AS total FROM recent_items) AS recent_count FROM tenant_1.items',
 				params: [],
 			},
 			{
-				sql: 'WITH recent_items AS (SELECT items.id FROM tenant_1.items WHERE items.name IS NULL) SELECT items.id, (SELECT count(*) AS total FROM recent_items AS recent_items) AS recent_count FROM tenant_1.items WHERE items.name IS NULL',
+				sql: 'WITH recent_items AS (SELECT items.id FROM tenant_1.items WHERE items.name IS NULL) SELECT items.id, (SELECT count(*) AS total FROM recent_items) AS recent_count FROM tenant_1.items WHERE items.name IS NULL',
 				params: [],
 			},
 		]);
@@ -506,11 +506,11 @@ describe('NQL bind CTE identifier injection defense', () => {
 			}),
 		).toEqual([
 			{
-				sql: 'WITH items AS (SELECT items.id FROM items) SELECT (SELECT items.* FROM items AS items) AS v FROM posts',
+				sql: 'WITH items AS (SELECT items.id FROM items) SELECT (SELECT items.* FROM items) AS v FROM posts',
 				params: [],
 			},
 			{
-				sql: 'WITH items AS (SELECT items.id FROM items) SELECT (SELECT items.* FROM items AS items) AS v FROM posts WHERE posts.title IS NULL',
+				sql: 'WITH items AS (SELECT items.id FROM items) SELECT (SELECT items.* FROM items) AS v FROM posts WHERE posts.title IS NULL',
 				params: [],
 			},
 		]);
@@ -1708,7 +1708,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 	});
 });
 
-describe('orm.nql keeps a scalar body on a binding on the adapter route (#891 slice 5b, R7)', () => {
+describe('orm.nql plans a scalar body on a binding like a body on a table (#1040)', () => {
 	const tables = {
 		items: { id: { type: 'integer', primaryKey: true }, name: 'string' },
 		posts: { id: { type: 'integer', primaryKey: true }, title: 'string' },
@@ -1732,8 +1732,8 @@ describe('orm.nql keeps a scalar body on a binding on the adapter route (#891 sl
 items | select id, (recent_items | select count() as total) as recent_count`;
 		expect(query.dump().sql).toBe(
 			name === 'plain'
-				? 'WITH recent_items AS (SELECT items.id FROM items) SELECT items.id, (SELECT count(*) AS total FROM recent_items AS recent_items) AS recent_count FROM items'
-				: 'WITH recent_items AS (SELECT items.id FROM items WHERE items.name IS NULL) SELECT items.id, (SELECT count(*) AS total FROM recent_items AS recent_items) AS recent_count FROM items WHERE items.name IS NULL',
+				? 'WITH recent_items AS (SELECT items.id FROM items) SELECT items.id, (SELECT count(*) AS total FROM recent_items) AS recent_count FROM items'
+				: 'WITH recent_items AS (SELECT items.id FROM items WHERE items.name IS NULL) SELECT items.id, (SELECT count(*) AS total FROM recent_items) AS recent_count FROM items WHERE items.name IS NULL',
 		);
 		expect(query.plan().execution).toBeDefined();
 	});
@@ -1742,9 +1742,91 @@ items | select id, (recent_items | select count() as total) as recent_count`;
 posts | select (items | select *) as v`;
 		expect(query.dump().sql).toBe(
 			name === 'plain'
-				? 'WITH items AS (SELECT items.id FROM items) SELECT (SELECT items.* FROM items AS items) AS v FROM posts'
-				: 'WITH items AS (SELECT items.id FROM items WHERE items.name IS NULL) SELECT (SELECT items.* FROM items AS items) AS v FROM posts WHERE posts.title IS NULL',
+				? 'WITH items AS (SELECT items.id FROM items) SELECT (SELECT items.* FROM items) AS v FROM posts'
+				: 'WITH items AS (SELECT items.id FROM items WHERE items.name IS NULL) SELECT (SELECT items.* FROM items) AS v FROM posts WHERE posts.title IS NULL',
 		);
 		expect(query.plan().execution).toBeDefined();
+	});
+});
+
+describe('scalar bodies on NQL bindings and with CTEs are nested selects (#1040)', () => {
+	const cols = {
+		id: { type: 'integer', primaryKey: true },
+		name: { type: 'text' },
+		score: { type: 'integer' },
+	} as const;
+	const db = schema({
+		users: cols,
+		posts: {
+			...cols,
+			authorId: ref('users', { as: 'author', inverse: 'posts' }),
+		},
+	});
+	const orm = createOrm({
+		schema: db,
+		adapter: createPgCompileOnlyAdapter({ model: db.model }),
+		suppressDxWarnings: true,
+	});
+	const out = (q: ReturnType<typeof orm.nql>) => {
+		const { sql, params } = q.dump() as {
+			sql: string;
+			params: readonly unknown[];
+		};
+		return { sql, params };
+	};
+
+	it('AC2 bind body WHERE (N1)', () => {
+		expect(
+			out(orm.nql`users | bind b
+posts | select id, (b | where score > 1 | select count(*)) as n`),
+		).toEqual({
+			sql: 'WITH b AS (SELECT users.* FROM users) SELECT posts.id, (SELECT count(*) FROM b WHERE b.score > $1) AS n FROM posts',
+			params: [1],
+		});
+	});
+
+	it('AC2 bind body CASE (N4)', () => {
+		expect(
+			out(orm.nql`users | select id | bind b
+posts | select (b | select case when id = 1 then 1 else 0 end as c | limit 1) as v`),
+		).toEqual({
+			sql: 'WITH b AS (SELECT users.id FROM users) SELECT (SELECT CASE WHEN b.id = $1 THEN 1 ELSE 0 END AS c FROM b LIMIT 1) AS v FROM posts',
+			params: [1],
+		});
+	});
+
+	it('AC2 with CTE body (N7)', () => {
+		expect(
+			out(
+				orm.nql`with e as (users | select id) posts | select id, (e | select count(*)) as n`,
+			),
+		).toEqual({
+			sql: 'WITH e AS (SELECT users.id FROM users) SELECT posts.id, (SELECT count(*) FROM e) AS n FROM posts',
+			params: [],
+		});
+	});
+
+	it('AC5 a star over a local source is left to PostgreSQL (N3, W1)', () => {
+		expect(
+			[
+				orm.nql`users | select id, name | bind b
+posts | select (b | select *) as v`,
+				orm.nql`with b as (users | select 1 | limit 1) users | select (b | select *) as v`,
+			].map((q) => out(q).sql),
+		).toEqual([
+			'WITH b AS (SELECT users.id, users.name FROM users) SELECT (SELECT b.* FROM b) AS v FROM posts',
+			'WITH b AS (SELECT 1 FROM users LIMIT 1) SELECT (SELECT b.* FROM b) AS v FROM users',
+		]);
+	});
+
+	it('AC4 a body alias skips a local source name (R6S5)', () => {
+		expect(
+			out(
+				orm.nql`with recent as (users | select id), recent_1 as (users | select id) recent | select id, (recent | where id > 0 | select count(*)) as n`,
+			),
+		).toEqual({
+			sql: 'WITH recent AS (SELECT users.id FROM users), recent_1 AS (SELECT users.id FROM users) SELECT recent.id, (SELECT count(*) FROM recent AS recent_2 WHERE recent_2.id > $1) AS n FROM recent',
+			params: [0],
+		});
 	});
 });

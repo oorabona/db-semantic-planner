@@ -58,10 +58,10 @@ import {
 	localSourcePredicate,
 	type QueryScope,
 	queryScope,
+	type RelationBinding,
 	relationBinding,
 	relationBindingFor,
 } from './binding-registry.js';
-import { truncateIdentifier } from './column-metadata.js';
 import {
 	buildSubqueryFromIntent,
 	compileCondition,
@@ -102,10 +102,7 @@ import {
 } from './handlers/types.js';
 import { buildKeyCorrelation } from './handlers/where/exists.js';
 import { buildColumnRef, compileValue } from './handlers/where/utils.js';
-import {
-	convertWhereCondition,
-	intentToDecisions,
-} from './intent-to-decisions.js';
+import { convertWhereCondition } from './intent-to-decisions.js';
 import { unwrapParamIntent } from './param-intent.js';
 import { createParamRef } from './param-ref.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
@@ -408,10 +405,8 @@ export interface SimplifiedPlanReport {
 	/** Legacy SELECT-expression / NQL body predicate (HAVING, CASE and FILTER still use it); issued root WHERE uses resolvedWhere. */
 	readonly rawWhere?: WhereIntent;
 	readonly resolvedWhere?: import('@dbsp/types').ResolvedCondition;
-	/** Core recorded every HAVING, CASE WHEN and FILTER root (resolved or local). */
+	/** Core resolved every HAVING, CASE WHEN and FILTER root. */
 	readonly rootsResolved?: boolean;
-	/** Condition roots core left to the local route because they hold a query-local body. */
-	readonly localConditions?: readonly WhereIntent[];
 	readonly expressionConditions?: readonly {
 		readonly intent: WhereIntent;
 		readonly condition: import('@dbsp/types').ResolvedCondition;
@@ -508,8 +503,6 @@ export interface CompilerOptions {
 	readonly relationTargetProjections?: RelationTargetProjectionRegistry;
 	/** Compiles a scalar subquery body that core resolved as a nested select. */
 	readonly compileNestedSelect?: NestedSelectCompiler;
-	/** The compiler of a query-local-source body: bodies below it keep its route. */
-	readonly localSubtree?: boolean;
 }
 
 export class PlanCompiler {
@@ -526,7 +519,6 @@ export class PlanCompiler {
 		| RelationTargetProjectionRegistry
 		| undefined;
 	private readonly nestedSelectCompiler: NestedSelectCompiler | undefined;
-	private readonly localSubtree: boolean;
 	/** Mutable state shared with extracted condition/value compilation functions */
 	private state: HandlerCompilerState = {
 		parameters: [],
@@ -593,39 +585,6 @@ export class PlanCompiler {
 		this.scope = options.scope;
 		this.relationTargetProjections = options.relationTargetProjections;
 		this.nestedSelectCompiler = options.compileNestedSelect;
-		this.localSubtree = options.localSubtree === true;
-	}
-
-	private childCompilerOptions(
-		overrides: CompilerOptions = {},
-	): CompilerOptions {
-		return {
-			...(this.declaredNames !== undefined && {
-				declaredNames: this.declaredNames,
-			}),
-			dbCasing: this.dbCasing,
-			...(this.schema !== undefined && { schema: this.schema }),
-			defaultPkColumnName: this.defaultPk,
-			deriveFkColumnName: this.deriveFk,
-			...(this.model !== undefined && { model: this.model }),
-			...(this.dialectCapabilities !== undefined && {
-				dialectCapabilities: this.dialectCapabilities,
-			}),
-			...(this.bindingNames !== undefined && {
-				bindingNames: this.bindingNames,
-			}),
-			...(this.scope !== undefined && {
-				scope: queryScope([...this.scope.bindings.values()]),
-			}),
-			...(this.relationTargetProjections !== undefined && {
-				relationTargetProjections: this.relationTargetProjections,
-			}),
-			...(this.nestedSelectCompiler !== undefined && {
-				compileNestedSelect: this.nestedSelectCompiler,
-			}),
-			...(this.localSubtree && { localSubtree: true }),
-			...overrides,
-		};
 	}
 
 	/** Build immutable context for handler-based WHERE compilation */
@@ -639,6 +598,16 @@ export class PlanCompiler {
 				)
 			)?.bindings.values() ?? []),
 		];
+		const localRootAlias =
+			this.currentRootAlias !== undefined &&
+			this.isQueryLocalSource(this.currentRootTable)
+				? localAliasBinding(
+						bindings,
+						this.currentRootTable,
+						this.currentRootAlias,
+					)
+				: undefined;
+		if (localRootAlias) bindings.push(localRootAlias);
 		if (
 			this.currentRootTable.length > 0 &&
 			relationBindingFor(this.scope, queryLocal(this.currentRootTable)) ===
@@ -970,7 +939,6 @@ export class PlanCompiler {
 	private readonly conditionIndexCache = new WeakMap<
 		SimplifiedPlanReport,
 		{
-			readonly localConditions?: ReadonlySet<WhereIntent>;
 			readonly resolvedConditions?: ReadonlyMap<
 				WhereIntent,
 				import('@dbsp/types').ResolvedCondition
@@ -982,9 +950,6 @@ export class PlanCompiler {
 		const cached = this.conditionIndexCache.get(plan);
 		if (cached) return cached;
 		const indexes = {
-			...(plan.localConditions && {
-				localConditions: new Set(plan.localConditions),
-			}),
 			...(plan.expressionConditions && {
 				resolvedConditions: new Map(
 					plan.expressionConditions.map((entry) => [
@@ -1024,6 +989,18 @@ export class PlanCompiler {
 		const declaredRoot = plan.rootAlias
 			? queryLocal(plan.rootAlias)
 			: this.tableIdentifier(plan.rootTable);
+		// A body on a query-local source emitted under an alias reads the source's
+		// outputs through that alias, a range, never a source a FROM could name.
+		const localRoot =
+			plan.rootAlias !== undefined &&
+			!boundQualifiers.has(declaredRoot) &&
+			this.isQueryLocalSource(plan.rootTable)
+				? localAliasBinding(bindings, plan.rootTable, plan.rootAlias)
+				: undefined;
+		if (localRoot) {
+			bindings.push(localRoot);
+			boundQualifiers.add(declaredRoot);
+		}
 		if (
 			!boundQualifiers.has(declaredRoot) &&
 			declaredRelationBindingFor(this.scope, plan.rootTable) === undefined
@@ -1658,50 +1635,10 @@ export class PlanCompiler {
 				parameters: compiled.parameters,
 			};
 		}
-		// With a model, core resolves every body except one on a query-local
-		// source and the bodies below it, which keep this compiler's route.
-		if (
-			this.model !== undefined &&
-			parentPlan.directConditions &&
-			!this.localSubtree &&
-			!this.isQueryLocalSource(query.from)
-		)
-			throw new Error(
-				'An expression subquery reached the adapter without its nested select.',
-			);
-		const parent = parentContext ?? this.createHandlerContext(parentPlan);
-		const enclosingRanges = [
-			parent.queryRanges ?? [],
-			...(parent.enclosingRanges ?? []),
-		];
-		const reserved = new Set(
-			enclosingRanges
-				.flat()
-				.map((binding) => identifierText(binding.qualifier)),
+		// Core plans every expression subquery body as a nested select.
+		throw new Error(
+			'An expression subquery reached the adapter without its nested select.',
 		);
-		let rootAlias: string = this.tableIdentifier(query.from);
-		for (let i = 0; reserved.has(rootAlias); i++) {
-			const suffix = i === 0 ? '_sq' : `_sq_${i}`;
-			rootAlias = `${truncateIdentifier(query.from, 63 - suffix.length)}${suffix}`;
-		}
-		const innerCompiler = new PlanCompiler(
-			this.childCompilerOptions({ localSubtree: true }),
-		);
-		const innerPlan: SimplifiedPlanReport = {
-			rootTable: query.from,
-			decisions: intentToDecisions(query, query.from, {
-				omitRootWhere: true,
-				directConditions: true,
-			}),
-			directConditions: true,
-			rootAlias,
-			enclosingRanges,
-			...(query.where && { rawWhere: query.where }),
-			...(query.having && { rawHaving: query.having }),
-		};
-		const innerResult = innerCompiler.compile(innerPlan);
-		const renumbered = renumberParamRefsInAst(innerResult.ast, paramOffset);
-		return { ast: renumbered, parameters: innerResult.parameters };
 	}
 
 	private compileGenericNqlFunction(
@@ -2060,7 +1997,10 @@ export class PlanCompiler {
 								? expressionUnqualifiedColumnRef(decision.column, ctx)
 								: expressionQualifiedColumnRef(
 										decision.column,
-										decision.table,
+										decision.table === plan.rootTable &&
+											plan.rootAlias !== undefined
+											? plan.rootAlias
+											: decision.table,
 										ctx,
 									),
 							decision.alias === undefined
@@ -3215,4 +3155,27 @@ export function compilePlan(
 ): CompiledResult {
 	const compiler = new PlanCompiler(options);
 	return compiler.compile(plan);
+}
+
+/**
+ * The range binding of a body on a query-local source emitted under `alias`:
+ * the source's outputs, bound as a join alias so that a FROM naming a source
+ * never resolves to it.
+ */
+function localAliasBinding(
+	bindings: readonly RelationBinding[],
+	source: string,
+	alias: string,
+): RelationBinding | undefined {
+	if (bindings.some((binding) => identifierText(binding.qualifier) === alias))
+		return undefined;
+	const local = bindings.find(
+		(binding) => identifierText(binding.qualifier) === source,
+	);
+	if (local === undefined) return undefined;
+	return relationBinding({
+		qualifier: queryLocal(alias),
+		kind: 'join-alias',
+		...(local.outputs !== undefined && { outputs: local.outputs }),
+	});
 }

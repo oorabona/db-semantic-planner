@@ -27,8 +27,7 @@ import { singularize } from './conventions.js';
 import { getDefaultFilter } from './default-filter-map.js';
 import { relationJoinHops } from './dx/relation-join-path.js';
 import { isBoundPayload } from './intent-payload.js';
-import { containsOriginRefs, refuseLocalOriginRefs } from './path-ref-scan.js';
-import { getRelationalReadPolicy } from './relational-read-plans.js';
+import { containsOriginRefs } from './path-ref-scan.js';
 import {
 	type HavingAggregate,
 	type OriginFrame,
@@ -36,7 +35,7 @@ import {
 	resolveScanDefaultFilter,
 	type UnreadableRange,
 } from './resolved-conditions.js';
-import { classifyScalarBody, nextSelectBody } from './scalar-body.js';
+import { nextSelectBody } from './scalar-body.js';
 
 /** An outerRef() operand: a SubqueryRefIntent or an outer FieldRef. */
 function isOuterRef(value: unknown): boolean {
@@ -62,32 +61,6 @@ function holdsOuterRef(value: unknown): boolean {
 		([key, child]) =>
 			isOuterRef(child) ||
 			(!isBoundPayload(node, key, child) && holdsOuterRef(child)),
-	);
-}
-
-/** A qualified outerRef() anywhere below, nested query bodies included. */
-function holdsQualifiedOuterRef(
-	value: unknown,
-	seen = new Set<object>(),
-): boolean {
-	if (!value || typeof value !== 'object' || isParamIntent(value)) return false;
-	if (seen.has(value)) return false;
-	seen.add(value);
-	if (Array.isArray(value))
-		return value.some((item) => holdsQualifiedOuterRef(item, seen));
-	if (isOuterRef(value)) {
-		const ref = value as { column?: unknown; alias?: unknown };
-		return (
-			Boolean(ref.alias) ||
-			(typeof ref.column === 'string' && ref.column.includes('.'))
-		);
-	}
-	const node = value as Record<string, unknown>;
-	if (node.kind === 'literal' || node.kind === 'param') return false;
-	return dataEntries(node).some(
-		([key, child]) =>
-			(isOuterRef(child) || !isBoundPayload(node, key, child)) &&
-			holdsQualifiedOuterRef(child, seen),
 	);
 }
 
@@ -431,7 +404,15 @@ export function resolveReportIncludes(
 	const allocator = nested?.allocator ?? new RangeAllocator();
 	// A body's range is generated in its own SQL scope, after every enclosing
 	// alias and every earlier body alias was reserved.
-	const body = nested && nextSelectBody(allocator, intent.from);
+	const body =
+		nested &&
+		nextSelectBody(
+			allocator,
+			intent.from,
+			(name) =>
+				model?.getTable(name) !== undefined ||
+				options.isLocalSource?.(name) === true,
+		);
 	const rootRange = body
 		? allocator.allocate(intent.from, body.alias, body.scope)
 		: allocator.bind(intent.from, intent.from);
@@ -453,7 +434,12 @@ export function resolveReportIncludes(
 	const rootDefaultFilter =
 		options.skipRootDefaultFilter || intent.batchValuesSource
 			? undefined
-			: resolveScanDefaultFilter(options.defaultFilters, rootRange, model);
+			: resolveScanDefaultFilter(
+					options.defaultFilters,
+					rootRange,
+					model,
+					options.isLocalSource,
+				);
 	for (const name of options.whereReservedNames ?? []) allocator.reserve(name);
 	const rangesByPath = new Map<
 		string,
@@ -550,7 +536,12 @@ export function resolveReportIncludes(
 				visibleJoinRanges.push(range);
 				const defaultFilter = join.batchValues
 					? undefined
-					: resolveScanDefaultFilter(options.defaultFilters, range, model);
+					: resolveScanDefaultFilter(
+							options.defaultFilters,
+							range,
+							model,
+							options.isLocalSource,
+						);
 				const on = resolveConditionContext(
 					join.on,
 					rootRange,
@@ -873,6 +864,7 @@ export function resolveReportIncludes(
 					options.defaultFilters,
 					node.targetRange,
 					model,
+					options.isLocalSource,
 				);
 			const stepDefaultFilter =
 				recursiveRanges &&
@@ -880,6 +872,7 @@ export function resolveReportIncludes(
 					options.defaultFilters,
 					recursiveRanges.next,
 					model,
+					options.isLocalSource,
 				);
 			return {
 				...node,
@@ -897,6 +890,7 @@ export function resolveReportIncludes(
 							options.defaultFilters,
 							node.targetRange,
 							model,
+							options.isLocalSource,
 						);
 					return defaultFilter ? { defaultFilter } : {};
 				})(),
@@ -1003,58 +997,6 @@ export function resolveReportIncludes(
 				(range) => range.alias === qualifier || range.table === qualifier,
 			);
 		});
-	const localConditions: { intentPath: string }[] = [];
-	/**
-	 * Whether a condition root holds an expression subquery on a query-local
-	 * source. Decided before any resolution, so it allocates and plans nothing and
-	 * does not depend on operand order. It walks query structure only (bound
-	 * payloads, literals and parameters are data), and below a query carrying an
-	 * issued read policy it classifies with that policy's filters, an explicit
-	 * disable included, as the resolver does.
-	 */
-	const holdsLocalBody = (start: unknown): boolean => {
-		if (!model) return false;
-		const seen = new Set<object>();
-		const visit = (
-			value: unknown,
-			filters: typeof options.defaultFilters,
-		): boolean => {
-			if (!value || typeof value !== 'object' || isParamIntent(value))
-				return false;
-			if (seen.has(value)) return false;
-			seen.add(value);
-			if (Array.isArray(value))
-				return value.some((child) => visit(child, filters));
-			const node = value as Record<string, unknown>;
-			if (
-				node.kind === 'literal' ||
-				node.kind === 'param' ||
-				node.kind === 'parameter'
-			)
-				return false;
-			if (
-				node.kind === 'subquery' &&
-				node.query &&
-				classifyScalarBody(
-					node.query as QueryIntent,
-					model,
-					filters,
-					options.isLocalSource,
-				) === 'local'
-			)
-				return true;
-			const policy =
-				typeof node.from === 'string'
-					? getRelationalReadPolicy(value as QueryIntent)
-					: undefined;
-			const below = policy ? policy.filters : filters;
-			return Object.entries(node).some(
-				([key, child]) =>
-					!isBoundPayload(node, key, child) && visit(child, below),
-			);
-		};
-		return visit(start, options.defaultFilters);
-	};
 	let callDepth = 0;
 	const inspect = (
 		value: unknown,
@@ -1125,34 +1067,11 @@ export function resolveReportIncludes(
 			throw new Error(
 				`Default filter for table '${rootRange.table}' is not supported at expression.pseudoColumn.`,
 			);
-		// With a model, every body is a nested select, except one on a visible
-		// query-local source, which keeps the adapter's route with its subtree.
+		// With a model, every body is a nested select, on a model table or on a
+		// visible query-local source.
 		if (node.kind === 'subquery' && node.query) {
 			const query = node.query as QueryIntent;
 			if (!model) return;
-			if (
-				classifyScalarBody(
-					query,
-					model,
-					options.defaultFilters,
-					options.isLocalSource,
-				) === 'local'
-			) {
-				// Below a nested select, the adapter's route for a local body does
-				// not see the names written in enclosing scopes: a qualified
-				// outerRef() there is not realised yet.
-				if (nested && holdsQualifiedOuterRef(query))
-					throw new NotYetSupportedError(
-						'a qualified outerRef()',
-						'local-source subquery body',
-						1040,
-					);
-				// The adapter's reduced route compiles this body: what it cannot resolve
-				// from an origin stays refused (#1040).
-				refuseLocalOriginRefs(query, true);
-				inspected.delete(value);
-				return;
-			}
 			const resolved = resolveConditionContext(
 				{ kind: 'expression', expr: { kind: 'subquery', query } },
 				rootRange,
@@ -1181,9 +1100,7 @@ export function resolveReportIncludes(
 			inspected.delete(value);
 			return;
 		}
-		// With a model, a condition root resolves whole, unless it holds a body on a
-		// query-local source: that root keeps the adapter's local route (#1040).
-		const localRoot = condition !== undefined && root && holdsLocalBody(node);
+		// With a model, a condition root resolves whole.
 		const relationSensitive =
 			[
 				'exists',
@@ -1198,7 +1115,7 @@ export function resolveReportIncludes(
 		if (
 			condition &&
 			((relationSensitive && model) ||
-				(model !== undefined && root && !localRoot) ||
+				(model !== undefined && root) ||
 				(inHaving && namesAlias(node)) ||
 				// In a body, every condition correlated by outerRef() (HAVING,
 				// CASE WHEN, FILTER, in any clause) is bound by core, the one
@@ -1232,12 +1149,6 @@ export function resolveReportIncludes(
 			expressionConditions.push({ intentPath, condition: resolved });
 			inspected.delete(value);
 			return;
-		}
-		// Not resolved by another trigger: the root keeps the local route, recorded
-		// once, so localConditions and expressionConditions stay disjoint.
-		if (localRoot) {
-			refuseLocalOriginRefs(node, false);
-			localConditions.push({ intentPath });
 		}
 		// A body left unresolved (no model) stays the adapter's: HAVING's aliases and
 		// the outer ranges do not reach into it.
@@ -1311,7 +1222,6 @@ export function resolveReportIncludes(
 			...(where && { where }),
 			...(expressionSubqueries.length && { expressionSubqueries }),
 			...(expressionConditions.length && { expressionConditions }),
-			...(localConditions.length && { localConditions }),
 			...(model !== undefined && { rootsResolved: true as const }),
 		},
 		intent: executable,

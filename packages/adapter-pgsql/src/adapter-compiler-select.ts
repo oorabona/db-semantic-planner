@@ -31,6 +31,7 @@ import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { andExpr, funcCall, sqlRangeVar } from './ast-helpers.js';
 import {
 	declaredRelationBindingFor,
+	localSourcePredicate,
 	queryScope,
 	relationBinding,
 	relationBindingFor,
@@ -1125,13 +1126,6 @@ export function compileSelectEnvelope<T = unknown>(
 		compileNestedSelect: nestedSelectCompiler(options, deps),
 	};
 
-	const localConditions = plan.execution?.localConditions?.map(
-		(entry) =>
-			planningNodeAtPath(
-				plan.executableIntent ?? plan.intent,
-				entry.intentPath,
-			) as import('@dbsp/types').WhereIntent,
-	);
 	const rootsResolved = plan.execution?.rootsResolved === true;
 	const expressionConditions = plan.execution?.expressionConditions?.map(
 		(entry) => ({
@@ -1247,7 +1241,6 @@ export function compileSelectEnvelope<T = unknown>(
 						directConditions: true,
 						...(plan.execution !== undefined && { resolvedExecution: true }),
 						...(expressionConditions && { expressionConditions }),
-						...(localConditions && { localConditions }),
 						...(rootsResolved && { rootsResolved: true }),
 						...(plan.execution?.expressionSubqueries && {
 							expressionSubqueries: bindExpressionSubqueries(
@@ -1335,7 +1328,6 @@ export function compileSelectEnvelope<T = unknown>(
 			directConditions: true,
 			...(plan.execution !== undefined && { resolvedExecution: true }),
 			...(expressionConditions && { expressionConditions }),
-			...(localConditions && { localConditions }),
 			...(rootsResolved && { rootsResolved: true }),
 			...(plan.execution?.expressionSubqueries && {
 				expressionSubqueries: bindExpressionSubqueries(
@@ -1361,7 +1353,13 @@ export function compileSelectEnvelope<T = unknown>(
 
 	const result = compilePlan(simplifiedPlan, compilerOptions);
 	if (nested)
-		assertScalarBodyArity(result.ast, plan.rootTable, resolvedModelForCompiler);
+		assertScalarBodyArity(
+			result.ast,
+			localSourcePredicate(deps.bindingNames, deps.scope)(plan.rootTable)
+				? undefined
+				: (resolvedModelForCompiler?.getTable(plan.rootTable)?.columns.length ??
+						1),
+		);
 	const baseEnv = fromAstProjection<T>({
 		sql: result.sql,
 		parameters: result.parameters,
@@ -1472,7 +1470,8 @@ export function nestedSelectCompiler(
 		// The body's own root, which a condition body inside it may correlate to.
 		enclosingQualifiers.set(
 			range.alias,
-			range.alias !== range.table
+			range.alias !== range.table ||
+				localSourcePredicate(deps.bindingNames, deps.scope)(range.table)
 				? range.alias
 				: identifierText(
 						resolveDeclaredIdentifier(
@@ -1484,8 +1483,8 @@ export function nestedSelectCompiler(
 		);
 		// Core binds every outerRef of the body itself (WHERE, and each HAVING,
 		// CASE WHEN or FILTER condition that holds one). These scopes, core's,
-		// serve a body below it that keeps the adapter's route (a query-local
-		// source); a binding the parent already established is reused.
+		// serve the reduced condition bodies below it (rawExists, IN); a binding
+		// the parent already established is reused.
 		const known = [
 			...(parent.queryRanges ?? []),
 			...(parent.enclosingRanges ?? []).flat(),
@@ -1537,28 +1536,29 @@ export function nestedSelectCompiler(
 
 /**
  * A scalar subquery yields one value: the target list the nested select
- * emits holds one column. A star stands for every column of the body's table
- * in the model (a body has no join); existsWrap emits one EXISTS target.
+ * emits holds one column. A star stands for every column of the body's model
+ * table (a body has no join); existsWrap emits one EXISTS target. A star over
+ * a query-local source is not counted here: the outputs its projection names
+ * are not the columns it emits (#1123), so PostgreSQL's own one-column check
+ * applies to it.
  */
-function assertScalarBodyArity(
-	ast: Node,
-	table: string,
-	model: ModelIR | undefined,
-): void {
+function assertScalarBodyArity(ast: Node, star: number | undefined): void {
 	const targets =
 		(ast as { SelectStmt?: { targetList?: readonly unknown[] } }).SelectStmt
 			?.targetList ?? [];
-	const star = model?.getTable(table)?.columns.length ?? 1;
-	const columns = targets.reduce<number>((n, target) => {
+	let columns = 0;
+	for (const target of targets) {
 		const fields = (
 			target as { ResTarget?: { val?: { ColumnRef?: { fields?: unknown } } } }
 		).ResTarget?.val?.ColumnRef?.fields;
 		const last = Array.isArray(fields) ? fields.at(-1) : undefined;
-		return (
-			n +
-			(last !== null && typeof last === 'object' && 'A_Star' in last ? star : 1)
-		);
-	}, 0);
+		if (last === null || typeof last !== 'object' || !('A_Star' in last)) {
+			columns += 1;
+			continue;
+		}
+		if (star === undefined) return;
+		columns += star;
+	}
 	if (columns !== 1)
 		throw new Error(
 			`scalar subquery body projects ${columns} columns; a scalar subquery yields one value.`,

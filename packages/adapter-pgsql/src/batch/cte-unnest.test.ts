@@ -12,16 +12,21 @@
 import {
 	createOrm,
 	eq,
+	exists,
 	exprRef,
 	fn,
+	gt,
 	InvalidOperationError,
+	inSubquery,
 	isNull,
 	literal,
 	NotYetSupportedError,
 	type QueryIntent,
+	rawExists,
 	ref,
 	SubqueryExpression,
 	schema,
+	subquery,
 	type WhereIntent,
 } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
@@ -179,7 +184,7 @@ describe('SC-14c: an unnest CTE after a parameterised CTE (ADR 0012)', () => {
 // ---------------------------------------------------------------------------
 // SC-14b: a scalar body on a CTE keeps the adapter's route (#891 slice 5b, R7)
 // ---------------------------------------------------------------------------
-describe('SC-14b: a scalar body on a CTE keeps its route with its subtree', () => {
+describe('SC-14b: a scalar body on a CTE is a nested select (#1040)', () => {
 	const tables = {
 		users: {
 			id: { type: 'integer', primaryKey: true },
@@ -260,24 +265,12 @@ describe('SC-14b: a scalar body on a CTE keeps its route with its subtree', () =
 			message: `${construct} in a ${position} is not supported yet (#${issue}).`,
 		});
 	};
-	/** The refusal of a local-source subtree that needs a filter or a policy. */
-	const localFiltered = (run: () => unknown) => {
-		notYet(
-			run,
-			'a filtered or policy-bearing body',
-			1040,
-			'local-source subquery body',
-		);
-		expect(run).toThrow(
-			'a filtered or policy-bearing body in a local-source subquery body is not supported yet (#1040).',
-		);
-	};
 
 	it.each(configs)(
-		'R7 local-subtree: a model-table body below the CTE body keeps the CTE route (%s)',
+		'R7 local-subtree: a model-table body below the CTE body is a nested select (%s)',
 		(name, o) => {
 			expect(dump(o, onCte(count('items')))).toEqual({
-				sql: `WITH recent_items AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT users.id, (SELECT (SELECT count(*) FROM items AS items) AS n FROM recent_items AS recent_items LIMIT 1) AS v FROM users${rootFilter(name)}`,
+				sql: `WITH recent_items AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT users.id, (SELECT (SELECT count(*) FROM items) AS n FROM recent_items LIMIT 1) AS v FROM users${rootFilter(name)}`,
 				params: [[1, 2]],
 			});
 		},
@@ -373,21 +366,26 @@ describe('SC-14b: a scalar body on a CTE keeps its route with its subtree', () =
 			1030,
 		);
 	});
-	it('R7 local-filtered-descendant-refused: a descendant scanning a filtered table is refused, an unfiltered one keeps the route', () => {
+	it('AC7 local-filtered-descendant: a descendant scanning a filtered table carries its filter', () => {
 		expect(dump(ormOf(), onCte(count('items'))).sql).toBe(
-			'WITH recent_items AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT users.id, (SELECT (SELECT count(*) FROM items AS items) AS n FROM recent_items AS recent_items LIMIT 1) AS v FROM users',
+			'WITH recent_items AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT users.id, (SELECT (SELECT count(*) FROM items) AS n FROM recent_items LIMIT 1) AS v FROM users',
 		);
-		localFiltered(() =>
+		expect(
 			dump(ormOf({ items: isNull('deletedAt') }), onCte(count('items'))),
-		);
+		).toEqual({
+			sql: 'WITH recent_items AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT users.id, (SELECT (SELECT count(*) FROM items WHERE items."deletedAt" IS NULL) AS n FROM recent_items LIMIT 1) AS v FROM users',
+			params: [[1, 2]],
+		});
 	});
-	it.each(configs)('R7 local-policy-descendant-refused (%s)', (_name, o) => {
+	it.each(configs)('AC7 local-policy-descendant (%s)', (name, o) => {
 		const issued = (
 			o.select('items').columns([]).count('id', 'n') as unknown as {
 				buildSubqueryIntent(): QueryIntent;
 			}
 		).buildSubqueryIntent();
-		localFiltered(() => dump(o, onCte(issued)));
+		expect(dump(o, onCte(issued)).sql).toBe(
+			`WITH recent_items AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT users.id, (SELECT (SELECT count(items.id) AS n FROM items) AS n FROM recent_items LIMIT 1) AS v FROM users${rootFilter(name)}`,
+		);
 	});
 });
 
@@ -722,5 +720,387 @@ describe('Gap 1: batchSet().where() guard propagation', () => {
 		expect(result.parameters).toHaveLength(2);
 		// No $3
 		expect(result.sql).not.toContain('$3');
+	});
+});
+
+describe('SC-14c: a body on a local source reads its own range and its source (#1040)', () => {
+	const cols = {
+		id: { type: 'integer', primaryKey: true },
+		name: { type: 'text' },
+		score: { type: 'integer' },
+	} as const;
+	const tables = {
+		users: cols,
+		posts: {
+			...cols,
+			authorId: ref('users', { as: 'author', inverse: 'posts' }),
+		},
+	};
+	const plainDb = schema(tables);
+	const filteredDb = schema(tables, undefined, {
+		defaultFilters: { posts: eq('score', 0) },
+	});
+	const collisionDb = schema({
+		users: { id: { type: 'integer', primaryKey: true } },
+		recent_1: {
+			id: { type: 'integer', primaryKey: true },
+			score: { type: 'integer' },
+		},
+	});
+	const o = createOrm({
+		schema: plainDb,
+		adapter: createPgCompileOnlyAdapter({ model: plainDb.model }),
+		suppressDxWarnings: true,
+	});
+	const of = createOrm({
+		schema: filteredDb,
+		adapter: createPgCompileOnlyAdapter({ model: filteredDb.model }),
+		suppressDxWarnings: true,
+	});
+	const oc = createOrm({
+		schema: collisionDb,
+		adapter: createPgCompileOnlyAdapter({ model: collisionDb.model }),
+		suppressDxWarnings: true,
+	}).withSchema('t1');
+	type Out = { sql?: string; params?: readonly unknown[]; error?: string };
+	const result = (
+		build: () => { dump(): { sql: string; params: readonly unknown[] } },
+		withParams: boolean,
+	): Out => {
+		try {
+			const d = build().dump();
+			return withParams ? { sql: d.sql, params: d.params } : { sql: d.sql };
+		} catch (e) {
+			return { error: (e as Error).message };
+		}
+	};
+	const star = (from: string) =>
+		new SubqueryExpression({
+			type: 'select',
+			from,
+			limit: 1,
+		} as QueryIntent).asExpr('v');
+	const recent = (ids: number[] = [1]) =>
+		o.withCte('recent').fromUnnest({ id: ids });
+	const cases: [
+		string,
+		() => { dump(): { sql: string; params: readonly unknown[] } },
+		Out,
+	][] = [
+		[
+			'AC4 self-alias bare (B5)',
+			() =>
+				recent().query(
+					o
+						.select('recent' as 'users')
+						.columns([
+							'id',
+							subquery('recent').where(gt('id', 1)).count().asExpr('n'),
+						]),
+				),
+			{
+				sql: 'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT recent.id, (SELECT count(*) FROM recent AS recent_1 WHERE recent_1.id > $2) AS n FROM recent',
+				params: [[1], 1],
+			},
+		],
+		[
+			'AC4 self-alias qualified (B6)',
+			() =>
+				recent().query(
+					o
+						.select('recent' as 'users')
+						.columns([
+							'id',
+							subquery('recent').where(gt('recent.id', 1)).count().asExpr('n'),
+						]),
+				),
+			{
+				sql: 'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT recent.id, (SELECT count(*) FROM recent AS recent_1 WHERE recent_1.id > $2) AS n FROM recent',
+				params: [[1], 1],
+			},
+		],
+		[
+			'AC4 order-by (C5)',
+			() =>
+				recent([1, 2]).query(
+					o.select('recent' as 'users').columns([
+						'id',
+						o
+							.select('recent' as 'users')
+							.columns(['id'])
+							.where(gt('id', 0))
+							.orderBy('id', 'desc')
+							.limit(1)
+							.asExpr('top'),
+					]),
+				),
+			{
+				sql: 'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT recent.id, (SELECT recent_1.id FROM recent AS recent_1 WHERE recent_1.id > $2 ORDER BY recent_1.id DESC LIMIT 1) AS top FROM recent',
+				params: [[1, 2], 0],
+			},
+		],
+		[
+			'AC4 expression-ref projection (E4)',
+			() =>
+				recent().query(
+					o.select('recent' as 'users').columns([
+						'id',
+						o
+							.select('recent' as 'users')
+							.columns([exprRef('recent.id').as('v')])
+							.where(gt('id', 0))
+							.limit(1)
+							.asExpr('v'),
+					]),
+				),
+			{
+				sql: 'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT recent.id, (SELECT recent_1.id AS v FROM recent AS recent_1 WHERE recent_1.id > $2 LIMIT 1) AS v FROM recent',
+			},
+		],
+		[
+			'AC4 expression-ref order-by (E5)',
+			() =>
+				recent().query(
+					o.select('recent' as 'users').columns([
+						'id',
+						o
+							.select('recent' as 'users')
+							.columns(['id'])
+							.orderBy(exprRef('recent.id'), 'desc')
+							.limit(1)
+							.asExpr('v'),
+					]),
+				),
+			{
+				sql: 'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT recent.id, (SELECT recent_1.id FROM recent AS recent_1 ORDER BY recent_1.id DESC LIMIT 1) AS v FROM recent',
+			},
+		],
+		[
+			'AC4 self-star (R4S4)',
+			() =>
+				recent([1, 2]).query(
+					o.select('recent' as 'users').columns([
+						'id',
+						new SubqueryExpression({
+							type: 'select',
+							from: 'recent',
+							where: gt('id', 1),
+							limit: 1,
+						} as QueryIntent).asExpr('v'),
+					]),
+				),
+			{
+				sql: 'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT recent.id, (SELECT recent_1.* FROM recent AS recent_1 WHERE recent_1.id > $2 LIMIT 1) AS v FROM recent',
+			},
+		],
+		[
+			'AC4 self-group-having',
+			() =>
+				recent([1, 2]).query(
+					o.select('recent' as 'users').columns([
+						'id',
+						new SubqueryExpression({
+							type: 'select',
+							from: 'recent',
+							select: { type: 'fields', fields: ['id'] },
+							groupBy: ['recent.id'],
+							having: gt('recent.id', 0),
+							limit: 1,
+						} as QueryIntent).asExpr('v'),
+					]),
+				),
+			{
+				sql: 'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT recent.id, (SELECT recent_1.id FROM recent AS recent_1 GROUP BY recent_1.id HAVING recent_1.id > $2 LIMIT 1) AS v FROM recent',
+			},
+		],
+		[
+			'AC4 alias-collision (G2)',
+			() =>
+				oc
+					.withCte('recent')
+					.fromUnnest({ id: [1] })
+					.query(
+						oc.select('recent' as 'users').columns([
+							subquery('recent')
+								.where(rawExists(subquery('recent_1').select('score')))
+								.count()
+								.asExpr('n'),
+						]),
+					),
+			{
+				sql: 'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT (SELECT count(*) FROM recent AS recent_2 WHERE EXISTS (SELECT recent_1_sq.score FROM t1.recent_1 AS recent_1_sq)) AS n FROM recent',
+			},
+		],
+		[
+			'AC11 shadow-relations kept (C1)',
+			() =>
+				o
+					.withCte('posts')
+					.fromUnnest({ id: [1], authorId: [1] })
+					.query(
+						o
+							.select('users')
+							.columns([
+								subquery('posts').where(exists('author')).count().asExpr('n'),
+							]),
+					),
+			{
+				sql: 'WITH posts AS (SELECT t.id AS id, t."authorId" AS "authorId" FROM unnest(CAST($1 AS int4[]), CAST($2 AS int4[])) AS t(id, "authorId")) SELECT (SELECT count(*) FROM posts WHERE EXISTS (SELECT 1 FROM users AS users_exists_0 WHERE posts."authorId" = users_exists_0.id)) AS n FROM users',
+				params: [[1], [1]],
+			},
+		],
+		[
+			'AC11 shadow-relations refused (C2)',
+			() =>
+				o
+					.withCte('posts')
+					.fromUnnest({ id: [1] })
+					.query(
+						o
+							.select('users')
+							.columns([
+								subquery('posts').where(exists('author')).count().asExpr('n'),
+							]),
+					),
+			{
+				error:
+					"Local relation 'posts' does not project expression column 'authorId'.",
+			},
+		],
+		[
+			'AC7 policy-shadow (C3)',
+			() =>
+				of
+					.withCte('posts')
+					.fromUnnest({ id: [1], score: [5] })
+					.query(
+						of
+							.select('users')
+							.columns([
+								of.select('posts').columns(['id']).limit(1).asExpr('v'),
+							]),
+					),
+			{
+				sql: 'WITH posts AS (SELECT t.id AS id, t.score AS score FROM unnest(CAST($1 AS int4[]), CAST($2 AS int4[])) AS t(id, score)) SELECT (SELECT posts.id FROM posts LIMIT 1) AS v FROM users',
+				params: [[1], [5]],
+			},
+		],
+		[
+			'AC7 policy-shadow (C4)',
+			() =>
+				of
+					.withCte('posts')
+					.fromUnnest({ id: [1] })
+					.query(
+						of
+							.select('users')
+							.columns([
+								of.select('posts').columns(['id']).limit(1).asExpr('v'),
+							]),
+					),
+			{
+				sql: 'WITH posts AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT (SELECT posts.id FROM posts LIMIT 1) AS v FROM users',
+				params: [[1]],
+			},
+		],
+		[
+			'AC7 descendant-shadow rawExists (D2)',
+			() =>
+				of
+					.withCte('posts')
+					.fromUnnest({ id: [1], score: [5] })
+					.query(
+						of.select('users').columns([
+							of
+								.select('posts')
+								.where(rawExists(subquery('posts').select('id')))
+								.count('*', 'n')
+								.asExpr('n'),
+						]),
+					),
+			{
+				sql: 'WITH posts AS (SELECT t.id AS id, t.score AS score FROM unnest(CAST($1 AS int4[]), CAST($2 AS int4[])) AS t(id, score)) SELECT (SELECT count(*) AS n FROM posts WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq)) AS n FROM users',
+				params: [[1], [5]],
+			},
+		],
+		[
+			'AC7 descendant-shadow inSubquery (D3)',
+			() =>
+				of
+					.withCte('posts')
+					.fromUnnest({ id: [1], score: [5] })
+					.query(
+						of.select('users').columns([
+							of
+								.select('posts')
+								.where(inSubquery('id', subquery('posts').select('id')))
+								.count('*', 'n')
+								.asExpr('n'),
+						]),
+					),
+			{
+				sql: 'WITH posts AS (SELECT t.id AS id, t.score AS score FROM unnest(CAST($1 AS int4[]), CAST($2 AS int4[])) AS t(id, score)) SELECT (SELECT count(*) AS n FROM posts WHERE posts.id = ANY (SELECT posts_subq_0.id FROM posts AS posts_subq_0)) AS n FROM users',
+				params: [[1], [5]],
+			},
+		],
+		[
+			'AC7 descendant-shadow root (D4)',
+			() =>
+				of
+					.withCte('posts')
+					.fromUnnest({ id: [1], score: [5] })
+					.query(
+						of
+							.select('users')
+							.where(rawExists(of.select('posts').columns(['id']))),
+					),
+			{
+				sql: 'WITH posts AS (SELECT t.id AS id, t.score AS score FROM unnest(CAST($1 AS int4[]), CAST($2 AS int4[])) AS t(id, score)) SELECT users.* FROM users WHERE EXISTS (SELECT posts_sq.id FROM posts AS posts_sq)',
+				params: [[1], [5]],
+			},
+		],
+		[
+			'AC5 one (A5)',
+			() =>
+				recent([1, 2]).query(o.select('posts').columns(['id', star('recent')])),
+			{
+				sql: 'WITH recent AS (SELECT t.id AS id FROM unnest(CAST($1 AS int4[])) AS t(id)) SELECT posts.id, (SELECT recent.* FROM recent LIMIT 1) AS v FROM posts',
+			},
+		],
+		[
+			'AC5 local-star (A6)',
+			() =>
+				o
+					.withCte('recent')
+					.fromUnnest({ id: [1], name: ['a'] })
+					.query(o.select('posts').columns(['id', star('recent')])),
+			{
+				sql: 'WITH recent AS (SELECT t.id AS id, t.name AS name FROM unnest(CAST($1 AS int4[]), CAST($2 AS text[])) AS t(id, name)) SELECT posts.id, (SELECT recent.* FROM recent LIMIT 1) AS v FROM posts',
+			},
+		],
+		[
+			'AC5 counted (K2)',
+			() =>
+				o
+					.withCte('recent')
+					.fromUnnest({ id: [1], name: ['a'] })
+					.query(
+						o.select('posts').columns([
+							new SubqueryExpression({
+								type: 'select',
+								from: 'recent',
+								select: { type: 'fields', fields: ['id', 'name'] },
+								limit: 1,
+							} as QueryIntent).asExpr('v'),
+						]),
+					),
+			{
+				error:
+					'scalar subquery body projects 2 columns; a scalar subquery yields one value.',
+			},
+		],
+	];
+	it.each(cases)('%s', (_name, build, want) => {
+		expect(result(build, want.params !== undefined)).toEqual(want);
 	});
 });

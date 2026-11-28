@@ -1,5 +1,5 @@
 import { EXPRESSION_BRAND } from '@dbsp/types';
-import { CALLBACK_SCOPE, QUANTIFIER_SCOPE } from './dx/symbols.js';
+import { CALLBACK_SCOPE } from './dx/symbols.js';
 import { isRangeSideExpression, isRangeValueShape } from './intent-payload.js';
 
 /** Predicates whose `where` (and includes) are evaluated from the related row. */
@@ -162,10 +162,6 @@ function walkIncludes(
 	path.delete(includes);
 }
 
-/** A marked filter leaf (a marked quantifier is left to the legacy route's rule). */
-const hasPathRef = (node: Node): boolean =>
-	own(node, 'pathRef') === true && own(node, 'kind') !== 'relationFilter';
-
 /** A node core resolves from its origin: a `pathRef` leaf or quantifier, or a callback node. */
 const hasOrigin = (node: Node): boolean =>
 	own(node, 'pathRef') === true || own(node, CALLBACK_SCOPE) !== undefined;
@@ -180,66 +176,6 @@ export function refuseTableRootedQuantifier(relation: unknown): never {
 	throw new Error(
 		`RelationRef '${String(relation)}' follows a relation from its table; inside a body over a query-local source (an NQL binding or a CTE) it cannot be resolved from its origin yet (#1040).`,
 	);
-}
-
-/**
- * Refuse what the adapter's reduced route for a query-local source (#1040)
- * cannot resolve from an origin: a `pathRef` leaf below a body boundary, and a
- * callback node used anywhere but directly in the callback that issued its
- * token. `isBody` is true when `value` is itself such a body (a query), false
- * for a condition root holding one.
- *
- * @internal
- */
-export function refuseLocalOriginRefs(value: unknown, isBody: boolean): void {
-	const refuseLeaf = (node: Node): never => {
-		throw new Error(
-			`ColumnRef '${String(own(node, 'field'))}' follows a relation; in a condition holding a body over a query-local source (an NQL binding or a CTE) it cannot be resolved from its origin yet (#1040).`,
-		);
-	};
-	if (isBody && isObject(value))
-		walkQuery(value, true, new Set(), hasPathRef, refuseLeaf);
-	else walk(value, false, new Set(), hasPathRef, refuseLeaf);
-	const path = new Set<object>();
-	// `active` is the token of the callback this position sits directly in.
-	const visit = (node: unknown, active: unknown): void => {
-		if (!isObject(node) || path.has(node)) return;
-		path.add(node);
-		if (Array.isArray(node)) {
-			for (const child of items(node)) visit(child, active);
-			path.delete(node);
-			return;
-		}
-		const kind = own(node, 'kind');
-		if (kind === 'literal' || kind === 'param') {
-			path.delete(node);
-			return;
-		}
-		const token = own(node, CALLBACK_SCOPE);
-		if (token !== undefined && token !== active)
-			throw new Error(
-				`'${String(own(node, 'field') ?? own(node, 'relation'))}' comes from a quantifier callback parameter; in a condition holding a body over a query-local source (an NQL binding or a CTE) it is resolved only directly in that callback (#1040).`,
-			);
-		const relationBody = RELATION_BODIES.has(String(kind));
-		const dotted = hasDottedField(node);
-		for (const [key, descriptor] of Object.entries(
-			Object.getOwnPropertyDescriptors(node),
-		)) {
-			if (!('value' in descriptor) || !descriptor.enumerable) continue;
-			const child: unknown = descriptor.value;
-			if (key === 'defaultValue' || isPayload(kind, key, child)) continue;
-			let next = active;
-			if (key === 'subquery' || key === 'query') next = undefined;
-			else if (relationBody && key === 'where')
-				next =
-					kind === 'relationFilter' ? own(node, QUANTIFIER_SCOPE) : undefined;
-			else if (dotted && (key === 'value' || key === 'values'))
-				next = undefined;
-			visit(child, next);
-		}
-		path.delete(node);
-	};
-	visit(value, undefined);
 }
 
 /**

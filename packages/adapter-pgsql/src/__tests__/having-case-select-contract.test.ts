@@ -1830,15 +1830,6 @@ b | select case when score = 1 then 1 else 0 end as c`.dump(),
 			sql: 'SELECT count(*) FILTER (WHERE users.data = $1) AS n FROM users',
 			params: [value],
 		});
-		for (const read of [
-			() => users().groupBy(['id']).having(cond()),
-			() =>
-				users().columns([
-					caseWhen(cond(), literal(1)).else(literal(0)).as('c'),
-				]),
-			() => users().columns([fn('count', star()).filter(cond()).as('n')]),
-		])
-			expect(read().plan().execution?.localConditions).toBeUndefined();
 	});
 
 	it('AC1 routed-body: an expression body resolves its own HAVING, CASE WHEN and FILTER roots', () => {
@@ -2239,13 +2230,6 @@ b | select case when score = 1 then 1 else 0 end as c`.dump(),
 						rootsResolved: true,
 						resolvedConditions: new Map([[intent, {}]]),
 					},
-					position,
-				),
-			).not.toThrow();
-			expect(() =>
-				assertConditionRootRecorded(
-					intent,
-					{ rootsResolved: true, localConditions: new Set([intent]) },
 					position,
 				),
 			).not.toThrow();
