@@ -77,7 +77,6 @@ const CORE_AMBIENT_NAMES = [
 const ADAPTER_AMBIENT_NAMES = [
 	'createPgCompileOnlyAdapter',
 	'createPgAdapter',
-	'bm25Search',
 	'booleanSearch',
 	'boost',
 	'parse',

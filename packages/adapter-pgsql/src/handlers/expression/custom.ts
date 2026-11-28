@@ -159,7 +159,7 @@ export function compileExpressionIntent(
 			const operator = i.operator;
 			assertSafeOperator(operator);
 			// ParadeDB's `relation @@@ query` takes a whole-row relation reference
-			// on its left.  fullTextSearch() and bm25Search() encode that relation
+			// on its left.  fullTextSearch() encodes that relation
 			// as a ref intent, so resolve its QueryScope binding rather than trying
 			// to address a same-named declared column.
 			const leftNode =

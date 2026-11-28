@@ -1,7 +1,7 @@
 /**
  * ParadeDB Extension Integration Tests
  *
- * Tests the ParadeDB wrappers (score, parse, boost, booleanSearch, bm25Search)
+ * Tests the ParadeDB wrappers (score, parse, boost, booleanSearch)
  * using the compile-only adapter with the full intent pipeline.
  *
  * Every query goes through a model-carrying ORM and `.dump()`.
@@ -23,7 +23,7 @@ import {
 } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgCompileOnlyAdapter } from '../../pgsql-adapter.js';
-import { bm25Search, booleanSearch, boost, parse, score } from '../paradedb.js';
+import { booleanSearch, boost, parse, score } from '../paradedb.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -173,78 +173,6 @@ describe('booleanSearch', () => {
 });
 
 // ---------------------------------------------------------------------------
-// bm25Search()
-// ---------------------------------------------------------------------------
-
-describe('bm25Search', () => {
-	const FIELD_BOOSTS = {
-		name_searchable: 3.0,
-		name: 1.0,
-		signature: 1.5,
-		doc_searchable: 1.0,
-	};
-	const fourFields = () =>
-		`SELECT symbols.* FROM symbols WHERE symbols @@@ paradedb.boolean(should => ARRAY[paradedb.boost(3, paradedb.parse('name_searchable', $1)), paradedb.boost(1, paradedb.parse('name', $2)), paradedb.boost(1.5, paradedb.parse('signature', $3)), paradedb.boost(1, paradedb.parse('doc_searchable', $4))])`;
-	const dumpWhere = (expr: ExprRef) => {
-		const { sql, params } = orm
-			.select('symbols')
-			// bm25Search() returns an ExpressionRef, which where() does not type-accept
-			.where(expr as never)
-			.dump();
-		return { sql, params };
-	};
-
-	it('produces the @@@ operator in WHERE', () => {
-		expect(dumpWhere(bm25Search('symbols', 'hello', FIELD_BOOSTS))).toEqual({
-			sql: fourFields(),
-			params: ['hello', 'hello', 'hello', 'hello'],
-		});
-	});
-
-	it('includes all field boosts in the generated SQL', () => {
-		expect(dumpWhere(bm25Search('symbols', 'hello', FIELD_BOOSTS))).toEqual({
-			sql: fourFields(),
-			params: ['hello', 'hello', 'hello', 'hello'],
-		});
-	});
-
-	it('references the table alias on the left side of @@@', () => {
-		expect(dumpWhere(bm25Search('symbols', 'hello', FIELD_BOOSTS))).toEqual({
-			sql: fourFields(),
-			params: ['hello', 'hello', 'hello', 'hello'],
-		});
-	});
-
-	it('binds one parameter per field (same value)', () => {
-		const q = 'hello';
-		const { params } = dumpWhere(bm25Search('symbols', q, FIELD_BOOSTS));
-		// 4 fields → 4 query param slots, all with the same value
-		expect(params).toEqual([q, q, q, q]);
-	});
-
-	it('handles single-field boost', () => {
-		expect(dumpWhere(bm25Search('symbols', 'test', { name: 1.0 }))).toEqual({
-			sql: "SELECT symbols.* FROM symbols WHERE symbols @@@ paradedb.boolean(should => ARRAY[paradedb.boost(1, paradedb.parse('name', $1))])",
-			params: ['test'],
-		});
-	});
-
-	it('can be combined with score() for full SELECT + WHERE + ORDER BY pattern', () => {
-		const q = 'typescript';
-		const { sql, params } = orm
-			.select('symbols')
-			.columns([score('id').as('bm25_score')])
-			.where(bm25Search('symbols', q, { name: 3.0, doc: 1.0 }) as never)
-			.orderBy(score('id'), 'desc')
-			.dump();
-		expect({ sql, params }).toEqual({
-			sql: "SELECT paradedb.score(id) AS bm25_score FROM symbols WHERE symbols @@@ paradedb.boolean(should => ARRAY[paradedb.boost(3, paradedb.parse('name', $1)), paradedb.boost(1, paradedb.parse('doc', $2))]) ORDER BY paradedb.score(id) DESC",
-			params: [q, q],
-		});
-	});
-});
-
-// ---------------------------------------------------------------------------
 // ADR 0011 leaf rule (#1082): the query is a value leaf, the key field and the
 // sub-expressions are reference leaves, the table and field are names.
 // ---------------------------------------------------------------------------
@@ -273,14 +201,6 @@ describe('ParadeDB helper leaves (#1082)', () => {
 			.dump();
 		return { sql, params };
 	};
-	const where = (expr: ExpressionRef) => {
-		const { sql, params } = leafOrm
-			.select('posts')
-			.columns(['id'])
-			.where(expr as never)
-			.dump();
-		return { sql, params };
-	};
 	const refused = (helper: string, reason: string) =>
 		new InvalidOperationError(helper, reason);
 	const notAnArgument = (helper: string, kind: string) =>
@@ -289,44 +209,16 @@ describe('ParadeDB helper leaves (#1082)', () => {
 			`${kind} is not an expression argument; use literal(null), param(value) or an expression`,
 		);
 
-	it('AC-B1 / plain', () => {
-		expect(where(bm25Search('posts', 'hello', { title: 2, body: 1 }))).toEqual({
-			sql: "SELECT posts.id FROM posts WHERE posts @@@ paradedb.boolean(should => ARRAY[paradedb.boost(2, paradedb.parse('title', $1)), paradedb.boost(1, paradedb.parse('body', $2))])",
-			params: ['hello', 'hello'],
-		});
-	});
-	it('AC-B1 / param', () => {
-		expect(
-			where(bm25Search('posts', coreParam('hello'), { title: 2, body: 1 })),
-		).toEqual({
-			sql: "SELECT posts.id FROM posts WHERE posts @@@ paradedb.boolean(should => ARRAY[paradedb.boost(2, paradedb.parse('title', $1)), paradedb.boost(1, paradedb.parse('body', $2))])",
-			params: ['hello', 'hello'],
-		});
-	});
-	it('AC-B1 / expression', () => {
-		expect(
-			where(bm25Search('posts', literal('hello'), { title: 2, body: 1 })),
-		).toEqual({
-			sql: "SELECT posts.id FROM posts WHERE posts @@@ paradedb.boolean(should => ARRAY[paradedb.boost(2, paradedb.parse('title', 'hello')), paradedb.boost(1, paradedb.parse('body', 'hello'))])",
-			params: [],
-		});
-	});
-	it('AC-B1 / ColumnRef', () => {
-		expect(where(bm25Search('posts', T.posts.title, { title: 2 }))).toEqual({
-			sql: "SELECT posts.id FROM posts WHERE posts @@@ paradedb.boolean(should => ARRAY[paradedb.boost(2, paradedb.parse('title', posts.title))])",
-			params: [],
-		});
-	});
-	it('AC-B1 / null', () => {
-		expect(where(bm25Search('posts', null, { title: 2 }))).toEqual({
-			sql: "SELECT posts.id FROM posts WHERE posts @@@ paradedb.boolean(should => ARRAY[paradedb.boost(2, paradedb.parse('title', $1))])",
-			params: [null],
-		});
-	});
 	it('AC-B2 / plain', () => {
 		expect(select(parse('title', 'q'))).toEqual({
 			sql: "SELECT paradedb.parse(field => 'title', query_string => $1) AS v FROM posts",
 			params: ['q'],
+		});
+	});
+	it('parse: an inlined literal query', () => {
+		expect(select(parse('title', literal('hello')))).toEqual({
+			sql: "SELECT paradedb.parse(field => 'title', query_string => 'hello') AS v FROM posts",
+			params: [],
 		});
 	});
 	it('AC-B2 / ColumnRef', () => {
@@ -381,22 +273,6 @@ describe('ParadeDB helper leaves (#1082)', () => {
 		});
 	});
 
-	it('RT-B3 / table', () => {
-		expect(() =>
-			where(bm25Search(T.posts.title as never, 'q', { title: 1 })),
-		).toThrowError(
-			refused(
-				'bm25Search',
-				'table must be the name of a table or alias in the FROM clause; got a ColumnRef',
-			),
-		);
-		expect(() => where(bm25Search(2 as never, 'q', { title: 1 }))).toThrowError(
-			refused(
-				'bm25Search',
-				'table must be the name of a table or alias in the FROM clause; got a number',
-			),
-		);
-	});
 	it('RT-B3 / field', () => {
 		expect(() => select(parse(exprRef('title') as never, 'q'))).toThrowError(
 			refused(
@@ -432,11 +308,9 @@ describe('ParadeDB helper leaves (#1082)', () => {
 		);
 	});
 	it('RT-B1 / sql', () => {
-		expect(() =>
-			where(bm25Search('posts', sql('1'), { title: 1 })),
-		).toThrowError(
+		expect(() => select(parse('title', sql('1')))).toThrowError(
 			refused(
-				'bm25Search',
+				'parse',
 				'sql() is only accepted in set(), values(), doUpdate() and batchSet().set(); use literal(), param() or an expression here',
 			),
 		);

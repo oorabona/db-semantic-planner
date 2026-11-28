@@ -36,7 +36,8 @@ import {
 } from './testkit/extension-features.seed.js';
 
 const SCHEMA = 'extension_features_e2e';
-const QUERY_VECTOR = '[1,0,0]' as unknown as number[];
+// A plain number[]: the helpers bind it as pgvector's text form (#1120).
+const QUERY_VECTOR = [1, 0, 0];
 
 type VectorRow = {
 	label: string;
@@ -114,7 +115,7 @@ function asWhereExpression(expr: ExpressionRef): WhereIntent {
 	return { kind: 'expression', expr: expr.intent } as WhereIntent;
 }
 
-function bm25SearchExpression(
+function boostedSearchExpression(
 	table: string,
 	query: string,
 	fieldBoosts: Record<string, number>,
@@ -285,7 +286,7 @@ describe('extension feature real-DB e2e', () => {
 				.columns(['title', score('id').as('score')])
 				.where(
 					asWhereExpression(
-						bm25SearchExpression('documents', 'semantic', {
+						boostedSearchExpression('documents', 'semantic', {
 							title: 1,
 							body: 1,
 						}),
@@ -360,7 +361,7 @@ describe('extension feature real-DB e2e', () => {
 						.columns(['title', score(key).as('score')])
 						.where(
 							asWhereExpression(
-								bm25SearchExpression('documents', 'semantic', {
+								boostedSearchExpression('documents', 'semantic', {
 									title: 1,
 									body: 1,
 								}),

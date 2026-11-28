@@ -2,7 +2,7 @@
  * @dbsp/core — Full-Text Search Helpers (FR-5)
  *
  * High-level cross-DB-friendly helpers that wrap the low-level ParadeDB
- * expression primitives (bm25Search / score from adapter-pgsql) using only
+ * expression primitives (parse / boost / score from adapter-pgsql) using only
  * core expression building blocks.
  *
  * These helpers are ParadeDB/PostgreSQL-first; other adapters are expected
