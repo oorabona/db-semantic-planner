@@ -36,7 +36,8 @@ import {
 } from './testkit/extension-features.seed.js';
 
 const SCHEMA = 'extension_features_e2e';
-const QUERY_VECTOR = '[1,0,0]' as unknown as number[];
+// A plain number[]: the helpers bind it as pgvector's text form (#1120).
+const QUERY_VECTOR = [1, 0, 0];
 
 type VectorRow = {
 	label: string;

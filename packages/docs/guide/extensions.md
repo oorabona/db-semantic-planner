@@ -11,7 +11,7 @@ This guide shows how to use the pgvector and ParadeDB extension helpers that shi
 Use extensions when you need PostgreSQL-native capabilities beyond standard SQL:
 
 - **pgvector** — nearest-neighbour / similarity search on embedding vectors
-- **ParadeDB** — full-text BM25 search with per-field boost weights
+- **ParadeDB** — BM25 relevance primitives (`score`, `parse`, `boost`, `booleanSearch`); multi-field search is core's `fullTextSearch`
 
 Both extensions are implemented as thin wrappers over expression primitives and are
 imported from `@dbsp/adapter-pgsql`.
@@ -21,7 +21,7 @@ imported from `@dbsp/adapter-pgsql`.
 | Package | Extension | Import |
 |---------|-----------|--------|
 | `@dbsp/adapter-pgsql` | pgvector | `cosineDistance`, `rawDistance`, `l2Distance`, `innerProduct` |
-| `@dbsp/adapter-pgsql` | ParadeDB | `score`, `parse`, `boost`, `booleanSearch`, `bm25Search` |
+| `@dbsp/adapter-pgsql` | ParadeDB | `score`, `parse`, `boost`, `booleanSearch` (multi-field search: core's `fullTextSearch`) |
 
 ### How arguments are read
 
@@ -29,10 +29,10 @@ Each helper reads its arguments with the same rule as the core helpers (ADR 0011
 
 | Argument | Kind | A plain value | An expression (`literal()`, `exprRef()`, a `ColumnRef`, a subquery, a query builder) |
 |----------|------|---------------|-----------------------------------------------------------------------------------|
-| the vector of `cosineDistance`, `rawDistance`, `l2Distance`, `innerProduct` | value | bound as `CAST($N AS vector)` | compiled inside `CAST(… AS vector)` |
-| the query of `parse`, `bm25Search` | value | bound as `$N` (`bm25Search`: once per field) | compiled as the query |
+| the vector of `cosineDistance`, `rawDistance`, `l2Distance`, `innerProduct` | value | bound as `CAST($N AS vector)`; a `number[]` is sent as pgvector's text form `'[a,b,…]'` | compiled inside `CAST(… AS vector)` |
+| the query of `parse` | value | bound as `$N` | compiled as the query |
 | the column of the distances and of `vectorDims`, the key field of `score`, the expression of `boost`, each element of `booleanSearch` | reference | a string is a column; a finite number or boolean is inlined | compiled (a `ColumnRef` gives its qualified column) |
-| the table of `bm25Search`, the field of `parse` | name | a string only | refused |
+| the field of `parse` | name | a string only | refused |
 
 `param(v)` always binds `v`. An argument a helper cannot use (`null` or `undefined` in a reference position, a plain
 object there, a `sql()` marker, an unfinished `caseWhen()`) is refused with an `InvalidOperationError` naming the
@@ -132,8 +132,8 @@ const db = schema(
 ### Full Example
 
 ```typescript
-import { schema, createOrm } from '@dbsp/core';
-import { createPgCompileOnlyAdapter, score, bm25Search } from '@dbsp/adapter-pgsql';
+import { schema, createOrm, fullTextSearch } from '@dbsp/core';
+import { createPgCompileOnlyAdapter, score } from '@dbsp/adapter-pgsql';
 
 const db = schema({
   symbols: {
@@ -150,10 +150,14 @@ const searchTerm = 'semantic query planner';
 const results = orm
   .select('symbols')
   .columns([score('id').as('score')])                        // BM25 relevance score
-  .where(bm25Search('symbols', searchTerm, {
-    name: 3.0,          // 3x weight on name column
-    signature: 1.5,     // 1.5x weight on signature
-    doc_comment: 1.0,   // 1x weight on doc comments
+  .where(fullTextSearch({
+    query: searchTerm,
+    tableAlias: 'symbols',
+    fields: [
+      { name: 'name', boost: 3.0 },          // 3x weight on name column
+      { name: 'signature', boost: 1.5 },     // 1.5x weight on signature
+      { name: 'doc_comment', boost: 1.0 },   // 1x weight on doc comments
+    ],
   }))
   .orderBy(score('id'), 'desc')                              // sort by relevance
   .limit(50)
@@ -162,9 +166,9 @@ const results = orm
 //   SELECT paradedb.score(id) AS score
 //   FROM symbols
 //   WHERE symbols @@@ paradedb.boolean(should => ARRAY[
-//     paradedb.boost(3, paradedb.parse('name', $1)),
-//     paradedb.boost(1.5, paradedb.parse('signature', $2)),
-//     paradedb.boost(1, paradedb.parse('doc_comment', $3))
+//     paradedb.boost(3, paradedb.parse(field => 'name', query_string => $1)),
+//     paradedb.boost(1.5, paradedb.parse(field => 'signature', query_string => $2)),
+//     paradedb.boost(1, paradedb.parse(field => 'doc_comment', query_string => $3))
 //   ])
 //   ORDER BY paradedb.score(id) DESC
 //   LIMIT 50
@@ -175,17 +179,14 @@ const results = orm
 | Function | SQL output | Use case |
 |----------|------------|----------|
 | `score(keyField)` | `paradedb.score(keyField)` | Relevance score in SELECT / ORDER BY |
-| `bm25Search(table, query, fieldBoosts)` | `table @@@ paradedb.boolean(...)` | Multi-field BM25 with per-field weights |
 | `parse(field, query)` | `paradedb.parse(field => '...', query_string => $N)` | Single-field query sub-expression |
 | `boost(factor, expr)` | `paradedb.boost(factor, expr)` | Apply weight multiplier to sub-expression |
 | `booleanSearch(exprs[])` | `paradedb.boolean(should => ARRAY[expr1, expr2, ...])` | Combine sub-expressions with OR logic |
 
-**`bm25Search` binds a plain query once per field** (`$1`, `$2`, … all equal); an expression query is compiled in
-every field. For different query strings per field, compose `parse()` / `boost()` / `booleanSearch()` manually.
-
-**`bm25Search` does not execute on pg_search 0.25.3:** its `paradedb.parse('<field>', <query>)` call is ambiguous
-there (#1119). Use core's [`fullTextSearch()`](./full-text-search), which emits the named
-`paradedb.parse(field => …, query_string => …)` form.
+For a multi-field search with per-field weights, use core's [`fullTextSearch()`](./full-text-search) as above: it
+binds a plain query once per field (`$1`, `$2`, … all equal) and compiles an expression query in every field. For
+different query strings per field, compose `parse()` / `boost()` / `booleanSearch()` under
+`op('@@@', exprRef('<table>'), …)`.
 
 ### DDL: BM25 Index
 

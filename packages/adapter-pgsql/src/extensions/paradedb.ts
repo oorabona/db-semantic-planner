@@ -4,7 +4,7 @@
  * Type-safe query builders for ParadeDB BM25 full-text search.
  * All functions return ExpressionRef instances that can be used in:
  * - SELECT: .column(score('id').as('score'))
- * - WHERE:  .where(bm25Search('symbols', query, { name: 3.0, doc: 1.0 }))
+ * - WHERE:  .where(op('@@@', exprRef('symbols'), booleanSearch([...])))
  * - ORDER BY: .orderBy(score('id'), 'desc')
  *
  * Each user argument follows the ADR 0011 leaf rule before it is wrapped:
@@ -12,7 +12,9 @@
  *   (`literal()`, `exprRef()`, a `ColumnRef`, a subquery …) is compiled;
  * - a key field or a sub-expression is a reference leaf: a string is a
  *   column, a `ColumnRef` its qualified column, an expression is compiled;
- * - a table or field name is a name and accepts a string only.
+ * - a field name is a name and accepts a string only.
+ *
+ * For a multi-field search use core's `fullTextSearch()`.
  *
  * @remarks
  * `parse()` uses named arguments via namedArg(), which produces:
@@ -23,11 +25,9 @@
 import {
 	array,
 	type ExpressionRef,
-	exprRef,
 	fn,
 	literal,
 	namedArg,
-	op,
 	type ReferenceLeaf,
 } from '@dbsp/core';
 import { nameArgument, referenceLeaf, valueLeaf } from './leaves.js';
@@ -118,50 +118,4 @@ export function booleanSearch(exprs: readonly ReferenceLeaf[]): ExpressionRef {
 			array(...exprs.map((expr) => referenceLeaf(expr, 'booleanSearch'))),
 		),
 	);
-}
-
-/**
- * Full BM25 multi-field search with per-field boost weights.
- *
- * Produces: table @@@ paradedb.boolean(should => ARRAY[boost1, boost2, ...])
- *
- * Each field in `fieldBoosts` generates a
- * `paradedb.boost(weight, paradedb.parse('<field>', <query>))` sub-expression.
- * A plain query value is bound once per field (`$1`, `$2` … all equal); an
- * expression query is compiled in every field.
- *
- * @param table - Name or alias of the table in the FROM clause, for the left
- *   side of the @@@ operator (a string only)
- * @param query - The query (value leaf)
- * @param fieldBoosts - Map of column name → boost weight
- * @returns ExpressionRef for use in .where()
- *
- * @example
- * bm25Search('s', searchTerm, { name: 3.0, signature: 1.5 })
- * // → s @@@ paradedb.boolean(should => ARRAY[
- * //     paradedb.boost(3, paradedb.parse('name', $1)),
- * //     paradedb.boost(1.5, paradedb.parse('signature', $2))
- * //   ])
- *
- * @remarks
- * Prefer core's `fullTextSearch()`: on pg_search 0.25.3 the
- * `paradedb.parse('<field>', <query>)` call this helper emits is ambiguous and
- * fails at execution (#1119).
- */
-export function bm25Search(
-	table: string,
-	query: unknown,
-	fieldBoosts: Record<string, number>,
-): ExpressionRef {
-	const name = nameArgument(
-		table,
-		'bm25Search',
-		'table must be the name of a table or alias in the FROM clause',
-	);
-	const queryLeaf = valueLeaf(query, 'bm25Search');
-	const boostExprs = Object.entries(fieldBoosts).map(([field, weight]) =>
-		boost(weight, fn('paradedb.parse', literal(field), queryLeaf)),
-	);
-	const booleanExpr = booleanSearch(boostExprs);
-	return op('@@@', exprRef(name), booleanExpr);
 }

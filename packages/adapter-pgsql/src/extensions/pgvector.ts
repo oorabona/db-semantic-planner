@@ -10,9 +10,10 @@
  * Each user argument follows the ADR 0011 leaf rule before it is wrapped:
  * - the column is a reference leaf: a string is a column, a `ColumnRef` its
  *   qualified column, an expression is compiled;
- * - the vector is a value leaf inside `CAST(… AS vector)`: a plain value is
- *   bound as given, an expression (`literal('[1,0,0]')`, a `ColumnRef`, a
- *   subquery …) is compiled inside the cast.
+ * - the vector is a value leaf inside `CAST(… AS vector)`: a `number[]` is
+ *   bound as pgvector's text form `'[a,b,…]'`, another plain value (a
+ *   `'[1,0,0]'` string) is bound as given, an expression (`literal('[1,0,0]')`,
+ *   a `ColumnRef`, a subquery …) is compiled inside the cast.
  */
 
 import {
@@ -25,6 +26,17 @@ import {
 } from '@dbsp/core';
 import { referenceLeaf, valueLeaf } from './leaves.js';
 
+/**
+ * The vector leaf: a plain array is bound as pgvector's text form `[a,b,…]`
+ * (`pg` would send a JavaScript array as a PostgreSQL array literal, which
+ * `vector_in` refuses); any other leaf follows the value rule.
+ */
+function vectorLeaf(vector: unknown, helper: string): ExpressionRef {
+	return Array.isArray(vector)
+		? valueLeaf(JSON.stringify(vector.map(Number)), helper)
+		: valueLeaf(vector, helper);
+}
+
 /** `<column> <operator> CAST(<vector> AS vector)`, each leaf coerced under `helper`. */
 function distance(
 	operator: '<=>' | '<->' | '<#>',
@@ -35,7 +47,7 @@ function distance(
 	return op(
 		operator,
 		referenceLeaf(column, helper),
-		cast(valueLeaf(vector, helper), 'vector'),
+		cast(vectorLeaf(vector, helper), 'vector'),
 	);
 }
 
